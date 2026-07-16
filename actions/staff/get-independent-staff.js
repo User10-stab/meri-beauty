@@ -1,0 +1,111 @@
+"use server";
+
+import { prisma } from "@/lib/prisma";
+
+/**
+ * Fetches all independent staff members with their user, contract, and
+ * active service assignment data. Returns a plain serialisable array.
+ *
+ * @returns {{ success: boolean, data?: Array<object>, message?: string }}
+ */
+export async function getIndependentStaff() {
+  try {
+    const staffList = await prisma.staff.findMany({
+      where: { type: "INDEPENDENT", isDeleted: false, user: { isDeleted: false } },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        photo: true,
+        bio: true,
+        languages: true,
+        isActive: true,
+        yearsOfExperience: true,
+        hireDate: true,
+        createdAt: true,
+        updatedAt: true,
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            phone: true,
+            role: true,
+            isActive: true,
+            emailVerified: true,
+            createdAt: true,
+          },
+        },
+        contracts: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+        },
+        staffServices: {
+          where: { isActive: true },
+          select: {
+            serviceId: true,
+            service: {
+              select: {
+                id: true,
+                name: true,
+                category: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const serialised = staffList.map((s) => ({
+      id: s.id,
+      photo: s.photo ?? null,
+      bio: s.bio,
+      languages: s.languages,
+      isActive: s.isActive,
+      yearsOfExperience: s.yearsOfExperience ?? null,
+      hireDate: s.hireDate ? s.hireDate.toISOString() : null,
+      createdAt: s.createdAt.toISOString(),
+      updatedAt: s.updatedAt.toISOString(),
+      // Current active service IDs (used to pre-populate the edit form)
+      serviceIds: s.staffServices.map((ss) => ss.serviceId),
+      // Full service objects (used to render service tags in the table)
+      services: s.staffServices.map((ss) => ({
+        id: ss.service.id,
+        name: ss.service.name,
+        category: ss.service.category,
+      })),
+      // Keep count for convenience
+      servicesCount: s.staffServices.length,
+      user: {
+        ...s.user,
+        createdAt: s.user.createdAt.toISOString(),
+      },
+      contract: s.contracts[0]
+        ? {
+            id: s.contracts[0].id,
+            type: s.contracts[0].type,
+            commissionPercentage: s.contracts[0].commissionPercentage
+              ? Number(s.contracts[0].commissionPercentage)
+              : null,
+            fixedRent: s.contracts[0].fixedRent
+              ? Number(s.contracts[0].fixedRent)
+              : null,
+            startDate: s.contracts[0].startDate.toISOString(),
+            endDate: s.contracts[0].endDate
+              ? s.contracts[0].endDate.toISOString()
+              : null,
+            status: s.contracts[0].status,
+            notes: s.contracts[0].notes,
+          }
+        : null,
+    }));
+
+    return { success: true, data: serialised };
+  } catch (error) {
+    console.error("[getIndependentStaff]", error);
+    return {
+      success: false,
+      message: "Impossible de charger la liste des auto-entrepreneurs.",
+      data: [],
+    };
+  }
+}

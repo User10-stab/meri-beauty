@@ -1,0 +1,461 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+
+// ENUMS
+
+enum UserRole {
+  OWNER
+  STAFF
+  CUSTOMER
+  ADMIN
+}
+
+enum StaffType {
+  EMPLOYEE
+  INDEPENDENT
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  PARTIALLY_PAID
+}
+
+enum PaymentType {
+  ON_SITE
+  ONLINE
+  DEPOSIT
+}
+
+enum TransactionMethod {
+  CASH
+  CARD
+  ONLINE
+}
+
+enum TransactionType {
+  DEPOSIT
+  FINAL_PAYMENT
+  REFUND
+}
+
+enum ContractType {
+  PERCENTAGE
+  FIXED_RENT
+  HYBRID
+}
+
+// Language enum kept for backward compatibility — new code uses Staff.languages as String[]
+enum Language {
+  ARABIC
+  FRENCH
+  ENGLISH
+  SPANISH
+}
+
+enum ContractStatus {
+  ACTIVE
+  EXPIRED
+  TERMINATED
+}
+
+enum NotificationType {
+  APPOINTMENT_CREATED
+  APPOINTMENT_CONFIRMED
+  APPOINTMENT_CANCELLED
+  APPOINTMENT_REMINDER
+  PAYMENT_RECEIVED
+  PAYMENT_PENDING
+  GENERAL
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  READ
+}
+
+enum NewsletterStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+}
+
+enum RecipientStatus {
+  SENT
+  OPENED
+  FAILED
+}
+
+enum RentalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum CommissionType {
+  PERCENTAGE
+  FIXED
+  HYBRID
+}
+
+enum WeekDay {
+  MONDAY
+
+  TUESDAY
+
+  WEDNESDAY
+
+  THURSDAY
+
+  FRIDAY
+
+  SATURDAY
+
+  SUNDAY
+}
+
+// SALON
+model Salon {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  logo        String?
+  coverImage  String?
+  phone       String
+  email       String
+  address     String?
+  instagram   String?
+  facebook    String?
+  tiktok      String?
+  openingTime DateTime
+  closingTime DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  gallery SalonGallery[]
+}
+
+// USER
+model User {
+  id                   String    @id @default(cuid())
+  fullName             String
+  nickName             String?
+  email                String    @unique
+  password             String
+  phone                String    @unique
+  role                 UserRole
+  avatar               String?
+  emailVerified        Boolean   @default(false)
+  isActive             Boolean   @default(true)
+  lastLogin            DateTime?
+  newsletterSubscribed Boolean   @default(false)
+  isDeleted            Boolean   @default(false)
+  deletedAt            DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staff                Staff?
+  appointments         Appointment[]
+  reviews              Review[]
+  notifications        Notification[]
+  newsletterRecipients NewsletterRecipient[]
+  createdStaffServices StaffService[]        @relation("CreatedBy")
+  rentalRequests       RentalRequest[]
+}
+
+// CATEGORY
+model Category {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+
+  services Service[]
+}
+
+// SERVICE
+model Service {
+  id          String   @id @default(cuid())
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+  name        String
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staffServices StaffService[]
+}
+
+// STAFF
+model Staff {
+  id String @id @default(cuid())
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  type               StaffType
+  languages          String[]
+  bio                String?
+  isActive           Boolean   @default(true)
+  photo              String?
+  hireDate           DateTime?
+  yearsOfExperience  Int?
+  isDeleted            Boolean   @default(false)
+  deletedAt            DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  staffServices StaffService[]
+  workingHours  WorkingHour[]
+  timeOffs      TimeOff[]
+  contracts     Contract[]
+}
+
+// StaffService
+model StaffService {
+  id String @id @default(cuid())
+
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id])
+
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  createdById String
+  createdBy   User   @relation("CreatedBy", fields: [createdById], references: [id])
+
+  price    Decimal
+  duration Int
+  margin   Decimal?
+  photo    String
+  isActive Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointments Appointment[]
+
+  @@unique([staffId, serviceId])
+}
+
+// APPOINTMENT
+model Appointment {
+  id String @id @default(cuid())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  staffServiceId String
+  staffService   StaffService @relation(fields: [staffServiceId], references: [id])
+
+  date      DateTime
+  startTime DateTime
+  endTime   DateTime
+  status    AppointmentStatus
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isDeleted            Boolean   @default(false)
+  deletedAt            DateTime?
+  payment       Payment?
+  review        Review?
+  notifications Notification[]
+}
+
+// PAYMENT 
+model Payment {
+  id                   String        @id @default(cuid())
+  appointmentId        String        @unique
+  appointment          Appointment   @relation(fields: [appointmentId], references: [id])
+  depositAmount        Decimal       @default(0)
+  totalAmount          Decimal
+  paidAmount           Decimal
+  remainingAmount      Decimal
+  paymentType          PaymentType
+  status               PaymentStatus
+  paidAt               DateTime?
+  isDeleted            Boolean   @default(false)
+  deletedAt            DateTime?
+  transactionReference String?
+
+  transactions Transaction[]
+}
+
+// TRANSACTION
+model Transaction {
+  id String @id @default(cuid())
+
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id])
+
+  amount          Decimal
+  method          TransactionMethod
+  transactionType TransactionType
+  paidAt          DateTime
+  createdAt       DateTime          @default(now())
+  isDeleted            Boolean   @default(false)
+  deletedAt            DateTime?
+}
+
+// CONTRACT
+model Contract {
+  id String @id @default(cuid())
+
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id])
+
+  type                 ContractType
+  commissionPercentage Float?
+  fixedRent            Decimal?
+  startDate            DateTime
+  endDate              DateTime?
+  status               ContractStatus
+  notes                String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+}
+
+// WORKING HOUR
+model WorkingHour {
+  id String @id @default(cuid())
+
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id])
+
+  day       WeekDay
+  startTime String
+  endTime   String
+  isClosed  Boolean @default(false)
+}
+
+// TIME OFF
+model TimeOff {
+  id String @id @default(cuid())
+
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id])
+
+  startDate DateTime
+  endDate   DateTime
+  reason    String?
+}
+
+// REVIEW
+model Review {
+  id String @id @default(cuid())
+
+  userId        String
+  appointmentId String @unique
+
+  user        User        @relation(fields: [userId], references: [id])
+  appointment Appointment @relation(fields: [appointmentId], references: [id])
+
+  rating  Int
+  comment String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// NOTIFICATION
+model Notification {
+  id String @id @default(cuid())
+
+  userId        String
+  appointmentId String?
+
+  user        User         @relation(fields: [userId], references: [id])
+  appointment Appointment? @relation(fields: [appointmentId], references: [id])
+
+  type    NotificationType
+  title   String
+  message String
+
+  status    NotificationStatus
+  sentAt    DateTime?
+  createdAt DateTime           @default(now())
+}
+
+// NEWSLETTER
+model Newsletter {
+  id String @id @default(cuid())
+
+  title       String
+  subject     String
+  content     String
+  status      NewsletterStatus
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  createdAt   DateTime         @default(now())
+
+  recipients NewsletterRecipient[]
+}
+
+// NEWSLETTER RECIPIENT
+model NewsletterRecipient {
+  id String @id @default(cuid())
+
+  newsletterId String
+  userId       String
+
+  newsletter Newsletter @relation(fields: [newsletterId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+
+  status   RecipientStatus
+  openedAt DateTime?
+
+  @@unique([newsletterId, userId])
+}
+
+// RENTAL REQUEST
+model RentalRequest {
+  id             String              @id @default(cuid())
+  userId         String?
+  user           User?               @relation(fields: [userId], references: [id])
+  rentalType     String
+  startDate      DateTime
+  endDate        DateTime?
+  commissionType CommissionType
+  status         RentalRequestStatus
+  message        String?
+  ownerResponse  String?
+  isDeleted            Boolean   @default(false)
+  deletedAt            DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+}
+
+// SALON GALLERY
+model SalonGallery {
+  id String @id @default(cuid())
+
+  salonId String
+  salon   Salon  @relation(fields: [salonId], references: [id])
+
+  image     String
+  createdAt DateTime @default(now())
+}

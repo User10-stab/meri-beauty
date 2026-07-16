@@ -1,0 +1,269 @@
+"use server";
+
+import bcrypt from "bcrypt";
+import crypto from "crypto";
+import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { sendEmail } from "@/lib/email";
+import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
+
+const BCRYPT_SALT_ROUNDS = 12;
+const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
+
+// ─── Password generator ───────────────────────────────────────────────────────
+function generateSecurePassword() {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghjkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const symbols = "!@#$%^&*";
+  const all = upper + lower + digits + symbols;
+
+  const pick = (str) => str[crypto.randomInt(str.length)];
+  const required = [pick(upper), pick(lower), pick(digits), pick(symbols)];
+  const rest = Array.from({ length: 12 }, () => pick(all));
+  const combined = [...required, ...rest];
+
+  for (let i = combined.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [combined[i], combined[j]] = [combined[j], combined[i]];
+  }
+  return combined.join("");
+}
+
+// ─── Email template ───────────────────────────────────────────────────────────
+function buildWelcomeEmail({ fullName, email, password, loginUrl }) {
+  const text = [
+    `Bonjour ${fullName},`,
+    ``,
+    `Votre compte auto-entrepreneur a été créé sur la plateforme Meri Beauty.`,
+    ``,
+    `Vos identifiants de connexion :`,
+    `  E-mail      : ${email}`,
+    `  Mot de passe : ${password}`,
+    ``,
+    `Connectez-vous ici : ${loginUrl}`,
+    ``,
+    `Pour des raisons de sécurité, nous vous recommandons de changer votre mot de passe dès votre première connexion.`,
+    ``,
+    `Cordialement,`,
+    `L'équipe Meri Beauty`,
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;border:1px solid #eaeaea;border-radius:12px;background:#fff;">
+      <h2 style="color:#2F3A2E;font-family:serif;margin-bottom:8px;">Bienvenue sur Meri Beauty</h2>
+      <p style="font-size:15px;color:#404040;">Bonjour <strong>${fullName}</strong>,</p>
+      <p style="font-size:14px;color:#525252;line-height:1.6;">
+        Votre compte auto-entrepreneur a été créé. Voici vos identifiants de connexion :
+      </p>
+      <table style="width:100%;border-collapse:collapse;margin:20px 0;font-size:14px;">
+        <tr>
+          <td style="padding:10px 14px;background:#f4f6f4;border-radius:8px 0 0 0;font-weight:600;color:#2F3A2E;width:40%;">E-mail</td>
+          <td style="padding:10px 14px;background:#f4f6f4;border-radius:0 8px 0 0;color:#404040;">${email}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 14px;background:#eef2ed;font-weight:600;color:#2F3A2E;">Mot de passe</td>
+          <td style="padding:10px 14px;background:#eef2ed;font-family:monospace;letter-spacing:1px;color:#404040;">${password}</td>
+        </tr>
+      </table>
+      <p style="margin:28px 0;text-align:center;">
+        <a href="${loginUrl}" style="background:#2F3A2E;color:#fff;padding:13px 28px;text-decoration:none;border-radius:10px;font-weight:600;display:inline-block;">
+          Se connecter
+        </a>
+      </p>
+      <p style="font-size:12px;color:#737373;">
+        Pour des raisons de sécurité, nous vous recommandons de changer votre mot de passe dès votre première connexion.
+      </p>
+    </div>
+  `;
+
+  return { text, html };
+}
+
+// ─── Server action ────────────────────────────────────────────────────────────
+
+/**
+ * Creates User (STAFF) + Staff (INDEPENDENT) + optional Contract (FIXED_RENT)
+ * + StaffService assignments — all inside a single Prisma transaction.
+ *
+ * @param {object} input  Raw form data (validated against createIndependentStaffSchema)
+ * @returns {{ success: boolean, message: string, errors?: object, staffId?: string }}
+ */
+export async function createIndependentStaff(input) {
+  // ── 1. Validate ──────────────────────────────────────────────────────────
+  const parsed = createIndependentStaffSchema.safeParse(input);
+
+  if (!parsed.success) {
+    const fe = parsed.error.flatten().fieldErrors;
+    return {
+      success: false,
+      message: "Veuillez corriger les erreurs dans le formulaire.",
+      errors: {
+        fullName:          fe.fullName?.[0]          ?? null,
+        email:             fe.email?.[0]             ?? null,
+        phone:             fe.phone?.[0]             ?? null,
+        photo:             fe.photo?.[0]             ?? null,
+        bio:               fe.bio?.[0]               ?? null,
+        languages:         fe.languages?.[0]         ?? null,
+        yearsOfExperience: fe.yearsOfExperience?.[0] ?? null,
+        hireDate:          fe.hireDate?.[0]          ?? null,
+        serviceIds:        fe.serviceIds?.[0]        ?? null,
+        contract:          fe["contract"]?.[0]       ?? null,
+      },
+    };
+  }
+
+  const {
+    fullName,
+    email,
+    phone,
+    photo,
+    bio,
+    languages,
+    yearsOfExperience,
+    hireDate,
+    serviceIds,
+    contract,
+  } = parsed.data;
+
+  // ── 2. Validate referenced service IDs exist ─────────────────────────────
+  const ids = serviceIds ?? [];
+  if (ids.length > 0) {
+    const found = await prisma.service.findMany({
+      where: { id: { in: ids } },
+      select: { id: true },
+    });
+    if (found.length !== ids.length) {
+      return {
+        success: false,
+        message: "Un ou plusieurs services sélectionnés sont introuvables.",
+        errors: { serviceIds: "Services introuvables." },
+      };
+    }
+  }
+
+  // ── 3. Generate & hash password ──────────────────────────────────────────
+  const plainPassword = generateSecurePassword();
+  console.log('password', plainPassword)
+  const hashedPassword = await bcrypt.hash(plainPassword, BCRYPT_SALT_ROUNDS);
+
+  // ── 4. Transaction ───────────────────────────────────────────────────────
+  try {
+    const staff = await prisma.$transaction(async (tx) => {
+      // 4a. Create User
+      const user = await tx.user.create({
+        data: {
+          fullName,
+          email,
+          phone,
+          password: hashedPassword,
+          role:          "STAFF",
+          emailVerified: false,
+          isActive:      true,
+        },
+      });
+
+      // 4b. Create Staff
+      const newStaff = await tx.staff.create({
+        data: {
+          userId:            user.id,
+          type:              "INDEPENDENT",
+          photo:             photo ?? null,
+          bio:               bio ?? null,
+          languages:         languages ?? [],
+          yearsOfExperience: yearsOfExperience ?? null,
+          isActive:          true,
+          hireDate:          hireDate ? new Date(hireDate) : null,
+        },
+      });
+
+      // 4c. Create Contract (always FIXED_RENT when provided)
+      if (contract) {
+        await tx.contract.create({
+          data: {
+            staffId:   newStaff.id,
+            type:      "FIXED_RENT",
+            fixedRent: contract.fixedRent,
+            startDate: new Date(contract.startDate),
+            endDate:   contract.endDate ? new Date(contract.endDate) : null,
+            status:    "ACTIVE",
+            notes:     contract.notes ?? null,
+          },
+        });
+      }
+
+      // 4d. Assign services — StaffService requires createdById (the admin creating the record)
+      // We use the newly-created staff's userId as createdById.
+      // Price and duration are set to 0 — the admin can edit them later per service.
+      if (ids.length > 0) {
+        await tx.staffService.createMany({
+          data: ids.map((serviceId) => ({
+            staffId:     newStaff.id,
+            serviceId,
+            createdById: user.id,
+            price:       0,
+            duration:    0,
+            photo:       "",
+            isActive:    true,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
+      return newStaff;
+    });
+
+    // ── 5. Send welcome email ────────────────────────────────────────────
+    const loginUrl = `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/login`;
+    const { text, html } = buildWelcomeEmail({
+      fullName,
+      email,
+      password: plainPassword,
+      loginUrl,
+    });
+
+    await sendEmail({
+      to: email,
+      subject: "Vos identifiants de connexion – Meri Beauty",
+      text,
+      html,
+    });
+
+    revalidatePath(REVALIDATE_PATH);
+
+    return {
+      success: true,
+      message: `Le profil de ${fullName} a été créé avec succès. Les identifiants ont été envoyés par e-mail.`,
+      staffId: staff.id,
+    };
+  } catch (error) {
+    if (error.code === "P2002") {
+      const fields = error.meta?.target ?? [];
+
+      if (fields.includes("email")) {
+        return {
+          success: false,
+          message: "Cette adresse e-mail est déjà utilisée.",
+          errors: { email: "Cette adresse e-mail est déjà utilisée." },
+        };
+      }
+      if (fields.includes("phone")) {
+        return {
+          success: false,
+          message: "Ce numéro de téléphone est déjà utilisé.",
+          errors: { phone: "Ce numéro de téléphone est déjà utilisé." },
+        };
+      }
+      return {
+        success: false,
+        message: "Un compte avec ces informations existe déjà.",
+      };
+    }
+
+    console.error("[createIndependentStaff]", error);
+    return {
+      success: false,
+      message: "Une erreur inattendue s'est produite. Veuillez réessayer.",
+    };
+  }
+}

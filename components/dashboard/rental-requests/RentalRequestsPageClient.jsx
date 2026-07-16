@@ -1,0 +1,262 @@
+"use client";
+
+import { useState, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { DataTable } from "@/components/dashboard/Tables/DataTable";
+import { RentalRequestRow } from "./RentalRequestRow";
+import { RentalRequestEmptyState } from "./RentalRequestEmptyState";
+import { RentalRequestDetailsModal } from "./RentalRequestDetailsModal";
+import { CreateStaffModal } from "@/components/dashboard/staff/CreateStaffModal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { createStaffFromRental } from "@/actions/staff/create-staff-from-rental";
+
+const COLUMNS = [
+  { key: "rentalType", label: "Type" },
+  { key: "user", label: "Utilisateur" },
+  { key: "period", label: "Période" },
+  { key: "status", label: "Statut" },
+  { key: "message", label: "Message" },
+  { key: "createdAt", label: "Date de création" },
+];
+
+/**
+ * Client shell for the rental requests page.
+ * Handles view, approve, reject, and delete actions.
+ */
+export function RentalRequestsPageClient({ initialData, services = [] }) {
+  const router = useRouter();
+  const [data, setData] = useState(initialData);
+  const [loading, setLoading] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [showCreateStaff, setShowCreateStaff] = useState(false);
+  const approvingRef = useRef(null);
+
+  // −−− Confirmation dialog state −−−
+  const [confirmDialog, setConfirmDialog] = useState({
+    open: false,
+    title: "",
+    message: "",
+    danger: false,
+    onConfirm: null,
+  });
+
+  const handleMutated = useCallback(() => {
+    router.refresh();
+  }, [router]);
+
+  /** Updates a single rental request in local state (e.g. after status change). */
+  const updateLocalRequest = useCallback((id, updates) => {
+    setData((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
+    );
+  }, []);
+
+  const handleView = useCallback((row) => {
+    setSelectedRequest(row);
+    setModalOpen(true);
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setModalOpen(false);
+    setSelectedRequest(null);
+  }, []);
+
+  // ─── Approve flow ────────────────────────────────────────────────────
+  const handleApprove = useCallback((row) => {
+    approvingRef.current = row;
+    setShowCreateStaff(true);
+  }, []);
+
+  const handleStaffCreated = useCallback(async () => {
+    const pending = approvingRef.current;
+    if (!pending) {
+      console.warn("[handleStaffCreated] No pending approval request found.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await fetch(`/api/rental-requests/${pending.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "APPROVED" }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erreur HTTP: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        toast.success("Demande approuvée avec succès.");
+        updateLocalRequest(pending.id, { status: "APPROVED" });
+        handleMutated();
+      } else {
+        toast.error(result.message || "Erreur lors de l'approbation");
+      }
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [handleMutated, updateLocalRequest]);
+
+  const handleCloseCreateStaff = useCallback(() => {
+    setShowCreateStaff(false);
+    approvingRef.current = null;
+  }, []);
+
+  // ─── Reject flow ─────────────────────────────────────────────────────
+  const handleReject = useCallback(
+    (row) => {
+      setConfirmDialog({
+        open: true,
+        title: "Rejeter la demande",
+        message: `Êtes-vous sûr de vouloir rejeter la demande de location "${row.rentalType}" ? Cette action est irréversible.`,
+        danger: true,
+        confirmLabel: "Rejeter",
+        onConfirm: async () => {
+          setConfirmDialog((prev) => ({ ...prev, open: false }));
+          try {
+            setLoading(true);
+            const response = await fetch(`/api/rental-requests/${row.id}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ status: "REJECTED" }),
+            });
+
+            if (!response.ok) {
+              throw new Error(`Erreur HTTP: ${response.status}`);
+            }
+
+            const result = await response.json();
+
+            if (result.success) {
+              toast.success("Demande rejetée.");
+              updateLocalRequest(row.id, { status: "REJECTED" });
+              handleMutated();
+            } else {
+              toast.error(result.message || "Erreur lors du rejet");
+            }
+          } catch (err) {
+            toast.error(err.message);
+          } finally {
+            setLoading(false);
+          }
+        },
+      });
+    },
+    [handleMutated, updateLocalRequest]
+  );
+
+  // ─── Delete flow ─────────────────────────────────────────────────────
+  const handleDelete = useCallback(
+    (row) => {
+      setConfirmDialog({
+        open: true,
+        title: "Supprimer la demande",
+        message: `Êtes-vous sûr de vouloir supprimer la demande de location "${row.rentalType}" ? Cette action est irréversible.`,
+        danger: true,
+        confirmLabel: "Supprimer",
+        onConfirm: async () => {
+          setConfirmDialog((prev) => ({ ...prev, open: false }));
+          try {
+            setLoading(true);
+            const response = await fetch(`/api/rental-requests/${row.id}`, {
+              method: "DELETE",
+            });
+
+            if (!response.ok) {
+              throw new Error(`Erreur HTTP: ${response.status}`);
+            }
+
+            toast.success("Demande supprimée.");
+            handleMutated();
+          } catch (err) {
+            toast.error(err.message);
+          } finally {
+            setLoading(false);
+          }
+        },
+      });
+    },
+    [handleMutated]
+  );
+
+  const closeConfirmDialog = useCallback(() => {
+    setConfirmDialog((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const searchFilter = useCallback((row, query) => {
+    const q = query.toLowerCase();
+    return (
+      row.id?.toLowerCase().includes(q) ||
+      row.rentalType?.toLowerCase().includes(q) ||
+      row.message?.toLowerCase().includes(q) ||
+      row.status?.toLowerCase().includes(q) ||
+      row.user?.fullName?.toLowerCase().includes(q) ||
+      row.user?.email?.toLowerCase().includes(q)
+    );
+  }, []);
+
+  return (
+    <>
+      <RentalRequestDetailsModal
+        rentalRequest={selectedRequest}
+        open={modalOpen}
+        onClose={handleCloseModal}
+        onApprove={handleApprove}
+        onReject={handleReject}
+      />
+
+      {/* Create Staff modal — shown when Approve is clicked */}
+      {showCreateStaff && approvingRef.current && (
+        <CreateStaffModal
+          services={services}
+          onClose={handleCloseCreateStaff}
+          onSuccess={handleStaffCreated}
+          serverAction={createStaffFromRental}
+          initialValues={{
+            fullName: approvingRef.current.user?.fullName ?? "",
+            email: approvingRef.current.user?.email ?? "",
+            phone: approvingRef.current.user?.phone ?? "",
+          }}
+        />
+      )}
+
+      {/* Confirmation dialog for reject and delete */}
+      <ConfirmDialog
+        open={confirmDialog.open}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel || "Confirmer"}
+        cancelLabel="Annuler"
+        danger={confirmDialog.danger}
+        loading={loading}
+        onConfirm={confirmDialog.onConfirm || (() => {})}
+        onCancel={closeConfirmDialog}
+      />
+
+      <DataTable
+        data={data}
+        isLoading={loading}
+        columns={COLUMNS}
+        renderRow={RentalRequestRow}
+        emptyState={RentalRequestEmptyState}
+        searchPlaceholder="Rechercher par type, message, statut..."
+        searchFilter={searchFilter}
+        onView={handleView}
+        onApprove={handleApprove}
+        onReject={handleReject}
+        onDelete={handleDelete}
+      />
+    </>
+  );
+}

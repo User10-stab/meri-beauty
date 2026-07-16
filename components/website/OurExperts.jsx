@@ -1,0 +1,238 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { StarIcon, ArrowIcon } from "./icons";
+
+const FALLBACK_STYLISTS = [
+  {
+    id: 1,
+    name: "Sofia Bellamy",
+    speciality: "Coiffure & Style",
+    experience: 8,
+    image: "/Images/expert.jpg",
+  },
+  {
+    id: 2,
+    name: "Yasmine El Amine",
+    speciality: "Soin du Visage",
+    experience: 6,
+    image: "/Images/expert.jpg",
+  },
+  {
+    id: 3,
+    name: "Lisa Hadden",
+    speciality: "Expertise Ongles",
+    experience: 5,
+    image: "/Images/expert.jpg",
+  },
+  {
+    id: 4,
+    name: "Maya Ertas",
+    speciality: "Massage & Bien-être",
+    experience: 7,
+    image: "/Images/expert.jpg",
+  },
+  {
+    id: 5,
+    name: "Nour El Jane",
+    speciality: "Coloration & Soin",
+    experience: 4,
+    image: "/Images/expert.jpg",
+  },
+];
+
+function useInView(options = {}) {
+  const ref = useRef(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.15, ...options }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, inView];
+}
+
+function ChevronIcon({ direction = "right", className = "w-5 h-5" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      className={className}
+      aria-hidden="true"
+    >
+      {direction === "left" ? (
+        <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+      ) : (
+        <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+      )}
+    </svg>
+  );
+}
+
+export default function OurExperts() {
+  const [stylists, setStylists] = useState(FALLBACK_STYLISTS);
+  const [isLoading, setIsLoading] = useState(true);
+  const [headerRef, headerInView] = useInView();
+  const [cardsRef, cardsInView] = useInView();
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    async function loadExperts() {
+      try {
+        const response = await fetch("/api/staff");
+        if (!response.ok) throw new Error("Failed to fetch experts");
+        const data = await response.json();
+        setStylists(data);
+      } catch (error) {
+        console.error("[OurExperts] fetch failed", error);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadExperts();
+  }, []);
+
+  const scrollLeft = () => {
+    scrollRef.current?.scrollBy({ left: -340, behavior: "smooth" });
+  };
+
+  const scrollRight = () => {
+    scrollRef.current?.scrollBy({ left: 340, behavior: "smooth" });
+  };
+
+  return (
+    <section className="relative w-full overflow-hidden bg-cream">
+      {/* Subtle background detail */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 opacity-[0.03]"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(90deg,#b89664 0px,#b89664 1px,transparent 1px,transparent 80px)",
+        }}
+      />
+
+      <div className="mx-auto max-w-[1400px] px-6 py-20 md:px-10 lg:px-14 lg:py-28">
+        {/* Header row */}
+        <div
+          ref={headerRef}
+          className={`mb-14 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between transition-all duration-700 ease-out ${
+            headerInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
+          }`}
+        >
+          <div>
+            {/* Eyebrow */}
+            <div className="mb-5 inline-flex items-center gap-3">
+              <span className="h-px w-8 bg-gold" />
+              <span className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-gold">
+                Nos Experts Beauté
+              </span>
+            </div>
+
+            <h2 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[2.4rem] lg:text-[2.6rem]">
+              Nos expertes{" "}
+              <em className="font-light text-gold/80 not-italic">à votre écoute.</em>
+            </h2>
+
+            <p className="mt-4 max-w-[420px] text-[14.5px] leading-[1.8] text-ink/55">
+              Rencontrez les professionnelles qui créent des expériences beauté
+              d'exception.
+            </p>
+          </div>
+
+          {/* Navigation Arrows + View All */}
+          <div className="flex items-center gap-3">
+            {/* <a
+              href="#experts"
+              className="mr-4 hidden text-[13px] font-semibold uppercase tracking-[0.12em] text-gold transition-opacity duration-200 hover:opacity-70 sm:inline"
+            >
+              Voir l'équipe →
+            </a> */}
+            <button
+              onClick={scrollLeft}
+              aria-label="Défiler à gauche"
+              className="flex h-11 w-11 items-center justify-center rounded-full border border-gold/30 text-gold transition-all duration-200 hover:bg-gold hover:text-white hover:shadow-md hover:shadow-gold/20"
+            >
+              <ChevronIcon direction="left" className="h-5 w-5" />
+            </button>
+            <button
+              onClick={scrollRight}
+              aria-label="Défiler à droite"
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-gold text-white shadow-md shadow-gold/30 transition-all duration-200 hover:bg-gold/90 hover:shadow-lg"
+            >
+              <ChevronIcon direction="right" className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Cards scroll container */}
+        <div
+          ref={cardsRef}
+          className={`relative transition-all duration-700 ease-out delay-200 ${
+            cardsInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
+          }`}
+        >
+          <div
+            ref={scrollRef}
+            className="flex gap-5 overflow-x-auto pb-4 scrollbar-hide snap-x snap-mandatory"
+            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+          >
+            {(isLoading ? FALLBACK_STYLISTS : stylists).map((stylist, index) => (
+              <ExpertCard key={stylist.id} stylist={stylist} delay={index * 80} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ExpertCard({ stylist, delay }) {
+  return (
+    <article
+      className="group relative flex w-[260px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl bg-white shadow-sm shadow-black/5 transition-all duration-300 hover:-translate-y-2 hover:shadow-xl hover:shadow-gold/10"
+      style={{ transitionDelay: `${delay}ms` }}
+    >
+      <div className="absolute inset-x-0 bottom-0 h-[3px] origin-left bg-gradient-to-r from-gold to-gold-soft transition-all duration-300 group-hover:h-[4px]" />
+      <div className="relative aspect-[4/5] w-full overflow-hidden bg-cream">
+        <img
+          src={stylist.image}
+          alt={stylist.name}
+          className="h-full w-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />
+      </div>
+      <div className="flex flex-col gap-3 p-5">
+        <div>
+          <h3 className="text-[16px] font-bold leading-tight text-ink">
+            {stylist.name}
+          </h3>
+          <p className="mt-1 text-[12px] font-medium uppercase tracking-[0.12em] text-gold">
+            {stylist.speciality}
+          </p>
+        </div>
+        <div className="flex items-center justify-between">
+          <p className="text-[12px] text-ink/45">
+            {stylist.experience} ans d'expérience
+          </p>
+        </div>
+        <button className="group/btn mt-1 inline-flex w-full items-center justify-center gap-2 rounded-full border border-gold/30 py-2.5 text-[12px] font-semibold text-gold transition-all duration-200 hover:bg-gold hover:text-white hover:shadow-md hover:shadow-gold/20">
+          Voir le profil
+          <ArrowIcon className="h-3.5 w-3.5 transition-transform duration-200 group-hover/btn:translate-x-1" />
+        </button>
+      </div>
+    </article>
+  );
+}

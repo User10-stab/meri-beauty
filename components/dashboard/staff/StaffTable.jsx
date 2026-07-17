@@ -240,7 +240,7 @@ function RowActions({ row, onEdit, onDelete, isPending }) {
         <div
           role="menu"
           aria-label="Menu d'actions"
-          className="absolute right-0 top-full z-50 mt-1 w-48 origin-top-right rounded-lg border border-gray-100 bg-white py-1 shadow-lg shadow-gray-200/60 animate-in fade-in-0 zoom-in-95"
+          className="absolute right-0 top-full z-40 mt-1 w-48 origin-top-right rounded-lg border border-gray-100 bg-white py-1 shadow-lg shadow-gray-200/60 animate-in fade-in-0 zoom-in-95"
         >
           <MenuBtn icon={Eye} label="Voir le profil" onClick={() => { close(); onEdit(row, "view"); }} />
           <MenuBtn icon={Pencil} label="Modifier" onClick={() => { close(); onEdit(row, "edit"); }} />
@@ -278,7 +278,7 @@ function DeleteDialog({ staff, onConfirm, onCancel, isPending }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="delete-dialog-title"
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
     >
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
         <div className="flex items-center gap-3 mb-4">

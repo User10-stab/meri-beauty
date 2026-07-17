@@ -80,7 +80,7 @@ export function CreateCategoryModal({ open, onClose, onCreated, category }) {
 
   return (
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="relative flex w-full max-w-md flex-col rounded-2xl bg-white shadow-xl">

@@ -78,7 +78,7 @@ export function DropdownContent({
       role="menu"
       aria-orientation="vertical"
       className={cn(
-        "fade-in-0 zoom-in-95 pointer-events-auto absolute z-99 mt-2 min-w-32 origin-top-right rounded-lg",
+        "fade-in-0 zoom-in-95 pointer-events-auto absolute z-40 mt-2 min-w-32 origin-top-right rounded-lg",
         {
           "animate-in right-0": align === "end",
           "left-0": align === "start",

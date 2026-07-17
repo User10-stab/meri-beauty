@@ -121,7 +121,7 @@ export function WorkingHoursModal({ staff, onClose }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="working-hours-title"
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

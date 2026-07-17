@@ -540,7 +540,7 @@ export function EditStaffModal({ staff, mode, onClose, services = [] }) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="edit-modal-title"
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="flex max-h-[92vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-xl">

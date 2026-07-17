@@ -80,7 +80,7 @@ export function RowActions({ row, onView, onEdit, onDelete }) {
           role="menu"
           aria-label="Row action menu"
           className="
-            absolute right-0 top-full z-50 mt-1 w-36 origin-top-right
+            absolute right-0 top-full z-40 mt-1 w-36 origin-top-right
             rounded-lg border border-gray-100 bg-white py-1
             shadow-lg shadow-gray-200/60
             animate-in fade-in-0 zoom-in-95

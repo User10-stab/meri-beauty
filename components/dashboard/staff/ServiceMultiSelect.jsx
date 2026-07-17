@@ -373,7 +373,7 @@ export function ServiceMultiSelect({ services: initialServices, value = [], onCh
 
       {/* ── Dropdown ──────────────────────────────────────────────── */}
       {open && (
-        <div className="absolute left-0 right-0 top-full z-[200] mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg shadow-gray-200/60">
+        <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg shadow-gray-200/60">
 
           {/* Search bar + toggle create button */}
           <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">

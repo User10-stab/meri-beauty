@@ -8,7 +8,7 @@ export function Logo() {
             {/* <div className="flex items-center justify-center w-[85px] h-[85px] bg-[#2f3a2e] rounded-full"> */}
                <Image
                 className="rounded-full "
-                src="/Images/logo.webp"
+                src="/Images/Logo.webp"
                 alt="Logo"
                 width={50}
                 height={50}

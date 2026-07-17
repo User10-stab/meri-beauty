@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { validateResetToken } from "@/action/auth/reset-password";
+import { validateResetToken } from "@/actions/auth/reset-password";
 import ResetPasswordForm from "./reset-password-form";
 
 export const metadata = {

@@ -8,12 +8,6 @@ export const metadata = {
 };
 
 export default async function LoginPage() {
-  const session = await auth();
-
-  // If already authenticated, redirect directly to /dashboard
-  if (session?.user) {
-    redirect("/dashboard");
-  }
 
   return <LoginForm />;
 }

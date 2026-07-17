@@ -139,7 +139,7 @@ export default function RegisterForm() {
         router.push("/login");
         return;
       }
-
+      
       router.push("/");
     } catch (err) {
       console.error("[RegisterForm] submit error:", err);

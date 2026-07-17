@@ -17,15 +17,16 @@ export default function LoginForm() {
       return response; // Return to AuthForm to display error banner
     }
 
-    // Success response
-    setTimeout(() => {
-      router.push("/dashboard");
-      router.refresh();
-    }, 1000);
+    const redirectTo = response.redirectTo || "/dashboard";
+    
+    window.location.href = redirectTo;
+    router.replace(redirectTo);
+    router.refresh();
 
     return {
       success: true,
-      message: "Success! Redirecting you to your dashboard...",
+      message: `Success! Redirecting you...`,
+      redirectTo,
     };
   };
 

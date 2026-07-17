@@ -1,9 +1,9 @@
 "use server";
 
-import { signIn, signOut } from "@/auth";
+import { signIn } from "@/auth";
 import { loginSchema } from "@/lib/validations/login";
 import { AuthError } from "next-auth";
-import { AUTH_ERRORS, ROLES, DASHBOARD_ROLES, WEBSITE_ROLES } from "@/lib/authorization";
+import { DASHBOARD_ROLES } from "@/lib/authorization";
 import { auth } from "@/auth";
 
 /**
@@ -29,43 +29,44 @@ export async function loginUser(input) {
   const { email, password } = parsed.data;
 
   try {
-    // First, authenticate the user
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
+      const user = await prisma.user.findUnique({
+        where: { email },
+        select: {
+          role: true,
+        },
+      });
 
-    if (result?.error) {
-      return {
-        success: false,
-        message: "Invalid email or password.",
-      };
-    }
+      if (!user) {
+        return {
+          success: false,
+          message: "Invalid email or password.",
+        };
+      }
+      
+      // Authenticate the user
+        const result = await signIn("credentials", {
+          email,
+          password,
+          redirect: false,
+        });
 
-    // After successful authentication, check the user's role
-    const session = await auth();
-    if (!session?.user) {
-      return {
-        success: false,
-        message: "Authentication failed. Please try again.",
-      };
-    }
+        if (result?.error) {
+          return {
+            success: false,
+            message: "Invalid email or password.",
+          };
+        }
+      // Redirect based on the role we already have
+        const redirectTo = DASHBOARD_ROLES.includes(user.role)
+          ? "/dashboard"
+          : "/";
 
-    // Reject CUSTOMER accounts from dashboard login
-    if (!DASHBOARD_ROLES.includes(session.user.role)) {
-      // Sign out the user since they don't have dashboard access
-      await signOut();
-      return {
-        success: false,
-        message: AUTH_ERRORS.CUSTOMER_DASHBOARD_ACCESS,
-      };
-    }
-
-    return {
-      success: true,
-      message: "Logged in successfully.",
-    };
+        return {
+          success: true,
+          message: "Logged in successfully.",
+          redirectTo,
+        };
+ 
   } catch (error) {
     if (error instanceof AuthError) {
       switch (error.type) {
@@ -94,80 +95,4 @@ export async function loginUser(input) {
  * Only accepts CUSTOMER accounts.
  * @param {{ email: string, password: string, rememberMe?: boolean }} input
  */
-export async function loginCustomer(input) {
-  const parsed = loginSchema.safeParse(input);
 
-  if (!parsed.success) {
-    const errors = parsed.error.flatten().fieldErrors;
-    return {
-      success: false,
-      message: "Please correct the errors in the form.",
-      errors: {
-        email: errors.email?.[0] ?? null,
-        password: errors.password?.[0] ?? null,
-      },
-    };
-  }
-
-  const { email, password } = parsed.data;
-
-  try {
-    // First, authenticate the user
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
-
-    if (result?.error) {
-      return {
-        success: false,
-        message: "Invalid email or password.",
-      };
-    }
-
-    // After successful authentication, check the user's role
-    const session = await auth();
-    if (!session?.user) {
-      return {
-        success: false,
-        message: "Authentication failed. Please try again.",
-      };
-    }
-
-    // Reject ADMIN, OWNER, and STAFF accounts from website login
-    if (!WEBSITE_ROLES.includes(session.user.role)) {
-      // Sign out the user since they don't have website access
-      await signOut();
-      return {
-        success: false,
-        message: AUTH_ERRORS.STAFF_WEBSITE_ACCESS,
-      };
-    }
-
-    return {
-      success: true,
-      message: "Logged in successfully.",
-    };
-  } catch (error) {
-    if (error instanceof AuthError) {
-      switch (error.type) {
-        case "CredentialsSignin":
-          return {
-            success: false,
-            message: "Invalid email or password.",
-          };
-        default:
-          return {
-            success: false,
-            message: "Something went wrong. Please try again.",
-          };
-      }
-    }
-    console.error("[loginCustomer] error:", error);
-    return {
-      success: false,
-      message: "An unexpected error occurred. Please try again.",
-    };
-  }
-}

@@ -25,7 +25,7 @@ export default function Navbar() {
   
   // Check if user has one of the specified roles
   const hasDashboardRole = isAuthed && session?.user?.role && 
-    ["OWNER", "STAFF", "CUSTOMER", "ADMIN"].includes(session.user.role);
+    ["OWNER", "STAFF", "ADMIN"].includes(session.user.role);
 
   // Dropdown state
   const [menuOpen, setMenuOpen] = useState(false);
@@ -46,6 +46,7 @@ export default function Navbar() {
         setMenuOpen(false);
       }
     }
+    
 
     if (menuOpen) {
       document.addEventListener("mousedown", handleClickOutside);

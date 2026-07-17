@@ -90,12 +90,14 @@ export async function createStaffFromRental(input) {
         // ── Existing user: update info, link Staff to this user ──────────
         userId = existingUser.id;
 
-        // Update user info in case the admin modified the fields
+        // Update user info in case the admin modified the fields,
+        // and promote the user from CUSTOMER to STAFF
         await tx.user.update({
           where: { id: userId },
           data: {
             fullName,
             phone,
+            role: "STAFF",
             // email is NOT updated — it's the unique identifier and should
             // remain as-is to avoid breaking references
           },

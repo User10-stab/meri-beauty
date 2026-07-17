@@ -497,11 +497,11 @@ function InstagramThumbnailList({ posts, activeId, onSelect }) {
 
   // Scroll active thumbnail into view when it changes
   useEffect(() => {
-    activeRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
-      inline: "center",
-    });
+    const el = activeRef.current;
+    const strip = stripRef.current;
+    if (!el || !strip) return;
+    const left = el.offsetLeft - strip.offsetWidth / 2 + el.offsetWidth / 2;
+    strip.scrollTo({ left, behavior: "smooth" });
   }, [activeId]);
 
   function scrollBy(dir) {

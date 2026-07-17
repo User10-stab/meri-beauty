@@ -91,7 +91,7 @@ export default function AboutUs() {
 
           {/* Floating pill */}
           <div
-            className={`absolute bottom-8 right-6 flex items-center gap-2 rounded-full bg-white px-3.5 py-2 shadow-md shadow-black/8
+            className={`absolute bottom-24 flex items-center gap-2 rounded-full bg-white px-3.5 py-2 shadow-md shadow-black/8
               transition-all duration-500 delay-700
               ${imgInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-3"}`}
           >

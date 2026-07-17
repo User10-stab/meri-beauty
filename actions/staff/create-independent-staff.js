@@ -144,7 +144,7 @@ export async function createIndependentStaff(input) {
 
   // ── 3. Generate & hash password ──────────────────────────────────────────
   const plainPassword = generateSecurePassword();
-  console.log('password', plainPassword)
+  
   const hashedPassword = await bcrypt.hash(plainPassword, BCRYPT_SALT_ROUNDS);
 
   // ── 4. Transaction ───────────────────────────────────────────────────────

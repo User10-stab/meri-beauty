@@ -5,6 +5,7 @@ import { loginSchema } from "@/lib/validations/login";
 import { AuthError } from "next-auth";
 import { DASHBOARD_ROLES } from "@/lib/authorization";
 import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
 
 /**
  * Server action to log in a user for dashboard access.

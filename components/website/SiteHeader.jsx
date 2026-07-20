@@ -9,12 +9,12 @@ import { useSession, signOut } from "next-auth/react";
 import { AnimatePresence, motion } from "framer-motion";
 
 const NAV_LINKS = [
-  { label: "Accueil", href: "#accueil" },
-  { label: "Concept", href: "#concept" },
-  { label: "Réservation", href: "#reservation" },
-  { label: "Boutique", href: "#boutique" },
-  { label: "Évènements & Ateliers", href: "#evenements" },
-  { label: "Contact", href: "#contact" },
+  { label: "Accueil", href: "/" },
+  { label: "Concept", href: "/concept" },
+  { label: "Réservation", href: "/reservation" },
+  { label: "Boutique", href: "/boutique" },
+  { label: "Évènements & Ateliers", href: "/evenements" },
+  { label: "Contact", href: "/contact" },
 ];
 
 export default function Navbar() {

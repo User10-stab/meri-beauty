@@ -144,18 +144,54 @@ model Salon {
   description String?
   logo        String?
   coverImage  String?
+
   phone       String
   email       String
   address     String?
+
   instagram   String?
   facebook    String?
   tiktok      String?
-  openingTime DateTime
-  closingTime DateTime
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  gallery SalonGallery[]
+  gallery      SalonGallery[]
+  workingDays  SalonWorkingDay[]
+  closures     SalonClosure[]
+}
+model SalonWorkingDay {
+  id           String   @id @default(cuid())
+
+  day          WeekDay
+  isOpen       Boolean  @default(true)
+
+  openingTime  String
+  closingTime  String
+
+  salonId      String
+  salon        Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@unique([salonId, day])
+}
+model SalonClosure {
+  id          String   @id @default(cuid())
+
+  title       String
+
+  startDate   DateTime
+  endDate     DateTime?
+
+  isFullDay   Boolean @default(true)
+
+  openingTime String?
+  closingTime String?
+
+  salonId     String
+  salon       Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // USER

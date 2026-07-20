@@ -46,11 +46,12 @@ export const NAV_DATA = [
         items: [],
       },
        {
-        title: "Services",
-        icon: Icons.User,
-        url: "/dashboard/services",
-        items: [],
-      },
+         title: "Services",
+         icon: Icons.User,
+         url: "/dashboard/services",
+         items: [],
+       },
+      
       // {
       //   title: "Profile",
       //   url: "/dashboard/profile",

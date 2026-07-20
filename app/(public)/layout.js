@@ -1,7 +1,16 @@
 import SiteHeader from "@/components/website/SiteHeader";
 import Footer from "@/components/website/Footer";
+import { getSalon } from "@/actions/salon/get-salon";
+import { getServices } from "@/actions/services/get-services";
 
-export default function PublicLayout({ children }) {
+export default async function PublicLayout({ children }) {
+  const [salonResult, servicesResult] = await Promise.all([
+    getSalon(),
+    getServices(),
+  ]);
+  const salon = salonResult.data;
+  const services = servicesResult.data ?? [];
+
   return (
     <>
       <SiteHeader />
@@ -15,7 +24,7 @@ export default function PublicLayout({ children }) {
         {children}
       </main>
 
-      <Footer />
+      <Footer salon={salon} services={services} />
     </>
   );
 }

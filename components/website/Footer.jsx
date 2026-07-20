@@ -4,6 +4,16 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 
+const DAY_LABELS = {
+  MONDAY: "Lundi",
+  TUESDAY: "Mardi",
+  WEDNESDAY: "Mercredi",
+  THURSDAY: "Jeudi",
+  FRIDAY: "Vendredi",
+  SATURDAY: "Samedi",
+  SUNDAY: "Dimanche",
+};
+
 const NAVIGATION = [
   { label: "Accueil", href: "#accueil" },
   { label: "Concept", href: "#concept" },
@@ -13,7 +23,7 @@ const NAVIGATION = [
   { label: "Contact", href: "#contact" },
 ];
 
-const SERVICES = [
+const FALLBACK_SERVICES = [
   "Soins Visage",
   "Coiffure",
   "Manucure",
@@ -21,13 +31,6 @@ const SERVICES = [
   "Maquillage",
   "Rituels Corps",
   "Beauty Coaching",
-];
-
-const OPENING_HOURS = [
-  { days: "Lundi", hours: "12:00 – 19:00" },
-  { days: "Mardi – Vendredi", hours: "8:00 – 19:00" },
-  { days: "Samedi", hours: "8:00 – 15:30" },
-  { days: "Dimanche", hours: "Fermé" },
 ];
 
 function InstagramIcon({ className = "w-5 h-5" }) {
@@ -88,7 +91,7 @@ function MailIcon({ className = "w-4 h-4" }) {
   );
 }
 
-export default function Footer() {
+export default function Footer({ salon, services = [] }) {
   const [email, setEmail] = useState("");
   const [subscribed, setSubscribed] = useState(false);
 
@@ -100,12 +103,19 @@ export default function Footer() {
     }
   };
 
+  const openDays = (salon?.workingDays ?? []).filter((d) => d.isOpen);
+  const closedDays = (salon?.workingDays ?? []).filter((d) => !d.isOpen);
+
+  const socialLinks = [
+    { icon: InstagramIcon, href: salon?.instagram || "#", label: "Instagram" },
+    { icon: FacebookIcon, href: salon?.facebook || "#", label: "Facebook" },
+    { icon: TiktokIcon, href: salon?.tiktok || "#", label: "TikTok" },
+  ];
+
   return (
     <footer className="relative w-full overflow-hidden bg-primary">
-      {/* Top golden separator */}
       <div className="h-[2px] w-full bg-gradient-to-r from-transparent via-gold/40 to-transparent" />
 
-      {/* Subtle texture */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 opacity-[0.03]"
@@ -116,34 +126,26 @@ export default function Footer() {
       />
 
       <div className="relative mx-auto max-w-[1400px] px-6 pt-16 pb-8 md:px-10 lg:px-14 lg:pt-20">
-        {/* Main footer grid */}
         <div className="grid grid-cols-1 gap-12 sm:grid-cols-2 lg:grid-cols-5 lg:gap-10 xl:gap-16">
 
           {/* ── Col 1: Brand ── */}
           <div className="lg:col-span-1">
-            {/* Logo */}
             <Link href="#accueil" aria-label="MeriBeauty — Accueil">
               <Image
                 src="/Images/Logo.webp"
                 alt="MeriBeauty Studio"
                 width={140}
                 height={60}
-                className="mb-5 h-[50px] w-auto "
+                className="mb-5 h-[50px] w-auto"
               />
             </Link>
 
             <p className="mb-6 text-[13px] leading-[1.8] text-white/50">
-              Salon de beauté & bien-être à Jette. Un espace pensé pour révéler
-              votre beauté avec justesse.
+              {salon?.description || "Salon de beauté & bien-être à Jette. Un espace pensé pour révéler votre beauté avec justesse."}
             </p>
 
-            {/* Social icons */}
             <div className="flex gap-3">
-              {[
-                { Icon: InstagramIcon, href: "#", label: "Instagram" },
-                { Icon: FacebookIcon, href: "#", label: "Facebook" },
-                { Icon: TiktokIcon, href: "#", label: "TikTok" },
-              ].map(({ Icon, href, label }) => (
+              {socialLinks.map(({ icon: Icon, href, label }) => (
                 <a
                   key={label}
                   href={href}
@@ -181,13 +183,13 @@ export default function Footer() {
               Nos Services
             </h4>
             <ul className="flex flex-col gap-3">
-              {SERVICES.map((service) => (
-                <li key={service}>
+              {(services.length > 0 ? services : FALLBACK_SERVICES).map((service) => (
+                <li key={typeof service === "string" ? service : service.id}>
                   <a
                     href="#services"
                     className="text-[13px] text-white/50 transition-colors duration-200 hover:text-white"
                   >
-                    {service}
+                    {typeof service === "string" ? service : service.name}
                   </a>
                 </li>
               ))}
@@ -200,45 +202,60 @@ export default function Footer() {
               Informations
             </h4>
 
-            {/* Contact details */}
             <ul className="mb-7 flex flex-col gap-3">
-              <li className="flex items-start gap-2.5">
-                <MapPinIcon className="mt-0.5 h-4 w-4 shrink-0 text-gold/60" />
-                <span className="text-[13px] leading-snug text-white/50">
-                  66 Broklyn Golden Street<br />New York, USA
-                </span>
-              </li>
-              <li className="flex items-center gap-2.5">
-                <PhoneIcon className="h-4 w-4 shrink-0 text-gold/60" />
-                <a
-                  href="tel:+12125551234"
-                  className="text-[13px] text-white/50 transition-colors hover:text-white"
-                >
-                  +1 (212) 555 1234
-                </a>
-              </li>
-              <li className="flex items-center gap-2.5">
-                <MailIcon className="h-4 w-4 shrink-0 text-gold/60" />
-                <a
-                  href="mailto:hello@meri-beauty.com"
-                  className="text-[13px] text-white/50 transition-colors hover:text-white"
-                >
-                  hello@meri-beauty.com
-                </a>
-              </li>
+              {salon?.address && (
+                <li className="flex items-start gap-2.5">
+                  <MapPinIcon className="mt-0.5 h-4 w-4 shrink-0 text-gold/60" />
+                  <span className="text-[13px] leading-snug text-white/50">
+                    {salon.address.split(",").map((part, i) => (
+                      <span key={i}>{i > 0 && <br />}{part.trim()}</span>
+                    ))}
+                  </span>
+                </li>
+              )}
+              {salon?.phone && (
+                <li className="flex items-center gap-2.5">
+                  <PhoneIcon className="h-4 w-4 shrink-0 text-gold/60" />
+                  <a
+                    href={`tel:${salon.phone.replace(/\s+/g, "")}`}
+                    className="text-[13px] text-white/50 transition-colors hover:text-white"
+                  >
+                    {salon.phone}
+                  </a>
+                </li>
+              )}
+              {salon?.email && (
+                <li className="flex items-center gap-2.5">
+                  <MailIcon className="h-4 w-4 shrink-0 text-gold/60" />
+                  <a
+                    href={`mailto:${salon.email}`}
+                    className="text-[13px] text-white/50 transition-colors hover:text-white"
+                  >
+                    {salon.email}
+                  </a>
+                </li>
+              )}
             </ul>
 
-            {/* Hours */}
             <h4 className="mb-4 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-gold">
               Horaires
             </h4>
             <ul className="flex flex-col gap-2">
-              {OPENING_HOURS.map(({ days, hours }) => (
-                <li key={days} className="flex items-center justify-between gap-4">
-                  <span className="text-[12px] text-white/40">{days}</span>
-                  <span className="text-[12px] font-medium text-white/65">{hours}</span>
+              {(salon?.workingDays ?? []).map(({ day, isOpen, openingTime, closingTime }) => (
+                <li key={day} className="flex items-center justify-between gap-4">
+                  <span className="text-[12px] text-white/40">{DAY_LABELS[day]}</span>
+                  <span className="text-[12px] font-medium text-white/65">
+                    {isOpen
+                      ? `${openingTime?.slice(0, 5)} – ${closingTime?.slice(0, 5)}`
+                      : "Fermé"}
+                  </span>
                 </li>
               ))}
+              {(!salon?.workingDays || salon.workingDays.length === 0) && (
+                <li>
+                  <span className="text-[12px] text-white/30">Non définis</span>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -280,7 +297,7 @@ export default function Footer() {
         {/* Bottom bar */}
         <div className="mt-14 flex flex-col items-center justify-between gap-4 border-t border-white/8 pt-7 sm:flex-row">
           <p className="text-[12px] text-white/30">
-            © 2024 MeriBeauty. Tous droits réservés.
+            &copy; {new Date().getFullYear()} {salon?.name || "MeriBeauty"}. Tous droits réservés.
           </p>
           <div className="flex gap-5">
             <a

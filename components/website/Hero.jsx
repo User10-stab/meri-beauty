@@ -1,5 +1,7 @@
 import Image from "next/image";
 import { ArrowIcon, StarIcon, ClockIcon, MapPinIcon } from "./icons";
+import { getSalon } from "@/actions/salon/get-salon";
+import { groupWorkingDays } from "@/lib/groupWorkingDays";
 
 const SERVICES = [
   "Coiffure",
@@ -19,7 +21,11 @@ const WORKING_HOURS = [
 
 const ADDRESS = "66 Broklyn Golden Street\nNew York, USA";
 
-export default function Hero() {
+export default async function Hero() {
+   const salon = await getSalon();
+  const workingDays = groupWorkingDays(salon.data.workingDays);
+  
+  
   return (
     /* Outer wrapper: relative so the card can be absolutely positioned.
        Right padding reserves space so the card doesn't overlap the text. */
@@ -118,49 +124,60 @@ export default function Hero() {
           Vertically centered on the right side
           of the hero section.
       ══════════════════════════════════════ */}
-      <aside
-        aria-label="Opening hours"
-        className="absolute right-6 z-20 hidden w-[300px] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25 sm:right-10 lg:right-14 lg:block xl:right-20"
-        style={{
-        //   top: "50%",
-          transform: "translateY(-50%)",
-        }}
-      >
-        {/* Gold address header */}
-        <div className="bg-gold px-6 py-5">
-          <div className="flex items-start gap-2.5">
-            <MapPinIcon className="mt-0.5 h-4 w-4 shrink-0 text-white/80" />
-            <p className="whitespace-pre-line text-[14px] font-semibold leading-snug text-white">
-              {ADDRESS}
+     <aside
+  aria-label="Opening hours"
+  className="absolute right-6 z-20 hidden w-[330px] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25 sm:right-10 lg:right-14 lg:block xl:right-20"
+  style={{
+    transform: "translateY(-50%)",
+  }}
+>
+  {/* Address */}
+  <div className="bg-gold px-6 py-5">
+    <div className="flex items-start gap-2.5">
+      <MapPinIcon className="mt-0.5 h-4 w-4 shrink-0 text-white/80" />
+
+      <p className="whitespace-pre-line text-[14px] font-semibold leading-snug text-white">
+        {salon.data.address || "Address not available"}
+      </p>
+    </div>
+  </div>
+
+  {/* Card Body */}
+  <div className="px-6 py-6">
+    <div className="mb-6 flex items-center gap-4 justify-between">
+      <h2 className="text-[1.3rem] font-bold uppercase leading-[1.1] tracking-tight text-ink">
+        Heures d'ouverture
+      </h2>
+
+      <ClockIcon className="mt-0.5 h-9 w-9 text-gold" />
+    </div>
+
+    <ul className="flex flex-col gap-4">
+      {workingDays.length > 0 ? (
+        workingDays.map((item) => (
+          <li
+            key={item.label}
+            className="border-b border-black/8 pb-4 last:border-0 last:pb-0"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-black/40">
+              {item.label}
             </p>
-          </div>
-        </div>
 
-        {/* Card body */}
-        <div className="px-6 py-6">
-          {/* Title + clock */}
-          <div className="mb-6 flex items-start justify-between">
-            <h2 className="text-[1.4rem] font-bold uppercase leading-[1.1] tracking-tight text-ink">
-              Opening Hours
-            </h2>
-            <ClockIcon className="mt-0.5 h-9 w-9 text-gold" />
-          </div>
-
-          {/* Schedule rows */}
-          <ul className="flex flex-col gap-4">
-            {WORKING_HOURS.map(({ days, hours }) => (
-              <li key={days} className="border-b border-black/8 pb-4 last:border-0 last:pb-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-black/40">
-                  {days}
-                </p>
-                <p className="mt-1 text-[1.15rem] font-light text-gold">
-                  {hours}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </aside>
+            <p className="mt-1 text-[1.15rem] font-light text-gold">
+              {item.hours}
+            </p>
+          </li>
+        ))
+      ) : (
+        <li>
+          <p className="text-sm text-gray-500">
+            Opening hours not available.
+          </p>
+        </li>
+      )}
+    </ul>
+  </div>
+</aside>
     </div>
   );
 }

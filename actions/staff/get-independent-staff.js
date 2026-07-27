@@ -1,6 +1,8 @@
 "use server";
 
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 
 /**
  * Fetches all independent staff members with their user, contract, and
@@ -10,6 +12,10 @@ import { prisma } from "@/lib/prisma";
  */
 export async function getIndependentStaff() {
   try {
+    const session = await auth();
+    if (!session?.user || !isAdminRole(session.user.role)) {
+      return { success: false, data: [], message: "Permissions insuffisantes" };
+    }
     const staffList = await prisma.staff.findMany({
       where: { type: "INDEPENDENT", isDeleted: false, user: { isDeleted: false } },
       orderBy: { createdAt: "desc" },
@@ -31,6 +37,7 @@ export async function getIndependentStaff() {
             phone: true,
             role: true,
             isActive: true,
+            isDeleted: true,
             emailVerified: true,
             createdAt: true,
           },
@@ -42,6 +49,7 @@ export async function getIndependentStaff() {
         staffServices: {
           where: { isActive: true },
           select: {
+            isActive: true,
             serviceId: true,
             service: {
               select: {
@@ -51,6 +59,9 @@ export async function getIndependentStaff() {
               },
             },
           },
+        },
+        _count: {
+          select: { workingHours: true },
         },
       },
     });
@@ -65,6 +76,10 @@ export async function getIndependentStaff() {
       hireDate: s.hireDate ? s.hireDate.toISOString() : null,
       createdAt: s.createdAt.toISOString(),
       updatedAt: s.updatedAt.toISOString(),
+      // Compliance data
+      workingHoursCount: s._count.workingHours,
+      userIsDeleted: s.user.isDeleted,
+      userIsActive: s.user.isActive,
       // Current active service IDs (used to pre-populate the edit form)
       serviceIds: s.staffServices.map((ss) => ss.serviceId),
       // Full service objects (used to render service tags in the table)

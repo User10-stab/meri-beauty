@@ -2,33 +2,20 @@
 
 import bcrypt from "bcrypt";
 import crypto from "crypto";
+import { generateSecurePassword } from "@/lib/generate-password";
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import { sendEmail } from "@/lib/email";
+import { emailVerificationEmail } from "@/lib/email-templates";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 
-const BCRYPT_SALT_ROUNDS = 12;
-const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
+  const BCRYPT_SALT_ROUNDS = 12;
+  const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
+  const VERIFICATION_TOKEN_EXPIRY_MINUTES = 15;
 
-// ─── Password generator ───────────────────────────────────────────────────────
-function generateSecurePassword() {
-  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  const lower = "abcdefghjkmnpqrstuvwxyz";
-  const digits = "23456789";
-  const symbols = "!@#$%^&*";
-  const all = upper + lower + digits + symbols;
 
-  const pick = (str) => str[crypto.randomInt(str.length)];
-  const required = [pick(upper), pick(lower), pick(digits), pick(symbols)];
-  const rest = Array.from({ length: 12 }, () => pick(all));
-  const combined = [...required, ...rest];
-
-  for (let i = combined.length - 1; i > 0; i--) {
-    const j = crypto.randomInt(i + 1);
-    [combined[i], combined[j]] = [combined[j], combined[i]];
-  }
-  return combined.join("");
-}
 
 // ─── Email template ───────────────────────────────────────────────────────────
 function buildWelcomeEmail({ fullName, email, password, loginUrl }) {
@@ -83,13 +70,18 @@ function buildWelcomeEmail({ fullName, email, password, loginUrl }) {
 // ─── Server action ────────────────────────────────────────────────────────────
 
 /**
- * Creates User (STAFF) + Staff (INDEPENDENT) + optional Contract (FIXED_RENT)
+ * Creates User (STAFF) + Staff (INDEPENDENT) + Contract (FIXED_RENT — mandatory)
  * + StaffService assignments — all inside a single Prisma transaction.
  *
  * @param {object} input  Raw form data (validated against createIndependentStaffSchema)
  * @returns {{ success: boolean, message: string, errors?: object, staffId?: string }}
  */
 export async function createIndependentStaff(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   // ── 1. Validate ──────────────────────────────────────────────────────────
   const parsed = createIndependentStaffSchema.safeParse(input);
 
@@ -177,20 +169,18 @@ export async function createIndependentStaff(input) {
         },
       });
 
-      // 4c. Create Contract (always FIXED_RENT when provided)
-      if (contract) {
-        await tx.contract.create({
-          data: {
-            staffId:   newStaff.id,
-            type:      "FIXED_RENT",
-            fixedRent: contract.fixedRent,
-            startDate: new Date(contract.startDate),
-            endDate:   contract.endDate ? new Date(contract.endDate) : null,
-            status:    "ACTIVE",
-            notes:     contract.notes ?? null,
-          },
-        });
-      }
+      // 4c. Create Contract (always FIXED_RENT — mandatory for all staff)
+      await tx.contract.create({
+        data: {
+          staffId:   newStaff.id,
+          type:      "FIXED_RENT",
+          fixedRent: contract.fixedRent,
+          startDate: new Date(contract.startDate),
+          endDate:   contract.endDate ? new Date(contract.endDate) : null,
+          status:    "ACTIVE",
+          notes:     contract.notes ?? null,
+        },
+      });
 
       // 4d. Assign services — StaffService requires createdById (the admin creating the record)
       // We use the newly-created staff's userId as createdById.
@@ -227,6 +217,36 @@ export async function createIndependentStaff(input) {
       subject: "Vos identifiants de connexion – Meri Beauty",
       text,
       html,
+    });
+
+    // ── 6. Send verification email ──────────────────────────────────────
+    const verificationPlainToken = crypto.randomUUID();
+    const verificationTokenHash = await bcrypt.hash(verificationPlainToken, BCRYPT_SALT_ROUNDS);
+    const verificationExpiresAt = new Date(Date.now() + VERIFICATION_TOKEN_EXPIRY_MINUTES * 60 * 1000);
+
+    await prisma.emailVerificationToken.create({
+      data: {
+        email,
+        tokenHash: verificationTokenHash,
+        expiresAt: verificationExpiresAt,
+      },
+    });
+
+    const verificationUrl = `${
+      process.env.NEXTAUTH_URL || "http://localhost:3000"
+    }/verify-email?token=${encodeURIComponent(verificationPlainToken)}`;
+
+    const verificationTemplate = emailVerificationEmail({
+      customerName: fullName,
+      verificationUrl,
+      expiresInMinutes: VERIFICATION_TOKEN_EXPIRY_MINUTES,
+    });
+
+    await sendEmail({
+      to: email,
+      subject: verificationTemplate.subject,
+      text: verificationTemplate.text,
+      html: verificationTemplate.html,
     });
 
     revalidatePath(REVALIDATE_PATH);

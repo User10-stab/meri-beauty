@@ -4,7 +4,26 @@
  *
  * @type {import("next-auth").NextAuthConfig}
  */
-import { canAccessDashboard } from "@/lib/authorization";
+import { canAccessDashboard, isAdminRole, ROLES } from "@/lib/authorization";
+
+// Define admin-only route patterns
+const ADMIN_ONLY_ROUTES = [
+  "/dashboard/staff",
+  "/dashboard/categories",
+  "/dashboard/rental-requests",
+  "/dashboard/reports",
+  "/dashboard/salon-settings",
+  "/dashboard/settings",
+];
+
+/**
+ * Check if a pathname matches any admin-only route
+ * @param {string} pathname
+ * @returns {boolean}
+ */
+function isAdminOnlyRoute(pathname) {
+  return ADMIN_ONLY_ROUTES.some((route) => pathname.startsWith(route));
+}
 
 export const authConfig = {
   pages: {
@@ -26,6 +45,14 @@ export const authConfig = {
         if (!canAccessDashboard(userRole)) {
           // Redirect customers to website home page
           return Response.redirect(new URL("/", nextUrl));
+        }
+
+        // Check for admin-only routes
+        if (isAdminOnlyRoute(nextUrl.pathname)) {
+          if (!isAdminRole(userRole)) {
+            // Staff trying to access admin page - redirect to dashboard home
+            return Response.redirect(new URL("/dashboard", nextUrl));
+          }
         }
 
         return true;

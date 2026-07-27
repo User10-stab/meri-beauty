@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
@@ -14,7 +16,7 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * and sending a welcome email. Instead we:
  *  1. Find the existing user by email
  *  2. Update their fullName / phone if the admin changed them
- *  3. Create the Staff record + optional Contract + Service assignments
+ *  3. Create the Staff record + Contract (mandatory) + Service assignments
  *
  * If the user does NOT exist (edge case), it falls back to creating a new
  * User + Staff (same as createIndependentStaff).
@@ -23,6 +25,11 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * @returns {{ success: boolean, message: string, errors?: object, staffId?: string }}
  */
 export async function createStaffFromRental(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   // ── 1. Validate ──────────────────────────────────────────────────────────
   const parsed = createIndependentStaffSchema.safeParse(input);
 
@@ -153,20 +160,18 @@ export async function createStaffFromRental(input) {
         },
       });
 
-      // ── Create Contract (always FIXED_RENT when provided) ────────────
-      if (contract) {
-        await tx.contract.create({
-          data: {
-            staffId: newStaff.id,
-            type: "FIXED_RENT",
-            fixedRent: contract.fixedRent,
-            startDate: new Date(contract.startDate),
-            endDate: contract.endDate ? new Date(contract.endDate) : null,
-            status: "ACTIVE",
-            notes: contract.notes ?? null,
-          },
-        });
-      }
+      // ── Create Contract (always FIXED_RENT — mandatory for all staff) ──
+      await tx.contract.create({
+        data: {
+          staffId: newStaff.id,
+          type: "FIXED_RENT",
+          fixedRent: contract.fixedRent,
+          startDate: new Date(contract.startDate),
+          endDate: contract.endDate ? new Date(contract.endDate) : null,
+          status: "ACTIVE",
+          notes: contract.notes ?? null,
+        },
+      });
 
       // ── Assign services ──────────────────────────────────────────────
       if (ids.length > 0) {

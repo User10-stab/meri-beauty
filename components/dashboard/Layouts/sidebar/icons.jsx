@@ -183,6 +183,26 @@ export function SettingsIcon(props) {
   );
 }
 
+export function MailIcon(props) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={24}
+      height={24}
+      viewBox="0 0 24 24"
+      fill="none"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M3.75 5.25L3 6v12l.75.75h16.5l.75-.75V6l-.75-.75H3.75zM4.5 7.695l7.5 5.25 7.5-5.25V18H4.5V7.695zm.972-1.195h13.056L12 11.305 5.472 6.5z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export function ArrowLeftIcon(props) {
   return (
     <svg

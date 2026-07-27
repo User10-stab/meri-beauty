@@ -4,6 +4,15 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { isAdminRole, ROLES } from "@/lib/authorization";
+
+const staffAssignmentSchema = z.object({
+  staffId: z.string().min(1, "Le professionnel est obligatoire."),
+  price: z.coerce.number({ invalid_type_error: "Le prix est invalide." }).nonnegative("Le prix ne peut pas être négatif."),
+  duration: z.coerce.number({ invalid_type_error: "La durée est invalide." }).int("La durée doit être un nombre entier.").nonnegative("La durée ne peut pas être négative."),
+  margin: z.coerce.number().nonnegative("La marge ne peut pas être négative.").optional().nullable(),
+  photo: z.string().optional().nullable(),
+});
 
 const createServiceSchema = z.object({
   name: z
@@ -20,48 +29,25 @@ const createServiceSchema = z.object({
     .max(500, "La description ne peut pas dépasser 500 caractères.")
     .optional()
     .nullable(),
-  selectedStaffId: z
-    .string()
-    .optional()
-    .nullable(),
-  price: z
-    .number()
-    .min(0, "Le prix ne peut pas être négatif.")
-    .optional()
-    .nullable(),
-  duration: z
-    .number()
-    .int("La durée doit être un nombre entier.")
-    .min(1, "La durée doit être d'au moins 1 minute.")
-    .optional()
-    .nullable(),
-  margin: z
-    .number()
-    .min(0, "La marge ne peut pas être négative.")
-    .optional()
-    .nullable(),
-  photo: z
-    .string()
-    .optional()
-    .nullable(),
+  staffAssignments: z.array(staffAssignmentSchema).optional().default([]),
 }).superRefine((data, ctx) => {
-  // If staff is selected, price and duration are required
-  if (data.selectedStaffId) {
-    if (data.price === null || data.price === undefined) {
+  // Validate each staff assignment has price and duration
+  (data.staffAssignments || []).forEach((assignment, index) => {
+    if (!assignment.price && assignment.price !== 0) {
       ctx.addIssue({
-        path: ["price"],
+        path: [`staffAssignments`, index, `price`],
         code: z.ZodIssueCode.custom,
-        message: "Le prix est obligatoire lorsque vous associez un professionnel.",
+        message: "Le prix est obligatoire.",
       });
     }
-    if (data.duration === null || data.duration === undefined) {
+    if (!assignment.duration) {
       ctx.addIssue({
-        path: ["duration"],
+        path: [`staffAssignments`, index, `duration`],
         code: z.ZodIssueCode.custom,
-        message: "La durée est obligatoire lorsque vous associez un professionnel.",
+        message: "La durée est obligatoire.",
       });
     }
-  }
+  });
 });
 
 const updateServiceSchema = z.object({
@@ -80,53 +66,32 @@ const updateServiceSchema = z.object({
     .max(500, "La description ne peut pas dépasser 500 caractères.")
     .optional()
     .nullable(),
-  selectedStaffId: z
-    .string()
-    .optional()
-    .nullable(),
-  price: z
-    .number()
-    .min(0, "Le prix ne peut pas être négatif.")
-    .optional()
-    .nullable(),
-  duration: z
-    .number()
-    .int("La durée doit être un nombre entier.")
-    .min(1, "La durée doit être d'au moins 1 minute.")
-    .optional()
-    .nullable(),
-  margin: z
-    .number()
-    .min(0, "La marge ne peut pas être négative.")
-    .optional()
-    .nullable(),
-  photo: z
-    .string()
-    .optional()
-    .nullable(),
+  staffAssignments: z.array(staffAssignmentSchema).optional().default([]),
 }).superRefine((data, ctx) => {
-  if (data.selectedStaffId) {
-    if (data.price === null || data.price === undefined) {
+  // Validate each staff assignment has price and duration
+  (data.staffAssignments || []).forEach((assignment, index) => {
+    if (!assignment.price && assignment.price !== 0) {
       ctx.addIssue({
-        path: ["price"],
+        path: [`staffAssignments`, index, `price`],
         code: z.ZodIssueCode.custom,
-        message: "Le prix est obligatoire lorsque vous associez un professionnel.",
+        message: "Le prix est obligatoire.",
       });
     }
-    if (data.duration === null || data.duration === undefined) {
+    if (!assignment.duration) {
       ctx.addIssue({
-        path: ["duration"],
+        path: [`staffAssignments`, index, `duration`],
         code: z.ZodIssueCode.custom,
-        message: "La durée est obligatoire lorsque vous associez un professionnel.",
+        message: "La durée est obligatoire.",
       });
     }
-  }
+  });
 });
 
 /**
- * Creates a new service and optionally links it with a single staff member.
+ * Creates a new service and optionally links it with multiple staff members.
+ * Each staff member can have their own price, duration, margin, and photo.
  *
- * @param {{ name: string, categoryId: string, description?: string, selectedStaffId?: string, price?: number, duration?: number, margin?: number, photo?: string }} input
+ * @param {{ name: string, categoryId: string, description?: string, staffAssignments?: Array<{ staffId: string, price: number, duration: number, margin?: number, photo?: string }> }} input
  * @returns {{ success: boolean, message: string, service?: { id, name, category } }}
  */
 export async function createService(input) {
@@ -144,16 +109,11 @@ export async function createService(input) {
         name: errors.name?.[0] ?? null,
         categoryId: errors.categoryId?.[0] ?? null,
         description: errors.description?.[0] ?? null,
-        selectedStaffId: errors.selectedStaffId?.[0] ?? null,
-        price: errors.price?.[0] ?? null,
-        duration: errors.duration?.[0] ?? null,
-        margin: errors.margin?.[0] ?? null,
-        photo: errors.photo?.[0] ?? null,
       },
     };
   }
 
-  const { name, categoryId, description, selectedStaffId, price, duration, margin, photo } = parsed.data;
+  const { name, categoryId, description, staffAssignments } = parsed.data;
 
   try {
     // Verify the category exists
@@ -168,15 +128,33 @@ export async function createService(input) {
         message: "La catégorie sélectionnée est introuvable.",
         errors: { 
           categoryId: "Catégorie introuvable.",
-          selectedStaffId: null,
-          price: null,
-          duration: null,
-          margin: null,
         },
       };
     }
 
     const session = await auth();
+    if (!session?.user) {
+      return { success: false, message: "Non authentifié" };
+    }
+
+    // Check if a service with the same name already exists (case-insensitive)
+    const existingService = await prisma.service.findFirst({
+      where: { 
+        name: {
+          equals: name,
+          mode: 'insensitive',
+        },
+      },
+      select: { id: true, name: true },
+    });
+
+    if (existingService) {
+      return {
+        success: false,
+        message: "Un service avec ce nom existe déjà.",
+        errors: { name: "Ce nom est déjà utilisé." },
+      };
+    }
 
     const service = await prisma.$transaction(async (tx) => {
       const newService = await tx.service.create({
@@ -184,39 +162,67 @@ export async function createService(input) {
         include: { category: { select: { id: true, name: true } } },
       });
 
-      if (selectedStaffId) {
-        // Verify staff exists and is active
-        const staffExist = await tx.staff.findUnique({
-          where: { id: selectedStaffId, isDeleted: false },
+      // Determine createdBy user ID
+      let createdById = session.user.id;
+
+      // If staff member, get their staff ID and auto-assign the service to them
+      let staffIdToAssign = null;
+      if (session.user.role === ROLES.STAFF) {
+        const staffRecord = await tx.staff.findUnique({
+          where: { userId: session.user.id, isDeleted: false },
           select: { id: true },
         });
+        staffIdToAssign = staffRecord?.id;
+      }
 
-        if (staffExist) {
-          let createdById = session?.user?.id;
-          if (!createdById) {
-            const firstUser = await tx.user.findFirst({ select: { id: true }});
-            createdById = firstUser?.id;
-          }
-          if (!createdById) {
-            const anyUser = await tx.user.findFirst();
-            createdById = anyUser?.id;
-          }
+      // Create staff-service assignments
+      const assignmentsToCreate = [];
 
-          if (createdById) {
-            await tx.staffService.create({
-              data: {
+      // If staff member created this, auto-assign to them
+      if (staffIdToAssign) {
+        assignmentsToCreate.push({
+          staffId: staffIdToAssign,
+          serviceId: newService.id,
+          createdById,
+          price: 0,
+          duration: 0,
+          margin: null,
+          photo: "",
+          isActive: true,
+        });
+      }
+
+      // Add any additional staff assignments from the form (admin/owner only)
+      if (staffAssignments && staffAssignments.length > 0 && isAdminRole(session.user.role)) {
+        for (const assignment of staffAssignments) {
+          // Verify staff exists and is active
+          const staffExist = await tx.staff.findUnique({
+            where: { id: assignment.staffId, isDeleted: false },
+            select: { id: true },
+          });
+
+          if (staffExist) {
+            // Check if already added (avoid duplicates)
+            const alreadyAdded = assignmentsToCreate.some(a => a.staffId === staffExist.id);
+            if (!alreadyAdded) {
+              assignmentsToCreate.push({
                 staffId: staffExist.id,
                 serviceId: newService.id,
                 createdById,
-                price: price || 0,
-                duration: duration || 0,
-                margin: margin ?? null,
-                photo: photo ?? "",
+                price: assignment.price || 0,
+                duration: assignment.duration || 0,
+                margin: assignment.margin ?? null,
+                photo: assignment.photo ?? "",
                 isActive: true,
-              },
-            });
+              });
+            }
           }
         }
+      }
+
+      // Create all assignments
+      for (const assignment of assignmentsToCreate) {
+        await tx.staffService.create({ data: assignment });
       }
 
       return newService;
@@ -242,10 +248,6 @@ export async function createService(input) {
         message: "Un service avec ce nom existe déjà.",
         errors: { 
           name: "Ce nom est déjà utilisé.",
-          selectedStaffId: null,
-          price: null,
-          duration: null,
-          margin: null,
         },
       };
     }
@@ -260,9 +262,10 @@ export async function createService(input) {
 
 /**
  * Updates an existing service's core fields (name, category, description).
- * Also manages the single StaffService association: creates, updates, or removes it.
+ * Syncs staff-service assignments: creates new ones, updates existing ones,
+ * and removes any that are no longer in the provided list.
  *
- * @param {{ id: string, name: string, categoryId: string, description?: string, selectedStaffId?: string, price?: number, duration?: number, margin?: number, photo?: string }} input
+ * @param {{ id: string, name: string, categoryId: string, description?: string, staffAssignments?: Array<{ staffId: string, price: number, duration: number, margin?: number, photo?: string }> }} input
  * @returns {{ success: boolean, message: string, service?: object }}
  */
 export async function updateService(input) {
@@ -277,79 +280,136 @@ export async function updateService(input) {
         name: errors.name?.[0] ?? null,
         categoryId: errors.categoryId?.[0] ?? null,
         description: errors.description?.[0] ?? null,
-        selectedStaffId: errors.selectedStaffId?.[0] ?? null,
-        price: errors.price?.[0] ?? null,
-        duration: errors.duration?.[0] ?? null,
-        margin: errors.margin?.[0] ?? null,
-        photo: errors.photo?.[0] ?? null,
       },
     };
   }
 
-  const { id, name, categoryId, description, selectedStaffId, price, duration, margin, photo } = parsed.data;
+  const { id, name, categoryId, description, staffAssignments } = parsed.data;
 
   try {
     const session = await auth();
+    if (!session?.user) {
+      return { success: false, message: "Non authentifié" };
+    }
+
+    // Check if user is admin/owner or if staff member is assigned to this service
+    let canEdit = false;
+    let staffId = null;
+
+    if (isAdminRole(session.user.role)) {
+      canEdit = true;
+    } else if (session.user.role === ROLES.STAFF) {
+      // Check if this staff member is assigned to the service
+      const staffRecord = await prisma.staff.findUnique({
+        where: { userId: session.user.id, isDeleted: false },
+        select: { id: true },
+      });
+      
+      if (staffRecord) {
+        const assignment = await prisma.staffService.findFirst({
+          where: { 
+            serviceId: id, 
+            staffId: staffRecord.id,
+            isActive: true 
+          },
+          select: { id: true },
+        });
+        
+        if (assignment) {
+          canEdit = true;
+          staffId = staffRecord.id;
+        }
+      }
+    }
+
+    if (!canEdit) {
+      return { success: false, message: "Permissions insuffisantes" };
+    }
 
     const service = await prisma.$transaction(async (tx) => {
-      // 1. Update the service core fields
+      // 1. Update the service core fields (only admin/owner can update core fields)
       const updatedService = await tx.service.update({
         where: { id },
         data: { name, categoryId, description: description ?? null },
         include: { category: { select: { id: true, name: true } } },
       });
 
-      // 2. Handle staff association
-      // Find existing StaffService for this service (we only support one)
-      const existingAssignment = await tx.staffService.findFirst({
+      // 2. Sync staff-service assignments
+      // Get existing assignments for this service
+      const existingAssignments = await tx.staffService.findMany({
         where: { serviceId: id },
         select: { id: true, staffId: true },
       });
 
-      if (selectedStaffId) {
-        if (existingAssignment) {
-          // Update existing assignment
-          await tx.staffService.update({
-            where: { id: existingAssignment.id },
-            data: {
-              staffId: selectedStaffId,
-              price: price || 0,
-              duration: duration || 0,
-              margin: margin ?? null,
-              photo: photo ?? "",
-            },
-          });
-        } else {
-          // Create new assignment
-          let createdById = session?.user?.id;
-          if (!createdById) {
-            const firstUser = await tx.user.findFirst({ select: { id: true } });
-            createdById = firstUser?.id;
-          }
-          if (!createdById) {
-            const anyUser = await tx.user.findFirst();
-            createdById = anyUser?.id;
-          }
+      const createdById = session.user.id;
 
-          if (createdById) {
-            await tx.staffService.create({
+      // If staff member, they can only update their own assignment
+      if (staffId && !isAdminRole(session.user.role)) {
+        // Staff can only update their own staffService record
+        const myAssignment = (staffAssignments || []).find(a => a.staffId === staffId);
+        
+        if (myAssignment) {
+          const existing = existingAssignments.find(a => a.staffId === staffId);
+          if (existing) {
+            await tx.staffService.update({
+              where: { id: existing.id },
               data: {
-                staffId: selectedStaffId,
-                serviceId: id,
-                createdById,
-                price: price || 0,
-                duration: duration || 0,
-                margin: margin ?? null,
-                photo: photo ?? "",
-                isActive: true,
+                price: myAssignment.price || 0,
+                duration: myAssignment.duration || 0,
+                margin: myAssignment.margin ?? null,
+                photo: myAssignment.photo ?? "",
               },
             });
           }
         }
       } else {
-        // No staff selected — remove existing assignment if any
-        if (existingAssignment) {
-          await tx.staffService.delete({ where: { id: existingAssignment.id } });
+        // Admin/Owner can sync all assignments
+        const existingStaffIds = existingAssignments.map((a) => a.staffId);
+        const incomingStaffIds = (staffAssignments || []).map((a) => a.staffId);
+
+        // Remove assignments that are no longer in the list
+        const toRemove = existingAssignments.filter((a) => !incomingStaffIds.includes(a.staffId));
+        for (const assignment of toRemove) {
+          await tx.staffService.delete({ where: { id: assignment.id } });
+        }
+
+        // Upsert assignments for incoming staff
+        for (const assignment of staffAssignments || []) {
+          const existing = existingAssignments.find((a) => a.staffId === assignment.staffId);
+
+          if (existing) {
+            // Update existing assignment
+            await tx.staffService.update({
+              where: { id: existing.id },
+              data: {
+                price: assignment.price || 0,
+                duration: assignment.duration || 0,
+                margin: assignment.margin ?? null,
+                photo: assignment.photo ?? "",
+              },
+            });
+          } else {
+            // Create new assignment
+            const staffExist = await tx.staff.findUnique({
+              where: { id: assignment.staffId, isDeleted: false },
+              select: { id: true },
+            });
+
+            if (staffExist) {
+              await tx.staffService.create({
+                data: {
+                  staffId: assignment.staffId,
+                  serviceId: id,
+                  createdById,
+                  price: assignment.price || 0,
+                  duration: assignment.duration || 0,
+                  margin: assignment.margin ?? null,
+                  photo: assignment.photo ?? "",
+                  isActive: true,
+                },
+              });
+            }
+          }
         }
       }
 
@@ -397,7 +457,44 @@ export async function deleteService(id) {
     return { success: false, message: "Aucun service sélectionné." };
   }
 
+  const session = await auth();
+  if (!session?.user) {
+    return { success: false, message: "Non authentifié" };
+  }
+
   try {
+    // Check if user is admin/owner or if staff member is assigned to this service
+    let canDelete = false;
+
+    if (isAdminRole(session.user.role)) {
+      canDelete = true;
+    } else if (session.user.role === ROLES.STAFF) {
+      // Check if this staff member is assigned to the service
+      const staffRecord = await prisma.staff.findUnique({
+        where: { userId: session.user.id, isDeleted: false },
+        select: { id: true },
+      });
+      
+      if (staffRecord) {
+        const assignment = await prisma.staffService.findFirst({
+          where: { 
+            serviceId: id, 
+            staffId: staffRecord.id,
+            isActive: true 
+          },
+          select: { id: true },
+        });
+        
+        if (assignment) {
+          canDelete = true;
+        }
+      }
+    }
+
+    if (!canDelete) {
+      return { success: false, message: "Permissions insuffisantes" };
+    }
+
     await prisma.$transaction(async (tx) => {
       // Delete all staff-service associations
       await tx.staffService.deleteMany({ where: { serviceId: id } });
@@ -455,6 +552,11 @@ const createCategorySchema = z.object({
  * @returns {{ success: boolean, message: string, category?: { id, name } }}
  */
 export async function createCategory(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   const parsed = createCategorySchema.safeParse(input);
 
   if (!parsed.success) {
@@ -472,6 +574,25 @@ export async function createCategory(input) {
   const { name, description } = parsed.data;
 
   try {
+    // Check if a category with the same name already exists (case-insensitive)
+    const existingCategory = await prisma.category.findFirst({
+      where: {
+        name: {
+          equals: name,
+          mode: 'insensitive',
+        },
+      },
+      select: { id: true, name: true },
+    });
+
+    if (existingCategory) {
+      return {
+        success: false,
+        message: "Une catégorie avec ce nom existe déjà.",
+        errors: { name: "Ce nom est déjà utilisé." },
+      };
+    }
+
     const category = await prisma.category.create({
       data: { name, description: description ?? null },
       select: { id: true, name: true },
@@ -523,6 +644,11 @@ const updateCategorySchema = z.object({
  * @returns {{ success: boolean, message: string, category?: { id, name, description } }}
  */
 export async function updateCategory(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   const parsed = updateCategorySchema.safeParse(input);
 
   if (!parsed.success) {
@@ -578,6 +704,11 @@ export async function updateCategory(input) {
  * @returns {{ success: boolean, message: string }}
  */
 export async function deleteCategory(id) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   if (!id) {
     return { success: false, message: "Aucune catégorie sélectionnée." };
   }
@@ -616,6 +747,11 @@ export async function deleteCategory(id) {
  * Returns all active staff members for selection dropdowns.
  */
 export async function getStaffOptions() {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, data: [], message: "Permissions insuffisantes" };
+  }
+
   try {
     const staff = await prisma.staff.findMany({
       where: { isDeleted: false, user: { isDeleted: false, isActive: true , role: "STAFF"  } },

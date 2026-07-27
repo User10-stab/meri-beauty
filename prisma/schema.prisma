@@ -136,6 +136,10 @@ enum WeekDay {
 
   SUNDAY
 }
+enum ReservationConfirmationMode {
+  AUTOMATIC
+  MANUAL
+}
 
 // SALON
 model Salon {
@@ -159,6 +163,7 @@ model Salon {
   gallery      SalonGallery[]
   workingDays  SalonWorkingDay[]
   closures     SalonClosure[]
+  newsletters  Newsletter[]
 }
 model SalonWorkingDay {
   id           String   @id @default(cuid())
@@ -258,9 +263,18 @@ model Staff {
   isActive           Boolean   @default(true)
   photo              String?
   hireDate           DateTime?
-  yearsOfExperience  Int?
+  yearsOfExperience  Int
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
+
+  // Reservation Settings
+  reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
+  depositEnabled              Boolean @default(false)
+  depositPercentage           Decimal @default(10.0) @db.Decimal(5,2)
+
+  // Account Setup
+  setupCompleted              Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -447,6 +461,10 @@ model Newsletter {
   scheduledAt DateTime?
   sentAt      DateTime?
   createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  salonId String
+  salon   Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
   recipients NewsletterRecipient[]
 }
@@ -494,4 +512,30 @@ model SalonGallery {
 
   image     String
   createdAt DateTime @default(now())
+}
+
+// PASSWORD RESET TOKEN
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  tokenHash String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
+}
+
+// EMAIL VERIFICATION TOKEN
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  tokenHash String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email])
+  @@index([expiresAt])
 }

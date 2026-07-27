@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { X, Loader2, Tag, Layers, FileText, Plus, Image } from "lucide-react";
+import { X, Loader2, Tag, Layers, FileText, Plus, Trash2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { PhotoUpload } from "@/components/ui/PhotoUpload";
 import { createService, updateService, getCategories, getStaffOptions } from "@/actions/services/create-service";
@@ -25,6 +25,108 @@ function ModalField({ label, children, required = false }) {
   );
 }
 
+function StaffAssignmentCard({ staff, index, assignment, onChange, onRemove, canRemove, errors }) {
+  const handleChange = (field, value) => {
+    onChange(index, { ...assignment, [field]: value });
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50/50 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 uppercase">
+            {staff.user.fullName.slice(0, 2)}
+          </div>
+          <div>
+            <span className="block text-sm font-medium text-gray-800">{staff.user.fullName}</span>
+            <span className="text-xs text-gray-400">{staff.user.email}</span>
+          </div>
+        </div>
+        {canRemove && (
+          <button
+            type="button"
+            onClick={() => onRemove(index)}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+            title="Retirer ce professionnel"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        {/* Price */}
+        <ModalField label="Prix (€)" required>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">€</span>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              required
+              value={assignment.price}
+              onChange={(e) => handleChange("price", e.target.value)}
+              className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              placeholder="0.00"
+            />
+          </div>
+          <FieldError message={errors?.price} />
+        </ModalField>
+
+        {/* Duration */}
+        <ModalField label="Durée (minutes)" required>
+          <div className="relative">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">⏱</span>
+            <input
+              type="number"
+              min="1"
+              required
+              value={assignment.duration}
+              onChange={(e) => handleChange("duration", e.target.value)}
+              className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              placeholder="30"
+            />
+          </div>
+          <FieldError message={errors?.duration} />
+        </ModalField>
+      </div>
+
+      {/* Margin */}
+      <ModalField label="Marge (minutes)">
+        <div className="relative">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">⏱</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={assignment.margin}
+            onChange={(e) => handleChange("margin", e.target.value)}
+            className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+            placeholder="Optionnel"
+          />
+        </div>
+        <FieldError message={errors?.margin} />
+      </ModalField>
+
+      {/* Photo */}
+      <ModalField label="Photo du service">
+        <div className="flex items-center gap-3">
+          <PhotoUpload
+            value={assignment.photo}
+            onChange={(url) => handleChange("photo", url ?? "")}
+            uploadFolder="services"
+          />
+          <div className="text-xs text-gray-400">
+            <p>Photo illustrant le service</p>
+            <p>JPEG, PNG, WebP ou GIF (max 20 Mo)</p>
+          </div>
+        </div>
+        <FieldError message={errors?.photo} />
+      </ModalField>
+    </div>
+  );
+}
+
 
 export function CreateServiceModal({ open, onClose, onCreated, service }) {
   const isEditing = !!service;
@@ -36,12 +138,8 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
     name: "",
     categoryId: "",
     description: "",
-    selectedStaffId: "",
-    price: "",
-    duration: "",
-    margin: "",
-    photo: "",
   });
+  const [staffAssignments, setStaffAssignments] = useState([]);
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
@@ -57,55 +155,119 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
         setCategories(catsRes.data ?? []);
       }
       if (staffRes.success) {
-        setStaffOptions(staffRes.data ?? []);
+        setStaffOptions((prev) => {
+          // Merge freshly loaded staff with any staff that may have been
+          // added during pre-fill (e.g. existing assignments from editing).
+          const fetchedIds = new Set(staffRes.data.map((s) => s.id));
+          const fromPrev = prev.filter((s) => !fetchedIds.has(s.id));
+          return [...staffRes.data, ...fromPrev];
+        });
       }
     });
   }, [open]);
 
-  // Pre-fill form when editing
+  // Pre-fill form when editing or reset when creating
   useEffect(() => {
-    if (!open || !service) {
+    if (!open) return;
+
+    if (!service) {
       // Reset form for create mode
       setForm({
         name: "",
         categoryId: "",
         description: "",
-        selectedStaffId: "",
-        price: "",
-        duration: "",
-        margin: "",
-        photo: "",
       });
+      setStaffAssignments([]);
       setErrors({});
       return;
     }
 
-    const existingAssignment = service.staffServices?.[0];
+    // Editing mode — pre-fill from service data
     setForm({
       name: service.name ?? "",
       categoryId: service.category?.id ?? "",
       description: service.description ?? "",
-      selectedStaffId: existingAssignment?.staffId ?? "",
-      price: existingAssignment ? String(existingAssignment.price) : "",
-      duration: existingAssignment ? String(existingAssignment.duration) : "",
-      margin: existingAssignment?.margin != null ? String(existingAssignment.margin) : "",
-      photo: existingAssignment?.photo ?? "",
     });
+
+    // Map existing staffServices into assignments
+    const existingAssignments = (service.staffServices || []).map((ss) => ({
+      staffId: ss.staffId,
+      price: ss.price ? String(ss.price) : "",
+      duration: ss.duration ? String(ss.duration) : "",
+      margin: ss.margin != null ? String(ss.margin) : "",
+      photo: ss.photo ?? "",
+    }));
+    setStaffAssignments(existingAssignments);
+
+    // Ensure staff from existing assignments are in staffOptions
+    // so their assignment cards render correctly
+    setStaffOptions((prev) => {
+      const existingStaff = (service.staffServices || [])
+        .filter((ss) => ss.staff?.user)
+        .map((ss) => ({
+          id: ss.staff.id,
+          user: {
+            id: ss.staff.user.id,
+            fullName: ss.staff.user.fullName,
+            email: ss.staff.user.email,
+          },
+        }));
+      const currentIds = new Set(prev.map((s) => s.id));
+      const toAdd = existingStaff.filter((s) => !currentIds.has(s.id));
+      return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+    });
+
     setErrors({});
   }, [open, service]);
 
   if (!open) return null;
+
+  const selectedStaffIds = staffAssignments.map((a) => a.staffId);
+
+  function handleAddStaff(staffId) {
+    if (selectedStaffIds.includes(staffId)) return;
+    setStaffAssignments((prev) => [
+      ...prev,
+      { staffId, price: "", duration: "", margin: "", photo: "" },
+    ]);
+  }
+
+  function handleRemoveStaff(index) {
+    setStaffAssignments((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function handleAssignmentChange(index, updated) {
+    setStaffAssignments((prev) => {
+      const next = [...prev];
+      next[index] = updated;
+      return next;
+    });
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setErrors({});
 
     // Client-side validation
-    if (form.selectedStaffId && (!form.price || !form.duration)) {
-      setErrors({
-        price: !form.price ? "Le prix est obligatoire lorsque vous associez un professionnel." : null,
-        duration: !form.duration ? "La durée est obligatoire lorsque vous associez un professionnel." : null,
-      });
+    let hasError = false;
+    const newErrors = {};
+    const assignmentErrors = [];
+
+    staffAssignments.forEach((assignment, i) => {
+      const aErr = {};
+      if (!assignment.price) {
+        aErr.price = "Le prix est obligatoire.";
+        hasError = true;
+      }
+      if (!assignment.duration) {
+        aErr.duration = "La durée est obligatoire.";
+        hasError = true;
+      }
+      assignmentErrors[i] = aErr;
+    });
+
+    if (hasError) {
+      setErrors({ assignments: assignmentErrors });
       return;
     }
 
@@ -113,11 +275,13 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
       name: form.name,
       categoryId: form.categoryId,
       description: form.description || null,
-      selectedStaffId: form.selectedStaffId || null,
-      price: form.selectedStaffId ? (form.price ? parseFloat(form.price) : null) : null,
-      duration: form.selectedStaffId ? (form.duration ? parseInt(form.duration) : null) : null,
-      margin: form.selectedStaffId ? (form.margin ? parseFloat(form.margin) : null) : null,
-      photo: form.selectedStaffId ? (form.photo || null) : null,
+      staffAssignments: staffAssignments.map((a) => ({
+        staffId: a.staffId,
+        price: parseFloat(a.price),
+        duration: parseInt(a.duration),
+        margin: a.margin ? parseFloat(a.margin) : null,
+        photo: a.photo || null,
+      })),
     };
 
     const result = isEditing
@@ -129,17 +293,25 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
       onCreated?.();
       onClose();
     } else {
-      setErrors(result.errors ?? {});
-      toast.error(result.message || "Impossible de créer le service.");
+      if (result.errors?.assignments) {
+        setErrors({ assignments: result.errors.assignments });
+      } else {
+        setErrors(result.errors ?? {});
+      }
+      toast.error(result.message || "Impossible de sauvegarder le service.");
     }
   }
+
+  const staffNotSelected = staffOptions.filter(
+    (s) => !selectedStaffIds.includes(s.id)
+  );
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="relative flex max-h-[92vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-xl">
+      <div className="relative flex max-h-[92vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-xl">
         {/* Header */}
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
           <div>
@@ -238,122 +410,57 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
               <FieldError message={errors.description} />
             </ModalField>
 
-            {/* Professionnel */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-                Associer à un professionnel (Optionnel)
-              </label>
-              <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3 space-y-2">
-                {staffOptions.length === 0 ? (
-                  <p className="text-xs text-gray-400 italic">Aucun professionnel disponible</p>
-                ) : (
-                  staffOptions.map((staff) => (
-                    <label
-                      key={staff.id}
-                      className="flex cursor-pointer items-center gap-2.5 text-sm text-gray-700 hover:text-gray-900"
+            {/* Staff Assignments */}
+            <div className="border-t border-gray-100 pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+                  Professionnels associés
+                </h3>
+                {staffNotSelected.length > 0 && (
+                  <div className="relative">
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) handleAddStaff(e.target.value);
+                      }}
+                      className="h-8 rounded-lg border border-dashed border-gray-300 px-3 text-xs text-gray-500 outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 bg-white cursor-pointer appearance-none"
                     >
-                      <input
-                        type="radio"
-                        name="selectedStaff"
-                        value={staff.id}
-                        checked={form.selectedStaffId === staff.id}
-                        onChange={(e) => {
-                          setForm((prev) => ({ 
-                            ...prev, 
-                            selectedStaffId: e.target.value,
-                            price: "",
-                            duration: "",
-                            margin: "",
-                            photo: "",
-                          }));
-                        }}
-                        className="h-4 w-4 rounded-full border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e]"
-                      />
-                      {staff.user.fullName}
-                    </label>
-                  ))
+                      <option value="">+ Ajouter un professionnel</option>
+                      {staffNotSelected.map((staff) => (
+                        <option key={staff.id} value={staff.id}>
+                          {staff.user.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 )}
               </div>
-              <p className="text-[10px] text-gray-400 italic">
-                Sélectionnez un seul professionnel pour ce service.
-              </p>
-            </div>
 
-            {/* Price, Duration, Margin, and Photo fields (only shown when staff is selected) */}
-            {form.selectedStaffId && (
-              <div className="space-y-4 border-t border-gray-100 pt-4">
-                <div className="grid grid-cols-2 gap-3">
-                  {/* Price */}
-                  <ModalField label="Prix (€)" required>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">€</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        required
-                        value={form.price}
-                        onChange={(e) => setForm((prev) => ({ ...prev, price: e.target.value }))}
-                        className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                        placeholder="0.00"
+              {staffAssignments.length === 0 ? (
+                <p className="text-xs text-gray-400 italic py-3 text-center border border-dashed border-gray-200 rounded-lg">
+                  Aucun professionnel associé. Ajoutez-en un depuis le menu déroulant ci-dessus.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {staffAssignments.map((assignment, index) => {
+                    const staff = staffOptions.find((s) => s.id === assignment.staffId);
+                    if (!staff) return null;
+                    return (
+                      <StaffAssignmentCard
+                        key={assignment.staffId}
+                        staff={staff}
+                        index={index}
+                        assignment={assignment}
+                        onChange={handleAssignmentChange}
+                        onRemove={handleRemoveStaff}
+                        canRemove={staffAssignments.length > 1}
+                        errors={errors.assignments?.[index]}
                       />
-                    </div>
-                    <FieldError message={errors.price} />
-                  </ModalField>
-
-                  {/* Duration */}
-                  <ModalField label="Durée (minutes)" required>
-                    <div className="relative">
-                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">⏱</span>
-                      <input
-                        type="number"
-                        min="1"
-                        required
-                        value={form.duration}
-                        onChange={(e) => setForm((prev) => ({ ...prev, duration: e.target.value }))}
-                        className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                        placeholder="30"
-                      />
-                    </div>
-                    <FieldError message={errors.duration} />
-                  </ModalField>
+                    );
+                  })}
                 </div>
-
-                {/* Margin */}
-                <ModalField label="Marge(minutes)">
-                  <div className="relative">
-                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">⏱</span>
-
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.margin}
-                      onChange={(e) => setForm((prev) => ({ ...prev, margin: e.target.value }))}
-                      className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                      placeholder="Optionnel"
-                    />
-                  </div>
-                  <FieldError message={errors.margin} />
-                </ModalField>
-
-                {/* Photo upload */}
-                <ModalField label="Photo du service">
-                  <div className="flex items-center gap-3">
-                    <PhotoUpload
-                      value={form.photo}
-                      onChange={(url) => setForm((prev) => ({ ...prev, photo: url ?? "" }))}
-                      uploadFolder="services"
-                    />
-                    <div className="text-xs text-gray-400">
-                      <p>Photo illustrant le service</p>
-                      <p>JPEG, PNG, WebP ou GIF (max 20 Mo)</p>
-                    </div>
-                  </div>
-                  <FieldError message={errors.photo} />
-                </ModalField>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
           {/* Footer */}

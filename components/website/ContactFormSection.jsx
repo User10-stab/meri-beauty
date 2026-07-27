@@ -1,7 +1,8 @@
 "use client";
 
-import { Phone, Mail, MapPin, Clock } from "lucide-react";
+import { Phone, Mail, MapPin, Clock, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useState } from "react";
+import { sendContactMessage } from "@/actions/contact/send-contact-message";
 
 const DAYS_ORDER = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
 
@@ -15,23 +16,51 @@ const DAY_LABELS = {
   SUNDAY: "Dim",
 };
 
-export default function ContactFormSection({ salon }) {
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    phone: "",
-    subject: "",
-    message: "",
-  });
+const INITIAL_FORM = {
+  name: "",
+  email: "",
+  phone: "",
+  subject: "",
+  message: "",
+};
 
-  const handleSubmit = (e) => {
+export default function ContactFormSection({ salon }) {
+  const [formData, setFormData] = useState(INITIAL_FORM);
+  const [errors, setErrors] = useState({});
+  const [isPending, setIsPending] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [serverError, setServerError] = useState("");
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log("Form submitted:", formData);
-    // Handle form submission here
+    setErrors({});
+    setServerError("");
+    setSuccess(false);
+    setIsPending(true);
+
+    const result = await sendContactMessage(formData);
+
+    setIsPending(false);
+
+    if (result.success) {
+      setSuccess(true);
+      setFormData(INITIAL_FORM);
+    } else {
+      if (result.errors) {
+        setErrors(result.errors);
+      }
+      if (result.message) {
+        setServerError(result.message);
+      }
+    }
   };
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+    // Clear field error on change
+    if (errors[e.target.name]) {
+      setErrors((prev) => ({ ...prev, [e.target.name]: null }));
+    }
   };
 
   function formatHours(workingDays) {
@@ -97,7 +126,28 @@ export default function ContactFormSection({ salon }) {
               </h2>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Success message */}
+            {success && (
+              <div className="mb-6 flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 px-5 py-4 text-sm text-green-800">
+                <CheckCircle2 size={20} className="mt-0.5 shrink-0 text-green-600" />
+                <div>
+                  <p className="font-semibold">Message envoyé avec succès !</p>
+                  <p className="mt-1 text-green-700">
+                    Nous vous répondrons dans les plus brefs délais.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Server error message */}
+            {serverError && !success && (
+              <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800">
+                <AlertCircle size={20} className="mt-0.5 shrink-0 text-red-600" />
+                <p>{serverError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <div>
                   <label className="mb-2 block text-[13px] font-semibold uppercase tracking-[0.13em] text-ink/70">
@@ -109,9 +159,16 @@ export default function ContactFormSection({ salon }) {
                     value={formData.name}
                     onChange={handleChange}
                     required
-                    className="w-full border-b-2 border-gold/30 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:border-gold focus:outline-none transition-colors"
+                    className={`w-full border-b-2 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:outline-none transition-colors ${
+                      errors.name
+                        ? "border-red-400 focus:border-red-500"
+                        : "border-gold/30 focus:border-gold"
+                    }`}
                     placeholder="Votre nom"
                   />
+                  {errors.name && (
+                    <p className="mt-1 text-[12px] font-medium text-red-600">{errors.name}</p>
+                  )}
                 </div>
                 <div>
                   <label className="mb-2 block text-[13px] font-semibold uppercase tracking-[0.13em] text-ink/70">
@@ -123,9 +180,16 @@ export default function ContactFormSection({ salon }) {
                     value={formData.email}
                     onChange={handleChange}
                     required
-                    className="w-full border-b-2 border-gold/30 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:border-gold focus:outline-none transition-colors"
+                    className={`w-full border-b-2 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:outline-none transition-colors ${
+                      errors.email
+                        ? "border-red-400 focus:border-red-500"
+                        : "border-gold/30 focus:border-gold"
+                    }`}
                     placeholder="votre@email.com"
                   />
+                  {errors.email && (
+                    <p className="mt-1 text-[12px] font-medium text-red-600">{errors.email}</p>
+                  )}
                 </div>
               </div>
 
@@ -138,9 +202,16 @@ export default function ContactFormSection({ salon }) {
                   name="phone"
                   value={formData.phone}
                   onChange={handleChange}
-                  className="w-full border-b-2 border-gold/30 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:border-gold focus:outline-none transition-colors"
+                  className={`w-full border-b-2 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:outline-none transition-colors ${
+                    errors.phone
+                      ? "border-red-400 focus:border-red-500"
+                      : "border-gold/30 focus:border-gold"
+                  }`}
                   placeholder="+32 123 456 789"
                 />
+                {errors.phone && (
+                  <p className="mt-1 text-[12px] font-medium text-red-600">{errors.phone}</p>
+                )}
               </div>
 
               <div>
@@ -153,9 +224,16 @@ export default function ContactFormSection({ salon }) {
                   value={formData.subject}
                   onChange={handleChange}
                   required
-                  className="w-full border-b-2 border-gold/30 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:border-gold focus:outline-none transition-colors"
+                  className={`w-full border-b-2 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:outline-none transition-colors ${
+                    errors.subject
+                      ? "border-red-400 focus:border-red-500"
+                      : "border-gold/30 focus:border-gold"
+                  }`}
                   placeholder="Sujet de votre message"
                 />
+                {errors.subject && (
+                  <p className="mt-1 text-[12px] font-medium text-red-600">{errors.subject}</p>
+                )}
               </div>
 
               <div>
@@ -168,16 +246,31 @@ export default function ContactFormSection({ salon }) {
                   onChange={handleChange}
                   required
                   rows={5}
-                  className="w-full border-b-2 border-gold/30 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:border-gold focus:outline-none transition-colors resize-none"
+                  className={`w-full border-b-2 bg-transparent px-4 py-3 text-ink placeholder:text-ink/40 focus:outline-none transition-colors resize-none ${
+                    errors.message
+                      ? "border-red-400 focus:border-red-500"
+                      : "border-gold/30 focus:border-gold"
+                  }`}
                   placeholder="Votre message..."
                 />
+                {errors.message && (
+                  <p className="mt-1 text-[12px] font-medium text-red-600">{errors.message}</p>
+                )}
               </div>
 
               <button
                 type="submit"
-                className="inline-flex items-center gap-3 rounded-full bg-primary px-8 py-4 text-[0.9rem] font-semibold uppercase tracking-wider text-white transition-all duration-300 hover:bg-primary-dark hover:shadow-lg"
+                disabled={isPending}
+                className="inline-flex items-center gap-3 rounded-full bg-primary px-8 py-4 text-[0.9rem] font-semibold uppercase tracking-wider text-white transition-all duration-300 hover:bg-primary-dark hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                Envoyer le message
+                {isPending ? (
+                  <>
+                    <Loader2 size={18} className="animate-spin" />
+                    Envoi en cours…
+                  </>
+                ) : (
+                  "Envoyer le message"
+                )}
               </button>
             </form>
           </div>

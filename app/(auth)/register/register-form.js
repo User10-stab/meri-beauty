@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
+import { toast } from "sonner";
 import {
   Loader2,
   Sparkles,
@@ -96,6 +97,7 @@ export default function RegisterForm() {
       phone: "",
       password: "",
       confirmPassword: "",
+      newsletterSubscribed: false,
     },
   });
 
@@ -109,8 +111,8 @@ export default function RegisterForm() {
     setServerSuccess(null);
 
     try {
-      // nickName and confirmPassword are frontend-only — strip before sending
-      const { confirmPassword: _confirm, nickName: _nick, ...serverData } = data;
+      // Strip confirmPassword — it's client-only validation, not a DB field
+      const { confirmPassword: _confirm, ...serverData } = data;
 
       const response = await registerUser(serverData);
 
@@ -126,21 +128,12 @@ export default function RegisterForm() {
         return;
       }
 
-      // Auto-login after successful registration
-      const signInResult = await signIn("credentials", {
-        email: serverData.email,
-        password: serverData.password,
-        redirect: false,
-      });
-
-      if (signInResult?.error) {
-        console.error("[RegisterForm] auto-login failed:", signInResult.error);
-        // Still redirect to login page so user can sign in manually
-        router.push("/login");
-        return;
-      }
-      
-      router.push("/");
+      // Do not auto-login — user must verify email first
+      toast.success(
+        "Votre compte a été créé avec succès. Un e-mail de vérification vous a été envoyé. Veuillez consulter votre boîte de réception et vérifier votre adresse e-mail avant de vous connecter.",
+        { duration: 8000 }
+      );
+      setServerSuccess(response.message);
     } catch (err) {
       console.error("[RegisterForm] submit error:", err);
       setServerError("An unexpected error occurred. Please try again.");
@@ -229,6 +222,20 @@ export default function RegisterForm() {
           <p className="text-xs text-zinc-400 dark:text-zinc-500 -mt-2 pl-1">
             Password must be at least 8 characters.
           </p>
+
+          {/* Newsletter opt-in */}
+          <label className="flex items-start gap-3 cursor-pointer select-none group">
+            <input
+              type="checkbox"
+              id="newsletterSubscribed"
+              disabled={isLoading}
+              {...register("newsletterSubscribed")}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 dark:border-zinc-600 text-[#2F3A2E] focus:ring-[#2F3A2E]/40 dark:focus:ring-[#a8c4a2]/30 transition-colors disabled:opacity-60 cursor-pointer"
+            />
+            <span className="text-sm text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-300 transition-colors leading-snug">
+              Je souhaite recevoir des offres exclusives et des actualités par email.
+            </span>
+          </label>
 
           {/* Submit */}
           <button

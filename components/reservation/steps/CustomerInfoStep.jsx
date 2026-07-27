@@ -1,0 +1,283 @@
+"use client";
+
+import { useState } from "react";
+import { User, Mail, Phone, MessageSquare, LogIn, AlertCircle } from "lucide-react";
+import toast from "react-hot-toast";
+import { checkEmailExists } from "@/actions/reservation/check-email-exists";
+
+// ─── Field wrapper ────────────────────────────────────────────────────────────
+
+function Field({ label, htmlFor, required, children }) {
+  return (
+    <div>
+      <label
+        htmlFor={htmlFor}
+        className="mb-2 block text-sm font-semibold text-[#2F3A2E]"
+      >
+        {label} {required && <span className="text-[#C8A46A]">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function InputIcon({ children }) {
+  return (
+    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+      {children}
+    </div>
+  );
+}
+
+// ─── Existing-account banner ──────────────────────────────────────────────────
+
+function ExistingAccountBanner({ email, onDismiss }) {
+  return (
+    <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-5">
+      <div className="flex items-start gap-3">
+        <AlertCircle size={20} className="mt-0.5 flex-shrink-0 text-amber-500" />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-amber-900">
+            Un compte existe déjà pour cette adresse email.
+          </p>
+          <p className="mt-1 text-sm text-amber-700">
+            Connectez-vous pour associer cette réservation à votre compte
+            existant, ou continuez en tant qu'invité si vous souhaitez créer un
+            nouveau compte.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <a
+              href={`/login?callbackUrl=/reservation&email=${encodeURIComponent(email)}`}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#2F3A2E] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#3d4e3b]"
+            >
+              <LogIn size={15} />
+              Se connecter
+            </a>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-50"
+            >
+              Continuer quand même
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+/**
+ * Shown only for unauthenticated users. Authenticated users skip this step
+ * entirely — ReservationForm filters it out of the STEPS array.
+ */
+export default function CustomerInfoStep({ data, updateData, nextStep }) {
+  const [formData, setFormData] = useState(
+    data.customerInfo ?? {
+      fullName: "",
+      email: "",
+      phone: "",
+      newsletterSubscribed: false,
+    }
+  );
+  const [notes, setNotes] = useState(data.notes ?? "");
+
+  // null = not checked yet | "exists" = account found | "dismissed" = user chose to continue anyway
+  const [emailStatus, setEmailStatus] = useState(null);
+  const [checkingEmail, setCheckingEmail] = useState(false);
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
+    // Reset email check when the email field changes
+    if (name === "email") setEmailStatus(null);
+  };
+
+  const handleEmailBlur = async () => {
+    const email = formData.email.trim();
+    if (!email || !email.includes("@")) return;
+
+    setCheckingEmail(true);
+    try {
+      const result = await checkEmailExists(email);
+      if (result.exists) {
+        setEmailStatus("exists");
+      }
+    } catch {
+      // Non-critical — silently ignore, user can still proceed
+    } finally {
+      setCheckingEmail(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!formData.fullName.trim()) {
+      toast.error("Veuillez entrer votre nom complet");
+      return;
+    }
+    if (!formData.email.trim() || !formData.email.includes("@")) {
+      toast.error("Veuillez entrer une adresse email valide");
+      return;
+    }
+    if (!formData.phone.trim()) {
+      toast.error("Veuillez entrer votre numéro de téléphone");
+      return;
+    }
+
+    // If account exists and user hasn't explicitly dismissed the warning, block submit
+    if (emailStatus === "exists") {
+      toast.error(
+        "Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même »."
+      );
+      return;
+    }
+
+    updateData({ customerInfo: formData, notes });
+    nextStep();
+  };
+
+  return (
+    <div className="mx-auto max-w-2xl">
+      <div className="mb-8 text-center">
+        <h2 className="text-3xl font-bold text-[#2F3A2E]">Vos informations</h2>
+        <p className="mt-2 text-gray-600">
+          Nous aurons besoin de ces détails pour confirmer votre réservation.
+        </p>
+        <p className="mt-1 text-sm text-gray-400">
+          Un compte sera créé automatiquement après votre réservation.
+        </p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-5">
+        {/* ── Personal information ──────────────────────────────── */}
+        <div className="rounded-2xl border-2 border-gray-200 p-6 space-y-5">
+
+          {/* Full name */}
+          <Field label="Nom complet" htmlFor="fullName" required>
+            <div className="relative">
+              <InputIcon><User size={18} /></InputIcon>
+              <input
+                type="text"
+                id="fullName"
+                name="fullName"
+                value={formData.fullName}
+                onChange={handleChange}
+                placeholder="Votre nom complet"
+                className="w-full rounded-lg border-2 border-gray-200 py-3 pl-10 pr-4 transition-all focus:border-[#C8A46A] focus:outline-none"
+                required
+              />
+            </div>
+          </Field>
+
+          {/* Email */}
+          <Field label="Email" htmlFor="email" required>
+            <div className="relative">
+              <InputIcon><Mail size={18} /></InputIcon>
+              <input
+                type="email"
+                id="email"
+                name="email"
+                value={formData.email}
+                onChange={handleChange}
+                onBlur={handleEmailBlur}
+                placeholder="votre.email@exemple.com"
+                className={`w-full rounded-lg border-2 py-3 pl-10 pr-4 transition-all focus:outline-none ${
+                  emailStatus === "exists"
+                    ? "border-amber-400 focus:border-amber-500"
+                    : "border-gray-200 focus:border-[#C8A46A]"
+                }`}
+                required
+              />
+              {checkingEmail && (
+                <div className="absolute inset-y-0 right-3 flex items-center">
+                  <svg className="h-4 w-4 animate-spin text-gray-400" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                </div>
+              )}
+            </div>
+
+            {/* Existing account warning */}
+            {emailStatus === "exists" && (
+              <div className="mt-3">
+                <ExistingAccountBanner
+                  email={formData.email}
+                  onDismiss={() => setEmailStatus("dismissed")}
+                />
+              </div>
+            )}
+          </Field>
+
+          {/* Phone */}
+          <Field label="Téléphone" htmlFor="phone" required>
+            <div className="relative">
+              <InputIcon><Phone size={18} /></InputIcon>
+              <input
+                type="tel"
+                id="phone"
+                name="phone"
+                value={formData.phone}
+                onChange={handleChange}
+                placeholder="+33 6 12 34 56 78"
+                className="w-full rounded-lg border-2 border-gray-200 py-3 pl-10 pr-4 transition-all focus:border-[#C8A46A] focus:outline-none"
+                required
+              />
+            </div>
+          </Field>
+
+          {/* Newsletter */}
+          <div>
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                name="newsletterSubscribed"
+                checked={formData.newsletterSubscribed}
+                onChange={handleChange}
+                className="mt-1 h-5 w-5 rounded border-gray-300 text-[#C8A46A] focus:ring-[#C8A46A]"
+              />
+              <span className="text-sm text-gray-600">
+                Je souhaite recevoir des offres exclusives et des actualités par email
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* ── Notes ─────────────────────────────────────────────── */}
+        <div className="rounded-2xl border-2 border-gray-200 p-6">
+          <Field label="Notes" htmlFor="notes">
+            <div className="relative">
+              <div className="pointer-events-none absolute left-3 top-3 text-gray-400">
+                <MessageSquare size={18} />
+              </div>
+              <textarea
+                id="notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Des demandes particulières ? Faites-le nous savoir..."
+                rows={4}
+                className="w-full rounded-lg border-2 border-gray-200 py-3 pl-10 pr-4 transition-all focus:border-[#C8A46A] focus:outline-none resize-none"
+              />
+            </div>
+          </Field>
+        </div>
+
+        <button
+          type="submit"
+          className="w-full rounded-lg bg-[#C8A46A] px-6 py-4 text-base font-semibold text-white transition-all hover:bg-[#B8945A]"
+        >
+          Continuer vers le récapitulatif
+        </button>
+      </form>
+    </div>
+  );
+}

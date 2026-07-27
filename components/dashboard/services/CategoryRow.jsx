@@ -1,13 +1,31 @@
 "use client";
 
 import { RowActions } from "../Tables/RowActions";
+import { checkCategoryReservationReadiness } from "@/lib/reservation-compliance";
+import { WarningTooltip } from "../shared/WarningTooltip";
 
 export function CategoryRow({ row, onView, onEdit, onDelete }) {
+  const readiness = checkCategoryReservationReadiness(row);
   return (
-    <tr className="group border-b border-gray-100 transition-colors hover:bg-gray-50/70">
+    <>
+    <tr className={`group border-b border-gray-100 transition-colors hover:bg-gray-50/70 ${!readiness.ready ? "bg-red-50/40" : ""}`}>
       {/* Name */}
       <td className="px-4 py-4 pl-5 align-middle">
-        <span className="font-medium text-gray-800">{row.name}</span>
+        <div className="flex items-center gap-3">
+          {/* Fixed-width warning slot — always present to keep name aligned */}
+          <div className="w-4 flex-shrink-0 flex items-center justify-center">
+            {!readiness.ready && (
+              <WarningTooltip
+                title="Problème de réservation"
+                warnings={readiness.warnings}
+                footer="Cette catégorie n'apparaîtra pas sur la page de réservation."
+              />
+            )}
+          </div>
+
+          {/* Name */}
+          <span className="font-medium text-gray-800">{row.name}</span>
+        </div>
       </td>
 
       {/* Description */}
@@ -55,5 +73,6 @@ export function CategoryRow({ row, onView, onEdit, onDelete }) {
         />
       </td>
     </tr>
+    </>
   );
 }

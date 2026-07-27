@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { auth } from "@/auth";
 import { getCategories } from "@/actions/categories/get-categories";
 import { getServices } from "@/actions/services/get-services";
 import { ServicesPageClient } from "@/components/dashboard/services/ServicesPageClient";
@@ -11,6 +12,9 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function ServicesPage() {
+  const session = await auth();
+  const userRole = session?.user?.role;
+  
   const [categoriesResult, servicesResult] = await Promise.all([
     getCategories(),
     getServices(),
@@ -32,47 +36,51 @@ export default async function ServicesPage() {
           </p>
         </div>
 
-        {/* Stats strip */}
-        <div className="flex items-center gap-3">
-          <StatBadge
-            label="Catégories"
-            value={categories.length}
-            color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
-          />
-          <StatBadge
-            label="Services"
-            value={services.length}
-            color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-          />
-        </div>
+      {/* Stats strip */}
+      <div className="flex items-center gap-3">
+        <StatBadge
+          label="Catégories"
+          value={categories.length}
+          color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
+        />
+        <StatBadge
+          label="Services"
+          value={services.length}
+          color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+        />
       </div>
-
-      {/* ── Error banners ──────────────────────────────────────────────── */}
-      {categoriesResult.message && (
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
-        >
-          <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
-          {categoriesResult.message}
-        </div>
-      )}
-
-      {servicesResult.message && (
-        <div
-          role="alert"
-          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-400"
-        >
-          <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
-          {servicesResult.message}
-        </div>
-      )}
-
-      {/* ── Client shell ───────────────────────────────────────────────── */}
-      <Suspense fallback={<ServicesTableSkeleton />}>
-        <ServicesPageClient initialCategories={categories} initialServices={services} />
-      </Suspense>
     </div>
+
+    {/* ── Error banners ──────────────────────────────────────────────── */}
+    {categoriesResult.message && (
+      <div
+        role="alert"
+        className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
+      >
+        <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
+        {categoriesResult.message}
+      </div>
+    )}
+
+    {servicesResult.message && (
+      <div
+        role="alert"
+        className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-400"
+      >
+        <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
+        {servicesResult.message}
+      </div>
+    )}
+
+    {/* ── Client shell ───────────────────────────────────────────────── */}
+    <Suspense fallback={<ServicesTableSkeleton />}>
+      <ServicesPageClient 
+        initialCategories={categories} 
+        initialServices={services} 
+        userRole={userRole}
+      />
+    </Suspense>
+  </div>
   );
 }
 

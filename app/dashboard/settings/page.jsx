@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { requireAdmin } from "@/lib/route-protection";
 import { getSalon } from "@/actions/salon/get-salon";
 import { SalonSettingsClient } from "@/components/dashboard/settings/SalonSettingsClient";
 
@@ -10,6 +11,8 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  await requireAdmin();
+
   const result = await getSalon();
   const salon = result.data ?? null;
 

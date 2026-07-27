@@ -1,16 +1,63 @@
 "use server";
 
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
+import { isAdminRole, ROLES } from "@/lib/authorization";
+import { getCurrentStaffId } from "@/lib/route-protection";
 
 /**
- * Returns all staff services with their details, serialised for client components.
+ * Returns services based on the current user's role.
+ * 
+ * - OWNER/ADMIN: See all services
+ * - STAFF: See only services assigned to them through StaffService
  *
- * @returns {{ success: boolean, data: Array<{ id, name, description, category: { id, name }, price, duration, margin, photo, isActive }>, message?: string }}
+ * This function ONLY fetches data. It does NOT apply any business logic
+ * regarding staff availability (contract, working hours, time off, etc.).
+ *
+ * @returns {{ success: boolean, data: Array<{ id, name, description, category, staffServices, staffNames, price, priceRange, duration, durationRange, margin, marginRange }>, message?: string }}
  */
 export async function getServices() {
   try {
+    const session = await auth();
+    
+    if (!session?.user) {
+      return {
+        success: false,
+        data: [],
+        message: "Non authentifié",
+      };
+    }
+
+    const userRole = session.user.role;
+    let whereClause = {};
+
+    // For STAFF, only show services they are assigned to
+    if (userRole === ROLES.STAFF) {
+      const staffId = await getCurrentStaffId();
+      
+      if (!staffId) {
+        return {
+          success: false,
+          data: [],
+          message: "Profil staff introuvable",
+        };
+      }
+
+      // Filter services that have at least one StaffService record for this staff member
+      whereClause = {
+        staffServices: {
+          some: {
+            staffId: staffId,
+            isActive: true,
+          },
+        },
+      };
+    }
+    // For OWNER/ADMIN, no filtering needed - they see all services
+
     const services = await prisma.service.findMany({
+      where: whereClause,
       orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
       include: {
         category: { select: { id: true, name: true } },
@@ -21,6 +68,10 @@ export async function getServices() {
               isDeleted: false,
               user: { isDeleted: false, isActive: true },
             },
+            // For STAFF users, also filter staffServices to only show their own
+            ...(userRole === ROLES.STAFF
+              ? { staffId: await getCurrentStaffId() }
+              : {}),
           },
           include: {
             staff: {
@@ -34,10 +85,7 @@ export async function getServices() {
     });
 
     const data = services.map((s) => {
-      // Serialize the entire service object to handle Decimal fields
       const serializedService = serializeDecimalFields(s);
-      
-      // Extract staffServices from serialized service
       const serializedStaffServices = serializedService.staffServices || [];
 
       const prices = serializedStaffServices.map((ss) => ss.price);
@@ -76,7 +124,7 @@ export async function getServices() {
           : "—",
         margin: minMargin,
         marginRange: margins.length > 0
-          ? (minMargin === maxMargin ? `${minMargin}%` : `${minMargin} - ${maxMargin}%`)
+          ? (minMargin === maxMargin ? `${minMargin} min` : `${minMargin} - ${maxMargin} min`)
           : "—",
       };
     });
@@ -84,6 +132,40 @@ export async function getServices() {
     return { success: true, data };
   } catch (error) {
     console.error("[getServices]", error);
+    return {
+      success: false,
+      data: [],
+      message: "Impossible de charger les services.",
+    };
+  }
+}
+
+/**
+ * Returns the first 7 services for public display (e.g., footer).
+ * This function does NOT require authentication and is accessible to everyone.
+ *
+ * @returns {{ success: boolean, data: Array<{ id, name, category: { id, name } }>, message?: string }}
+ */
+export async function getPublicServices() {
+  try {
+    const services = await prisma.service.findMany({
+      take: 7,
+      orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        category: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    return { success: true, data: services };
+  } catch (error) {
+    console.error("[getPublicServices]", error);
     return {
       success: false,
       data: [],

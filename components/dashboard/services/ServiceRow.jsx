@@ -1,14 +1,30 @@
 "use client";
 
-import { Users } from "lucide-react";
 import { RowActions } from "../Tables/RowActions";
+import { checkServiceReservationReadiness } from "@/lib/reservation-compliance";
+import { WarningTooltip } from "../shared/WarningTooltip";
 
 export function ServiceRow({ row, onView, onEdit, onDelete }) {
+  const readiness = checkServiceReservationReadiness(row);
   return (
-    <tr className="group border-b border-gray-100 transition-colors hover:bg-gray-50/70">
+    <>
+    <tr className={`group border-b border-gray-100 transition-colors hover:bg-gray-50/70 ${!readiness.ready ? "bg-red-50/40" : ""}`}>
       {/* Service Name */}
       <td className="px-4 py-4 pl-5 align-middle">
+        
         <div className="flex items-center gap-3">
+          {/* Fixed-width warning slot — always present to keep avatar aligned */}
+          <div className="w-4 flex-shrink-0 flex items-center justify-center">
+            {!readiness.ready && (
+              <WarningTooltip
+                title="Problème de réservation"
+                warnings={readiness.warnings}
+                footer="Ce service n'apparaîtra pas sur la page de réservation."
+              />
+            )}
+          </div>
+
+          {/* Avatar */}
           {row.staffServices?.[0]?.photo ? (
             <img
               src={row.staffServices[0].photo}
@@ -20,6 +36,8 @@ export function ServiceRow({ row, onView, onEdit, onDelete }) {
               {row.name.slice(0, 2)}
             </div>
           )}
+
+          {/* Name + description */}
           <div>
             <span className="block font-medium text-gray-800">{row.name}</span>
             {row.description && (
@@ -71,15 +89,14 @@ export function ServiceRow({ row, onView, onEdit, onDelete }) {
 
       {/* Actions */}
       <td className="px-4 py-4 pr-5 align-middle">
-        <div className="flex items-center justify-end gap-2">
-          <RowActions
-            row={row}
-            onView={onView}
-            onEdit={onEdit}
-            onDelete={onDelete}
-          />
-        </div>
+        <RowActions
+          row={row}
+          onView={onView}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
       </td>
     </tr>
+    </>
   );
 }

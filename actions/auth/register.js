@@ -1,10 +1,14 @@
 "use server";
 
 import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
+import { sendEmail } from "@/lib/email";
+import { emailVerificationEmail } from "@/lib/email-templates";
 import { registerSchema } from "@/lib/validations/register";
 
 const BCRYPT_SALT_ROUNDS = 12;
+const TOKEN_EXPIRY_MINUTES = 15;
 
 const userSelect = {
   id: true,
@@ -17,6 +21,10 @@ const userSelect = {
   isActive: true,
   createdAt: true,
 };
+
+async function hashToken(token) {
+  return bcrypt.hash(token, BCRYPT_SALT_ROUNDS);
+}
 
 /**
  * Register a new customer account.
@@ -40,29 +48,61 @@ export async function registerUser(input) {
     };
   }
 
-  const { fullName, nickName, email, phone, password } = parsed.data;
+  const { fullName, nickName, email, phone, password, newsletterSubscribed } = parsed.data;
 
   try {
     const hashedPassword = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+    const plainToken = crypto.randomUUID();
+    const tokenHash = await hashToken(plainToken);
+    const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MINUTES * 60 * 1000);
 
-    // Create user without email verification
-    const user = await prisma.user.create({
-      data: {
-        fullName,
-        nickName,
-        email,
-        phone,
-        password: hashedPassword,
-        role: "CUSTOMER",
-        emailVerified: true,
-        isActive: true,
-      },
-      select: userSelect,
+    const user = await prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          fullName,
+          nickName,
+          email,
+          phone,
+          password: hashedPassword,
+          role: "CUSTOMER",
+          emailVerified: false,
+          isActive: true,
+          newsletterSubscribed: newsletterSubscribed ?? false,
+        },
+        select: userSelect,
+      });
+
+      await tx.emailVerificationToken.create({
+        data: {
+          email: newUser.email,
+          tokenHash,
+          expiresAt,
+        },
+      });
+
+      return newUser;
+    });
+
+    const verificationUrl = `${
+      process.env.NEXTAUTH_URL || "http://localhost:3000"
+    }/verify-email?token=${encodeURIComponent(plainToken)}`;
+
+    const emailTemplate = emailVerificationEmail({
+      customerName: user.fullName,
+      verificationUrl,
+      expiresInMinutes: TOKEN_EXPIRY_MINUTES,
+    });
+
+    await sendEmail({
+      to: user.email,
+      subject: emailTemplate.subject,
+      text: emailTemplate.text,
+      html: emailTemplate.html,
     });
 
     return {
       success: true,
-      message: "Account created successfully. You can now sign in.",
+      message: "Account created successfully. Please check your email to verify your account before logging in.",
       user,
     };
   } catch (error) {

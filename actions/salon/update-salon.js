@@ -1,10 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import { updateSalonSchema } from "@/lib/validations/salon";
 
 export async function updateSalon(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   const parsed = updateSalonSchema.safeParse(input);
   if (!parsed.success) {
     const fe = parsed.error.flatten().fieldErrors;

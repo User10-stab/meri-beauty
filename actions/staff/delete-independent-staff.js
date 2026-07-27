@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import { softDeleteStaffSchema } from "@/lib/validations/independent-staff";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
@@ -24,6 +26,11 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * @returns {{ success: boolean, message: string }}
  */
 export async function deleteIndependentStaff(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   // ── 1. Validate input ────────────────────────────────────────────────────
   const parsed = softDeleteStaffSchema.safeParse(input);
 
@@ -138,6 +145,11 @@ export async function deleteIndependentStaff(input) {
  * @returns {{ success: boolean, message: string }}
  */
 export async function hardDeleteIndependentStaff({ id }) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   if (!id || typeof id !== "string") {
     return {
       success: false,

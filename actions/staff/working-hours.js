@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import { workingHoursSchema } from "@/lib/validations/working-hours";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
@@ -14,6 +16,11 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * @returns {{ success: boolean, message: string, errors?: object }}
  */
 export async function upsertWorkingHours(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   // ── 1. Validate ──────────────────────────────────────────────────────────
   const parsed = workingHoursSchema.safeParse(input);
 
@@ -99,6 +106,11 @@ export async function upsertWorkingHours(input) {
  * @returns {{ success: boolean, data?: Array<object>, message?: string }}
  */
 export async function getWorkingHours(staffId) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, data: [], message: "Permissions insuffisantes" };
+  }
+
   try {
     const allDays = [
       "MONDAY",

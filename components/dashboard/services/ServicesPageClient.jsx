@@ -9,6 +9,7 @@ import { CategoryRow } from "./CategoryRow";
 import { ServiceRow } from "./ServiceRow";
 import { CreateServiceModal } from "./CreateServiceModal";
 import { CreateCategoryModal } from "./CreateCategoryModal";
+import { ServiceDetailsDrawer } from "./ServiceDetailsDrawer";
 import { deleteService } from "@/actions/services/create-service";
 import { deleteCategory } from "@/actions/services/create-service";
 import { useConfirm } from "@/components/ConfirmProvider";
@@ -25,21 +26,25 @@ const SERVICES_COLUMNS = [
   { key: "name", label: "Service Name" },
   { key: "staffNames", label: "Staff Name(s)" },
   { key: "category", label: "Category" },
-  { key: "price", label: "Price" },
-  { key: "duration", label: "Duration" },
-  { key: "margin", label: "margin" },
+  { key: "price", label: "Prix" },
+  { key: "duration", label: "Durée" },
+  { key: "margin", label: "Marge tampon" },
 ];
 
-export function ServicesPageClient({ initialCategories, initialServices }) {
+export function ServicesPageClient({ initialCategories, initialServices, userRole }) {
   const router = useRouter();
   const confirm = useConfirm();
-  const [activeTab, setActiveTab] = useState("categories");
+  
+  // Staff members can only see the Services tab
+  const isAdminOrOwner = userRole === "ADMIN" || userRole === "OWNER";
+  const [activeTab, setActiveTab] = useState(isAdminOrOwner ? "categories" : "services");
   const [selectedService, setSelectedService] = useState(null);
   const [editingService, setEditingService] = useState(null);
   const [editingCategory, setEditingCategory] = useState(null);
   const [showManageModal, setShowManageModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [detailsService, setDetailsService] = useState(null);
   const [isDeleting, startDelete] = useTransition();
 
   function openManageModal(service) {
@@ -102,12 +107,14 @@ export function ServicesPageClient({ initialCategories, initialServices }) {
       {/* Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200">
         <div className="flex gap-2">
-          <TabButton
-            active={activeTab === "categories"}
-            onClick={() => setActiveTab("categories")}
-            label="Catégories"
-            count={initialCategories.length}
-          />
+          {isAdminOrOwner && (
+            <TabButton
+              active={activeTab === "categories"}
+              onClick={() => setActiveTab("categories")}
+              label="Catégories"
+              count={initialCategories.length}
+            />
+          )}
           <TabButton
             active={activeTab === "services"}
             onClick={() => setActiveTab("services")}
@@ -116,7 +123,7 @@ export function ServicesPageClient({ initialCategories, initialServices }) {
           />
         </div>
 
-        {activeTab === "categories" && (
+        {isAdminOrOwner && activeTab === "categories" && (
           <Button onClick={() => { setEditingCategory(null); setShowCategoryModal(true); }} className="mb-2 bg-[#2f3a2e]">
             <Plus size={16} /> Nouvelle catégorie
           </Button>
@@ -157,6 +164,7 @@ export function ServicesPageClient({ initialCategories, initialServices }) {
             data={initialServices}
             columns={SERVICES_COLUMNS}
             renderRow={(props) => <ServiceRow {...props} onManage={openManageModal} />}
+            onView={(service) => setDetailsService(service)}
             onEdit={handleEditService}
             onDelete={handleDeleteService}
             searchPlaceholder="Rechercher par nom, catégorie, description ou professionnel..."
@@ -173,6 +181,11 @@ export function ServicesPageClient({ initialCategories, initialServices }) {
             onClose={handleServiceModalClose}
             onCreated={() => router.refresh()}
             service={editingService}
+          />
+
+          <ServiceDetailsDrawer
+            service={detailsService}
+            onClose={() => setDetailsService(null)}
           />
         </>
       )}

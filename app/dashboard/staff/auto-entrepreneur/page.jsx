@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { requireAdmin } from "@/lib/route-protection";
 import { getIndependentStaff } from "@/actions/staff/get-independent-staff";
 import { getServices } from "@/actions/services/get-services";
 import { StaffPageClient } from "@/components/dashboard/staff/StaffPageClient";
@@ -11,6 +12,8 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function AutoEntrepreneurPage() {
+  await requireAdmin();
+
   const [staffResult, servicesResult] = await Promise.all([
     getIndependentStaff(),
     getServices(),

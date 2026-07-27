@@ -20,8 +20,10 @@ import {
 } from "lucide-react";
 import { deleteIndependentStaff } from "@/actions/staff/delete-independent-staff";
 import { updateIndependentStaff } from "@/actions/staff/update-independent-staff";
+import { checkStaffReservationReadiness } from "@/lib/reservation-compliance";
 import { EditStaffModal } from "./EditStaffModal";
 import { WorkingHoursModal } from "./WorkingHoursModal";
+import { WarningTooltip } from "../shared/WarningTooltip";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -530,8 +532,10 @@ export function StaffTable({ data, isLoading = false, services = [] }) {
 function StaffRow({ staff, onAction, onDelete, isPending }) {
   const photoUrl = staff.photo ?? staff.user.avatar ?? null;
   const hasPhoto = Boolean(photoUrl);
+  const readiness = checkStaffReservationReadiness(staff);
   return (
-    <tr className="group border-b border-gray-100 transition-colors hover:bg-gray-50/70">
+    <>
+    <tr className={`group border-b border-gray-100 transition-colors hover:bg-gray-50/70 ${!readiness.ready ? "bg-red-50/40" : ""}`}>
       {/* Photo */}
       <td className="px-4 py-4 pl-5 align-middle">
         <div className="flex items-center justify-center">
@@ -562,9 +566,23 @@ function StaffRow({ staff, onAction, onDelete, isPending }) {
 
       {/* Nom */}
       <td className="px-4 py-4 align-middle">
-        <div>
-          <p className="font-medium text-gray-800 leading-tight">{staff.user.fullName}</p>
-          <p className="text-xs text-gray-400">{staff.servicesCount} service{staff.servicesCount !== 1 ? "s" : ""}</p>
+        <div className="flex items-center gap-2">
+          {/* Fixed-width warning slot — always present to keep name aligned */}
+          <div className="w-4 flex-shrink-0 flex items-center justify-center">
+            {!readiness.ready && (
+              <WarningTooltip
+                title="Problème de réservation"
+                warnings={readiness.warnings}
+                footer="Ce professionnel n'apparaîtra pas dans le système de réservation."
+              />
+            )}
+          </div>
+
+          {/* Name + subtitle */}
+          <div>
+            <p className="font-medium text-gray-800 leading-tight">{staff.user.fullName}</p>
+            <p className="text-xs text-gray-400">{staff.servicesCount} service{staff.servicesCount !== 1 ? "s" : ""}</p>
+          </div>
         </div>
       </td>
 
@@ -643,5 +661,6 @@ function StaffRow({ staff, onAction, onDelete, isPending }) {
         />
       </td>
     </tr>
+    </>
   );
 }

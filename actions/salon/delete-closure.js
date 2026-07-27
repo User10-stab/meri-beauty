@@ -1,10 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import { deleteClosureSchema } from "@/lib/validations/salon";
 
 export async function deleteClosure(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   const parsed = deleteClosureSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, message: "Identifiant manquant." };

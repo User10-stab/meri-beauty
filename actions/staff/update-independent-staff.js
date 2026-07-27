@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import { updateIndependentStaffSchema } from "@/lib/validations/independent-staff";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
@@ -21,6 +23,11 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * @returns {{ success: boolean, message: string, errors?: object }}
  */
 export async function updateIndependentStaff(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   // ── 1. Validate ──────────────────────────────────────────────────────────
   const parsed = updateIndependentStaffSchema.safeParse(input);
 

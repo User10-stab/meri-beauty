@@ -4,9 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import { MoreHorizontal, Eye, Pencil, Trash2 } from "lucide-react";
 
 const MENU_ITEMS = [
-  // { label: "View", icon: Eye },
-  { label: "Edit", icon: Pencil },
-  { label: "Delete", icon: Trash2, danger: true },
+  { label: "View", icon: Eye, display: "Voir plus" },
+  { label: "Edit", icon: Pencil, display: "Modifier" },
+  { label: "Delete", icon: Trash2, display: "Supprimer", danger: true },
 ];
 
 /**
@@ -86,7 +86,7 @@ export function RowActions({ row, onView, onEdit, onDelete }) {
             animate-in fade-in-0 zoom-in-95
           "
         >
-          {MENU_ITEMS.filter(({ label }) => handlers[label]).map(({ label, icon: Icon, danger }) => (
+          {MENU_ITEMS.filter(({ label }) => handlers[label]).map(({ label, display, icon: Icon, danger }) => (
             <button
               key={label}
               role="menuitem"
@@ -104,7 +104,7 @@ export function RowActions({ row, onView, onEdit, onDelete }) {
               `}
             >
               <Icon size={14} />
-              {label}
+              {display ?? label}
             </button>
           ))}
         </div>

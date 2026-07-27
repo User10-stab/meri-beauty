@@ -206,7 +206,6 @@ function PhotoUpload({ value, onChange, error }) {
 
 export function CreateStaffModal({ onClose, services = [], initialValues = {}, onSuccess, serverAction }) {
   const action = serverAction ?? createIndependentStaff;
-  const [addContract, setAddContract] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const {
@@ -227,7 +226,12 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       yearsOfExperience: "",
       hireDate:          "",
       serviceIds:        [],
-      contract:          null,
+      contract: {
+        fixedRent: "",
+        startDate: "",
+        endDate:   "",
+        notes:     "",
+      },
     },
   });
 
@@ -241,13 +245,8 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
   }, [onClose]);
 
   function onSubmit(data) {
-    const payload = {
-      ...data,
-      contract: addContract ? data.contract : null,
-    };
-
     startTransition(async () => {
-      const res = await action(payload);
+      const res = await action(data);
       if (res.success) {
         toast.success(res.message);
         onSuccess?.();
@@ -424,7 +423,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
               {/* Years of experience + hire date */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <Label htmlFor="yearsOfExperience" icon={Briefcase}>
+                  <Label htmlFor="yearsOfExperience" icon={Briefcase} required>
                     Années d'expérience
                   </Label>
                   <TextInput
@@ -476,99 +475,78 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
             </p>
           </div>
 
-          {/* ── Section 4: Contrat (optionnel, toujours FIXED_RENT) ── */}
+          {/* ── Section 4: Contrat (obligatoire, toujours FIXED_RENT) ── */}
           <div>
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50">
-                  <FileSignature size={14} className="text-indigo-600" />
-                </div>
-                <h3 className="text-sm font-semibold text-gray-700">Contrat</h3>
-                <div className="w-8 border-t border-gray-100" />
+            <div className="mb-4 flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50">
+                <FileSignature size={14} className="text-indigo-600" />
               </div>
-              <label className="ml-4 flex cursor-pointer items-center gap-2 text-sm text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={addContract}
-                  onChange={(e) => setAddContract(e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                Ajouter un contrat
-              </label>
+              <h3 className="text-sm font-semibold text-gray-700">Contrat</h3>
+              <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-indigo-600">
+                Obligatoire
+              </span>
+              <div className="flex-1 border-t border-gray-100" />
             </div>
 
-            {addContract && (
-              <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
-                {/* Type is always FIXED_RENT — display only */}
-                {/* <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2">
-                  <FileSignature size={13} className="text-indigo-400" />
-                  <span className="text-sm font-medium text-indigo-700">
-                    Loyer fixe (FIXED_RENT)
-                  </span>
-                  <span className="ml-auto text-xs text-gray-400">
-                    Type automatique
-                  </span>
-                </div> */}
+            <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
+              {/* Fixed rent amount */}
+              <div>
+                <Label htmlFor="fixedRent" required>
+                  Montant du loyer mensuel (€)
+                </Label>
+                <TextInput
+                  id="fixedRent"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="ex. 500"
+                  error={errors.contract?.fixedRent}
+                  {...register("contract.fixedRent")}
+                />
+                <FieldError message={errors.contract?.fixedRent?.message} />
+              </div>
 
-                {/* Fixed rent amount */}
+              {/* Dates */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <Label htmlFor="fixedRent" required>
-                    Montant du loyer mensuel (€)
+                  <Label htmlFor="contractStart" icon={Calendar} required>
+                    Date de début
                   </Label>
                   <TextInput
-                    id="fixedRent"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    placeholder="ex. 500"
-                    error={errors.contract?.fixedRent}
-                    {...register("contract.fixedRent")}
+                    id="contractStart"
+                    type="date"
+                    error={errors.contract?.startDate}
+                    {...register("contract.startDate")}
                   />
-                  <FieldError message={errors.contract?.fixedRent?.message} />
+                  <FieldError message={errors.contract?.startDate?.message} />
                 </div>
-
-                {/* Dates */}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <Label htmlFor="contractStart" icon={Calendar} required>
-                      Date de début
-                    </Label>
-                    <TextInput
-                      id="contractStart"
-                      type="date"
-                      error={errors.contract?.startDate}
-                      {...register("contract.startDate")}
-                    />
-                    <FieldError message={errors.contract?.startDate?.message} />
-                  </div>
-                  <div>
-                    <Label htmlFor="contractEnd" icon={Calendar}>
-                      Date de fin
-                    </Label>
-                    <TextInput
-                      id="contractEnd"
-                      type="date"
-                      error={errors.contract?.endDate}
-                      {...register("contract.endDate")}
-                    />
-                    <FieldError message={errors.contract?.endDate?.message} />
-                  </div>
-                </div>
-
-                {/* Notes */}
                 <div>
-                  <Label htmlFor="contractNotes">Notes (optionnel)</Label>
-                  <textarea
-                    id="contractNotes"
-                    rows={2}
-                    placeholder="Conditions particulières, remarques..."
-                    {...register("contract.notes")}
-                    className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  <Label htmlFor="contractEnd" icon={Calendar}>
+                    Date de fin
+                  </Label>
+                  <TextInput
+                    id="contractEnd"
+                    type="date"
+                    error={errors.contract?.endDate}
+                    {...register("contract.endDate")}
                   />
-                  <FieldError message={errors.contract?.notes?.message} />
+                  <FieldError message={errors.contract?.endDate?.message} />
                 </div>
               </div>
-            )}
+
+              {/* Notes */}
+              <div>
+                <Label htmlFor="contractNotes">Notes (optionnel)</Label>
+                <textarea
+                  id="contractNotes"
+                  rows={2}
+                  placeholder="Conditions particulières, remarques..."
+                  {...register("contract.notes")}
+                  className="w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                />
+                <FieldError message={errors.contract?.notes?.message} />
+              </div>
+            </div>
           </div>
 
           {/* Password notice */}
@@ -609,24 +587,6 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
               </>
             )}
             </Button>
-          {/* <button
-            type="submit"
-            form="create-staff-form"
-            disabled={isPending}
-            className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-indigo-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-50"
-          >
-            {isPending ? (
-              <>
-                <Loader2 size={15} className="animate-spin" />
-                Création en cours…
-              </>
-            ) : (
-              <>
-                <UserPlus size={15} />
-                Créer le profil
-              </>
-            )}
-          </button> */}
         </div>
       </div>
     </div>

@@ -437,13 +437,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
 
         {addContract && (
           <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
-            {/* Fixed rent badge */}
-            <div className="flex items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2">
-              <FileSignature size={13} className="text-indigo-400" />
-              <span className="text-sm font-medium text-indigo-700">Loyer fixe (FIXED_RENT)</span>
-              <span className="ml-auto text-xs text-gray-400">Type automatique</span>
-            </div>
-
+           
             <div>
               <Label htmlFor="editFixedRent" required>Montant du loyer mensuel (€)</Label>
               <TextInput id="editFixedRent" type="number" min="0" step="0.01" placeholder="ex. 500" error={errors.contract?.fixedRent} {...register("contract.fixedRent")} />

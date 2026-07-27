@@ -1,9 +1,12 @@
 "use server";
 
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 
 export async function getSalon() {
   try {
+   
     const salon = await prisma.salon.findFirst({
       include: {
         workingDays: { orderBy: { day: "asc" } },

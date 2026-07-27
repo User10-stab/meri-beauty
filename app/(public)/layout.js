@@ -1,12 +1,12 @@
 import SiteHeader from "@/components/website/SiteHeader";
 import Footer from "@/components/website/Footer";
 import { getSalon } from "@/actions/salon/get-salon";
-import { getServices } from "@/actions/services/get-services";
+import { getPublicServices } from "@/actions/services/get-services";
 
 export default async function PublicLayout({ children }) {
   const [salonResult, servicesResult] = await Promise.all([
     getSalon(),
-    getServices(),
+    getPublicServices(),
   ]);
   const salon = salonResult.data;
   const services = servicesResult.data ?? [];

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import {
   staffServiceAssignmentSchema,
   staffServiceUpdateSchema,
@@ -26,6 +27,11 @@ function serializeAssignment(assignment) {
 }
 
 export async function getServiceStaffAssignments(serviceId) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes", data: null };
+  }
+
   if (!serviceId) {
     return { success: false, message: "Aucun service sélectionné.", data: null };
   }
@@ -94,6 +100,14 @@ export async function getServiceStaffAssignments(serviceId) {
 }
 
 export async function assignStaffService(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+  if (!session?.user?.id) {
+    return { success: false, message: "Vous devez être connecté pour réaliser cette action." };
+  }
+
   const parsed = staffServiceAssignmentSchema.safeParse(input);
 
   if (!parsed.success) {
@@ -110,11 +124,6 @@ export async function assignStaffService(input) {
         photo: errors.photo?.[0] ?? null,
       },
     };
-  }
-
-  const session = await auth();
-  if (!session?.user?.id) {
-    return { success: false, message: "Vous devez être connecté pour réaliser cette action." };
   }
 
   const { staffId, serviceId, price, duration, margin, photo, isActive } = parsed.data;
@@ -180,6 +189,11 @@ export async function assignStaffService(input) {
 }
 
 export async function updateStaffService(input) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   const parsed = staffServiceUpdateSchema.safeParse(input);
 
   if (!parsed.success) {
@@ -233,6 +247,11 @@ export async function updateStaffService(input) {
 }
 
 export async function deleteStaffService(id) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   if (!id) {
     return { success: false, message: "Aucune assignation sélectionnée." };
   }

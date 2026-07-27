@@ -34,6 +34,7 @@ export async function loginUser(input) {
         where: { email },
         select: {
           role: true,
+          emailVerified: true,
         },
       });
 
@@ -42,6 +43,15 @@ export async function loginUser(input) {
           success: false,
           message: "Invalid email or password.",
         };
+      }
+
+      if (user.role === "CUSTOMER" || user.role === "STAFF") {
+        if (!user.emailVerified) {
+          return {
+            success: false,
+            message: "Please verify your email before logging in. Check your inbox for the verification link.",
+          };
+        }
       }
       
       // Authenticate the user

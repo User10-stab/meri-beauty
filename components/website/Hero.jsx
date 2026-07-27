@@ -23,7 +23,8 @@ const ADDRESS = "66 Broklyn Golden Street\nNew York, USA";
 
 export default async function Hero() {
    const salon = await getSalon();
-  const workingDays = groupWorkingDays(salon.data.workingDays);
+   
+  const workingDays = groupWorkingDays(salon?.data?.workingDays || []);
   
   
   return (
@@ -137,7 +138,7 @@ export default async function Hero() {
       <MapPinIcon className="mt-0.5 h-4 w-4 shrink-0 text-white/80" />
 
       <p className="whitespace-pre-line text-[14px] font-semibold leading-snug text-white">
-        {salon.data.address || "Address not available"}
+        {salon?.data?.address || "Address not available"}
       </p>
     </div>
   </div>

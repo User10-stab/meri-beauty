@@ -5,15 +5,18 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { NAV_DATA } from "./data";
+import { getNavDataForRole } from "./data";
 import { ArrowLeftIcon, ChevronUp } from "./icons";
 import { MenuItem } from "./menu-item";
 import { useSidebarContext } from "./sidebar-context";
 
-export function Sidebar() {
+export function Sidebar({ userRole }) {
   const pathname = usePathname();
   const { setIsOpen, isOpen, isMobile, toggleSidebar } = useSidebarContext();
   const [expandedItems, setExpandedItems] = useState([]);
+
+  // Get navigation data filtered by user role
+  const NAV_DATA = getNavDataForRole(userRole);
 
   const toggleExpanded = (title) => {
     setExpandedItems((prev) => (prev.includes(title) ? [] : [title]));
@@ -41,7 +44,7 @@ export function Sidebar() {
         });
       });
     });
-  }, [expandedItems, pathname]);
+  }, [expandedItems, pathname, userRole]); // Added userRole to dependencies
 
   return (
     <>

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { requireAdmin } from "@/lib/route-protection";
 import { getRentalRequests } from "@/actions/rental-requests/get-rental-requests";
 import { getServices } from "@/actions/services/get-services";
 import { RentalRequestsPageClient } from "@/components/dashboard/rental-requests/RentalRequestsPageClient";
@@ -11,6 +12,8 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function RentalRequestsPage() {
+  await requireAdmin();
+
   const [rentalRequestsResult, servicesResult] = await Promise.all([
     getRentalRequests(),
     getServices(),

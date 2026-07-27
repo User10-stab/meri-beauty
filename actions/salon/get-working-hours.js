@@ -1,9 +1,15 @@
 "use server";
 
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 
 export async function getWorkingHours() {
   try {
+    const session = await auth();
+    if (!session?.user || !isAdminRole(session.user.role)) {
+      return { success: false, message: "Permissions insuffisantes", data: [] };
+    }
     const salon = await prisma.salon.findFirst();
     if (!salon) {
       return { success: true, data: [] };

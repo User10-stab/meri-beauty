@@ -3,6 +3,9 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { useSession, signIn } from "next-auth/react";
+import { toggleNewsletterSubscription } from "@/actions/newsletter/toggle-subscription";
+import { Loader2, LogIn } from "lucide-react";
 
 const DAY_LABELS = {
   MONDAY: "Lundi",
@@ -92,14 +95,30 @@ function MailIcon({ className = "w-4 h-4" }) {
 }
 
 export default function Footer({ salon, services = [] }) {
-  const [email, setEmail] = useState("");
-  const [subscribed, setSubscribed] = useState(false);
+  const { data: session, status } = useSession();
+  const isAuthed = status === "authenticated";
+  const isPending = status === "loading";
+  const [subscribing, setSubscribing] = useState(false);
+  const [feedback, setFeedback] = useState({ type: null, message: "" });
 
-  const handleSubscribe = (e) => {
+  const handleSubscribe = async (e) => {
     e.preventDefault();
-    if (email) {
-      setSubscribed(true);
-      setEmail("");
+
+    if (!isAuthed) {
+      signIn(undefined, { callbackUrl: "/" });
+      return;
+    }
+
+    setFeedback({ type: null, message: "" });
+    setSubscribing(true);
+
+    const result = await toggleNewsletterSubscription();
+    setSubscribing(false);
+
+    if (result.success) {
+      setFeedback({ type: "success", message: result.message });
+    } else {
+      setFeedback({ type: "error", message: result.message });
     }
   };
 
@@ -183,7 +202,7 @@ export default function Footer({ salon, services = [] }) {
               Nos Services
             </h4>
             <ul className="flex flex-col gap-3">
-              {(services.length > 0 ? services : FALLBACK_SERVICES).map((service) => (
+              {(services.length > 0 ? services : FALLBACK_SERVICES).slice(0, 7).map((service) => (
                 <li key={typeof service === "string" ? service : service.id}>
                   <a
                     href="#services"
@@ -268,21 +287,37 @@ export default function Footer({ salon, services = [] }) {
               Recevez nos actualités & offres exclusives.
             </p>
 
+            {feedback.message && (
+              <div className={`mb-3 rounded-lg px-3 py-2 text-[12px] font-medium ${
+                feedback.type === "success"
+                  ? "bg-green-900/30 text-green-300"
+                  : "bg-red-900/30 text-red-300"
+              }`}>
+                {feedback.message}
+              </div>
+            )}
+
             <form onSubmit={handleSubscribe} className="flex flex-col gap-3">
-              <input
-                type="email"
-                required
-                placeholder="Votre adresse e-mail"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-[13px] text-white placeholder-white/30 transition-all focus:border-gold/40 focus:outline-none focus:ring-1 focus:ring-gold/20"
-              />
+              {isAuthed ? (
+                <p className="text-[13px] text-white/50">
+                  Vous êtes connecté en tant que <span className="text-white/70">{session.user.email}</span>.
+                </p>
+              ) : isPending ? (
+                <p className="flex items-center gap-2 text-[13px] text-white/50">
+                  <Loader2 size={14} className="animate-spin" />
+                  Chargement…
+                </p>
+              ) : null}
+
               <button
                 type="submit"
-                className="group flex items-center justify-center gap-2 rounded-xl bg-gold px-5 py-3 text-[13px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-gold/30"
+                disabled={subscribing || isPending}
+                className="group flex items-center justify-center gap-2 rounded-xl bg-gold px-5 py-3 text-[13px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-gold/30 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                {subscribed ? (
-                  "Merci ! ✓"
+                {subscribing ? (
+                  <><Loader2 size={16} className="animate-spin" /> Inscription…</>
+                ) : !isAuthed ? (
+                  <><LogIn size={16} /> Se connecter pour s'inscrire</>
                 ) : (
                   <>
                     S'inscrire

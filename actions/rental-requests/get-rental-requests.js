@@ -1,6 +1,8 @@
 "use server";
 
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 
 /**
  * Fetches all rental requests with their data. Returns a plain serialisable array.
@@ -9,6 +11,10 @@ import { prisma } from "@/lib/prisma";
  */
 export async function getRentalRequests() {
   try {
+    const session = await auth();
+    if (!session?.user || !isAdminRole(session.user.role)) {
+      return { success: false, data: [], message: "Permissions insuffisantes" };
+    }
     const rentalRequests = await prisma.rentalRequest.findMany({
       where: { isDeleted: false },
       orderBy: { createdAt: "desc" },

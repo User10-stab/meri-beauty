@@ -4,7 +4,7 @@
  *
  * @type {import("next-auth").NextAuthConfig}
  */
-import { canAccessDashboard, isAdminRole, ROLES } from "@/lib/authorization";
+import { canAccessDashboard, isAdminRole } from "@/lib/authorization";
 
 // Define admin-only route patterns
 const ADMIN_ONLY_ROUTES = [

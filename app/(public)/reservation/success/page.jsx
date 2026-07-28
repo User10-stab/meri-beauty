@@ -2,7 +2,9 @@ import Link from "next/link";
 import { stripe } from "@/lib/stripe";
 
 export const metadata = {
-  title: "Réservation confirmée – Meri Beauty",
+  // Deliberately neutral: this page also renders the "payment pending" and
+  // "session not found" states, where "confirmée" would be misleading.
+  title: "Votre réservation – Meri Beauty",
 };
 
 /**

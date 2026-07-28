@@ -115,6 +115,23 @@ enum RentalRequestStatus {
   CANCELLED
 }
 
+// BOUTIQUE ENUMS
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum MovementType {
+  SALE
+  RESTOCK
+  RETURN
+  LOSS
+  ADJUSTMENT
+  SALON_USAGE // product taken from retail stock during a service
+}
+
 enum CommissionType {
   PERCENTAGE
   FIXED
@@ -225,15 +242,204 @@ model User {
   newsletterRecipients NewsletterRecipient[]
   createdStaffServices StaffService[]        @relation("CreatedBy")
   rentalRequests       RentalRequest[]
+  stockMovements       InventoryMovement[]   @relation("StockMovementBy")
 }
 
-// CATEGORY
+// CATEGORY — services only. Retail products use ProductCategory.
 model Category {
   id          String  @id @default(cuid())
   name        String  @unique
   description String?
 
   services Service[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOUTIQUE — CATALOGUE
+// ─────────────────────────────────────────────────────────────────────────────
+
+// BRAND
+// Deliberately carries no category link: a beauty brand spans several
+// categories, and a stored copy would only be able to disagree with the
+// products themselves. Derive it with a DISTINCT query when needed.
+model Brand {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  logo        String?
+  description String?
+
+  isActive  Boolean   @default(true)
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@index([slug])
+  @@index([isActive, isDeleted])
+}
+
+// PRODUCT CATEGORY
+model ProductCategory {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  position    Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subcategories ProductSubcategory[]
+
+  @@index([slug])
+}
+
+// PRODUCT SUBCATEGORY
+// The "max 4 subcategories per brand" rule is a UI/display constraint and is
+// deliberately not enforced here.
+model ProductSubcategory {
+  id       String @id @default(cuid())
+  name     String
+  slug     String
+  position Int    @default(0)
+  isActive Boolean @default(true)
+
+  categoryId String
+  category   ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@unique([categoryId, slug])
+  @@index([categoryId])
+}
+
+// PRODUCT
+// Descriptive only — every sellable unit, price and stock level lives on
+// ProductVariant, so a product with one size still has exactly one variant.
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+
+  brandId String?
+  brand   Brand?  @relation(fields: [brandId], references: [id])
+
+  subcategoryId String
+  subcategory   ProductSubcategory @relation(fields: [subcategoryId], references: [id])
+
+  status ProductStatus @default(DRAFT)
+
+  // Never hard-delete: OrderItem references variants of this product forever.
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variants ProductVariant[]
+  images   ProductImage[]
+
+  @@index([slug])
+  @@index([subcategoryId])
+  @@index([brandId])
+  @@index([status, isDeleted])
+}
+
+// PRODUCT VARIANT
+// The sellable unit: "250 ml", "Teinte 03". Carries sku, barcode, prices and stock.
+//
+// profit and margin are intentionally absent — both are derivations of
+// (price - costPrice). Stored, they go stale the moment either input changes
+// and leave three fields that can contradict each other. Compute on read.
+model ProductVariant {
+  id String @id @default(cuid())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  name    String // "250 ml", "Teinte 03" — "Standard" for single-variant products
+  sku     String  @unique
+  barcode String? @unique // EAN/UPC; null until an internal code is generated
+
+  price        Decimal  @db.Decimal(10, 2) // selling price, TVA included
+  costPrice    Decimal  @db.Decimal(10, 2) // supplier cost — "prix initial"
+  comparePrice Decimal? @db.Decimal(10, 2) // struck-through price — "prix barré"
+
+  // Available to sell = stockQuantity - reservedQuantity.
+  // Reservation is NOT an InventoryMovement: it does not change stock on hand,
+  // and folding it in would break SUM(quantity) == stockQuantity.
+  stockQuantity     Int @default(0)
+  reservedQuantity  Int @default(0)
+  lowStockThreshold Int @default(3)
+
+  position Int     @default(0)
+  isActive Boolean @default(true)
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inventoryMovements InventoryMovement[]
+
+  @@index([productId])
+  @@index([sku])
+  @@index([barcode])
+  @@index([isActive, isDeleted])
+}
+
+// PRODUCT IMAGE
+model ProductImage {
+  id String @id @default(cuid())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  path      String
+  alt       String?
+  position  Int     @default(0)
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+}
+
+// INVENTORY MOVEMENT
+// Append-only ledger. quantity is signed, so SUM(quantity) reconciles to
+// ProductVariant.stockQuantity. Written in the same transaction as the stock
+// update, never after it.
+model InventoryMovement {
+  id String @id @default(cuid())
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  type     MovementType
+  quantity Int // negative for SALE / LOSS / SALON_USAGE, positive for RESTOCK / RETURN
+
+  previousStock Int
+  newStock      Int
+
+  reason String?
+
+  createdById String?
+  createdBy   User?   @relation("StockMovementBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([variantId, createdAt])
+  @@index([type])
 }
 
 // SERVICE

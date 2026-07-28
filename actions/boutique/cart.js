@@ -131,15 +131,29 @@ const cartInclude = {
   },
 };
 
-/** Current cart for this browser, empty if none exists yet. */
+const EMPTY_CART = { id: null, itemCount: 0, subtotal: 0, items: [] };
+
+/**
+ * Read-only: never issues a cart cookie or creates a Cart row. Safe to call
+ * from Server Component renders (page.jsx, layout.js), unlike
+ * getOrCreateActiveCart() — cookies().set() is only legal inside a Server
+ * Action or Route Handler, so cart *creation* only ever happens the moment
+ * addToCart() actually runs (a real Server Action call from a click). Until
+ * then, a browser with no cart cookie simply has an empty cart.
+ */
 export async function getCart() {
   try {
-    const cart = await getOrCreateActiveCart();
-    const full = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude });
-    return { success: true, data: serializeCart(full) };
+    const jar = await cookies();
+    const token = jar.get(CART_COOKIE)?.value;
+    if (!token) return { success: true, data: EMPTY_CART };
+
+    const cart = await prisma.cart.findUnique({ where: { token }, include: cartInclude });
+    if (!cart || cart.status !== "ACTIVE") return { success: true, data: EMPTY_CART };
+
+    return { success: true, data: serializeCart(cart) };
   } catch (error) {
     console.error("[getCart]", error);
-    return { success: false, message: "Impossible de charger le panier.", data: null };
+    return { success: false, message: "Impossible de charger le panier.", data: EMPTY_CART };
   }
 }
 

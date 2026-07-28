@@ -1,0 +1,336 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
+import { isAdminRole } from "@/lib/authorization";
+import {
+  createProductCategorySchema,
+  updateProductCategorySchema,
+  createProductSubcategorySchema,
+  updateProductSubcategorySchema,
+  slugify,
+} from "@/lib/validations/boutique";
+
+/**
+ * Product category / subcategory management.
+ *
+ * Separate from Category/Service — that model is service-only. Retail
+ * products classify under ProductCategory → ProductSubcategory instead.
+ *
+ * The "max 4 subcategories per brand" rule from the brief is a UI/display
+ * constraint, not a data rule, and is intentionally not enforced here.
+ */
+
+async function requireAdmin() {
+  const session = await auth();
+  if (!session?.user) return { error: "Non authentifié." };
+  if (!isAdminRole(session.user.role)) return { error: "Accès non autorisé." };
+  return { session };
+}
+
+async function uniqueCategorySlug(base, excludeId = null) {
+  let slug = base;
+  let n = 1;
+   
+  while (true) {
+    const clash = await prisma.productCategory.findUnique({ where: { slug }, select: { id: true } });
+    if (!clash || clash.id === excludeId) return slug;
+    n += 1;
+    slug = `${base}-${n}`;
+  }
+}
+
+// ─── Read ─────────────────────────────────────────────────────────────────────
+
+export async function getProductCategories({ includeInactive = false } = {}) {
+  try {
+    const categories = await prisma.productCategory.findMany({
+      where: includeInactive ? {} : { isActive: true },
+      orderBy: [{ position: "asc" }, { name: "asc" }],
+      include: {
+        subcategories: {
+          where: includeInactive ? {} : { isActive: true },
+          orderBy: [{ position: "asc" }, { name: "asc" }],
+          include: { _count: { select: { products: true } } },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      data: categories.map((c) => ({
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        description: c.description,
+        position: c.position,
+        isActive: c.isActive,
+        subcategories: c.subcategories.map((s) => ({
+          id: s.id,
+          name: s.name,
+          slug: s.slug,
+          position: s.position,
+          isActive: s.isActive,
+          productCount: s._count.products,
+        })),
+      })),
+    };
+  } catch (error) {
+    console.error("[getProductCategories]", error);
+    return { success: false, message: "Impossible de charger les catégories.", data: [] };
+  }
+}
+
+// ─── Category CRUD ──────────────────────────────────────────────────────────────
+
+export async function createProductCategory(input) {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const parsed = createProductCategorySchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return {
+      success: false,
+      message: errors.name?.[0] ?? "Données invalides.",
+      errors: { name: errors.name?.[0] ?? null },
+    };
+  }
+
+  const { name, description, position, isActive } = parsed.data;
+
+  try {
+    const duplicate = await prisma.productCategory.findFirst({
+      where: { name: { equals: name, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (duplicate) {
+      return {
+        success: false,
+        message: "Une catégorie portant ce nom existe déjà.",
+        errors: { name: "Ce nom est déjà utilisé." },
+      };
+    }
+
+    const category = await prisma.productCategory.create({
+      data: {
+        name,
+        slug: await uniqueCategorySlug(slugify(name)),
+        description: description ?? null,
+        position,
+        isActive,
+      },
+    });
+
+    revalidatePath("/dashboard/boutique/categories");
+    return { success: true, message: "Catégorie créée.", data: category };
+  } catch (error) {
+    console.error("[createProductCategory]", error);
+    return { success: false, message: "Impossible de créer la catégorie." };
+  }
+}
+
+export async function updateProductCategory(input) {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const parsed = updateProductCategorySchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return {
+      success: false,
+      message: errors.name?.[0] ?? "Données invalides.",
+      errors: { name: errors.name?.[0] ?? null },
+    };
+  }
+
+  const { id, name, description, position, isActive } = parsed.data;
+
+  try {
+    const existing = await prisma.productCategory.findUnique({ where: { id } });
+    if (!existing) return { success: false, message: "Catégorie introuvable." };
+
+    const duplicate = await prisma.productCategory.findFirst({
+      where: { name: { equals: name, mode: "insensitive" }, id: { not: id } },
+      select: { id: true },
+    });
+    if (duplicate) {
+      return {
+        success: false,
+        message: "Une catégorie portant ce nom existe déjà.",
+        errors: { name: "Ce nom est déjà utilisé." },
+      };
+    }
+
+    const category = await prisma.productCategory.update({
+      where: { id },
+      data: {
+        name,
+        ...(existing.name !== name ? { slug: await uniqueCategorySlug(slugify(name), id) } : {}),
+        description: description ?? null,
+        position,
+        isActive,
+      },
+    });
+
+    revalidatePath("/dashboard/boutique/categories");
+    return { success: true, message: "Catégorie mise à jour.", data: category };
+  } catch (error) {
+    console.error("[updateProductCategory]", error);
+    return { success: false, message: "Impossible de mettre à jour la catégorie." };
+  }
+}
+
+/** Hard-blocked if it still has subcategories — no cascading surprises. */
+export async function deleteProductCategory(id) {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, message: guard.error };
+  if (!id) return { success: false, message: "Identifiant manquant." };
+
+  try {
+    const category = await prisma.productCategory.findUnique({
+      where: { id },
+      include: { _count: { select: { subcategories: true } } },
+    });
+    if (!category) return { success: false, message: "Catégorie introuvable." };
+
+    if (category._count.subcategories > 0) {
+      return {
+        success: false,
+        message: `Impossible de supprimer : ${category._count.subcategories} sous-catégorie(s) en dépendent.`,
+      };
+    }
+
+    await prisma.productCategory.delete({ where: { id } });
+    revalidatePath("/dashboard/boutique/categories");
+    return { success: true, message: "Catégorie supprimée." };
+  } catch (error) {
+    console.error("[deleteProductCategory]", error);
+    return { success: false, message: "Impossible de supprimer la catégorie." };
+  }
+}
+
+// ─── Subcategory CRUD ───────────────────────────────────────────────────────────
+
+export async function createProductSubcategory(input) {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const parsed = createProductSubcategorySchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return {
+      success: false,
+      message: errors.name?.[0] ?? errors.categoryId?.[0] ?? "Données invalides.",
+      errors: {
+        name: errors.name?.[0] ?? null,
+        categoryId: errors.categoryId?.[0] ?? null,
+      },
+    };
+  }
+
+  const { name, categoryId, position, isActive } = parsed.data;
+
+  try {
+    const category = await prisma.productCategory.findUnique({
+      where: { id: categoryId },
+      select: { id: true },
+    });
+    if (!category) {
+      return {
+        success: false,
+        message: "Catégorie introuvable.",
+        errors: { categoryId: "Catégorie introuvable." },
+      };
+    }
+
+    const baseSlug = slugify(name);
+    let slug = baseSlug;
+    let n = 1;
+     
+    while (true) {
+      const clash = await prisma.productSubcategory.findUnique({
+        where: { categoryId_slug: { categoryId, slug } },
+        select: { id: true },
+      });
+      if (!clash) break;
+      n += 1;
+      slug = `${baseSlug}-${n}`;
+    }
+
+    const subcategory = await prisma.productSubcategory.create({
+      data: { name, categoryId, slug, position, isActive },
+    });
+
+    revalidatePath("/dashboard/boutique/categories");
+    return { success: true, message: "Sous-catégorie créée.", data: subcategory };
+  } catch (error) {
+    console.error("[createProductSubcategory]", error);
+    return { success: false, message: "Impossible de créer la sous-catégorie." };
+  }
+}
+
+export async function updateProductSubcategory(input) {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const parsed = updateProductSubcategorySchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return {
+      success: false,
+      message: errors.name?.[0] ?? errors.categoryId?.[0] ?? "Données invalides.",
+      errors: {
+        name: errors.name?.[0] ?? null,
+        categoryId: errors.categoryId?.[0] ?? null,
+      },
+    };
+  }
+
+  const { id, name, categoryId, position, isActive } = parsed.data;
+
+  try {
+    const existing = await prisma.productSubcategory.findUnique({ where: { id } });
+    if (!existing) return { success: false, message: "Sous-catégorie introuvable." };
+
+    const subcategory = await prisma.productSubcategory.update({
+      where: { id },
+      data: { name, categoryId, position, isActive },
+    });
+
+    revalidatePath("/dashboard/boutique/categories");
+    return { success: true, message: "Sous-catégorie mise à jour.", data: subcategory };
+  } catch (error) {
+    console.error("[updateProductSubcategory]", error);
+    return { success: false, message: "Impossible de mettre à jour la sous-catégorie." };
+  }
+}
+
+export async function deleteProductSubcategory(id) {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, message: guard.error };
+  if (!id) return { success: false, message: "Identifiant manquant." };
+
+  try {
+    const subcategory = await prisma.productSubcategory.findUnique({
+      where: { id },
+      include: { _count: { select: { products: true } } },
+    });
+    if (!subcategory) return { success: false, message: "Sous-catégorie introuvable." };
+
+    if (subcategory._count.products > 0) {
+      return {
+        success: false,
+        message: `Impossible de supprimer : ${subcategory._count.products} produit(s) en dépendent.`,
+      };
+    }
+
+    await prisma.productSubcategory.delete({ where: { id } });
+    revalidatePath("/dashboard/boutique/categories");
+    return { success: true, message: "Sous-catégorie supprimée." };
+  } catch (error) {
+    console.error("[deleteProductSubcategory]", error);
+    return { success: false, message: "Impossible de supprimer la sous-catégorie." };
+  }
+}

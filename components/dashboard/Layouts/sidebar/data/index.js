@@ -54,6 +54,17 @@ const ALL_NAV_DATA = [
         roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT, // Admin only
       },
       {
+        title: "Boutique",
+        icon: Icons.ShoppingBagIcon,
+        items: [
+          { title: "Produits", url: "/dashboard/boutique/products" },
+          { title: "Catégories", url: "/dashboard/boutique/categories" },
+          { title: "Marques", url: "/dashboard/boutique/brands" },
+          { title: "Stock", url: "/dashboard/boutique/stock" },
+        ],
+        roles: DASHBOARD_PERMISSIONS.BOUTIQUE, // Admin only
+      },
+      {
         title: "Newsletter",
         icon: Icons.MailIcon,
         url: "/dashboard/newsletter",

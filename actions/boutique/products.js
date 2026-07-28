@@ -245,7 +245,12 @@ export async function createProduct(input) {
     }
 
     revalidatePath("/dashboard/boutique/products");
-    return { success: true, message: "Produit créé.", data: product };
+    // Deliberately not returning the raw `product` object here: its variants
+    // carry Prisma Decimal instances (price/costPrice/comparePrice), and a
+    // Server Action's return value is serialized across the client boundary
+    // just like a prop — an un-converted Decimal fails that exactly the same
+    // way it would as a prop. The caller only needs the id.
+    return { success: true, message: "Produit créé.", data: { id: product.id } };
   } catch (error) {
     console.error("[createProduct]", error);
     return { success: false, message: "Impossible de créer le produit." };

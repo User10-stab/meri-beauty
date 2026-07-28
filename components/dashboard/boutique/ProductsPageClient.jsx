@@ -1,0 +1,233 @@
+"use client";
+
+import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Search, Plus, AlertTriangle, Package } from "lucide-react";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import Button from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { RowActions } from "@/components/dashboard/Tables/RowActions";
+import { deleteProduct } from "@/actions/boutique/products";
+
+const STATUS_LABEL = { DRAFT: "Brouillon", ACTIVE: "Actif", ARCHIVED: "Archivé" };
+const STATUS_STYLE = {
+  DRAFT: "bg-gray-100 text-gray-600 border-gray-200",
+  ACTIVE: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  ARCHIVED: "bg-amber-50 text-amber-700 border-amber-100",
+};
+
+function formatPrice(n) {
+  return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
+}
+
+/** A product can have several variants at different prices — show a range. */
+function priceRange(variants) {
+  if (!variants.length) return "—";
+  const prices = variants.map((v) => v.price);
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  return min === max ? formatPrice(min) : `${formatPrice(min)} – ${formatPrice(max)}`;
+}
+
+export function ProductsPageClient({ initialProducts, categories, brands }) {
+  const router = useRouter();
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [toDelete, setToDelete] = useState(null);
+  const [isPending, startTransition] = useTransition();
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return initialProducts.filter((p) => {
+      if (q) {
+        const hay = `${p.name} ${p.brand?.name ?? ""} ${p.variants.map((v) => v.sku).join(" ")}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (categoryFilter && p.category.id !== categoryFilter) return false;
+      if (statusFilter && p.status !== statusFilter) return false;
+      return true;
+    });
+  }, [initialProducts, search, categoryFilter, statusFilter]);
+
+  function handleDelete() {
+    if (!toDelete) return;
+    startTransition(async () => {
+      const result = await deleteProduct(toDelete.id);
+      if (result.success) {
+        toast.success(result.message);
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+      setToDelete(null);
+    });
+  }
+
+  return (
+    <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+      {/* Toolbar — Wix-style: search + filters on the left, primary action on the right */}
+      <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-3">
+          <div className="relative w-full max-w-xs">
+            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un produit, une référence…"
+              className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+          </div>
+
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+          >
+            <option value="">Toutes les catégories</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+          >
+            <option value="">Tous les statuts</option>
+            <option value="ACTIVE">Actif</option>
+            <option value="DRAFT">Brouillon</option>
+            <option value="ARCHIVED">Archivé</option>
+          </select>
+        </div>
+
+        <Link href="/dashboard/boutique/products/new">
+          <Button>
+            <Plus size={16} />
+            Ajouter un produit
+          </Button>
+        </Link>
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState hasProducts={initialProducts.length > 0} />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="pl-6">Produit</TableHead>
+              <TableHead>Catégorie</TableHead>
+              <TableHead>Prix</TableHead>
+              <TableHead>Stock</TableHead>
+              <TableHead>Statut</TableHead>
+              <TableHead className="pr-6 text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.map((p) => (
+              <TableRow
+                key={p.id}
+                className="cursor-pointer"
+                onClick={() => router.push(`/dashboard/boutique/products/${p.id}`)}
+              >
+                <TableCell className="pl-6">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
+                      {p.thumbnail ? (
+                        <img src={p.thumbnail} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <Package size={16} className="text-gray-300" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-800 dark:text-white">{p.name}</div>
+                      <div className="text-xs text-gray-400">
+                        {p.brand?.name ?? "Sans marque"} · {p.variants.length} déclinaison{p.variants.length > 1 ? "s" : ""}
+                      </div>
+                    </div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <span className="text-gray-600 dark:text-dark-6">{p.category.name}</span>
+                  <span className="block text-xs text-gray-400">{p.subcategory.name}</span>
+                </TableCell>
+                <TableCell>
+                  <span className="font-medium text-gray-700 dark:text-dark-6">{priceRange(p.variants)}</span>
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-medium text-gray-700 dark:text-dark-6">{p.totalStock}</span>
+                    {p.lowStock && (
+                      <span title="Stock bas sur au moins une déclinaison">
+                        <AlertTriangle size={14} className="text-amber-500" />
+                      </span>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[p.status]}`}>
+                    {STATUS_LABEL[p.status]}
+                  </span>
+                </TableCell>
+                <TableCell className="pr-6" onClick={(e) => e.stopPropagation()}>
+                  <RowActions
+                    row={p}
+                    onEdit={() => router.push(`/dashboard/boutique/products/${p.id}`)}
+                    onDelete={() => setToDelete(p)}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <ConfirmDialog
+        open={!!toDelete}
+        title="Supprimer ce produit ?"
+        message={
+          toDelete
+            ? `"${toDelete.name}" sera retiré de la boutique. Les commandes passées le conservent dans leur historique.`
+            : ""
+        }
+        confirmLabel="Supprimer"
+        danger
+        loading={isPending}
+        onConfirm={handleDelete}
+        onCancel={() => setToDelete(null)}
+      />
+    </div>
+  );
+}
+
+function EmptyState({ hasProducts }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
+        <Package size={22} className="text-gray-300" />
+      </div>
+      <div>
+        <p className="font-medium text-gray-700">
+          {hasProducts ? "Aucun produit ne correspond à votre recherche" : "Aucun produit pour le moment"}
+        </p>
+        <p className="mt-1 text-sm text-gray-400">
+          {hasProducts
+            ? "Essayez d'autres filtres."
+            : "Commencez par ajouter votre premier produit à la boutique."}
+        </p>
+      </div>
+      {!hasProducts && (
+        <Link href="/dashboard/boutique/products/new">
+          <Button className="mt-2">
+            <Plus size={16} />
+            Ajouter un produit
+          </Button>
+        </Link>
+      )}
+    </div>
+  );
+}

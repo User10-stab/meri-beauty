@@ -192,6 +192,57 @@ export async function recordStockCount(input) {
   }
 }
 
+/** Flat, variant-centric inventory listing — the Stock page's main table. */
+export async function getAllVariants({ search, lowStockOnly = false } = {}) {
+  try {
+    const variants = await prisma.productVariant.findMany({
+      where: {
+        isDeleted: false,
+        product: { isDeleted: false },
+        ...(search
+          ? {
+              OR: [
+                { sku: { contains: search, mode: "insensitive" } },
+                { barcode: { contains: search, mode: "insensitive" } },
+                { name: { contains: search, mode: "insensitive" } },
+                { product: { name: { contains: search, mode: "insensitive" } } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ product: { name: "asc" } }, { position: "asc" }],
+      // Explicit select — price/costPrice/comparePrice are Decimal and this
+      // list goes straight to a client component, which can't serialize
+      // Prisma's Decimal instances. Leave them out rather than convert them,
+      // since the Stock page has no use for price.
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        barcode: true,
+        stockQuantity: true,
+        reservedQuantity: true,
+        lowStockThreshold: true,
+        product: { select: { id: true, name: true } },
+      },
+    });
+
+    const withAvailability = variants.map((v) => ({
+      ...v,
+      availableQuantity: v.stockQuantity - v.reservedQuantity,
+      isLowStock: v.stockQuantity - v.reservedQuantity <= v.lowStockThreshold,
+    }));
+
+    return {
+      success: true,
+      data: lowStockOnly ? withAvailability.filter((v) => v.isLowStock) : withAvailability,
+    };
+  } catch (error) {
+    console.error("[getAllVariants]", error);
+    return { success: false, message: "Impossible de charger l'inventaire.", data: [] };
+  }
+}
+
 /** Variants at or below their low-stock threshold, for the dashboard alert. */
 export async function getLowStockVariants() {
   try {

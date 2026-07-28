@@ -8,6 +8,7 @@ import {
   paymentConfirmationEmail,
   welcomeWithCredentialsEmail,
 } from "@/lib/email-templates";
+import { fulfillOrderPayment } from "@/actions/boutique/orders";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -61,7 +62,13 @@ export async function POST(req) {
   }
 
   try {
-    const result = await processCheckoutSession(session);
+    // Order checkouts carry metadata.kind === "order" (see
+    // actions/boutique/orders.js#createOrderCheckoutSession); anything else
+    // is the appointment reservation flow, unchanged from before.
+    const result =
+      session.metadata?.kind === "order"
+        ? await fulfillOrderPayment(session)
+        : await processCheckoutSession(session);
     return NextResponse.json(result);
   } catch (err) {
     console.error("[stripe-webhook] Processing failed:", err);

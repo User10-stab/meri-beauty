@@ -43,6 +43,13 @@ const ALL_NAV_DATA = [
         items: [],
       },
       {
+        title: "Activités",
+        icon: Icons.Calendar,
+        url: "/dashboard/workshops",
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.SALON_SETTINGS,
+      },
+      {
         title: "Staff",
         icon: Icons.User,
         items: [

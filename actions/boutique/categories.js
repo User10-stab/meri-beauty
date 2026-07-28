@@ -320,9 +320,13 @@ export async function deleteProductSubcategory(id) {
     if (!subcategory) return { success: false, message: "Sous-catégorie introuvable." };
 
     if (subcategory._count.products > 0) {
+      // Deliberately permanent: even a deleted product's row still exists
+      // and still references this subcategory, and the database (correctly)
+      // refuses to break that reference. There is no "empty it out" path —
+      // a subcategory that has ever been used stays forever.
       return {
         success: false,
-        message: `Impossible de supprimer : ${subcategory._count.products} produit(s) en dépendent.`,
+        message: `Impossible de supprimer : ${subcategory._count.products} produit(s) ont utilisé cette sous-catégorie, y compris ceux déjà supprimés. Une sous-catégorie déjà utilisée ne peut plus être supprimée — vous pouvez la désactiver à la place.`,
       };
     }
 

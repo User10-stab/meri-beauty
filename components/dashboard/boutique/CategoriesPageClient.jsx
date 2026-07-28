@@ -150,7 +150,13 @@ export function CategoriesPageClient({ initialCategories }) {
                               <button
                                 type="button"
                                 onClick={() => setToDelete({ type: "subcategory", id: sub.id, name: sub.name })}
-                                className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                                disabled={sub.productCount > 0}
+                                title={
+                                  sub.productCount > 0
+                                    ? "Déjà utilisée par au moins un produit — ne peut plus être supprimée, même si ce produit a été supprimé depuis. Désactivez-la à la place."
+                                    : undefined
+                                }
+                                className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
                               >
                                 <Trash2 size={13} />
                               </button>

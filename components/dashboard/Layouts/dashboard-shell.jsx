@@ -9,7 +9,7 @@ export function DashboardShell({ user, children }) {
   return (
     <SidebarProvider>
       <OnboardingGuard userRole={user?.role} />
-      <div className="flex min-h-screen">
+      <div className="dashboard-scope flex min-h-screen">
         <Sidebar userRole={user?.role} />
 
         <div className="w-full bg-gray-2 dark:bg-[#020d1a]">

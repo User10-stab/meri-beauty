@@ -234,3 +234,17 @@ export function ShoppingBagIcon(props) {
     </svg>
   );
 }
+
+export function PackageIcon(props) {
+  return (
+    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3.75 8.25l8.25-4.5 8.25 4.5-8.25 4.5-8.25-4.5z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 8.25v7.5l8.25 4.5 8.25-4.5v-7.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75v7.5" />
+    </svg>
+  );
+}

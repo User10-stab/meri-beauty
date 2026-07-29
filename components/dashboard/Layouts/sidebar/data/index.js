@@ -65,6 +65,13 @@ const ALL_NAV_DATA = [
         roles: DASHBOARD_PERMISSIONS.BOUTIQUE, // Admin only
       },
       {
+        title: "Commandes",
+        icon: Icons.PackageIcon,
+        url: "/dashboard/boutique/orders",
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.ORDERS, // Admin + staff — day-to-day counter work
+      },
+      {
         title: "Newsletter",
         icon: Icons.MailIcon,
         url: "/dashboard/newsletter",

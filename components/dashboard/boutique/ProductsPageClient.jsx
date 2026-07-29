@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Plus, AlertTriangle, Package } from "lucide-react";
+import { Search, Plus, Upload, AlertTriangle, Package } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -105,12 +105,23 @@ export function ProductsPageClient({ initialProducts, categories, brands }) {
           </select>
         </div>
 
-        <Link href="/dashboard/boutique/products/new">
-          <Button>
-            <Plus size={16} />
-            Ajouter un produit
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/dashboard/boutique/products/import">
+            <button
+              type="button"
+              className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
+            >
+              <Upload size={16} />
+              Importer depuis Wix
+            </button>
+          </Link>
+          <Link href="/dashboard/boutique/products/new">
+            <Button>
+              <Plus size={16} />
+              Ajouter un produit
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {filtered.length === 0 ? (

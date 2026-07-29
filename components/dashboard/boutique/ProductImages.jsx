@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { X, Loader2, ImagePlus, Star } from "lucide-react";
+import { X, Loader2, ImagePlus, Star, ChevronLeft, ChevronRight } from "lucide-react";
 
 const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
@@ -68,6 +68,14 @@ export function ProductImages({ value = [], onChange }) {
     onChange(value.map((img, i) => ({ ...img, isPrimary: i === index })));
   }
 
+  function move(index, offset) {
+    const target = index + offset;
+    if (target < 0 || target >= value.length) return;
+    const next = [...value];
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  }
+
   return (
     <div>
       <div className="flex flex-wrap gap-3">
@@ -95,6 +103,28 @@ export function ProductImages({ value = [], onChange }) {
             >
               <X size={11} />
             </button>
+            {value.length > 1 && (
+              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/60 to-transparent px-1 pb-1 pt-3 opacity-0 transition-opacity group-hover:opacity-100">
+                <button
+                  type="button"
+                  onClick={() => move(i, -1)}
+                  disabled={i === 0}
+                  aria-label="Déplacer vers la gauche"
+                  className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 text-gray-600 shadow disabled:opacity-30"
+                >
+                  <ChevronLeft size={12} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => move(i, 1)}
+                  disabled={i === value.length - 1}
+                  aria-label="Déplacer vers la droite"
+                  className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 text-gray-600 shadow disabled:opacity-30"
+                >
+                  <ChevronRight size={12} />
+                </button>
+              </div>
+            )}
           </div>
         ))}
 

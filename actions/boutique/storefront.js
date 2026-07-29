@@ -129,7 +129,12 @@ export async function getStorefrontProducts({
   }
 }
 
-/** In-store self-scan: resolve a scanned EAN/UPC barcode straight to a product + variant. */
+/**
+ * In-store self-scan: resolve a scanned EAN/UPC barcode to a product +
+ * variant. Returns enough to render an inline confirm card (name, image,
+ * price, stock) so the scan page can offer "Add to cart" / "Cancel" without
+ * navigating away — the customer may be scanning several items in a row.
+ */
 export async function getStorefrontProductByBarcode(barcode) {
   const cleaned = (barcode ?? "").trim();
   if (!cleaned) return { success: false, message: "Code-barres introuvable." };
@@ -137,12 +142,38 @@ export async function getStorefrontProductByBarcode(barcode) {
   try {
     const variant = await prisma.productVariant.findFirst({
       where: { barcode: cleaned, isDeleted: false, isActive: true, product: activeProductWhere },
-      select: { id: true, product: { select: { slug: true } } },
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        comparePrice: true,
+        stockQuantity: true,
+        reservedQuantity: true,
+        product: {
+          select: {
+            slug: true,
+            name: true,
+            images: { where: { isPrimary: true }, take: 1, select: { path: true } },
+          },
+        },
+      },
     });
 
     if (!variant) return { success: false, message: "Aucun produit ne correspond à ce code-barres." };
 
-    return { success: true, data: { slug: variant.product.slug, variantId: variant.id } };
+    return {
+      success: true,
+      data: {
+        slug: variant.product.slug,
+        variantId: variant.id,
+        productName: variant.product.name,
+        variantName: variant.name,
+        image: variant.product.images[0]?.path ?? null,
+        price: Number(variant.price),
+        comparePrice: variant.comparePrice != null ? Number(variant.comparePrice) : null,
+        availableQuantity: Math.max(variant.stockQuantity - variant.reservedQuantity, 0),
+      },
+    };
   } catch (error) {
     console.error("[getStorefrontProductByBarcode]", error);
     return { success: false, message: "Impossible de rechercher ce produit." };

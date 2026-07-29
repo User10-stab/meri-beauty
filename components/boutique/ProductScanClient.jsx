@@ -1,26 +1,31 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CameraOff } from "lucide-react";
+import { CameraOff, ShoppingBag, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { getStorefrontProductByBarcode } from "@/actions/boutique/storefront";
+import { addToCart } from "@/actions/boutique/cart";
 
 /**
  * In-store self-scan: point the camera at a product's barcode (EAN/UPC on
- * the packaging) to jump straight to its page. A miss (wrong item, wrapper,
- * random code) just shows a toast and keeps scanning — it doesn't stop the
- * camera, since the customer will likely just try again immediately.
+ * the packaging). A hit pauses decoding and shows an inline confirm card
+ * (name, image, price) with "Add to cart" / "Cancel" — it never navigates
+ * away, since the customer is typically scanning several items in a row and
+ * may want to retry a misread as many times as needed. The camera itself is
+ * never stopped between scans, only the decode results are ignored while a
+ * card is showing (foundRef), so resuming is instant.
  */
 export function ProductScanClient() {
-  const router = useRouter();
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
   const busyRef = useRef(false);
+  const foundRef = useRef(false);
   const lastCodeRef = useRef(null);
   const [error, setError] = useState(null);
+  const [found, setFound] = useState(null);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +37,7 @@ export function ProductScanClient() {
         videoRef.current,
         async (result, err, controls) => {
           controlsRef.current = controls;
-          if (cancelled || !result || busyRef.current) return;
+          if (cancelled || !result || busyRef.current || foundRef.current) return;
 
           const code = result.getText().trim();
           if (code === lastCodeRef.current) return; // avoid re-firing on the same held-up barcode
@@ -53,8 +58,8 @@ export function ProductScanClient() {
             return;
           }
 
-          controls.stop();
-          router.push(`/boutique/${lookup.data.slug}?variant=${lookup.data.variantId}`);
+          foundRef.current = true;
+          setFound(lookup.data);
         }
       )
       .catch((err) => {
@@ -68,7 +73,28 @@ export function ProductScanClient() {
       controlsRef.current?.stop();
       controlsRef.current = null;
     };
-  }, [router]);
+  }, []);
+
+  function resumeScanning() {
+    foundRef.current = false;
+    lastCodeRef.current = null;
+    setFound(null);
+  }
+
+  async function handleAddToCart() {
+    if (!found) return;
+    setAdding(true);
+    const result = await addToCart({ variantId: found.variantId, quantity: 1 });
+    setAdding(false);
+
+    if (!result.success) {
+      toast.error(result.message);
+      return;
+    }
+    toast.success("Ajouté au panier.");
+    window.dispatchEvent(new Event("boutique:cart-updated")); // updates the header badge (client-fetched)
+    resumeScanning();
+  }
 
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center px-6 py-16 text-center">
@@ -84,8 +110,61 @@ export function ProductScanClient() {
           <p className="text-sm text-gray-500">{error}</p>
         </div>
       ) : (
-        <div className="w-full overflow-hidden bg-black">
+        <div className="relative w-full overflow-hidden bg-black">
           <video ref={videoRef} className="aspect-square w-full object-cover" muted playsInline />
+
+          {found && (
+            <div className="absolute inset-0 flex flex-col justify-end bg-black/60 p-4">
+              <div className="w-full bg-white p-4 text-left shadow-xl">
+                <div className="flex items-center gap-3">
+                  <div className="h-16 w-16 flex-shrink-0 overflow-hidden bg-neutral-50">
+                    {found.image ? (
+                      <img src={found.image} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[10px] uppercase text-gray-300">
+                        Meri Beauty
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-[#2F3A2E]">{found.productName}</p>
+                    {found.variantName && found.variantName !== "Standard" && (
+                      <p className="truncate text-xs text-gray-400">{found.variantName}</p>
+                    )}
+                    <div className="mt-0.5 flex items-baseline gap-2">
+                      <span className="text-sm font-semibold text-[#2F3A2E]">€{found.price.toFixed(2)}</span>
+                      {found.comparePrice != null && (
+                        <span className="text-xs text-gray-400 line-through">€{found.comparePrice.toFixed(2)}</span>
+                      )}
+                    </div>
+                    {found.availableQuantity === 0 && (
+                      <p className="mt-0.5 text-xs text-red-500">Rupture de stock</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={resumeScanning}
+                    className="flex flex-1 items-center justify-center gap-1.5 border border-neutral-200 px-4 py-2.5 text-sm font-medium text-[#2F3A2E] transition-colors hover:bg-neutral-50"
+                  >
+                    <X size={14} />
+                    Annuler
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAddToCart}
+                    disabled={adding || found.availableQuantity === 0}
+                    className="flex flex-1 items-center justify-center gap-1.5 bg-[#C8A46A] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#B8945A] disabled:cursor-not-allowed disabled:bg-gray-300"
+                  >
+                    <ShoppingBag size={14} />
+                    {adding ? "Ajout…" : "Ajouter au panier"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

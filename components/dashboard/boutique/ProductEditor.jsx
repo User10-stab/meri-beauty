@@ -4,11 +4,21 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, RefreshCw, Tag } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ProductImages } from "@/components/dashboard/boutique/ProductImages";
+import { BarcodeLabelDialog } from "@/components/dashboard/boutique/BarcodeLabelDialog";
 import { createProduct, updateProduct, deleteProduct } from "@/actions/boutique/products";
+
+/** Not a real EAN/UPC — a locally-unique fallback so a product with no
+ * supplier barcode can still get a printable label and be found by
+ * /boutique/scan. The DB's unique constraint is the actual safety net. */
+function generateInternalBarcode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(5));
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  return `IN${hex}`;
+}
 
 const STATUS_OPTIONS = [
   { value: "DRAFT", label: "Brouillon", hint: "Non visible sur la boutique" },
@@ -75,6 +85,7 @@ export function ProductEditor({ product, categories, brands }) {
   );
   const [errors, setErrors] = useState({});
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [labelVariant, setLabelVariant] = useState(null);
   const [isPending, startTransition] = useTransition();
 
   const subcategories = useMemo(
@@ -235,6 +246,7 @@ export function ProductEditor({ product, categories, brands }) {
                   canRemove={variants.length > 1}
                   onChange={(patch) => updateVariant(v._key, patch)}
                   onRemove={() => removeVariant(v._key)}
+                  onShowLabel={() => setLabelVariant(v)}
                 />
               ))}
             </div>
@@ -329,6 +341,8 @@ export function ProductEditor({ product, categories, brands }) {
         onConfirm={handleDelete}
         onCancel={() => setConfirmDelete(false)}
       />
+
+      <BarcodeLabelDialog variant={labelVariant} productName={name} onClose={() => setLabelVariant(null)} />
     </form>
   );
 }
@@ -348,7 +362,7 @@ function Section({ title, action, children }) {
 /** One variant's fields. Stock quantity is only editable for a brand-new
  * variant — an existing one can only change stock through a movement
  * (Stock page), so the ledger always reconciles. */
-function VariantRow({ variant, canRemove, onChange, onRemove }) {
+function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
   const isExisting = !!variant.id;
   const price = Number(variant.price) || 0;
   const cost = Number(variant.costPrice) || 0;
@@ -395,13 +409,36 @@ function VariantRow({ variant, canRemove, onChange, onRemove }) {
             className={inputClass}
           />
         </Field>
-        <Field label="Code-barres">
-          <input
-            type="text"
-            value={variant.barcode ?? ""}
-            onChange={(e) => onChange({ barcode: e.target.value })}
-            className={inputClass}
-          />
+        <Field label="Code-barres" hint="Code fournisseur (EAN/UPC) ou un code interne généré">
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={variant.barcode ?? ""}
+              onChange={(e) => onChange({ barcode: e.target.value })}
+              className={`${inputClass} flex-1`}
+            />
+            <button
+              type="button"
+              title="Générer un code interne"
+              onClick={() => {
+                if (variant.barcode && !window.confirm("Remplacer le code-barres actuel par un nouveau code interne ?")) return;
+                onChange({ barcode: generateInternalBarcode() });
+              }}
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+            >
+              <RefreshCw size={14} />
+            </button>
+            {variant.barcode && (
+              <button
+                type="button"
+                title="Étiquette à imprimer"
+                onClick={onShowLabel}
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+              >
+                <Tag size={14} />
+              </button>
+            )}
+          </div>
         </Field>
 
         {isExisting ? (

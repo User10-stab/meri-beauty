@@ -195,6 +195,7 @@ model Activity {
   animator              Animator?      @relation(fields: [animatorId], references: [id])
   status                WorkshopStatus @default(DRAFT)
   allowMultipleSessions Boolean        @default(false)
+  depositPercentage     Int            @default(30)
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
 

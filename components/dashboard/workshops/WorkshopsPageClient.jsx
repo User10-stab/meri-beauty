@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
+import { Plus, Filter } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable } from "../Tables/DataTable";
 import { ActivityRow } from "./ActivityRow";
@@ -43,6 +43,17 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
   const [showAnimatorModal, setShowAnimatorModal] = useState(false);
 
   const [isDeleting, startDelete] = useTransition();
+
+  const [filterType, setFilterType] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+
+  const filteredActivities = useMemo(() => {
+    return initialActivities.filter((a) => {
+      if (filterType && a.type !== filterType) return false;
+      if (filterStatus && a.status !== filterStatus) return false;
+      return true;
+    });
+  }, [initialActivities, filterType, filterStatus]);
 
   const isAdminOrOwner = userRole === "ADMIN" || userRole === "OWNER";
 
@@ -105,7 +116,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
             active={activeTab === "activities"}
             onClick={() => setActiveTab("activities")}
             label="Activités"
-            count={initialActivities.length}
+            count={filteredActivities.length}
           />
           <TabButton
             active={activeTab === "animators"}
@@ -140,11 +151,38 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
         )}
       </div>
 
+      {/* Filters */}
+      {activeTab === "activities" && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Filter size={15} className="text-gray-400" />
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+          >
+            <option value="">Tous les types</option>
+            <option value="WORKSHOP">Atelier (Workshop)</option>
+            <option value="EVENT">Événement</option>
+          </select>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+          >
+            <option value="">Tous les statuts</option>
+            <option value="DRAFT">Brouillon</option>
+            <option value="PUBLISHED">Publié</option>
+            <option value="CANCELLED">Annulé</option>
+            <option value="ARCHIVED">Archivé</option>
+          </select>
+        </div>
+      )}
+
       {/* Main Table Views */}
       {activeTab === "activities" ? (
         <>
           <DataTable
-            data={initialActivities}
+            data={filteredActivities}
             columns={ACTIVITIES_COLUMNS}
             renderRow={ActivityRow}
             onView={handleEditActivity}

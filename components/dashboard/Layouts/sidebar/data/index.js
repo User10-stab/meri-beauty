@@ -43,7 +43,7 @@ const ALL_NAV_DATA = [
         items: [],
       },
       {
-        title: "Activités",
+        title: "Workshops & Événements",
         icon: Icons.Calendar,
         url: "/dashboard/workshops",
         items: [],
@@ -83,7 +83,7 @@ const ALL_NAV_DATA = [
       },
     ],
   },
- 
+
 ];
 
 /**

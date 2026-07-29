@@ -7,6 +7,15 @@ import { auth } from "@/auth";
 import { isAdminRole } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 
+const sessionSchema = z.object({
+  id: z.string().optional(),
+  startDate: z.string().min(1, "La date de début est obligatoire."),
+  endDate: z.string().optional().nullable(),
+  capacity: z.coerce.number().int().positive("La capacité doit être d'au moins 1."),
+  animatorId: z.string().optional().nullable(),
+  registrationDeadline: z.string().optional().nullable(),
+});
+
 const activitySchema = z.object({
   type: z.enum(["WORKSHOP", "EVENT"], { required_error: "Le type d'activité est obligatoire." }),
   title: z.string().trim().min(2, "Le titre doit contenir au moins 2 caractères.").max(100, "Le titre ne peut pas dépasser 100 caractères."),
@@ -19,6 +28,10 @@ const activitySchema = z.object({
   animatorId: z.string().optional().nullable(),
   status: z.enum(["DRAFT", "PUBLISHED", "CANCELLED", "ARCHIVED"]).optional().default("DRAFT"),
   allowMultipleSessions: z.boolean().optional().default(false),
+  depositPercentage: z.coerce.number().int().min(0).max(100).optional().default(30),
+  startDate: z.string().optional().nullable(),
+  endDate: z.string().optional().nullable(),
+  sessions: z.array(sessionSchema).optional().default([]),
 });
 
 const updateActivitySchema = activitySchema.extend({
@@ -48,9 +61,8 @@ export async function createActivity(input) {
       };
     }
 
-    const { animatorId, ...rest } = parsed.data;
+    const { animatorId, sessions, startDate, endDate, ...rest } = parsed.data;
 
-    // Vérifier si l'animateur existe si fourni
     if (animatorId) {
       const animatorExists = await prisma.animator.findUnique({ where: { id: animatorId } });
       if (!animatorExists) {
@@ -58,11 +70,37 @@ export async function createActivity(input) {
       }
     }
 
+    if (sessions.length > 0) {
+      for (const s of sessions) {
+        if (s.animatorId) {
+          const animExists = await prisma.animator.findUnique({ where: { id: s.animatorId } });
+          if (!animExists) {
+            return { success: false, message: `L'animateur de la session est introuvable.` };
+          }
+        }
+      }
+    }
+
     const activity = await prisma.activity.create({
       data: {
         ...rest,
         animatorId: animatorId || null,
+        sessions:
+          sessions.length > 0
+            ? {
+                create: sessions.map((s) => ({
+                  startDate: new Date(s.startDate),
+                  endDate: s.endDate ? new Date(s.endDate) : null,
+                  capacity: s.capacity,
+                  animatorId: s.animatorId || null,
+                  registrationDeadline: s.registrationDeadline
+                    ? new Date(s.registrationDeadline)
+                    : null,
+                })),
+              }
+            : undefined,
       },
+      include: { sessions: true },
     });
 
     revalidatePath("/dashboard/workshops");
@@ -100,15 +138,16 @@ export async function updateActivity(input) {
       };
     }
 
-    const { id, animatorId, ...rest } = parsed.data;
+    const { id, animatorId, sessions, startDate, endDate, ...rest } = parsed.data;
 
-    // Vérifier si l'activité existe
-    const existingActivity = await prisma.activity.findUnique({ where: { id } });
+    const existingActivity = await prisma.activity.findUnique({
+      where: { id },
+      include: { sessions: true },
+    });
     if (!existingActivity) {
       return { success: false, message: "Activité introuvable." };
     }
 
-    // Vérifier l'animateur si fourni
     if (animatorId) {
       const animatorExists = await prisma.animator.findUnique({ where: { id: animatorId } });
       if (!animatorExists) {
@@ -116,13 +155,52 @@ export async function updateActivity(input) {
       }
     }
 
+    const existingIds = existingActivity.sessions.map((s) => s.id);
+    const incomingIds = sessions.filter((s) => s.id).map((s) => s.id);
+    const idsToDelete = existingIds.filter((eid) => !incomingIds.includes(eid));
+
+    if (idsToDelete.length > 0) {
+      await prisma.workshopSession.deleteMany({ where: { id: { in: idsToDelete } } });
+    }
+
     const updated = await prisma.activity.update({
       where: { id },
       data: {
         ...rest,
         animatorId: animatorId || null,
+        sessions: {
+          create: sessions
+            .filter((s) => !s.id)
+            .map((s) => ({
+              startDate: new Date(s.startDate),
+              endDate: s.endDate ? new Date(s.endDate) : null,
+              capacity: s.capacity,
+              animatorId: s.animatorId || null,
+              registrationDeadline: s.registrationDeadline
+                ? new Date(s.registrationDeadline)
+                : null,
+            })),
+        },
       },
+      include: { sessions: true },
     });
+
+    for (const s of sessions) {
+      if (s.id && incomingIds.includes(s.id)) {
+        await prisma.workshopSession.update({
+          where: { id: s.id },
+          data: {
+            startDate: new Date(s.startDate),
+            endDate: s.endDate ? new Date(s.endDate) : null,
+            capacity: s.capacity,
+            animatorId: s.animatorId || null,
+            registrationDeadline: s.registrationDeadline
+              ? new Date(s.registrationDeadline)
+              : null,
+          },
+        });
+      }
+    }
 
     revalidatePath("/dashboard/workshops");
     return {

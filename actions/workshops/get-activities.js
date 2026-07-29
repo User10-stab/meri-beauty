@@ -25,6 +25,7 @@ export async function getActivities() {
       orderBy: { createdAt: "desc" },
       include: {
         animator: true,
+        sessions: true,
       },
     });
 

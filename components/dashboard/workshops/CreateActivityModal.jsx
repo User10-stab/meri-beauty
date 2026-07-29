@@ -135,13 +135,30 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
     language: "Français",
     animatorId: "",
     status: "DRAFT",
+    startDate: "",
+    endDate: "",
     allowMultipleSessions: false,
+    depositPercentage: 30,
   });
+  const [sessions, setSessions] = useState([]);
   const [errors, setErrors] = useState({});
+
+  function addSession(session = { startDate: "", endDate: "", capacity: "", animatorId: "", registrationDeadline: "" }) {
+    setSessions((prev) => [...prev, session]);
+  }
+
+  function removeSession(index) {
+    setSessions((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function updateSession(index, field, value) {
+    setSessions((prev) => prev.map((s, i) => (i === index ? { ...s, [field]: value } : s)));
+  }
 
   useEffect(() => {
     if (!open) return;
     if (activity) {
+      const firstSession = activity.sessions?.[0];
       setForm({
         type: activity.type ?? "WORKSHOP",
         title: activity.title ?? "",
@@ -153,8 +170,27 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
         language: activity.language ?? "Français",
         animatorId: activity.animatorId ?? "",
         status: activity.status ?? "DRAFT",
+        startDate: firstSession?.startDate ? new Date(firstSession.startDate).toISOString().slice(0, 16) : "",
+        endDate: firstSession?.endDate ? new Date(firstSession.endDate).toISOString().slice(0, 16) : "",
         allowMultipleSessions: activity.allowMultipleSessions ?? false,
+        depositPercentage: activity.depositPercentage ?? 30,
       });
+      if (activity.allowMultipleSessions && activity.sessions?.length > 0) {
+        setSessions(
+          activity.sessions.map((s) => ({
+            id: s.id,
+            startDate: s.startDate ? new Date(s.startDate).toISOString().slice(0, 16) : "",
+            endDate: s.endDate ? new Date(s.endDate).toISOString().slice(0, 16) : "",
+            capacity: String(s.capacity ?? ""),
+            animatorId: s.animatorId ?? "",
+            registrationDeadline: s.registrationDeadline
+              ? new Date(s.registrationDeadline).toISOString().slice(0, 16)
+              : "",
+          }))
+        );
+      } else {
+        setSessions([]);
+      }
     } else {
       setForm({
         type: "WORKSHOP",
@@ -167,8 +203,12 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
         language: "Français",
         animatorId: "",
         status: "DRAFT",
+        startDate: "",
+        endDate: "",
         allowMultipleSessions: false,
+        depositPercentage: 30,
       });
+      setSessions([]);
     }
     setErrors({});
   }, [open, activity]);
@@ -185,6 +225,28 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
         price: form.price === "" ? 0 : parseFloat(form.price),
         duration: form.duration === "" ? 0 : parseInt(form.duration, 10),
         capacity: form.capacity === "" ? 0 : parseInt(form.capacity, 10),
+        startDate: form.startDate,
+        endDate: form.endDate,
+        sessions: form.allowMultipleSessions
+          ? sessions.map((s) => ({
+              ...(s.id ? { id: s.id } : {}),
+              startDate: s.startDate,
+              endDate: s.endDate || null,
+              capacity: s.capacity === "" ? parseInt(form.capacity, 10) || 0 : parseInt(s.capacity, 10),
+              animatorId: s.animatorId || null,
+              registrationDeadline: s.registrationDeadline || null,
+            }))
+          : form.startDate
+            ? [
+                {
+                  startDate: form.startDate,
+                  endDate: form.endDate || null,
+                  capacity: parseInt(form.capacity, 10) || 0,
+                  animatorId: null,
+                  registrationDeadline: null,
+                },
+              ]
+            : [],
       };
 
       const result = isEditing
@@ -344,7 +406,24 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
             </ModalField>
           </div>
 
+          {/* Deposit Percentage */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <ModalField label="Acompte (%)">
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={form.depositPercentage}
+                  onChange={(e) => setForm((prev) => ({ ...prev, depositPercentage: parseInt(e.target.value, 10) || 0 }))}
+                  className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                  placeholder="30"
+                />
+              </div>
+              <p className="mt-1 text-xs text-gray-400">Pourcentage du prix total demandé à la réservation.</p>
+              <FieldError message={errors.depositPercentage} />
+            </ModalField>
+
             {/* Language */}
             <ModalField label="Langue">
               <div className="relative">
@@ -407,6 +486,129 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
                 <span className="text-sm font-medium text-gray-700">Autoriser plusieurs sessions</span>
               </label>
             </div>
+          </div>
+
+          {/* Date / Sessions */}
+          <div className="pt-2 border-t border-gray-100 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-700">
+                {form.allowMultipleSessions ? `Sessions (${sessions.length})` : "Date de l'activité"}
+              </h3>
+              {form.allowMultipleSessions && (
+                <button
+                  type="button"
+                  onClick={() => addSession()}
+                  className="text-xs font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
+                >
+                  + Ajouter une session
+                </button>
+              )}
+            </div>
+
+            {form.allowMultipleSessions ? (
+              <>
+                {sessions.length === 0 && (
+                  <p className="text-xs text-gray-400 italic">
+                    Aucune session définie. Cliquez sur &quot;+ Ajouter une session&quot; pour ajouter des créneaux.
+                  </p>
+                )}
+
+                {sessions.map((session, index) => (
+                  <div
+                    key={index}
+                    className="rounded-lg border border-gray-200 p-3 space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                        Session #{index + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeSession(index)}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <ModalField label="Date de début" required>
+                        <input
+                          type="datetime-local"
+                          required
+                          value={session.startDate}
+                          onChange={(e) => updateSession(index, "startDate", e.target.value)}
+                          className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                        />
+                      </ModalField>
+                      <ModalField label="Date de fin">
+                        <input
+                          type="datetime-local"
+                          value={session.endDate}
+                          onChange={(e) => updateSession(index, "endDate", e.target.value)}
+                          className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                        />
+                      </ModalField>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <ModalField label="Capacité">
+                        <input
+                          type="number"
+                          value={session.capacity}
+                          onChange={(e) => updateSession(index, "capacity", e.target.value)}
+                          placeholder={`${form.capacity || "10"} (défaut)`}
+                          className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                        />
+                      </ModalField>
+                      <ModalField label="Date limite inscription">
+                        <input
+                          type="datetime-local"
+                          value={session.registrationDeadline}
+                          onChange={(e) => updateSession(index, "registrationDeadline", e.target.value)}
+                          className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                        />
+                      </ModalField>
+                    </div>
+
+                    <ModalField label="Animateur (spécifique à cette session)">
+                      <select
+                        value={session.animatorId}
+                        onChange={(e) => updateSession(index, "animatorId", e.target.value)}
+                        className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                      >
+                        <option value="">-- Animateur par défaut --</option>
+                        {animators.map((animator) => (
+                          <option key={animator.id} value={animator.id}>
+                            {animator.name}
+                          </option>
+                        ))}
+                      </select>
+                    </ModalField>
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <ModalField label="Date de début" required>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={form.startDate}
+                    onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))}
+                    className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </ModalField>
+                <ModalField label="Date de fin">
+                  <input
+                    type="datetime-local"
+                    value={form.endDate}
+                    onChange={(e) => setForm((prev) => ({ ...prev, endDate: e.target.value }))}
+                    className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                  />
+                </ModalField>
+              </div>
+            )}
           </div>
 
           {/* Footer */}

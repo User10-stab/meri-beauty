@@ -42,6 +42,19 @@ const STATUS_STYLE = {
 
 const CANCELLABLE = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP"];
 
+const RETURN_STATUS_LABEL = {
+  REQUESTED: "Demandée",
+  APPROVED: "Approuvée",
+  REJECTED: "Refusée",
+  COMPLETED: "Terminée",
+};
+const RETURN_STATUS_STYLE = {
+  REQUESTED: "bg-amber-50 text-amber-700 border-amber-100",
+  APPROVED: "bg-blue-50 text-blue-700 border-blue-100",
+  REJECTED: "bg-red-50 text-red-600 border-red-100",
+  COMPLETED: "bg-gray-100 text-gray-500 border-gray-200",
+};
+
 function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
 }
@@ -246,6 +259,24 @@ export function OrderDetailClient({ order }) {
                   <FileMinus size={14} />
                 </a>
               ))}
+            </div>
+          )}
+
+          {/* Returns */}
+          {order.returnRequests?.length > 0 && (
+            <div className="space-y-2 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+              <h2 className="mb-1 font-semibold text-gray-800 dark:text-white">Retours</h2>
+              {order.returnRequests.map((rr) => (
+                <div key={rr.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-3">
+                  <span className="text-gray-700 dark:text-dark-6">{rr.itemCount} article(s)</span>
+                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${RETURN_STATUS_STYLE[rr.status]}`}>
+                    {RETURN_STATUS_LABEL[rr.status]}
+                  </span>
+                </div>
+              ))}
+              <Link href="/dashboard/boutique/returns" className="mt-1 inline-block text-xs font-medium text-[#2f3a2e] hover:underline">
+                Gérer les retours →
+              </Link>
             </div>
           )}
 

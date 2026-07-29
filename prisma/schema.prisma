@@ -53,6 +53,13 @@ enum InvoiceSource {
   APPOINTMENT
 }
 
+enum ReturnStatus {
+  REQUESTED // customer submitted it, awaiting staff review
+  APPROVED // staff accepted it — waiting for the item to actually come back
+  REJECTED
+  COMPLETED // item received, stock restored, refund/credit note issued
+}
+
 enum TransactionMethod {
   CASH
   CARD
@@ -278,6 +285,7 @@ model User {
   carts                Cart[]
   orders               Order[]               @relation("OrderBuyer")
   pickedUpOrders       Order[]               @relation("OrderPickedUpBy")
+  processedReturns     ReturnRequest[]       @relation("ReturnProcessedBy")
 }
 
 // CATEGORY — services only. Retail products use ProductCategory.
@@ -573,6 +581,7 @@ model Order {
 
   items   OrderItem[]
   payment Payment?
+  returnRequests ReturnRequest[]
 
   @@index([userId])
   @@index([status])
@@ -600,8 +609,58 @@ model OrderItem {
 
   createdAt DateTime @default(now())
 
+  returnRequestItems ReturnRequestItem[]
+
   @@index([orderId])
   @@index([variantId])
+}
+
+// RETURN REQUEST
+// Belgian/EU 14-day withdrawal right. Customer-initiated (order lookup by
+// number + email, no account/login required — see actions/boutique/returns.js)
+// for any COMPLETED order still inside its withdrawal window. Supports
+// partial returns: one order can have several ReturnRequests over time as
+// long as the returned quantity per item never exceeds what was bought.
+model ReturnRequest {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  status ReturnStatus @default(REQUESTED)
+  reason String
+
+  requestedAt DateTime @default(now())
+
+  processedAt         DateTime?
+  processedByStaffId  String?
+  processedByStaff    User?     @relation("ReturnProcessedBy", fields: [processedByStaffId], references: [id])
+  staffNote           String?
+
+  // Set only once COMPLETED with a refund — the credit note that
+  // documents the money actually credited back for this return.
+  creditNoteId String?     @unique
+  creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id])
+
+  items ReturnRequestItem[]
+
+  @@index([orderId])
+  @@index([status])
+}
+
+// RETURN REQUEST ITEM
+model ReturnRequestItem {
+  id String @id @default(cuid())
+
+  returnRequestId String
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+
+  quantity Int
+
+  @@index([returnRequestId])
+  @@index([orderItemId])
 }
 
 // SERVICE
@@ -807,6 +866,8 @@ model CreditNote {
   reason       String?
   issuedAt     DateTime @default(now())
   totalInclVat Decimal  @db.Decimal(10, 2)
+
+  returnRequest ReturnRequest?
 
   @@index([invoiceId])
 }

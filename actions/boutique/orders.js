@@ -157,6 +157,12 @@ function serializeOrder(order) {
       issuedAt: cn.issuedAt,
       totalInclVat: Number(cn.totalInclVat),
     })),
+    returnRequests: (order.returnRequests ?? []).map((rr) => ({
+      id: rr.id,
+      status: rr.status,
+      requestedAt: rr.requestedAt,
+      itemCount: (rr.items ?? []).reduce((sum, i) => sum + i.quantity, 0),
+    })),
     items: (order.items ?? []).map((item) => ({
       id: item.id,
       productName: item.productName,
@@ -580,6 +586,7 @@ export async function getOrderById(orderId) {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
         payment: { include: { invoice: { include: { creditNotes: true } } } },
         items: true,
+        returnRequests: { include: { items: true }, orderBy: { requestedAt: "desc" } },
       },
     });
     if (!order) return { success: false, message: "Commande introuvable." };

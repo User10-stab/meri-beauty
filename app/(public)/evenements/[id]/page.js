@@ -88,10 +88,24 @@ export default async function EvenementDetailPage({ params }) {
     notFound();
   }
 
+  const depositPct = activity.depositPercentage ?? 30;
+  const depositAmount = (activity.price * depositPct) / 100;
+  const balanceAmount = activity.price - depositAmount;
+
   const priceFormatted = new Intl.NumberFormat("fr-FR", {
     style: "currency",
     currency: "EUR",
   }).format(activity.price);
+
+  const depositFormatted = new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+  }).format(depositAmount);
+
+  const balanceFormatted = new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+  }).format(balanceAmount);
 
   const isWorkshop = activity.type === "WORKSHOP";
 
@@ -126,8 +140,8 @@ export default async function EvenementDetailPage({ params }) {
             <span className="h-px w-8 bg-gold" />
             <span
               className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wide ${isWorkshop
-                  ? "bg-amber-100 text-amber-900"
-                  : "bg-sky-100 text-sky-900"
+                ? "bg-amber-100 text-amber-900"
+                : "bg-sky-100 text-sky-900"
                 }`}
             >
               {isWorkshop ? "Atelier" : "Événement"}
@@ -205,12 +219,24 @@ export default async function EvenementDetailPage({ params }) {
                             )}
                           </div>
 
-                          <Link
-                            href={`/reservation?activity=${activity.id}&session=${session.id}`}
-                            className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gold px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gold/90 hover:shadow-md"
-                          >
-                            Réserver
-                          </Link>
+                          <div className="flex flex-col items-end gap-2">
+                            {depositPct > 0 && activity.price > 0 && (
+                              <p className="text-right text-xs leading-snug text-ink/50">
+                                Vous ne réglez aujourd&apos;hui que{" "}
+                                <strong className="text-gold">{depositFormatted}</strong>.
+                                <br />
+                                Le solde de{" "}
+                                <strong className="text-ink/70">{balanceFormatted}</strong>{" "}
+                                sera à payer sur place.
+                              </p>
+                            )}
+                            <Link
+                              href={`/reservation-atelier?activity=${activity.id}&session=${session.id}`}
+                              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gold px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gold/90 hover:shadow-md"
+                            >
+                              Réserver
+                            </Link>
+                          </div>
                         </div>
 
                         {session.registrationDeadline && (
@@ -238,11 +264,13 @@ export default async function EvenementDetailPage({ params }) {
                   Informations
                 </h3>
                 <ul className="space-y-4">
-                  <li className="flex items-center gap-3">
-                    <EuroIcon />
+                  <li className="flex items-start gap-3">
+                    <EuroIcon className="mt-0.5" />
                     <div>
                       <p className="text-sm font-semibold text-ink">{priceFormatted}</p>
-                      <p className="text-xs text-ink/45">Tarif</p>
+                      <p className="text-xs text-ink/45">
+                        Tarif {depositPct > 0 && `(dont ${depositPct}% d'acompte à la réservation)`}
+                      </p>
                     </div>
                   </li>
                   <li className="flex items-center gap-3">

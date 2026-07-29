@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, ScanLine, Package } from "lucide-react";
+import { Search, ScanLine, Camera, Package } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import Button from "@/components/ui/Button";
+import { PickupScannerDialog } from "@/components/dashboard/boutique/PickupScannerDialog";
 
 const MODE_LABEL = {
   PICKUP_PREPAID: "Retrait (payé)",
@@ -47,6 +48,7 @@ export function OrdersPageClient({ initialOrders }) {
   const [statusFilter, setStatusFilter] = useState("");
   const [modeFilter, setModeFilter] = useState("");
   const [pickupLookup, setPickupLookup] = useState("");
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -61,21 +63,33 @@ export function OrdersPageClient({ initialOrders }) {
     });
   }, [initialOrders, search, statusFilter, modeFilter]);
 
+  const lookupByPickupCode = useCallback(
+    (rawCode) => {
+      const code = rawCode.trim().toUpperCase();
+      if (!code) return;
+      const order = initialOrders.find((o) => o.pickupCode === code);
+      if (!order) {
+        toast.error("Aucune commande ne correspond à ce code.");
+        return;
+      }
+      router.push(`/dashboard/boutique/orders/${order.id}`);
+    },
+    [initialOrders, router]
+  );
+
   function handlePickupLookup(e) {
     e.preventDefault();
-    const code = pickupLookup.trim().toUpperCase();
-    if (!code) return;
-    const order = initialOrders.find((o) => o.pickupCode === code);
-    if (!order) {
-      toast.error("Aucune commande ne correspond à ce code.");
-      return;
-    }
-    router.push(`/dashboard/boutique/orders/${order.id}`);
+    lookupByPickupCode(pickupLookup);
+  }
+
+  function handleScanned(code) {
+    setScannerOpen(false);
+    lookupByPickupCode(code);
   }
 
   return (
     <div className="space-y-4">
-      {/* Pickup code quick-lookup — the counter workflow until camera QR scanning ships */}
+      {/* Pickup code quick-lookup — manual entry or camera scan of the customer's QR */}
       <div className="flex items-center gap-3 rounded-[10px] border border-stroke bg-white p-4 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <ScanLine size={18} className="flex-shrink-0 text-[#2f3a2e]" />
         <form onSubmit={handlePickupLookup} className="flex flex-1 items-center gap-2">
@@ -87,8 +101,14 @@ export function OrdersPageClient({ initialOrders }) {
             className="h-9 flex-1 rounded-lg border border-gray-200 px-3 text-sm uppercase tracking-wide text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           />
           <Button type="submit">Vérifier</Button>
+          <Button type="button" onClick={() => setScannerOpen(true)}>
+            <Camera size={14} />
+            Scanner
+          </Button>
         </form>
       </div>
+
+      <PickupScannerDialog open={scannerOpen} onClose={() => setScannerOpen(false)} onDecoded={handleScanned} />
 
       <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center">

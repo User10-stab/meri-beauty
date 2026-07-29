@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { stripe } from "@/lib/stripe";
+import { prisma } from "@/lib/prisma";
+import { pickupQrDataUrl } from "@/lib/qrcode";
 
 export const metadata = {
   // Deliberately neutral — this page also renders the "payment pending" and
@@ -16,27 +18,24 @@ export default async function OrderSuccessPage({ searchParams }) {
   const { session_id: sessionId, onsite, number, code } = await searchParams;
 
   if (onsite === "1") {
+    const qr = code ? await pickupQrDataUrl(code) : null;
     return (
       <Outcome
         title="Commande confirmée"
         message={
           <>
             Merci ! Votre commande n°{number} est confirmée.
-            {code && (
-              <>
-                {" "}
-                Présentez ce code en boutique pour la retirer et régler le paiement sur place :{" "}
-                <span className="font-semibold text-[#2F3A2E]">{code}</span>.
-              </>
-            )}
+            {code && " Présentez ce code (ou son QR) en boutique pour la retirer et régler le paiement sur place :"}
           </>
         }
+        pickup={code ? { code, qr } : null}
       />
     );
   }
 
   let state = "invalid"; // invalid | paid | unpaid
   let details = null;
+  let pickup = null;
 
   if (sessionId) {
     try {
@@ -47,6 +46,17 @@ export default async function OrderSuccessPage({ searchParams }) {
           email: session.customer_email || null,
           amount: session.amount_total != null ? (session.amount_total / 100).toFixed(2) : null,
         };
+
+        const orderId = session.metadata?.orderId;
+        if (orderId) {
+          const order = await prisma.order.findUnique({
+            where: { id: orderId },
+            select: { pickupCode: true, fulfilmentMode: true },
+          });
+          if (order?.pickupCode && order.fulfilmentMode !== "SHIPPING_PREPAID") {
+            pickup = { code: order.pickupCode, qr: await pickupQrDataUrl(order.pickupCode) };
+          }
+        }
       } else {
         state = "unpaid";
       }
@@ -70,8 +80,10 @@ export default async function OrderSuccessPage({ searchParams }) {
               </>
             )}
             .
+            {pickup && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
           </>
         }
+        pickup={pickup}
       />
     );
   }
@@ -93,7 +105,7 @@ export default async function OrderSuccessPage({ searchParams }) {
   );
 }
 
-function Outcome({ title, message }) {
+function Outcome({ title, message, pickup }) {
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-4 py-24">
       <div className="w-full max-w-xl text-center">
@@ -104,7 +116,17 @@ function Outcome({ title, message }) {
         </div>
 
         <h1 className="mb-4 text-3xl text-[#2F3A2E] sm:text-4xl">{title}</h1>
-        <p className="mb-10 text-neutral-600">{message}</p>
+        <p className="mb-6 text-neutral-600">{message}</p>
+
+        {pickup && (
+          <div className="mx-auto mb-10 flex w-fit flex-col items-center gap-3 border border-neutral-200 bg-white px-8 py-6">
+            {pickup.qr && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={pickup.qr} alt="QR code de retrait" width={160} height={160} className="h-40 w-40" />
+            )}
+            <span className="text-xl font-semibold tracking-wide text-[#2F3A2E]">{pickup.code}</span>
+          </div>
+        )}
 
         <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Link

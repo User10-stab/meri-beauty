@@ -16,10 +16,11 @@ import {
  * Product category / subcategory management.
  *
  * Separate from Category/Service — that model is service-only. Retail
- * products classify under ProductCategory → ProductSubcategory instead.
- *
- * The "max 4 subcategories per brand" rule from the brief is a UI/display
- * constraint, not a data rule, and is intentionally not enforced here.
+ * products classify under Brand → ProductCategory → ProductSubcategory
+ * instead (client decision, 29 Jul 2026 — a category belongs to exactly one
+ * brand; the same category name can recur under different brands as
+ * separate rows, since brandId+slug is what's actually unique, not slug
+ * alone).
  */
 
 async function requireAdmin() {
@@ -29,12 +30,12 @@ async function requireAdmin() {
   return { session };
 }
 
-async function uniqueCategorySlug(base, excludeId = null) {
+async function uniqueCategorySlug(brandId, base, excludeId = null) {
   let slug = base;
   let n = 1;
-   
+
   while (true) {
-    const clash = await prisma.productCategory.findUnique({ where: { slug }, select: { id: true } });
+    const clash = await prisma.productCategory.findFirst({ where: { brandId, slug }, select: { id: true } });
     if (!clash || clash.id === excludeId) return slug;
     n += 1;
     slug = `${base}-${n}`;
@@ -43,10 +44,13 @@ async function uniqueCategorySlug(base, excludeId = null) {
 
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
-export async function getProductCategories({ includeInactive = false } = {}) {
+/** Categories for one brand — used by the product editor's cascading selects. */
+export async function getProductCategories({ brandId, includeInactive = false } = {}) {
+  if (!brandId) return { success: false, message: "La marque est obligatoire.", data: [] };
+
   try {
     const categories = await prisma.productCategory.findMany({
-      where: includeInactive ? {} : { isActive: true },
+      where: { brandId, ...(includeInactive ? {} : { isActive: true }) },
       orderBy: [{ position: "asc" }, { name: "asc" }],
       include: {
         subcategories: {
@@ -66,6 +70,7 @@ export async function getProductCategories({ includeInactive = false } = {}) {
         description: c.description,
         position: c.position,
         isActive: c.isActive,
+        brandId: c.brandId,
         subcategories: c.subcategories.map((s) => ({
           id: s.id,
           name: s.name,
@@ -82,6 +87,62 @@ export async function getProductCategories({ includeInactive = false } = {}) {
   }
 }
 
+/**
+ * Full tree for the "Catégories" dashboard page: every brand, with its
+ * categories and their subcategories nested underneath — the whole
+ * Brand → Category → Subcategory shape in one read.
+ */
+export async function getCatalogueTree({ includeInactive = false } = {}) {
+  try {
+    const brands = await prisma.brand.findMany({
+      where: { isDeleted: false, ...(includeInactive ? {} : { isActive: true }) },
+      orderBy: { name: "asc" },
+      include: {
+        categories: {
+          where: includeInactive ? {} : { isActive: true },
+          orderBy: [{ position: "asc" }, { name: "asc" }],
+          include: {
+            subcategories: {
+              where: includeInactive ? {} : { isActive: true },
+              orderBy: [{ position: "asc" }, { name: "asc" }],
+              include: { _count: { select: { products: true } } },
+            },
+          },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      data: brands.map((b) => ({
+        id: b.id,
+        name: b.name,
+        slug: b.slug,
+        isActive: b.isActive,
+        categories: b.categories.map((c) => ({
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          description: c.description,
+          position: c.position,
+          isActive: c.isActive,
+          subcategories: c.subcategories.map((s) => ({
+            id: s.id,
+            name: s.name,
+            slug: s.slug,
+            position: s.position,
+            isActive: s.isActive,
+            productCount: s._count.products,
+          })),
+        })),
+      })),
+    };
+  } catch (error) {
+    console.error("[getCatalogueTree]", error);
+    return { success: false, message: "Impossible de charger le catalogue.", data: [] };
+  }
+}
+
 // ─── Category CRUD ──────────────────────────────────────────────────────────────
 
 export async function createProductCategory(input) {
@@ -93,30 +154,36 @@ export async function createProductCategory(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: errors.name?.[0] ?? "Données invalides.",
-      errors: { name: errors.name?.[0] ?? null },
+      message: errors.name?.[0] ?? errors.brandId?.[0] ?? "Données invalides.",
+      errors: { name: errors.name?.[0] ?? null, brandId: errors.brandId?.[0] ?? null },
     };
   }
 
-  const { name, description, position, isActive } = parsed.data;
+  const { name, brandId, description, position, isActive } = parsed.data;
 
   try {
+    const brand = await prisma.brand.findUnique({ where: { id: brandId }, select: { id: true } });
+    if (!brand) {
+      return { success: false, message: "Marque introuvable.", errors: { brandId: "Marque introuvable." } };
+    }
+
     const duplicate = await prisma.productCategory.findFirst({
-      where: { name: { equals: name, mode: "insensitive" } },
+      where: { brandId, name: { equals: name, mode: "insensitive" } },
       select: { id: true },
     });
     if (duplicate) {
       return {
         success: false,
-        message: "Une catégorie portant ce nom existe déjà.",
-        errors: { name: "Ce nom est déjà utilisé." },
+        message: "Cette marque a déjà une catégorie portant ce nom.",
+        errors: { name: "Ce nom est déjà utilisé pour cette marque." },
       };
     }
 
     const category = await prisma.productCategory.create({
       data: {
         name,
-        slug: await uniqueCategorySlug(slugify(name)),
+        brandId,
+        slug: await uniqueCategorySlug(brandId, slugify(name)),
         description: description ?? null,
         position,
         isActive,
@@ -140,34 +207,37 @@ export async function updateProductCategory(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: errors.name?.[0] ?? "Données invalides.",
-      errors: { name: errors.name?.[0] ?? null },
+      message: errors.name?.[0] ?? errors.brandId?.[0] ?? "Données invalides.",
+      errors: { name: errors.name?.[0] ?? null, brandId: errors.brandId?.[0] ?? null },
     };
   }
 
-  const { id, name, description, position, isActive } = parsed.data;
+  const { id, name, brandId, description, position, isActive } = parsed.data;
 
   try {
     const existing = await prisma.productCategory.findUnique({ where: { id } });
     if (!existing) return { success: false, message: "Catégorie introuvable." };
 
     const duplicate = await prisma.productCategory.findFirst({
-      where: { name: { equals: name, mode: "insensitive" }, id: { not: id } },
+      where: { brandId, name: { equals: name, mode: "insensitive" }, id: { not: id } },
       select: { id: true },
     });
     if (duplicate) {
       return {
         success: false,
-        message: "Une catégorie portant ce nom existe déjà.",
-        errors: { name: "Ce nom est déjà utilisé." },
+        message: "Cette marque a déjà une catégorie portant ce nom.",
+        errors: { name: "Ce nom est déjà utilisé pour cette marque." },
       };
     }
+
+    const nameOrBrandChanged = existing.name !== name || existing.brandId !== brandId;
 
     const category = await prisma.productCategory.update({
       where: { id },
       data: {
         name,
-        ...(existing.name !== name ? { slug: await uniqueCategorySlug(slugify(name), id) } : {}),
+        brandId,
+        ...(nameOrBrandChanged ? { slug: await uniqueCategorySlug(brandId, slugify(name), id) } : {}),
         description: description ?? null,
         position,
         isActive,
@@ -248,7 +318,7 @@ export async function createProductSubcategory(input) {
     const baseSlug = slugify(name);
     let slug = baseSlug;
     let n = 1;
-     
+
     while (true) {
       const clash = await prisma.productSubcategory.findUnique({
         where: { categoryId_slug: { categoryId, slug } },

@@ -7,23 +7,24 @@ import Button from "@/components/ui/Button";
 import { createProductCategory, updateProductCategory } from "@/actions/boutique/categories";
 
 /**
- * @param {{ open: boolean, category: object|null, onClose: () => void, onSaved: () => void }} props
+ * @param {{ open: boolean, category: object|null, brands: object[], defaultBrandId: string|null, onClose: () => void, onSaved: () => void }} props
  */
-export function CategoryModal({ open, category, onClose, onSaved }) {
+export function CategoryModal({ open, category, brands, defaultBrandId, onClose, onSaved }) {
   const isEditing = !!category;
   const [loading, startLoading] = useTransition();
-  const [form, setForm] = useState({ name: "", description: "", isActive: true });
+  const [form, setForm] = useState({ name: "", brandId: "", description: "", isActive: true });
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
     if (!open) return;
     setForm({
       name: category?.name ?? "",
+      brandId: category?.brandId ?? defaultBrandId ?? "",
       description: category?.description ?? "",
       isActive: category?.isActive ?? true,
     });
     setErrors({});
-  }, [open, category]);
+  }, [open, category, defaultBrandId]);
 
   if (!open) return null;
 
@@ -65,13 +66,31 @@ export function CategoryModal({ open, category, onClose, onSaved }) {
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+              Marque <span className="text-red-400">*</span>
+            </label>
+            <select
+              value={form.brandId}
+              onChange={(e) => setForm((f) => ({ ...f, brandId: e.target.value }))}
+              required
+              className="mt-1.5 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
+            >
+              <option value="">Choisir…</option>
+              {brands.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+            {errors.brandId && <p className="mt-1 text-xs font-medium text-red-600">{errors.brandId}</p>}
+          </div>
+
+          <div>
+            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
               Nom <span className="text-red-400">*</span>
             </label>
             <input
               type="text"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              placeholder="Cheveux, Maquillage, Soin visage…"
+              placeholder="Bases, Accessoires, Gels…"
               required
               className="mt-1.5 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
             />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ProductImages } from "@/components/dashboard/boutique/ProductImages";
 import { BarcodeLabelDialog } from "@/components/dashboard/boutique/BarcodeLabelDialog";
 import { createProduct, updateProduct, deleteProduct } from "@/actions/boutique/products";
+import { getProductCategories } from "@/actions/boutique/categories";
 
 /** Not a real EAN/UPC — a locally-unique fallback so a product with no
  * supplier barcode can still get a printable label and be found by
@@ -63,9 +64,9 @@ const inputClass =
  * rather than a modal, since a product carries images, multiple variants
  * and stock: too much to reason about inside a dialog.
  *
- * @param {{ product: object|null, categories: object[], brands: object[] }} props
+ * @param {{ product: object|null, brands: object[] }} props
  */
-export function ProductEditor({ product, categories, brands }) {
+export function ProductEditor({ product, brands }) {
   const router = useRouter();
   const isEdit = !!product;
 
@@ -75,6 +76,8 @@ export function ProductEditor({ product, categories, brands }) {
   const [brandId, setBrandId] = useState(product?.brandId ?? "");
   const [categoryId, setCategoryId] = useState(product?.subcategory?.categoryId ?? "");
   const [subcategoryId, setSubcategoryId] = useState(product?.subcategoryId ?? "");
+  const [categories, setCategories] = useState([]);
+  const [loadingCategories, setLoadingCategories] = useState(false);
   const [images, setImages] = useState(
     product?.images?.map((img) => ({ path: img.path, alt: img.alt, isPrimary: img.isPrimary })) ?? []
   );
@@ -87,6 +90,33 @@ export function ProductEditor({ product, categories, brands }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [labelVariant, setLabelVariant] = useState(null);
   const [isPending, startTransition] = useTransition();
+
+  // Categories are brand-scoped, so they're loaded per selection rather than
+  // passed down from the server for every brand up front.
+  useEffect(() => {
+    if (!brandId) {
+      setCategories([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingCategories(true);
+    getProductCategories({ brandId, includeInactive: true }).then((result) => {
+      if (cancelled) return;
+      setCategories(result.data ?? []);
+      setLoadingCategories(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [brandId]);
+
+  function handleBrandChange(nextBrandId) {
+    setBrandId(nextBrandId);
+    // A category/subcategory picked under the old brand can't carry over —
+    // the tree is brand-scoped now, so switching brand always resets both.
+    setCategoryId("");
+    setSubcategoryId("");
+  }
 
   const subcategories = useMemo(
     () => categories.find((c) => c.id === categoryId)?.subcategories ?? [],
@@ -112,7 +142,6 @@ export function ProductEditor({ product, categories, brands }) {
     const payload = {
       name,
       description: description || null,
-      brandId: brandId || null,
       subcategoryId,
       status,
       variants: variants.map((v, i) => ({
@@ -283,16 +312,20 @@ export function ProductEditor({ product, categories, brands }) {
 
           <Section title="Organisation">
             <div className="space-y-4">
-              <Field label="Marque">
-                <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputClass}>
-                  <option value="">Sans marque</option>
+              <Field label="Marque" required>
+                <select value={brandId} onChange={(e) => handleBrandChange(e.target.value)} required className={inputClass}>
+                  <option value="">Choisir…</option>
                   {brands.map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
                 </select>
               </Field>
 
-              <Field label="Catégorie" required>
+              <Field
+                label="Catégorie"
+                required
+                hint={!brandId ? "Choisissez d'abord une marque." : loadingCategories ? "Chargement…" : null}
+              >
                 <select
                   value={categoryId}
                   onChange={(e) => {
@@ -300,7 +333,8 @@ export function ProductEditor({ product, categories, brands }) {
                     setSubcategoryId("");
                   }}
                   required
-                  className={inputClass}
+                  disabled={!brandId || loadingCategories}
+                  className={`${inputClass} disabled:cursor-not-allowed disabled:bg-gray-50`}
                 >
                   <option value="">Choisir…</option>
                   {categories.map((c) => (

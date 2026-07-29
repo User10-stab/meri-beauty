@@ -31,10 +31,10 @@ function priceRange(variants) {
   return min === max ? formatPrice(min) : `${formatPrice(min)} – ${formatPrice(max)}`;
 }
 
-export function ProductsPageClient({ initialProducts, categories, brands }) {
+export function ProductsPageClient({ initialProducts, brands }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("");
+  const [brandFilter, setBrandFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [toDelete, setToDelete] = useState(null);
   const [isPending, startTransition] = useTransition();
@@ -46,11 +46,11 @@ export function ProductsPageClient({ initialProducts, categories, brands }) {
         const hay = `${p.name} ${p.brand?.name ?? ""} ${p.variants.map((v) => v.sku).join(" ")}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      if (categoryFilter && p.category.id !== categoryFilter) return false;
+      if (brandFilter && p.brand?.id !== brandFilter) return false;
       if (statusFilter && p.status !== statusFilter) return false;
       return true;
     });
-  }, [initialProducts, search, categoryFilter, statusFilter]);
+  }, [initialProducts, search, brandFilter, statusFilter]);
 
   function handleDelete() {
     if (!toDelete) return;
@@ -83,13 +83,13 @@ export function ProductsPageClient({ initialProducts, categories, brands }) {
           </div>
 
           <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            value={brandFilter}
+            onChange={(e) => setBrandFilter(e.target.value)}
             className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
-            <option value="">Toutes les catégories</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+            <option value="">Toutes les marques</option>
+            {brands.map((b) => (
+              <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
 

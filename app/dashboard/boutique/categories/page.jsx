@@ -1,10 +1,10 @@
 import { requireAdmin } from "@/lib/route-protection";
-import { getProductCategories } from "@/actions/boutique/categories";
+import { getCatalogueTree } from "@/actions/boutique/categories";
 import { CategoriesPageClient } from "@/components/dashboard/boutique/CategoriesPageClient";
 
 export const metadata = {
   title: "Catégories — Boutique — Dashboard",
-  description: "Organisez le catalogue en catégories et sous-catégories.",
+  description: "Organisez le catalogue par marque, catégorie et sous-catégorie.",
 };
 
 export const dynamic = "force-dynamic";
@@ -12,14 +12,14 @@ export const dynamic = "force-dynamic";
 export default async function ProductCategoriesPage() {
   await requireAdmin();
 
-  const result = await getProductCategories({ includeInactive: true });
+  const result = await getCatalogueTree({ includeInactive: true });
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-bold text-dark dark:text-white">Catégories</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Chaque produit appartient à une sous-catégorie, elle-même rattachée à une catégorie.
+          Chaque produit appartient à une sous-catégorie, elle-même rattachée à une catégorie, elle-même rattachée à une marque.
         </p>
       </div>
 
@@ -30,7 +30,7 @@ export default async function ProductCategoriesPage() {
         </div>
       )}
 
-      <CategoriesPageClient initialCategories={result.data ?? []} />
+      <CategoriesPageClient initialBrands={result.data ?? []} />
     </div>
   );
 }

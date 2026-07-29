@@ -11,11 +11,10 @@ import {
 } from "@/lib/validations/boutique";
 
 /**
- * Brand management.
- *
- * Brands deliberately carry no category link — a beauty brand spans several
- * categories, and a stored link could only ever disagree with the products
- * themselves. Use getBrandCategories() to derive it from actual products.
+ * Brand management. Brand is the root of the catalogue tree
+ * (Brand → ProductCategory → ProductSubcategory → Product, client decision
+ * 29 Jul 2026) — there's no longer a standalone "Marques" dashboard page;
+ * brand CRUD is folded into the Catégories tree view.
  */
 
 async function requireAdmin() {
@@ -49,63 +48,27 @@ export async function getBrands({ includeInactive = false } = {}) {
         ...(includeInactive ? {} : { isActive: true }),
       },
       orderBy: { name: "asc" },
-      include: { _count: { select: { products: true } } },
+      include: { _count: { select: { categories: true } } },
     });
 
     return {
       success: true,
-      data: brands.map((b) => ({
-        id: b.id,
-        name: b.name,
-        slug: b.slug,
-        logo: b.logo,
-        description: b.description,
-        isActive: b.isActive,
-        productCount: b._count.products,
-      })),
+      data: await Promise.all(
+        brands.map(async (b) => ({
+          id: b.id,
+          name: b.name,
+          slug: b.slug,
+          logo: b.logo,
+          description: b.description,
+          isActive: b.isActive,
+          categoryCount: b._count.categories,
+          productCount: await prisma.product.count({ where: { subcategory: { category: { brandId: b.id } } } }),
+        }))
+      ),
     };
   } catch (error) {
     console.error("[getBrands]", error);
     return { success: false, message: "Impossible de charger les marques.", data: [] };
-  }
-}
-
-/**
- * Derives which categories a brand actually sells into, from its products.
- * This is the replacement for a stored Brand→Category link.
- */
-export async function getBrandCategories(brandId) {
-  try {
-    const products = await prisma.product.findMany({
-      where: { brandId, isDeleted: false, status: "ACTIVE" },
-      select: {
-        subcategory: {
-          select: { id: true, name: true, category: { select: { id: true, name: true, slug: true } } },
-        },
-      },
-    });
-
-    const categories = new Map();
-    for (const p of products) {
-      const c = p.subcategory.category;
-      if (!categories.has(c.id)) categories.set(c.id, { ...c, subcategories: new Map() });
-      categories
-        .get(c.id)
-        .subcategories.set(p.subcategory.id, { id: p.subcategory.id, name: p.subcategory.name });
-    }
-
-    return {
-      success: true,
-      data: [...categories.values()].map((c) => ({
-        id: c.id,
-        name: c.name,
-        slug: c.slug,
-        subcategories: [...c.subcategories.values()],
-      })),
-    };
-  } catch (error) {
-    console.error("[getBrandCategories]", error);
-    return { success: false, message: "Impossible de charger les catégories.", data: [] };
   }
 }
 
@@ -148,7 +111,7 @@ export async function createBrand(input) {
       },
     });
 
-    revalidatePath("/dashboard/boutique/brands");
+    revalidatePath("/dashboard/boutique/categories");
     return { success: true, message: "Marque créée.", data: brand };
   } catch (error) {
     console.error("[createBrand]", error);
@@ -202,7 +165,7 @@ export async function updateBrand(input) {
       },
     });
 
-    revalidatePath("/dashboard/boutique/brands");
+    revalidatePath("/dashboard/boutique/categories");
     return { success: true, message: "Marque mise à jour.", data: brand };
   } catch (error) {
     console.error("[updateBrand]", error);
@@ -211,8 +174,9 @@ export async function updateBrand(input) {
 }
 
 /**
- * Soft delete. Products keep their brandId, so historical orders and product
- * pages stay intact; the brand simply stops appearing in listings.
+ * Soft delete only — a brand with any categories/products underneath can't
+ * be hard-deleted anyway (ProductCategory.brandId is required), so this just
+ * flips isActive/isDeleted; every read path already filters on those.
  */
 export async function deleteBrand(id) {
   const guard = await requireAdmin();
@@ -221,23 +185,22 @@ export async function deleteBrand(id) {
   if (!id) return { success: false, message: "Identifiant manquant." };
 
   try {
-    const brand = await prisma.brand.findUnique({
-      where: { id },
-      include: { _count: { select: { products: true } } },
-    });
+    const brand = await prisma.brand.findUnique({ where: { id } });
     if (!brand) return { success: false, message: "Marque introuvable." };
+
+    const productCount = await prisma.product.count({ where: { subcategory: { category: { brandId: id } } } });
 
     await prisma.brand.update({
       where: { id },
       data: { isDeleted: true, deletedAt: new Date(), isActive: false },
     });
 
-    revalidatePath("/dashboard/boutique/brands");
+    revalidatePath("/dashboard/boutique/categories");
     return {
       success: true,
-      message: brand._count.products
-        ? `Marque supprimée. ${brand._count.products} produit(s) conservent leur référence.`
-        : "Marque supprimée.",
+      message: productCount
+        ? `Marque désactivée. ${productCount} produit(s) et leurs catégories restent en base mais disparaissent du catalogue actif.`
+        : "Marque désactivée.",
     };
   } catch (error) {
     console.error("[deleteBrand]", error);

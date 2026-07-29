@@ -60,9 +60,9 @@ function withMargin(variant) {
 
 export async function getProducts({
   search,
+  brandId,
   categoryId,
   subcategoryId,
-  brandId,
   status,
   includeDeleted = false,
   page = 1,
@@ -72,11 +72,12 @@ export async function getProducts({
     const where = {
       isDeleted: includeDeleted ? undefined : false,
       ...(status ? { status } : {}),
-      ...(brandId ? { brandId } : {}),
       ...(subcategoryId
         ? { subcategoryId }
         : categoryId
         ? { subcategory: { categoryId } }
+        : brandId
+        ? { subcategory: { category: { brandId } } }
         : {}),
       ...(search
         ? {
@@ -96,8 +97,13 @@ export async function getProducts({
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          brand: { select: { id: true, name: true } },
-          subcategory: { select: { id: true, name: true, category: { select: { id: true, name: true } } } },
+          subcategory: {
+            select: {
+              id: true,
+              name: true,
+              category: { select: { id: true, name: true, brand: { select: { id: true, name: true } } } },
+            },
+          },
           variants: { where: { isDeleted: false }, orderBy: { position: "asc" } },
           images: { orderBy: { position: "asc" }, take: 1 },
         },
@@ -112,8 +118,8 @@ export async function getProducts({
         name: p.name,
         slug: p.slug,
         status: p.status,
-        brand: p.brand,
-        category: p.subcategory.category,
+        brand: p.subcategory.category.brand,
+        category: { id: p.subcategory.category.id, name: p.subcategory.category.name },
         subcategory: { id: p.subcategory.id, name: p.subcategory.name },
         thumbnail: p.images[0]?.path ?? null,
         variants: p.variants.map(withMargin),
@@ -133,8 +139,9 @@ export async function getProductById(id) {
     const product = await prisma.product.findUnique({
       where: { id, isDeleted: false },
       include: {
-        brand: { select: { id: true, name: true } },
-        subcategory: { select: { id: true, name: true, categoryId: true } },
+        subcategory: {
+          select: { id: true, name: true, categoryId: true, category: { select: { id: true, brandId: true } } },
+        },
         variants: { where: { isDeleted: false }, orderBy: { position: "asc" } },
         images: { orderBy: { position: "asc" } },
       },
@@ -144,7 +151,11 @@ export async function getProductById(id) {
 
     return {
       success: true,
-      data: { ...product, variants: product.variants.map(withMargin) },
+      data: {
+        ...product,
+        brandId: product.subcategory.category.brandId,
+        variants: product.variants.map(withMargin),
+      },
     };
   } catch (error) {
     console.error("[getProductById]", error);
@@ -168,7 +179,7 @@ export async function createProduct(input) {
     };
   }
 
-  const { name, description, brandId, subcategoryId, status, variants, images } = parsed.data;
+  const { name, description, subcategoryId, status, variants, images } = parsed.data;
 
   try {
     const subcategory = await prisma.productSubcategory.findUnique({
@@ -193,7 +204,6 @@ export async function createProduct(input) {
         name,
         slug: await uniqueProductSlug(slugify(name)),
         description: description ?? null,
-        brandId,
         subcategoryId,
         status,
         variants: {
@@ -279,7 +289,7 @@ export async function updateProduct(input) {
     };
   }
 
-  const { id, name, description, brandId, subcategoryId, status, variants, images } = parsed.data;
+  const { id, name, description, subcategoryId, status, variants, images } = parsed.data;
 
   try {
     const existing = await prisma.product.findUnique({
@@ -301,7 +311,6 @@ export async function updateProduct(input) {
           name,
           ...(existing.name !== name ? { slug: await uniqueProductSlug(slugify(name), id) } : {}),
           description: description ?? null,
-          brandId,
           subcategoryId,
           status,
         },

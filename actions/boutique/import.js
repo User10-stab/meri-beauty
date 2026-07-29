@@ -79,69 +79,66 @@ export async function previewWixImport({ productsCsv, inventoryCsv }) {
   };
 }
 
-export async function runWixImport({ products, slugMapping, parentCategoryName }) {
+/**
+ * Every product needs a Brand → Category → Subcategory chain now (client
+ * decision, 29 Jul 2026). Wix only ever gives us brand + one flat "category"
+ * tag per product (never a real 2-level split), so the category resolved
+ * from that tag always gets a single generic "Général" subcategory
+ * underneath — a starting point for staff to refine later, not a final
+ * taxonomy. Products with no brand-classified tag, or no category-classified
+ * tag, fall back to a "Non classé" placeholder for whichever is missing.
+ */
+export async function runWixImport({ products, slugMapping }) {
   const guard = await requireAdmin();
   if (guard.error) return { success: false, message: guard.error };
   if (!products?.length) return { success: false, message: "Aucun produit à importer." };
-  if (!parentCategoryName?.trim()) return { success: false, message: "Choisissez une catégorie parente pour les sous-catégories." };
 
+  const PLACEHOLDER = "Non classé";
   const brandCache = new Map();
-  const subcategoryCache = new Map();
-  let parentCategoryId = null;
-
-  try {
-    let category = await prisma.productCategory.findFirst({
-      where: { name: { equals: parentCategoryName.trim(), mode: "insensitive" } },
-    });
-    if (!category) {
-      category = await prisma.productCategory.create({
-        data: { name: parentCategoryName.trim(), slug: await uniqueSlug("productCategory", slugify(parentCategoryName)) },
-      });
-    }
-    parentCategoryId = category.id;
-  } catch (error) {
-    console.error("[runWixImport] parent category setup failed:", error);
-    return { success: false, message: "Impossible de créer/trouver la catégorie parente." };
-  }
+  const categoryCache = new Map(); // `${brandId}::${categoryName}` -> categoryId
+  const subcategoryCache = new Map(); // categoryId -> subcategoryId ("Général")
 
   const createdIds = [];
   const errors = [];
 
   for (const p of products) {
     try {
-      const { brandName, subcategoryName } = resolveProductClassification(p, slugMapping);
+      const { brandName, categoryName } = resolveProductClassification(p, slugMapping);
 
-      let brandId = null;
-      if (brandName) {
-        const key = brandName.toLowerCase();
-        if (!brandCache.has(key)) {
-          let brand = await prisma.brand.findFirst({ where: { name: { equals: brandName, mode: "insensitive" } } });
-          if (!brand) {
-            brand = await prisma.brand.create({ data: { name: brandName, slug: await uniqueSlug("brand", slugify(brandName)) } });
-          }
-          brandCache.set(key, brand.id);
+      const resolvedBrandName = brandName || PLACEHOLDER;
+      const brandKey = resolvedBrandName.toLowerCase();
+      if (!brandCache.has(brandKey)) {
+        let brand = await prisma.brand.findFirst({ where: { name: { equals: resolvedBrandName, mode: "insensitive" } } });
+        if (!brand) {
+          brand = await prisma.brand.create({ data: { name: resolvedBrandName, slug: await uniqueSlug("brand", slugify(resolvedBrandName)) } });
         }
-        brandId = brandCache.get(key);
+        brandCache.set(brandKey, brand.id);
       }
+      const brandId = brandCache.get(brandKey);
 
-      const subName = subcategoryName || "Non classé";
-      const subKey = subName.toLowerCase();
-      if (!subcategoryCache.has(subKey)) {
-        let sub = await prisma.productSubcategory.findFirst({
-          where: { categoryId: parentCategoryId, name: { equals: subName, mode: "insensitive" } },
-        });
-        if (!sub) {
-          sub = await prisma.productSubcategory.create({
-            data: {
-              name: subName,
-              slug: await uniqueSlug("productSubcategory", slugify(subName), { categoryId: parentCategoryId }),
-              categoryId: parentCategoryId,
-            },
+      const resolvedCategoryName = categoryName || PLACEHOLDER;
+      const categoryKey = `${brandId}::${resolvedCategoryName.toLowerCase()}`;
+      if (!categoryCache.has(categoryKey)) {
+        let category = await prisma.productCategory.findFirst({ where: { brandId, name: { equals: resolvedCategoryName, mode: "insensitive" } } });
+        if (!category) {
+          category = await prisma.productCategory.create({
+            data: { name: resolvedCategoryName, brandId, slug: await uniqueSlug("productCategory", slugify(resolvedCategoryName), { brandId }) },
           });
         }
-        subcategoryCache.set(subKey, sub.id);
+        categoryCache.set(categoryKey, category.id);
       }
-      const subcategoryId = subcategoryCache.get(subKey);
+      const categoryId = categoryCache.get(categoryKey);
+
+      if (!subcategoryCache.has(categoryId)) {
+        let sub = await prisma.productSubcategory.findFirst({ where: { categoryId, name: "Général" } });
+        if (!sub) {
+          sub = await prisma.productSubcategory.create({
+            data: { name: "Général", categoryId, slug: await uniqueSlug("productSubcategory", "general", { categoryId }) },
+          });
+        }
+        subcategoryCache.set(categoryId, sub.id);
+      }
+      const subcategoryId = subcategoryCache.get(categoryId);
 
       const sku = await uniqueSku(`WIX-${slugify(p.name).toUpperCase().slice(0, 16)}`);
 
@@ -150,7 +147,6 @@ export async function runWixImport({ products, slugMapping, parentCategoryName }
           name: p.name,
           slug: await uniqueSlug("product", slugify(p.name)),
           description: p.description || null,
-          brandId,
           subcategoryId,
           status: "DRAFT", // reviewed by staff before going live on the storefront
           variants: {

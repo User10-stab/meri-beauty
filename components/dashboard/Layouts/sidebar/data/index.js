@@ -59,7 +59,6 @@ const ALL_NAV_DATA = [
         items: [
           { title: "Produits", url: "/dashboard/boutique/products" },
           { title: "Catégories", url: "/dashboard/boutique/categories" },
-          { title: "Marques", url: "/dashboard/boutique/brands" },
           { title: "Stock", url: "/dashboard/boutique/stock" },
         ],
         roles: DASHBOARD_PERMISSIONS.BOUTIQUE, // Admin only

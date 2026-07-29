@@ -9,9 +9,6 @@ import Button from "@/components/ui/Button";
 import { previewWixImport, runWixImport } from "@/actions/boutique/import";
 import { resolveProductClassification } from "@/lib/wixImport";
 
-const inputClass =
-  "h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10";
-
 function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
 }
@@ -35,7 +32,6 @@ export function ImportWixClient() {
   const [products, setProducts] = useState([]);
   const [slugs, setSlugs] = useState([]);
   const [slugMapping, setSlugMapping] = useState({});
-  const [parentCategoryName, setParentCategoryName] = useState("Produits professionnels");
   const [result, setResult] = useState(null);
 
   async function handleAnalyze() {
@@ -60,17 +56,17 @@ export function ImportWixClient() {
   const resolved = useMemo(
     () =>
       products.map((p) => {
-        const { brandName, subcategoryName } = resolveProductClassification(p, slugMapping);
-        return { ...p, brandName, subcategoryName: subcategoryName || "Non classé" };
+        const { brandName, categoryName } = resolveProductClassification(p, slugMapping);
+        return { ...p, brandName: brandName || "Non classé", categoryName: categoryName || "Non classé" };
       }),
     [products, slugMapping]
   );
 
-  const unclassifiedCount = resolved.filter((p) => p.subcategoryName === "Non classé").length;
+  const unclassifiedCount = resolved.filter((p) => p.categoryName === "Non classé").length;
 
   async function handleImport() {
     setLoading(true);
-    const res = await runWixImport({ products, slugMapping, parentCategoryName });
+    const res = await runWixImport({ products, slugMapping });
     setLoading(false);
 
     if (!res.success) {
@@ -133,23 +129,10 @@ export function ImportWixClient() {
           <div className="rounded-[10px] border border-stroke bg-white p-5 shadow-1 dark:border-dark-3 dark:bg-gray-dark">
             <p className="text-sm text-gray-600">
               <strong>{products.length}</strong> produits trouvés, avec <strong>{slugs.length}</strong> étiquettes Wix différentes.
-              Wix ne distingue pas marque et catégorie — indiquez ce que chaque étiquette représente. Une suggestion est déjà
-              pré-remplie quand les noms de produits le confirment ; vérifiez et corrigez le reste.
-            </p>
-          </div>
-
-          <div className="rounded-[10px] border border-stroke bg-white p-5 shadow-1 dark:border-dark-3 dark:bg-gray-dark">
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
-              Catégorie parente pour les nouvelles sous-catégories
-            </label>
-            <input
-              type="text"
-              value={parentCategoryName}
-              onChange={(e) => setParentCategoryName(e.target.value)}
-              className={`${inputClass} max-w-sm`}
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              Toute étiquette classée « Sous-catégorie » sera créée sous cette catégorie (créée si elle n'existe pas encore).
+              Wix ne distingue pas marque et catégorie — indiquez ce que chaque étiquette représente. Une étiquette classée
+              « Catégorie » devient une catégorie sous la marque du produit, avec une sous-catégorie générique « Général » en
+              dessous, à affiner plus tard. Une suggestion est déjà pré-remplie quand les noms de produits le confirment ;
+              vérifiez et corrigez le reste.
             </p>
           </div>
 
@@ -173,7 +156,7 @@ export function ImportWixClient() {
                     <td className="px-4 py-2.5">
                       <div className="flex gap-3 text-xs">
                         {[
-                          { value: "subcategory", label: "Sous-catégorie" },
+                          { value: "subcategory", label: "Catégorie" },
                           { value: "brand", label: "Marque" },
                           { value: "ignore", label: "Ignorer" },
                         ].map((opt) => (
@@ -212,7 +195,7 @@ export function ImportWixClient() {
             <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
               <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
               <span>
-                <strong>{unclassifiedCount}</strong> produit(s) n'ont aucune étiquette classée « Sous-catégorie » — ils seront
+                <strong>{unclassifiedCount}</strong> produit(s) n'ont aucune étiquette classée « Catégorie » — ils seront
                 importés sous « Non classé » et pourront être reclassés depuis la fiche produit.
               </span>
             </div>
@@ -224,7 +207,7 @@ export function ImportWixClient() {
                 <tr className="border-b border-stroke text-left text-xs uppercase tracking-wide text-gray-500 dark:border-dark-3">
                   <th className="px-4 py-3">Produit</th>
                   <th className="px-4 py-3">Marque</th>
-                  <th className="px-4 py-3">Sous-catégorie</th>
+                  <th className="px-4 py-3">Catégorie</th>
                   <th className="px-4 py-3">Prix</th>
                   <th className="px-4 py-3">Stock</th>
                   <th className="px-4 py-3">Images</th>
@@ -234,8 +217,8 @@ export function ImportWixClient() {
                 {resolved.map((p) => (
                   <tr key={p.handle} className="border-b border-stroke last:border-0 dark:border-dark-3">
                     <td className="px-4 py-2.5 font-medium text-gray-800 dark:text-white">{p.name}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{p.brandName ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-gray-500">{p.subcategoryName}</td>
+                    <td className="px-4 py-2.5 text-gray-500">{p.brandName}</td>
+                    <td className="px-4 py-2.5 text-gray-500">{p.categoryName}</td>
                     <td className="px-4 py-2.5 text-gray-500">{formatPrice(p.price)}</td>
                     <td className="px-4 py-2.5 text-gray-500">
                       {p.stockQuantity}

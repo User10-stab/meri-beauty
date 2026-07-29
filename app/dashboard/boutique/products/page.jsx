@@ -1,7 +1,6 @@
 import { Suspense } from "react";
 import { requireAdmin } from "@/lib/route-protection";
 import { getProducts } from "@/actions/boutique/products";
-import { getProductCategories } from "@/actions/boutique/categories";
 import { getBrands } from "@/actions/boutique/brands";
 import { ProductsPageClient } from "@/components/dashboard/boutique/ProductsPageClient";
 
@@ -15,9 +14,8 @@ export const dynamic = "force-dynamic";
 export default async function ProductsPage() {
   await requireAdmin();
 
-  const [productsResult, categoriesResult, brandsResult] = await Promise.all([
+  const [productsResult, brandsResult] = await Promise.all([
     getProducts({ pageSize: 50 }),
-    getProductCategories(),
     getBrands({ includeInactive: true }),
   ]);
 
@@ -43,7 +41,6 @@ export default async function ProductsPage() {
       <Suspense fallback={null}>
         <ProductsPageClient
           initialProducts={productsResult.data ?? []}
-          categories={categoriesResult.data ?? []}
           brands={brandsResult.data ?? []}
         />
       </Suspense>

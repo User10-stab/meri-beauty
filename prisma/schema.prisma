@@ -302,9 +302,10 @@ model Category {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // BRAND
-// Deliberately carries no category link: a beauty brand spans several
-// categories, and a stored copy would only be able to disagree with the
-// products themselves. Derive it with a DISTINCT query when needed.
+// Root of the catalogue tree: Brand → ProductCategory → ProductSubcategory →
+// Product. A category belongs to exactly one brand (client decision,
+// 29 Jul 2026) — two brands each having their own "Bases" category are two
+// separate ProductCategory rows, not a shared one.
 model Brand {
   id          String  @id @default(cuid())
   name        String
@@ -319,32 +320,36 @@ model Brand {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  products Product[]
+  categories ProductCategory[]
 
   @@index([slug])
   @@index([isActive, isDeleted])
 }
 
 // PRODUCT CATEGORY
+// Brand-scoped — slug is unique per brand, not globally, since the same
+// category name ("Bases", "Accessoires"...) commonly recurs across brands.
 model ProductCategory {
   id          String  @id @default(cuid())
   name        String
-  slug        String  @unique
+  slug        String
   description String?
   position    Int     @default(0)
   isActive    Boolean @default(true)
+
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   subcategories ProductSubcategory[]
 
-  @@index([slug])
+  @@unique([brandId, slug])
+  @@index([brandId])
 }
 
 // PRODUCT SUBCATEGORY
-// The "max 4 subcategories per brand" rule is a UI/display constraint and is
-// deliberately not enforced here.
 model ProductSubcategory {
   id       String @id @default(cuid())
   name     String
@@ -367,14 +372,17 @@ model ProductSubcategory {
 // PRODUCT
 // Descriptive only — every sellable unit, price and stock level lives on
 // ProductVariant, so a product with one size still has exactly one variant.
+//
+// Brand is deliberately NOT stored directly on Product — it's derived via
+// subcategory.category.brand. Storing it a second time here would let a
+// product's brand disagree with its own category's brand; since the tree is
+// now Brand → Category → Subcategory → Product, subcategoryId alone already
+// determines the brand unambiguously.
 model Product {
   id          String  @id @default(cuid())
   name        String
   slug        String  @unique
   description String?
-
-  brandId String?
-  brand   Brand?  @relation(fields: [brandId], references: [id])
 
   subcategoryId String
   subcategory   ProductSubcategory @relation(fields: [subcategoryId], references: [id])
@@ -393,7 +401,6 @@ model Product {
 
   @@index([slug])
   @@index([subcategoryId])
-  @@index([brandId])
   @@index([status, isDeleted])
 }
 

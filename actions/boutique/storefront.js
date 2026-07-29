@@ -23,8 +23,8 @@ function serializeCard(product) {
     id: product.id,
     name: product.name,
     slug: product.slug,
-    brand: product.brand ? { id: product.brand.id, name: product.brand.name } : null,
-    category: product.subcategory.category,
+    brand: { id: product.subcategory.category.brand.id, name: product.subcategory.category.brand.name },
+    category: { id: product.subcategory.category.id, name: product.subcategory.category.name },
     subcategory: { id: product.subcategory.id, name: product.subcategory.name },
     image: product.images[0]?.path ?? null,
     priceFrom: Math.min(...prices),
@@ -58,7 +58,11 @@ export async function getStorefrontFilters() {
         },
       }),
       prisma.brand.findMany({
-        where: { isActive: true, isDeleted: false, products: { some: activeProductWhere } },
+        where: {
+          isActive: true,
+          isDeleted: false,
+          categories: { some: { subcategories: { some: { products: { some: activeProductWhere } } } } },
+        },
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       }),
@@ -81,17 +85,18 @@ export async function getStorefrontProducts({
   try {
     const where = {
       ...activeProductWhere,
-      ...(brandId ? { brandId } : {}),
       ...(subcategorySlug
         ? { subcategory: { slug: subcategorySlug } }
         : categorySlug
         ? { subcategory: { category: { slug: categorySlug } } }
+        : brandId
+        ? { subcategory: { category: { brandId } } }
         : {}),
       ...(search
         ? {
             OR: [
               { name: { contains: search, mode: "insensitive" } },
-              { brand: { name: { contains: search, mode: "insensitive" } } },
+              { subcategory: { category: { brand: { name: { contains: search, mode: "insensitive" } } } } },
             ],
           }
         : {}),
@@ -101,8 +106,13 @@ export async function getStorefrontProducts({
       where,
       orderBy: sort === "name" ? { name: "asc" } : { createdAt: "desc" },
       include: {
-        brand: { select: { id: true, name: true } },
-        subcategory: { select: { id: true, name: true, category: { select: { id: true, name: true, slug: true } } } },
+        subcategory: {
+          select: {
+            id: true,
+            name: true,
+            category: { select: { id: true, name: true, slug: true, brand: { select: { id: true, name: true } } } },
+          },
+        },
         variants: { where: { isDeleted: false, isActive: true }, select: { price: true, comparePrice: true, stockQuantity: true, reservedQuantity: true } },
         images: { where: { isPrimary: true }, take: 1, select: { path: true } },
       },
@@ -146,8 +156,13 @@ export async function getStorefrontProductBySlug(slug) {
     const product = await prisma.product.findFirst({
       where: { slug, ...activeProductWhere },
       include: {
-        brand: { select: { id: true, name: true } },
-        subcategory: { select: { id: true, name: true, category: { select: { id: true, name: true, slug: true } } } },
+        subcategory: {
+          select: {
+            id: true,
+            name: true,
+            category: { select: { id: true, name: true, slug: true, brand: { select: { id: true, name: true } } } },
+          },
+        },
         variants: {
           where: { isDeleted: false, isActive: true },
           orderBy: { position: "asc" },
@@ -174,8 +189,8 @@ export async function getStorefrontProductBySlug(slug) {
         name: product.name,
         slug: product.slug,
         description: product.description,
-        brand: product.brand,
-        category: product.subcategory.category,
+        brand: product.subcategory.category.brand,
+        category: { id: product.subcategory.category.id, name: product.subcategory.category.name, slug: product.subcategory.category.slug },
         subcategory: { id: product.subcategory.id, name: product.subcategory.name },
         images: product.images.map((img) => ({ path: img.path, alt: img.alt })),
         variants: product.variants.map((v) => ({

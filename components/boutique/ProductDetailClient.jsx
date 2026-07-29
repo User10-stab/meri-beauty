@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Minus, Plus, ShoppingBag, ChevronRight } from "lucide-react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import { addToCart } from "@/actions/boutique/cart";
 
 export function ProductDetailClient({ product }) {

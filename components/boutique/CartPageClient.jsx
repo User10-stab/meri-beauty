@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import { updateCartItemQuantity, removeFromCart } from "@/actions/boutique/cart";
 
 function notifyCartUpdated() {

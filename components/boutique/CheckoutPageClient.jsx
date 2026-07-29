@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Store, Wallet, Truck, Check, Loader2 } from "lucide-react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import { createOrderFromCart, createOrderCheckoutSession } from "@/actions/boutique/orders";
 
 const SHIPPING_FLAT_COST = 4.95;

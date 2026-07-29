@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { X, Loader2, ImagePlus, Star, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Loader2, ImagePlus, Star, GripHorizontal } from "lucide-react";
 
 const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
@@ -15,6 +15,8 @@ const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 export function ProductImages({ value = [], onChange }) {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
 
   async function handleFiles(files) {
     const list = Array.from(files ?? []).filter((f) => {
@@ -68,12 +70,34 @@ export function ProductImages({ value = [], onChange }) {
     onChange(value.map((img, i) => ({ ...img, isPrimary: i === index })));
   }
 
-  function move(index, offset) {
-    const target = index + offset;
-    if (target < 0 || target >= value.length) return;
+  function reorder(from, to) {
+    if (from === null || to === null || from === to) return;
     const next = [...value];
-    [next[index], next[target]] = [next[target], next[index]];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
     onChange(next);
+  }
+
+  function handleDragStart(e, index) {
+    setDragIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index)); // required by Firefox for drag to start
+  }
+
+  function handleDragEnter(index) {
+    if (index !== dragIndex) setOverIndex(index);
+  }
+
+  function handleDrop(e, index) {
+    e.preventDefault();
+    reorder(dragIndex, index);
+    setDragIndex(null);
+    setOverIndex(null);
+  }
+
+  function handleDragEnd() {
+    setDragIndex(null);
+    setOverIndex(null);
   }
 
   return (
@@ -82,9 +106,30 @@ export function ProductImages({ value = [], onChange }) {
         {value.map((img, i) => (
           <div
             key={img.path + i}
-            className="group relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200"
+            draggable={value.length > 1}
+            onDragStart={(e) => handleDragStart(e, i)}
+            onDragEnter={() => handleDragEnter(i)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => handleDrop(e, i)}
+            onDragEnd={handleDragEnd}
+            className={`group relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg border transition-all ${
+              value.length > 1 ? "cursor-grab active:cursor-grabbing" : ""
+            } ${
+              dragIndex === i
+                ? "scale-95 border-gray-200 opacity-40"
+                : overIndex === i
+                ? "scale-105 border-[#2f3a2e] shadow-lg"
+                : "border-gray-200"
+            }`}
           >
-            <img src={img.path} alt="" className="h-full w-full object-cover" />
+            <img src={img.path} alt="" draggable={false} className="h-full w-full select-none object-cover" />
+
+            {value.length > 1 && (
+              <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center bg-gradient-to-b from-black/50 to-transparent pb-3 pt-1 opacity-0 transition-opacity group-hover:opacity-100">
+                <GripHorizontal size={14} className="text-white" />
+              </div>
+            )}
+
             <button
               type="button"
               onClick={() => setPrimary(i)}
@@ -103,28 +148,6 @@ export function ProductImages({ value = [], onChange }) {
             >
               <X size={11} />
             </button>
-            {value.length > 1 && (
-              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-gradient-to-t from-black/60 to-transparent px-1 pb-1 pt-3 opacity-0 transition-opacity group-hover:opacity-100">
-                <button
-                  type="button"
-                  onClick={() => move(i, -1)}
-                  disabled={i === 0}
-                  aria-label="Déplacer vers la gauche"
-                  className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 text-gray-600 shadow disabled:opacity-30"
-                >
-                  <ChevronLeft size={12} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => move(i, 1)}
-                  disabled={i === value.length - 1}
-                  aria-label="Déplacer vers la droite"
-                  className="flex h-5 w-5 items-center justify-center rounded-full bg-white/90 text-gray-600 shadow disabled:opacity-30"
-                >
-                  <ChevronRight size={12} />
-                </button>
-              </div>
-            )}
           </div>
         ))}
 
@@ -148,11 +171,13 @@ export function ProductImages({ value = [], onChange }) {
         onChange={(e) => handleFiles(e.target.files)}
       />
 
-      {value.length === 0 && (
+      {value.length === 0 ? (
         <p className="mt-2 text-xs text-gray-400">
           Aucune image. La première image ajoutée devient l'image principale — cliquez sur l'étoile pour en choisir une autre.
         </p>
-      )}
+      ) : value.length > 1 ? (
+        <p className="mt-2 text-xs text-gray-400">Glissez une image pour changer son ordre.</p>
+      ) : null}
     </div>
   );
 }

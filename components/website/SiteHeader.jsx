@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { UserIcon, BagIcon, MenuIcon, CloseIcon } from "./icons";
+import { UserIcon, BagIcon, ScanIcon, MenuIcon, CloseIcon } from "./icons";
 import { useSession, signOut } from "next-auth/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getCart } from "@/actions/boutique/cart";
@@ -246,6 +246,15 @@ export default function Navbar() {
               </Link>
             </>
           )}
+
+          {/* Scan icon — in-store self-scan, visible to everyone like the bag icon */}
+          <Link
+            href="/boutique/scan"
+            aria-label="Scanner un produit"
+            className="rounded-full p-2 text-cream/70 transition-colors duration-200 hover:text-cream"
+          >
+            <ScanIcon className="h-[18px] w-[18px]" />
+          </Link>
 
           {/* Bag icon — visible to everyone, guests included, since checkout supports guest orders */}
           <Link

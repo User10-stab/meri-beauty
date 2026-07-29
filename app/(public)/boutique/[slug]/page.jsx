@@ -12,11 +12,12 @@ export async function generateMetadata({ params }) {
   };
 }
 
-export default async function ProductPage({ params }) {
+export default async function ProductPage({ params, searchParams }) {
   const { slug } = await params;
+  const { variant } = await searchParams;
   const result = await getStorefrontProductBySlug(slug);
 
   if (!result.success) notFound();
 
-  return <ProductDetailClient product={result.data} />;
+  return <ProductDetailClient product={result.data} initialVariantId={variant} />;
 }

@@ -6,8 +6,11 @@ import { Minus, Plus, ShoppingBag, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { addToCart } from "@/actions/boutique/cart";
 
-export function ProductDetailClient({ product }) {
-  const [selectedVariantId, setSelectedVariantId] = useState(product.variants[0]?.id ?? null);
+export function ProductDetailClient({ product, initialVariantId }) {
+  const hasInitialVariant = product.variants.some((v) => v.id === initialVariantId);
+  const [selectedVariantId, setSelectedVariantId] = useState(
+    hasInitialVariant ? initialVariantId : product.variants[0]?.id ?? null
+  );
   const [activeImage, setActiveImage] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [adding, setAdding] = useState(false);

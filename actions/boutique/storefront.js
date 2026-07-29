@@ -119,6 +119,26 @@ export async function getStorefrontProducts({
   }
 }
 
+/** In-store self-scan: resolve a scanned EAN/UPC barcode straight to a product + variant. */
+export async function getStorefrontProductByBarcode(barcode) {
+  const cleaned = (barcode ?? "").trim();
+  if (!cleaned) return { success: false, message: "Code-barres introuvable." };
+
+  try {
+    const variant = await prisma.productVariant.findFirst({
+      where: { barcode: cleaned, isDeleted: false, isActive: true, product: activeProductWhere },
+      select: { id: true, product: { select: { slug: true } } },
+    });
+
+    if (!variant) return { success: false, message: "Aucun produit ne correspond à ce code-barres." };
+
+    return { success: true, data: { slug: variant.product.slug, variantId: variant.id } };
+  } catch (error) {
+    console.error("[getStorefrontProductByBarcode]", error);
+    return { success: false, message: "Impossible de rechercher ce produit." };
+  }
+}
+
 export async function getStorefrontProductBySlug(slug) {
   if (!slug) return { success: false, message: "Produit introuvable." };
 

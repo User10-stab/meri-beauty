@@ -248,3 +248,16 @@ export function PackageIcon(props) {
     </svg>
   );
 }
+
+export function ReceiptIcon(props) {
+  return (
+    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6 3.75h12v16.5l-2.25-1.5-2.25 1.5-2.25-1.5-2.25 1.5-2.25-1.5-2.25 1.5V3.75z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.75 8.25h6.5M8.75 11.5h6.5M8.75 14.75h4" />
+    </svg>
+  );
+}

@@ -48,6 +48,11 @@ enum PaymentType {
   DEPOSIT
 }
 
+enum InvoiceSource {
+  ORDER
+  APPOINTMENT
+}
+
 enum TransactionMethod {
   CASH
   CARD
@@ -195,6 +200,7 @@ model Salon {
   phone       String
   email       String
   address     String?
+  vatNumber   String? // legal TVA/BCE number — printed on every issued invoice
 
   instagram   String?
   facebook    String?
@@ -722,6 +728,87 @@ model Payment {
   transactionReference String?
 
   transactions Transaction[]
+  invoice      Invoice?
+}
+
+// NUMBERING COUNTER
+// Atomic per-key counter backing legally-gapless sequential numbering
+// (invoices, credit notes — Belgian TVA law requires an unbroken sequence,
+// not just "usually in order"). One row per series+year, e.g. "invoice-2026".
+// Incremented via a single UPDATE...RETURNING inside the SAME transaction as
+// the document it numbers (see lib/invoicing.js), so a rolled-back
+// transaction never burns a number.
+model NumberingCounter {
+  key        String @id
+  lastNumber Int    @default(0)
+}
+
+// INVOICE
+// One per Payment, created the moment a sale is actually settled (Stripe
+// payment confirmed, or cash/card collected in person) — never at checkout
+// time, since an unpaid/abandoned order or appointment must never consume a
+// number. Seller/customer/line data is a frozen snapshot taken at issue
+// time (copied in, never joined live) because the invoice must keep
+// reflecting what was true when issued even if the product, customer, or
+// salon info changes afterwards.
+model Invoice {
+  id     String        @id @default(cuid())
+  number String        @unique // "2026-000001" — year + gapless in-year sequence
+  source InvoiceSource
+
+  paymentId String  @unique
+  payment   Payment @relation(fields: [paymentId], references: [id])
+
+  issuedAt DateTime @default(now())
+
+  sellerName      String
+  sellerAddress   String?
+  sellerVatNumber String?
+
+  customerName    String
+  customerEmail   String
+  customerAddress String?
+
+  subtotalExclVat Decimal @db.Decimal(10, 2)
+  vatRate         Decimal @default(21) @db.Decimal(4, 2)
+  vatAmount       Decimal @db.Decimal(10, 2)
+  totalInclVat    Decimal @db.Decimal(10, 2)
+
+  lines       InvoiceLine[]
+  creditNotes CreditNote[]
+
+  @@index([paymentId])
+}
+
+// INVOICE LINE
+model InvoiceLine {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  description String
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(10, 2)
+  lineTotal   Decimal @db.Decimal(10, 2)
+}
+
+// CREDIT NOTE
+// Issued alongside a refund whenever an already-invoiced order/appointment
+// is cancelled — never edits or deletes the original Invoice, Belgian law
+// requires the correction to be its own numbered document. Own gapless
+// sequence, separate counter from Invoice's.
+model CreditNote {
+  id     String @id @default(cuid())
+  number String @unique // "NC2026-000001"
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+
+  reason       String?
+  issuedAt     DateTime @default(now())
+  totalInclVat Decimal  @db.Decimal(10, 2)
+
+  @@index([invoiceId])
 }
 
 // TRANSACTION

@@ -11,6 +11,21 @@ import { welcomeWithCredentialsEmail } from "@/lib/email-templates";
 import { ROLES, DASHBOARD_PERMISSIONS, hasPermission } from "@/lib/authorization";
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
+import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
+import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
+
+/** Order items (+ shipping, if any) as invoice line snapshots. */
+function orderInvoiceLines(order) {
+  const lines = order.items.map((item) => ({
+    description: `${item.productName} — ${item.variantName}`,
+    quantity: item.quantity,
+    unitPrice: Number(item.unitPrice),
+  }));
+  if (Number(order.shippingCost) > 0) {
+    lines.push({ description: "Livraison", quantity: 1, unitPrice: Number(order.shippingCost) });
+  }
+  return lines;
+}
 
 /**
  * Checkout + order fulfilment.
@@ -133,6 +148,15 @@ function serializeOrder(order) {
       ? { id: order.user.id, fullName: order.user.fullName, email: order.user.email, phone: order.user.phone }
       : null,
     hasPayment: Boolean(order.payment),
+    invoice: order.payment?.invoice
+      ? { id: order.payment.invoice.id, number: order.payment.invoice.number, issuedAt: order.payment.invoice.issuedAt }
+      : null,
+    creditNotes: (order.payment?.invoice?.creditNotes ?? []).map((cn) => ({
+      id: cn.id,
+      number: cn.number,
+      issuedAt: cn.issuedAt,
+      totalInclVat: Number(cn.totalInclVat),
+    })),
     items: (order.items ?? []).map((item) => ({
       id: item.id,
       productName: item.productName,
@@ -406,7 +430,7 @@ export async function fulfillOrderPayment(session) {
   const paidAmount = (session.amount_total ?? 0) / 100;
   const nextStatus = order.fulfilmentMode === "SHIPPING_PREPAID" ? "PROCESSING" : "PAID";
 
-  await prisma.$transaction(async (tx) => {
+  const { invoice } = await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.create({
       data: {
         orderId: order.id,
@@ -428,6 +452,14 @@ export async function fulfillOrderPayment(session) {
         transactionType: "FINAL_PAYMENT",
         paidAt: new Date(),
       },
+    });
+
+    const invoice = await issueInvoice(tx, {
+      paymentId: payment.id,
+      source: "ORDER",
+      totalInclVat: paidAmount,
+      customer: { fullName: order.user.fullName, email: order.user.email },
+      lines: orderInvoiceLines(order),
     });
 
     for (const item of order.items) {
@@ -468,12 +500,19 @@ export async function fulfillOrderPayment(session) {
         status: "PENDING",
       },
     });
+
+    return { invoice };
   });
 
   const pickupNote =
     order.fulfilmentMode === "PICKUP_PREPAID"
       ? `Nous vous préviendrons dès qu'elle sera prête à être retirée. Code de retrait : ${order.pickupCode}.`
       : "Elle sera expédiée sous peu — vous recevrez le numéro de suivi bpost par e-mail.";
+
+  const invoicePdf = await renderInvoicePdf(invoice).catch((err) => {
+    console.error("[fulfillOrderPayment] invoice PDF render failed:", err);
+    return null;
+  });
 
   sendEmail({
     to: order.user.email,
@@ -482,6 +521,7 @@ export async function fulfillOrderPayment(session) {
       `Bonjour ${order.user.fullName},\n\n` +
       `Votre paiement de €${paidAmount.toFixed(2)} pour la commande n°${order.orderNumber} a bien été reçu. ${pickupNote}\n\n` +
       `L'équipe Meri Beauty`,
+    ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
     html:
       `<p>Bonjour ${order.user.fullName},</p>` +
       `<p>Votre paiement de <strong>€${paidAmount.toFixed(2)}</strong> pour la commande n°${order.orderNumber} a bien été reçu. ${pickupNote}</p>` +
@@ -538,7 +578,7 @@ export async function getOrderById(orderId) {
       where: { id: orderId },
       include: {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
-        payment: true,
+        payment: { include: { invoice: { include: { creditNotes: true } } } },
         items: true,
       },
     });
@@ -605,7 +645,9 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
       return { success: false, message: "Mode de paiement requis pour cette commande non prépayée." };
     }
 
-    await prisma.$transaction(async (tx) => {
+    const { invoice } = await prisma.$transaction(async (tx) => {
+      let invoice = null;
+
       if (needsPayment) {
         const payment = await tx.payment.create({
           data: {
@@ -627,6 +669,14 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
           },
+        });
+
+        invoice = await issueInvoice(tx, {
+          paymentId: payment.id,
+          source: "ORDER",
+          totalInclVat: Number(order.totalAmount),
+          customer: { fullName: order.user.fullName, email: order.user.email },
+          lines: orderInvoiceLines(order),
         });
 
         for (const item of order.items) {
@@ -663,7 +713,30 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
           expiresAt: null,
         },
       });
+
+      return { invoice };
     });
+
+    if (invoice) {
+      const invoicePdf = await renderInvoicePdf(invoice).catch((err) => {
+        console.error("[completeOrderPickup] invoice PDF render failed:", err);
+        return null;
+      });
+
+      sendEmail({
+        to: order.user.email,
+        subject: `Facture – Commande n°${order.orderNumber} – Meri Beauty`,
+        text:
+          `Bonjour ${order.user.fullName},\n\n` +
+          `Merci pour votre achat ! Voici votre facture pour la commande n°${order.orderNumber} (${Number(order.totalAmount).toFixed(2)} €).\n\n` +
+          `L'équipe Meri Beauty`,
+        html:
+          `<p>Bonjour ${order.user.fullName},</p>` +
+          `<p>Merci pour votre achat ! Voici votre facture pour la commande n°${order.orderNumber} (<strong>${Number(order.totalAmount).toFixed(2)} €</strong>).</p>` +
+          `<p>L'équipe Meri Beauty</p>`,
+        ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
+      }).catch((err) => console.error("[completeOrderPickup] receipt email failed:", err));
+    }
 
     revalidatePath("/dashboard/boutique/orders");
     return { success: true, message: `Commande n°${order.orderNumber} remise au client.` };
@@ -758,7 +831,11 @@ export async function cancelOrder(input) {
   try {
     const order = await prisma.order.findUnique({
       where: { id: orderId },
-      include: { items: true, payment: true, user: { select: { fullName: true, email: true } } },
+      include: {
+        items: true,
+        payment: { include: { invoice: true } },
+        user: { select: { fullName: true, email: true } },
+      },
     });
     if (!order) return { success: false, message: "Commande introuvable." };
     if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
@@ -767,7 +844,7 @@ export async function cancelOrder(input) {
 
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
 
-    await prisma.$transaction(async (tx) => {
+    const { creditNote } = await prisma.$transaction(async (tx) => {
       for (const item of order.items) {
         const variant = await tx.productVariant.findUnique({
           where: { id: item.variantId },
@@ -799,6 +876,17 @@ export async function cancelOrder(input) {
         where: { id: orderId },
         data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: reason ?? null },
       });
+
+      let creditNote = null;
+      if (wasSold && order.payment.invoice) {
+        creditNote = await issueCreditNote(tx, {
+          invoiceId: order.payment.invoice.id,
+          reason: reason ?? "Commande annulée",
+          totalInclVat: Number(order.payment.paidAmount),
+        });
+      }
+
+      return { creditNote };
     });
 
     if (wasSold && order.payment.transactionReference) {
@@ -812,6 +900,14 @@ export async function cancelOrder(input) {
         // refund failure loudly rather than rolling any of that back.
         console.error("[cancelOrder] REFUND FAILED for order", orderId, err);
       }
+    }
+
+    let creditNotePdf = null;
+    if (creditNote) {
+      creditNotePdf = await renderCreditNotePdf(creditNote, order.payment.invoice).catch((err) => {
+        console.error("[cancelOrder] credit note PDF render failed:", err);
+        return null;
+      });
     }
 
     sendEmail({
@@ -829,6 +925,9 @@ export async function cancelOrder(input) {
         (wasSold ? " Le remboursement apparaîtra sur votre compte sous quelques jours." : "") +
         (reason ? ` Raison : ${reason}` : "") +
         `</p><p>L'équipe Meri Beauty</p>`,
+      ...(creditNotePdf
+        ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] }
+        : {}),
     }).catch((err) => console.error("[cancelOrder] email failed:", err));
 
     revalidatePath("/dashboard/boutique/orders");

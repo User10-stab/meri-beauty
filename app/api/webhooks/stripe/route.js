@@ -9,6 +9,8 @@ import {
   welcomeWithCredentialsEmail,
 } from "@/lib/email-templates";
 import { fulfillOrderPayment } from "@/actions/boutique/orders";
+import { issueInvoice } from "@/lib/invoicing";
+import { renderInvoicePdf } from "@/lib/pdf/render";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -218,7 +220,7 @@ async function processCheckoutSession(session) {
   const isFullPayment = paymentMethod === "ONLINE";
 
   // ── 9. Create appointment + payment + transaction atomically ─────────────
-  await prisma.$transaction(async (tx) => {
+  const { invoice } = await prisma.$transaction(async (tx) => {
     const appointment = await tx.appointment.create({
       data: {
         userId: user.id,
@@ -276,11 +278,33 @@ async function processCheckoutSession(session) {
         status: "PENDING",
       },
     });
+
+    // Only fully-settled payments are invoiced — a deposit (PARTIALLY_PAID)
+    // has a balance still due in-salon, invoiced once that's collected.
+    let invoice = null;
+    if (isFullPayment) {
+      invoice = await issueInvoice(tx, {
+        paymentId: payment.id,
+        source: "APPOINTMENT",
+        totalInclVat: paidAmount,
+        customer: { fullName: user.fullName, email: user.email },
+        lines: [{ description: staffService.service?.name ?? "Prestation", quantity: 1, unitPrice: totalAmount }],
+      });
+    }
+
+    return { invoice };
   });
 
   // ── 10. Emails — fire-and-forget, never fail the webhook ─────────────────
   const staffName = staffService.staff?.user?.fullName ?? "votre experte";
   const serviceName = staffService.service?.name ?? "votre service";
+
+  const invoicePdf = invoice
+    ? await renderInvoicePdf(invoice).catch((err) => {
+        console.error("[stripe-webhook] invoice PDF render failed:", err);
+        return null;
+      })
+    : null;
 
   sendEmail({
     to: user.email,
@@ -294,6 +318,7 @@ async function processCheckoutSession(session) {
       totalAmount,
       paymentMethod: "Carte bancaire",
     }),
+    ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
   }).catch((err) => console.error("[stripe-webhook] confirmation email failed:", err));
 
   if (isNewUser && temporaryPassword) {

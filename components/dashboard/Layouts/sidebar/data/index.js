@@ -72,6 +72,13 @@ const ALL_NAV_DATA = [
         roles: DASHBOARD_PERMISSIONS.ORDERS, // Admin + staff — day-to-day counter work
       },
       {
+        title: "Factures",
+        icon: Icons.ReceiptIcon,
+        url: "/dashboard/invoices",
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.INVOICES, // Admin only
+      },
+      {
         title: "Newsletter",
         icon: Icons.MailIcon,
         url: "/dashboard/newsletter",

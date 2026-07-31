@@ -7,7 +7,7 @@ import QRCode from "qrcode";
 /**
  * Printable label for a variant's barcode — mainly for internally-generated
  * codes (no supplier EAN/UPC to fall back on) that need a physical sticker
- * before /boutique/scan can ever find them on the shelf.
+ * before /dashboard/boutique/scan can ever find them on the shelf.
  *
  * @param {{ variant: object|null, productName: string, onClose: () => void }} props
  */

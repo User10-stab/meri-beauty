@@ -14,7 +14,7 @@ import { getProductCategories } from "@/actions/boutique/categories";
 
 /** Not a real EAN/UPC — a locally-unique fallback so a product with no
  * supplier barcode can still get a printable label and be found by
- * /boutique/scan. The DB's unique constraint is the actual safety net. */
+ * /dashboard/boutique/scan. The DB's unique constraint is the actual safety net. */
 function generateInternalBarcode() {
   const bytes = crypto.getRandomValues(new Uint8Array(5));
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();

@@ -43,6 +43,10 @@ const ALL_NAV_DATA = [
         items: [],
       },
       {
+        title: "Paiements",
+        icon: Icons.CreditCardIcon,
+        url: "/dashboard/payments",
+        items: [],
         title: "Workshops & Événements",
         icon: Icons.Calendar,
         url: "/dashboard/workshops",

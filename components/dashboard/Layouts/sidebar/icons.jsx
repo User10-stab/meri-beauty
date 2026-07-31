@@ -203,6 +203,26 @@ export function MailIcon(props) {
   );
 }
 
+export function CreditCardIcon(props) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={24}
+      height={24}
+      viewBox="0 0 24 24"
+      fill="none"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M3 5.25C2.173 5.25 1.5 5.923 1.5 6.75V17.25C1.5 18.077 2.173 18.75 3 18.75H21C21.827 18.75 22.5 18.077 22.5 17.25V6.75C22.5 5.923 21.827 5.25 21 5.25H3ZM3 6.75H21V8.25H3V6.75ZM3 9.75V17.25H21V9.75H3ZM7.5 14.25C7.5 13.836 7.836 13.5 8.25 13.5H12C12.414 13.5 12.75 13.836 12.75 14.25C12.75 14.664 12.414 15 12 15H8.25C7.836 15 7.5 14.664 7.5 14.25Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export function ArrowLeftIcon(props) {
   return (
     <svg

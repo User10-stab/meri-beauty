@@ -9,6 +9,12 @@ export default function ServiceStep({ data, updateData, nextStep }) {
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Build a Set of service IDs already committed to the draft list so they
+  // can be excluded from the selection. The rule is per-service, not per-staff.
+  const draftedServiceIds = new Set(
+    (data.appointmentDrafts ?? []).map((d) => d.service?.id).filter(Boolean)
+  );
+
   useEffect(() => {
     if (data.category) {
       loadServices();
@@ -39,12 +45,20 @@ export default function ServiceStep({ data, updateData, nextStep }) {
     );
   }
 
-  if (services.length === 0) {
+  // Services available for selection — exclude any already in the draft list
+  const availableServices = services.filter((s) => !draftedServiceIds.has(s.id));
+
+  if (availableServices.length === 0) {
     return (
-      <div className="flex min-h-[500px] flex-col items-center justify-center">
+      <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-center">
         <p className="text-lg text-gray-600">
           Aucun service disponible pour cette catégorie
         </p>
+        {draftedServiceIds.size > 0 && (
+          <p className="text-sm text-gray-400">
+            Tous les services de cette catégorie ont déjà été ajoutés à votre réservation.
+          </p>
+        )}
       </div>
     );
   }
@@ -56,12 +70,12 @@ export default function ServiceStep({ data, updateData, nextStep }) {
           Sélectionnez un service
         </h2>
         <p className="mt-2 text-gray-600">
-          {data.category?.name} • {services.length} service{services.length > 1 ? "s" : ""} disponible{services.length > 1 ? "s" : ""}
+          {data.category?.name} • {availableServices.length} service{availableServices.length > 1 ? "s" : ""} disponible{availableServices.length > 1 ? "s" : ""}
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {services.map((service) => (
+        {availableServices.map((service) => (
           <button
             key={service.id}
             onClick={() => handleSelectService(service)}

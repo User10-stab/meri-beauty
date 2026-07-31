@@ -1,0 +1,71 @@
+import { Suspense } from "react";
+import { getStripeStatus } from "@/actions/stripe/get-stripe-status";
+import { PaymentsSettingsClient } from "@/components/dashboard/payments/PaymentsSettingsClient";
+
+export const metadata = {
+  title: "Paiements — Dashboard",
+  description: "Gérez votre connexion Stripe et vos paramètres de paiement.",
+};
+
+export const dynamic = "force-dynamic";
+
+export default async function PaymentsPage() {
+  const result = await getStripeStatus();
+
+  const settings = result.success ? result.data : null;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-dark dark:text-white">
+          Paiements
+        </h1>
+        <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
+          Gérez votre connexion Stripe pour recevoir des paiements en ligne.
+        </p>
+      </div>
+
+      {result.message && !result.success && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
+        >
+          <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
+          {result.message}
+        </div>
+      )}
+
+      <Suspense fallback={<SettingsSkeleton />}>
+        <PaymentsSettingsClient initialData={settings} />
+      </Suspense>
+    </div>
+  );
+}
+
+function SettingsSkeleton() {
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+        <div className="border-b border-stroke px-6 py-4 dark:border-dark-3">
+          <div className="h-5 w-48 animate-pulse rounded bg-gray-100 dark:bg-dark-2" />
+        </div>
+        <div className="space-y-4 p-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="h-24 w-full animate-pulse rounded-lg bg-gray-100 dark:bg-dark-2" />
+            <div className="h-24 w-full animate-pulse rounded-lg bg-gray-100 dark:bg-dark-2" />
+          </div>
+          <div className="h-10 w-40 animate-pulse rounded-lg bg-gray-100 dark:bg-dark-2" />
+        </div>
+      </div>
+      <div className="rounded-xl border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+        <div className="border-b border-stroke px-6 py-4 dark:border-dark-3">
+          <div className="h-5 w-48 animate-pulse rounded bg-gray-100 dark:bg-dark-2" />
+        </div>
+        <div className="space-y-4 p-6">
+          <div className="h-10 w-full animate-pulse rounded-lg bg-gray-100 dark:bg-dark-2" />
+          <div className="h-10 w-full animate-pulse rounded-lg bg-gray-100 dark:bg-dark-2" />
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -848,15 +848,16 @@ model Staff {
   userId String @unique
   user   User   @relation(fields: [userId], references: [id])
 
-  type              StaffType
-  languages         String[]
-  bio               String?
-  isActive          Boolean   @default(true)
-  photo             String?
-  hireDate          DateTime?
-  yearsOfExperience Int
-  isDeleted         Boolean   @default(false)
-  deletedAt         DateTime?
+  type               StaffType
+  languages          String[]
+  bio                String?
+  isActive           Boolean   @default(true)
+  photo              String?
+  hireDate           DateTime?
+  yearsOfExperience  Int
+  isDeleted            Boolean   @default(false)
+  deletedAt            DateTime?
+  vatNumber            String?  @unique
 
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
@@ -865,6 +866,17 @@ model Staff {
 
   // Account Setup
   setupCompleted Boolean @default(false)
+
+  // Bank account details
+  accountHolderName String?
+  iban              String?
+  bic               String?
+  bankName          String?
+
+  // Stripe Connect
+  stripeAccountId           String? @unique
+  stripeChargesEnabled      Boolean @default(false)
+  stripePayoutsEnabled      Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1179,6 +1191,9 @@ model RentalRequest {
   status         RentalRequestStatus
   message        String?
   ownerResponse  String?
+  specialty      String?
+  isDeleted            Boolean   @default(false)
+  deletedAt            DateTime?
   isDeleted      Boolean             @default(false)
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())

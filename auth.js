@@ -44,12 +44,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        autologinToken: { label: "Autologin Token", type: "text" },
       },
       async authorize(credentials) {
         const email = credentials?.email?.trim().toLowerCase();
         const password = credentials?.password;
+        const autologinToken = credentials?.autologinToken;
 
-        if (!email || !password) {
+        if (!email) {
           return null;
         }
 
@@ -78,10 +80,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const passwordMatch = await bcrypt.compare(password, user.password);
-
-        if (!passwordMatch) {
-          return null;
+        if (autologinToken) {
+          const { verifyAutologinToken } = await import("@/lib/autologin");
+          const isValid = verifyAutologinToken(email, autologinToken);
+          if (!isValid) {
+            return null;
+          }
+        } else {
+          if (!password) {
+            return null;
+          }
+          const passwordMatch = await bcrypt.compare(password, user.password);
+          if (!passwordMatch) {
+            return null;
+          }
         }
 
         return {

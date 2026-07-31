@@ -1,15 +1,3 @@
-/*
-  Warnings:
-
-  - You are about to drop the `Brand` table. If the table is not empty, all the data it contains will be lost.
-  - You are about to drop the `InventoryMovement` table. If the table is not empty, all the data it contains will be lost.
-  - You are about to drop the `Product` table. If the table is not empty, all the data it contains will be lost.
-  - You are about to drop the `ProductCategory` table. If the table is not empty, all the data it contains will be lost.
-  - You are about to drop the `ProductImage` table. If the table is not empty, all the data it contains will be lost.
-  - You are about to drop the `ProductSubcategory` table. If the table is not empty, all the data it contains will be lost.
-  - You are about to drop the `ProductVariant` table. If the table is not empty, all the data it contains will be lost.
-
-*/
 -- CreateEnum
 CREATE TYPE "WorkshopType" AS ENUM ('WORKSHOP', 'EVENT');
 
@@ -24,54 +12,6 @@ CREATE TYPE "WorkshopReservationStatus" AS ENUM ('PENDING_DEPOSIT', 'CONFIRMED',
 
 -- CreateEnum
 CREATE TYPE "WaitingListStatus" AS ENUM ('WAITING', 'NOTIFIED', 'EXPIRED', 'CONVERTED', 'REMOVED');
-
--- DropForeignKey
-ALTER TABLE "InventoryMovement" DROP CONSTRAINT "InventoryMovement_createdById_fkey";
-
--- DropForeignKey
-ALTER TABLE "InventoryMovement" DROP CONSTRAINT "InventoryMovement_variantId_fkey";
-
--- DropForeignKey
-ALTER TABLE "Product" DROP CONSTRAINT "Product_brandId_fkey";
-
--- DropForeignKey
-ALTER TABLE "Product" DROP CONSTRAINT "Product_subcategoryId_fkey";
-
--- DropForeignKey
-ALTER TABLE "ProductImage" DROP CONSTRAINT "ProductImage_productId_fkey";
-
--- DropForeignKey
-ALTER TABLE "ProductSubcategory" DROP CONSTRAINT "ProductSubcategory_categoryId_fkey";
-
--- DropForeignKey
-ALTER TABLE "ProductVariant" DROP CONSTRAINT "ProductVariant_productId_fkey";
-
--- DropTable
-DROP TABLE "Brand";
-
--- DropTable
-DROP TABLE "InventoryMovement";
-
--- DropTable
-DROP TABLE "Product";
-
--- DropTable
-DROP TABLE "ProductCategory";
-
--- DropTable
-DROP TABLE "ProductImage";
-
--- DropTable
-DROP TABLE "ProductSubcategory";
-
--- DropTable
-DROP TABLE "ProductVariant";
-
--- DropEnum
-DROP TYPE "MovementType";
-
--- DropEnum
-DROP TYPE "ProductStatus";
 
 -- CreateTable
 CREATE TABLE "workshops" (

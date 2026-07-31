@@ -3,6 +3,14 @@ import Footer from "@/components/website/Footer";
 import { getSalon } from "@/actions/salon/get-salon";
 import { getPublicServices } from "@/actions/services/get-services";
 
+// Deliberately NOT fetching the cart here: this layout wraps every public
+// page including the marketing homepage, and getCart() touches cookies() —
+// doing that in a shared layout would force cookies() during static
+// generation for every page under it, permanently opting the whole public
+// site out of static rendering. SiteHeader fetches its own cart badge count
+// client-side instead (see components/website/SiteHeader.jsx), which only
+// costs a request on pages a visitor actually loads, not a build-time
+// static/ISR regression on pages that have nothing to do with the boutique.
 export default async function PublicLayout({ children }) {
   const [salonResult, servicesResult] = await Promise.all([
     getSalon(),

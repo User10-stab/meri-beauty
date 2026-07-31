@@ -1,0 +1,241 @@
+"use client";
+
+import { useMemo, useState, useTransition } from "react";
+import { toast } from "sonner";
+import { Search, X, Loader2, PackageSearch } from "lucide-react";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import Button from "@/components/ui/Button";
+import { approveReturnRequest, rejectReturnRequest, completeReturnRequest } from "@/actions/boutique/returns";
+
+const STATUS_LABEL = {
+  REQUESTED: "Demandée",
+  APPROVED: "Approuvée",
+  REJECTED: "Refusée",
+  COMPLETED: "Terminée",
+};
+
+const STATUS_STYLE = {
+  REQUESTED: "bg-amber-50 text-amber-700 border-amber-100",
+  APPROVED: "bg-blue-50 text-blue-700 border-blue-100",
+  REJECTED: "bg-red-50 text-red-600 border-red-100",
+  COMPLETED: "bg-gray-100 text-gray-500 border-gray-200",
+};
+
+function formatPrice(n) {
+  return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
+}
+function formatDate(d) {
+  return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" }) : "—";
+}
+
+export function ReturnsPageClient({ initialRequests }) {
+  const [requests] = useState(initialRequests);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [search, setSearch] = useState("");
+  const [active, setActive] = useState(null);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return requests.filter((rr) => {
+      if (statusFilter && rr.status !== statusFilter) return false;
+      if (q) {
+        const hay = `${rr.order?.orderNumber ?? ""} ${rr.order?.user?.fullName ?? ""} ${rr.order?.user?.email ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [requests, statusFilter, search]);
+
+  return (
+    <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+      <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center">
+        <div className="relative w-full max-w-xs">
+          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher n°, client…"
+            className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+          />
+        </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+        >
+          <option value="">Tous les statuts</option>
+          {Object.entries(STATUS_LABEL).map(([value, label]) => (
+            <option key={value} value={value}>{label}</option>
+          ))}
+        </select>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
+            <PackageSearch size={22} className="text-gray-300" />
+          </div>
+          <p className="font-medium text-gray-700">
+            {requests.length > 0 ? "Aucune demande ne correspond à votre recherche" : "Aucune demande de retour pour le moment"}
+          </p>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="pl-6">Commande</TableHead>
+              <TableHead>Client</TableHead>
+              <TableHead>Articles</TableHead>
+              <TableHead>Statut</TableHead>
+              <TableHead className="pr-6">Demandée le</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filtered.map((rr) => (
+              <TableRow key={rr.id} className="cursor-pointer" onClick={() => setActive(rr)}>
+                <TableCell className="pl-6">
+                  <span className="font-medium text-gray-800 dark:text-white">n°{rr.order?.orderNumber}</span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-gray-700 dark:text-dark-6">{rr.order?.user?.fullName ?? "—"}</span>
+                  <span className="block text-xs text-gray-400">{rr.order?.user?.email}</span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-gray-600 dark:text-dark-6">
+                    {rr.items.reduce((sum, i) => sum + i.quantity, 0)} article(s)
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[rr.status]}`}>
+                    {STATUS_LABEL[rr.status]}
+                  </span>
+                </TableCell>
+                <TableCell className="pr-6">
+                  <span className="text-gray-500 dark:text-dark-6">{formatDate(rr.requestedAt)}</span>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <ReturnDetailDialog returnRequest={active} onClose={() => setActive(null)} />
+    </div>
+  );
+}
+
+function ReturnDetailDialog({ returnRequest, onClose }) {
+  const [isPending, startTransition] = useTransition();
+  const [staffNote, setStaffNote] = useState("");
+
+  if (!returnRequest) return null;
+  const rr = returnRequest;
+
+  function run(action) {
+    startTransition(async () => {
+      const result = await action({ returnRequestId: rr.id, staffNote: staffNote || undefined });
+      if (result.success) {
+        toast.success(result.message);
+        onClose();
+        // Reload rather than patch client state — completion changes stock,
+        // credit notes, and the order's own record, not just this row.
+        window.location.reload();
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-dark">
+        <div className="mb-4 flex items-start justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900 dark:text-white">
+              Retour — commande n°{rr.order?.orderNumber}
+            </h2>
+            <p className="text-sm text-gray-500">{rr.order?.user?.fullName} — {rr.order?.user?.email}</p>
+          </div>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mb-4 space-y-2">
+          {rr.items.map((item) => (
+            <div key={item.id} className="flex justify-between text-sm">
+              <span className="text-gray-700 dark:text-dark-6">
+                {item.productName} ({item.variantName}) × {item.quantity}
+              </span>
+              <span className="text-gray-500">{item.unitPrice != null ? formatPrice(item.unitPrice * item.quantity) : ""}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mb-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-dark-2 dark:text-dark-6">
+          <span className="font-medium text-gray-700 dark:text-white">Motif : </span>
+          {rr.reason}
+        </div>
+
+        {["REQUESTED", "APPROVED"].includes(rr.status) && (
+          <div className="mb-4">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Note interne (optionnel)
+            </label>
+            <textarea
+              value={staffNote}
+              onChange={(e) => setStaffNote(e.target.value)}
+              rows={2}
+              className="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+          </div>
+        )}
+
+        {rr.staffNote && !["REQUESTED", "APPROVED"].includes(rr.status) && (
+          <p className="mb-4 text-xs text-gray-400">Note : {rr.staffNote}</p>
+        )}
+
+        <div className="flex flex-wrap justify-end gap-3">
+          {rr.status === "REQUESTED" && (
+            <>
+              <button
+                type="button"
+                onClick={() => run(rejectReturnRequest)}
+                disabled={isPending}
+                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+              >
+                Refuser
+              </button>
+              <Button onClick={() => run(approveReturnRequest)} disabled={isPending}>
+                {isPending && <Loader2 size={14} className="animate-spin" />}
+                Approuver
+              </Button>
+            </>
+          )}
+          {rr.status === "APPROVED" && (
+            <>
+              <button
+                type="button"
+                onClick={() => run(rejectReturnRequest)}
+                disabled={isPending}
+                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+              >
+                Refuser
+              </button>
+              <Button onClick={() => run(completeReturnRequest)} disabled={isPending}>
+                {isPending && <Loader2 size={14} className="animate-spin" />}
+                Confirmer réception &amp; rembourser
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

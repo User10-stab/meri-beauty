@@ -1,6 +1,10 @@
 @import 'tailwindcss';
 
-@custom-variant dark (&:is(.dark *));
+/* Dark mode is a dashboard-only preference (its toggle only exists there) — scoped to
+   .dashboard-scope so an admin's choice never bleeds into the public boutique/marketing
+   site or the login/register pages, which share the same <html> and were never designed
+   with dark styling. */
+@custom-variant dark (&:is(.dark .dashboard-scope, .dark .dashboard-scope *));
 
 @theme {
   --font-sans:

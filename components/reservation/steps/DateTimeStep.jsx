@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getAvailableSlots, getMonthAvailability } from "@/actions/reservation/get-available-slots";
 import { ChevronLeft, ChevronRight, Calendar, Clock } from "lucide-react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 
 const MONTHS = [
   "Janvier",

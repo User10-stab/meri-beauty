@@ -101,6 +101,22 @@ export function ClockIcon({ className = "w-6 h-6" }) {
   );
 }
 
+export function ScanIcon({ className = "w-5 h-5" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M4 8V6a2 2 0 0 1 2-2h2M20 8V6a2 2 0 0 0-2-2h-2M4 16v2a2 2 0 0 0 2 2h2M20 16v2a2 2 0 0 1-2 2h-2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 12h16" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function MapPinIcon({ className = "w-5 h-5" }) {
   return (
     <svg

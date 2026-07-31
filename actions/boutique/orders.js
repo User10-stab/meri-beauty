@@ -260,6 +260,7 @@ export async function createOrderFromCart(input) {
       const created = await tx.order.create({
         data: {
           userId: user.id,
+          cartId: fullCart.id,
           fulfilmentMode,
           status: isOnSite ? "PENDING_PICKUP" : "PENDING_PAYMENT",
           subtotal,
@@ -285,7 +286,15 @@ export async function createOrderFromCart(input) {
         },
       });
 
-      await tx.cart.update({ where: { id: fullCart.id }, data: { status: "CONVERTED" } });
+      // PICKUP_ON_SITE has no payment step — the order is confirmed right here, so the
+      // cart empties immediately, same as any normal checkout. The two prepaid modes
+      // still redirect to Stripe after this: the cart deliberately stays ACTIVE until
+      // fulfillOrderPayment() confirms the payment actually went through, so a customer
+      // who abandons the Stripe page and comes back still finds their cart intact
+      // instead of it looking silently cleared.
+      if (isOnSite) {
+        await tx.cart.update({ where: { id: fullCart.id }, data: { status: "CONVERTED" } });
+      }
 
       return created;
     });
@@ -415,7 +424,7 @@ export async function fulfillOrderPayment(session) {
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    include: { items: true, user: { select: { id: true, fullName: true, email: true } } },
+    include: { items: true, cart: { select: { id: true, status: true } }, user: { select: { id: true, fullName: true, email: true } } },
   });
 
   if (!order || order.status === "CANCELLED" || order.status === "EXPIRED") {
@@ -496,6 +505,13 @@ export async function fulfillOrderPayment(session) {
     }
 
     await tx.order.update({ where: { id: order.id }, data: { status: nextStatus, expiresAt: null } });
+
+    // Only now — payment confirmed — does the source cart actually empty. It was
+    // deliberately left ACTIVE at checkout time so an abandoned Stripe session
+    // wouldn't wipe the customer's cart (see createOrderFromCart).
+    if (order.cart && order.cart.status === "ACTIVE") {
+      await tx.cart.update({ where: { id: order.cart.id }, data: { status: "CONVERTED" } });
+    }
 
     await tx.notification.create({
       data: {

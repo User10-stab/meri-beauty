@@ -516,7 +516,8 @@ model Cart {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items CartItem[]
+  items  CartItem[]
+  orders Order[]
 
   @@index([userId])
 }
@@ -553,6 +554,14 @@ model Order {
 
   userId String
   user   User   @relation("OrderBuyer", fields: [userId], references: [id])
+
+  // The cart this order was checked out from — null for older orders created
+  // before this field existed. Prepaid orders keep their source cart ACTIVE
+  // until payment actually succeeds (see fulfillOrderPayment), specifically so
+  // a customer who abandons the Stripe redirect still finds their cart intact
+  // instead of it looking silently cleared.
+  cartId String?
+  cart   Cart?   @relation(fields: [cartId], references: [id])
 
   fulfilmentMode FulfilmentMode
   status         OrderStatus    @default(PENDING_PAYMENT)

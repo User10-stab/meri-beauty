@@ -10,7 +10,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 // ENUMS
@@ -191,14 +191,159 @@ enum WeekDay {
 
   SUNDAY
 }
+
 enum ReservationConfirmationMode {
   AUTOMATIC
   MANUAL
 }
 
-// SALON
+// ─── WORKSHOP / EVENT ENUMS ────────────────────────────────────────────────────
+
+enum WorkshopType {
+  WORKSHOP
+  EVENT
+}
+
+enum WorkshopStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  ARCHIVED
+}
+
+enum SessionStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum WorkshopReservationStatus {
+  PENDING_DEPOSIT
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum WaitingListStatus {
+  WAITING
+  NOTIFIED
+  EXPIRED
+  CONVERTED
+  REMOVED
+}
+
+// ─── WORKSHOP / EVENT MODELS ───────────────────────────────────────────
+
+model Activity {
+  id                    String         @id @default(cuid())
+  type                  WorkshopType
+  title                 String
+  description           String?
+  cover                 String?
+  price                 Decimal        @db.Decimal(10, 2)
+  duration              Int
+  language              String?
+  capacity              Int
+  animatorId            String?
+  animator              Animator?      @relation(fields: [animatorId], references: [id])
+  status                WorkshopStatus @default(DRAFT)
+  allowMultipleSessions Boolean        @default(false)
+  depositPercentage     Int            @default(30)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  sessions WorkshopSession[]
+
+  @@map("workshops")
+}
+
+model WorkshopSession {
+  id                   String        @id @default(cuid())
+  workshopId           String
+  workshop             Activity      @relation(fields: [workshopId], references: [id], onDelete: Cascade)
+  animatorId           String?
+  animator             Animator?     @relation(fields: [animatorId], references: [id])
+  startDate            DateTime
+  endDate              DateTime?
+  capacity             Int
+  status               SessionStatus @default(SCHEDULED)
+  registrationDeadline DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  reservations WorkshopReservation[]
+  waitingList  WaitingListEntry[]
+
+  @@index([workshopId])
+  @@map("workshop_sessions")
+}
+
+model WorkshopReservation {
+  id            String                    @id @default(cuid())
+  sessionId     String
+  session       WorkshopSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId    String
+  customer      User                      @relation(fields: [customerId], references: [id])
+  paymentId     String?
+  seatsCount    Int                       @default(1)
+  status        WorkshopReservationStatus @default(PENDING_DEPOSIT)
+  holdExpiresAt DateTime?
+  depositAmount Decimal                   @default(0) @db.Decimal(10, 2)
+  totalPrice    Decimal                   @db.Decimal(10, 2)
+  balanceDue    Decimal                   @default(0) @db.Decimal(10, 2)
+  participants  String?
+  notes         String?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  @@index([sessionId])
+  @@index([customerId])
+  @@map("workshop_reservations")
+}
+
+model WaitingListEntry {
+  id                       String            @id @default(cuid())
+  sessionId                String
+  session                  WorkshopSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId               String
+  customer                 User              @relation(fields: [customerId], references: [id])
+  seatsRequested           Int               @default(1)
+  position                 Int
+  status                   WaitingListStatus @default(WAITING)
+  notifiedAt               DateTime?
+  expiresAt                DateTime?
+  convertedToReservationId String?
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+
+  @@index([sessionId, position])
+  @@index([sessionId, status])
+  @@map("waiting_list_entries")
+}
+
+model Animator {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique
+  phone     String?
+  bio       String?
+  avatar    String?
+  website   String?
+  instagram String?
+  facebook  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activities Activity[]
+  sessions   WorkshopSession[]
+
+  @@map("animators")
+}
+
 model Salon {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   description String?
   logo        String?
@@ -209,50 +354,43 @@ model Salon {
   address     String?
   vatNumber   String? // legal TVA/BCE number — printed on every issued invoice
 
-  instagram   String?
-  facebook    String?
-  tiktok      String?
+  instagram String?
+  facebook  String?
+  tiktok    String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  gallery      SalonGallery[]
-  workingDays  SalonWorkingDay[]
-  closures     SalonClosure[]
-  newsletters  Newsletter[]
+  gallery     SalonGallery[]
+  workingDays SalonWorkingDay[]
+  closures    SalonClosure[]
+  newsletters Newsletter[]
 }
+
 model SalonWorkingDay {
-  id           String   @id @default(cuid())
-
-  day          WeekDay
-  isOpen       Boolean  @default(true)
-
-  openingTime  String
-  closingTime  String
-
-  salonId      String
-  salon        Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  id          String  @id @default(cuid())
+  day         WeekDay
+  isOpen      Boolean @default(true)
+  openingTime String
+  closingTime String
+  salonId     String
+  salon       Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
   @@unique([salonId, day])
 }
+
 model SalonClosure {
-  id          String   @id @default(cuid())
-
+  id          String    @id @default(cuid())
   title       String
-
   startDate   DateTime
   endDate     DateTime?
-
-  isFullDay   Boolean @default(true)
-
+  isFullDay   Boolean   @default(true)
   openingTime String?
   closingTime String?
-
   salonId     String
-  salon       Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  salon       Salon     @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 // USER
@@ -272,8 +410,8 @@ model User {
   vatNumber            String?   // Client TVA number for B2B invoices
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   staff                Staff?
   appointments         Appointment[]
@@ -282,6 +420,8 @@ model User {
   newsletterRecipients NewsletterRecipient[]
   createdStaffServices StaffService[]        @relation("CreatedBy")
   rentalRequests       RentalRequest[]
+  workshopReservations WorkshopReservation[]
+  waitingListEntries   WaitingListEntry[]
   stockMovements       InventoryMovement[]   @relation("StockMovementBy")
   carts                Cart[]
   orders               Order[]               @relation("OrderBuyer")
@@ -708,23 +848,23 @@ model Staff {
   userId String @unique
   user   User   @relation(fields: [userId], references: [id])
 
-  type               StaffType
-  languages          String[]
-  bio                String?
-  isActive           Boolean   @default(true)
-  photo              String?
-  hireDate           DateTime?
-  yearsOfExperience  Int
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
+  type              StaffType
+  languages         String[]
+  bio               String?
+  isActive          Boolean   @default(true)
+  photo             String?
+  hireDate          DateTime?
+  yearsOfExperience Int
+  isDeleted         Boolean   @default(false)
+  deletedAt         DateTime?
 
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
-  depositEnabled              Boolean @default(false)
-  depositPercentage           Decimal @default(10.0) @db.Decimal(5,2)
+  depositEnabled              Boolean                     @default(false)
+  depositPercentage           Decimal                     @default(10.0) @db.Decimal(5, 2)
 
   // Account Setup
-  setupCompleted              Boolean @default(false)
+  setupCompleted Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -778,10 +918,10 @@ model Appointment {
   status    AppointmentStatus
   notes     String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  isDeleted     Boolean        @default(false)
+  deletedAt     DateTime?
   payment       Payment?
   review        Review?
   notifications Notification[]
@@ -806,7 +946,7 @@ model Payment {
   paymentType          PaymentType
   status               PaymentStatus
   paidAt               DateTime?
-  isDeleted            Boolean   @default(false)
+  isDeleted            Boolean       @default(false)
   deletedAt            DateTime?
   transactionReference String?
 
@@ -909,8 +1049,8 @@ model Transaction {
   transactionType TransactionType
   paidAt          DateTime
   createdAt       DateTime          @default(now())
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
+  isDeleted       Boolean           @default(false)
+  deletedAt       DateTime?
 }
 
 // CONTRACT
@@ -1006,7 +1146,7 @@ model Newsletter {
   updatedAt   DateTime         @updatedAt
 
   salonId String
-  salon   Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  salon   Salon  @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
   recipients NewsletterRecipient[]
 }
@@ -1039,8 +1179,8 @@ model RentalRequest {
   status         RentalRequestStatus
   message        String?
   ownerResponse  String?
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
+  isDeleted      Boolean             @default(false)
+  deletedAt      DateTime?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 }

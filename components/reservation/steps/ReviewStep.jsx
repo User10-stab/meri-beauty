@@ -4,7 +4,7 @@ import { Calendar, Clock, User, Mail, Phone, Tag, Euro, FileText } from "lucide-
 import Image from "next/image";
 import { useState } from "react";
 import { createReservation } from "@/actions/reservation/create-reservation";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
 export default function ReviewStep({ data, updateData, nextStep, customerSession }) {

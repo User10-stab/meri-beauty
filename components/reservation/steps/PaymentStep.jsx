@@ -4,7 +4,7 @@ import { useState } from "react";
 import { CreditCard, Wallet, Check, Loader2, Mail } from "lucide-react";
 import { createReservation, confirmPayment } from "@/actions/reservation/create-reservation";
 import { signIn } from "next-auth/react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 
 // ─── Success screen ───────────────────────────────────────────────────────────

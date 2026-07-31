@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { User, Mail, Phone, MessageSquare, LogIn, AlertCircle } from "lucide-react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import { checkEmailExists } from "@/actions/reservation/check-email-exists";
 
 // ─── Field wrapper ────────────────────────────────────────────────────────────

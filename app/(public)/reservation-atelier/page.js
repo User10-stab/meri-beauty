@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, ArrowLeft, Calendar, Clock, Users, Euro, CheckCircle } from "lucide-react";
+import { Loader2, ArrowLeft, Calendar, Clock, Users, Euro, CheckCircle, Bell, AlertTriangle } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { checkWorkshopSessionAvailability, createWorkshopReservation } from "@/actions/workshops/create-workshop-reservation";
 import { getPublicActivityById } from "@/actions/workshops/get-public-activities";
+import { joinWaitingList, validateWaitingListPriority, convertWaitingListEntry } from "@/actions/workshops/waiting-list";
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
@@ -32,6 +33,9 @@ export default function ReservationAtelierPage() {
 
   const activityId = searchParams.get("activity");
   const sessionId = searchParams.get("session");
+  const isPriority = searchParams.get("priority") === "true";
+  const waitingListId = searchParams.get("wl");
+  const wantsWaitingList = searchParams.get("waitingList") === "true";
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -41,6 +45,12 @@ export default function ReservationAtelierPage() {
   const [seats, setSeats] = useState(1);
   const [form, setForm] = useState({ fullName: "", email: "", phone: "" });
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  // Waiting list state
+  const [wlSuccess, setWlSuccess] = useState(null); // { position }
+  const [priorityValid, setPriorityValid] = useState(false);
+  const [priorityMessage, setPriorityMessage] = useState("");
 
   useEffect(() => {
     if (!activityId || !sessionId) {
@@ -74,11 +84,21 @@ export default function ReservationAtelierPage() {
         setAvailable(availResult.data.available);
       }
 
+      // Check priority token if present
+      if (isPriority && waitingListId) {
+        const priorityRes = await validateWaitingListPriority(waitingListId);
+        if (priorityRes.valid) {
+          setPriorityValid(true);
+        } else {
+          setPriorityMessage(priorityRes.message || "Lien d'accès prioritaire expiré ou invalide.");
+        }
+      }
+
       setLoading(false);
     }
 
     load();
-  }, [activityId, sessionId]);
+  }, [activityId, sessionId, isPriority, waitingListId]);
 
   useEffect(() => {
     if (session?.user) {
@@ -90,6 +110,9 @@ export default function ReservationAtelierPage() {
     }
   }, [session]);
 
+  const isFull = available <= 0 && !priorityValid;
+  const showWaitingListForm = (isFull || wantsWaitingList) && !priorityValid;
+
   const depositPct = activity?.depositPercentage ?? 30;
   const unitPrice = Number(activity?.price || 0);
   const totalPrice = unitPrice * seats;
@@ -97,32 +120,68 @@ export default function ReservationAtelierPage() {
   const balanceDue = totalPrice - depositAmount;
 
   const priceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
-  const maxSeats = Math.min(available, 10);
+  const maxSeats = Math.min(Math.max(1, available), 10);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError("");
+    setFieldErrors({});
     setSubmitting(true);
 
+    if (showWaitingListForm) {
+      // Submit to Waiting List
+      const result = await joinWaitingList({
+        sessionId,
+        customerInfo: { ...form, seatsRequested: seats },
+      });
+
+      if (result.success) {
+        if (result.isNewUser) {
+          sessionStorage.setItem("workshop_signin", JSON.stringify({
+            email: result.email,
+            password: result.temporaryPassword,
+          }));
+        }
+        setWlSuccess({ position: result.position });
+      } else {
+        if (result.field) {
+          setFieldErrors({ [result.field]: result.message });
+        } else {
+          setError(result.message || "Erreur lors de l'inscription à la liste d'attente.");
+        }
+      }
+      setSubmitting(false);
+      return;
+    }
+
+    // Standard reservation submission
     const result = await createWorkshopReservation({
       sessionId,
       activityId,
       seatsCount: seats,
       customerInfo: form,
+      isPriority: priorityValid,
+      waitingListEntryId: waitingListId,
     });
 
     if (result.success && result.url) {
-      // Store credentials for auto-login after payment
+      if (waitingListId) {
+        await convertWaitingListEntry(waitingListId, result.reservationId);
+      }
+
       if (result.isNewUser) {
         sessionStorage.setItem("workshop_signin", JSON.stringify({
           email: result.email,
           password: result.temporaryPassword,
         }));
       }
-      // Redirect to Stripe Checkout
       window.location.href = result.url;
     } else {
-      setError(result.message || "Erreur lors de la réservation.");
+      if (result.field) {
+        setFieldErrors({ [result.field]: result.message });
+      } else {
+        setError(result.message || "Erreur lors de la réservation.");
+      }
       setSubmitting(false);
     }
   }
@@ -164,185 +223,243 @@ export default function ReservationAtelierPage() {
             {activity.type === "WORKSHOP" ? "Atelier" : "Événement"}
           </span>
           <h1 className="text-2xl font-bold text-ink sm:text-3xl">{activity.title}</h1>
+
+          {/* Priority Access Badge */}
+          {priorityValid && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 border border-emerald-200">
+              <CheckCircle size={16} className="text-emerald-600 shrink-0" />
+              <span>Une place s&apos;est libérée ! Finalisez votre réservation rapidement : elle sera attribuée à la première personne qui réserve.</span>
+            </div>
+          )}
+
+          {priorityMessage && !priorityValid && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-800 border border-amber-200">
+              <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+              <span>{priorityMessage}</span>
+            </div>
+          )}
         </div>
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="lg:col-span-3 space-y-6">
-            {/* Seats selection */}
-            <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
-              <h2 className="mb-4 text-sm font-semibold text-ink">Nombre de places</h2>
-              <div className="flex items-center gap-4">
-                <button
-                  type="button"
-                  onClick={() => setSeats(Math.max(1, seats - 1))}
-                  disabled={seats <= 1}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-ink/15 text-ink transition-colors hover:bg-gold/10 hover:border-gold/30 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  −
-                </button>
-                <span className="min-w-[3ch] text-center text-xl font-bold text-ink">{seats}</span>
-                <button
-                  type="button"
-                  onClick={() => setSeats(Math.min(maxSeats, seats + 1))}
-                  disabled={seats >= maxSeats}
-                  className="flex h-9 w-9 items-center justify-center rounded-full border border-ink/15 text-ink transition-colors hover:bg-gold/10 hover:border-gold/30 disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  +
-                </button>
-                <span className="text-xs text-ink/40">
-                  {available > 0
-                    ? `max. ${maxSeats} place${maxSeats > 1 ? "s" : ""} disponible${maxSeats > 1 ? "s" : ""}`
-                    : "Complet"}
-                </span>
-              </div>
-              {available <= 3 && available > 0 && (
-                <p className="mt-2 text-xs text-amber-600">Plus que {available} place{available > 1 ? "s" : ""} !</p>
-              )}
+        {/* Waiting list success state */}
+        {wlSuccess ? (
+          <div className="rounded-2xl border border-emerald-200 bg-white p-8 text-center shadow-sm space-y-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <Bell size={28} />
             </div>
-
-            {/* Customer info */}
-            <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
-              <h2 className="text-sm font-semibold text-ink">Vos coordonnées</h2>
-              {isAuthed ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 rounded-lg bg-gold/5 px-3 py-2.5">
-                    <CheckCircle size={16} className="shrink-0 text-emerald-500" />
-                    <span className="text-sm text-ink/70">
-                      Connecté en tant que <strong>{form.email}</strong>
-                    </span>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-ink/60">Nom</label>
-                    <input
-                      type="text"
-                      value={form.fullName}
-                      onChange={(e) => setForm((p) => ({ ...p, fullName: e.target.value }))}
-                      className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-ink/60">Téléphone</label>
-                    <input
-                      type="tel"
-                      value={form.phone}
-                      onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
-                      className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
-                      placeholder="+32 4XX XX XX XX"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-ink/60">Nom complet *</label>
-                    <input
-                      type="text"
-                      required
-                      value={form.fullName}
-                      onChange={(e) => setForm((p) => ({ ...p, fullName: e.target.value }))}
-                      className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
-                      placeholder="Votre nom"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-ink/60">Email *</label>
-                    <input
-                      type="email"
-                      required
-                      value={form.email}
-                      onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                      className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
-                      placeholder="votre@email.com"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-ink/60">Téléphone</label>
-                    <input
-                      type="tel"
-                      value={form.phone}
-                      onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
-                      className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
-                      placeholder="+32 4XX XX XX XX"
-                    />
-                  </div>
-                  <p className="text-xs text-ink/40">Un compte sera créé automatiquement avec votre email.</p>
-                </div>
-              )}
-            </div>
-
-            {/* Error */}
-            {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
-            {/* Submit */}
-            <button
-              type="submit"
-              disabled={submitting || available <= 0}
-              className="w-full rounded-full bg-gold py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {submitting ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 size={18} className="animate-spin" />
-                  Réservation en cours…
-                </span>
-              ) : (
-                `Payer l'acompte de ${priceFormatted.format(depositAmount)}`
-              )}
-            </button>
-
-            <p className="text-center text-xs text-ink/40">
-              Paiement sécurisé par Stripe. Vous ne serez débité que du montant de l&apos;acompte.
+            <h2 className="text-xl font-bold text-ink">Vous êtes inscrit(e) sur la liste d&apos;attente !</h2>
+            <p className="text-sm text-ink/70 max-w-md mx-auto">
+              Vous êtes en <strong className="text-gold font-bold">position #{wlSuccess.position}</strong> sur la liste d&apos;attente.
+              Dès qu&apos;une place se libère, un email sera envoyé à toutes les personnes inscrites. La place sera attribuée à la première personne qui finalise sa réservation — soyez rapide !
             </p>
-          </form>
-
-          {/* Sidebar - Summary */}
-          <div className="lg:col-span-2">
-            <div className="sticky top-24 rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
-              <h2 className="text-sm font-semibold text-ink">Récapitulatif</h2>
-
-              {/* Date/Time */}
-              <div className="flex items-start gap-3 text-sm">
-                <Calendar size={16} className="mt-0.5 shrink-0 text-gold" />
-                <div>
-                  <p className="text-ink/80">{formatDate(sessionData.startDate)}</p>
-                  <p className="text-xs text-ink/50">
-                    {formatTime(sessionData.startDate)}
-                    {sessionData.endDate && ` – ${formatTime(sessionData.endDate)}`}
-                  </p>
+            <div className="pt-4 flex justify-center gap-4">
+              <Link
+                href="/evenements"
+                className="rounded-full bg-gold px-6 py-2.5 text-sm font-semibold text-white shadow hover:bg-gold/90"
+              >
+                Découvrir d&apos;autres activités
+              </Link>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
+            {/* Form */}
+            <form onSubmit={handleSubmit} className="lg:col-span-3 space-y-6">
+              {/* Seats selection */}
+              <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
+                <h2 className="mb-4 text-sm font-semibold text-ink">Nombre de places</h2>
+                <div className="flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setSeats(Math.max(1, seats - 1))}
+                    disabled={seats <= 1}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-ink/15 text-ink transition-colors hover:bg-gold/10 hover:border-gold/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    −
+                  </button>
+                  <span className="min-w-[3ch] text-center text-xl font-bold text-ink">{seats}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSeats(Math.min(maxSeats, seats + 1))}
+                    disabled={seats >= maxSeats || isFull}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-ink/15 text-ink transition-colors hover:bg-gold/10 hover:border-gold/30 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    +
+                  </button>
+                  <span className="text-xs text-ink/40">
+                    {showWaitingListForm
+                      ? "Places demandées"
+                      : available > 0
+                      ? `max. ${maxSeats} place${maxSeats > 1 ? "s" : ""} disponible${maxSeats > 1 ? "s" : ""}`
+                      : "Complet"}
+                  </span>
                 </div>
               </div>
 
-              <hr className="border-ink/8" />
-
-              {/* Pricing */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-ink/60">{unitPrice > 0 ? `${priceFormatted.format(unitPrice)} × ${seats} place${seats > 1 ? "s" : ""}` : "Gratuit"}</span>
-                  <span className="font-medium text-ink">{priceFormatted.format(totalPrice)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-ink/60">Acompte ({depositPct}%)</span>
-                  <span className="font-semibold text-gold">{priceFormatted.format(depositAmount)}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-ink/60">Solde à payer sur place</span>
-                  <span className="text-ink">{priceFormatted.format(balanceDue)}</span>
-                </div>
+              {/* Customer info */}
+              <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
+                <h2 className="text-sm font-semibold text-ink">Vos coordonnées</h2>
+                {isAuthed ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 rounded-lg bg-gold/5 px-3 py-2.5">
+                      <CheckCircle size={16} className="shrink-0 text-emerald-500" />
+                      <span className="text-sm text-ink/70">
+                        Connecté en tant que <strong>{form.email}</strong>
+                      </span>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Nom</label>
+                      <input
+                        type="text"
+                        value={form.fullName}
+                        onChange={(e) => setForm((p) => ({ ...p, fullName: e.target.value }))}
+                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Téléphone</label>
+                      <input
+                        type="tel"
+                        value={form.phone}
+                        onChange={(e) => { setForm((p) => ({ ...p, phone: e.target.value })); setFieldErrors((p) => ({ ...p, phone: undefined })); }}
+                        className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.phone ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                        placeholder="+32 4XX XX XX XX"
+                      />
+                      {fieldErrors.phone && <p className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Nom complet *</label>
+                      <input
+                        type="text"
+                        required
+                        value={form.fullName}
+                        onChange={(e) => setForm((p) => ({ ...p, fullName: e.target.value }))}
+                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
+                        placeholder="Votre nom"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Email *</label>
+                      <input
+                        type="email"
+                        required
+                        value={form.email}
+                        onChange={(e) => { setForm((p) => ({ ...p, email: e.target.value })); setFieldErrors((p) => ({ ...p, email: undefined })); }}
+                        className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.email ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                        placeholder="votre@email.com"
+                      />
+                      {fieldErrors.email && <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Téléphone</label>
+                      <input
+                        type="tel"
+                        value={form.phone}
+                        onChange={(e) => { setForm((p) => ({ ...p, phone: e.target.value })); setFieldErrors((p) => ({ ...p, phone: undefined })); }}
+                        className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.phone ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                        placeholder="+32 4XX XX XX XX"
+                      />
+                      {fieldErrors.phone && <p className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
+                    </div>
+                    <p className="text-xs text-ink/40">Un compte sera créé automatiquement avec votre email.</p>
+                  </div>
+                )}
               </div>
 
-              <hr className="border-ink/8" />
+              {/* Error */}
+              {error && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {error}
+                </div>
+              )}
 
-              <div className="rounded-lg bg-gold/5 px-3 py-2.5 text-xs leading-relaxed text-ink/60">
-                Vous ne réglez aujourd&apos;hui que <strong className="text-gold">{priceFormatted.format(depositAmount)}</strong>.
-                Le solde de <strong className="text-ink/80">{priceFormatted.format(balanceDue)}</strong> sera à payer sur place.
+              {/* Submit Button */}
+              {showWaitingListForm ? (
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full rounded-full bg-amber-600 py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-amber-600/20 transition-all duration-200 hover:bg-amber-700 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {submitting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 size={18} className="animate-spin" />
+                      Inscription en cours…
+                    </span>
+                  ) : (
+                    "S'inscrire à la liste d'attente"
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={submitting || (available <= 0 && !priorityValid)}
+                  className="w-full rounded-full bg-gold py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {submitting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 size={18} className="animate-spin" />
+                      Réservation en cours…
+                    </span>
+                  ) : (
+                    `Payer l'acompte de ${priceFormatted.format(depositAmount)}`
+                  )}
+                </button>
+              )}
+
+              {!showWaitingListForm && (
+                <p className="text-center text-xs text-ink/40">
+                  Paiement sécurisé par Stripe. Vous ne serez débité que du montant de l&apos;acompte.
+                </p>
+              )}
+            </form>
+
+            {/* Sidebar - Summary */}
+            <div className="lg:col-span-2">
+              <div className="sticky top-24 rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
+                <h2 className="text-sm font-semibold text-ink">Récapitulatif</h2>
+
+                {/* Date/Time */}
+                <div className="flex items-start gap-3 text-sm">
+                  <Calendar size={16} className="mt-0.5 shrink-0 text-gold" />
+                  <div>
+                    <p className="text-ink/80">{formatDate(sessionData.startDate)}</p>
+                    <p className="text-xs text-ink/50">
+                      {formatTime(sessionData.startDate)}
+                      {sessionData.endDate && ` – ${formatTime(sessionData.endDate)}`}
+                    </p>
+                  </div>
+                </div>
+
+                <hr className="border-ink/8" />
+
+                {/* Pricing */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-ink/60">{unitPrice > 0 ? `${priceFormatted.format(unitPrice)} × ${seats} place${seats > 1 ? "s" : ""}` : "Gratuit"}</span>
+                    <span className="font-medium text-ink">{priceFormatted.format(totalPrice)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-ink/60">Acompte ({depositPct}%)</span>
+                    <span className="font-semibold text-gold">{priceFormatted.format(depositAmount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-ink/60">Solde à payer sur place</span>
+                    <span className="text-ink">{priceFormatted.format(balanceDue)}</span>
+                  </div>
+                </div>
+
+                <hr className="border-ink/8" />
+
+                <div className="rounded-lg bg-gold/5 px-3 py-2.5 text-xs leading-relaxed text-ink/60">
+                  Vous ne réglez aujourd&apos;hui que <strong className="text-gold">{priceFormatted.format(depositAmount)}</strong>.
+                  Le solde de <strong className="text-ink/80">{priceFormatted.format(balanceDue)}</strong> sera à payer sur place.
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

@@ -211,12 +211,34 @@ export default async function EvenementDetailPage({ params }) {
                                 {session.endDate && ` – ${formatTime(session.endDate)}`}
                               </span>
                             </div>
-                            {session.capacity > 0 && (
-                              <span className="flex items-center gap-1.5 text-sm text-ink/50">
-                                <UsersIcon className="h-4 w-4" />
-                                {session.capacity} places disponibles
-                              </span>
-                            )}
+                            {(() => {
+                              const taken = session.reservations?.reduce((sum, r) => sum + r.seatsCount, 0) ?? 0;
+                              const cap = session.capacity ?? activity.capacity;
+                              const avail = Math.max(0, cap - taken);
+                              return (
+                                <div className="space-y-1.5 mt-2">
+                                  <span className="flex items-center gap-1.5 text-sm text-ink/55">
+                                    <UsersIcon className="h-4 w-4" />
+                                    <span>
+                                      {taken} / {cap} place{cap > 1 ? "s" : ""} occupée{taken > 1 ? "s" : ""}
+                                    </span>
+                                  </span>
+                                  {avail === 0 ? (
+                                    <span className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-800">
+                                      Complet
+                                    </span>
+                                  ) : avail <= 3 ? (
+                                    <span className="inline-flex rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                                      Plus que {avail} place{avail > 1 ? "s" : ""} !
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+                                      {avail} disponible{avail > 1 ? "s" : ""}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
 
                           <div className="flex flex-col items-end gap-2">
@@ -230,12 +252,31 @@ export default async function EvenementDetailPage({ params }) {
                                 sera à payer sur place.
                               </p>
                             )}
-                            <Link
-                              href={`/reservation-atelier?activity=${activity.id}&session=${session.id}`}
-                              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gold px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gold/90 hover:shadow-md"
-                            >
-                              Réserver
-                            </Link>
+                            {(() => {
+                              const taken = session.reservations?.reduce((sum, r) => sum + r.seatsCount, 0) ?? 0;
+                              const cap = session.capacity ?? activity.capacity;
+                              const avail = Math.max(0, cap - taken);
+
+                              if (avail === 0) {
+                                return (
+                                  <Link
+                                    href={`/reservation-atelier?activity=${activity.id}&session=${session.id}&waitingList=true`}
+                                    className="inline-flex shrink-0 items-center gap-2 rounded-full bg-amber-600 px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-amber-700 hover:shadow-md"
+                                  >
+                                    Rejoindre la liste d&apos;attente
+                                  </Link>
+                                );
+                              }
+
+                              return (
+                                <Link
+                                  href={`/reservation-atelier?activity=${activity.id}&session=${session.id}`}
+                                  className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gold px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gold/90 hover:shadow-md"
+                                >
+                                  Réserver
+                                </Link>
+                              );
+                            })()}
                           </div>
                         </div>
 

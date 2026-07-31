@@ -6,6 +6,7 @@ import { stripe } from "@/lib/stripe";
 import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
 import { welcomeWithCredentialsEmail } from "@/lib/email-templates";
+import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -43,6 +44,11 @@ export async function checkWorkshopSessionAvailability(sessionId) {
     const capacity = session.capacity ?? session.workshop.capacity;
     const available = capacity - takenSeats;
 
+    // If spots are available, notify everyone on the waiting list
+    if (available > 0) {
+      notifyAllInWaitingList(sessionId).catch(() => {});
+    }
+
     return {
       success: true,
       data: {
@@ -64,7 +70,7 @@ export async function checkWorkshopSessionAvailability(sessionId) {
 
 export async function createWorkshopReservation(data) {
   try {
-    const { sessionId, activityId, seatsCount, customerInfo } = data;
+    const { sessionId, activityId, seatsCount, customerInfo, isPriority, waitingListEntryId } = data;
 
     if (!sessionId || !activityId || !seatsCount || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
@@ -85,7 +91,28 @@ export async function createWorkshopReservation(data) {
       return { success: false, message: "Session non disponible." };
     }
 
-    // Check available capacity
+    // Validate priority access from the waiting list (first come, first served)
+    if (isPriority) {
+      if (!waitingListEntryId) {
+        return { success: false, message: "Accès prioritaire invalide." };
+      }
+      const wlEntry = await prisma.waitingListEntry.findUnique({
+        where: { id: waitingListEntryId },
+      });
+      if (
+        !wlEntry ||
+        wlEntry.sessionId !== sessionId ||
+        wlEntry.status !== "NOTIFIED"
+      ) {
+        return {
+          success: false,
+          message: "Votre accès prioritaire n'est plus valide. Réinscrivez-vous sur la liste d'attente.",
+        };
+      }
+    }
+
+    // Check available capacity (also applies to priority access so the
+    // fastest person to reserve wins the freed spot without overselling)
     const reserved = await prisma.workshopReservation.aggregate({
       where: {
         sessionId,
@@ -108,6 +135,17 @@ export async function createWorkshopReservation(data) {
     const available = capacity - takenSeats;
 
     if (seatsCount > available) {
+      // A priority user who lost the race goes back on the waiting list
+      if (isPriority && waitingListEntryId) {
+        await prisma.waitingListEntry.updateMany({
+          where: { id: waitingListEntryId, status: "NOTIFIED" },
+          data: { status: "WAITING", notifiedAt: null, expiresAt: null },
+        });
+        return {
+          success: false,
+          message: "La place vient d'être réservée par une autre personne avant vous. Vous restez sur la liste d'attente et serez renotifié(e) si une nouvelle place se libère.",
+        };
+      }
       return {
         success: false,
         message: `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
@@ -116,11 +154,24 @@ export async function createWorkshopReservation(data) {
 
     // Resolve or create user
     const email = customerInfo.email.trim().toLowerCase();
+    const phone = customerInfo.phone?.trim() || "";
     let user = await prisma.user.findUnique({ where: { email } });
 
     let temporaryPassword = null;
 
     if (!user) {
+      // Check phone uniqueness if a phone is provided
+      if (phone) {
+        const phoneExists = await prisma.user.findUnique({ where: { phone } });
+        if (phoneExists) {
+          return {
+            success: false,
+            message: "Ce numéro de téléphone est déjà associé à un autre compte. Veuillez en utiliser un autre ou vous connecter.",
+            field: "phone",
+          };
+        }
+      }
+
       temporaryPassword = generateTemporaryPassword();
       const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
       user = await prisma.user.create({
@@ -128,7 +179,7 @@ export async function createWorkshopReservation(data) {
           fullName: customerInfo.fullName,
           email,
           password: hashedPassword,
-          phone: customerInfo.phone || "",
+          phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
         },
       });
@@ -218,5 +269,27 @@ export async function createWorkshopReservation(data) {
       success: false,
       message: process.env.NODE_ENV === "development" ? `Erreur: ${error?.message}` : "Erreur lors de la création de la réservation.",
     };
+  }
+}
+
+/**
+ * Cancel a reservation and notify everyone on the waiting list.
+ */
+export async function cancelWorkshopReservation(reservationId) {
+  try {
+    const reservation = await prisma.workshopReservation.update({
+      where: { id: reservationId },
+      data: { status: "CANCELLED" },
+    });
+
+    // Automatically trigger waiting list notification
+    if (reservation?.sessionId) {
+      await notifyAllInWaitingList(reservation.sessionId);
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("[cancelWorkshopReservation]", error);
+    return { success: false, message: "Erreur lors de l'annulation." };
   }
 }

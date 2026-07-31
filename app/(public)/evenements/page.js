@@ -19,6 +19,10 @@ async function ActivityCard({ activity }) {
     })
     : null;
 
+  const takenSeats = session?.reservations?.reduce((sum, res) => sum + res.seatsCount, 0) ?? 0;
+  const capacity = session?.capacity ?? activity.capacity;
+  const available = Math.max(0, capacity - takenSeats);
+
   return (
     <Link
       href={`/evenements/${activity.id}`}
@@ -76,6 +80,22 @@ async function ActivityCard({ activity }) {
           )}
         </div>
 
+        {session && (
+          <div className="mt-2 flex items-center justify-between text-[11px] border-t border-ink/5 pt-2 text-ink/50">
+            <span className="flex items-center gap-1">
+              <UsersIcon />
+              <span>{takenSeats} / {capacity} places</span>
+            </span>
+            {available === 0 ? (
+              <span className="rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-800">Complet</span>
+            ) : available <= 3 ? (
+              <span className="font-bold text-amber-600 text-[9px] uppercase tracking-wide">Plus que {available} place{available > 1 ? "s" : ""} !</span>
+            ) : (
+              <span className="font-medium text-emerald-600 text-[9px] uppercase tracking-wide">{available} libre{available > 1 ? "s" : ""}</span>
+            )}
+          </div>
+        )}
+
         {activity.animator && (
           <div className="flex items-center gap-1.5 border-t border-cream/80 pt-2 mt-0.5">
             {activity.animator.avatar ? (
@@ -103,6 +123,16 @@ function CalendarIcon() {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-3.5 w-3.5" aria-hidden="true">
       <rect x="3" y="4" width="18" height="18" rx="2" />
       <path d="M3 10h18M8 2v4M16 2v4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function UsersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
     </svg>
   );
 }

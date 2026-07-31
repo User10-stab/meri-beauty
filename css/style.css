@@ -237,10 +237,29 @@
   --animate-line2: line-revert 8s infinite linear;
   --animate-line3: line 7s infinite linear;
   --animate-marquee: marquee 30s linear infinite;
+  --animate-slow-zoom: slow-zoom 28s ease-in-out infinite alternate;
+  --animate-fade-up: fade-up 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-spin-slow: spin 40s linear infinite;
 
   @keyframes marquee {
     from { transform: translateX(0); }
     to   { transform: translateX(-50%); }
+  }
+
+  @keyframes slow-zoom {
+    from { transform: scale(1); }
+    to   { transform: scale(1.14); }
+  }
+
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(28px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50%      { transform: translateY(-14px) rotate(8deg); }
   }
 
   @keyframes linspin {

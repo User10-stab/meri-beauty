@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useMemo } from "react";
 import Link from "next/link";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import { updateCartItemQuantity, removeFromCart } from "@/actions/boutique/cart";
+import { calculateCartPricing, calculateItemPricing, formatPrice } from "@/lib/pricing";
 
 function notifyCartUpdated() {
   window.dispatchEvent(new Event("boutique:cart-updated")); // updates the header badge (client-fetched)
@@ -13,6 +14,9 @@ function notifyCartUpdated() {
 export function CartPageClient({ initialCart }) {
   const [cart, setCart] = useState(initialCart);
   const [isPending, startTransition] = useTransition();
+
+  // Calculate detailed pricing breakdown for the entire cart
+  const cartPricing = useMemo(() => calculateCartPricing(cart.items), [cart.items]);
 
   function updateQuantity(item, nextQuantity) {
     // Optimistic update — the server re-validates stock and we roll back on failure.
@@ -75,7 +79,9 @@ export function CartPageClient({ initialCart }) {
 
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_320px]">
         <ul className={`divide-y divide-neutral-100 ${isPending ? "opacity-60" : ""}`}>
-          {cart.items.map((item) => (
+          {cart.items.map((item) => {
+            const itemPricing = calculateItemPricing(item);
+            return (
             <li key={item.id} className="flex gap-4 py-6">
               <Link href={`/boutique/${item.variant.product.slug}`} className="h-24 w-24 flex-shrink-0 overflow-hidden bg-neutral-50">
                 {item.variant.product.image ? (
@@ -85,11 +91,24 @@ export function CartPageClient({ initialCart }) {
 
               <div className="flex flex-1 flex-col justify-between">
                 <div className="flex items-start justify-between gap-4">
-                  <div>
+                  <div className="flex-1">
                     <Link href={`/boutique/${item.variant.product.slug}`} className="text-sm font-medium text-[#2F3A2E] hover:text-[#C8A46A]">
                       {item.variant.product.name}
                     </Link>
                     {item.variant.name !== "Standard" && <p className="mt-0.5 text-xs text-gray-400">{item.variant.name}</p>}
+
+                    {/* Pricing breakdown for this item */}
+                    <div className="mt-2 space-y-1 text-xs">
+                      {itemPricing.savings > 0 && (
+                        <div className="text-gray-400">
+                          <span className="line-through">{formatPrice(itemPricing.originalPrice / itemPricing.quantity)} / unit</span>
+                          <span className="text-green-600 ml-2">Économie: {formatPrice(itemPricing.savings)}</span>
+                        </div>
+                      )}
+                      <div className="text-gray-500">
+                        {formatPrice(itemPricing.subtotalExclVat / itemPricing.quantity)} HT/unit + {formatPrice(itemPricing.vatAmount / itemPricing.quantity)} TVA
+                      </div>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -121,23 +140,59 @@ export function CartPageClient({ initialCart }) {
                       <Plus size={13} />
                     </button>
                   </div>
-                  <span className="text-sm font-semibold text-[#2F3A2E]">
-                    €{(item.variant.price * item.quantity).toFixed(2)}
-                  </span>
+                  <div className="text-right">
+                    <span className="block text-sm font-semibold text-[#2F3A2E]">
+                      {formatPrice(itemPricing.totalPrice)}
+                    </span>
+                    <span className="block text-xs text-gray-500">TTC</span>
+                  </div>
                 </div>
               </div>
             </li>
-          ))}
+          );
+          })}
         </ul>
 
         {/* Summary */}
         <div className="h-fit border border-neutral-200 p-6">
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Récapitulatif</h2>
+
+          {/* Before promotion (if applicable) */}
+          {cartPricing.hasPromotions && (
+            <div className="flex justify-between text-sm text-gray-500 mb-2">
+              <span>Avant promotion (TTC)</span>
+              <span className="line-through">{formatPrice(cartPricing.totalOriginalTTC)}</span>
+            </div>
+          )}
+
+          {/* Before TVA */}
           <div className="flex justify-between text-sm text-gray-600">
-            <span>Sous-total</span>
-            <span className="font-medium text-[#2F3A2E]">€{cart.subtotal.toFixed(2)}</span>
+            <span>Sous-total (hors TVA)</span>
+            <span className="font-medium text-[#2F3A2E]">{formatPrice(cartPricing.totalHT)}</span>
           </div>
-          <p className="mt-2 text-xs text-gray-400">Frais de livraison calculés à l'étape suivante.</p>
+
+          {/* TVA amount */}
+          <div className="flex justify-between text-sm text-gray-600">
+            <span>TVA (21%)</span>
+            <span className="font-medium text-[#2F3A2E]">{formatPrice(cartPricing.totalVAT)}</span>
+          </div>
+
+          {/* Savings (if applicable) */}
+          {cartPricing.hasPromotions && (
+            <div className="flex justify-between text-sm text-green-600">
+              <span>Économie promotion</span>
+              <span className="font-medium">-{formatPrice(cartPricing.totalSavings)}</span>
+            </div>
+          )}
+
+          {/* Total */}
+          <div className="flex justify-between text-base font-semibold text-[#2F3A2E] mt-3 pt-3 border-t border-neutral-200">
+            <span>Total TTC</span>
+            <span>{formatPrice(cartPricing.totalTTC)}</span>
+          </div>
+
+          <p className="mt-3 text-xs text-gray-400">Frais de livraison calculés à l'étape suivante.</p>
+
           <Link
             href="/boutique/checkout"
             className="mt-6 flex w-full items-center justify-center bg-[#C8A46A] px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-[#B8945A]"

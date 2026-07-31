@@ -13,6 +13,7 @@ import { checkoutSchema, shipOrderSchema, cancelOrderSchema } from "@/lib/valida
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
 import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
+import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 
 /** Order items (+ shipping, if any) as invoice line snapshots. */
 function orderInvoiceLines(order) {
@@ -53,8 +54,6 @@ const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
   ? `${process.env.NEXT_PUBLIC_APP_URL}/login`
   : "https://meribeauty.com/login";
 
-const SHIPPING_FLAT_COST = 4.95;
-const FREE_SHIPPING_THRESHOLD = 50;
 const PENDING_PAYMENT_EXPIRY_MINUTES = 30;
 const PENDING_PICKUP_EXPIRY_DAYS = 7;
 
@@ -232,8 +231,22 @@ export async function createOrderFromCart(input) {
       (sum, item) => sum + Number(item.variant.price) * item.quantity,
       0
     );
-    const shippingCost =
-      fulfilmentMode === "SHIPPING_PREPAID" ? (subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FLAT_COST) : 0;
+
+    // Calculate shipping based on total weight (Marie's requirement)
+    let shippingCost = 0;
+    if (fulfilmentMode === "SHIPPING_PREPAID") {
+      const totalWeight = calculateTotalWeight(fullCart.items);
+      shippingCost = calculateShippingCost(totalWeight, subtotal);
+
+      // Handle >30kg orders that require manual shipping quote
+      if (shippingCost === "QUOTE_REQUIRED") {
+        return {
+          success: false,
+          message: "Votre commande dépasse 30 kg. Merci de nous contacter pour un devis de livraison personnalisé."
+        };
+      }
+    }
+
     const totalAmount = subtotal + shippingCost;
 
     const isOnSite = fulfilmentMode === "PICKUP_ON_SITE";

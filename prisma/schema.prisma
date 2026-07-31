@@ -426,6 +426,7 @@ model ProductVariant {
   name    String // "250 ml", "Teinte 03" — "Standard" for single-variant products
   sku     String  @unique
   barcode String? @unique // EAN/UPC; null until an internal code is generated
+  weightGrams Int @default(0) // Weight in grams for shipping cost calculation
 
   price        Decimal  @db.Decimal(10, 2) // selling price, TVA included
   costPrice    Decimal  @db.Decimal(10, 2) // supplier cost — "prix initial"

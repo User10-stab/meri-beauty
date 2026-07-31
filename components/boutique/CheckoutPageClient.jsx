@@ -1,13 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Store, Wallet, Truck, Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { createOrderFromCart, createOrderCheckoutSession } from "@/actions/boutique/orders";
-
-const SHIPPING_FLAT_COST = 4.95;
-const FREE_SHIPPING_THRESHOLD = 50;
+import { getCartShippingCost } from "@/actions/boutique/shipping";
 
 const MODES = [
   {
@@ -26,7 +24,7 @@ const MODES = [
     value: "SHIPPING_PREPAID",
     icon: Truck,
     title: "Livraison à domicile",
-    description: `Payez maintenant, livraison bpost. €${SHIPPING_FLAT_COST.toFixed(2)} — offerte dès €${FREE_SHIPPING_THRESHOLD}.`,
+    description: "Payez maintenant, livraison bpost. Frais de port calculés au poids — gratuite dès €150.",
   },
 ];
 
@@ -41,11 +39,35 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const [shippingAddress, setShippingAddress] = useState({ line1: "", line2: "", city: "", postalCode: "" });
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [shippingDetails, setShippingDetails] = useState({ cost: 0, isFree: true, loading: true });
 
-  const shippingCost = useMemo(() => {
-    if (fulfilmentMode !== "SHIPPING_PREPAID") return 0;
-    return cart.subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING_FLAT_COST;
-  }, [fulfilmentMode, cart.subtotal]);
+  // Fetch real shipping cost from server (weight-based calculation)
+  useEffect(() => {
+    async function fetchShippingCost() {
+      if (fulfilmentMode !== "SHIPPING_PREPAID") {
+        setShippingDetails({ cost: 0, isFree: true, loading: false });
+        return;
+      }
+
+      setShippingDetails(prev => ({ ...prev, loading: true }));
+      const result = await getCartShippingCost();
+      if (result.success) {
+        setShippingDetails({
+          cost: result.data.cost,
+          isFree: result.data.isFree,
+          loading: false,
+          untilFree: result.data.untilFree,
+          totalWeightKg: result.data.totalWeightKg
+        });
+      } else {
+        setShippingDetails({ cost: 0, isFree: true, loading: false });
+      }
+    }
+
+    fetchShippingCost();
+  }, [fulfilmentMode, cart.subtotal, cart.items]);
+
+  const shippingCost = shippingDetails.cost;
 
   const total = cart.subtotal + shippingCost;
 

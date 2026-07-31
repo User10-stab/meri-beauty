@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function ProductCategoriesPage() {
   await requireAdmin();
 
-  const result = await getCatalogueTree({ includeInactive: true });
+  const result = await getCatalogueTree({ includeInactive: true, includeProducts: true });
 
   return (
     <div className="space-y-6">

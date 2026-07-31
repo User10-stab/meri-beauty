@@ -3,11 +3,12 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronDown, Plus, Pencil, Trash2, FolderOpen, Tag } from "lucide-react";
+import { ChevronDown, Plus, Pencil, Trash2, FolderOpen, Tag, Package } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { deleteBrand } from "@/actions/boutique/brands";
 import { deleteProductCategory, deleteProductSubcategory } from "@/actions/boutique/categories";
+import { deleteProduct } from "@/actions/boutique/products";
 import { BrandModal } from "@/components/dashboard/boutique/BrandModal";
 import { CategoryModal } from "@/components/dashboard/boutique/CategoryModal";
 import { SubcategoryModal } from "@/components/dashboard/boutique/SubcategoryModal";
@@ -21,6 +22,7 @@ export function CategoriesPageClient({ initialBrands }) {
   const router = useRouter();
   const [expandedBrands, setExpandedBrands] = useState(() => new Set(initialBrands.map((b) => b.id)));
   const [expandedCategories, setExpandedCategories] = useState(() => new Set());
+  const [expandedSubcategories, setExpandedSubcategories] = useState(() => new Set());
   const [brandModal, setBrandModal] = useState(null); // null | "new" | brand
   const [categoryModal, setCategoryModal] = useState(null); // null | { brandId, category? }
   const [subcategoryModal, setSubcategoryModal] = useState(null); // null | { categoryId, subcategory? }
@@ -43,6 +45,14 @@ export function CategoriesPageClient({ initialBrands }) {
     });
   }
 
+  function toggleSubcategory(id) {
+    setExpandedSubcategories((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
   function handleDelete() {
     if (!toDelete) return;
     startTransition(async () => {
@@ -51,7 +61,9 @@ export function CategoriesPageClient({ initialBrands }) {
           ? await deleteBrand(toDelete.id)
           : toDelete.type === "category"
           ? await deleteProductCategory(toDelete.id)
-          : await deleteProductSubcategory(toDelete.id);
+          : toDelete.type === "subcategory"
+          ? await deleteProductSubcategory(toDelete.id)
+          : await deleteProduct(toDelete.id);
 
       if (result.success) {
         toast.success(result.message);
@@ -182,39 +194,110 @@ export function CategoriesPageClient({ initialBrands }) {
                                   <p className="py-2 text-sm text-gray-400">Aucune sous-catégorie.</p>
                                 ) : (
                                   <ul className="divide-y divide-gray-100">
-                                    {cat.subcategories.map((sub) => (
-                                      <li key={sub.id} className="flex items-center justify-between py-2.5">
-                                        <div className="flex items-center gap-2">
-                                          <span className="text-sm text-gray-700 dark:text-dark-6">{sub.name}</span>
-                                          {!sub.isActive && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Inactive</span>}
-                                          <span className="text-xs text-gray-400">
-                                            {sub.productCount} produit{sub.productCount !== 1 ? "s" : ""}
-                                          </span>
-                                        </div>
-                                        <div className="flex items-center gap-1">
+                                    {cat.subcategories.map((sub) => {
+                                      const subOpen = expandedSubcategories.has(sub.id);
+                                      const products = sub.products ?? [];
+                                      return (
+                                      <li key={sub.id} className="py-1">
+                                        <div className="flex items-center justify-between py-1.5">
                                           <button
                                             type="button"
-                                            onClick={() => setSubcategoryModal({ categoryId: cat.id, subcategory: sub })}
-                                            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                                            onClick={() => toggleSubcategory(sub.id)}
+                                            className="flex flex-1 items-center gap-2 text-left"
+                                            disabled={sub.productCount === 0}
                                           >
-                                            <Pencil size={13} />
+                                            {sub.productCount > 0 && (
+                                              <ChevronDown size={12} className={`flex-shrink-0 text-gray-400 transition-transform ${subOpen ? "" : "-rotate-90"}`} />
+                                            )}
+                                            <span className="text-sm text-gray-700 dark:text-dark-6">{sub.name}</span>
+                                            {!sub.isActive && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Inactive</span>}
+                                            <span className="text-xs text-gray-400">
+                                              {sub.productCount} produit{sub.productCount !== 1 ? "s" : ""}
+                                            </span>
                                           </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => setToDelete({ type: "subcategory", id: sub.id, name: sub.name })}
-                                            disabled={sub.productCount > 0}
-                                            title={
-                                              sub.productCount > 0
-                                                ? "Déjà utilisée par au moins un produit — ne peut plus être supprimée, même si ce produit a été supprimé depuis. Désactivez-la à la place."
-                                                : undefined
-                                            }
-                                            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
-                                          >
-                                            <Trash2 size={13} />
-                                          </button>
+                                          <div className="flex items-center gap-1">
+                                            <button
+                                              type="button"
+                                              onClick={() => setSubcategoryModal({ categoryId: cat.id, subcategory: sub })}
+                                              className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                                            >
+                                              <Pencil size={13} />
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => setToDelete({ type: "subcategory", id: sub.id, name: sub.name })}
+                                              disabled={sub.productCount > 0}
+                                              title={
+                                                sub.productCount > 0
+                                                  ? "Déjà utilisée par au moins un produit — ne peut plus être supprimée, même si ce produit a été supprimé depuis. Désactivez-la à la place."
+                                                  : undefined
+                                              }
+                                              className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                                            >
+                                              <Trash2 size={13} />
+                                            </button>
+                                          </div>
                                         </div>
+
+                                        {subOpen && products.length > 0 && (
+                                          <ul className="ml-5 mb-2 space-y-1 border-l border-gray-100 pl-3">
+                                            {products.map((product) => {
+                                              const prices = product.variants.map((v) => Number(v.price));
+                                              const priceLabel =
+                                                prices.length === 0
+                                                  ? "—"
+                                                  : Math.min(...prices) === Math.max(...prices)
+                                                  ? `€${Math.min(...prices).toFixed(2)}`
+                                                  : `€${Math.min(...prices).toFixed(2)} – €${Math.max(...prices).toFixed(2)}`;
+                                              const totalStock = product.variants.reduce(
+                                                (sum, v) => sum + v.stockQuantity,
+                                                0
+                                              );
+                                              return (
+                                                <li key={product.id} className="flex items-center justify-between rounded-md py-1.5 pr-1 text-sm hover:bg-gray-50">
+                                                  <div className="flex items-center gap-2 min-w-0">
+                                                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-100 bg-gray-50">
+                                                      {product.thumbnail ? (
+                                                        <img src={product.thumbnail} alt="" className="h-full w-full object-cover" />
+                                                      ) : (
+                                                        <Package size={12} className="text-gray-300" />
+                                                      )}
+                                                    </div>
+                                                    <span className="truncate text-gray-700 dark:text-dark-6">{product.name}</span>
+                                                    {product.status !== "ACTIVE" && (
+                                                      <span className="flex-shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
+                                                        {product.status === "DRAFT" ? "Brouillon" : "Archivé"}
+                                                      </span>
+                                                    )}
+                                                    <span className="flex-shrink-0 text-xs text-gray-400">{priceLabel}</span>
+                                                    <span className="flex-shrink-0 text-xs text-gray-400">· stock {totalStock}</span>
+                                                  </div>
+                                                  <div className="flex flex-shrink-0 items-center gap-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => router.push(`/dashboard/boutique/products/${product.id}`)}
+                                                      className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                                                      title="Modifier"
+                                                    >
+                                                      <Pencil size={12} />
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => setToDelete({ type: "product", id: product.id, name: product.name })}
+                                                      className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                                                      title="Supprimer"
+                                                    >
+                                                      <Trash2 size={12} />
+                                                    </button>
+                                                  </div>
+                                                </li>
+                                              );
+                                            })}
+                                          </ul>
+                                        )}
                                       </li>
-                                    ))}
+                                    );
+                                    })}
                                   </ul>
                                 )}
                               </div>
@@ -274,9 +357,17 @@ export function CategoriesPageClient({ initialBrands }) {
             ? "Supprimer cette marque ?"
             : toDelete?.type === "category"
             ? "Supprimer cette catégorie ?"
-            : "Supprimer cette sous-catégorie ?"
+            : toDelete?.type === "subcategory"
+            ? "Supprimer cette sous-catégorie ?"
+            : "Supprimer ce produit ?"
         }
-        message={toDelete ? `"${toDelete.name}" sera ${toDelete.type === "brand" ? "désactivée" : "définitivement supprimée"}.` : ""}
+        message={
+          toDelete
+            ? toDelete.type === "product"
+              ? `"${toDelete.name}" sera retiré de la boutique. Les commandes passées le conservent dans leur historique.`
+              : `"${toDelete.name}" sera ${toDelete.type === "brand" ? "désactivée" : "définitivement supprimée"}.`
+            : ""
+        }
         confirmLabel="Supprimer"
         danger
         loading={isPending}

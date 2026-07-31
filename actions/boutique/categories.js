@@ -92,7 +92,7 @@ export async function getProductCategories({ brandId, includeInactive = false } 
  * categories and their subcategories nested underneath — the whole
  * Brand → Category → Subcategory shape in one read.
  */
-export async function getCatalogueTree({ includeInactive = false } = {}) {
+export async function getCatalogueTree({ includeInactive = false, includeProducts = false } = {}) {
   try {
     const brands = await prisma.brand.findMany({
       where: { isDeleted: false, ...(includeInactive ? {} : { isActive: true }) },
@@ -105,7 +105,34 @@ export async function getCatalogueTree({ includeInactive = false } = {}) {
             subcategories: {
               where: includeInactive ? {} : { isActive: true },
               orderBy: [{ position: "asc" }, { name: "asc" }],
-              include: { _count: { select: { products: true } } },
+              include: {
+                _count: { select: { products: true } },
+                ...(includeProducts ? {
+                  products: {
+                    where: { isDeleted: false },
+                    select: {
+                      id: true,
+                      name: true,
+                      slug: true,
+                      status: true,
+                      images: { orderBy: { position: "asc" }, take: 1, select: { path: true } },
+                      variants: {
+                      where: { isDeleted: false, isActive: true },
+                      select: {
+                        id: true,
+                        name: true,
+                        price: true,
+                        comparePrice: true,
+                        stockQuantity: true,
+                        reservedQuantity: true
+                      },
+                      orderBy: { position: 'asc' }
+                    }
+                    },
+                    orderBy: { name: 'asc' }
+                  }
+                } : {})
+              },
             },
           },
         },
@@ -133,6 +160,20 @@ export async function getCatalogueTree({ includeInactive = false } = {}) {
             position: s.position,
             isActive: s.isActive,
             productCount: s._count.products,
+            products: includeProducts
+              ? (s.products || []).map((p) => ({
+                  id: p.id,
+                  name: p.name,
+                  slug: p.slug,
+                  status: p.status,
+                  thumbnail: p.images[0]?.path ?? null,
+                  variants: p.variants.map((v) => ({
+                    ...v,
+                    price: Number(v.price),
+                    comparePrice: v.comparePrice != null ? Number(v.comparePrice) : null,
+                  })),
+                }))
+              : undefined,
           })),
         })),
       })),

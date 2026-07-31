@@ -6,19 +6,22 @@ import { ChevronRight, ChevronLeft, Check } from "lucide-react";
 import CategoryStep from "./steps/CategoryStep";
 import ServiceStep from "./steps/ServiceStep";
 import StaffStep from "./steps/StaffStep";
+import AppointmentDraftsStep from "./steps/AppointmentDraftsStep";
 import DateTimeStep from "./steps/DateTimeStep";
 import CustomerInfoStep from "./steps/CustomerInfoStep";
 import ReviewStep from "./steps/ReviewStep";
 import PaymentStep from "./steps/PaymentStep";
+import { computePaymentDecision } from "@/lib/reservation-payment";
 
 const ALL_STEPS = [
-  { id: 1, name: "Catégorie",    component: CategoryStep },
-  { id: 2, name: "Service",      component: ServiceStep },
-  { id: 3, name: "Experte",      component: StaffStep },
-  { id: 4, name: "Date & Heure", component: DateTimeStep },
-  { id: 5, name: "Informations", component: CustomerInfoStep, guestOnly: true },
-  { id: 6, name: "Récapitulatif",component: ReviewStep },
-  { id: 7, name: "Paiement",     component: PaymentStep },
+  { id: 1, name: "Catégorie",      component: CategoryStep },
+  { id: 2, name: "Service",        component: ServiceStep },
+  { id: 3, name: "Experte",        component: StaffStep },
+  { id: 4, name: "Rendez-vous",    component: AppointmentDraftsStep, draftStep: true },
+  { id: 5, name: "Date & Heure",   component: DateTimeStep },
+  { id: 6, name: "Informations",   component: CustomerInfoStep, guestOnly: true },
+  { id: 7, name: "Récapitulatif",  component: ReviewStep },
+  { id: 8, name: "Paiement",       component: PaymentStep, paymentStep: true },
 ];
 
 /**
@@ -27,36 +30,61 @@ const ALL_STEPS = [
 export default function ReservationForm({ customerSession = null }) {
   const isAuthenticated = Boolean(customerSession);
 
-  // The steps actually shown — skip CustomerInfoStep when logged in
-  const STEPS = useMemo(
-    () => ALL_STEPS.filter((s) => !s.guestOnly || !isAuthenticated),
-    [isAuthenticated]
-  );
-
   const [currentStep, setCurrentStep] = useState(1);
   const [reservationData, setReservationData] = useState({
-    category: null,
-    service: null,
-    staff: null,
-    staffService: null,
-    date: null,
-    time: null,
+    category:          null,
+    service:           null,
+    staff:             null,
+    staffService:      null,
+    // List of appointment drafts accumulated before Date & Time selection.
+    // Each draft: { category, service, staff, staffService, duration, price }
+    appointmentDrafts: [],
+    date:              null,
+    time:              null,
+    // Multi-draft scheduling fields (populated in DateTimeStep)
+    schedulingMode:    "same-day", // "same-day" | "multi-day"
+    sameDayDate:       null,       // Date — used in same-day mode
+    perDraftDates:     {},         // { [draftIndex]: Date } — used in multi-day mode
+    perDraftTimes:     {},         // { [draftIndex]: string } — used in multi-day mode
+    selectedScheduleProposal: null, // chosen auto-proposal from DateTimeStep
     // Pre-populate from session so create-reservation always has customerInfo
     customerInfo: isAuthenticated
       ? {
-          fullName: customerSession.fullName ?? "",
-          email: customerSession.email ?? "",
-          phone: customerSession.phone ?? "",
+          fullName:             customerSession.fullName ?? "",
+          email:                customerSession.email    ?? "",
+          phone:                customerSession.phone    ?? "",
           newsletterSubscribed: false,
         }
       : null,
     paymentMethod: null,
-    notes: "",
+    notes:         "",
   });
+
+  // ── Step list — derived from auth state + live payment decision ───────────
+  // Re-evaluated whenever drafts change so PaymentStep is included/excluded
+  // automatically as soon as the customer's draft configuration is known.
+  const STEPS = useMemo(() => {
+    const { requiresPaymentStep } = computePaymentDecision({
+      drafts: reservationData.appointmentDrafts,
+    });
+
+    return ALL_STEPS.filter((s) => {
+      if (s.guestOnly && isAuthenticated) return false;
+      if (s.paymentStep && !requiresPaymentStep) return false;
+      return true;
+    });
+  }, [isAuthenticated, reservationData.appointmentDrafts]);
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
 
   const updateReservationData = (data) => {
     setReservationData((prev) => ({ ...prev, ...data }));
   };
+
+  /** Index (1-based) of the AppointmentDraftsStep inside STEPS */
+  const draftStepNumber = STEPS.findIndex((s) => s.draftStep) + 1;
+
+  // ── Navigation ───────────────────────────────────────────────────────────
 
   const nextStep = () => {
     if (currentStep < STEPS.length) setCurrentStep((prev) => prev + 1);
@@ -70,8 +98,80 @@ export default function ReservationForm({ customerSession = null }) {
     if (step <= currentStep || step === 1) setCurrentStep(step);
   };
 
-  const CurrentStepComponent = STEPS[currentStep - 1].component;
-  const isLastStep = currentStep === STEPS.length;
+  // ── Draft-step specific handlers ─────────────────────────────────────────
+
+  /**
+   * Called by StaffStep (via nextStep) just before advancing.
+   * Receives the freshly-selected staffService directly to avoid reading
+   * stale state — category and service are read inside the state updater
+   * callback to guarantee they are also current.
+   *
+   * @param {object} selectedStaffService  — the staffService record chosen in StaffStep
+   */
+  const commitDraftAndGoToSummary = (selectedStaffService) => {
+    setReservationData((prev) => {
+      const newDraft = {
+        category:     prev.category,
+        service:      prev.service,
+        staff:        selectedStaffService.staff,
+        staffService: selectedStaffService,
+        duration:     selectedStaffService?.duration ?? null,
+        price:        selectedStaffService?.price    ?? null,
+      };
+      return {
+        ...prev,
+        appointmentDrafts: [...prev.appointmentDrafts, newDraft],
+        // Reset current-selection fields so the next pick starts clean
+        category:     null,
+        service:      null,
+        staff:        null,
+        staffService: null,
+      };
+    });
+
+    // Jump to the drafts step
+    setCurrentStep(draftStepNumber);
+  };
+
+  /**
+   * "Ajouter un autre rendez-vous": keep drafts, go back to Category (step 1).
+   */
+  const handleAddAnother = () => {
+    // category/service/staff are already null (reset in commitDraftAndGoToSummary)
+    setCurrentStep(1);
+  };
+
+  /**
+   * "Continuer vers Date & Heure": advance past the drafts step.
+   */
+  const handleContinueToDates = () => {
+    setCurrentStep(draftStepNumber + 1);
+  };
+
+  /**
+   * Remove a draft by index. If no drafts remain, send the user back to
+   * Category so they are never stuck with an empty list.
+   */
+  const handleRemoveDraft = (index) => {
+    setReservationData((prev) => {
+      const updated = prev.appointmentDrafts.filter((_, i) => i !== index);
+      if (updated.length === 0) {
+        // Schedule navigation outside the state updater
+        setTimeout(() => setCurrentStep(1), 0);
+      }
+      return { ...prev, appointmentDrafts: updated };
+    });
+  };
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  const currentStepDef  = STEPS[currentStep - 1];
+  const CurrentStepComponent = currentStepDef.component;
+  const isLastStep      = currentStep === STEPS.length;
+  const isDraftStep     = currentStepDef.draftStep === true;
+  const isDateTimeStep  = currentStepDef.id === 5;
+  // Staff step is always step 3 (id 3) regardless of guest/auth filtering
+  const isStaffStep     = currentStepDef.id === 3;
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
@@ -128,18 +228,30 @@ export default function ReservationForm({ customerSession = null }) {
           transition={{ duration: 0.3 }}
           className="min-h-[500px]"
         >
-          <CurrentStepComponent
-            data={reservationData}
-            updateData={updateReservationData}
-            nextStep={nextStep}
-            prevStep={prevStep}
-            customerSession={customerSession}
-          />
+          {isDraftStep ? (
+            // AppointmentDraftsStep uses custom action props instead of nextStep/prevStep
+            <AppointmentDraftsStep
+              data={reservationData}
+              onAddAnother={handleAddAnother}
+              onContinue={handleContinueToDates}
+              onRemoveDraft={handleRemoveDraft}
+            />
+          ) : (
+            <CurrentStepComponent
+              data={reservationData}
+              updateData={updateReservationData}
+              // StaffStep gets a special nextStep that commits the draft first
+              nextStep={isStaffStep ? commitDraftAndGoToSummary : nextStep}
+              prevStep={prevStep}
+              customerSession={customerSession}
+            />
+          )}
         </motion.div>
       </AnimatePresence>
 
-      {/* ── Navigation Buttons (hidden on payment step) ────────── */}
-      {!isLastStep && (
+      {/* ── Navigation Buttons ─────────────────────────────────── */}
+      {/* Hidden on: last step (payment), draft step (has its own buttons) */}
+      {!isLastStep && !isDraftStep && !isDateTimeStep && (
         <div className="mt-8 flex items-center justify-between">
           <button
             onClick={prevStep}

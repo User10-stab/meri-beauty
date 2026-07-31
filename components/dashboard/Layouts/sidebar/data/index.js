@@ -43,6 +43,12 @@ const ALL_NAV_DATA = [
         items: [],
       },
       {
+        title: "Paiements",
+        icon: Icons.CreditCardIcon,
+        url: "/dashboard/payments",
+        items: [],
+      },
+      {
         title: "Staff",
         icon: Icons.User,
         items: [

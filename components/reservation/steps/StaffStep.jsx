@@ -28,13 +28,16 @@ export default function StaffStep({ data, updateData, nextStep }) {
   };
 
   const handleSelectStaff = (staffService) => {
+    // Store the selection in shared state (for display purposes in other steps),
+    // then immediately call nextStep with the selected staffService so the
+    // parent can build the draft without reading stale state.
     updateData({
-      staff: staffService.staff,
+      staff:        staffService.staff,
       staffService,
-      date: null,
-      time: null,
+      date:         null,
+      time:         null,
     });
-    nextStep();
+    nextStep(staffService);
   };
 
   if (loading) {

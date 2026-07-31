@@ -266,6 +266,7 @@ model Staff {
   yearsOfExperience  Int
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
+  vatNumber            String?  @unique
 
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
@@ -274,6 +275,17 @@ model Staff {
 
   // Account Setup
   setupCompleted              Boolean @default(false)
+
+  // Bank account details
+  accountHolderName String?
+  iban              String?
+  bic               String?
+  bankName          String?
+
+  // Stripe Connect
+  stripeAccountId           String? @unique
+  stripeChargesEnabled      Boolean @default(false)
+  stripePayoutsEnabled      Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -497,6 +509,7 @@ model RentalRequest {
   status         RentalRequestStatus
   message        String?
   ownerResponse  String?
+  specialty      String?
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
   createdAt      DateTime            @default(now())

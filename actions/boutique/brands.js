@@ -174,9 +174,12 @@ export async function updateBrand(input) {
 }
 
 /**
- * Soft delete only — a brand with any categories/products underneath can't
- * be hard-deleted anyway (ProductCategory.brandId is required), so this just
- * flips isActive/isDeleted; every read path already filters on those.
+ * Soft delete (deactivate) — matches deleteProductCategory()'s pattern: a
+ * brand can't be removed while it still has categories underneath, so the
+ * tree has to be pruned bottom-up (products, then subcategories, then
+ * categories) before the brand itself becomes deletable. This is what
+ * actually makes "cannot delete a brand while a subcategory still has a
+ * product" true — it's enforced transitively, one level at a time.
  */
 export async function deleteBrand(id) {
   const guard = await requireAdmin();
@@ -185,10 +188,18 @@ export async function deleteBrand(id) {
   if (!id) return { success: false, message: "Identifiant manquant." };
 
   try {
-    const brand = await prisma.brand.findUnique({ where: { id } });
+    const brand = await prisma.brand.findUnique({
+      where: { id },
+      include: { _count: { select: { categories: true } } },
+    });
     if (!brand) return { success: false, message: "Marque introuvable." };
 
-    const productCount = await prisma.product.count({ where: { subcategory: { category: { brandId: id } } } });
+    if (brand._count.categories > 0) {
+      return {
+        success: false,
+        message: `Impossible de supprimer : ${brand._count.categories} catégorie(s) en dépendent. Supprimez-les d'abord (chacune requiert que ses sous-catégories soient vides de produits).`,
+      };
+    }
 
     await prisma.brand.update({
       where: { id },
@@ -196,12 +207,7 @@ export async function deleteBrand(id) {
     });
 
     revalidatePath("/dashboard/boutique/categories");
-    return {
-      success: true,
-      message: productCount
-        ? `Marque désactivée. ${productCount} produit(s) et leurs catégories restent en base mais disparaissent du catalogue actif.`
-        : "Marque désactivée.",
-    };
+    return { success: true, message: "Marque supprimée." };
   } catch (error) {
     console.error("[deleteBrand]", error);
     return { success: false, message: "Impossible de supprimer la marque." };

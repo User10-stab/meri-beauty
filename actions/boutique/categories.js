@@ -385,21 +385,21 @@ export async function deleteProductSubcategory(id) {
   try {
     const subcategory = await prisma.productSubcategory.findUnique({
       where: { id },
-      include: { _count: { select: { products: true } } },
+      include: { _count: { select: { products: { where: { isDeleted: false } } } } },
     });
     if (!subcategory) return { success: false, message: "Sous-catégorie introuvable." };
 
     if (subcategory._count.products > 0) {
-      // Deliberately permanent: even a deleted product's row still exists
-      // and still references this subcategory, and the database (correctly)
-      // refuses to break that reference. There is no "empty it out" path —
-      // a subcategory that has ever been used stays forever.
       return {
         success: false,
-        message: `Impossible de supprimer : ${subcategory._count.products} produit(s) ont utilisé cette sous-catégorie, y compris ceux déjà supprimés. Une sous-catégorie déjà utilisée ne peut plus être supprimée — vous pouvez la désactiver à la place.`,
+        message: `Impossible de supprimer : ${subcategory._count.products} produit(s) utilisent encore cette sous-catégorie. Supprimez-les (ou déplacez-les) d'abord.`,
       };
     }
 
+    // Any already-archived (soft-deleted) product still referencing this
+    // subcategory just loses the reference (Product.subcategoryId is nullable,
+    // ON DELETE SET NULL) — its own row, and its OrderItem/invoice history, is
+    // never touched.
     await prisma.productSubcategory.delete({ where: { id } });
     revalidatePath("/dashboard/boutique/categories");
     return { success: true, message: "Sous-catégorie supprimée." };

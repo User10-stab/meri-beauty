@@ -163,8 +163,8 @@ export function ProductsPageClient({ initialProducts, brands }) {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <span className="text-gray-600 dark:text-dark-6">{p.category.name}</span>
-                  <span className="block text-xs text-gray-400">{p.subcategory.name}</span>
+                  <span className="text-gray-600 dark:text-dark-6">{p.category?.name ?? "—"}</span>
+                  <span className="block text-xs text-gray-400">{p.subcategory?.name ?? ""}</span>
                 </TableCell>
                 <TableCell>
                   <span className="font-medium text-gray-700 dark:text-dark-6">{priceRange(p.variants)}</span>

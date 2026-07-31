@@ -118,9 +118,11 @@ export async function getProducts({
         name: p.name,
         slug: p.slug,
         status: p.status,
-        brand: p.subcategory.category.brand,
-        category: { id: p.subcategory.category.id, name: p.subcategory.category.name },
-        subcategory: { id: p.subcategory.id, name: p.subcategory.name },
+        // null only for an archived product whose subcategory was later deleted —
+        // its own subcategoryId is SET NULL rather than blocking that deletion.
+        brand: p.subcategory?.category.brand ?? null,
+        category: p.subcategory ? { id: p.subcategory.category.id, name: p.subcategory.category.name } : null,
+        subcategory: p.subcategory ? { id: p.subcategory.id, name: p.subcategory.name } : null,
         thumbnail: p.images[0]?.path ?? null,
         variants: p.variants.map(withMargin),
         totalStock: p.variants.reduce((sum, v) => sum + v.stockQuantity, 0),

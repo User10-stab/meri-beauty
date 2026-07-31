@@ -384,8 +384,14 @@ model Product {
   slug        String  @unique
   description String?
 
-  subcategoryId String
-  subcategory   ProductSubcategory @relation(fields: [subcategoryId], references: [id])
+  // Nullable so a subcategory can actually be deleted once it has no active
+  // products left — an archived (soft-deleted) product's row still exists
+  // forever (see isDeleted below) and would otherwise block deletion forever
+  // too. onDelete: SetNull only ever fires for those already-archived rows,
+  // since deleteProductSubcategory() refuses to delete while any non-deleted
+  // product still references it.
+  subcategoryId String?
+  subcategory   ProductSubcategory? @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
 
   status ProductStatus @default(DRAFT)
 

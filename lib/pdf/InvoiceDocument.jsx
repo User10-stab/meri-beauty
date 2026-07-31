@@ -75,6 +75,7 @@ export function InvoiceDocument({ invoice }) {
             <Text style={styles.partyLabel}>Facturé à</Text>
             <Text>{invoice.customerName}</Text>
             <Text style={styles.muted}>{invoice.customerEmail}</Text>
+            {invoice.customerVatNumber && <Text style={styles.muted}>TVA : {invoice.customerVatNumber}</Text>}
             {invoice.customerAddress && <Text style={styles.muted}>{invoice.customerAddress}</Text>}
           </View>
         </View>

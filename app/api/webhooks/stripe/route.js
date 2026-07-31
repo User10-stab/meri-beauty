@@ -287,7 +287,7 @@ async function processCheckoutSession(session) {
         paymentId: payment.id,
         source: "APPOINTMENT",
         totalInclVat: paidAmount,
-        customer: { fullName: user.fullName, email: user.email },
+        customer: { fullName: user.fullName, email: user.email, vatNumber: user.vatNumber },
         lines: [{ description: staffService.service?.name ?? "Prestation", quantity: 1, unitPrice: totalAmount }],
       });
     }

@@ -424,7 +424,7 @@ export async function fulfillOrderPayment(session) {
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
-    include: { items: true, cart: { select: { id: true, status: true } }, user: { select: { id: true, fullName: true, email: true } } },
+    include: { items: true, cart: { select: { id: true, status: true } }, user: { select: { id: true, fullName: true, email: true, vatNumber: true } } },
   });
 
   if (!order || order.status === "CANCELLED" || order.status === "EXPIRED") {
@@ -473,7 +473,7 @@ export async function fulfillOrderPayment(session) {
       paymentId: payment.id,
       source: "ORDER",
       totalInclVat: paidAmount,
-      customer: { fullName: order.user.fullName, email: order.user.email },
+      customer: { fullName: order.user.fullName, email: order.user.email, vatNumber: order.user.vatNumber },
       lines: orderInvoiceLines(order),
     });
 
@@ -652,7 +652,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
   try {
     const order = await prisma.order.findFirst({
       where: orderId ? { id: orderId } : { pickupCode },
-      include: { items: true, payment: true, user: { select: { fullName: true, email: true } } },
+      include: { items: true, payment: true, user: { select: { fullName: true, email: true, vatNumber: true } } },
     });
     if (!order) return { success: false, message: "Commande introuvable — vérifiez le code." };
     if (order.fulfilmentMode === "SHIPPING_PREPAID") {
@@ -698,7 +698,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
           paymentId: payment.id,
           source: "ORDER",
           totalInclVat: Number(order.totalAmount),
-          customer: { fullName: order.user.fullName, email: order.user.email },
+          customer: { fullName: order.user.fullName, email: order.user.email, vatNumber: order.user.vatNumber },
           lines: orderInvoiceLines(order),
         });
 

@@ -269,6 +269,7 @@ model User {
   isActive             Boolean   @default(true)
   lastLogin            DateTime?
   newsletterSubscribed Boolean   @default(false)
+  vatNumber            String?   // Client TVA number for B2B invoices
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
   createdAt DateTime @default(now())
@@ -846,9 +847,10 @@ model Invoice {
   sellerAddress   String?
   sellerVatNumber String?
 
-  customerName    String
-  customerEmail   String
-  customerAddress String?
+  customerName      String
+  customerEmail     String
+  customerVatNumber String?   // Client TVA number (copied from User.vatNumber at invoice time)
+  customerAddress   String?
 
   subtotalExclVat Decimal @db.Decimal(10, 2)
   vatRate         Decimal @default(21) @db.Decimal(4, 2)

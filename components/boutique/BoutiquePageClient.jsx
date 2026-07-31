@@ -26,6 +26,19 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
     [categories, categorySlug]
   );
 
+  // Categories are brand-scoped — the same name (e.g. "Non classé", "Accessoires")
+  // legitimately recurs under several brands, so group by brand here instead of
+  // showing one flat list where duplicate names can't be told apart.
+  const categoriesByBrand = useMemo(() => {
+    const groups = new Map();
+    for (const cat of categories) {
+      const key = cat.brand?.id ?? "unknown";
+      if (!groups.has(key)) groups.set(key, { brand: cat.brand, categories: [] });
+      groups.get(key).categories.push(cat);
+    }
+    return [...groups.values()];
+  }, [categories]);
+
   function refetch(next) {
     const params = {
       search: next.search ?? search,
@@ -144,27 +157,34 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
                 <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
                   Catégories
                 </h3>
-                <ul className="space-y-1.5">
-                  {categories.map((cat) => (
-                    <li key={cat.id}>
-                      <button
-                        type="button"
-                        onClick={() => selectCategory(cat.slug)}
-                        className={`text-left text-sm transition-colors ${
-                          categorySlug === cat.slug ? "font-semibold text-[#C8A46A]" : "text-gray-600 hover:text-[#2F3A2E]"
-                        }`}
-                      >
-                        {cat.name}
-                      </button>
-                      {activeCategory?.id === cat.id && cat.subcategories.length > 0 && (
-                        <ul className="ml-3 mt-1.5 space-y-1 border-l border-neutral-200 pl-3">
-                          {cat.subcategories.map((sub) => (
-                            <li key={sub.id} className="text-sm text-gray-500">
-                              {sub.name}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
+                <ul className="space-y-4">
+                  {categoriesByBrand.map((group) => (
+                    <li key={group.brand?.id ?? "unknown"}>
+                      <p className="mb-1.5 text-xs font-semibold text-[#2F3A2E]">{group.brand?.name ?? "Autre"}</p>
+                      <ul className="space-y-1.5 border-l border-neutral-200 pl-3">
+                        {group.categories.map((cat) => (
+                          <li key={cat.id}>
+                            <button
+                              type="button"
+                              onClick={() => selectCategory(cat.slug)}
+                              className={`text-left text-sm transition-colors ${
+                                categorySlug === cat.slug ? "font-semibold text-[#C8A46A]" : "text-gray-600 hover:text-[#2F3A2E]"
+                              }`}
+                            >
+                              {cat.name}
+                            </button>
+                            {activeCategory?.id === cat.id && cat.subcategories.length > 0 && (
+                              <ul className="ml-3 mt-1.5 space-y-1 border-l border-neutral-200 pl-3">
+                                {cat.subcategories.map((sub) => (
+                                  <li key={sub.id} className="text-sm text-gray-500">
+                                    {sub.name}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
                     </li>
                   ))}
                   {categories.length === 0 && <li className="text-sm text-gray-400">Aucune catégorie.</li>}

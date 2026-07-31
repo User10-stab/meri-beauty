@@ -39,17 +39,25 @@ const activeProductWhere = {
   variants: { some: { isDeleted: false, isActive: true } },
 };
 
-/** Categories/subcategories/brands that actually have active products — for the filter sidebar. */
+/**
+ * Categories/subcategories/brands that actually have active products — for the
+ * filter sidebar. Categories are brand-scoped (a name like "Accessoires" or
+ * "Non classé" legitimately recurs under several different brands), so each
+ * category carries its brand here — the sidebar groups by brand instead of
+ * showing a flat list where the same name appears several times with no way
+ * to tell them apart.
+ */
 export async function getStorefrontFilters() {
   try {
     const [categories, brands] = await Promise.all([
       prisma.productCategory.findMany({
         where: { isActive: true, subcategories: { some: { products: { some: activeProductWhere } } } },
-        orderBy: [{ position: "asc" }, { name: "asc" }],
+        orderBy: [{ brand: { name: "asc" } }, { position: "asc" }, { name: "asc" }],
         select: {
           id: true,
           name: true,
           slug: true,
+          brand: { select: { id: true, name: true } },
           subcategories: {
             where: { isActive: true, products: { some: activeProductWhere } },
             orderBy: [{ position: "asc" }, { name: "asc" }],

@@ -335,6 +335,12 @@ export default function Footer({ salon, services = [] }) {
             &copy; {new Date().getFullYear()} {salon?.name || "MeriBeauty"}. Tous droits réservés.
           </p>
           <div className="flex gap-5">
+            <Link
+              href="/boutique/returns"
+              className="text-[12px] text-white/30 transition-colors hover:text-white/60"
+            >
+              Retourner un article
+            </Link>
             <a
               href="#"
               className="text-[12px] text-white/30 transition-colors hover:text-white/60"

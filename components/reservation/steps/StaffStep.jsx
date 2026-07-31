@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getStaffByService } from "@/actions/reservation/get-staff-by-service";
 import { Star, Clock, Euro } from "lucide-react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import Image from "next/image";
 
 export default function StaffStep({ data, updateData, nextStep }) {

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getBookableCategories } from "@/actions/reservation/get-bookable-categories";
 import { Sparkles } from "lucide-react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 
 export default function CategoryStep({ data, updateData, nextStep }) {
   const [categories, setCategories] = useState([]);

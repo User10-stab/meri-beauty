@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { getBookableServices } from "@/actions/reservation/get-bookable-services";
 import { Clock } from "lucide-react";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 
 export default function ServiceStep({ data, updateData, nextStep }) {
   const [services, setServices] = useState([]);

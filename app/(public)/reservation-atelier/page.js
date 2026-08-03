@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ArrowLeft, Calendar, Clock, Users, Euro, CheckCircle, Bell, AlertTriangle } from "lucide-react";
@@ -26,6 +26,14 @@ function formatTime(dateStr) {
 }
 
 export default function ReservationAtelierPage() {
+  return (
+    <Suspense fallback={null}>
+      <ReservationAtelierContent />
+    </Suspense>
+  );
+}
+
+function ReservationAtelierContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { data: session } = useSession();

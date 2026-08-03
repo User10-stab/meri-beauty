@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { Loader2 } from "lucide-react";
 
 export default function ReservationAtelierSuccesPage() {
+  return (
+    <Suspense fallback={null}>
+      <ReservationAtelierSuccesContent />
+    </Suspense>
+  );
+}
+
+function ReservationAtelierSuccesContent() {
   const searchParams = useSearchParams();
   const reservationId = searchParams.get("reservation_id");
   const [status, setStatus] = useState("loading");

@@ -150,7 +150,7 @@ export default function AboutUs() {
           {/* CTA */}
           <div className="mt-8">
             <a
-              href="#reservation"
+              href="/reservation"
               className="group inline-flex items-center gap-2.5 rounded-full border border-gold/40 px-6 py-3 text-[13px] font-semibold text-gold transition-all duration-300 hover:bg-gold hover:text-white hover:shadow-lg hover:shadow-gold/20"
             >
               Réserver une séance

@@ -248,7 +248,7 @@ export default function Navbar() {
 
               {/* CTA — gold pill (only when authenticated) */}
               <Link
-                href="#reservation"
+                href="/reservation"
                 className="ml-2 hidden rounded-full border border-gold px-5 py-2 text-[13px] font-medium text-gold transition-all duration-200 hover:bg-gold hover:text-primary sm:inline-flex"
               >
                 Réserver
@@ -322,7 +322,7 @@ export default function Navbar() {
               </Link>
             ) : isAuthed ? (
               <Link
-                href="#reservation"
+                href="/reservation"
                 onClick={() => setOpen(false)}
                 className="inline-flex rounded-full border border-gold px-6 py-2.5 text-[13px] font-medium text-gold transition-all hover:bg-gold hover:text-primary"
               >

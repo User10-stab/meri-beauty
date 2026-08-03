@@ -82,7 +82,7 @@ export default async function Hero() {
           {/* CTAs */}
           <div className="mt-10 flex flex-wrap items-center gap-4">
             <a
-              href="#reservation"
+              href="/reservation"
               className="group inline-flex items-center gap-3 rounded-full bg-gold px-9 py-4 text-[15px] font-semibold text-white shadow-lg transition-all duration-300 hover:bg-gold/90 hover:shadow-xl hover:shadow-gold/20"
             >
               Réserver un rendez-vous

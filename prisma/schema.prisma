@@ -329,6 +329,7 @@ model WorkshopReservation {
   cancelledBy       User?                     @relation("ReservationCancelledBy", fields: [cancelledByUserId], references: [id])
   participants      String?
   notes             String?
+  reminderSentAt    DateTime?
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
 
@@ -432,22 +433,23 @@ model FormationSession {
 }
 
 model FormationReservation {
-  id            String                     @id @default(cuid())
-  sessionId     String
-  session       FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  customerId    String
-  customer      User                       @relation(fields: [customerId], references: [id])
-  payment       Payment?
-  seatsCount    Int                        @default(1) // always 1 for PRIVATE
-  status        FormationReservationStatus @default(PENDING_DEPOSIT)
-  holdExpiresAt DateTime?
-  depositAmount Decimal                    @default(0) @db.Decimal(10, 2)
-  totalPrice    Decimal                    @db.Decimal(10, 2)
-  balanceDue    Decimal                    @default(0) @db.Decimal(10, 2)
-  participants  String?
-  notes         String?
-  createdAt     DateTime                   @default(now())
-  updatedAt     DateTime                   @updatedAt
+  id             String                     @id @default(cuid())
+  sessionId      String
+  session        FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       User                       @relation(fields: [customerId], references: [id])
+  payment        Payment?
+  seatsCount     Int                        @default(1) // always 1 for PRIVATE
+  status         FormationReservationStatus @default(PENDING_DEPOSIT)
+  holdExpiresAt  DateTime?
+  depositAmount  Decimal                    @default(0) @db.Decimal(10, 2)
+  totalPrice     Decimal                    @db.Decimal(10, 2)
+  balanceDue     Decimal                    @default(0) @db.Decimal(10, 2)
+  participants   String?
+  notes          String?
+  reminderSentAt DateTime?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
 
   @@index([sessionId])
   @@index([customerId])

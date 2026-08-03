@@ -190,3 +190,102 @@ export async function changeReservationSession(reservationId, newSessionId) {
     return { success: false, message: "Erreur lors de la modification de la séance." };
   }
 }
+
+/**
+ * Admin-only: changes the number of seats on an existing CONFIRMED
+ * reservation, charging a flat 10% fee (of the reservation's original
+ * total price) via a Stripe Checkout link — regardless of whether seats go
+ * up or down. Per the confirmed pricing rule, this is a flat administrative
+ * fee: totalPrice/depositAmount/balanceDue are NOT recalculated for the new
+ * seat count, only seatsCount changes once the fee is paid.
+ */
+export async function changeReservationSeats(reservationId, newSeatsCount) {
+  try {
+    const session = await auth();
+    if (!session?.user || !isAdminRole(session.user.role)) {
+      return { success: false, message: "Non autorisé." };
+    }
+
+    const seats = Number(newSeatsCount);
+    if (!Number.isInteger(seats) || seats < 1) {
+      return { success: false, message: "Le nombre de places doit être un entier positif." };
+    }
+
+    const reservation = await prisma.workshopReservation.findUnique({
+      where: { id: reservationId },
+      include: { session: { include: { workshop: true } }, customer: true },
+    });
+    if (!reservation) {
+      return { success: false, message: "Réservation introuvable." };
+    }
+    if (reservation.status !== "CONFIRMED") {
+      return { success: false, message: "Seule une réservation confirmée peut être modifiée." };
+    }
+    if (seats === reservation.seatsCount) {
+      return { success: false, message: "Cette réservation a déjà ce nombre de places." };
+    }
+
+    const capacity = reservation.session.capacity ?? reservation.session.workshop.capacity;
+    if (seats > capacity) {
+      return { success: false, message: `La capacité maximale de cette séance est de ${capacity} personnes.` };
+    }
+
+    // Only enforce availability when INCREASING — the reservation's own
+    // current seats already count as "taken," so the room available for
+    // this change is what's free PLUS what this reservation already holds.
+    if (seats > reservation.seatsCount) {
+      const availability = await checkWorkshopSessionAvailability(reservation.sessionId);
+      const roomForThisReservation = (availability.data?.available ?? 0) + reservation.seatsCount;
+      if (!availability.success || seats > roomForThisReservation) {
+        return { success: false, message: "Pas assez de places disponibles sur cette séance pour cette augmentation." };
+      }
+    }
+
+    const changeFeeAmount = Number(reservation.totalPrice) * SESSION_CHANGE_FEE_RATE;
+
+    const stripeSession = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "eur",
+            product_data: {
+              name: `Frais de modification - ${reservation.session.workshop.title}`,
+              description: `Modification du nombre de places (${reservation.seatsCount} → ${seats})`,
+            },
+            unit_amount: Math.round(changeFeeAmount * 100),
+          },
+          quantity: 1,
+        },
+      ],
+      mode: "payment",
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation-atelier/succes?reservation_id=${reservation.id}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/workshops/reservations`,
+      customer_email: reservation.customer.email,
+      metadata: {
+        kind: "workshop",
+        workshopAction: "seats_change_fee",
+        reservationId: reservation.id,
+        newSeatsCount: String(seats),
+        changeFeeAmount: String(changeFeeAmount),
+      },
+      payment_intent_data: {
+        metadata: {
+          kind: "workshop",
+          workshopAction: "seats_change_fee",
+          reservationId: reservation.id,
+        },
+      },
+    });
+
+    return {
+      success: true,
+      message: "Lien de paiement généré. Envoyez-le au client pour finaliser le changement.",
+      paymentUrl: stripeSession.url,
+      changeFeeAmount,
+    };
+  } catch (error) {
+    console.error("[changeReservationSeats]", error);
+    return { success: false, message: "Erreur lors de la modification du nombre de places." };
+  }
+}

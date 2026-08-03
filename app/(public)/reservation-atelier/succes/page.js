@@ -34,20 +34,39 @@ function ReservationAtelierSuccesContent() {
       signIn("credentials", { email, password, redirect: false }).catch(() => {});
     }
 
-    // Fetch reservation details
+    // Fetch reservation details. The webhook that confirms payment runs
+    // asynchronously and can lag a few seconds behind the Stripe redirect,
+    // so poll briefly for PENDING_DEPOSIT -> CONFIRMED before giving up —
+    // otherwise a real, successful payment could flash a false "pending"
+    // state, and (worse) an abandoned/unpaid checkout would need to be
+    // distinguishable from a confirmed one at all.
+    let cancelled = false;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 5;
+
     async function fetchReservation() {
       try {
         const res = await fetch(`/api/workshop-reservations/${reservationId}`);
         if (!res.ok) throw new Error();
         const data = await res.json();
+        if (cancelled) return;
         setReservation(data);
-        setStatus("success");
+
+        if (data.status === "PENDING_DEPOSIT" && attempts < MAX_ATTEMPTS) {
+          attempts += 1;
+          setTimeout(fetchReservation, 2000);
+          return;
+        }
+        setStatus("done");
       } catch {
-        setStatus("success");
+        if (!cancelled) setStatus("done");
       }
     }
 
     fetchReservation();
+    return () => {
+      cancelled = true;
+    };
   }, [reservationId]);
 
   if (status === "loading") {
@@ -59,6 +78,8 @@ function ReservationAtelierSuccesContent() {
   }
 
   const r = reservation;
+  const isConfirmed = r?.status === "CONFIRMED" || r?.status === "COMPLETED";
+  const isStillPending = r?.status === "PENDING_DEPOSIT";
   const depositFormatted = r && new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(r.depositAmount));
   const totalFormatted = r && new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(r.totalPrice));
   const balanceFormatted = r && new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(r.balanceDue));
@@ -66,18 +87,32 @@ function ReservationAtelierSuccesContent() {
   return (
     <div className="min-h-screen bg-cream">
       <div className="mx-auto max-w-[600px] px-6 py-20 text-center md:px-10 lg:py-28">
-        <div className="mb-6 inline-flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-8 w-8 text-emerald-600">
-            <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+        <div
+          className={`mb-6 inline-flex h-16 w-16 items-center justify-center rounded-full ${
+            isStillPending ? "bg-amber-100" : "bg-emerald-100"
+          }`}
+        >
+          {isStillPending ? (
+            <Loader2 className="h-8 w-8 animate-spin text-amber-600" />
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-8 w-8 text-emerald-600">
+              <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
         </div>
 
         <h1 className="text-2xl font-bold text-ink sm:text-3xl">
-          Réservation confirmée !
+          {isStillPending ? "Confirmation en cours..." : isConfirmed ? "Réservation confirmée !" : "Réservation introuvable"}
         </h1>
         <p className="mt-3 text-ink/60">
-          Votre réservation a bien été prise en compte.
-          {r && <span className="font-medium"> Un email de confirmation vous a été envoyé.</span>}
+          {isStillPending && "Nous attendons la confirmation de votre paiement. Cela peut prendre quelques instants — vous recevrez un email dès que ce sera confirmé."}
+          {isConfirmed && (
+            <>
+              Votre réservation a bien été prise en compte.
+              <span className="font-medium"> Un email de confirmation vous a été envoyé.</span>
+            </>
+          )}
+          {!r && "Nous n'avons pas pu retrouver votre réservation. Si le paiement a été débité, contactez-nous."}
         </p>
 
         {r && (

@@ -9,6 +9,7 @@ import {
   welcomeWithCredentialsEmail,
   workshopReservationConfirmationEmail,
   workshopSessionChangeEmail,
+  workshopSeatsChangeEmail,
 } from "@/lib/email-templates";
 import { fulfillOrderPayment } from "@/actions/boutique/orders";
 import { issueInvoice } from "@/lib/invoicing";
@@ -426,6 +427,9 @@ async function processWorkshopCheckoutSession(session) {
   if (workshopAction === "session_change_fee") {
     return applyWorkshopSessionChangeFee(session, meta);
   }
+  if (workshopAction === "seats_change_fee") {
+    return applyWorkshopSeatsChangeFee(session, meta);
+  }
 
   // ── Idempotency — was this session already processed? ────────────────────
   const existing = await prisma.payment.findFirst({
@@ -648,6 +652,71 @@ async function applyWorkshopSessionChangeFee(session, meta) {
       changeFeeAmount,
     }),
   }).catch((err) => console.error("[stripe-webhook] session change email failed:", err));
+
+  return { received: true, processed: true };
+}
+
+/** Applies an admin-mediated seat-count change once its flat 10% fee has cleared. */
+async function applyWorkshopSeatsChangeFee(session, meta) {
+  const { reservationId, newSeatsCount } = meta;
+  const seats = Number(newSeatsCount);
+
+  if (!reservationId || !Number.isInteger(seats)) {
+    console.error("[stripe-webhook] seats_change_fee missing metadata:", session.id, meta);
+    return { received: true, warning: "missing metadata" };
+  }
+
+  const reservation = await prisma.workshopReservation.findUnique({
+    where: { id: reservationId },
+    include: { session: { include: { workshop: true } }, customer: true, payment: true },
+  });
+
+  if (!reservation) {
+    console.error("[stripe-webhook] WorkshopReservation gone for seats change, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "reservation deleted" };
+  }
+
+  if (reservation.seatsCount === seats) {
+    // Already applied — a Stripe retry of the same event.
+    return { received: true, alreadyProcessed: true };
+  }
+
+  const changeFeeAmount = (session.amount_total ?? 0) / 100;
+  const previousSeatsCount = reservation.seatsCount;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.workshopReservation.update({
+      where: { id: reservation.id },
+      data: {
+        seatsCount: seats,
+        changeFeeAmount: { increment: changeFeeAmount },
+      },
+    });
+
+    if (reservation.payment) {
+      await tx.transaction.create({
+        data: {
+          paymentId: reservation.payment.id,
+          amount: changeFeeAmount,
+          method: "ONLINE",
+          transactionType: "FINAL_PAYMENT",
+          paidAt: new Date(),
+        },
+      });
+    }
+  });
+
+  sendEmail({
+    to: reservation.customer.email,
+    ...workshopSeatsChangeEmail({
+      customerName: reservation.customer.fullName,
+      activityTitle: reservation.session.workshop.title,
+      previousSeatsCount,
+      newSeatsCount: seats,
+      changeFeeAmount,
+    }),
+  }).catch((err) => console.error("[stripe-webhook] seats change email failed:", err));
 
   return { received: true, processed: true };
 }

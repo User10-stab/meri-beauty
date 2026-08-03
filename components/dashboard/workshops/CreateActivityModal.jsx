@@ -138,7 +138,7 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
     startDate: "",
     endDate: "",
     allowMultipleSessions: false,
-    depositPercentage: 30,
+    depositPercentage: 50,
   });
   const [sessions, setSessions] = useState([]);
   const [errors, setErrors] = useState({});
@@ -173,7 +173,7 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
         startDate: firstSession?.startDate ? new Date(firstSession.startDate).toISOString().slice(0, 16) : "",
         endDate: firstSession?.endDate ? new Date(firstSession.endDate).toISOString().slice(0, 16) : "",
         allowMultipleSessions: activity.allowMultipleSessions ?? false,
-        depositPercentage: activity.depositPercentage ?? 30,
+        depositPercentage: activity.depositPercentage ?? 50,
       });
       if (activity.allowMultipleSessions && activity.sessions?.length > 0) {
         setSessions(
@@ -206,7 +206,7 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
         startDate: "",
         endDate: "",
         allowMultipleSessions: false,
-        depositPercentage: 30,
+        depositPercentage: 50,
       });
       setSessions([]);
     }
@@ -396,12 +396,15 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
                 <input
                   type="number"
                   required
+                  min={1}
+                  max={8}
                   value={form.capacity}
                   onChange={(e) => setForm((prev) => ({ ...prev, capacity: e.target.value }))}
                   className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                  placeholder="10"
+                  placeholder="8"
                 />
               </div>
+              <p className="mt-1 text-xs text-gray-400">Maximum 8 personnes par atelier/événement.</p>
               <FieldError message={errors.capacity} />
             </ModalField>
           </div>
@@ -417,7 +420,7 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
                   value={form.depositPercentage}
                   onChange={(e) => setForm((prev) => ({ ...prev, depositPercentage: parseInt(e.target.value, 10) || 0 }))}
                   className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                  placeholder="30"
+                  placeholder="50"
                 />
               </div>
               <p className="mt-1 text-xs text-gray-400">Pourcentage du prix total demandé à la réservation.</p>
@@ -555,9 +558,11 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
                       <ModalField label="Capacité">
                         <input
                           type="number"
+                          min={1}
+                          max={8}
                           value={session.capacity}
                           onChange={(e) => updateSession(index, "capacity", e.target.value)}
-                          placeholder={`${form.capacity || "10"} (défaut)`}
+                          placeholder={`${form.capacity || "8"} (défaut)`}
                           className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
                         />
                       </ModalField>

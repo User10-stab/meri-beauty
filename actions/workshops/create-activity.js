@@ -4,14 +4,18 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isAdminRole } from "@/lib/authorization";
+import { isAdminRole, hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 
 const sessionSchema = z.object({
   id: z.string().optional(),
   startDate: z.string().min(1, "La date de début est obligatoire."),
   endDate: z.string().optional().nullable(),
-  capacity: z.coerce.number().int().positive("La capacité doit être d'au moins 1."),
+  capacity: z.coerce
+    .number()
+    .int()
+    .positive("La capacité doit être d'au moins 1.")
+    .max(8, "La capacité maximale est de 8 personnes."),
   animatorId: z.string().optional().nullable(),
   registrationDeadline: z.string().optional().nullable(),
 });
@@ -24,11 +28,15 @@ const activitySchema = z.object({
   price: z.coerce.number({ invalid_type_error: "Le prix est invalide." }).nonnegative("Le prix ne peut pas être négatif."),
   duration: z.coerce.number({ invalid_type_error: "La durée est invalide." }).int().positive("La durée doit être supérieure à 0 minutes."),
   language: z.string().trim().optional().nullable(),
-  capacity: z.coerce.number({ invalid_type_error: "La capacité est invalide." }).int().positive("La capacité doit être d'au moins 1 personne."),
+  capacity: z.coerce
+    .number({ invalid_type_error: "La capacité est invalide." })
+    .int()
+    .positive("La capacité doit être d'au moins 1 personne.")
+    .max(8, "La capacité maximale est de 8 personnes."),
   animatorId: z.string().optional().nullable(),
   status: z.enum(["DRAFT", "PUBLISHED", "CANCELLED", "ARCHIVED"]).optional().default("DRAFT"),
   allowMultipleSessions: z.boolean().optional().default(false),
-  depositPercentage: z.coerce.number().int().min(0).max(100).optional().default(30),
+  depositPercentage: z.coerce.number().int().min(0).max(100).optional().default(50),
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
   sessions: z.array(sessionSchema).optional().default([]),
@@ -39,13 +47,38 @@ const updateActivitySchema = activitySchema.extend({
 });
 
 /**
+ * Gate for activity mutations: admin/owner may act on any activity; staff
+ * may only create (no existing row to own yet) or, when requireOwnerForEdit
+ * is set, act on an activity they created themselves.
+ */
+async function requireActivityAccess(activityId, { requireOwnerForEdit = false } = {}) {
+  const session = await auth();
+  if (!session?.user) return { error: "Non authentifié." };
+  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.WORKSHOPS)) {
+    return { error: "Non autorisé." };
+  }
+  if (isAdminRole(session.user.role)) return { session };
+  if (!requireOwnerForEdit) return { session };
+
+  const activity = await prisma.activity.findUnique({
+    where: { id: activityId },
+    select: { createdById: true },
+  });
+  if (!activity) return { error: "Activité introuvable." };
+  if (activity.createdById !== session.user.id) {
+    return { error: "Vous ne pouvez modifier que les activités que vous avez créées." };
+  }
+  return { session };
+}
+
+/**
  * Crée une nouvelle activité.
  */
 export async function createActivity(input) {
   try {
-    const session = await auth();
-    if (!session?.user || !isAdminRole(session.user.role)) {
-      return { success: false, message: "Non autorisé." };
+    const { session, error } = await requireActivityAccess();
+    if (error) {
+      return { success: false, message: error };
     }
 
     const parsed = activitySchema.safeParse(input);
@@ -85,6 +118,7 @@ export async function createActivity(input) {
       data: {
         ...rest,
         animatorId: animatorId || null,
+        createdById: session.user.id,
         sessions:
           sessions.length > 0
             ? {
@@ -103,7 +137,7 @@ export async function createActivity(input) {
       include: { sessions: true },
     });
 
-    revalidatePath("/dashboard/workshops");
+    revalidatePath("/dashboard/workshops/activities");
     return {
       success: true,
       message: "Activité créée avec succès !",
@@ -120,9 +154,9 @@ export async function createActivity(input) {
  */
 export async function updateActivity(input) {
   try {
-    const session = await auth();
-    if (!session?.user || !isAdminRole(session.user.role)) {
-      return { success: false, message: "Non autorisé." };
+    const { error } = await requireActivityAccess(input?.id, { requireOwnerForEdit: true });
+    if (error) {
+      return { success: false, message: error };
     }
 
     const parsed = updateActivitySchema.safeParse(input);
@@ -202,7 +236,7 @@ export async function updateActivity(input) {
       }
     }
 
-    revalidatePath("/dashboard/workshops");
+    revalidatePath("/dashboard/workshops/activities");
     return {
       success: true,
       message: "Activité mise à jour avec succès !",
@@ -219,9 +253,9 @@ export async function updateActivity(input) {
  */
 export async function deleteActivity(id) {
   try {
-    const session = await auth();
-    if (!session?.user || !isAdminRole(session.user.role)) {
-      return { success: false, message: "Non autorisé." };
+    const { error } = await requireActivityAccess(id, { requireOwnerForEdit: true });
+    if (error) {
+      return { success: false, message: error };
     }
 
     if (!id) {
@@ -235,7 +269,7 @@ export async function deleteActivity(id) {
 
     await prisma.activity.delete({ where: { id } });
 
-    revalidatePath("/dashboard/workshops");
+    revalidatePath("/dashboard/workshops/activities");
     return { success: true, message: "Activité supprimée avec succès !" };
   } catch (error) {
     console.error("[deleteActivity]", error);

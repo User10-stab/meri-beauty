@@ -113,13 +113,13 @@ export function ActivityRow({ row, onView, onEdit, onDelete }) {
         </span>
       </td>
 
-      {/* Actions */}
+      {/* Actions — staff only manage activities they created; admin manages all */}
       <td className="px-4 py-4 pr-5 align-middle">
         <RowActions
           row={row}
           onView={onView}
-          onEdit={onEdit}
-          onDelete={onDelete}
+          onEdit={row.canManage ? onEdit : undefined}
+          onDelete={row.canManage ? onDelete : undefined}
         />
       </td>
     </tr>

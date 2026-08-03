@@ -1192,8 +1192,6 @@ model RentalRequest {
   message        String?
   ownerResponse  String?
   specialty      String?
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
   isDeleted      Boolean             @default(false)
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())

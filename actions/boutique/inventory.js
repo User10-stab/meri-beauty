@@ -163,7 +163,8 @@ export async function generateAnnualInventoryReport(year) {
       RESTOCK: movements.filter(m => m.type === 'RESTOCK').length,
       RETURNS: movements.filter(m => m.type === 'RETURN').length,
       LOSS: movements.filter(m => m.type === 'LOSS').length,
-      ADJUSTMENT: movements.filter(m => m.type === 'ADJUSTMENT').length
+      ADJUSTMENT: movements.filter(m => m.type === 'ADJUSTMENT').length,
+      SALON_USAGE: movements.filter(m => m.type === 'SALON_USAGE').length
     };
 
     // Low stock items

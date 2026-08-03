@@ -194,8 +194,16 @@ export default function Navbar() {
 
                     <div className="py-2">
                       <a
-                        href="/appointments"
+                        href="/mon-compte"
                         ref={firstMenuItemRef}
+                        onClick={() => setMenuOpen(false)}
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        role="menuitem"
+                      >
+                        Mes commandes
+                      </a>
+                      <a
+                        href="/appointments"
                         onClick={() => setMenuOpen(false)}
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         role="menuitem"

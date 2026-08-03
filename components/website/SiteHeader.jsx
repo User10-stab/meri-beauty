@@ -15,6 +15,7 @@ const NAV_LINKS = [
   { label: "Réservation", href: "/reservation" },
   { label: "Boutique", href: "/boutique" },
   { label: "Évènements & Ateliers", href: "/evenements" },
+  { label: "Formations", href: "/formations" },
   { label: "Contact", href: "/contact" },
 ];
 

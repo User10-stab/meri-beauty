@@ -60,6 +60,15 @@ const ALL_NAV_DATA = [
         roles: DASHBOARD_PERMISSIONS.WORKSHOPS,
       },
       {
+        title: "Formations",
+        icon: Icons.Calendar,
+        items: [
+          { title: "Formations", url: "/dashboard/formations", roles: DASHBOARD_PERMISSIONS.FORMATIONS },
+          { title: "Réservations", url: "/dashboard/formations/reservations", roles: DASHBOARD_PERMISSIONS.FORMATION_RESERVATIONS },
+        ],
+        roles: DASHBOARD_PERMISSIONS.FORMATIONS,
+      },
+      {
         title: "Staff",
         icon: Icons.User,
         items: [

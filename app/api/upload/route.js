@@ -12,7 +12,7 @@ export const maxDuration = 30;
 // Max raw file size: 20 MB (consistent with frontend)
 const MAX_SIZE = 20 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-const ALLOWED_FOLDERS = ["staff", "services", "products"];
+const ALLOWED_FOLDERS = ["staff", "services", "products", "activities", "formations"];
 const BASE_UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 
 export async function POST(request) {

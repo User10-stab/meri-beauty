@@ -52,6 +52,7 @@ enum InvoiceSource {
   ORDER
   APPOINTMENT
   WORKSHOP
+  FORMATION
 }
 
 enum ReturnStatus {
@@ -235,6 +236,28 @@ enum WaitingListStatus {
   REMOVED
 }
 
+// ─── FORMATION ENUMS ────────────────────────────────────────────────────────
+
+enum FormationType {
+  PRIVATE
+  PUBLIC
+}
+
+enum FormationStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  ARCHIVED
+}
+
+enum FormationReservationStatus {
+  PENDING_DEPOSIT
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
 // ─── WORKSHOP / EVENT MODELS ───────────────────────────────────────────
 
 model Activity {
@@ -347,10 +370,88 @@ model Animator {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  activities Activity[]
-  sessions   WorkshopSession[]
+  activities        Activity[]
+  sessions          WorkshopSession[]
+  formations        Formation[]
+  formationSessions FormationSession[]
 
   @@map("animators")
+}
+
+// ─── FORMATION MODELS ───────────────────────────────────────────────────────
+// Training courses. Structurally parallel to Activity/WorkshopSession/
+// WorkshopReservation above, but deliberately kept as separate tables: none
+// of the atelier-only features (48h cancellation cutoff, waiting list,
+// low-seats banner/email, paid session/seat change) apply here, so this
+// stays a plain CRUD + deposit/full-payment module instead of threading
+// exclusions through the ateliers code.
+
+model Formation {
+  id                    String          @id @default(cuid())
+  type                  FormationType
+  title                 String
+  description           String?
+  cover                 String?
+  price                 Decimal         @db.Decimal(10, 2)
+  duration              Int
+  language              String?
+  capacity              Int // PRIVATE: always 1 (enforced in Zod); PUBLIC: admin-set, no ceiling
+  animatorId            String?
+  animator              Animator?       @relation(fields: [animatorId], references: [id])
+  status                FormationStatus @default(DRAFT)
+  allowMultipleSessions Boolean         @default(false)
+  depositPercentage     Int             @default(30)
+  createdById           String?
+  createdBy             User?           @relation("FormationCreatedBy", fields: [createdById], references: [id])
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  sessions FormationSession[]
+
+  @@map("formations")
+}
+
+model FormationSession {
+  id                   String        @id @default(cuid())
+  formationId          String
+  formation            Formation     @relation(fields: [formationId], references: [id], onDelete: Cascade)
+  animatorId           String?
+  animator             Animator?     @relation(fields: [animatorId], references: [id])
+  startDate            DateTime
+  endDate              DateTime?
+  capacity             Int
+  status               SessionStatus @default(SCHEDULED)
+  registrationDeadline DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  reservations FormationReservation[]
+
+  @@index([formationId])
+  @@map("formation_sessions")
+}
+
+model FormationReservation {
+  id            String                     @id @default(cuid())
+  sessionId     String
+  session       FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId    String
+  customer      User                       @relation(fields: [customerId], references: [id])
+  payment       Payment?
+  seatsCount    Int                        @default(1) // always 1 for PRIVATE
+  status        FormationReservationStatus @default(PENDING_DEPOSIT)
+  holdExpiresAt DateTime?
+  depositAmount Decimal                    @default(0) @db.Decimal(10, 2)
+  totalPrice    Decimal                    @db.Decimal(10, 2)
+  balanceDue    Decimal                    @default(0) @db.Decimal(10, 2)
+  participants  String?
+  notes         String?
+  createdAt     DateTime                   @default(now())
+  updatedAt     DateTime                   @updatedAt
+
+  @@index([sessionId])
+  @@index([customerId])
+  @@map("formation_reservations")
 }
 
 model Salon {
@@ -429,17 +530,19 @@ model User {
   reviews               Review[]
   notifications         Notification[]
   newsletterRecipients  NewsletterRecipient[]
-  createdStaffServices  StaffService[]        @relation("CreatedBy")
+  createdStaffServices  StaffService[]         @relation("CreatedBy")
   rentalRequests        RentalRequest[]
   workshopReservations  WorkshopReservation[]
   waitingListEntries    WaitingListEntry[]
-  createdActivities     Activity[]            @relation("ActivityCreatedBy")
-  cancelledReservations WorkshopReservation[] @relation("ReservationCancelledBy")
-  stockMovements        InventoryMovement[]   @relation("StockMovementBy")
+  createdActivities     Activity[]             @relation("ActivityCreatedBy")
+  cancelledReservations WorkshopReservation[]  @relation("ReservationCancelledBy")
+  formationReservations FormationReservation[]
+  createdFormations     Formation[]            @relation("FormationCreatedBy")
+  stockMovements        InventoryMovement[]    @relation("StockMovementBy")
   carts                 Cart[]
-  orders                Order[]               @relation("OrderBuyer")
-  pickedUpOrders        Order[]               @relation("OrderPickedUpBy")
-  processedReturns      ReturnRequest[]       @relation("ReturnProcessedBy")
+  orders                Order[]                @relation("OrderBuyer")
+  pickedUpOrders        Order[]                @relation("OrderPickedUpBy")
+  processedReturns      ReturnRequest[]        @relation("ReturnProcessedBy")
 }
 
 // CATEGORY — services only. Retail products use ProductCategory.
@@ -953,29 +1056,30 @@ model Appointment {
 }
 
 // PAYMENT
-// Polymorphic: exactly one of appointmentId / orderId is set, enforced by a
-// raw-SQL CHECK constraint added after the migration (see
-// prisma/migrations/*_add_commerce_cart_order/migration.sql) — Prisma has no
-// schema-level XOR. A future workshopReservationId branch can join this same
-// CHECK when that module exists.
+// Polymorphic: exactly one of appointmentId / orderId / workshopReservationId
+// / formationReservationId is set, enforced by a raw-SQL CHECK constraint
+// added after the migration (see prisma/migrations/*/migration.sql for
+// "Payment_exactly_one_source") — Prisma has no schema-level XOR.
 model Payment {
-  id                    String               @id @default(cuid())
-  appointmentId         String?              @unique
-  appointment           Appointment?         @relation(fields: [appointmentId], references: [id])
-  orderId               String?              @unique
-  order                 Order?               @relation(fields: [orderId], references: [id])
-  workshopReservationId String?              @unique
-  workshopReservation   WorkshopReservation? @relation(fields: [workshopReservationId], references: [id])
-  depositAmount         Decimal              @default(0)
-  totalAmount           Decimal
-  paidAmount            Decimal
-  remainingAmount       Decimal
-  paymentType           PaymentType
-  status                PaymentStatus
-  paidAt                DateTime?
-  isDeleted             Boolean              @default(false)
-  deletedAt             DateTime?
-  transactionReference  String?
+  id                     String                @id @default(cuid())
+  appointmentId          String?               @unique
+  appointment            Appointment?          @relation(fields: [appointmentId], references: [id])
+  orderId                String?               @unique
+  order                  Order?                @relation(fields: [orderId], references: [id])
+  workshopReservationId  String?               @unique
+  workshopReservation    WorkshopReservation?  @relation(fields: [workshopReservationId], references: [id])
+  formationReservationId String?               @unique
+  formationReservation   FormationReservation? @relation(fields: [formationReservationId], references: [id])
+  depositAmount          Decimal               @default(0)
+  totalAmount            Decimal
+  paidAmount             Decimal
+  remainingAmount        Decimal
+  paymentType            PaymentType
+  status                 PaymentStatus
+  paidAt                 DateTime?
+  isDeleted              Boolean               @default(false)
+  deletedAt              DateTime?
+  transactionReference   String?
 
   transactions Transaction[]
   invoice      Invoice?

@@ -4,7 +4,18 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
-import { welcomeWithCredentialsEmail, waitingListNotificationEmail } from "@/lib/email-templates";
+import { welcomeWithCredentialsEmail, waitingListNotificationEmail, waitingListJoinConfirmationEmail } from "@/lib/email-templates";
+
+function formatSessionDate(date) {
+  return new Date(date).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -104,15 +115,27 @@ export async function joinWaitingList({ sessionId, customerInfo }) {
     const nextPosition = (lastEntry?.position ?? 0) + 1;
 
     // Create waiting list entry
+    const seatsRequested = customerInfo.seatsRequested ?? 1;
     const entry = await prisma.waitingListEntry.create({
       data: {
         sessionId,
         customerId: user.id,
-        seatsRequested: customerInfo.seatsRequested ?? 1,
+        seatsRequested,
         position: nextPosition,
         status: "WAITING",
       },
     });
+
+    sendEmail({
+      to: email,
+      ...waitingListJoinConfirmationEmail({
+        customerName: customerInfo.fullName,
+        activityTitle: session.workshop.title,
+        sessionDate: formatSessionDate(session.startDate),
+        position: nextPosition,
+        seatsRequested,
+      }),
+    }).catch((err) => console.error("[joinWaitingList] confirmation email failed:", err));
 
     return {
       success: true,

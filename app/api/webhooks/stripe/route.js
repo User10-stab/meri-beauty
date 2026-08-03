@@ -10,6 +10,7 @@ import {
   workshopReservationConfirmationEmail,
   workshopSessionChangeEmail,
   workshopSeatsChangeEmail,
+  formationReservationConfirmationEmail,
 } from "@/lib/email-templates";
 import { fulfillOrderPayment } from "@/actions/boutique/orders";
 import { issueInvoice } from "@/lib/invoicing";
@@ -96,6 +97,8 @@ export async function POST(req) {
       result = await fulfillOrderPayment(session);
     } else if (session.metadata?.kind === "workshop") {
       result = await processWorkshopCheckoutSession(session);
+    } else if (session.metadata?.kind === "formation") {
+      result = await processFormationCheckoutSession(session);
     } else {
       result = await processCheckoutSession(session);
     }
@@ -562,6 +565,146 @@ async function processWorkshopCheckoutSession(session) {
   sendLowSeatsBroadcast(reservation.sessionId).catch((err) =>
     console.error("[stripe-webhook] low-seats broadcast failed:", err)
   );
+
+  return { received: true, processed: true };
+}
+
+// ─── checkout.session.completed (formations) ─────────────────────────────────
+
+async function processFormationCheckoutSession(session) {
+  const meta = session.metadata ?? {};
+  const { reservationId, formationAction } = meta;
+
+  if (!reservationId) {
+    console.error("[stripe-webhook] Formation session missing reservationId:", session.id, meta);
+    return { received: true, warning: "missing metadata" };
+  }
+
+  // ── Idempotency — was this session already processed? ────────────────────
+  const existing = await prisma.payment.findFirst({
+    where: { transactionReference: session.id },
+    select: { id: true },
+  });
+  if (existing) {
+    return { received: true, alreadyProcessed: true };
+  }
+
+  const reservation = await prisma.formationReservation.findUnique({
+    where: { id: reservationId },
+    include: { session: { include: { formation: true } }, customer: true },
+  });
+
+  if (!reservation) {
+    console.error("[stripe-webhook] FormationReservation gone, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "reservation deleted" };
+  }
+
+  // Same failed-sale safety net as the workshops flow — never a customer
+  // refund feature, since formations have no refund policy at all otherwise.
+  if (reservation.status === "CANCELLED") {
+    console.warn("[stripe-webhook] Formation reservation cancelled before payment cleared, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "reservation cancelled" };
+  }
+
+  if (reservation.status === "CONFIRMED") {
+    // Already confirmed by a previous delivery of this same webhook event.
+    return { received: true, alreadyProcessed: true };
+  }
+
+  const isFullPayment = formationAction === "full_payment";
+  const totalAmount = Number(reservation.totalPrice);
+  const paidAmount = (session.amount_total ?? 0) / 100;
+
+  const { invoice } = await prisma.$transaction(async (tx) => {
+    await tx.formationReservation.update({
+      where: { id: reservation.id },
+      data: { status: "CONFIRMED", holdExpiresAt: null },
+    });
+
+    const payment = await tx.payment.create({
+      data: {
+        formationReservationId: reservation.id,
+        depositAmount: isFullPayment ? 0 : paidAmount,
+        totalAmount,
+        paidAmount,
+        remainingAmount: Math.max(totalAmount - paidAmount, 0),
+        paymentType: isFullPayment ? "ONLINE" : "DEPOSIT",
+        status: isFullPayment ? "PAID" : "PARTIALLY_PAID",
+        paidAt: new Date(),
+        transactionReference: session.id, // idempotency key
+      },
+    });
+
+    await tx.transaction.create({
+      data: {
+        paymentId: payment.id,
+        amount: paidAmount,
+        method: "ONLINE",
+        transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
+        paidAt: new Date(),
+      },
+    });
+
+    // Only fully-settled payments are invoiced — a deposit leaves a balance
+    // due in-salon, invoiced once that's collected (same rule as workshops).
+    let invoice = null;
+    if (isFullPayment) {
+      invoice = await issueInvoice(tx, {
+        paymentId: payment.id,
+        source: "FORMATION",
+        totalInclVat: paidAmount,
+        customer: {
+          fullName: reservation.customer.fullName,
+          email: reservation.customer.email,
+          vatNumber: reservation.customer.vatNumber,
+        },
+        lines: [
+          {
+            description: reservation.session.formation.title,
+            quantity: reservation.seatsCount,
+            unitPrice: totalAmount / reservation.seatsCount,
+          },
+        ],
+      });
+    }
+
+    return { invoice };
+  });
+
+  const sessionDate = new Date(reservation.session.startDate).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const invoicePdf = invoice
+    ? await renderInvoicePdf(invoice).catch((err) => {
+        console.error("[stripe-webhook] formation invoice PDF render failed:", err);
+        return null;
+      })
+    : null;
+
+  sendEmail({
+    to: reservation.customer.email,
+    ...formationReservationConfirmationEmail({
+      customerName: reservation.customer.fullName,
+      formationTitle: reservation.session.formation.title,
+      sessionDate,
+      seatsCount: reservation.seatsCount,
+      paidAmount,
+      totalAmount,
+      balanceDue: Number(reservation.balanceDue),
+      isFullPayment,
+    }),
+    ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
+  }).catch((err) => console.error("[stripe-webhook] formation confirmation email failed:", err));
+
+  // No low-seats broadcast, no waiting list — formations don't have either.
 
   return { received: true, processed: true };
 }

@@ -28,23 +28,25 @@ export function Sidebar({ userRole }) {
   };
 
   useEffect(() => {
-    // Keep collapsible open, when it's subpage is active
-    NAV_DATA.some((section) => {
-      return section.items.some((item) => {
-        return item.items.some((subItem) => {
-          if (subItem.url === pathname) {
-            if (!expandedItems.includes(item.title)) {
-              toggleExpanded(item.title);
-            }
-
-            return true;
-          }
-
-          return false;
-        });
-      });
-    });
-  }, [expandedItems, pathname, userRole]); // Added userRole to dependencies
+    // Auto-expand the group containing the active page. Deliberately keyed
+    // only on pathname/userRole — NOT expandedItems — so this only fires on
+    // actual navigation. Depending on expandedItems here used to fight any
+    // manual click on a sibling group: while sitting on a Boutique subpage,
+    // opening Formations or Workshops would set expandedItems, re-trigger
+    // this effect, and since pathname still matched Boutique it would
+    // immediately snap Boutique back open, collapsing the group the user
+    // just tried to switch to.
+    for (const section of NAV_DATA) {
+      const activeItem = section.items.find((item) =>
+        item.items.some((subItem) => subItem.url === pathname),
+      );
+      if (activeItem) {
+        setExpandedItems([activeItem.title]);
+        break;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, userRole]);
 
   return (
     <>

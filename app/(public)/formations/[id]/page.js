@@ -149,9 +149,20 @@ export default async function FormationDetailPage({ params }) {
             {/* Main content */}
             <div className="lg:col-span-2 space-y-10">
               {formation.description && (
-                <div>
-                  <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-gold">À propos</h2>
-                  <p className="text-[15px] leading-[1.9] text-ink/70">{formation.description}</p>
+                <div className="rounded-2xl border border-ink/8 bg-white p-6 shadow-sm sm:p-8">
+                  <div className="mb-5 flex items-center gap-3">
+                    <span className="h-px w-6 bg-gold" />
+                    <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">À propos</h2>
+                  </div>
+                  <div className="space-y-4 text-[15.5px] leading-[1.9] text-ink/70">
+                    {formation.description
+                      .split(/\n+/)
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .map((paragraph, i) => (
+                        <p key={i}>{paragraph}</p>
+                      ))}
+                  </div>
                 </div>
               )}
 

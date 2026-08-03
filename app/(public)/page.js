@@ -1,4 +1,5 @@
 import Hero from "@/components/website/Hero";
+import WorkshopBanner from "@/components/website/WorkshopBanner";
 import AboutUs from "@/components/website/AboutUs";
 import InstagramLifestyle from "@/components/website/InstagramLifestyle";
 import OurExperts from "@/components/website/OurExperts";
@@ -21,6 +22,7 @@ export default async function Home() {
   return (
     <>
       <Hero />
+      <WorkshopBanner />
       <AboutUs />
       <InstagramLifestyle
         posts={instagramPosts.length > 0 ? instagramPosts : undefined}

@@ -70,7 +70,8 @@ export async function checkWorkshopSessionAvailability(sessionId) {
 
 export async function createWorkshopReservation(data) {
   try {
-    const { sessionId, activityId, seatsCount, customerInfo, isPriority, waitingListEntryId } = data;
+    const { sessionId, activityId, seatsCount, customerInfo, isPriority, waitingListEntryId, paymentMethod } = data;
+    const isFullPayment = paymentMethod === "FULL";
 
     if (!sessionId || !activityId || !seatsCount || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
@@ -196,11 +197,13 @@ export async function createWorkshopReservation(data) {
     }
 
     // Calculate pricing
-    const depositPct = activity.depositPercentage ?? 30;
+    const depositPct = activity.depositPercentage ?? 50;
     const unitPrice = Number(activity.price);
     const totalPrice = unitPrice * seatsCount;
-    const depositAmount = (totalPrice * depositPct) / 100;
+    const depositAmount = isFullPayment ? totalPrice : (totalPrice * depositPct) / 100;
     const balanceDue = totalPrice - depositAmount;
+    const chargeAmount = isFullPayment ? totalPrice : depositAmount;
+    const workshopAction = isFullPayment ? "full_payment" : "deposit";
 
     // Create reservation record
     const reservation = await prisma.workshopReservation.create({
@@ -216,7 +219,7 @@ export async function createWorkshopReservation(data) {
       },
     });
 
-    // Create Stripe Checkout Session for the deposit
+    // Create Stripe Checkout Session for the deposit or the full amount
     const stripeSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"],
       line_items: [
@@ -224,10 +227,10 @@ export async function createWorkshopReservation(data) {
           price_data: {
             currency: "eur",
             product_data: {
-              name: `Acompte - ${activity.title}`,
+              name: `${isFullPayment ? "Paiement total" : "Acompte"} - ${activity.title}`,
               description: `${seatsCount} place${seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR")}`,
             },
-            unit_amount: Math.round(depositAmount * 100),
+            unit_amount: Math.round(chargeAmount * 100),
           },
           quantity: 1,
         },
@@ -237,7 +240,8 @@ export async function createWorkshopReservation(data) {
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation-atelier?canceled=true&activity=${activityId}&session=${sessionId}`,
       customer_email: email,
       metadata: {
-        type: "workshop_reservation",
+        kind: "workshop",
+        workshopAction,
         reservationId: reservation.id,
         sessionId,
         activityId: activity.id,
@@ -249,7 +253,8 @@ export async function createWorkshopReservation(data) {
       },
       payment_intent_data: {
         metadata: {
-          type: "workshop_reservation",
+          kind: "workshop",
+          workshopAction,
           reservationId: reservation.id,
         },
       },
@@ -272,24 +277,5 @@ export async function createWorkshopReservation(data) {
   }
 }
 
-/**
- * Cancel a reservation and notify everyone on the waiting list.
- */
-export async function cancelWorkshopReservation(reservationId) {
-  try {
-    const reservation = await prisma.workshopReservation.update({
-      where: { id: reservationId },
-      data: { status: "CANCELLED" },
-    });
-
-    // Automatically trigger waiting list notification
-    if (reservation?.sessionId) {
-      await notifyAllInWaitingList(reservation.sessionId);
-    }
-
-    return { success: true };
-  } catch (error) {
-    console.error("[cancelWorkshopReservation]", error);
-    return { success: false, message: "Erreur lors de l'annulation." };
-  }
-}
+// Reservation cancellation now lives in actions/workshops/manage-reservation.js
+// (admin-only, enforces the 48h cutoff and never issues a refund).

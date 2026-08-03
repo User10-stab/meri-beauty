@@ -7,10 +7,14 @@ import { sendEmail } from "@/lib/email";
 import {
   paymentConfirmationEmail,
   welcomeWithCredentialsEmail,
+  workshopReservationConfirmationEmail,
+  workshopSessionChangeEmail,
 } from "@/lib/email-templates";
 import { fulfillOrderPayment } from "@/actions/boutique/orders";
 import { issueInvoice } from "@/lib/invoicing";
 import { renderInvoicePdf } from "@/lib/pdf/render";
+import { sendLowSeatsBroadcast } from "@/actions/workshops/notify-low-seats";
+import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -82,13 +86,18 @@ export async function POST(req) {
   }
 
   try {
-    // Order checkouts carry metadata.kind === "order" (see
-    // actions/boutique/orders.js#createOrderCheckoutSession); anything else
-    // is the appointment reservation flow, unchanged from before.
-    const result =
-      session.metadata?.kind === "order"
-        ? await fulfillOrderPayment(session)
-        : await processCheckoutSession(session);
+    // Dispatch by metadata.kind: "order" (boutique, createOrderCheckoutSession),
+    // "workshop" (workshop deposit/full-payment/session-change-fee, see
+    // actions/workshops/create-workshop-reservation.js and manage-reservation.js),
+    // anything else falls through to the appointment reservation flow.
+    let result;
+    if (session.metadata?.kind === "order") {
+      result = await fulfillOrderPayment(session);
+    } else if (session.metadata?.kind === "workshop") {
+      result = await processWorkshopCheckoutSession(session);
+    } else {
+      result = await processCheckoutSession(session);
+    }
     return NextResponse.json(result);
   } catch (err) {
     console.error("[stripe-webhook] Processing failed:", err);
@@ -395,6 +404,250 @@ async function processCheckoutSession(session) {
       }),
     }).catch((err) => console.error("[stripe-webhook] welcome email failed:", err));
   }
+
+  return { received: true, processed: true };
+}
+
+// ─── checkout.session.completed (workshops/events) ───────────────────────────
+
+async function processWorkshopCheckoutSession(session) {
+  const meta = session.metadata ?? {};
+  const { reservationId, workshopAction } = meta;
+
+  if (!reservationId) {
+    console.error("[stripe-webhook] Workshop session missing reservationId:", session.id, meta);
+    return { received: true, warning: "missing metadata" };
+  }
+
+  // Session-change fees are charged against an EXISTING confirmed
+  // reservation that already has its one Payment row (Payment.
+  // workshopReservationId is 1:1) — handled separately since there's no
+  // new Payment to create, just a Transaction against the existing one.
+  if (workshopAction === "session_change_fee") {
+    return applyWorkshopSessionChangeFee(session, meta);
+  }
+
+  // ── Idempotency — was this session already processed? ────────────────────
+  const existing = await prisma.payment.findFirst({
+    where: { transactionReference: session.id },
+    select: { id: true },
+  });
+  if (existing) {
+    return { received: true, alreadyProcessed: true };
+  }
+
+  const reservation = await prisma.workshopReservation.findUnique({
+    where: { id: reservationId },
+    include: { session: { include: { workshop: true } }, customer: true },
+  });
+
+  if (!reservation) {
+    console.error("[stripe-webhook] WorkshopReservation gone, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "reservation deleted" };
+  }
+
+  // The salon can't honor a sale it already voided (e.g. an admin cancelled
+  // this reservation while the payment was in flight) — this is the one
+  // exception to "no refunds": a failed sale, not a voluntary cancellation
+  // of an honored booking.
+  if (reservation.status === "CANCELLED") {
+    console.warn("[stripe-webhook] Reservation cancelled before payment cleared, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "reservation cancelled" };
+  }
+
+  if (reservation.status === "CONFIRMED") {
+    // Already confirmed by a previous delivery of this same webhook event.
+    return { received: true, alreadyProcessed: true };
+  }
+
+  const isFullPayment = workshopAction === "full_payment";
+  const totalAmount = Number(reservation.totalPrice);
+  const paidAmount = (session.amount_total ?? 0) / 100;
+
+  const { invoice } = await prisma.$transaction(async (tx) => {
+    await tx.workshopReservation.update({
+      where: { id: reservation.id },
+      data: { status: "CONFIRMED", holdExpiresAt: null },
+    });
+
+    const payment = await tx.payment.create({
+      data: {
+        workshopReservationId: reservation.id,
+        depositAmount: isFullPayment ? 0 : paidAmount,
+        totalAmount,
+        paidAmount,
+        remainingAmount: Math.max(totalAmount - paidAmount, 0),
+        paymentType: isFullPayment ? "ONLINE" : "DEPOSIT",
+        status: isFullPayment ? "PAID" : "PARTIALLY_PAID",
+        paidAt: new Date(),
+        transactionReference: session.id, // idempotency key
+      },
+    });
+
+    await tx.transaction.create({
+      data: {
+        paymentId: payment.id,
+        amount: paidAmount,
+        method: "ONLINE",
+        transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
+        paidAt: new Date(),
+      },
+    });
+
+    // Only fully-settled payments are invoiced — a deposit leaves a balance
+    // due in-salon, invoiced once that's collected (same rule as appointments).
+    let invoice = null;
+    if (isFullPayment) {
+      invoice = await issueInvoice(tx, {
+        paymentId: payment.id,
+        source: "WORKSHOP",
+        totalInclVat: paidAmount,
+        customer: {
+          fullName: reservation.customer.fullName,
+          email: reservation.customer.email,
+          vatNumber: reservation.customer.vatNumber,
+        },
+        lines: [
+          {
+            description: reservation.session.workshop.title,
+            quantity: reservation.seatsCount,
+            unitPrice: totalAmount / reservation.seatsCount,
+          },
+        ],
+      });
+    }
+
+    return { invoice };
+  });
+
+  const sessionDate = new Date(reservation.session.startDate).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const invoicePdf = invoice
+    ? await renderInvoicePdf(invoice).catch((err) => {
+        console.error("[stripe-webhook] workshop invoice PDF render failed:", err);
+        return null;
+      })
+    : null;
+
+  sendEmail({
+    to: reservation.customer.email,
+    ...workshopReservationConfirmationEmail({
+      customerName: reservation.customer.fullName,
+      activityTitle: reservation.session.workshop.title,
+      sessionDate,
+      seatsCount: reservation.seatsCount,
+      paidAmount,
+      totalAmount,
+      balanceDue: Number(reservation.balanceDue),
+      isFullPayment,
+    }),
+    ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
+  }).catch((err) => console.error("[stripe-webhook] workshop confirmation email failed:", err));
+
+  // Fire-and-forget: the one place seat counts actually change from a real
+  // payment event, so this is where the low-seats threshold gets checked.
+  sendLowSeatsBroadcast(reservation.sessionId).catch((err) =>
+    console.error("[stripe-webhook] low-seats broadcast failed:", err)
+  );
+
+  return { received: true, processed: true };
+}
+
+/** Applies an admin-mediated session change once its 10% fee has cleared. */
+async function applyWorkshopSessionChangeFee(session, meta) {
+  const { reservationId, newSessionId } = meta;
+
+  if (!reservationId || !newSessionId) {
+    console.error("[stripe-webhook] session_change_fee missing metadata:", session.id, meta);
+    return { received: true, warning: "missing metadata" };
+  }
+
+  const reservation = await prisma.workshopReservation.findUnique({
+    where: { id: reservationId },
+    include: { session: { include: { workshop: true } }, customer: true, payment: true },
+  });
+
+  if (!reservation) {
+    console.error("[stripe-webhook] WorkshopReservation gone for session change, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "reservation deleted" };
+  }
+
+  if (reservation.sessionId === newSessionId) {
+    // Already applied — a Stripe retry of the same event.
+    return { received: true, alreadyProcessed: true };
+  }
+
+  const newSession = await prisma.workshopSession.findUnique({
+    where: { id: newSessionId },
+    include: { workshop: true },
+  });
+  if (!newSession) {
+    console.error("[stripe-webhook] Target session gone for session change, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "target session deleted" };
+  }
+
+  const changeFeeAmount = (session.amount_total ?? 0) / 100;
+  const oldSessionId = reservation.sessionId;
+  const oldSessionDate = new Date(reservation.session.startDate);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.workshopReservation.update({
+      where: { id: reservation.id },
+      data: {
+        sessionId: newSessionId,
+        previousSessionId: oldSessionId,
+        changeFeeAmount: { increment: changeFeeAmount },
+      },
+    });
+
+    if (reservation.payment) {
+      await tx.transaction.create({
+        data: {
+          paymentId: reservation.payment.id,
+          amount: changeFeeAmount,
+          method: "ONLINE",
+          transactionType: "FINAL_PAYMENT",
+          paidAt: new Date(),
+        },
+      });
+    }
+  });
+
+  // The old session just freed up the seats this reservation held.
+  notifyAllInWaitingList(oldSessionId).catch((err) =>
+    console.error("[stripe-webhook] waiting-list notify failed:", err)
+  );
+
+  const dateOptions = {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  };
+
+  sendEmail({
+    to: reservation.customer.email,
+    ...workshopSessionChangeEmail({
+      customerName: reservation.customer.fullName,
+      activityTitle: reservation.session.workshop.title,
+      previousSessionDate: oldSessionDate.toLocaleDateString("fr-FR", dateOptions),
+      newSessionDate: new Date(newSession.startDate).toLocaleDateString("fr-FR", dateOptions),
+      changeFeeAmount,
+    }),
+  }).catch((err) => console.error("[stripe-webhook] session change email failed:", err));
 
   return { received: true, processed: true };
 }

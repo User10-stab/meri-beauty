@@ -403,7 +403,7 @@ export async function createOrderCheckoutSession(orderId) {
     const metadata = { kind: "order", orderId: order.id };
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
+      payment_method_types: ["card", "bancontact"],
       line_items: lineItems,
       mode: "payment",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/boutique/order/success?session_id={CHECKOUT_SESSION_ID}`,
@@ -853,31 +853,14 @@ export async function markOrderCompleted(orderId) {
 }
 
 /** Staff-initiated cancellation — refunds if paid, always releases/returns stock. */
-export async function cancelOrder(input) {
-  const guard = await requireOrdersAccess();
-  if (guard.error) return { success: false, message: guard.error };
-
-  const parsed = cancelOrderSchema.safeParse(input);
-  if (!parsed.success) {
-    const errors = parsed.error.flatten().fieldErrors;
-    return { success: false, message: errors.orderId?.[0] ?? "Données invalides." };
-  }
-  const { orderId, reason } = parsed.data;
-
+/**
+ * Shared by both the admin-facing cancelOrder and the customer-facing
+ * cancelMyOrder — every authorization/ownership/status decision happens in
+ * the caller, this just performs the cancellation once that's settled.
+ */
+async function performOrderCancellation(order, reason) {
+  const orderId = order.id;
   try {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: {
-        items: true,
-        payment: { include: { invoice: true } },
-        user: { select: { fullName: true, email: true } },
-      },
-    });
-    if (!order) return { success: false, message: "Commande introuvable." };
-    if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
-      return { success: false, message: "Cette commande ne peut plus être annulée." };
-    }
-
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
 
     const { creditNote } = await prisma.$transaction(async (tx) => {
@@ -934,14 +917,14 @@ export async function cancelOrder(input) {
       } catch (err) {
         // The order is already cancelled and stock restored — surface the
         // refund failure loudly rather than rolling any of that back.
-        console.error("[cancelOrder] REFUND FAILED for order", orderId, err);
+        console.error("[performOrderCancellation] REFUND FAILED for order", orderId, err);
       }
     }
 
     let creditNotePdf = null;
     if (creditNote) {
       creditNotePdf = await renderCreditNotePdf(creditNote, order.payment.invoice).catch((err) => {
-        console.error("[cancelOrder] credit note PDF render failed:", err);
+        console.error("[performOrderCancellation] credit note PDF render failed:", err);
         return null;
       });
     }
@@ -964,14 +947,77 @@ export async function cancelOrder(input) {
       ...(creditNotePdf
         ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] }
         : {}),
-    }).catch((err) => console.error("[cancelOrder] email failed:", err));
+    }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
 
     revalidatePath("/dashboard/boutique/orders");
+    revalidatePath("/mon-compte");
     return { success: true, message: "Commande annulée." };
   } catch (error) {
-    console.error("[cancelOrder]", error);
+    console.error("[performOrderCancellation]", error);
     return { success: false, message: "Impossible d'annuler la commande." };
   }
+}
+
+/** Admin/staff: cancel any order. */
+export async function cancelOrder(input) {
+  const guard = await requireOrdersAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const parsed = cancelOrderSchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return { success: false, message: errors.orderId?.[0] ?? "Données invalides." };
+  }
+  const { orderId, reason } = parsed.data;
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: true,
+      payment: { include: { invoice: true } },
+      user: { select: { fullName: true, email: true } },
+    },
+  });
+  if (!order) return { success: false, message: "Commande introuvable." };
+  if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
+    return { success: false, message: "Cette commande ne peut plus être annulée." };
+  }
+
+  return performOrderCancellation(order, reason);
+}
+
+/**
+ * Customer self-service: cancel one of MY OWN orders, only while it's still
+ * PENDING_PAYMENT or PENDING_PICKUP — i.e. nothing has been paid-and-fulfilled
+ * yet. Once staff has started preparing/shipping (PAID and beyond), a
+ * customer can no longer unilaterally cancel through here; that needs staff
+ * involvement via the admin cancelOrder above.
+ */
+export async function cancelMyOrder(orderId) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, message: "Vous devez être connecté(e)." };
+  }
+  if (!orderId || typeof orderId !== "string") {
+    return { success: false, message: "Commande invalide." };
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: true,
+      payment: { include: { invoice: true } },
+      user: { select: { fullName: true, email: true } },
+    },
+  });
+  if (!order || order.userId !== session.user.id) {
+    return { success: false, message: "Commande introuvable." };
+  }
+  if (!["PENDING_PAYMENT", "PENDING_PICKUP"].includes(order.status)) {
+    return { success: false, message: "Cette commande ne peut plus être annulée en ligne — contactez-nous." };
+  }
+
+  return performOrderCancellation(order, "Annulée par le client");
 }
 
 // ─── Cron-ready ─────────────────────────────────────────────────────────────────

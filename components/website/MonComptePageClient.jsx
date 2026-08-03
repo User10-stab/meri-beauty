@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Package, Sparkles, GraduationCap } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Package, Sparkles, GraduationCap, Loader2 } from "lucide-react";
+import { cancelMyOrder } from "@/actions/boutique/orders";
+
+const CUSTOMER_CANCELLABLE_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP"];
 
 const ORDER_STATUS_LABELS = {
   PENDING_PAYMENT: "Paiement en attente",
@@ -86,6 +91,24 @@ function EmptyState({ icon: Icon, text }) {
 }
 
 function OrderCard({ order }) {
+  const router = useRouter();
+  const [cancelling, setCancelling] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const canCancel = CUSTOMER_CANCELLABLE_STATUSES.includes(order.status);
+
+  async function handleCancel() {
+    setCancelling(true);
+    const result = await cancelMyOrder(order.id);
+    if (result.success) {
+      toast.success("Commande annulée.");
+      router.refresh();
+    } else {
+      toast.error(result.message);
+      setCancelling(false);
+      setConfirming(false);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -111,6 +134,41 @@ function OrderCard({ order }) {
         ) : <span />}
         <span className="text-sm font-bold text-gold">{formatPrice(order.totalAmount)}</span>
       </div>
+
+      {canCancel && (
+        <div className="mt-3 flex items-center justify-end gap-2 border-t border-ink/8 pt-3">
+          {confirming ? (
+            <>
+              <span className="text-xs text-ink/50">Confirmer l&apos;annulation ?</span>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                disabled={cancelling}
+                className="text-xs font-semibold text-ink/50 hover:text-ink"
+              >
+                Non
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={cancelling}
+                className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {cancelling && <Loader2 className="h-3 w-3 animate-spin" />}
+                Oui, annuler
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="text-xs font-semibold text-red-600 hover:text-red-700"
+            >
+              Annuler la commande
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -221,7 +221,7 @@ export async function createWorkshopReservation(data) {
 
     // Create Stripe Checkout Session for the deposit or the full amount
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
+      payment_method_types: ["card", "bancontact"],
       line_items: [
         {
           price_data: {

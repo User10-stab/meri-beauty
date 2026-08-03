@@ -145,7 +145,7 @@ export async function changeReservationSession(reservationId, newSessionId) {
     const changeFeeAmount = Number(reservation.totalPrice) * SESSION_CHANGE_FEE_RATE;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
+      payment_method_types: ["card", "bancontact"],
       line_items: [
         {
           price_data: {
@@ -244,7 +244,7 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     const changeFeeAmount = Number(reservation.totalPrice) * SESSION_CHANGE_FEE_RATE;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
+      payment_method_types: ["card", "bancontact"],
       line_items: [
         {
           price_data: {

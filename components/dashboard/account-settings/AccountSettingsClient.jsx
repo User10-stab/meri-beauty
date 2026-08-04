@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useTransition } from "react";
+import { useState, useEffect, useRef, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -18,12 +18,17 @@ import {
   Phone,
   Lock,
   IdCard,
+  CalendarDays,
+  Copy,
+  RefreshCw,
+  Check,
 } from "lucide-react";
 import { updatePersonalInfo } from "@/actions/staff/update-personal-info";
 import { updateStaffProfile } from "@/actions/staff/update-staff-profile";
 import { updateReservationSettings } from "@/actions/staff/update-reservation-settings";
 import { upsertMyWorkingHours } from "@/actions/staff/upsert-my-working-hours";
 import { createStaffTimeOff } from "@/actions/staff/manage-time-off";
+import { getOrCreateCalendarToken, regenerateCalendarToken } from "@/actions/staff/manage-calendar-token";
 import Button from "@/components/ui/Button";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -172,7 +177,86 @@ export function AccountSettingsClient({ initialData }) {
       </div>
       <WorkingHoursSection data={data} onSuccess={(wh) => setData((prev) => ({ ...prev, workingHours: wh }))} />
       <TimeOffSection data={data} onSuccess={(timeOffs) => setData((prev) => ({ ...prev, timeOffs }))} />
+      <CalendarSyncSection />
     </div>
+  );
+}
+
+// ─── Calendar sync ───────────────────────────────────────────────────────────
+
+function CalendarSyncSection() {
+  const [url, setUrl] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    getOrCreateCalendarToken().then((res) => {
+      if (res.success) setUrl(`${window.location.origin}/api/calendar-feed/${res.token}`);
+      else toast.error(res.message);
+      setLoading(false);
+    });
+  }, []);
+
+  function handleCopy() {
+    if (!url) return;
+    navigator.clipboard.writeText(url);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  function handleRegenerate() {
+    startTransition(async () => {
+      const res = await regenerateCalendarToken();
+      if (res.success) {
+        setUrl(`${window.location.origin}/api/calendar-feed/${res.token}`);
+        toast.success("Lien régénéré — l'ancien lien ne fonctionne plus.");
+      } else {
+        toast.error(res.message);
+      }
+    });
+  }
+
+  return (
+    <SectionCard
+      icon={CalendarDays}
+      title="Synchroniser mon agenda"
+      description="Abonnez-vous à ce lien depuis Google Calendar, Apple Calendar ou Outlook pour voir vos rendez-vous Meri Beauty sur votre téléphone."
+    >
+      <div className="space-y-3.5">
+        <div>
+          <Label icon={CalendarDays}>Lien d'abonnement (URL iCal)</Label>
+          <div className="flex gap-2">
+            <TextInput readOnly value={loading ? "Génération en cours…" : (url ?? "")} className="font-mono text-xs" />
+            <button
+              type="button"
+              onClick={handleCopy}
+              disabled={loading}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-400"
+              aria-label="Copier le lien"
+            >
+              {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+            </button>
+          </div>
+        </div>
+
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          Ce calendrier se met à jour automatiquement (les applications de calendrier vérifient les nouveautés
+          toutes les 15 à 60 minutes environ — ce n'est pas instantané). Ne partagez ce lien avec personne :
+          quiconque le possède peut voir vos rendez-vous.
+        </p>
+
+        <button
+          type="button"
+          onClick={handleRegenerate}
+          disabled={isPending || loading}
+          className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 transition-colors hover:text-gray-900 disabled:opacity-50 dark:text-gray-400 dark:hover:text-white"
+        >
+          {isPending ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+          Régénérer le lien (si partagé par erreur)
+        </button>
+      </div>
+    </SectionCard>
   );
 }
 

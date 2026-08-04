@@ -30,7 +30,7 @@ export default async function OrdersPage() {
         </div>
       )}
 
-      <OrdersPageClient initialOrders={result.data ?? []} />
+      <OrdersPageClient initialOrders={result.data ?? []} initialTotalCount={result.totalCount ?? 0} />
     </div>
   );
 }

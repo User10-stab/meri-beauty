@@ -614,38 +614,50 @@ export async function fulfillOrderPayment(session) {
 
 // ─── Dashboard: read ────────────────────────────────────────────────────────────
 
-export async function listOrders({ status, fulfilmentMode, search } = {}) {
+const DEFAULT_PAGE_SIZE = 20;
+
+export async function listOrders({ status, fulfilmentMode, search, page = 1, pageSize = DEFAULT_PAGE_SIZE } = {}) {
   const guard = await requireOrdersAccess();
-  if (guard.error) return { success: false, message: guard.error, data: [] };
+  if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page: 1, pageSize };
 
   try {
-    const orders = await prisma.order.findMany({
-      where: {
-        ...(status ? { status } : {}),
-        ...(fulfilmentMode ? { fulfilmentMode } : {}),
-        ...(search
-          ? {
-              OR: [
-                { pickupCode: { contains: search, mode: "insensitive" } },
-                { bpostTrackingCode: { contains: search, mode: "insensitive" } },
-                { user: { fullName: { contains: search, mode: "insensitive" } } },
-                { user: { email: { contains: search, mode: "insensitive" } } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      include: {
-        user: { select: { id: true, fullName: true, email: true, phone: true } },
-        payment: { select: { id: true } },
-        items: true,
-      },
-    });
+    const where = {
+      ...(status ? { status } : {}),
+      ...(fulfilmentMode ? { fulfilmentMode } : {}),
+      ...(search
+        ? {
+            OR: [
+              { pickupCode: { contains: search, mode: "insensitive" } },
+              { bpostTrackingCode: { contains: search, mode: "insensitive" } },
+              { user: { fullName: { contains: search, mode: "insensitive" } } },
+              { user: { email: { contains: search, mode: "insensitive" } } },
+            ],
+          }
+        : {}),
+    };
 
-    return { success: true, data: orders.map(serializeOrder) };
+    // Unbounded findMany here used to fetch every order ever placed on
+    // every dashboard load — fine at launch, would hang the page once
+    // orders pile up. Paginate at the DB level instead.
+    const [totalCount, orders] = await Promise.all([
+      prisma.order.count({ where }),
+      prisma.order.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          user: { select: { id: true, fullName: true, email: true, phone: true } },
+          payment: { select: { id: true } },
+          items: true,
+        },
+      }),
+    ]);
+
+    return { success: true, data: orders.map(serializeOrder), totalCount, page, pageSize };
   } catch (error) {
     console.error("[listOrders]", error);
-    return { success: false, message: "Impossible de charger les commandes.", data: [] };
+    return { success: false, message: "Impossible de charger les commandes.", data: [], totalCount: 0, page, pageSize };
   }
 }
 

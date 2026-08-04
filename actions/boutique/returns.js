@@ -234,23 +234,47 @@ export async function requestReturn(input) {
 
 // ─── Dashboard: read ────────────────────────────────────────────────────────────
 
-export async function listReturnRequests({ status } = {}) {
+const DEFAULT_RETURNS_PAGE_SIZE = 20;
+
+export async function listReturnRequests({ status, search, page = 1, pageSize = DEFAULT_RETURNS_PAGE_SIZE } = {}) {
   const guard = await requireOrdersAccess();
-  if (guard.error) return { success: false, message: guard.error, data: [] };
+  if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page: 1, pageSize };
 
   try {
-    const requests = await prisma.returnRequest.findMany({
-      where: status ? { status } : {},
-      orderBy: { requestedAt: "desc" },
-      include: {
-        order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
-        items: { include: { orderItem: true } },
-      },
-    });
-    return { success: true, data: requests.map(serializeReturnRequest) };
+    const searchAsOrderNumber = search && /^\d+$/.test(search.trim()) ? Number(search.trim()) : null;
+
+    const where = {
+      ...(status ? { status } : {}),
+      ...(search
+        ? {
+            OR: [
+              { order: { user: { fullName: { contains: search, mode: "insensitive" } } } },
+              { order: { user: { email: { contains: search, mode: "insensitive" } } } },
+              ...(searchAsOrderNumber !== null ? [{ order: { orderNumber: searchAsOrderNumber } }] : []),
+            ],
+          }
+        : {}),
+    };
+
+    // Same issue as listOrders: this fetched every return request ever
+    // filed with no limit. Paginate at the DB level instead.
+    const [totalCount, requests] = await Promise.all([
+      prisma.returnRequest.count({ where }),
+      prisma.returnRequest.findMany({
+        where,
+        orderBy: { requestedAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
+          items: { include: { orderItem: true } },
+        },
+      }),
+    ]);
+    return { success: true, data: requests.map(serializeReturnRequest), totalCount, page, pageSize };
   } catch (error) {
     console.error("[listReturnRequests]", error);
-    return { success: false, message: "Impossible de charger les demandes de retour.", data: [] };
+    return { success: false, message: "Impossible de charger les demandes de retour.", data: [], totalCount: 0, page, pageSize };
   }
 }
 

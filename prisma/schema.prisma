@@ -871,6 +871,8 @@ model Order {
 
   @@index([userId])
   @@index([status])
+  @@index([expiresAt])
+  @@index([fulfilmentMode])
 }
 
 // ORDER ITEM
@@ -1065,6 +1067,10 @@ model Appointment {
   payment       Payment?
   review        Review?
   notifications Notification[]
+
+  @@index([staffServiceId, startTime]) // conflict checks + calendar
+  @@index([userId, startTime]) // "my appointments"
+  @@index([isDeleted, status, startTime]) // dashboard filters
 }
 
 // PAYMENT

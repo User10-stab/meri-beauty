@@ -2,11 +2,10 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { Store, Wallet, Truck, Check, Loader2, AlertTriangle } from "lucide-react";
+import { Store, Wallet, Truck, Check, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { createOrderFromCart, createOrderCheckoutSession } from "@/actions/boutique/orders";
-import { getCartShippingCost } from "@/actions/boutique/shipping";
+import { getCartShippingCost, requestShippingQuote } from "@/actions/boutique/shipping";
 
 const MODES = [
   {
@@ -41,6 +40,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [shippingDetails, setShippingDetails] = useState({ cost: 0, isFree: true, loading: true, quoteRequired: false });
+  const [quoteRequest, setQuoteRequest] = useState({ submitting: false, sent: false });
 
   // Fetch real shipping cost from server (weight-based calculation)
   useEffect(() => {
@@ -152,6 +152,35 @@ export function CheckoutPageClient({ cart, customerSession }) {
       console.error("[CheckoutPageClient]", error);
       toast.error("Une erreur est survenue. Veuillez réessayer.");
       setSubmitting(false);
+    }
+  }
+
+  async function handleRequestQuote() {
+    const info = isAuthenticated ? customerSession : customerInfo;
+    if (!info?.fullName?.trim() || !info?.email?.trim() || !info?.phone?.trim()) {
+      toast.error("Veuillez compléter vos informations de contact.");
+      return;
+    }
+    if (!shippingAddress.line1.trim() || !shippingAddress.city.trim() || !/^\d{4}$/.test(shippingAddress.postalCode.trim())) {
+      toast.error("Veuillez compléter une adresse de livraison valide (code postal belge à 4 chiffres).");
+      return;
+    }
+
+    setQuoteRequest({ submitting: true, sent: false });
+    const result = await requestShippingQuote({
+      fullName: info.fullName,
+      email: info.email,
+      phone: info.phone,
+      shippingAddress,
+      notes: notes || null,
+    });
+
+    if (result.success) {
+      setQuoteRequest({ submitting: false, sent: true });
+      toast.success(result.message);
+    } else {
+      setQuoteRequest({ submitting: false, sent: false });
+      toast.error(result.message);
     }
   }
 
@@ -339,17 +368,31 @@ export function CheckoutPageClient({ cart, customerSession }) {
           </div>
 
           {quoteRequired && (
-            <div className="mt-4 flex items-start gap-3 border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
-              <p>
-                Votre commande dépasse 30&nbsp;kg ({shippingDetails.totalWeightKg?.toFixed(1)}&nbsp;kg) : aucun tarif de
-                livraison automatique ne s&apos;applique.{" "}
-                <Link href="/contact" className="font-semibold underline hover:no-underline">
-                  Contactez-nous
-                </Link>{" "}
-                pour un devis, ou choisissez le retrait en boutique.
-              </p>
-            </div>
+            quoteRequest.sent ? (
+              <div className="mt-4 flex items-start gap-3 border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+                <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-green-600" />
+                <p>Votre demande de devis a été envoyée. Nous vous recontacterons sous peu par email ou téléphone.</p>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3 border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
+                  <p>
+                    Votre commande dépasse 30&nbsp;kg ({shippingDetails.totalWeightKg?.toFixed(1)}&nbsp;kg) : aucun tarif de
+                    livraison automatique ne s&apos;applique. Demandez un devis personnalisé, ou choisissez le retrait en boutique.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRequestQuote}
+                  disabled={quoteRequest.submitting}
+                  className="inline-flex items-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+                >
+                  {quoteRequest.submitting && <Loader2 size={14} className="animate-spin" />}
+                  Demander un devis
+                </button>
+              </div>
+            )
           )}
 
           <button

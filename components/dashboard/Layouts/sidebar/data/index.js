@@ -73,6 +73,10 @@ const ALL_NAV_DATA = [
         icon: Icons.User,
         items: [
           {
+            title: "Performance",
+            url: "/dashboard/staff/performance",
+          },
+          {
             title: "Auto-Entrepreneur",
             url: "/dashboard/staff/auto-entrepreneur",
           },

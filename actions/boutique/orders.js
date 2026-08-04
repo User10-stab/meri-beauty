@@ -519,26 +519,24 @@ export async function fulfillOrderPayment(session) {
     });
 
     for (const item of order.items) {
-      const variant = await tx.productVariant.findUnique({
-        where: { id: item.variantId },
-        select: { stockQuantity: true, reservedQuantity: true },
-      });
-      const newStock = variant.stockQuantity - item.quantity;
-
-      await tx.productVariant.update({
+      // Atomic {decrement} on both columns — a plain read-then-write of a
+      // JS-computed literal would let two orders paying for the same
+      // variant at once silently lose one side's decrement.
+      const updated = await tx.productVariant.update({
         where: { id: item.variantId },
         data: {
-          stockQuantity: newStock,
+          stockQuantity: { decrement: item.quantity },
           reservedQuantity: { decrement: item.quantity },
         },
       });
+      const newStock = updated.stockQuantity;
 
       await tx.inventoryMovement.create({
         data: {
           variantId: item.variantId,
           type: "SALE",
           quantity: -item.quantity,
-          previousStock: variant.stockQuantity,
+          previousStock: newStock + item.quantity,
           newStock,
           reason: `Commande n°${order.orderNumber}`,
         },
@@ -744,23 +742,18 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
         });
 
         for (const item of order.items) {
-          const variant = await tx.productVariant.findUnique({
+          const updated = await tx.productVariant.update({
             where: { id: item.variantId },
-            select: { stockQuantity: true },
+            data: { stockQuantity: { decrement: item.quantity }, reservedQuantity: { decrement: item.quantity } },
           });
-          const newStock = variant.stockQuantity - item.quantity;
-
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: { stockQuantity: newStock, reservedQuantity: { decrement: item.quantity } },
-          });
+          const newStock = updated.stockQuantity;
 
           await tx.inventoryMovement.create({
             data: {
               variantId: item.variantId,
               type: "SALE",
               quantity: -item.quantity,
-              previousStock: variant.stockQuantity,
+              previousStock: newStock + item.quantity,
               newStock,
               reason: `Commande n°${order.orderNumber} — paiement sur place`,
             },
@@ -893,20 +886,18 @@ async function performOrderCancellation(order, reason) {
 
     const { creditNote } = await prisma.$transaction(async (tx) => {
       for (const item of order.items) {
-        const variant = await tx.productVariant.findUnique({
-          where: { id: item.variantId },
-          select: { stockQuantity: true, reservedQuantity: true },
-        });
-
         if (wasSold) {
-          const newStock = variant.stockQuantity + item.quantity;
-          await tx.productVariant.update({ where: { id: item.variantId }, data: { stockQuantity: newStock } });
+          const updated = await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { stockQuantity: { increment: item.quantity } },
+          });
+          const newStock = updated.stockQuantity;
           await tx.inventoryMovement.create({
             data: {
               variantId: item.variantId,
               type: "RETURN",
               quantity: item.quantity,
-              previousStock: variant.stockQuantity,
+              previousStock: newStock - item.quantity,
               newStock,
               reason: `Commande n°${order.orderNumber} annulée`,
             },

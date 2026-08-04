@@ -2,10 +2,12 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { stripe } from "@/lib/stripe";
 import { ROLES, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
 import { reservationConfirmedWithPaymentLinkEmail } from "@/lib/email-templates";
+import { issueCreditNote } from "@/lib/invoicing";
 
 /**
  * Verify the authenticated user can manage the given appointment.
@@ -199,6 +201,7 @@ export async function rejectAppointment(appointmentId, reason = null) {
             email: true,
           },
         },
+        payment: { include: { invoice: true } },
       },
     });
 
@@ -213,32 +216,84 @@ export async function rejectAppointment(appointmentId, reason = null) {
       };
     }
 
-    // Update appointment status
-    await prisma.appointment.update({
-      where: { id: appointmentId },
-      data: { status: "CANCELLED" },
+    const payment = appointment.payment;
+    const wasPaid = Boolean(payment) && ["PAID", "PARTIALLY_PAID"].includes(payment.status);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.appointment.update({
+        where: { id: appointmentId },
+        data: { status: "CANCELLED" },
+      });
+
+      if (wasPaid) {
+        await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
+        await tx.transaction.create({
+          data: {
+            paymentId: payment.id,
+            amount: payment.paidAmount,
+            method: "ONLINE",
+            transactionType: "REFUND",
+            paidAt: new Date(),
+          },
+        });
+
+        if (payment.invoice) {
+          await issueCreditNote(tx, {
+            invoiceId: payment.invoice.id,
+            reason: reason ?? "Rendez-vous annulé",
+            totalInclVat: Number(payment.paidAmount),
+          });
+        }
+      }
+
+      await tx.notification.create({
+        data: {
+          userId: appointment.user.id,
+          appointmentId: appointment.id,
+          type: "APPOINTMENT_CANCELLED",
+          title: "Réservation annulée",
+          message: reason
+            ? `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé. Raison: ${reason}`
+            : `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé`,
+          status: "PENDING",
+        },
+      });
     });
 
-    // Create notification
-    await prisma.notification.create({
-      data: {
-        userId: appointment.user.id,
-        appointmentId: appointment.id,
-        type: "APPOINTMENT_CANCELLED",
-        title: "Réservation annulée",
-        message: reason
-          ? `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé. Raison: ${reason}`
-          : `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé`,
-        status: "PENDING",
-      },
-    });
+    // The DB side (status, payment, credit note) is already committed — a
+    // failed Stripe call here must not roll any of that back, just get
+    // logged loudly so it can be retried/handled manually.
+    if (wasPaid && payment.transactionReference) {
+      try {
+        const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
+        if (stripeSession.payment_intent) {
+          await stripe.refunds.create({ payment_intent: stripeSession.payment_intent });
+        }
+      } catch (err) {
+        console.error("[rejectAppointment] REFUND FAILED for appointment", appointmentId, err);
+      }
+    }
 
-    // TODO: Send cancellation email to customer
-    // You can add this later with a cancellationEmail template
+    sendEmail({
+      to: appointment.user.email,
+      subject: "Rendez-vous annulé – Meri Beauty",
+      text:
+        `Bonjour ${appointment.user.fullName},\n\n` +
+        `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé.` +
+        (wasPaid ? " Le remboursement apparaîtra sur votre compte sous quelques jours." : "") +
+        (reason ? ` Raison : ${reason}` : "") +
+        `\n\nL'équipe Meri Beauty`,
+      html:
+        `<p>Bonjour ${appointment.user.fullName},</p>` +
+        `<p>Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé.` +
+        (wasPaid ? " Le remboursement apparaîtra sur votre compte sous quelques jours." : "") +
+        (reason ? ` Raison : ${reason}` : "") +
+        `</p><p>L'équipe Meri Beauty</p>`,
+    }).catch((err) => console.error("[rejectAppointment] cancellation email failed:", err));
 
     return {
       success: true,
-      message: "Rendez-vous annulé",
+      message: wasPaid ? "Rendez-vous annulé — le client sera remboursé." : "Rendez-vous annulé",
     };
   } catch (error) {
     console.error("[rejectAppointment]", error);

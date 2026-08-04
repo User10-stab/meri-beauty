@@ -54,30 +54,38 @@ export async function recordStockMovement(input) {
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // Row lock via a plain SELECT inside the transaction — Postgres holds
-      // it until commit, which is what stops two concurrent adjustments
-      // from both reading the same previousStock.
       const variant = await tx.productVariant.findUnique({
         where: { id: variantId, isDeleted: false },
-        select: { id: true, stockQuantity: true, reservedQuantity: true, name: true, productId: true },
+        select: { id: true, productId: true },
       });
       if (!variant) throw new Error("NOT_FOUND");
 
-      const newStock = variant.stockQuantity + signedQuantity;
-      if (newStock < 0) throw new Error("INSUFFICIENT_STOCK");
-      if (newStock < variant.reservedQuantity) throw new Error("BELOW_RESERVED");
+      // Atomic {increment} — a single "SET stockQuantity = stockQuantity + n"
+      // statement, not a read-then-write of a JS-computed literal. Two
+      // concurrent adjustments on the same variant now correctly stack
+      // instead of one silently overwriting the other. The DB-level CHECK
+      // constraints (stock >= 0, reserved <= stock) are the actual guard
+      // against an adjustment going too far — caught below as P2004.
+      let updated;
+      try {
+        updated = await tx.productVariant.update({
+          where: { id: variantId },
+          data: { stockQuantity: { increment: signedQuantity } },
+        });
+      } catch (err) {
+        if (err.code === "P2004") throw new Error("INSUFFICIENT_STOCK");
+        throw err;
+      }
 
-      const updated = await tx.productVariant.update({
-        where: { id: variantId },
-        data: { stockQuantity: newStock },
-      });
+      const newStock = updated.stockQuantity;
+      const previousStock = newStock - signedQuantity;
 
       const movement = await tx.inventoryMovement.create({
         data: {
           variantId,
           type,
           quantity: signedQuantity,
-          previousStock: variant.stockQuantity,
+          previousStock,
           newStock,
           reason: reason ?? null,
           createdById: guard.session.user.id,
@@ -101,12 +109,9 @@ export async function recordStockMovement(input) {
       return { success: false, message: "Déclinaison introuvable." };
     }
     if (error.message === "INSUFFICIENT_STOCK") {
-      return { success: false, message: "Stock insuffisant pour ce retrait." };
-    }
-    if (error.message === "BELOW_RESERVED") {
       return {
         success: false,
-        message: "Ce retrait ferait passer le stock sous la quantité déjà réservée.",
+        message: "Ce retrait ferait passer le stock sous zéro ou sous la quantité déjà réservée.",
       };
     }
     console.error("[recordStockMovement]", error);

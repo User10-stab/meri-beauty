@@ -86,34 +86,6 @@ export async function createFormationReservation(data) {
     // submit a different seat count for these regardless of the form state.
     const seatsCount = formation.type === "PRIVATE" ? 1 : Math.max(1, Number(data.seatsCount) || 1);
 
-    const reserved = await prisma.formationReservation.aggregate({
-      where: {
-        sessionId,
-        OR: [
-          { status: { in: ["CONFIRMED", "COMPLETED"] } },
-          {
-            status: "PENDING_DEPOSIT",
-            OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }],
-          },
-        ],
-      },
-      _sum: { seatsCount: true },
-    });
-
-    const takenSeats = reserved._sum.seatsCount ?? 0;
-    const capacity = session.capacity ?? formation.capacity;
-    const available = capacity - takenSeats;
-
-    if (seatsCount > available) {
-      return {
-        success: false,
-        message:
-          available <= 0
-            ? "Cette session est complète."
-            : `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
-      };
-    }
-
     // Resolve or create user
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
@@ -164,18 +136,62 @@ export async function createFormationReservation(data) {
     const chargeAmount = isFullPayment ? totalPrice : depositAmount;
     const formationAction = isFullPayment ? "full_payment" : "deposit";
 
-    const reservation = await prisma.formationReservation.create({
-      data: {
-        sessionId,
-        customerId: user.id,
-        seatsCount,
-        totalPrice,
-        depositAmount,
-        balanceDue,
-        status: "PENDING_DEPOSIT",
-        holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000), // Expiration dans 15 minutes
-      },
-    });
+    // Capacity check + reservation insert as one atomic unit — locking the
+    // session row first stops two concurrent bookings for the last seat(s)
+    // from both reading the same "seats free" snapshot and both succeeding.
+    let reservation;
+    try {
+      reservation = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM formation_sessions WHERE id = ${sessionId} FOR UPDATE`;
+
+        const reserved = await tx.formationReservation.aggregate({
+          where: {
+            sessionId,
+            OR: [
+              { status: { in: ["CONFIRMED", "COMPLETED"] } },
+              {
+                status: "PENDING_DEPOSIT",
+                OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }],
+              },
+            ],
+          },
+          _sum: { seatsCount: true },
+        });
+
+        const takenSeats = reserved._sum.seatsCount ?? 0;
+        const capacity = session.capacity ?? formation.capacity;
+        const available = capacity - takenSeats;
+
+        if (seatsCount > available) {
+          throw new Error(`SOLD_OUT:${available}`);
+        }
+
+        return tx.formationReservation.create({
+          data: {
+            sessionId,
+            customerId: user.id,
+            seatsCount,
+            totalPrice,
+            depositAmount,
+            balanceDue,
+            status: "PENDING_DEPOSIT",
+            holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000), // Expiration dans 15 minutes
+          },
+        });
+      });
+    } catch (err) {
+      if (typeof err.message === "string" && err.message.startsWith("SOLD_OUT:")) {
+        const available = Number(err.message.slice("SOLD_OUT:".length));
+        return {
+          success: false,
+          message:
+            available <= 0
+              ? "Cette session est complète."
+              : `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
+        };
+      }
+      throw err;
+    }
 
     const stripeSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "bancontact"],

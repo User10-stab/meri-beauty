@@ -225,27 +225,7 @@ async function processCheckoutSession(session) {
   });
 
   if (conflict) {
-    console.warn("[stripe-webhook] Slot conflict after payment, refunding:", session.id);
-    await refundSession(session);
-
-    sendEmail({
-      to: customerEmail,
-      subject: "Créneau indisponible – Remboursement effectué – Meri Beauty",
-      text:
-        `Bonjour ${customerFullName},\n\n` +
-        `Le créneau que vous aviez choisi a malheureusement été réservé pendant votre paiement. ` +
-        `Votre paiement a été intégralement remboursé — le remboursement apparaîtra sur votre compte sous quelques jours.\n\n` +
-        `Nous vous invitons à choisir un autre créneau sur notre site.\n\n` +
-        `Toutes nos excuses pour ce contretemps,\nL'équipe Meri Beauty`,
-      html:
-        `<p>Bonjour ${customerFullName},</p>` +
-        `<p>Le créneau que vous aviez choisi a malheureusement été réservé pendant votre paiement. ` +
-        `Votre paiement a été <strong>intégralement remboursé</strong> — il apparaîtra sur votre compte sous quelques jours.</p>` +
-        `<p>Nous vous invitons à choisir un autre créneau sur notre site.</p>` +
-        `<p>Toutes nos excuses pour ce contretemps,<br/>L'équipe Meri Beauty</p>`,
-    }).catch((err) => console.error("[stripe-webhook] conflict email failed:", err));
-
-    return { received: true, refunded: true, reason: "slot conflict" };
+    return handleAppointmentSlotConflict(session, customerFullName, customerEmail);
   }
 
   // ── 7. Resolve or create the customer (mirrors createReservation) ────────
@@ -296,7 +276,16 @@ async function processCheckoutSession(session) {
   const isFullPayment = paymentMethod === "ONLINE";
 
   // ── 9. Create appointment + payment + transaction atomically ─────────────
-  const { invoice } = await prisma.$transaction(async (tx) => {
+  // The findFirst check above (step 6) is a fast-path check, not the real
+  // guard — two concurrent webhook deliveries can both pass it before either
+  // commits. The actual guard is the "Appointment_no_overlap" DB exclusion
+  // constraint (see prisma/migrations/20260804090000_appointment_no_overlap):
+  // if this create() loses that race, it throws here and is handled exactly
+  // like a pre-existing conflict, refunding this payment instead of
+  // double-booking the slot.
+  let invoice;
+  try {
+    ({ invoice } = await prisma.$transaction(async (tx) => {
     const appointment = await tx.appointment.create({
       data: {
         userId: user.id,
@@ -369,7 +358,13 @@ async function processCheckoutSession(session) {
     }
 
     return { invoice };
-  });
+    }));
+  } catch (err) {
+    if (isAppointmentOverlapViolation(err)) {
+      return handleAppointmentSlotConflict(session, customerFullName, customerEmail);
+    }
+    throw err;
+  }
 
   // ── 10. Emails — fire-and-forget, never fail the webhook ─────────────────
   const staffName = staffService.staff?.user?.fullName ?? "votre experte";
@@ -410,6 +405,44 @@ async function processCheckoutSession(session) {
   }
 
   return { received: true, processed: true };
+}
+
+/**
+ * True if `err` is a violation of the "Appointment_no_overlap" DB exclusion
+ * constraint (Postgres SQLSTATE 23P01). Prisma doesn't recognize exclusion
+ * constraints the way it does unique/foreign-key ones, so this surfaces as a
+ * PrismaClientUnknownRequestError with no structured `code` — the constraint
+ * name and SQLSTATE only show up in the raw message text (verified directly
+ * against the dev DB), so that's what this checks.
+ */
+function isAppointmentOverlapViolation(err) {
+  const text = String(err?.message ?? "");
+  return text.includes("Appointment_no_overlap") || text.includes("23P01");
+}
+
+/** Refunds a payment that lost the race for its appointment slot and tells the customer. */
+async function handleAppointmentSlotConflict(session, customerFullName, customerEmail) {
+  console.warn("[stripe-webhook] Slot conflict after payment, refunding:", session.id);
+  await refundSession(session);
+
+  sendEmail({
+    to: customerEmail,
+    subject: "Créneau indisponible – Remboursement effectué – Meri Beauty",
+    text:
+      `Bonjour ${customerFullName},\n\n` +
+      `Le créneau que vous aviez choisi a malheureusement été réservé pendant votre paiement. ` +
+      `Votre paiement a été intégralement remboursé — le remboursement apparaîtra sur votre compte sous quelques jours.\n\n` +
+      `Nous vous invitons à choisir un autre créneau sur notre site.\n\n` +
+      `Toutes nos excuses pour ce contretemps,\nL'équipe Meri Beauty`,
+    html:
+      `<p>Bonjour ${customerFullName},</p>` +
+      `<p>Le créneau que vous aviez choisi a malheureusement été réservé pendant votre paiement. ` +
+      `Votre paiement a été <strong>intégralement remboursé</strong> — il apparaîtra sur votre compte sous quelques jours.</p>` +
+      `<p>Nous vous invitons à choisir un autre créneau sur notre site.</p>` +
+      `<p>Toutes nos excuses pour ce contretemps,<br/>L'équipe Meri Beauty</p>`,
+  }).catch((err) => console.error("[stripe-webhook] conflict email failed:", err));
+
+  return { received: true, refunded: true, reason: "slot conflict" };
 }
 
 // ─── checkout.session.completed (workshops/events) ───────────────────────────
@@ -729,6 +762,15 @@ async function applyWorkshopSessionChangeFee(session, meta) {
     return { received: true, refunded: true, reason: "reservation deleted" };
   }
 
+  if (reservation.status === "CANCELLED") {
+    // The reservation was cancelled while this fee-payment link was still
+    // outstanding — the salon can't honor a session change on a booking
+    // that no longer exists, same as the main reservation-confirmation path.
+    console.warn("[stripe-webhook] Reservation cancelled before session-change fee cleared, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "reservation cancelled" };
+  }
+
   if (reservation.sessionId === newSessionId) {
     // Already applied — a Stripe retry of the same event.
     return { received: true, alreadyProcessed: true };
@@ -818,6 +860,14 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
     console.error("[stripe-webhook] WorkshopReservation gone for seats change, refunding:", session.id);
     await refundSession(session);
     return { received: true, refunded: true, reason: "reservation deleted" };
+  }
+
+  if (reservation.status === "CANCELLED") {
+    // The reservation was cancelled while this fee-payment link was still
+    // outstanding — same failed-sale safety net as the other webhook paths.
+    console.warn("[stripe-webhook] Reservation cancelled before seats-change fee cleared, refunding:", session.id);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "reservation cancelled" };
   }
 
   if (reservation.seatsCount === seats) {

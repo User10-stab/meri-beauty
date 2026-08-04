@@ -112,47 +112,6 @@ export async function createWorkshopReservation(data) {
       }
     }
 
-    // Check available capacity (also applies to priority access so the
-    // fastest person to reserve wins the freed spot without overselling)
-    const reserved = await prisma.workshopReservation.aggregate({
-      where: {
-        sessionId,
-        OR: [
-          { status: { in: ["CONFIRMED", "COMPLETED"] } },
-          {
-            status: "PENDING_DEPOSIT",
-            OR: [
-              { holdExpiresAt: null },
-              { holdExpiresAt: { gt: new Date() } }
-            ]
-          }
-        ]
-      },
-      _sum: { seatsCount: true },
-    });
-
-    const takenSeats = reserved._sum.seatsCount ?? 0;
-    const capacity = session.capacity ?? activity.capacity;
-    const available = capacity - takenSeats;
-
-    if (seatsCount > available) {
-      // A priority user who lost the race goes back on the waiting list
-      if (isPriority && waitingListEntryId) {
-        await prisma.waitingListEntry.updateMany({
-          where: { id: waitingListEntryId, status: "NOTIFIED" },
-          data: { status: "WAITING", notifiedAt: null, expiresAt: null },
-        });
-        return {
-          success: false,
-          message: "La place vient d'être réservée par une autre personne avant vous. Vous restez sur la liste d'attente et serez renotifié(e) si une nouvelle place se libère.",
-        };
-      }
-      return {
-        success: false,
-        message: `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
-      };
-    }
-
     // Resolve or create user
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
@@ -205,19 +164,76 @@ export async function createWorkshopReservation(data) {
     const chargeAmount = isFullPayment ? totalPrice : depositAmount;
     const workshopAction = isFullPayment ? "full_payment" : "deposit";
 
-    // Create reservation record
-    const reservation = await prisma.workshopReservation.create({
-      data: {
-        sessionId,
-        customerId: user.id,
-        seatsCount,
-        totalPrice,
-        depositAmount,
-        balanceDue,
-        status: "PENDING_DEPOSIT",
-        holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000), // Expiration dans 15 minutes
-      },
-    });
+    // Capacity check + reservation insert as one atomic unit. A plain
+    // "aggregate, then create" (the previous shape) lets two concurrent
+    // bookings for the last seat(s) both read the same "seats free"
+    // snapshot and both succeed — locking the session row first forces the
+    // second transaction to wait and recompute against the first one's
+    // already-committed seats.
+    let reservation;
+    try {
+      reservation = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM workshop_sessions WHERE id = ${sessionId} FOR UPDATE`;
+
+        const reserved = await tx.workshopReservation.aggregate({
+          where: {
+            sessionId,
+            OR: [
+              { status: { in: ["CONFIRMED", "COMPLETED"] } },
+              {
+                status: "PENDING_DEPOSIT",
+                OR: [
+                  { holdExpiresAt: null },
+                  { holdExpiresAt: { gt: new Date() } }
+                ]
+              }
+            ]
+          },
+          _sum: { seatsCount: true },
+        });
+
+        const takenSeats = reserved._sum.seatsCount ?? 0;
+        const capacity = session.capacity ?? activity.capacity;
+        const available = capacity - takenSeats;
+
+        if (seatsCount > available) {
+          throw new Error(`SOLD_OUT:${available}`);
+        }
+
+        return tx.workshopReservation.create({
+          data: {
+            sessionId,
+            customerId: user.id,
+            seatsCount,
+            totalPrice,
+            depositAmount,
+            balanceDue,
+            status: "PENDING_DEPOSIT",
+            holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000), // Expiration dans 15 minutes
+          },
+        });
+      });
+    } catch (err) {
+      if (typeof err.message === "string" && err.message.startsWith("SOLD_OUT:")) {
+        const available = Number(err.message.slice("SOLD_OUT:".length));
+        // A priority user who lost the race goes back on the waiting list
+        if (isPriority && waitingListEntryId) {
+          await prisma.waitingListEntry.updateMany({
+            where: { id: waitingListEntryId, status: "NOTIFIED" },
+            data: { status: "WAITING", notifiedAt: null, expiresAt: null },
+          });
+          return {
+            success: false,
+            message: "La place vient d'être réservée par une autre personne avant vous. Vous restez sur la liste d'attente et serez renotifié(e) si une nouvelle place se libère.",
+          };
+        }
+        return {
+          success: false,
+          message: `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
+        };
+      }
+      throw err;
+    }
 
     // Create Stripe Checkout Session for the deposit or the full amount
     const stripeSession = await stripe.checkout.sessions.create({

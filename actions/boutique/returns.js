@@ -398,20 +398,33 @@ export async function completeReturnRequest(input) {
     const totalRefund = refundAmount + shippingRefund;
 
     const { creditNote } = await prisma.$transaction(async (tx) => {
+      // Atomically claim this return: the WHERE clause only matches while
+      // status is still APPROVED, so if two requests race here only one
+      // update actually affects a row — the loser's count is 0 and it
+      // aborts before ever touching stock, credit notes, or Stripe.
+      const claim = await tx.returnRequest.updateMany({
+        where: { id: rr.id, status: "APPROVED" },
+        data: {
+          status: "COMPLETED",
+          staffNote: staffNote ?? rr.staffNote,
+          processedAt: new Date(),
+          processedByStaffId: guard.session.user.id,
+        },
+      });
+      if (claim.count === 0) throw new Error("ALREADY_PROCESSED");
+
       for (const item of rr.items) {
-        const variant = await tx.productVariant.findUnique({
+        const updated = await tx.productVariant.update({
           where: { id: item.orderItem.variantId },
-          select: { stockQuantity: true },
+          data: { stockQuantity: { increment: item.quantity } },
         });
-        const newStock = variant.stockQuantity + item.quantity;
-        await tx.productVariant.update({ where: { id: item.orderItem.variantId }, data: { stockQuantity: newStock } });
         await tx.inventoryMovement.create({
           data: {
             variantId: item.orderItem.variantId,
             type: "RETURN",
             quantity: item.quantity,
-            previousStock: variant.stockQuantity,
-            newStock,
+            previousStock: updated.stockQuantity - item.quantity,
+            newStock: updated.stockQuantity,
             reason: `Retour — commande n°${rr.order.orderNumber}`,
           },
         });
@@ -423,16 +436,7 @@ export async function completeReturnRequest(input) {
         totalInclVat: totalRefund,
       });
 
-      await tx.returnRequest.update({
-        where: { id: rr.id },
-        data: {
-          status: "COMPLETED",
-          staffNote: staffNote ?? rr.staffNote,
-          processedAt: new Date(),
-          processedByStaffId: guard.session.user.id,
-          creditNoteId: creditNote.id,
-        },
-      });
+      await tx.returnRequest.update({ where: { id: rr.id }, data: { creditNoteId: creditNote.id } });
 
       return { creditNote };
     });
@@ -462,6 +466,9 @@ export async function completeReturnRequest(input) {
     revalidatePath("/dashboard/boutique/returns");
     return { success: true, message: `Retour finalisé — €${totalRefund.toFixed(2)} remboursé(s).` };
   } catch (error) {
+    if (error.message === "ALREADY_PROCESSED") {
+      return { success: false, message: "Ce retour vient d'être finalisé (par vous ou un autre membre de l'équipe)." };
+    }
     console.error("[completeReturnRequest]", error);
     return { success: false, message: "Impossible de finaliser ce retour." };
   }

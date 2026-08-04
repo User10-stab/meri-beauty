@@ -16,17 +16,36 @@ const cormorant = Cormorant_Garamond({
   display: "swap",
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+const SITE_DESCRIPTION =
+  "Salon de beauté & bien-être à Jette, Bruxelles — coiffure, soins visage, manucure, massage et rituels corps sur mesure.";
+
 export const metadata = {
+  metadataBase: new URL(SITE_URL),
   title: {
-    default: "Meri Beauty",
+    default: "Meri Beauty — Salon de beauté à Jette, Bruxelles",
     template: "%s | Meri Beauty",
   },
-  description: "Premium salon management platform",
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    type: "website",
+    locale: "fr_BE",
+    siteName: "Meri Beauty",
+    title: "Meri Beauty — Salon de beauté à Jette, Bruxelles",
+    description: SITE_DESCRIPTION,
+    images: [{ url: "/Images/hero.webp" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Meri Beauty — Salon de beauté à Jette, Bruxelles",
+    description: SITE_DESCRIPTION,
+    images: ["/Images/hero.webp"],
+  },
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" suppressHydrationWarning className={cormorant.variable}>
+    <html lang="fr-BE" suppressHydrationWarning className={cormorant.variable}>
       <body className="antialiased">
         <Providers>
           <ConfirmProvider>

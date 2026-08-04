@@ -136,7 +136,7 @@ export default function FinalCTA() {
           }`}
         >
           <a
-            href="#reservation"
+            href="/reservation"
             className="group inline-flex items-center gap-3 rounded-full bg-gold px-10 py-5 text-[16px] font-semibold text-white shadow-2xl shadow-gold/40 transition-all duration-300 hover:scale-105 hover:bg-gold/95 hover:shadow-[0_0_40px_rgba(184,150,100,0.5)]"
           >
             Réserver maintenant

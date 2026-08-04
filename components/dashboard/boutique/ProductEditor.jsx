@@ -39,6 +39,7 @@ function emptyVariant() {
     comparePrice: "",
     stockQuantity: 0,
     lowStockThreshold: 3,
+    weightGrams: "",
     isActive: true,
   };
 }
@@ -154,6 +155,7 @@ export function ProductEditor({ product, brands }) {
         comparePrice: v.comparePrice || null,
         stockQuantity: v.id ? undefined : v.stockQuantity, // only meaningful for new variants — see server action
         lowStockThreshold: v.lowStockThreshold,
+        weightGrams: v.weightGrams === "" ? 0 : v.weightGrams,
         position: i,
         isActive: v.isActive,
       })),
@@ -532,6 +534,16 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             min="0"
             value={variant.lowStockThreshold}
             onChange={(e) => onChange({ lowStockThreshold: Number(e.target.value) })}
+            className={inputClass}
+          />
+        </Field>
+        <Field label="Poids (g)" hint="Optionnel — utilisé pour calculer les frais de port">
+          <input
+            type="number"
+            min="0"
+            value={variant.weightGrams ?? ""}
+            onChange={(e) => onChange({ weightGrams: e.target.value === "" ? "" : Number(e.target.value) })}
+            placeholder="ex. 250"
             className={inputClass}
           />
         </Field>

@@ -14,7 +14,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import Image from "next/image";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 
 // ─── Calendar constants & helpers ─────────────────────────────────────────────
 

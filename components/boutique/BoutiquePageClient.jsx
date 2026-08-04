@@ -173,9 +173,9 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
                             >
                               {cat.name}
                             </button>
-                            {activeCategory?.id === cat.id && cat.subcategories.filter(s => s.name !== "Général").length > 0 && (
+                            {activeCategory?.id === cat.id && cat.subcategories.length > 0 && (
                               <ul className="ml-3 mt-1.5 space-y-1 border-l border-neutral-200 pl-3">
-                                {cat.subcategories.filter(s => s.name !== "Général").map((sub) => (
+                                {cat.subcategories.map((sub) => (
                                   <li key={sub.id} className="text-sm text-gray-500">
                                     {sub.name}
                                   </li>

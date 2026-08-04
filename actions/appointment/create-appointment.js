@@ -1,6 +1,7 @@
 "use server";
 
 import { randomBytes } from "crypto";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
@@ -72,6 +73,7 @@ export async function checkEmailExists(email) {
  */
 export async function createAppointment(data) {
   try {
+    const session = await auth();
     const { staffServiceId, date, time, customerInfo, notes } = data;
 
     // ── 1. Validate required fields ──────────────────────────────────────────
@@ -124,10 +126,13 @@ export async function createAppointment(data) {
     let isNewUser = false;
     let temporaryPassword = null; // only set for brand-new accounts
 
-    if (customerInfo.userId) {
-      // Authenticated session — look up by primary key
+    if (session?.user?.id) {
+      // Authenticated session — always use the session's own id, never the
+      // client-supplied customerInfo.userId (that was a trust-the-client
+      // IDOR: any logged-in customer could pass a victim's id and book
+      // appointments under their account).
       user = await prisma.user.findUnique({
-        where: { id: customerInfo.userId, isDeleted: false },
+        where: { id: session.user.id, isDeleted: false },
       });
 
       if (!user) {

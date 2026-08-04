@@ -18,12 +18,13 @@ const DAY_LABELS = {
 };
 
 const NAVIGATION = [
-  { label: "Accueil", href: "#accueil" },
-  { label: "Concept", href: "#concept" },
-  { label: "Réservation", href: "#reservation" },
-  { label: "Boutique", href: "#boutique" },
-  { label: "Évènements & Ateliers", href: "#evenements" },
-  { label: "Contact", href: "#contact" },
+  { label: "Accueil", href: "/" },
+  { label: "Concept", href: "/#concept" },
+  { label: "Réservation", href: "/reservation" },
+  { label: "Boutique", href: "/boutique" },
+  { label: "Évènements & Ateliers", href: "/evenements" },
+  { label: "Formations", href: "/formations" },
+  { label: "Contact", href: "/contact" },
 ];
 
 const FALLBACK_SERVICES = [

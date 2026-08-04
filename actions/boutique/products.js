@@ -218,6 +218,7 @@ export async function createProduct(input) {
             comparePrice: v.comparePrice ?? null,
             stockQuantity: v.stockQuantity,
             lowStockThreshold: v.lowStockThreshold,
+            weightGrams: v.weightGrams,
             position: v.position ?? i,
             isActive: v.isActive,
           })),
@@ -330,6 +331,7 @@ export async function updateProduct(input) {
               costPrice: v.costPrice,
               comparePrice: v.comparePrice ?? null,
               lowStockThreshold: v.lowStockThreshold,
+              weightGrams: v.weightGrams,
               position: v.position ?? 0,
               isActive: v.isActive,
               // stockQuantity is deliberately NOT updated here — it only
@@ -349,6 +351,7 @@ export async function updateProduct(input) {
               comparePrice: v.comparePrice ?? null,
               stockQuantity: v.stockQuantity,
               lowStockThreshold: v.lowStockThreshold,
+              weightGrams: v.weightGrams,
               position: v.position ?? 0,
               isActive: v.isActive,
             },

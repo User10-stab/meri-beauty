@@ -89,7 +89,7 @@ export async function resetPassword(input) {
     await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { email: matchedToken.email },
-        data: { password: hashedPassword },
+        data: { password: hashedPassword, sessionVersion: { increment: 1 } },
       });
 
       await tx.passwordResetToken.update({

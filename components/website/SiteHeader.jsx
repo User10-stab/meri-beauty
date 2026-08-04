@@ -15,6 +15,7 @@ const NAV_LINKS = [
   { label: "Réservation", href: "/reservation" },
   { label: "Boutique", href: "/boutique" },
   { label: "Évènements & Ateliers", href: "/evenements" },
+  { label: "Formations", href: "/formations" },
   { label: "Contact", href: "/contact" },
 ];
 
@@ -193,8 +194,16 @@ export default function Navbar() {
 
                     <div className="py-2">
                       <a
-                        href="/appointments"
+                        href="/mon-compte"
                         ref={firstMenuItemRef}
+                        onClick={() => setMenuOpen(false)}
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        role="menuitem"
+                      >
+                        Mes commandes
+                      </a>
+                      <a
+                        href="/appointments"
                         onClick={() => setMenuOpen(false)}
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         role="menuitem"
@@ -236,14 +245,6 @@ export default function Navbar() {
                   </motion.div>
                 )}
               </AnimatePresence>
-
-              {/* CTA — gold pill (only when authenticated) */}
-              <Link
-                href="#reservation"
-                className="ml-2 hidden rounded-full border border-gold px-5 py-2 text-[13px] font-medium text-gold transition-all duration-200 hover:bg-gold hover:text-primary sm:inline-flex"
-              >
-                Réserver
-              </Link>
             </>
           )}
 
@@ -301,34 +302,30 @@ export default function Navbar() {
               </Link>
             </li>
           ))}
-          {/* CTA inside mobile menu too */}
-          <li className="pt-4">
-            {hasDashboardRole ? (
-              <Link
-                href="/dashboard"
-                onClick={() => setOpen(false)}
-                className="inline-flex w-full justify-center rounded-full border border-gold px-6 py-2.5 text-[13px] font-medium text-gold transition-all hover:bg-gold hover:text-primary"
-              >
-                Tableau de bord
-              </Link>
-            ) : isAuthed ? (
-              <Link
-                href="#reservation"
-                onClick={() => setOpen(false)}
-                className="inline-flex rounded-full border border-gold px-6 py-2.5 text-[13px] font-medium text-gold transition-all hover:bg-gold hover:text-primary"
-              >
-                Réserver
-              </Link>
-            ) : (
-              <Link
-                href="/login"
-                onClick={() => setOpen(false)}
-                className="inline-flex w-full justify-center rounded-full border border-gold px-6 py-2.5 text-[13px] font-medium text-gold transition-all hover:bg-gold hover:text-primary"
-              >
-                Se connecter
-              </Link>
-            )}
-          </li>
+          {/* CTA inside mobile menu too — nothing shown here for an
+              authenticated customer, matching the desktop header: their
+              account access is the profile icon/dropdown, not a CTA pill. */}
+          {(hasDashboardRole || !isAuthed) && (
+            <li className="pt-4">
+              {hasDashboardRole ? (
+                <Link
+                  href="/dashboard"
+                  onClick={() => setOpen(false)}
+                  className="inline-flex w-full justify-center rounded-full border border-gold px-6 py-2.5 text-[13px] font-medium text-gold transition-all hover:bg-gold hover:text-primary"
+                >
+                  Tableau de bord
+                </Link>
+              ) : (
+                <Link
+                  href="/login"
+                  onClick={() => setOpen(false)}
+                  className="inline-flex w-full justify-center rounded-full border border-gold px-6 py-2.5 text-[13px] font-medium text-gold transition-all hover:bg-gold hover:text-primary"
+                >
+                  Se connecter
+                </Link>
+              )}
+            </li>
+          )}
         </ul>
       </div>
     </header>

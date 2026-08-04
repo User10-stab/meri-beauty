@@ -11,14 +11,19 @@ import {
   forbidden,
 } from "@/lib/api-response";
 import { auth } from "@/auth";
-import { requireDashboardAuth, requireCustomer } from "@/lib/authorization";
+import { requireCustomer, hasPermission, DASHBOARD_PERMISSIONS, AUTH_ERRORS } from "@/lib/authorization";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
+// Admin/owner only — see the matching note in [id]/route.js. Any STAFF
+// account could otherwise list every rental applicant's contact info,
+// commission ask, and message.
 
 async function requireAuth() {
   const session = await auth();
-  const authError = requireDashboardAuth(session, unauthorized, forbidden);
-  if (authError) return { error: authError };
+  if (!session?.user) return { error: unauthorized(AUTH_ERRORS.NOT_AUTHENTICATED) };
+  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.RENTAL_REQUESTS)) {
+    return { error: forbidden(AUTH_ERRORS.INSUFFICIENT_PERMISSIONS) };
+  }
   return { session };
 }
 

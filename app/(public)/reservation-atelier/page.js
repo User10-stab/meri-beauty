@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ArrowLeft, Calendar, Clock, Users, Euro, CheckCircle, Bell, AlertTriangle } from "lucide-react";
@@ -26,6 +26,14 @@ function formatTime(dateStr) {
 }
 
 export default function ReservationAtelierPage() {
+  return (
+    <Suspense fallback={null}>
+      <ReservationAtelierContent />
+    </Suspense>
+  );
+}
+
+function ReservationAtelierContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { data: session } = useSession();
@@ -43,6 +51,7 @@ export default function ReservationAtelierPage() {
   const [sessionData, setSessionData] = useState(null);
   const [available, setAvailable] = useState(0);
   const [seats, setSeats] = useState(1);
+  const [paymentMethod, setPaymentMethod] = useState("DEPOSIT");
   const [form, setForm] = useState({ fullName: "", email: "", phone: "" });
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
@@ -113,11 +122,14 @@ export default function ReservationAtelierPage() {
   const isFull = available <= 0 && !priorityValid;
   const showWaitingListForm = (isFull || wantsWaitingList) && !priorityValid;
 
-  const depositPct = activity?.depositPercentage ?? 30;
+  const depositPct = activity?.depositPercentage ?? 50;
   const unitPrice = Number(activity?.price || 0);
   const totalPrice = unitPrice * seats;
   const depositAmount = (totalPrice * depositPct) / 100;
   const balanceDue = totalPrice - depositAmount;
+  const isFullPayment = paymentMethod === "FULL";
+  const chargeAmount = isFullPayment ? totalPrice : depositAmount;
+  const displayBalanceDue = isFullPayment ? 0 : balanceDue;
 
   const priceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
   const maxSeats = Math.min(Math.max(1, available), 10);
@@ -162,6 +174,7 @@ export default function ReservationAtelierPage() {
       customerInfo: form,
       isPriority: priorityValid,
       waitingListEntryId: waitingListId,
+      paymentMethod,
     });
 
     if (result.success && result.url) {
@@ -295,6 +308,38 @@ export default function ReservationAtelierPage() {
                 </div>
               </div>
 
+              {/* Payment method */}
+              {!showWaitingListForm && (
+                <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
+                  <h2 className="mb-4 text-sm font-semibold text-ink">Mode de paiement</h2>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("DEPOSIT")}
+                      className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                        paymentMethod === "DEPOSIT" ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
+                      }`}
+                    >
+                      <span>
+                        <span className="block text-sm font-medium text-ink">Payer un acompte</span>
+                        <span className="block text-xs text-ink/50">Payez l&apos;acompte maintenant et le reste plus tard.</span>
+                      </span>
+                      <span className="text-sm font-semibold text-ink">{priceFormatted.format(depositAmount)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("FULL")}
+                      className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                        paymentMethod === "FULL" ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
+                      }`}
+                    >
+                      <span className="block text-sm font-medium text-ink">Payer le montant total</span>
+                      <span className="text-sm font-semibold text-ink">{priceFormatted.format(totalPrice)}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Customer info */}
               <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
                 <h2 className="text-sm font-semibold text-ink">Vos coordonnées</h2>
@@ -402,6 +447,8 @@ export default function ReservationAtelierPage() {
                       <Loader2 size={18} className="animate-spin" />
                       Réservation en cours…
                     </span>
+                  ) : isFullPayment ? (
+                    `Payer le montant total de ${priceFormatted.format(totalPrice)}`
                   ) : (
                     `Payer l'acompte de ${priceFormatted.format(depositAmount)}`
                   )}
@@ -410,7 +457,9 @@ export default function ReservationAtelierPage() {
 
               {!showWaitingListForm && (
                 <p className="text-center text-xs text-ink/40">
-                  Paiement sécurisé par Stripe. Vous ne serez débité que du montant de l&apos;acompte.
+                  Paiement sécurisé par Stripe. {isFullPayment
+                    ? "Vous réglez la totalité aujourd'hui."
+                    : "Vous ne serez débité que du montant de l'acompte."}
                 </p>
               )}
             </form>
@@ -441,20 +490,24 @@ export default function ReservationAtelierPage() {
                     <span className="font-medium text-ink">{priceFormatted.format(totalPrice)}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-ink/60">Acompte ({depositPct}%)</span>
-                    <span className="font-semibold text-gold">{priceFormatted.format(depositAmount)}</span>
+                    <span className="text-ink/60">{isFullPayment ? "Montant total" : `Acompte (${depositPct}%)`}</span>
+                    <span className="font-semibold text-gold">{priceFormatted.format(chargeAmount)}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-ink/60">Solde à payer sur place</span>
-                    <span className="text-ink">{priceFormatted.format(balanceDue)}</span>
+                    <span className="text-ink">{priceFormatted.format(displayBalanceDue)}</span>
                   </div>
                 </div>
 
                 <hr className="border-ink/8" />
 
                 <div className="rounded-lg bg-gold/5 px-3 py-2.5 text-xs leading-relaxed text-ink/60">
-                  Vous ne réglez aujourd&apos;hui que <strong className="text-gold">{priceFormatted.format(depositAmount)}</strong>.
-                  Le solde de <strong className="text-ink/80">{priceFormatted.format(balanceDue)}</strong> sera à payer sur place.
+                  {isFullPayment ? (
+                    <>Vous réglez aujourd&apos;hui la totalité, soit <strong className="text-gold">{priceFormatted.format(totalPrice)}</strong>. Aucun solde ne restera à payer.</>
+                  ) : (
+                    <>Vous ne réglez aujourd&apos;hui que <strong className="text-gold">{priceFormatted.format(depositAmount)}</strong>.
+                    Le solde de <strong className="text-ink/80">{priceFormatted.format(balanceDue)}</strong> sera à payer sur place.</>
+                  )}
                 </div>
               </div>
             </div>

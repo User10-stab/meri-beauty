@@ -47,16 +47,35 @@ const ALL_NAV_DATA = [
         icon: Icons.CreditCardIcon,
         url: "/dashboard/payments",
         items: [],
+      },
+      {
         title: "Workshops & Événements",
         icon: Icons.Calendar,
-        url: "/dashboard/workshops",
-        items: [],
-        roles: DASHBOARD_PERMISSIONS.SALON_SETTINGS,
+        items: [
+          { title: "Activités", url: "/dashboard/workshops/activities", roles: DASHBOARD_PERMISSIONS.WORKSHOPS },
+          { title: "Animateurs", url: "/dashboard/workshops/animators", roles: DASHBOARD_PERMISSIONS.WORKSHOPS },
+          { title: "Réservations", url: "/dashboard/workshops/reservations", roles: DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS },
+          { title: "Liste d'attente", url: "/dashboard/workshops/waiting-list", roles: DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS },
+        ],
+        roles: DASHBOARD_PERMISSIONS.WORKSHOPS,
+      },
+      {
+        title: "Formations",
+        icon: Icons.Calendar,
+        items: [
+          { title: "Formations", url: "/dashboard/formations", roles: DASHBOARD_PERMISSIONS.FORMATIONS },
+          { title: "Réservations", url: "/dashboard/formations/reservations", roles: DASHBOARD_PERMISSIONS.FORMATION_RESERVATIONS },
+        ],
+        roles: DASHBOARD_PERMISSIONS.FORMATIONS,
       },
       {
         title: "Staff",
         icon: Icons.User,
         items: [
+          {
+            title: "Performance",
+            url: "/dashboard/staff/performance",
+          },
           {
             title: "Auto-Entrepreneur",
             url: "/dashboard/staff/auto-entrepreneur",

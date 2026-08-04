@@ -3,21 +3,23 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { isAdminRole } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 
 /**
  * Récupère toutes les activités (workshops et événements) pour le tableau de bord.
- * Réservé aux administrateurs et propriétaires.
+ * Accessible au staff et aux administrateurs — le staff voit toutes les
+ * activités (y compris celles créées par d'autres), mais ne peut modifier/
+ * supprimer que les siennes (voir requireActivityAccess dans create-activity.js).
  */
 export async function getActivities() {
   try {
     const session = await auth();
 
-    if (!session?.user || !isAdminRole(session.user.role)) {
+    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.WORKSHOPS)) {
       return {
         success: false,
         data: [],
-        message: "Non autorisé. Accès réservé aux administrateurs.",
+        message: "Non autorisé.",
       };
     }
 

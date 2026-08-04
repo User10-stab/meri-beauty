@@ -158,13 +158,11 @@ export async function generateAnnualInventoryReport(year) {
     }
 
     // Movement summary by type
-    const movementSummary = {
-      SALES: movements.filter(m => m.type === 'SALE').length,
-      RESTOCK: movements.filter(m => m.type === 'RESTOCK').length,
-      RETURNS: movements.filter(m => m.type === 'RETURN').length,
-      LOSS: movements.filter(m => m.type === 'LOSS').length,
-      ADJUSTMENT: movements.filter(m => m.type === 'ADJUSTMENT').length
-    };
+    const movementSummary = movements.reduce((summary, m) => {
+      const key = m.type === 'SALE' ? 'SALES' : m.type === 'RETURN' ? 'RETURNS' : m.type;
+      summary[key] = (summary[key] || 0) + 1;
+      return summary;
+    }, { SALES: 0, RESTOCK: 0, RETURNS: 0, LOSS: 0, ADJUSTMENT: 0, SALON_USAGE: 0 });
 
     // Low stock items
     const lowStockItems = variants.filter(v => {
@@ -218,25 +216,6 @@ export async function getInventoryOverview() {
       where: { isDeleted: false, isActive: true }
     });
 
-    const lowStockCount = await prisma.productVariant.count({
-      where: {
-        isDeleted: false,
-        isActive: true,
-        AND: [
-          {
-            OR: [
-              { stockQuantity: { lte: prisma.productVariant.fields.lowStockThreshold } },
-              {
-                reservedQuantity: {
-                  gt: 0
-                }
-              }
-            ]
-          }
-        ]
-      }
-    });
-
     const outOfStockCount = await prisma.productVariant.count({
       where: {
         isDeleted: false,
@@ -245,11 +224,18 @@ export async function getInventoryOverview() {
       }
     });
 
-    // Total stock value
+    // Fetched once and reused for both the low-stock count and the stock value
+    // totals below. Low stock is available stock (stockQuantity - reservedQuantity)
+    // at or under the threshold — the same definition generateAnnualInventoryReport
+    // uses — computed in JS since Prisma can't compare two columns in a `where` filter.
     const variants = await prisma.productVariant.findMany({
       where: { isDeleted: false, isActive: true },
-      select: { price: true, costPrice: true, stockQuantity: true }
+      select: { price: true, costPrice: true, stockQuantity: true, reservedQuantity: true, lowStockThreshold: true }
     });
+
+    const lowStockCount = variants.filter(v =>
+      (v.stockQuantity - v.reservedQuantity) <= v.lowStockThreshold
+    ).length;
 
     const totalStockValue = variants.reduce((sum, v) =>
       sum + Number(v.price) * v.stockQuantity, 0

@@ -28,14 +28,18 @@ export async function unlockSite(password) {
   }
 
   const inputHash = Buffer.from(sha256Hex(password), "hex");
-  const expectedHash = Buffer.from(sha256Hex(expected), "hex");
+  const expectedHashHex = sha256Hex(expected);
+  const expectedHash = Buffer.from(expectedHashHex, "hex");
 
   if (!timingSafeEqual(inputHash, expectedHash)) {
     return { success: false, message: "Mot de passe incorrect. Veuillez réessayer." };
   }
 
+  // Store the hash of the *gate password itself* (not of what the user typed)
+  // so middleware.js — which only ever knows GATE_PASSWORD, never the raw
+  // input — can compare against the same value on every subsequent request.
   const cookieStore = await cookies();
-  cookieStore.set(COOKIE_NAME, inputHash.toString("hex"), {
+  cookieStore.set(COOKIE_NAME, expectedHashHex, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",

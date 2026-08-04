@@ -51,6 +51,8 @@ enum PaymentType {
 enum InvoiceSource {
   ORDER
   APPOINTMENT
+  WORKSHOP
+  FORMATION
 }
 
 enum ReturnStatus {
@@ -234,6 +236,28 @@ enum WaitingListStatus {
   REMOVED
 }
 
+// ─── FORMATION ENUMS ────────────────────────────────────────────────────────
+
+enum FormationType {
+  PRIVATE
+  PUBLIC
+}
+
+enum FormationStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  ARCHIVED
+}
+
+enum FormationReservationStatus {
+  PENDING_DEPOSIT
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
 // ─── WORKSHOP / EVENT MODELS ───────────────────────────────────────────
 
 model Activity {
@@ -250,7 +274,9 @@ model Activity {
   animator              Animator?      @relation(fields: [animatorId], references: [id])
   status                WorkshopStatus @default(DRAFT)
   allowMultipleSessions Boolean        @default(false)
-  depositPercentage     Int            @default(30)
+  depositPercentage     Int            @default(50)
+  createdById           String?
+  createdBy             User?          @relation("ActivityCreatedBy", fields: [createdById], references: [id])
   createdAt             DateTime       @default(now())
   updatedAt             DateTime       @updatedAt
 
@@ -270,33 +296,42 @@ model WorkshopSession {
   capacity             Int
   status               SessionStatus @default(SCHEDULED)
   registrationDeadline DateTime?
+  lowSeatsNotifiedAt   DateTime?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 
-  reservations WorkshopReservation[]
-  waitingList  WaitingListEntry[]
+  reservations         WorkshopReservation[]
+  waitingList          WaitingListEntry[]
+  previousReservations WorkshopReservation[] @relation("ReservationPreviousSession")
 
   @@index([workshopId])
   @@map("workshop_sessions")
 }
 
 model WorkshopReservation {
-  id            String                    @id @default(cuid())
-  sessionId     String
-  session       WorkshopSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  customerId    String
-  customer      User                      @relation(fields: [customerId], references: [id])
-  paymentId     String?
-  seatsCount    Int                       @default(1)
-  status        WorkshopReservationStatus @default(PENDING_DEPOSIT)
-  holdExpiresAt DateTime?
-  depositAmount Decimal                   @default(0) @db.Decimal(10, 2)
-  totalPrice    Decimal                   @db.Decimal(10, 2)
-  balanceDue    Decimal                   @default(0) @db.Decimal(10, 2)
-  participants  String?
-  notes         String?
-  createdAt     DateTime                  @default(now())
-  updatedAt     DateTime                  @updatedAt
+  id                String                    @id @default(cuid())
+  sessionId         String
+  session           WorkshopSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId        String
+  customer          User                      @relation(fields: [customerId], references: [id])
+  payment           Payment?
+  seatsCount        Int                       @default(1)
+  status            WorkshopReservationStatus @default(PENDING_DEPOSIT)
+  holdExpiresAt     DateTime?
+  depositAmount     Decimal                   @default(0) @db.Decimal(10, 2)
+  totalPrice        Decimal                   @db.Decimal(10, 2)
+  balanceDue        Decimal                   @default(0) @db.Decimal(10, 2)
+  previousSessionId String?
+  previousSession   WorkshopSession?          @relation("ReservationPreviousSession", fields: [previousSessionId], references: [id])
+  changeFeeAmount   Decimal                   @default(0) @db.Decimal(10, 2)
+  cancelledAt       DateTime?
+  cancelledByUserId String?
+  cancelledBy       User?                     @relation("ReservationCancelledBy", fields: [cancelledByUserId], references: [id])
+  participants      String?
+  notes             String?
+  reminderSentAt    DateTime?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
 
   @@index([sessionId])
   @@index([customerId])
@@ -336,10 +371,89 @@ model Animator {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  activities Activity[]
-  sessions   WorkshopSession[]
+  activities        Activity[]
+  sessions          WorkshopSession[]
+  formations        Formation[]
+  formationSessions FormationSession[]
 
   @@map("animators")
+}
+
+// ─── FORMATION MODELS ───────────────────────────────────────────────────────
+// Training courses. Structurally parallel to Activity/WorkshopSession/
+// WorkshopReservation above, but deliberately kept as separate tables: none
+// of the atelier-only features (48h cancellation cutoff, waiting list,
+// low-seats banner/email, paid session/seat change) apply here, so this
+// stays a plain CRUD + deposit/full-payment module instead of threading
+// exclusions through the ateliers code.
+
+model Formation {
+  id                    String          @id @default(cuid())
+  type                  FormationType
+  title                 String
+  description           String?
+  cover                 String?
+  price                 Decimal         @db.Decimal(10, 2)
+  duration              Int
+  language              String?
+  capacity              Int // PRIVATE: always 1 (enforced in Zod); PUBLIC: admin-set, no ceiling
+  animatorId            String?
+  animator              Animator?       @relation(fields: [animatorId], references: [id])
+  status                FormationStatus @default(DRAFT)
+  allowMultipleSessions Boolean         @default(false)
+  depositPercentage     Int             @default(30)
+  createdById           String?
+  createdBy             User?           @relation("FormationCreatedBy", fields: [createdById], references: [id])
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  sessions FormationSession[]
+
+  @@map("formations")
+}
+
+model FormationSession {
+  id                   String        @id @default(cuid())
+  formationId          String
+  formation            Formation     @relation(fields: [formationId], references: [id], onDelete: Cascade)
+  animatorId           String?
+  animator             Animator?     @relation(fields: [animatorId], references: [id])
+  startDate            DateTime
+  endDate              DateTime?
+  capacity             Int
+  status               SessionStatus @default(SCHEDULED)
+  registrationDeadline DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  reservations FormationReservation[]
+
+  @@index([formationId])
+  @@map("formation_sessions")
+}
+
+model FormationReservation {
+  id             String                     @id @default(cuid())
+  sessionId      String
+  session        FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId     String
+  customer       User                       @relation(fields: [customerId], references: [id])
+  payment        Payment?
+  seatsCount     Int                        @default(1) // always 1 for PRIVATE
+  status         FormationReservationStatus @default(PENDING_DEPOSIT)
+  holdExpiresAt  DateTime?
+  depositAmount  Decimal                    @default(0) @db.Decimal(10, 2)
+  totalPrice     Decimal                    @db.Decimal(10, 2)
+  balanceDue     Decimal                    @default(0) @db.Decimal(10, 2)
+  participants   String?
+  notes          String?
+  reminderSentAt DateTime?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  @@index([sessionId])
+  @@index([customerId])
+  @@map("formation_reservations")
 }
 
 model Salon {
@@ -349,10 +463,10 @@ model Salon {
   logo        String?
   coverImage  String?
 
-  phone       String
-  email       String
-  address     String?
-  vatNumber   String? // legal TVA/BCE number — printed on every issued invoice
+  phone     String
+  email     String
+  address   String?
+  vatNumber String? // legal TVA/BCE number — printed on every issued invoice
 
   instagram String?
   facebook  String?
@@ -406,27 +520,35 @@ model User {
   emailVerified        Boolean   @default(false)
   isActive             Boolean   @default(true)
   lastLogin            DateTime?
+  // Bumped whenever this user's password changes (reset or self-service) so
+  // the JWT session callback can detect and invalidate stale sessions issued
+  // before the change — see auth.js#jwt.
+  sessionVersion       Int       @default(0)
   newsletterSubscribed Boolean   @default(false)
-  vatNumber            String?   // Client TVA number for B2B invoices
+  vatNumber            String? // Client TVA number for B2B invoices
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  staff                Staff?
-  appointments         Appointment[]
-  reviews              Review[]
-  notifications        Notification[]
-  newsletterRecipients NewsletterRecipient[]
-  createdStaffServices StaffService[]        @relation("CreatedBy")
-  rentalRequests       RentalRequest[]
-  workshopReservations WorkshopReservation[]
-  waitingListEntries   WaitingListEntry[]
-  stockMovements       InventoryMovement[]   @relation("StockMovementBy")
-  carts                Cart[]
-  orders               Order[]               @relation("OrderBuyer")
-  pickedUpOrders       Order[]               @relation("OrderPickedUpBy")
-  processedReturns     ReturnRequest[]       @relation("ReturnProcessedBy")
+  staff                 Staff?
+  appointments          Appointment[]
+  reviews               Review[]
+  notifications         Notification[]
+  newsletterRecipients  NewsletterRecipient[]
+  createdStaffServices  StaffService[]         @relation("CreatedBy")
+  rentalRequests        RentalRequest[]
+  workshopReservations  WorkshopReservation[]
+  waitingListEntries    WaitingListEntry[]
+  createdActivities     Activity[]             @relation("ActivityCreatedBy")
+  cancelledReservations WorkshopReservation[]  @relation("ReservationCancelledBy")
+  formationReservations FormationReservation[]
+  createdFormations     Formation[]            @relation("FormationCreatedBy")
+  stockMovements        InventoryMovement[]    @relation("StockMovementBy")
+  carts                 Cart[]
+  orders                Order[]                @relation("OrderBuyer")
+  pickedUpOrders        Order[]                @relation("OrderPickedUpBy")
+  processedReturns      ReturnRequest[]        @relation("ReturnProcessedBy")
 }
 
 // CATEGORY — services only. Retail products use ProductCategory.
@@ -492,10 +614,10 @@ model ProductCategory {
 
 // PRODUCT SUBCATEGORY
 model ProductSubcategory {
-  id       String @id @default(cuid())
+  id       String  @id @default(cuid())
   name     String
   slug     String
-  position Int    @default(0)
+  position Int     @default(0)
   isActive Boolean @default(true)
 
   categoryId String
@@ -563,10 +685,10 @@ model ProductVariant {
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  name    String // "250 ml", "Teinte 03" — "Standard" for single-variant products
-  sku     String  @unique
-  barcode String? @unique // EAN/UPC; null until an internal code is generated
-  weightGrams Int @default(0) // Weight in grams for shipping cost calculation
+  name        String // "250 ml", "Teinte 03" — "Standard" for single-variant products
+  sku         String  @unique
+  barcode     String? @unique // EAN/UPC; null until an internal code is generated
+  weightGrams Int     @default(0) // Weight in grams for shipping cost calculation
 
   price        Decimal  @db.Decimal(10, 2) // selling price, TVA included
   costPrice    Decimal  @db.Decimal(10, 2) // supplier cost — "prix initial"
@@ -734,17 +856,17 @@ model Order {
   pickedUpByStaff   User?     @relation("OrderPickedUpBy", fields: [pickedUpByStaffId], references: [id])
 
   // PENDING_PICKUP orders auto-cancel + restock if not collected by this date
-  expiresAt     DateTime?
-  cancelledAt   DateTime?
-  cancelReason  String?
+  expiresAt    DateTime?
+  cancelledAt  DateTime?
+  cancelReason String?
 
   notes String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items   OrderItem[]
-  payment Payment?
+  items          OrderItem[]
+  payment        Payment?
   returnRequests ReturnRequest[]
 
   @@index([userId])
@@ -795,10 +917,10 @@ model ReturnRequest {
 
   requestedAt DateTime @default(now())
 
-  processedAt         DateTime?
-  processedByStaffId  String?
-  processedByStaff    User?     @relation("ReturnProcessedBy", fields: [processedByStaffId], references: [id])
-  staffNote           String?
+  processedAt        DateTime?
+  processedByStaffId String?
+  processedByStaff   User?     @relation("ReturnProcessedBy", fields: [processedByStaffId], references: [id])
+  staffNote          String?
 
   // Set only once COMPLETED with a refund — the credit note that
   // documents the money actually credited back for this return.
@@ -848,16 +970,16 @@ model Staff {
   userId String @unique
   user   User   @relation(fields: [userId], references: [id])
 
-  type               StaffType
-  languages          String[]
-  bio                String?
-  isActive           Boolean   @default(true)
-  photo              String?
-  hireDate           DateTime?
-  yearsOfExperience  Int
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
-  vatNumber            String?  @unique
+  type              StaffType
+  languages         String[]
+  bio               String?
+  isActive          Boolean   @default(true)
+  photo             String?
+  hireDate          DateTime?
+  yearsOfExperience Int
+  isDeleted         Boolean   @default(false)
+  deletedAt         DateTime?
+  vatNumber         String?   @unique
 
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
@@ -874,9 +996,15 @@ model Staff {
   bankName          String?
 
   // Stripe Connect
-  stripeAccountId           String? @unique
-  stripeChargesEnabled      Boolean @default(false)
-  stripePayoutsEnabled      Boolean @default(false)
+  stripeAccountId      String? @unique
+  stripeChargesEnabled Boolean @default(false)
+  stripePayoutsEnabled Boolean @default(false)
+
+  // Calendar sync — a revocable random token gating the iCal subscription
+  // feed (app/api/calendar-feed/[token]). Null until the staff member first
+  // requests their feed URL. A DB field (not an HMAC of staffId) so it can
+  // actually be rotated if a URL ever leaks, without touching a global secret.
+  calendarToken String? @unique
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -940,27 +1068,30 @@ model Appointment {
 }
 
 // PAYMENT
-// Polymorphic: exactly one of appointmentId / orderId is set, enforced by a
-// raw-SQL CHECK constraint added after the migration (see
-// prisma/migrations/*_add_commerce_cart_order/migration.sql) — Prisma has no
-// schema-level XOR. A future workshopReservationId branch can join this same
-// CHECK when that module exists.
+// Polymorphic: exactly one of appointmentId / orderId / workshopReservationId
+// / formationReservationId is set, enforced by a raw-SQL CHECK constraint
+// added after the migration (see prisma/migrations/*/migration.sql for
+// "Payment_exactly_one_source") — Prisma has no schema-level XOR.
 model Payment {
-  id                   String        @id @default(cuid())
-  appointmentId        String?       @unique
-  appointment          Appointment?  @relation(fields: [appointmentId], references: [id])
-  orderId              String?       @unique
-  order                Order?        @relation(fields: [orderId], references: [id])
-  depositAmount        Decimal       @default(0)
-  totalAmount          Decimal
-  paidAmount           Decimal
-  remainingAmount      Decimal
-  paymentType          PaymentType
-  status               PaymentStatus
-  paidAt               DateTime?
-  isDeleted            Boolean       @default(false)
-  deletedAt            DateTime?
-  transactionReference String?
+  id                     String                @id @default(cuid())
+  appointmentId          String?               @unique
+  appointment            Appointment?          @relation(fields: [appointmentId], references: [id])
+  orderId                String?               @unique
+  order                  Order?                @relation(fields: [orderId], references: [id])
+  workshopReservationId  String?               @unique
+  workshopReservation    WorkshopReservation?  @relation(fields: [workshopReservationId], references: [id])
+  formationReservationId String?               @unique
+  formationReservation   FormationReservation? @relation(fields: [formationReservationId], references: [id])
+  depositAmount          Decimal               @default(0)
+  totalAmount            Decimal
+  paidAmount             Decimal
+  remainingAmount        Decimal
+  paymentType            PaymentType
+  status                 PaymentStatus
+  paidAt                 DateTime?
+  isDeleted              Boolean               @default(false)
+  deletedAt              DateTime?
+  transactionReference   String?
 
   transactions Transaction[]
   invoice      Invoice?
@@ -1002,7 +1133,7 @@ model Invoice {
 
   customerName      String
   customerEmail     String
-  customerVatNumber String?   // Client TVA number (copied from User.vatNumber at invoice time)
+  customerVatNumber String? // Client TVA number (copied from User.vatNumber at invoice time)
   customerAddress   String?
 
   subtotalExclVat Decimal @db.Decimal(10, 2)
@@ -1192,8 +1323,6 @@ model RentalRequest {
   message        String?
   ownerResponse  String?
   specialty      String?
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
   isDeleted      Boolean             @default(false)
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())

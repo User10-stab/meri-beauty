@@ -19,16 +19,20 @@ async function ActivityCard({ activity }) {
     })
     : null;
 
+  const isWorkshop = activity.type === "WORKSHOP";
   const takenSeats = session?.reservations?.reduce((sum, res) => sum + res.seatsCount, 0) ?? 0;
   const capacity = session?.capacity ?? activity.capacity;
   const available = Math.max(0, capacity - takenSeats);
+  const priceFormatted = activity.price > 0
+    ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(activity.price)
+    : null;
 
   return (
     <Link
       href={`/evenements/${activity.id}`}
-      className="group flex h-full flex-col overflow-hidden rounded-xl bg-white shadow-sm shadow-black/5 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:shadow-gold/10"
+      className="group flex h-full flex-col overflow-hidden rounded-2xl bg-white ring-1 ring-ink/[0.06] shadow-sm shadow-black/5 transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl hover:shadow-gold/15"
     >
-      <div className="relative aspect-[4/3] w-full overflow-hidden bg-cream">
+      <div className="relative aspect-5/4 w-full overflow-hidden bg-cream">
         {activity.cover ? (
           <img
             src={activity.cover}
@@ -37,82 +41,104 @@ async function ActivityCard({ activity }) {
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center">
-            <span className="text-3xl font-bold text-gold/30">
-              {activity.type === "WORKSHOP" ? "W" : "É"}
+            <span className="text-4xl font-bold text-gold/30">
+              {isWorkshop ? "W" : "É"}
             </span>
           </div>
         )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-black/5 to-transparent" />
+
         <span
-          className={`absolute right-2 top-2 rounded-full px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide shadow-sm ${activity.type === "WORKSHOP"
+          className={`absolute right-3 top-3 rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm ${isWorkshop
             ? "bg-amber-100 text-amber-900"
             : "bg-sky-100 text-sky-900"
             }`}
         >
-          {activity.type === "WORKSHOP" ? "Atelier" : "Événement"}
+          {isWorkshop ? "Atelier" : "Événement"}
         </span>
+
+        {priceFormatted && (
+          <div className="absolute bottom-3 left-3 rounded-lg bg-white/95 px-3 py-1.5 shadow-md backdrop-blur-sm">
+            <span className="block text-[9px] font-semibold uppercase leading-none tracking-wide text-ink/45">
+              à partir de
+            </span>
+            <span className="block text-base font-bold leading-tight text-gold">{priceFormatted}</span>
+          </div>
+        )}
+
+        {session && (
+          available === 0 ? (
+            <span className="absolute bottom-3 right-3 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
+              Complet
+            </span>
+          ) : available <= 3 ? (
+            <span className="absolute bottom-3 right-3 rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
+              {available} place{available > 1 ? "s" : ""} !
+            </span>
+          ) : null
+        )}
       </div>
 
-      <div className="flex flex-1 flex-col gap-1.5 p-4">
-        <h3 className="text-sm font-bold leading-snug text-ink">
+      <div className="flex flex-1 flex-col gap-2.5 p-5">
+        <h3 className="text-[17px] font-bold leading-snug text-ink transition-colors group-hover:text-gold">
           {activity.title}
         </h3>
 
         {activity.description && (
-          <p className="line-clamp-2 text-xs leading-relaxed text-ink/55">
+          <p className="line-clamp-3 text-[13.5px] leading-relaxed text-ink/60">
             {activity.description}
           </p>
         )}
 
-        <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 pt-2 text-xs text-ink/50">
+        <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 pt-3 text-[13px] text-ink/55">
           {dateStr && (
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1.5">
               <CalendarIcon /> {dateStr}
             </span>
           )}
-          {activity.price > 0 && (
-            <span className="font-semibold text-gold">
-              {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(activity.price)}
-            </span>
-          )}
           {activity.duration && (
-            <span>{activity.duration} min</span>
+            <span className="flex items-center gap-1.5">
+              <ClockIcon /> {activity.duration} min
+            </span>
           )}
         </div>
 
         {session && (
-          <div className="mt-2 flex items-center justify-between text-[11px] border-t border-ink/5 pt-2 text-ink/50">
-            <span className="flex items-center gap-1">
+          <div className="flex items-center justify-between border-t border-ink/8 pt-3 text-[12px] text-ink/50">
+            <span className="flex items-center gap-1.5">
               <UsersIcon />
               <span>{takenSeats} / {capacity} places</span>
             </span>
-            {available === 0 ? (
-              <span className="rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-800">Complet</span>
-            ) : available <= 3 ? (
-              <span className="font-bold text-amber-600 text-[9px] uppercase tracking-wide">Plus que {available} place{available > 1 ? "s" : ""} !</span>
-            ) : (
-              <span className="font-medium text-emerald-600 text-[9px] uppercase tracking-wide">{available} libre{available > 1 ? "s" : ""}</span>
+            {available > 3 && (
+              <span className="font-semibold uppercase tracking-wide text-emerald-600">
+                {available} libre{available > 1 ? "s" : ""}
+              </span>
             )}
           </div>
         )}
 
         {activity.animator && (
-          <div className="flex items-center gap-1.5 border-t border-cream/80 pt-2 mt-0.5">
+          <div className="flex items-center gap-2 border-t border-cream/80 pt-3">
             {activity.animator.avatar ? (
               <img
                 src={activity.animator.avatar}
                 alt={activity.animator.name}
-                className="h-5 w-5 rounded-full object-cover"
+                className="h-6 w-6 rounded-full object-cover"
               />
             ) : (
-              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-gold/10 text-[9px] font-bold text-gold uppercase">
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gold/10 text-[10px] font-bold text-gold uppercase">
                 {activity.animator.name.charAt(0)}
               </div>
             )}
-            <span className="text-[10px] text-ink/50">Animé par</span>
-            <span className="text-xs text-ink/60 font-medium truncate">{activity.animator.name}</span>
+            <span className="text-[11px] text-ink/45">Animé par</span>
+            <span className="truncate text-[12px] font-medium text-ink/65">{activity.animator.name}</span>
           </div>
         )}
+
+        <span className="mt-1 inline-flex items-center gap-1.5 text-[13px] font-semibold text-gold opacity-0 transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100">
+          Découvrir
+          <ArrowRightIcon />
+        </span>
       </div>
     </Link>
   );
@@ -133,6 +159,23 @@ function UsersIcon() {
       <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" />
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-3.5 w-3.5" aria-hidden="true">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5" aria-hidden="true">
+      <path d="M5 12h14M13 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -213,7 +256,7 @@ export default async function EvenementsPage({ searchParams }) {
                   Tous les ateliers ({workshops.length})
                 </h2>
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {workshops.map((activity, i) => (
                   <AnimatedCard key={activity.id} index={i}>
                     <ActivityCard activity={activity} />
@@ -238,7 +281,7 @@ export default async function EvenementsPage({ searchParams }) {
                   Tous les événements ({events.length})
                 </h2>
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {events.map((activity, i) => (
                   <AnimatedCard key={activity.id} index={i}>
                     <ActivityCard activity={activity} />
@@ -257,7 +300,7 @@ export default async function EvenementsPage({ searchParams }) {
                       Ateliers ({workshops.length})
                     </h2>
                   </div>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {workshops.slice(0, 4).map((activity, i) => (
                       <AnimatedCard key={activity.id} index={i}>
                         <ActivityCard activity={activity} />
@@ -286,7 +329,7 @@ export default async function EvenementsPage({ searchParams }) {
                       Événements ({events.length})
                     </h2>
                   </div>
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {events.slice(0, 4).map((activity, i) => (
                       <AnimatedCard key={activity.id} index={i}>
                         <ActivityCard activity={activity} />

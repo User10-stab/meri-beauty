@@ -36,9 +36,20 @@ async function getStaffOnboardingState(userId) {
   return { isStaff: true, setupCompleted };
 }
 
+// How often the jwt callback re-checks the DB for staleness (password
+// changed, account deactivated/deleted) instead of trusting the token as-is.
+// A tradeoff between "how fast a revocation takes effect" and "a DB round
+// trip on every authenticated request" — 5 minutes is a reasonable middle
+// ground for a salon-booking app, not a high-security banking session.
+const SESSION_REVALIDATE_INTERVAL_MS = 5 * 60 * 1000;
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
-  session: { strategy: "jwt" },
+  // Shorter than NextAuth's 30-day default — combined with the periodic
+  // re-validation below, this bounds how long a stale/stolen session can
+  // stay usable even in the worst case (revalidation interval passed but
+  // the browser never made a request during that window).
+  session: { strategy: "jwt", maxAge: 7 * 24 * 60 * 60 },
   providers: [
     Credentials({
       credentials: {
@@ -65,6 +76,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             isDeleted: true,
             password: true,
             emailVerified: true,
+            sessionVersion: true,
           },
         });
 
@@ -101,6 +113,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           role: user.role,
           isActive: user.isActive,
+          sessionVersion: user.sessionVersion,
         };
       },
     }),
@@ -147,7 +160,34 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.email = user.email;
         token.role = user.role;
         token.isActive = user.isActive;
+        token.sessionVersion = user.sessionVersion;
+        token.validatedAt = Date.now();
+        return token;
       }
+
+      // Not a fresh sign-in — this callback runs on every authenticated
+      // request under the JWT strategy. Re-checking the DB every single
+      // time would be wasteful, so only do it once the revalidation
+      // interval has elapsed since the last check.
+      const lastValidated = token.validatedAt ?? 0;
+      if (Date.now() - lastValidated < SESSION_REVALIDATE_INTERVAL_MS) {
+        return token;
+      }
+
+      const dbUser = await prisma.user.findUnique({
+        where: { id: token.id },
+        select: { isActive: true, isDeleted: true, role: true, sessionVersion: true },
+      });
+
+      // Deleted, deactivated, or a password reset (sessionVersion bump)
+      // since this token was issued — force sign-out by invalidating it.
+      if (!dbUser || dbUser.isDeleted || !dbUser.isActive || dbUser.sessionVersion !== token.sessionVersion) {
+        return null;
+      }
+
+      token.role = dbUser.role;
+      token.isActive = dbUser.isActive;
+      token.validatedAt = Date.now();
       return token;
     },
     async session({ session, token }) {

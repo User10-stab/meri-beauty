@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import { auth } from "@/auth";
+import { canAccessDashboard } from "@/lib/authorization";
 
 // Force Node.js runtime — required for fs/promises and large body reads
 export const runtime = "nodejs";
@@ -12,11 +14,30 @@ export const maxDuration = 30;
 // Max raw file size: 20 MB (consistent with frontend)
 const MAX_SIZE = 20 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-const ALLOWED_FOLDERS = ["staff", "services", "products"];
+// The on-disk extension is derived from this map, never from the client's
+// filename/MIME header — both are attacker-controlled and were previously
+// used verbatim, letting a spoofed upload land as .svg/.html and execute in
+// a dashboard viewer's browser (stored XSS).
+const EXTENSION_BY_TYPE = {
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+const ALLOWED_FOLDERS = ["staff", "services", "products", "activities", "formations"];
 const BASE_UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 
 export async function POST(request) {
   try {
+    // Dashboard-only feature (staff photos, product/service/activity/formation
+    // covers) — this route had no auth check at all, letting anyone on the
+    // internet write files to the server (the /acces pre-launch gate only
+    // covers page routes, not /api/*).
+    const session = await auth();
+    if (!session?.user || !canAccessDashboard(session.user.role)) {
+      return NextResponse.json({ success: false, message: "Non autorisé." }, { status: 401 });
+    }
+
     const formData = await request.formData();
     const file = formData.get("file");
     const folder = formData.get("folder") ?? "staff";
@@ -53,8 +74,9 @@ export async function POST(request) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    // Unique filename: timestamp + random hex + original extension
-    const ext = path.extname(file.name) || ".jpg";
+    // Unique filename: timestamp + random hex + extension forced from the
+    // validated MIME type (never from the client-supplied file.name).
+    const ext = EXTENSION_BY_TYPE[file.type];
     const uniqueName = `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${ext}`;
 
     await mkdir(uploadDir, { recursive: true });

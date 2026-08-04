@@ -59,7 +59,13 @@ export async function getStorefrontFilters() {
           slug: true,
           brand: { select: { id: true, name: true } },
           subcategories: {
-            where: { isActive: true, products: { some: activeProductWhere } },
+            // "Général" is the auto-created catch-all subcategory for
+            // products that haven't been organized further — an
+            // implementation detail, not a real filter customers should see.
+            // Excluded here (not just in the sidebar component) so every
+            // consumer of this action — breadcrumbs, a category landing
+            // page, an API — gets the same rule for free.
+            where: { isActive: true, name: { not: "Général" }, products: { some: activeProductWhere } },
             orderBy: [{ position: "asc" }, { name: "asc" }],
             select: { id: true, name: true, slug: true },
           },

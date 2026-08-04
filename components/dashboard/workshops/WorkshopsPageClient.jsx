@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Plus, Filter } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable } from "../Tables/DataTable";
@@ -12,6 +13,7 @@ import { CreateAnimatorModal } from "./CreateAnimatorModal";
 import { deleteActivity } from "@/actions/workshops/create-activity";
 import { deleteAnimator } from "@/actions/workshops/create-animator";
 import { useConfirm } from "@/components/ConfirmProvider";
+import { isAdminRole } from "@/lib/authorization";
 import Button from "@/components/ui/Button";
 
 const ACTIVITIES_COLUMNS = [
@@ -31,10 +33,10 @@ const ANIMATORS_COLUMNS = [
   { key: "socials", label: "Réseaux / Web" },
 ];
 
-export function WorkshopsPageClient({ initialActivities = [], initialAnimators = [], userRole }) {
+export function WorkshopsPageClient({ initialActivities = [], initialAnimators = [], userRole, currentUserId, initialTab = "activities" }) {
   const router = useRouter();
   const confirm = useConfirm();
-  const [activeTab, setActiveTab] = useState("activities");
+  const activeTab = initialTab;
 
   const [editingActivity, setEditingActivity] = useState(null);
   const [editingAnimator, setEditingAnimator] = useState(null);
@@ -48,14 +50,16 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
   const [filterStatus, setFilterStatus] = useState("");
 
   const filteredActivities = useMemo(() => {
-    return initialActivities.filter((a) => {
-      if (filterType && a.type !== filterType) return false;
-      if (filterStatus && a.status !== filterStatus) return false;
-      return true;
-    });
-  }, [initialActivities, filterType, filterStatus]);
+    return initialActivities
+      .filter((a) => {
+        if (filterType && a.type !== filterType) return false;
+        if (filterStatus && a.status !== filterStatus) return false;
+        return true;
+      })
+      .map((a) => ({ ...a, canManage: isAdminRole(userRole) || a.createdById === currentUserId }));
+  }, [initialActivities, filterType, filterStatus, userRole, currentUserId]);
 
-  const isAdminOrOwner = userRole === "ADMIN" || userRole === "OWNER";
+  const isAdminOrOwner = isAdminRole(userRole);
 
   // --- Activity Actions ---
   function handleEditActivity(activity) {
@@ -113,20 +117,20 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-gray-200">
         <div className="flex gap-2">
           <TabButton
+            href="/dashboard/workshops/activities"
             active={activeTab === "activities"}
-            onClick={() => setActiveTab("activities")}
             label="Activités"
             count={filteredActivities.length}
           />
           <TabButton
+            href="/dashboard/workshops/animators"
             active={activeTab === "animators"}
-            onClick={() => setActiveTab("animators")}
             label="Animateurs"
             count={initialAnimators.length}
           />
         </div>
 
-        {isAdminOrOwner && activeTab === "activities" && (
+        {activeTab === "activities" && (
           <Button
             onClick={() => {
               setEditingActivity(null);
@@ -235,11 +239,10 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
   );
 }
 
-function TabButton({ active, onClick, label, count }) {
+function TabButton({ href, active, label, count }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <Link
+      href={href}
       className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
         active
           ? "border-[#2f3a2e] text-[#2f3a2e] dark:border-white dark:text-white"
@@ -256,6 +259,6 @@ function TabButton({ active, onClick, label, count }) {
       >
         {count}
       </span>
-    </button>
+    </Link>
   );
 }

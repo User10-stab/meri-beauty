@@ -6,7 +6,7 @@ import { Search, Loader2, CalendarX } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
-import { confirmAppointment, rejectAppointment } from "@/actions/appointment/manage-appointment";
+import { confirmAppointment, rejectAppointment, completeAppointment } from "@/actions/appointment/manage-appointment";
 
 const STATUS_LABEL = {
   PENDING: "En attente",
@@ -36,6 +36,8 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [statusFilter, setStatusFilter] = useState("");
   const [staffFilter, setStaffFilter] = useState("");
   const [toReject, setToReject] = useState(null);
+  const [toComplete, setToComplete] = useState(null);
+  const [completeMethod, setCompleteMethod] = useState("CASH");
   const [isPending, startTransition] = useTransition();
   const [rowLoadingId, setRowLoadingId] = useState(null);
 
@@ -71,6 +73,34 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     } else {
       toast.error(result.message);
     }
+  }
+
+  async function handleCompleteDirect(appointmentId) {
+    setRowLoadingId(appointmentId);
+    const result = await completeAppointment(appointmentId);
+    setRowLoadingId(null);
+    if (result.success) {
+      toast.success(result.message);
+      refetch({});
+    } else {
+      toast.error(result.message);
+    }
+  }
+
+  function handleCompleteWithPayment() {
+    if (!toComplete) return;
+    setRowLoadingId(toComplete.id);
+    startTransition(async () => {
+      const result = await completeAppointment(toComplete.id, { method: completeMethod });
+      setRowLoadingId(null);
+      setToComplete(null);
+      if (result.success) {
+        toast.success(result.message);
+        refetch({});
+      } else {
+        toast.error(result.message);
+      }
+    });
   }
 
   function handleReject() {
@@ -205,6 +235,19 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                           Refuser
                         </button>
                       </div>
+                    ) : a.status === "CONFIRMED" ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          a.payment?.status === "PARTIALLY_PAID"
+                            ? setToComplete(a)
+                            : handleCompleteDirect(a.id)
+                        }
+                        disabled={rowLoadingId === a.id}
+                        className="rounded-lg border border-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:opacity-50"
+                      >
+                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer"}
+                      </button>
                     ) : (
                       <span className="text-gray-300">—</span>
                     )}
@@ -226,6 +269,55 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         onConfirm={handleReject}
         onCancel={() => setToReject(null)}
       />
+
+      {toComplete && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setToComplete(null); }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-base font-semibold text-gray-800">Encaisser le solde restant</h3>
+            <p className="mt-1.5 text-sm text-gray-500">
+              {toComplete.customer?.fullName} doit encore régler{" "}
+              <span className="font-medium text-gray-700">
+                €{(toComplete.payment.totalAmount - toComplete.payment.paidAmount).toFixed(2)}
+              </span>{" "}
+              sur place. Une facture sera émise pour le montant total dès l'encaissement.
+            </p>
+
+            <label className="mt-4 block text-xs font-medium text-gray-500">Mode de paiement</label>
+            <select
+              value={completeMethod}
+              onChange={(e) => setCompleteMethod(e.target.value)}
+              className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e]"
+            >
+              <option value="CASH">Espèces</option>
+              <option value="CARD">Carte</option>
+            </select>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setToComplete(null)}
+                disabled={isPending}
+                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={handleCompleteWithPayment}
+                disabled={isPending}
+                className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f3a2e]/90 disabled:opacity-50"
+              >
+                {isPending ? <Loader2 size={14} className="animate-spin" /> : "Encaisser et terminer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

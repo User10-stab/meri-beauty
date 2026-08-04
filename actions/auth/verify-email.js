@@ -6,36 +6,12 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { emailVerificationEmail } from "@/lib/email-templates";
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
-
-const rateLimitStore = new Map();
-
-function getRateLimitKey(email, ip) {
-  return `${email}:${ip}`;
-}
-
-function isRateLimited(key) {
-  const now = Date.now();
-  const record = rateLimitStore.get(key);
-
-  if (!record) return false;
-
-  const recentRequests = record.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
-  rateLimitStore.set(key, recentRequests);
-
-  return recentRequests.length >= RATE_LIMIT_MAX_REQUESTS;
-}
-
-function recordRequest(key) {
-  const now = Date.now();
-  const record = rateLimitStore.get(key) || [];
-  record.push(now);
-  rateLimitStore.set(key, record);
-}
 
 async function hashToken(token) {
   return bcrypt.hash(token, BCRYPT_SALT_ROUNDS);
@@ -129,16 +105,16 @@ export async function resendVerificationEmail(input) {
   }
 
   const { email } = parsed.data;
-  const ip = "anonymous";
+  const ip = await getClientIp();
 
-  const rateLimitKey = getRateLimitKey(email, ip);
-  if (isRateLimited(rateLimitKey)) {
+  const rateLimitKey = `${email}:${ip}`;
+  if (isRateLimited("verify-email", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
       message: "Too many requests. Please wait a few minutes before trying again.",
     };
   }
-  recordRequest(rateLimitKey);
+  recordRateLimitHit("verify-email", rateLimitKey);
 
   try {
     const user = await prisma.user.findUnique({

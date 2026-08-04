@@ -2,10 +2,10 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Store, Wallet, Truck, Check, Loader2 } from "lucide-react";
+import { Store, Wallet, Truck, Check, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { createOrderFromCart, createOrderCheckoutSession } from "@/actions/boutique/orders";
-import { getCartShippingCost } from "@/actions/boutique/shipping";
+import { getCartShippingCost, requestShippingQuote } from "@/actions/boutique/shipping";
 
 const MODES = [
   {
@@ -39,13 +39,14 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const [shippingAddress, setShippingAddress] = useState({ line1: "", line2: "", city: "", postalCode: "" });
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [shippingDetails, setShippingDetails] = useState({ cost: 0, isFree: true, loading: true });
+  const [shippingDetails, setShippingDetails] = useState({ cost: 0, isFree: true, loading: true, quoteRequired: false });
+  const [quoteRequest, setQuoteRequest] = useState({ submitting: false, sent: false });
 
   // Fetch real shipping cost from server (weight-based calculation)
   useEffect(() => {
     async function fetchShippingCost() {
       if (fulfilmentMode !== "SHIPPING_PREPAID") {
-        setShippingDetails({ cost: 0, isFree: true, loading: false });
+        setShippingDetails({ cost: 0, isFree: true, loading: false, quoteRequired: false });
         return;
       }
 
@@ -56,11 +57,22 @@ export function CheckoutPageClient({ cart, customerSession }) {
           cost: result.data.cost,
           isFree: result.data.isFree,
           loading: false,
+          quoteRequired: false,
           untilFree: result.data.untilFree,
           totalWeightKg: result.data.totalWeightKg
         });
+      } else if (result.data?.quoteRequired) {
+        // >30kg: no flat-rate price exists, don't pretend it's free — block checkout
+        // and point the customer at a way to actually reach us instead of a dead end.
+        setShippingDetails({
+          cost: 0,
+          isFree: false,
+          loading: false,
+          quoteRequired: true,
+          totalWeightKg: result.data.totalWeightKg
+        });
       } else {
-        setShippingDetails({ cost: 0, isFree: true, loading: false });
+        setShippingDetails({ cost: 0, isFree: true, loading: false, quoteRequired: false });
       }
     }
 
@@ -68,6 +80,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
   }, [fulfilmentMode, cart.subtotal, cart.items]);
 
   const shippingCost = shippingDetails.cost;
+  const quoteRequired = fulfilmentMode === "SHIPPING_PREPAID" && shippingDetails.quoteRequired;
 
   const total = cart.subtotal + shippingCost;
 
@@ -86,6 +99,10 @@ export function CheckoutPageClient({ cart, customerSession }) {
 
     if (!fulfilmentMode) {
       toast.error("Veuillez choisir un mode de retrait.");
+      return;
+    }
+    if (quoteRequired) {
+      toast.error("Votre commande dépasse 30 kg. Contactez-nous pour un devis de livraison personnalisé.");
       return;
     }
     if (!isAuthenticated) {
@@ -135,6 +152,35 @@ export function CheckoutPageClient({ cart, customerSession }) {
       console.error("[CheckoutPageClient]", error);
       toast.error("Une erreur est survenue. Veuillez réessayer.");
       setSubmitting(false);
+    }
+  }
+
+  async function handleRequestQuote() {
+    const info = isAuthenticated ? customerSession : customerInfo;
+    if (!info?.fullName?.trim() || !info?.email?.trim() || !info?.phone?.trim()) {
+      toast.error("Veuillez compléter vos informations de contact.");
+      return;
+    }
+    if (!shippingAddress.line1.trim() || !shippingAddress.city.trim() || !/^\d{4}$/.test(shippingAddress.postalCode.trim())) {
+      toast.error("Veuillez compléter une adresse de livraison valide (code postal belge à 4 chiffres).");
+      return;
+    }
+
+    setQuoteRequest({ submitting: true, sent: false });
+    const result = await requestShippingQuote({
+      fullName: info.fullName,
+      email: info.email,
+      phone: info.phone,
+      shippingAddress,
+      notes: notes || null,
+    });
+
+    if (result.success) {
+      setQuoteRequest({ submitting: false, sent: true });
+      toast.success(result.message);
+    } else {
+      setQuoteRequest({ submitting: false, sent: false });
+      toast.error(result.message);
     }
   }
 
@@ -305,17 +351,53 @@ export function CheckoutPageClient({ cart, customerSession }) {
             </div>
             <div className="flex justify-between text-gray-600">
               <span>Livraison</span>
-              <span>{fulfilmentMode === "SHIPPING_PREPAID" ? (shippingCost === 0 ? "Offerte" : `€${shippingCost.toFixed(2)}`) : "—"}</span>
+              <span>
+                {fulfilmentMode !== "SHIPPING_PREPAID"
+                  ? "—"
+                  : quoteRequired
+                    ? "Devis requis"
+                    : shippingCost === 0
+                      ? "Offerte"
+                      : `€${shippingCost.toFixed(2)}`}
+              </span>
             </div>
             <div className="flex justify-between border-t border-neutral-100 pt-2 text-base font-semibold text-[#2F3A2E]">
               <span>Total</span>
-              <span>€{total.toFixed(2)}</span>
+              <span>{quoteRequired ? "—" : `€${total.toFixed(2)}`}</span>
             </div>
           </div>
 
+          {quoteRequired && (
+            quoteRequest.sent ? (
+              <div className="mt-4 flex items-start gap-3 border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+                <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-green-600" />
+                <p>Votre demande de devis a été envoyée. Nous vous recontacterons sous peu par email ou téléphone.</p>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3 border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
+                  <p>
+                    Votre commande dépasse 30&nbsp;kg ({shippingDetails.totalWeightKg?.toFixed(1)}&nbsp;kg) : aucun tarif de
+                    livraison automatique ne s&apos;applique. Demandez un devis personnalisé, ou choisissez le retrait en boutique.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRequestQuote}
+                  disabled={quoteRequest.submitting}
+                  className="inline-flex items-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
+                >
+                  {quoteRequest.submitting && <Loader2 size={14} className="animate-spin" />}
+                  Demander un devis
+                </button>
+              </div>
+            )
+          )}
+
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || quoteRequired}
             className="mt-6 flex w-full items-center justify-center gap-2 bg-[#C8A46A] px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-[#B8945A] disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {submitting ? (

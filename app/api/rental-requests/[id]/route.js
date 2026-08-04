@@ -15,14 +15,22 @@ import {
   noContent,
 } from "@/lib/api-response";
 import { auth } from "@/auth";
-import { requireDashboardAuth } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS, AUTH_ERRORS } from "@/lib/authorization";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
+// Approving/rejecting a rental request decides who becomes a colleague and on
+// what commission terms — admin/owner only. The sidebar already gates the
+// whole "Demandes de location" page this way (DASHBOARD_PERMISSIONS.
+// RENTAL_REQUESTS); this route used to only check generic dashboard access,
+// so any STAFF account could call it directly and approve/reject any
+// request, including mass-assigning ownerResponse/status from the body.
 
 async function requireAuth() {
   const session = await auth();
-  const authError = requireDashboardAuth(session, unauthorized, forbidden);
-  if (authError) return { error: authError };
+  if (!session?.user) return { error: unauthorized(AUTH_ERRORS.NOT_AUTHENTICATED) };
+  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.RENTAL_REQUESTS)) {
+    return { error: forbidden(AUTH_ERRORS.INSUFFICIENT_PERMISSIONS) };
+  }
   return { session };
 }
 

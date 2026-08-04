@@ -6,36 +6,12 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { passwordResetEmail } from "@/lib/email-templates";
 import { forgotPasswordSchema } from "@/lib/validations/forgot-password";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
-
-const rateLimitStore = new Map();
-
-function getRateLimitKey(email, ip) {
-  return `${email}:${ip}`;
-}
-
-function isRateLimited(key) {
-  const now = Date.now();
-  const record = rateLimitStore.get(key);
-
-  if (!record) return false;
-
-  const recentRequests = record.filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
-  rateLimitStore.set(key, recentRequests);
-
-  return recentRequests.length >= RATE_LIMIT_MAX_REQUESTS;
-}
-
-function recordRequest(key) {
-  const now = Date.now();
-  const record = rateLimitStore.get(key) || [];
-  record.push(now);
-  rateLimitStore.set(key, record);
-}
 
 async function hashToken(token) {
   return bcrypt.hash(token, BCRYPT_SALT_ROUNDS);
@@ -60,16 +36,16 @@ export async function forgotPassword(input) {
   }
 
   const { email } = parsed.data;
-  const ip = "anonymous";
+  const ip = await getClientIp();
 
-  const rateLimitKey = getRateLimitKey(email, ip);
-  if (isRateLimited(rateLimitKey)) {
+  const rateLimitKey = `${email}:${ip}`;
+  if (isRateLimited("forgot-password", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
       message: "Too many requests. Please wait a few minutes before trying again.",
     };
   }
-  recordRequest(rateLimitKey);
+  recordRateLimitHit("forgot-password", rateLimitKey);
 
   try {
     const user = await prisma.user.findUnique({

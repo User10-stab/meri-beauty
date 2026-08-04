@@ -83,10 +83,16 @@ async function uniquePickupCode() {
   throw new Error("PICKUP_CODE_EXHAUSTED");
 }
 
-/** Mirrors createReservation's customer resolution — guest checkout creates an account. */
-async function resolveOrCreateCustomer(customerInfo) {
-  if (customerInfo.userId) {
-    const user = await prisma.user.findUnique({ where: { id: customerInfo.userId, isDeleted: false } });
+/**
+ * Mirrors createReservation's customer resolution — guest checkout creates
+ * an account. `authenticatedUserId` comes from the server-side session,
+ * never from client-supplied customerInfo — otherwise any logged-in
+ * customer could pass a victim's id and have the order attached to their
+ * account (IDOR).
+ */
+async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
+  if (authenticatedUserId) {
+    const user = await prisma.user.findUnique({ where: { id: authenticatedUserId, isDeleted: false } });
     if (user) return { user, isNewUser: false, temporaryPassword: null };
   }
 
@@ -183,21 +189,23 @@ function serializeOrder(order) {
 export async function createOrderFromCart(input) {
   const parsed = checkoutSchema.safeParse(input);
   if (!parsed.success) {
+    // Nested object fields (customerInfo.email, etc.) bucket under the
+    // parent key in Zod's flatten() output, not a dotted "customerInfo.email"
+    // key — checking for the dotted key here always missed the real message.
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
       message:
         errors.fulfilmentMode?.[0] ??
         errors.shippingAddress?.[0] ??
-        errors["customerInfo.email"]?.[0] ??
-        errors["customerInfo.fullName"]?.[0] ??
-        errors["customerInfo.phone"]?.[0] ??
+        errors.customerInfo?.[0] ??
         "Données invalides.",
     };
   }
   const { fulfilmentMode, customerInfo, shippingAddress, notes } = parsed.data;
 
   try {
+    const authSession = await auth();
     const cart = await getOrCreateActiveCart();
     const fullCart = await prisma.cart.findUnique({
       where: { id: cart.id },
@@ -210,6 +218,33 @@ export async function createOrderFromCart(input) {
 
     if (!fullCart || fullCart.items.length === 0) {
       return { success: false, message: "Votre panier est vide." };
+    }
+
+    // A customer who abandoned a prepaid checkout and comes back to retry
+    // (closed the Stripe tab, card declined, etc.) hits this same cart again
+    // before their first attempt's 30-minute hold expires - without this,
+    // the retry would reserve the same stock a second time on top of the
+    // still-live first reservation, self-inflicting a false "out of stock"
+    // against their own abandoned order. Silently supersede it: release its
+    // hold (no email - this isn't a customer-visible cancellation, it's an
+    // implementation detail of retrying the same purchase).
+    const supersededOrder = await prisma.order.findFirst({
+      where: { cartId: fullCart.id, status: "PENDING_PAYMENT" },
+      include: { items: true },
+    });
+    if (supersededOrder) {
+      await prisma.$transaction(async (tx) => {
+        for (const item of supersededOrder.items) {
+          await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { reservedQuantity: { decrement: item.quantity } },
+          });
+        }
+        await tx.order.update({
+          where: { id: supersededOrder.id },
+          data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: "Remplacée par une nouvelle tentative de paiement" },
+        });
+      });
     }
 
     for (const item of fullCart.items) {
@@ -225,7 +260,7 @@ export async function createOrderFromCart(input) {
       }
     }
 
-    const { user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo);
+    const { user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
 
     const subtotal = fullCart.items.reduce(
       (sum, item) => sum + Number(item.variant.price) * item.quantity,
@@ -257,6 +292,14 @@ export async function createOrderFromCart(input) {
 
     const order = await prisma.$transaction(async (tx) => {
       for (const item of fullCart.items) {
+        // Lock the variant row before reading it — without this, two
+        // concurrent checkouts on the same last-unit variant can both read
+        // the same "available" snapshot under READ COMMITTED and both pass
+        // the check, over-reserving stock (the DB CHECK constraint below is
+        // a backstop, not the primary guard). Mirrors the same FOR UPDATE
+        // pattern used for workshop/formation session capacity.
+        await tx.$queryRaw`SELECT id FROM "ProductVariant" WHERE id = ${item.variantId} FOR UPDATE`;
+
         const variant = await tx.productVariant.findUnique({
           where: { id: item.variantId },
           select: { stockQuantity: true, reservedQuantity: true },
@@ -264,10 +307,15 @@ export async function createOrderFromCart(input) {
         const available = variant.stockQuantity - variant.reservedQuantity;
         if (item.quantity > available) throw new Error("STOCK_RACE");
 
-        await tx.productVariant.update({
-          where: { id: item.variantId },
-          data: { reservedQuantity: { increment: item.quantity } },
-        });
+        try {
+          await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { reservedQuantity: { increment: item.quantity } },
+          });
+        } catch (err) {
+          if (err.code === "P2004") throw new Error("STOCK_RACE");
+          throw err;
+        }
       }
 
       const created = await tx.order.create({
@@ -403,7 +451,7 @@ export async function createOrderCheckoutSession(orderId) {
     const metadata = { kind: "order", orderId: order.id };
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
+      payment_method_types: ["card", "bancontact"],
       line_items: lineItems,
       mode: "payment",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/boutique/order/success?session_id={CHECKOUT_SESSION_ID}`,
@@ -491,26 +539,24 @@ export async function fulfillOrderPayment(session) {
     });
 
     for (const item of order.items) {
-      const variant = await tx.productVariant.findUnique({
-        where: { id: item.variantId },
-        select: { stockQuantity: true, reservedQuantity: true },
-      });
-      const newStock = variant.stockQuantity - item.quantity;
-
-      await tx.productVariant.update({
+      // Atomic {decrement} on both columns — a plain read-then-write of a
+      // JS-computed literal would let two orders paying for the same
+      // variant at once silently lose one side's decrement.
+      const updated = await tx.productVariant.update({
         where: { id: item.variantId },
         data: {
-          stockQuantity: newStock,
+          stockQuantity: { decrement: item.quantity },
           reservedQuantity: { decrement: item.quantity },
         },
       });
+      const newStock = updated.stockQuantity;
 
       await tx.inventoryMovement.create({
         data: {
           variantId: item.variantId,
           type: "SALE",
           quantity: -item.quantity,
-          previousStock: variant.stockQuantity,
+          previousStock: newStock + item.quantity,
           newStock,
           reason: `Commande n°${order.orderNumber}`,
         },
@@ -716,23 +762,18 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
         });
 
         for (const item of order.items) {
-          const variant = await tx.productVariant.findUnique({
+          const updated = await tx.productVariant.update({
             where: { id: item.variantId },
-            select: { stockQuantity: true },
+            data: { stockQuantity: { decrement: item.quantity }, reservedQuantity: { decrement: item.quantity } },
           });
-          const newStock = variant.stockQuantity - item.quantity;
-
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: { stockQuantity: newStock, reservedQuantity: { decrement: item.quantity } },
-          });
+          const newStock = updated.stockQuantity;
 
           await tx.inventoryMovement.create({
             data: {
               variantId: item.variantId,
               type: "SALE",
               quantity: -item.quantity,
-              previousStock: variant.stockQuantity,
+              previousStock: newStock + item.quantity,
               newStock,
               reason: `Commande n°${order.orderNumber} — paiement sur place`,
             },
@@ -853,49 +894,30 @@ export async function markOrderCompleted(orderId) {
 }
 
 /** Staff-initiated cancellation — refunds if paid, always releases/returns stock. */
-export async function cancelOrder(input) {
-  const guard = await requireOrdersAccess();
-  if (guard.error) return { success: false, message: guard.error };
-
-  const parsed = cancelOrderSchema.safeParse(input);
-  if (!parsed.success) {
-    const errors = parsed.error.flatten().fieldErrors;
-    return { success: false, message: errors.orderId?.[0] ?? "Données invalides." };
-  }
-  const { orderId, reason } = parsed.data;
-
+/**
+ * Shared by both the admin-facing cancelOrder and the customer-facing
+ * cancelMyOrder — every authorization/ownership/status decision happens in
+ * the caller, this just performs the cancellation once that's settled.
+ */
+async function performOrderCancellation(order, reason) {
+  const orderId = order.id;
   try {
-    const order = await prisma.order.findUnique({
-      where: { id: orderId },
-      include: {
-        items: true,
-        payment: { include: { invoice: true } },
-        user: { select: { fullName: true, email: true } },
-      },
-    });
-    if (!order) return { success: false, message: "Commande introuvable." };
-    if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
-      return { success: false, message: "Cette commande ne peut plus être annulée." };
-    }
-
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
 
     const { creditNote } = await prisma.$transaction(async (tx) => {
       for (const item of order.items) {
-        const variant = await tx.productVariant.findUnique({
-          where: { id: item.variantId },
-          select: { stockQuantity: true, reservedQuantity: true },
-        });
-
         if (wasSold) {
-          const newStock = variant.stockQuantity + item.quantity;
-          await tx.productVariant.update({ where: { id: item.variantId }, data: { stockQuantity: newStock } });
+          const updated = await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { stockQuantity: { increment: item.quantity } },
+          });
+          const newStock = updated.stockQuantity;
           await tx.inventoryMovement.create({
             data: {
               variantId: item.variantId,
               type: "RETURN",
               quantity: item.quantity,
-              previousStock: variant.stockQuantity,
+              previousStock: newStock - item.quantity,
               newStock,
               reason: `Commande n°${order.orderNumber} annulée`,
             },
@@ -934,14 +956,14 @@ export async function cancelOrder(input) {
       } catch (err) {
         // The order is already cancelled and stock restored — surface the
         // refund failure loudly rather than rolling any of that back.
-        console.error("[cancelOrder] REFUND FAILED for order", orderId, err);
+        console.error("[performOrderCancellation] REFUND FAILED for order", orderId, err);
       }
     }
 
     let creditNotePdf = null;
     if (creditNote) {
       creditNotePdf = await renderCreditNotePdf(creditNote, order.payment.invoice).catch((err) => {
-        console.error("[cancelOrder] credit note PDF render failed:", err);
+        console.error("[performOrderCancellation] credit note PDF render failed:", err);
         return null;
       });
     }
@@ -964,14 +986,77 @@ export async function cancelOrder(input) {
       ...(creditNotePdf
         ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] }
         : {}),
-    }).catch((err) => console.error("[cancelOrder] email failed:", err));
+    }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
 
     revalidatePath("/dashboard/boutique/orders");
+    revalidatePath("/mon-compte");
     return { success: true, message: "Commande annulée." };
   } catch (error) {
-    console.error("[cancelOrder]", error);
+    console.error("[performOrderCancellation]", error);
     return { success: false, message: "Impossible d'annuler la commande." };
   }
+}
+
+/** Admin/staff: cancel any order. */
+export async function cancelOrder(input) {
+  const guard = await requireOrdersAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const parsed = cancelOrderSchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return { success: false, message: errors.orderId?.[0] ?? "Données invalides." };
+  }
+  const { orderId, reason } = parsed.data;
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: true,
+      payment: { include: { invoice: true } },
+      user: { select: { fullName: true, email: true } },
+    },
+  });
+  if (!order) return { success: false, message: "Commande introuvable." };
+  if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
+    return { success: false, message: "Cette commande ne peut plus être annulée." };
+  }
+
+  return performOrderCancellation(order, reason);
+}
+
+/**
+ * Customer self-service: cancel one of MY OWN orders, only while it's still
+ * PENDING_PAYMENT or PENDING_PICKUP — i.e. nothing has been paid-and-fulfilled
+ * yet. Once staff has started preparing/shipping (PAID and beyond), a
+ * customer can no longer unilaterally cancel through here; that needs staff
+ * involvement via the admin cancelOrder above.
+ */
+export async function cancelMyOrder(orderId) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, message: "Vous devez être connecté(e)." };
+  }
+  if (!orderId || typeof orderId !== "string") {
+    return { success: false, message: "Commande invalide." };
+  }
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: true,
+      payment: { include: { invoice: true } },
+      user: { select: { fullName: true, email: true } },
+    },
+  });
+  if (!order || order.userId !== session.user.id) {
+    return { success: false, message: "Commande introuvable." };
+  }
+  if (!["PENDING_PAYMENT", "PENDING_PICKUP"].includes(order.status)) {
+    return { success: false, message: "Cette commande ne peut plus être annulée en ligne — contactez-nous." };
+  }
+
+  return performOrderCancellation(order, "Annulée par le client");
 }
 
 // ─── Cron-ready ─────────────────────────────────────────────────────────────────
@@ -1006,12 +1091,19 @@ export async function expireStaleOrders() {
             data: { reservedQuantity: { decrement: item.quantity } },
           });
         }
+        // cancelledAt is set for BOTH branches now — it previously stayed
+        // null for on-site pickup expirations, which broke any "cancelled
+        // orders" query filtering on that column even though the order was
+        // just as dead as a payment-timeout cancellation.
         await tx.order.update({
           where: { id: order.id },
           data: {
             status: order.status === "PENDING_PAYMENT" ? "CANCELLED" : "EXPIRED",
-            cancelledAt: order.status === "PENDING_PAYMENT" ? new Date() : null,
-            cancelReason: order.status === "PENDING_PAYMENT" ? "Paiement non complété" : null,
+            cancelledAt: new Date(),
+            cancelReason:
+              order.status === "PENDING_PAYMENT"
+                ? "Paiement non complété"
+                : "Retrait non effectué dans le délai imparti",
           },
         });
       });

@@ -2,6 +2,7 @@ import Image from "next/image";
 import { ArrowIcon, StarIcon, ClockIcon, MapPinIcon } from "./icons";
 import { getSalon } from "@/actions/salon/get-salon";
 import { groupWorkingDays } from "@/lib/groupWorkingDays";
+import WorkshopBanner from "./WorkshopBanner";
 
 const SERVICES = [
   "Coiffure",
@@ -119,6 +120,10 @@ export default async function Hero() {
           </div>
         </div>
       </section>
+
+      {/* Event/workshop promo card — floats over the hero's top-right on
+          desktop, plain strip under the hero on mobile (see WorkshopBanner). */}
+      <WorkshopBanner />
 
       {/* ══════════════════════════════════════
           OPENING HOURS FLOATING CARD

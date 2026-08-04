@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Package, Sparkles, GraduationCap, Loader2 } from "lucide-react";
+import { Package, Sparkles, GraduationCap, Loader2, FileDown } from "lucide-react";
 import { cancelMyOrder } from "@/actions/boutique/orders";
 
 const CUSTOMER_CANCELLABLE_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP"];
@@ -81,6 +81,21 @@ function StatusBadge({ status, labels }) {
   );
 }
 
+function InvoiceLink({ invoice }) {
+  if (!invoice) return null;
+  return (
+    <a
+      href={`/api/invoices/${invoice.id}/pdf`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink/60 hover:text-gold"
+    >
+      <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+      Facture {invoice.number}
+    </a>
+  );
+}
+
 function EmptyState({ icon: Icon, text }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-ink/15 bg-white/50 py-16 text-center">
@@ -131,7 +146,9 @@ function OrderCard({ order }) {
       <div className="mt-3 flex items-center justify-between border-t border-ink/8 pt-3">
         {order.pickupCode && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(order.status) ? (
           <span className="text-[11px] text-ink/45">Code de retrait : <span className="font-mono font-semibold text-ink/70">{order.pickupCode}</span></span>
-        ) : <span />}
+        ) : (
+          <InvoiceLink invoice={order.payment?.invoice} />
+        )}
         <span className="text-sm font-bold text-gold">{formatPrice(order.totalAmount)}</span>
       </div>
 
@@ -210,6 +227,8 @@ function ReservationCard({ reservation, kind }) {
           </span>
           <span className="text-sm font-bold text-gold">{formatPrice(reservation.totalPrice)}</span>
         </div>
+
+        <InvoiceLink invoice={reservation.payment?.invoice} />
       </div>
     </div>
   );

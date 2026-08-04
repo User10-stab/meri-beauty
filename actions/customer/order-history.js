@@ -18,11 +18,14 @@ export async function getMyOrderHistory() {
 
   const userId = session.user.id;
 
+  const invoiceSelect = { select: { invoice: { select: { id: true, number: true } } } };
+
   const [orders, workshopReservations, formationReservations] = await Promise.all([
     prisma.order.findMany({
       where: { userId },
       include: {
         items: { select: { productName: true, variantName: true, quantity: true, unitPrice: true } },
+        payment: invoiceSelect,
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -36,6 +39,7 @@ export async function getMyOrderHistory() {
             workshop: { select: { title: true, type: true, cover: true } },
           },
         },
+        payment: invoiceSelect,
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -49,6 +53,7 @@ export async function getMyOrderHistory() {
             formation: { select: { title: true, type: true, cover: true } },
           },
         },
+        payment: invoiceSelect,
       },
       orderBy: { createdAt: "desc" },
     }),

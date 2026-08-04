@@ -183,15 +183,16 @@ function serializeOrder(order) {
 export async function createOrderFromCart(input) {
   const parsed = checkoutSchema.safeParse(input);
   if (!parsed.success) {
+    // Nested object fields (customerInfo.email, etc.) bucket under the
+    // parent key in Zod's flatten() output, not a dotted "customerInfo.email"
+    // key — checking for the dotted key here always missed the real message.
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
       message:
         errors.fulfilmentMode?.[0] ??
         errors.shippingAddress?.[0] ??
-        errors["customerInfo.email"]?.[0] ??
-        errors["customerInfo.fullName"]?.[0] ??
-        errors["customerInfo.phone"]?.[0] ??
+        errors.customerInfo?.[0] ??
         "Données invalides.",
     };
   }

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCart } from "@/actions/boutique/cart";
 import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
 import { CheckoutPageClient } from "@/components/boutique/CheckoutPageClient";
 
 export const metadata = { title: "Commande – Meri Beauty" };
@@ -13,15 +14,17 @@ export default async function CheckoutPage() {
     redirect("/boutique/cart");
   }
 
-  const customerSession =
-    session?.user?.role === "CUSTOMER"
-      ? {
-          id: session.user.id,
-          fullName: session.user.fullName ?? session.user.name ?? "",
-          email: session.user.email ?? "",
-          phone: session.user.phone ?? "",
-        }
-      : null;
+  // The session's JWT only ever carries id/role/email/isActive (see
+  // auth.js's jwt/session callbacks) — fullName and phone are never in
+  // there, so they must come from the DB, not session.user.
+  let customerSession = null;
+  if (session?.user?.role === "CUSTOMER") {
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { id: true, fullName: true, email: true, phone: true },
+    });
+    if (user) customerSession = user;
+  }
 
   return <CheckoutPageClient cart={cart} customerSession={customerSession} />;
 }

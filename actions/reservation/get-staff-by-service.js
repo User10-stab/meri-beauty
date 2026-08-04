@@ -82,34 +82,40 @@ export async function getStaffByService(serviceId) {
     // Filter by availability using the reusable helper
     const availableStaffServices = getAvailableStaffServices(staffServices);
 
-    // Calculate average rating for each available staff member
-    const staffWithRatings = await Promise.all(
-      availableStaffServices.map(async (ss) => {
-        const appointments = await prisma.appointment.findMany({
-          where: {
-            staffServiceId: ss.id,
-            review: {
-              isNot: null,
-            },
-          },
-          include: {
-            review: true,
-          },
-        });
+    // Calculate average rating for each available staff member — one query
+    // for all of them (previously one query per staff member inside the
+    // .map() below, i.e. N+1: 10 staff meant 10 round-trips per page load).
+    const reviews = await prisma.review.findMany({
+      where: {
+        appointment: {
+          staffServiceId: { in: availableStaffServices.map((ss) => ss.id) },
+        },
+      },
+      select: {
+        rating: true,
+        appointment: { select: { staffServiceId: true } },
+      },
+    });
 
-        const reviews = appointments.map((a) => a.review).filter(Boolean);
-        const avgRating =
-          reviews.length > 0
-            ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
-            : 0;
+    const ratingsByStaffService = new Map();
+    for (const r of reviews) {
+      const key = r.appointment.staffServiceId;
+      const entry = ratingsByStaffService.get(key) ?? { sum: 0, count: 0 };
+      entry.sum += r.rating;
+      entry.count += 1;
+      ratingsByStaffService.set(key, entry);
+    }
 
-        return {
-          ...ss,
-          avgRating: Math.round(avgRating * 10) / 10,
-          reviewCount: reviews.length,
-        };
-      })
-    );
+    const staffWithRatings = availableStaffServices.map((ss) => {
+      const entry = ratingsByStaffService.get(ss.id);
+      const avgRating = entry ? entry.sum / entry.count : 0;
+
+      return {
+        ...ss,
+        avgRating: Math.round(avgRating * 10) / 10,
+        reviewCount: entry?.count ?? 0,
+      };
+    });
 
     const serializedData = staffWithRatings.map((item) =>
       serializeDecimalFields(item)

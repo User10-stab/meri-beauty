@@ -11,7 +11,7 @@ import { getCart } from "@/actions/boutique/cart";
 
 const NAV_LINKS = [
   { label: "Accueil", href: "/" },
-  { label: "Concept", href: "/concept" },
+  { label: "Concept", href: "/#concept" },
   { label: "Réservation", href: "/reservation" },
   { label: "Boutique", href: "/boutique" },
   { label: "Évènements & Ateliers", href: "/evenements" },

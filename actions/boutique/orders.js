@@ -213,6 +213,33 @@ export async function createOrderFromCart(input) {
       return { success: false, message: "Votre panier est vide." };
     }
 
+    // A customer who abandoned a prepaid checkout and comes back to retry
+    // (closed the Stripe tab, card declined, etc.) hits this same cart again
+    // before their first attempt's 30-minute hold expires - without this,
+    // the retry would reserve the same stock a second time on top of the
+    // still-live first reservation, self-inflicting a false "out of stock"
+    // against their own abandoned order. Silently supersede it: release its
+    // hold (no email - this isn't a customer-visible cancellation, it's an
+    // implementation detail of retrying the same purchase).
+    const supersededOrder = await prisma.order.findFirst({
+      where: { cartId: fullCart.id, status: "PENDING_PAYMENT" },
+      include: { items: true },
+    });
+    if (supersededOrder) {
+      await prisma.$transaction(async (tx) => {
+        for (const item of supersededOrder.items) {
+          await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { reservedQuantity: { decrement: item.quantity } },
+          });
+        }
+        await tx.order.update({
+          where: { id: supersededOrder.id },
+          data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: "Remplacée par une nouvelle tentative de paiement" },
+        });
+      });
+    }
+
     for (const item of fullCart.items) {
       if (item.variant.isDeleted || !item.variant.isActive) {
         return { success: false, message: `"${item.variant.product.name}" n'est plus disponible — retirez-le du panier.` };

@@ -84,7 +84,11 @@ export async function updateMyProfile(input) {
     if (fullName !== undefined) updateData.fullName = fullName;
     if (email !== undefined) updateData.email = email;
     if (phone !== undefined) updateData.phone = phone;
-    if (newPassword) updateData.password = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
+    if (newPassword) {
+      updateData.password = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
+      // Invalidates any other session logged in with the old password.
+      updateData.sessionVersion = { increment: 1 };
+    }
 
     if (Object.keys(updateData).length === 0) {
       return { success: false, message: "Aucune information à mettre à jour." };

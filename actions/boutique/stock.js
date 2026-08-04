@@ -49,6 +49,15 @@ export async function recordStockMovement(input) {
   }
 
   const { variantId, type, quantity, reason } = parsed.data;
+
+  // The UI only ever offers SALON_USAGE to a STAFF user, but the UI is not a
+  // security boundary — a STAFF session calling this action directly with
+  // type: "RESTOCK" (or LOSS/ADJUSTMENT) would otherwise freely move stock
+  // with no server-side check. Enforce the same restriction here.
+  if (guard.session.user.role === ROLES.STAFF && type !== "SALON_USAGE") {
+    return { success: false, message: "Accès non autorisé." };
+  }
+
   const increases = type === "RESTOCK";
   const signedQuantity = increases ? quantity : -quantity;
 

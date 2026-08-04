@@ -25,6 +25,37 @@ export default function VerifyEmailForm({ success, message }) {
     },
   });
 
+  const onSubmit = async (data) => {
+    setIsLoading(true);
+    setServerError(null);
+    setServerSuccess(null);
+
+    try {
+      const response = await resendVerificationEmail(data);
+
+      if (!response.success) {
+        if (response.errors) {
+          Object.entries(response.errors).forEach(([field, message]) => {
+            if (message) {
+              setServerError(message);
+            }
+          });
+        }
+        setServerError(response.message);
+        setIsLoading(false);
+        return;
+      }
+
+      setServerSuccess(response.message);
+      reset();
+      setIsLoading(false);
+    } catch (error) {
+      console.error("[resendVerificationEmail] submit error:", error);
+      setServerError("An unexpected error occurred. Please try again.");
+      setIsLoading(false);
+    }
+  };
+
   if (success && message) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
@@ -136,37 +167,6 @@ export default function VerifyEmailForm({ success, message }) {
       </div>
     );
   }
-
-  const onSubmit = async (data) => {
-    setIsLoading(true);
-    setServerError(null);
-    setServerSuccess(null);
-
-    try {
-      const response = await resendVerificationEmail(data);
-
-      if (!response.success) {
-        if (response.errors) {
-          Object.entries(response.errors).forEach(([field, message]) => {
-            if (message) {
-              setServerError(message);
-            }
-          });
-        }
-        setServerError(response.message);
-        setIsLoading(false);
-        return;
-      }
-
-      setServerSuccess(response.message);
-      reset();
-      setIsLoading(false);
-    } catch (error) {
-      console.error("[resendVerificationEmail] submit error:", error);
-      setServerError("An unexpected error occurred. Please try again.");
-      setIsLoading(false);
-    }
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">

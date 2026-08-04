@@ -44,3 +44,13 @@ next-env.d.ts
 
 # local-only notes, not for the shared repo
 /docs
+CLIENT_DECISION_FORM.md
+MERGE_NOTES_*.md
+REVIEW_REPORT.md
+REVIEW_REQUIREMENTS.md
+SECURITY_AND_LOGIC_REVIEW.md
+google-form-generator.gs
+
+# one-off Wix data exports, not app code
+catalog_products_from_wix.csv
+inventory_from_wix.csv

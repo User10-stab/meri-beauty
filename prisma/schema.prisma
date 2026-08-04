@@ -520,6 +520,10 @@ model User {
   emailVerified        Boolean   @default(false)
   isActive             Boolean   @default(true)
   lastLogin            DateTime?
+  // Bumped whenever this user's password changes (reset or self-service) so
+  // the JWT session callback can detect and invalidate stale sessions issued
+  // before the change — see auth.js#jwt.
+  sessionVersion       Int       @default(0)
   newsletterSubscribed Boolean   @default(false)
   vatNumber            String? // Client TVA number for B2B invoices
   isDeleted            Boolean   @default(false)
@@ -995,6 +999,12 @@ model Staff {
   stripeAccountId      String? @unique
   stripeChargesEnabled Boolean @default(false)
   stripePayoutsEnabled Boolean @default(false)
+
+  // Calendar sync — a revocable random token gating the iCal subscription
+  // feed (app/api/calendar-feed/[token]). Null until the staff member first
+  // requests their feed URL. A DB field (not an HMAC of staffId) so it can
+  // actually be rotated if a URL ever leaks, without touching a global secret.
+  calendarToken String? @unique
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

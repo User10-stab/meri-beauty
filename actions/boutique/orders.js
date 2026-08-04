@@ -83,10 +83,16 @@ async function uniquePickupCode() {
   throw new Error("PICKUP_CODE_EXHAUSTED");
 }
 
-/** Mirrors createReservation's customer resolution — guest checkout creates an account. */
-async function resolveOrCreateCustomer(customerInfo) {
-  if (customerInfo.userId) {
-    const user = await prisma.user.findUnique({ where: { id: customerInfo.userId, isDeleted: false } });
+/**
+ * Mirrors createReservation's customer resolution — guest checkout creates
+ * an account. `authenticatedUserId` comes from the server-side session,
+ * never from client-supplied customerInfo — otherwise any logged-in
+ * customer could pass a victim's id and have the order attached to their
+ * account (IDOR).
+ */
+async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
+  if (authenticatedUserId) {
+    const user = await prisma.user.findUnique({ where: { id: authenticatedUserId, isDeleted: false } });
     if (user) return { user, isNewUser: false, temporaryPassword: null };
   }
 
@@ -199,6 +205,7 @@ export async function createOrderFromCart(input) {
   const { fulfilmentMode, customerInfo, shippingAddress, notes } = parsed.data;
 
   try {
+    const authSession = await auth();
     const cart = await getOrCreateActiveCart();
     const fullCart = await prisma.cart.findUnique({
       where: { id: cart.id },
@@ -253,7 +260,7 @@ export async function createOrderFromCart(input) {
       }
     }
 
-    const { user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo);
+    const { user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
 
     const subtotal = fullCart.items.reduce(
       (sum, item) => sum + Number(item.variant.price) * item.quantity,
@@ -285,6 +292,14 @@ export async function createOrderFromCart(input) {
 
     const order = await prisma.$transaction(async (tx) => {
       for (const item of fullCart.items) {
+        // Lock the variant row before reading it — without this, two
+        // concurrent checkouts on the same last-unit variant can both read
+        // the same "available" snapshot under READ COMMITTED and both pass
+        // the check, over-reserving stock (the DB CHECK constraint below is
+        // a backstop, not the primary guard). Mirrors the same FOR UPDATE
+        // pattern used for workshop/formation session capacity.
+        await tx.$queryRaw`SELECT id FROM "ProductVariant" WHERE id = ${item.variantId} FOR UPDATE`;
+
         const variant = await tx.productVariant.findUnique({
           where: { id: item.variantId },
           select: { stockQuantity: true, reservedQuantity: true },
@@ -292,10 +307,15 @@ export async function createOrderFromCart(input) {
         const available = variant.stockQuantity - variant.reservedQuantity;
         if (item.quantity > available) throw new Error("STOCK_RACE");
 
-        await tx.productVariant.update({
-          where: { id: item.variantId },
-          data: { reservedQuantity: { increment: item.quantity } },
-        });
+        try {
+          await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { reservedQuantity: { increment: item.quantity } },
+          });
+        } catch (err) {
+          if (err.code === "P2004") throw new Error("STOCK_RACE");
+          throw err;
+        }
       }
 
       const created = await tx.order.create({
@@ -1071,12 +1091,19 @@ export async function expireStaleOrders() {
             data: { reservedQuantity: { decrement: item.quantity } },
           });
         }
+        // cancelledAt is set for BOTH branches now — it previously stayed
+        // null for on-site pickup expirations, which broke any "cancelled
+        // orders" query filtering on that column even though the order was
+        // just as dead as a payment-timeout cancellation.
         await tx.order.update({
           where: { id: order.id },
           data: {
             status: order.status === "PENDING_PAYMENT" ? "CANCELLED" : "EXPIRED",
-            cancelledAt: order.status === "PENDING_PAYMENT" ? new Date() : null,
-            cancelReason: order.status === "PENDING_PAYMENT" ? "Paiement non complété" : null,
+            cancelledAt: new Date(),
+            cancelReason:
+              order.status === "PENDING_PAYMENT"
+                ? "Paiement non complété"
+                : "Retrait non effectué dans le délai imparti",
           },
         });
       });

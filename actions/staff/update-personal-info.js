@@ -95,6 +95,8 @@ export async function updatePersonalInfo(input) {
 
     if (newPassword) {
       updateData.password = await bcrypt.hash(newPassword, BCRYPT_SALT_ROUNDS);
+      // Invalidates any other session logged in with the old password.
+      updateData.sessionVersion = { increment: 1 };
     }
 
     if (Object.keys(updateData).length === 0) {

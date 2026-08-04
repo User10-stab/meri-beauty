@@ -1,5 +1,6 @@
 "use server";
 
+import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 
@@ -28,6 +29,7 @@ import { prisma } from "@/lib/prisma";
  */
 export async function createCheckoutSession(reservationData) {
   try {
+    const authSession = await auth();
     const { staffServiceId, date, time, customerInfo, paymentMethod, notes } = reservationData;
 
     // ── 1. Validate required fields ──────────────────────────────────────────
@@ -128,7 +130,10 @@ export async function createCheckoutSession(reservationData) {
       customerFullName: customerInfo.fullName,
       customerEmail: customerInfo.email,
       customerPhone: customerInfo.phone,
-      customerUserId: customerInfo.userId || "",
+      // Trust the session, never the client-supplied customerInfo.userId —
+      // otherwise any logged-in customer could pass a victim's id and book
+      // an appointment under their account (IDOR).
+      customerUserId: authSession?.user?.id || "",
       newsletterSubscribed: String(customerInfo.newsletterSubscribed ?? false),
 
       paymentMethod,

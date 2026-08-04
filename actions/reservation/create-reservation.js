@@ -1,6 +1,7 @@
 "use server";
 
 import { randomBytes } from "crypto";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
@@ -58,18 +59,21 @@ function generateTemporaryPassword() {
  *   the already-existing record instead of crashing.
  *
  * @param {{
- *   userId?: string,
  *   fullName: string,
  *   email: string,
  *   phone: string,
  *   newsletterSubscribed?: boolean,
  * }} customerInfo
+ * @param {string|undefined} authenticatedUserId - from the server-side
+ *   session, never from client-supplied customerInfo (that was an IDOR:
+ *   any logged-in customer could pass a victim's id and book under their
+ *   account).
  * @returns {Promise<{ user: object, isNewUser: boolean, temporaryPassword: string|null }>}
  */
-async function resolveOrCreateCustomer(customerInfo) {
-  if (customerInfo.userId) {
+async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
+  if (authenticatedUserId) {
     const user = await prisma.user.findUnique({
-      where: { id: customerInfo.userId, isDeleted: false },
+      where: { id: authenticatedUserId, isDeleted: false },
     });
 
     if (!user) {
@@ -299,6 +303,7 @@ export async function checkEmailExists(email) {
  */
 export async function createReservation(data) {
   try {
+    const authSession = await auth();
     const { staffServiceId, date, time, customerInfo, paymentMethod, notes, isManualMode = false } = data;
 
     // ── 1. Validate required fields ──────────────────────────────────────────
@@ -352,7 +357,7 @@ export async function createReservation(data) {
     // ── 5. Resolve or create the customer user ───────────────────────────────
     let user, isNewUser, temporaryPassword;
     try {
-      ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo));
+      ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id));
     } catch (err) {
       if (err instanceof SessionExpiredError) {
         return {
@@ -587,6 +592,7 @@ export async function confirmPayment(paymentId, transactionReference = null) {
  */
 export async function createMultipleReservations(data) {
   try {
+    const authSession = await auth();
     const { appointments, customerInfo, notes } = data;
 
     // ── 1. Validate ────────────────────────────────────────────────────────
@@ -646,7 +652,7 @@ export async function createMultipleReservations(data) {
     // ── 5. Resolve or create the customer user (once) ─────────────────────
     let user, isNewUser, temporaryPassword;
     try {
-      ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo));
+      ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id));
     } catch (err) {
       if (err instanceof SessionExpiredError) {
         return {

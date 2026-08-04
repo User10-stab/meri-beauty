@@ -383,12 +383,15 @@ export async function completeReturnRequest(input) {
 
     const refundAmount = rr.items.reduce((sum, i) => sum + Number(i.orderItem.unitPrice) * i.quantity, 0);
 
-    // Is every unit of the order now returned (across all non-rejected requests, including this one)?
+    // Is every unit of the order now returned? Only COMPLETED requests
+    // (items physically confirmed back) count toward this — an APPROVED
+    // request is just "cleared to return," not proof the item actually
+    // came back, so counting it here could refund shipping before every
+    // item is truly accounted for.
     const claimed = new Map();
     for (const other of rr.order.returnRequests) {
-      if (other.status === "REJECTED") continue;
       const effectiveStatus = other.id === rr.id ? "COMPLETED" : other.status;
-      if (effectiveStatus === "REQUESTED") continue; // not yet committed
+      if (effectiveStatus !== "COMPLETED") continue;
       for (const item of other.items) {
         claimed.set(item.orderItemId, (claimed.get(item.orderItemId) ?? 0) + item.quantity);
       }

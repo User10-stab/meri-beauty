@@ -7,14 +7,18 @@ import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-wor
 
 /**
  * Broadcasts a "hurry, almost full" email to every newsletter-opted-in
- * customer when a session drops below 2 available seats. Fires at most
- * once per session (guarded by WorkshopSession.lowSeatsNotifiedAt) so a
- * string of bookings on an already-low session doesn't re-blast the list.
+ * customer when a session drops below 3 available seats — same threshold as
+ * the homepage low-seats banner (get-homepage-banner-data.js); the two used
+ * to disagree (email fired at 0-1 left, banner at 1-2), so a session could
+ * show "plus que 2 places !" on the homepage with no broadcast ever sent.
+ * Fires at most once per session (guarded by
+ * WorkshopSession.lowSeatsNotifiedAt) so a string of bookings on an
+ * already-low session doesn't re-blast the list.
  */
 export async function sendLowSeatsBroadcast(sessionId) {
   try {
     const availability = await checkWorkshopSessionAvailability(sessionId);
-    if (!availability.success || availability.data.available >= 2 || availability.data.available < 0) {
+    if (!availability.success || availability.data.available >= 3 || availability.data.available < 0) {
       return { success: true, sent: 0 };
     }
 

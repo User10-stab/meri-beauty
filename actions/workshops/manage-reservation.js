@@ -193,11 +193,16 @@ export async function changeReservationSession(reservationId, newSessionId) {
 
 /**
  * Admin-only: changes the number of seats on an existing CONFIRMED
- * reservation, charging a flat 10% fee (of the reservation's original
- * total price) via a Stripe Checkout link — regardless of whether seats go
- * up or down. Per the confirmed pricing rule, this is a flat administrative
- * fee: totalPrice/depositAmount/balanceDue are NOT recalculated for the new
- * seat count, only seatsCount changes once the fee is paid.
+ * reservation, via a Stripe Checkout link.
+ *
+ * A flat 10% fee (of the reservation's original total price) always
+ * applies, matching the confirmed pricing rule. On top of that, when seats
+ * are being ADDED, the customer must also pay for the extra seats — at the
+ * same paid ratio they originally chose (full payment or a deposit) — or
+ * the salon is left owed the difference with no way to invoice it. Seat
+ * DECREASES stay fee-only with no price/deposit adjustment: the deposit
+ * policy is "never refunded regardless of reason," so removing seats
+ * doesn't unwind money already collected for them.
  */
 export async function changeReservationSeats(reservationId, newSeatsCount) {
   try {
@@ -243,6 +248,24 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
 
     const changeFeeAmount = Number(reservation.totalPrice) * SESSION_CHANGE_FEE_RATE;
 
+    // On an increase, the customer must also pay for the added seats — at
+    // the same ratio they originally paid (1.0 for a full payment, the
+    // deposit % for a deposit booking) — so the salon isn't left owed the
+    // untracked difference. Computed once here and passed through Stripe
+    // metadata so the webhook applies these exact figures rather than
+    // re-deriving them from a reservation row that may have moved on.
+    let priceDelta = 0;
+    let newTotalPrice = Number(reservation.totalPrice);
+    let newDepositAmount = Number(reservation.depositAmount);
+    if (seats > reservation.seatsCount) {
+      const unitPrice = Number(reservation.totalPrice) / reservation.seatsCount;
+      const paidRatio = Number(reservation.depositAmount) / Number(reservation.totalPrice);
+      newTotalPrice = unitPrice * seats;
+      newDepositAmount = paidRatio * newTotalPrice;
+      priceDelta = newDepositAmount - Number(reservation.depositAmount);
+    }
+    const amountToCharge = changeFeeAmount + priceDelta;
+
     const stripeSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card", "bancontact"],
       line_items: [
@@ -251,9 +274,11 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
             currency: "eur",
             product_data: {
               name: `Frais de modification - ${reservation.session.workshop.title}`,
-              description: `Modification du nombre de places (${reservation.seatsCount} → ${seats})`,
+              description: `Modification du nombre de places (${reservation.seatsCount} → ${seats})${
+                priceDelta > 0 ? " — inclut le prix des places ajoutées" : ""
+              }`,
             },
-            unit_amount: Math.round(changeFeeAmount * 100),
+            unit_amount: Math.round(amountToCharge * 100),
           },
           quantity: 1,
         },
@@ -268,6 +293,8 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
         reservationId: reservation.id,
         newSeatsCount: String(seats),
         changeFeeAmount: String(changeFeeAmount),
+        newTotalPrice: String(newTotalPrice),
+        newDepositAmount: String(newDepositAmount),
       },
       payment_intent_data: {
         metadata: {
@@ -282,7 +309,7 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
       success: true,
       message: "Lien de paiement généré. Envoyez-le au client pour finaliser le changement.",
       paymentUrl: stripeSession.url,
-      changeFeeAmount,
+      changeFeeAmount: amountToCharge,
     };
   } catch (error) {
     console.error("[changeReservationSeats]", error);

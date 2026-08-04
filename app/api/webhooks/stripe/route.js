@@ -549,11 +549,16 @@ async function processWorkshopCheckoutSession(session) {
           email: reservation.customer.email,
           vatNumber: reservation.customer.vatNumber,
         },
+        // quantity: 1 with unitPrice = the actual total collected, not
+        // seatsCount at a divided-back unit price — dividing then
+        // re-multiplying independently-rounded numbers can leave the line
+        // a cent off the invoice total (e.g. 100/3 -> 33.33 x 3 = 99.99).
+        // Seat count is still visible in the description.
         lines: [
           {
-            description: reservation.session.workshop.title,
-            quantity: reservation.seatsCount,
-            unitPrice: totalAmount / reservation.seatsCount,
+            description: `${reservation.session.workshop.title} (${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""})`,
+            quantity: 1,
+            unitPrice: totalAmount,
           },
         ],
       });
@@ -693,11 +698,13 @@ async function processFormationCheckoutSession(session) {
           email: reservation.customer.email,
           vatNumber: reservation.customer.vatNumber,
         },
+        // See the matching workshop invoice comment above: quantity 1 at the
+        // actual total avoids a divide-then-round line/total mismatch.
         lines: [
           {
-            description: reservation.session.formation.title,
-            quantity: reservation.seatsCount,
-            unitPrice: totalAmount / reservation.seatsCount,
+            description: `${reservation.session.formation.title} (${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""})`,
+            quantity: 1,
+            unitPrice: totalAmount,
           },
         ],
       });
@@ -843,7 +850,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
 
 /** Applies an admin-mediated seat-count change once its flat 10% fee has cleared. */
 async function applyWorkshopSeatsChangeFee(session, meta) {
-  const { reservationId, newSeatsCount } = meta;
+  const { reservationId, newSeatsCount, newTotalPrice, newDepositAmount } = meta;
   const seats = Number(newSeatsCount);
 
   if (!reservationId || !Number.isInteger(seats)) {
@@ -877,6 +884,7 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
 
   const changeFeeAmount = (session.amount_total ?? 0) / 100;
   const previousSeatsCount = reservation.seatsCount;
+  const isIncrease = seats > previousSeatsCount;
 
   await prisma.$transaction(async (tx) => {
     await tx.workshopReservation.update({
@@ -884,6 +892,19 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
       data: {
         seatsCount: seats,
         changeFeeAmount: { increment: changeFeeAmount },
+        // Only an increase recomputes the price owed — a decrease stays
+        // fee-only (the non-refundable-deposit policy means removing seats
+        // doesn't unwind money already collected for them). newTotalPrice/
+        // newDepositAmount were computed once at fee-link creation time and
+        // passed through metadata rather than re-derived here, so this
+        // can't drift from what the customer was actually shown/charged.
+        ...(isIncrease && newTotalPrice
+          ? {
+              totalPrice: Number(newTotalPrice),
+              depositAmount: Number(newDepositAmount),
+              balanceDue: Number(newTotalPrice) - Number(newDepositAmount),
+            }
+          : {}),
       },
     });
 

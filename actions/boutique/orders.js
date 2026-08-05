@@ -232,6 +232,8 @@ export async function createOrderFromCart(input) {
       return { success: false, message: "Votre panier est vide." };
     }
 
+    const { user } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+
     // A customer who abandoned a prepaid checkout and comes back to retry
     // (closed the Stripe tab, card declined, etc.) hits this same cart again
     // before their first attempt's 30-minute hold expires - without this,
@@ -239,24 +241,28 @@ export async function createOrderFromCart(input) {
     // still-live first reservation, self-inflicting a false "out of stock"
     // against their own abandoned order. Silently supersede it: release its
     // hold (no email - this isn't a customer-visible cancellation, it's an
-    // implementation detail of retrying the same purchase).
-    const supersededOrder = await prisma.order.findFirst({
-      where: { cartId: fullCart.id, status: "PENDING_PAYMENT" },
-      include: { items: true },
-    });
-    if (supersededOrder) {
-      await prisma.$transaction(async (tx) => {
-        for (const item of supersededOrder.items) {
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: { reservedQuantity: { decrement: item.quantity } },
-          });
-        }
-        await tx.order.update({
-          where: { id: supersededOrder.id },
-          data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: "Remplacée par une nouvelle tentative de paiement" },
-        });
+    // implementation detail of retrying the same purchase). Only relevant
+    // once verified — an unverified retry is reused rather than superseded,
+    // by the check inside the order transaction below.
+    if (user.emailVerified) {
+      const supersededOrder = await prisma.order.findFirst({
+        where: { cartId: fullCart.id, status: "PENDING_PAYMENT" },
+        include: { items: true },
       });
+      if (supersededOrder) {
+        await prisma.$transaction(async (tx) => {
+          for (const item of supersededOrder.items) {
+            await tx.productVariant.update({
+              where: { id: item.variantId },
+              data: { reservedQuantity: { decrement: item.quantity } },
+            });
+          }
+          await tx.order.update({
+            where: { id: supersededOrder.id },
+            data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: "Remplacée par une nouvelle tentative de paiement" },
+          });
+        });
+      }
     }
 
     for (const item of fullCart.items) {
@@ -272,14 +278,9 @@ export async function createOrderFromCart(input) {
       }
     }
 
-    const { user } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
-
-    if (!user.emailVerified) {
-      const ip = await getClientIp();
-      if (isRateLimited("guest-checkout-hold", ip, { windowMs: GUEST_HOLD_RATE_LIMIT_WINDOW_MS, max: GUEST_HOLD_RATE_LIMIT_MAX })) {
-        return { success: false, message: "Trop de tentatives. Veuillez réessayer dans quelques minutes." };
-      }
-      recordRateLimitHit("guest-checkout-hold", ip);
+    const clientIp = user.emailVerified ? null : await getClientIp();
+    if (clientIp && isRateLimited("guest-checkout-hold", clientIp, { windowMs: GUEST_HOLD_RATE_LIMIT_WINDOW_MS, max: GUEST_HOLD_RATE_LIMIT_MAX })) {
+      return { success: false, message: "Trop de tentatives. Veuillez réessayer dans quelques minutes." };
     }
 
     const subtotal = fullCart.items.reduce(
@@ -311,6 +312,32 @@ export async function createOrderFromCart(input) {
       : new Date(Date.now() + PENDING_PAYMENT_EXPIRY_MINUTES * 60 * 1000);
 
     const order = await prisma.$transaction(async (tx) => {
+      // Locks the cart row for the rest of this transaction — an unverified
+      // guest submitting the same cart twice in close succession (a slow
+      // response followed by an impatient retry) would otherwise have both
+      // requests pass the checks above before either commits, each creating
+      // its own order, pickup code, and confirmation email for what's really
+      // one purchase. The second request now waits here, then finds and
+      // reuses the first one instead of also creating a duplicate.
+      await tx.$queryRaw`SELECT id FROM "Cart" WHERE id = ${fullCart.id} FOR UPDATE`;
+
+      if (!user.emailVerified) {
+        const existing = await tx.order.findFirst({
+          where: {
+            cartId: fullCart.id,
+            userId: user.id,
+            status: { in: ["PENDING_PAYMENT", "PENDING_PICKUP"] },
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: "desc" },
+        });
+        if (existing) return existing;
+
+        // Only a genuinely new hold counts against the rate limit — reusing
+        // a live one above doesn't lock any additional stock.
+        recordRateLimitHit("guest-checkout-hold", clientIp);
+      }
+
       for (const item of fullCart.items) {
         // Lock the variant row before reading it — without this, two
         // concurrent checkouts on the same last-unit variant can both read

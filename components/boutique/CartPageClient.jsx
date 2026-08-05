@@ -7,8 +7,11 @@ import { toast } from "sonner";
 import { updateCartItemQuantity, removeFromCart } from "@/actions/boutique/cart";
 import { calculateCartPricing, calculateItemPricing, formatPrice } from "@/lib/pricing";
 
-function notifyCartUpdated() {
-  window.dispatchEvent(new Event("boutique:cart-updated")); // updates the header badge (client-fetched)
+function notifyCartUpdated(itemCount) {
+  // Passing the count lets the header badge update in the same tick as this
+  // page's own optimistic state, instead of waiting on a second round trip
+  // to re-fetch it.
+  window.dispatchEvent(new CustomEvent("boutique:cart-updated", { detail: { itemCount } }));
 }
 
 export function CartPageClient({ initialCart }) {
@@ -25,15 +28,16 @@ export function CartPageClient({ initialCart }) {
     const subtotal = items.reduce((sum, i) => sum + i.variant.price * i.quantity, 0);
     const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
     setCart({ ...cart, items, subtotal, itemCount });
+    notifyCartUpdated(itemCount);
 
     startTransition(async () => {
       const result = await updateCartItemQuantity({ cartItemId: item.id, quantity: nextQuantity });
       if (!result.success) {
         toast.error(result.message);
         setCart(previous);
+        notifyCartUpdated(previous.itemCount);
         return;
       }
-      notifyCartUpdated();
     });
   }
 
@@ -43,15 +47,16 @@ export function CartPageClient({ initialCart }) {
     const subtotal = items.reduce((sum, i) => sum + i.variant.price * i.quantity, 0);
     const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
     setCart({ ...cart, items, subtotal, itemCount });
+    notifyCartUpdated(itemCount);
 
     startTransition(async () => {
       const result = await removeFromCart(item.id);
       if (!result.success) {
         toast.error(result.message);
         setCart(previous);
+        notifyCartUpdated(previous.itemCount);
         return;
       }
-      notifyCartUpdated();
     });
   }
 

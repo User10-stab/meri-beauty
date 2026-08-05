@@ -30,17 +30,31 @@ export default function Navbar() {
   // layout never touches cookies() — see app/(public)/layout.js. Re-fetches
   // whenever a cart mutation fires the "boutique:cart-updated" event, since
   // this component doesn't unmount on client-side navigation.
+  //
+  // The cart page already knows its new item count the instant it applies
+  // an optimistic update (before the server confirms), so it passes that
+  // count along on the event — reading it here skips a second round trip
+  // and updates the badge in the same tick as the on-page quantity. Callers
+  // that don't have that number handy (add-to-cart, product scan) just
+  // dispatch without a detail and fall back to a fresh fetch.
   useEffect(() => {
     let cancelled = false;
     async function refresh() {
       const result = await getCart();
       if (!cancelled) setCartItemCount(result.data?.itemCount ?? 0);
     }
+    function onCartUpdated(e) {
+      if (typeof e.detail?.itemCount === "number") {
+        setCartItemCount(e.detail.itemCount);
+      } else {
+        refresh();
+      }
+    }
     refresh();
-    window.addEventListener("boutique:cart-updated", refresh);
+    window.addEventListener("boutique:cart-updated", onCartUpdated);
     return () => {
       cancelled = true;
-      window.removeEventListener("boutique:cart-updated", refresh);
+      window.removeEventListener("boutique:cart-updated", onCartUpdated);
     };
   }, []);
   

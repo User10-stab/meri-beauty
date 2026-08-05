@@ -191,6 +191,7 @@ export async function createFormationReservation(data) {
     // own this email.
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
+    const vatNumber = customerInfo.vatNumber?.trim() || null;
     let user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {
@@ -216,8 +217,13 @@ export async function createFormationReservation(data) {
           password: placeholderHash,
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
+          vatNumber,
         },
       });
+    } else if (vatNumber && user.vatNumber !== vatNumber) {
+      // B2B customer supplying (or updating) their VAT number for invoicing —
+      // never clear it just because a later booking leaves the field blank.
+      user = await prisma.user.update({ where: { id: user.id }, data: { vatNumber } });
     }
 
     // Calculate pricing

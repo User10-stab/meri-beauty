@@ -27,13 +27,18 @@ const STATUS_OPTIONS = [
   { value: "ARCHIVED", label: "Archivé", hint: "Retiré de la boutique" },
 ];
 
-function emptyVariant(barcode = "") {
+function emptyVariant(barcode) {
   return {
     _key: crypto.randomUUID(),
     id: null,
     name: "Standard",
     sku: "",
-    barcode,
+    // Defaults to an internal code rather than blank — per Marie, some
+    // products (small/loose items with no supplier packaging) never get an
+    // EAN/UPC, and leaving this optional meant staff had to remember to
+    // click "Générer" or the product ended up with no scannable code at
+    // all. Still freely overwritable with a real supplier barcode.
+    barcode: barcode || generateInternalBarcode(),
     price: "",
     costPrice: "",
     comparePrice: "",

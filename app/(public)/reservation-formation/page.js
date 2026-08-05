@@ -59,7 +59,7 @@ function ReservationFormationContent() {
   const [available, setAvailable] = useState(0);
   const [seats, setSeats] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState("DEPOSIT");
-  const [form, setForm] = useState({ fullName: "", email: "", phone: "" });
+  const [form, setForm] = useState({ fullName: "", email: "", phone: "", vatNumber: "" });
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
 
@@ -423,6 +423,16 @@ function ReservationFormationContent() {
                       />
                       {fieldErrors.phone && <p className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
                     </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA (optionnel)</label>
+                      <input
+                        type="text"
+                        value={form.vatNumber}
+                        onChange={(e) => setForm((p) => ({ ...p, vatNumber: e.target.value }))}
+                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
+                        placeholder="BE0123456789"
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -476,6 +486,16 @@ function ReservationFormationContent() {
                         placeholder="+32 4XX XX XX XX"
                       />
                       {fieldErrors.phone && <p className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA (optionnel)</label>
+                      <input
+                        type="text"
+                        value={form.vatNumber}
+                        onChange={(e) => setForm((p) => ({ ...p, vatNumber: e.target.value }))}
+                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
+                        placeholder="BE0123456789"
+                      />
                     </div>
                     <p className="text-xs text-ink/40">Un compte sera créé automatiquement avec votre email.</p>
                   </div>

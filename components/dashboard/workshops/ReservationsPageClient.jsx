@@ -6,8 +6,8 @@ import { toast } from "sonner";
 import { DataTable } from "../Tables/DataTable";
 import { ReservationRow } from "./ReservationRow";
 import { ChangeSessionModal } from "./ChangeSessionModal";
+import { CancelReservationDialog } from "./CancelReservationDialog";
 import { cancelWorkshopReservation } from "@/actions/workshops/manage-reservation";
-import { useConfirm } from "@/components/ConfirmProvider";
 import { isAdminRole } from "@/lib/authorization";
 
 const COLUMNS = [
@@ -20,24 +20,17 @@ const COLUMNS = [
 
 export function ReservationsPageClient({ initialReservations = [], userRole }) {
   const router = useRouter();
-  const confirm = useConfirm();
   const isAdmin = isAdminRole(userRole);
-  const [, startCancel] = useTransition();
+  const [isCancelling, startCancel] = useTransition();
   const [changeModalReservation, setChangeModalReservation] = useState(null);
+  const [toCancel, setToCancel] = useState(null);
 
-  async function handleCancel(reservation) {
-    if (
-      !(await confirm(
-        `Annuler la réservation de « ${reservation.customer?.fullName} » pour « ${reservation.session?.workshop?.title} » ? L'acompte versé ne sera pas remboursé.`,
-        { danger: true }
-      ))
-    )
-      return;
-
+  function handleConfirmCancel({ reason, refundDeposit }) {
     startCancel(async () => {
-      const result = await cancelWorkshopReservation(reservation.id);
+      const result = await cancelWorkshopReservation(toCancel.id, { reason, refundDeposit });
       if (result.success) {
         toast.success(result.message);
+        setToCancel(null);
         router.refresh();
       } else {
         toast.error(result.message);
@@ -52,7 +45,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         columns={COLUMNS}
         renderRow={ReservationRow}
         onEdit={isAdmin ? (row) => setChangeModalReservation(row) : undefined}
-        onDelete={isAdmin ? handleCancel : undefined}
+        onDelete={isAdmin ? (row) => setToCancel(row) : undefined}
         searchPlaceholder="Rechercher une réservation..."
         searchFilter={(row, query) =>
           row.session?.workshop?.title?.toLowerCase().includes(query) ||
@@ -65,6 +58,13 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         open={!!changeModalReservation}
         onClose={() => setChangeModalReservation(null)}
         reservation={changeModalReservation}
+      />
+
+      <CancelReservationDialog
+        reservation={toCancel}
+        onClose={() => setToCancel(null)}
+        onConfirm={handleConfirmCancel}
+        loading={isCancelling}
       />
     </div>
   );

@@ -8,10 +8,11 @@ export const metadata = {
 
 export const dynamic = "force-dynamic";
 
-export default async function NewProductPage() {
+export default async function NewProductPage({ searchParams }) {
   await requireAdmin();
 
   const brandsResult = await getBrands({ includeInactive: true });
+  const { barcode } = await searchParams;
 
-  return <ProductEditor product={null} brands={brandsResult.data ?? []} />;
+  return <ProductEditor product={null} brands={brandsResult.data ?? []} initialBarcode={barcode ?? null} />;
 }

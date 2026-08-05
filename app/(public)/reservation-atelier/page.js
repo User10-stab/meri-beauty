@@ -1,13 +1,15 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ArrowLeft, Calendar, Clock, Users, Euro, CheckCircle, Bell, AlertTriangle } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { checkWorkshopSessionAvailability, createWorkshopReservation } from "@/actions/workshops/create-workshop-reservation";
 import { getPublicActivityById } from "@/actions/workshops/get-public-activities";
 import { joinWaitingList, validateWaitingListPriority, convertWaitingListEntry } from "@/actions/workshops/waiting-list";
+import { checkEmailExists } from "@/actions/shared/check-email-exists";
+import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
@@ -36,8 +38,10 @@ export default function ReservationAtelierPage() {
 function ReservationAtelierContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const pathname = usePathname();
   const { data: session } = useSession();
   const isAuthed = !!session?.user;
+  const callbackUrl = `${pathname}?${searchParams.toString()}`;
 
   const activityId = searchParams.get("activity");
   const sessionId = searchParams.get("session");
@@ -55,6 +59,27 @@ function ReservationAtelierContent() {
   const [form, setForm] = useState({ fullName: "", email: "", phone: "" });
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
+
+  // null = not checked yet | "exists" = verified account found | "dismissed" = user chose to continue as guest
+  const [emailStatus, setEmailStatus] = useState(null);
+  const [checkingEmail, setCheckingEmail] = useState(false);
+
+  async function handleEmailBlur() {
+    const email = form.email.trim();
+    if (!email || !email.includes("@")) return;
+
+    setCheckingEmail(true);
+    try {
+      const result = await checkEmailExists(email);
+      if (result.exists) setEmailStatus("exists");
+    } catch {
+      // Non-critical — silently ignore, the person can still proceed
+    } finally {
+      setCheckingEmail(false);
+    }
+  }
+
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
 
   // Waiting list state
   const [wlSuccess, setWlSuccess] = useState(null); // { position }
@@ -138,6 +163,12 @@ function ReservationAtelierContent() {
     e.preventDefault();
     setError("");
     setFieldErrors({});
+
+    if (!isAuthed && emailStatus === "exists") {
+      setError("Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même ».");
+      return;
+    }
+
     setSubmitting(true);
 
     if (showWaitingListForm) {
@@ -182,13 +213,10 @@ function ReservationAtelierContent() {
         await convertWaitingListEntry(waitingListId, result.reservationId);
       }
 
-      if (result.isNewUser) {
-        sessionStorage.setItem("workshop_signin", JSON.stringify({
-          email: result.email,
-          password: result.temporaryPassword,
-        }));
-      }
       window.location.href = result.url;
+    } else if (result.success && result.requiresEmailVerification) {
+      setPendingVerificationEmail(result.email);
+      setSubmitting(false);
     } else {
       if (result.field) {
         setFieldErrors({ [result.field]: result.message });
@@ -214,6 +242,21 @@ function ReservationAtelierContent() {
         <Link href="/evenements" className="text-sm text-gold hover:underline">
           Retour aux activités
         </Link>
+      </div>
+    );
+  }
+
+  if (pendingVerificationEmail) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center bg-cream gap-4 px-6 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gold/10 text-gold">
+          <CheckCircle size={28} />
+        </div>
+        <h1 className="text-xl font-bold text-ink">Confirmez votre email</h1>
+        <p className="max-w-md text-sm text-ink/60">
+          Nous avons envoyé un email de confirmation à <strong>{pendingVerificationEmail}</strong>. Une fois confirmée,
+          vous recevrez vos identifiants de connexion par email et pourrez finaliser votre paiement.
+        </p>
       </div>
     );
   }
@@ -387,15 +430,32 @@ function ReservationAtelierContent() {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-ink/60">Email *</label>
-                      <input
-                        type="email"
-                        required
-                        value={form.email}
-                        onChange={(e) => { setForm((p) => ({ ...p, email: e.target.value })); setFieldErrors((p) => ({ ...p, email: undefined })); }}
-                        className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.email ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                        placeholder="votre@email.com"
-                      />
+                      <div className="relative">
+                        <input
+                          type="email"
+                          required
+                          value={form.email}
+                          onChange={(e) => { setForm((p) => ({ ...p, email: e.target.value })); setFieldErrors((p) => ({ ...p, email: undefined })); setEmailStatus(null); }}
+                          onBlur={handleEmailBlur}
+                          className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.email || emailStatus === "exists" ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                          placeholder="votre@email.com"
+                        />
+                        {checkingEmail && (
+                          <div className="absolute inset-y-0 right-3 flex items-center">
+                            <Loader2 className="h-4 w-4 animate-spin text-ink/30" />
+                          </div>
+                        )}
+                      </div>
                       {fieldErrors.email && <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>}
+                      {emailStatus === "exists" && (
+                        <div className="mt-3">
+                          <ExistingAccountBanner
+                            email={form.email}
+                            callbackUrl={callbackUrl}
+                            onDismiss={() => setEmailStatus("dismissed")}
+                          />
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-ink/60">Téléphone</label>

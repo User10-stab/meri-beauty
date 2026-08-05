@@ -3,7 +3,6 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { signIn } from "next-auth/react";
 import { Loader2 } from "lucide-react";
 
 export default function ReservationFormationSuccesPage() {
@@ -24,13 +23,6 @@ function ReservationFormationSuccesContent() {
     if (!reservationId) {
       setStatus("error");
       return;
-    }
-
-    const stored = sessionStorage.getItem("workshop_signin");
-    if (stored) {
-      sessionStorage.removeItem("workshop_signin");
-      const { email, password } = JSON.parse(stored);
-      signIn("credentials", { email, password, redirect: false }).catch(() => {});
     }
 
     // Same reasoning as the ateliers success page: the webhook confirms

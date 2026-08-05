@@ -50,6 +50,7 @@ REVIEW_REPORT.md
 REVIEW_REQUIREMENTS.md
 SECURITY_AND_LOGIC_REVIEW.md
 google-form-generator.gs
+google-form-generator-round2.gs
 
 # one-off Wix data exports, not app code
 catalog_products_from_wix.csv

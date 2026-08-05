@@ -4,11 +4,12 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, Plus, Upload, AlertTriangle, Package } from "lucide-react";
+import { Search, Plus, Upload, AlertTriangle, Package, ScanLine } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { RowActions } from "@/components/dashboard/Tables/RowActions";
+import { ProductScanDialog } from "@/components/dashboard/boutique/ProductScanDialog";
 import { deleteProduct } from "@/actions/boutique/products";
 
 const STATUS_LABEL = { DRAFT: "Brouillon", ACTIVE: "Actif", ARCHIVED: "Archivé" };
@@ -31,12 +32,13 @@ function priceRange(variants) {
   return min === max ? formatPrice(min) : `${formatPrice(min)} – ${formatPrice(max)}`;
 }
 
-export function ProductsPageClient({ initialProducts, brands }) {
+export function ProductsPageClient({ initialProducts, brands, isAdmin = false }) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [toDelete, setToDelete] = useState(null);
+  const [scanOpen, setScanOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const filtered = useMemo(() => {
@@ -105,27 +107,52 @@ export function ProductsPageClient({ initialProducts, brands }) {
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Link href="/dashboard/boutique/products/import">
+        {isAdmin && (
+          <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => setScanOpen(true)}
               className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
             >
-              <Upload size={16} />
-              Importer depuis Wix
+              <ScanLine size={16} />
+              Scanner
             </button>
-          </Link>
-          <Link href="/dashboard/boutique/products/new">
-            <Button>
-              <Plus size={16} />
-              Ajouter un produit
-            </Button>
-          </Link>
-        </div>
+            <Link href="/dashboard/boutique/products/import">
+              <button
+                type="button"
+                className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
+              >
+                <Upload size={16} />
+                Importer depuis Wix
+              </button>
+            </Link>
+            <Link href="/dashboard/boutique/products/new">
+              <Button>
+                <Plus size={16} />
+                Ajouter un produit
+              </Button>
+            </Link>
+          </div>
+        )}
       </div>
 
+      {isAdmin && (
+        <ProductScanDialog
+          open={scanOpen}
+          onClose={() => setScanOpen(false)}
+          onFound={(productId) => {
+            setScanOpen(false);
+            router.push(`/dashboard/boutique/products/${productId}`);
+          }}
+          onNotFound={(code) => {
+            setScanOpen(false);
+            router.push(`/dashboard/boutique/products/new?barcode=${encodeURIComponent(code)}`);
+          }}
+        />
+      )}
+
       {filtered.length === 0 ? (
-        <EmptyState hasProducts={initialProducts.length > 0} />
+        <EmptyState hasProducts={initialProducts.length > 0} isAdmin={isAdmin} />
       ) : (
         <Table>
           <TableHeader>
@@ -142,8 +169,8 @@ export function ProductsPageClient({ initialProducts, brands }) {
             {filtered.map((p) => (
               <TableRow
                 key={p.id}
-                className="cursor-pointer"
-                onClick={() => router.push(`/dashboard/boutique/products/${p.id}`)}
+                className={isAdmin ? "cursor-pointer" : ""}
+                onClick={isAdmin ? () => router.push(`/dashboard/boutique/products/${p.id}`) : undefined}
               >
                 <TableCell className="pl-6">
                   <div className="flex items-center gap-3">
@@ -185,11 +212,13 @@ export function ProductsPageClient({ initialProducts, brands }) {
                   </span>
                 </TableCell>
                 <TableCell className="pr-6" onClick={(e) => e.stopPropagation()}>
-                  <RowActions
-                    row={p}
-                    onEdit={() => router.push(`/dashboard/boutique/products/${p.id}`)}
-                    onDelete={() => setToDelete(p)}
-                  />
+                  {isAdmin && (
+                    <RowActions
+                      row={p}
+                      onEdit={() => router.push(`/dashboard/boutique/products/${p.id}`)}
+                      onDelete={() => setToDelete(p)}
+                    />
+                  )}
                 </TableCell>
               </TableRow>
             ))}
@@ -215,7 +244,7 @@ export function ProductsPageClient({ initialProducts, brands }) {
   );
 }
 
-function EmptyState({ hasProducts }) {
+function EmptyState({ hasProducts, isAdmin }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
@@ -231,7 +260,7 @@ function EmptyState({ hasProducts }) {
             : "Commencez par ajouter votre premier produit à la boutique."}
         </p>
       </div>
-      {!hasProducts && (
+      {!hasProducts && isAdmin && (
         <Link href="/dashboard/boutique/products/new">
           <Button className="mt-2">
             <Plus size={16} />

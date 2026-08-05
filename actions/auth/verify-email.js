@@ -80,6 +80,12 @@ export async function verifyEmail(rawToken) {
     return {
       success: true,
       message: "Your email has been verified successfully. You can now log in.",
+      userId: user.id,
+      // Set only for tokens issued mid-checkout — null for plain
+      // registration tokens. The caller decides what, if anything, to do
+      // with these; verifyEmail itself has no opinion on orders/payments.
+      resumeType: matchedToken.resumeType,
+      resumeId: matchedToken.resumeId,
     };
   } catch (error) {
     console.error("[verifyEmail]", error);

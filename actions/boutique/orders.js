@@ -7,13 +7,14 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
-import { welcomeWithCredentialsEmail } from "@/lib/email-templates";
 import { ROLES, DASHBOARD_PERMISSIONS, hasPermission } from "@/lib/authorization";
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
 import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
+import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 
 /** Order items (+ shipping, if any) as invoice line snapshots. */
 function orderInvoiceLines(order) {
@@ -50,12 +51,17 @@ function orderInvoiceLines(order) {
  */
 
 const BCRYPT_SALT_ROUNDS = 12;
-const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
-  ? `${process.env.NEXT_PUBLIC_APP_URL}/login`
-  : "https://meribeauty.com/login";
 
 const PENDING_PAYMENT_EXPIRY_MINUTES = 30;
 const PENDING_PICKUP_EXPIRY_DAYS = 7;
+
+// New-hold creation only, for unverified guests — caps how many orders one
+// IP can spin up against unproven emails. The existing "supersede the same
+// cart's abandoned attempt" logic below already stops a single cart from
+// stacking holds; this catches the many-different-fake-emails case that
+// doesn't go through.
+const GUEST_HOLD_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const GUEST_HOLD_RATE_LIMIT_MAX = 5;
 
 // ─── Guards ───────────────────────────────────────────────────────────────────
 
@@ -89,6 +95,11 @@ async function uniquePickupCode() {
  * never from client-supplied customerInfo — otherwise any logged-in
  * customer could pass a victim's id and have the order attached to their
  * account (IDOR).
+ *
+ * A brand-new account starts unverified (emailVerified defaults to false,
+ * not forced true here as before) — createOrderFromCart gates on that to
+ * require email confirmation before Stripe, rather than trusting an
+ * unproven address outright.
  */
 async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   if (authenticatedUserId) {
@@ -107,23 +118,24 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   });
   if (existing) return { user: existing, isNewUser: false, temporaryPassword: null };
 
-  const temporaryPassword = randomBytes(9).toString("base64url");
-  const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
+  // Throwaway placeholder — never shown to anyone. The real, usable
+  // password is generated once the email is confirmed (see
+  // actions/shared/resume-checkout-after-verification.js).
+  const placeholderHash = await bcrypt.hash(randomBytes(9).toString("base64url"), BCRYPT_SALT_ROUNDS);
 
   const user = await prisma.user.create({
     data: {
       fullName: customerInfo.fullName.trim(),
       email: customerInfo.email.trim().toLowerCase(),
       phone: customerInfo.phone.trim(),
-      password: hashedPassword,
+      password: placeholderHash,
       role: "CUSTOMER",
-      emailVerified: true,
       isActive: true,
       newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
     },
   });
 
-  return { user, isNewUser: true, temporaryPassword };
+  return { user, isNewUser: true, temporaryPassword: null };
 }
 
 function serializeOrder(order) {
@@ -260,7 +272,15 @@ export async function createOrderFromCart(input) {
       }
     }
 
-    const { user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    const { user } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+
+    if (!user.emailVerified) {
+      const ip = await getClientIp();
+      if (isRateLimited("guest-checkout-hold", ip, { windowMs: GUEST_HOLD_RATE_LIMIT_WINDOW_MS, max: GUEST_HOLD_RATE_LIMIT_MAX })) {
+        return { success: false, message: "Trop de tentatives. Veuillez réessayer dans quelques minutes." };
+      }
+      recordRateLimitHit("guest-checkout-hold", ip);
+    }
 
     const subtotal = fullCart.items.reduce(
       (sum, item) => sum + Number(item.variant.price) * item.quantity,
@@ -360,35 +380,29 @@ export async function createOrderFromCart(input) {
       return created;
     });
 
-    if (isNewUser && temporaryPassword) {
-      sendEmail({
-        to: user.email,
-        ...welcomeWithCredentialsEmail({
-          customerName: user.fullName,
+    // Brand-new or still-unverified guest: the stock hold above already
+    // exists (same as a verified checkout), but stop short of Stripe / the
+    // on-site pickup confirmation until they confirm the email actually
+    // belongs to them. Awaited — the interstitial we show next promises
+    // "check your inbox", so we need to know it actually sent.
+    if (!user.emailVerified) {
+      try {
+        await sendCheckoutVerificationEmail({
           email: user.email,
-          temporaryPassword,
-          loginUrl: LOGIN_URL,
-        }),
-      }).catch((err) => console.error("[createOrderFromCart] welcome email failed:", err));
+          fullName: user.fullName,
+          resumeType: "ORDER",
+          resumeId: order.id,
+        });
+      } catch (err) {
+        console.error("[createOrderFromCart] verification email failed:", err);
+        return { success: false, message: "Impossible d'envoyer l'email de confirmation. Veuillez réessayer." };
+      }
+
+      return { success: true, message: "Vérifiez votre email pour confirmer.", data: { requiresEmailVerification: true, email: user.email } };
     }
 
     if (isOnSite) {
-      sendEmail({
-        to: user.email,
-        subject: "Commande confirmée – À retirer en boutique – Meri Beauty",
-        text:
-          `Bonjour ${user.fullName},\n\n` +
-          `Votre commande n°${order.orderNumber} (${totalAmount.toFixed(2)} €) est confirmée. ` +
-          `Présentez ce code en boutique pour la récupérer et régler le paiement sur place : ${pickupCode}\n\n` +
-          `Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR")} — passé ce délai, la commande sera annulée.\n\n` +
-          `L'équipe Meri Beauty`,
-        html:
-          `<p>Bonjour ${user.fullName},</p>` +
-          `<p>Votre commande n°${order.orderNumber} (<strong>${totalAmount.toFixed(2)} €</strong>) est confirmée.</p>` +
-          `<p>Présentez ce code en boutique pour la récupérer et régler le paiement sur place : <strong>${pickupCode}</strong></p>` +
-          `<p>Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR")} — passé ce délai, la commande sera annulée.</p>` +
-          `<p>L'équipe Meri Beauty</p>`,
-      }).catch((err) => console.error("[createOrderFromCart] confirmation email failed:", err));
+      await sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAmount);
 
       return {
         success: true,
@@ -409,6 +423,68 @@ export async function createOrderFromCart(input) {
     console.error("[createOrderFromCart]", error);
     return { success: false, message: "Impossible de créer la commande." };
   }
+}
+
+/**
+ * Extracted so it can be sent either immediately (already-verified
+ * checkout) or later from resumeOrderAfterVerification, once a brand-new
+ * guest confirms their email. Fire-and-forget — never blocks the caller.
+ */
+function sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAmount) {
+  return sendEmail({
+    to: user.email,
+    subject: "Commande confirmée – À retirer en boutique – Meri Beauty",
+    text:
+      `Bonjour ${user.fullName},\n\n` +
+      `Votre commande n°${order.orderNumber} (${totalAmount.toFixed(2)} €) est confirmée. ` +
+      `Présentez ce code en boutique pour la récupérer et régler le paiement sur place : ${pickupCode}\n\n` +
+      `Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR")} — passé ce délai, la commande sera annulée.\n\n` +
+      `L'équipe Meri Beauty`,
+    html:
+      `<p>Bonjour ${user.fullName},</p>` +
+      `<p>Votre commande n°${order.orderNumber} (<strong>${totalAmount.toFixed(2)} €</strong>) est confirmée.</p>` +
+      `<p>Présentez ce code en boutique pour la récupérer et régler le paiement sur place : <strong>${pickupCode}</strong></p>` +
+      `<p>Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR")} — passé ce délai, la commande sera annulée.</p>` +
+      `<p>L'équipe Meri Beauty</p>`,
+  }).catch((err) => console.error("[sendPickupConfirmationEmail] failed:", err));
+}
+
+/**
+ * Called by resumeCheckoutAfterVerification once a brand-new guest confirms
+ * their email for an ORDER-type token. Branches on fulfilment mode: prepaid
+ * orders still need a Stripe session (delegates to createOrderCheckoutSession
+ * below); PICKUP_ON_SITE orders have no payment step, so this just sends the
+ * confirmation email that createOrderFromCart deferred and points the
+ * browser straight at the success page.
+ *
+ * @param {string} orderId
+ */
+export async function resumeOrderAfterVerification(orderId) {
+  if (!orderId) return { success: false, message: "Identifiant de commande manquant." };
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { user: { select: { fullName: true, email: true } } },
+  });
+  if (!order) return { success: false, message: "Commande introuvable." };
+
+  if (order.fulfilmentMode === "PICKUP_ON_SITE") {
+    if (order.status !== "PENDING_PICKUP") {
+      return { success: false, message: "Cette commande n'est plus en attente." };
+    }
+    if (order.expiresAt && order.expiresAt < new Date()) {
+      return { success: false, message: "Le délai de retrait pour cette commande a expiré." };
+    }
+
+    await sendPickupConfirmationEmail(order.user, order, order.pickupCode, order.expiresAt, Number(order.totalAmount));
+
+    return {
+      success: true,
+      url: `/boutique/order/success?onsite=1&number=${order.orderNumber}&code=${order.pickupCode}`,
+    };
+  }
+
+  return createOrderCheckoutSession(orderId);
 }
 
 /** Stripe Checkout Session for a PENDING_PAYMENT order (prepaid modes only). */

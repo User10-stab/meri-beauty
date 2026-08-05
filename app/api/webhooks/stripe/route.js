@@ -17,6 +17,7 @@ import { issueInvoice } from "@/lib/invoicing";
 import { renderInvoicePdf } from "@/lib/pdf/render";
 import { sendLowSeatsBroadcast } from "@/actions/workshops/notify-low-seats";
 import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
+import { sendFormationLowSeatsBroadcast } from "@/actions/formations/notify-low-seats";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -729,6 +730,8 @@ async function processFormationCheckoutSession(session) {
       })
     : null;
 
+  const salon = await prisma.salon.findFirst({ select: { phone: true, email: true } });
+
   sendEmail({
     to: reservation.customer.email,
     ...formationReservationConfirmationEmail({
@@ -740,11 +743,15 @@ async function processFormationCheckoutSession(session) {
       totalAmount,
       balanceDue: Number(reservation.balanceDue),
       isFullPayment,
+      salonPhone: salon?.phone,
+      salonEmail: salon?.email,
     }),
     ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
   }).catch((err) => console.error("[stripe-webhook] formation confirmation email failed:", err));
 
-  // No low-seats broadcast, no waiting list — formations don't have either.
+  sendFormationLowSeatsBroadcast(reservation.sessionId).catch((err) =>
+    console.error("[stripe-webhook] formation low-seats broadcast failed:", err)
+  );
 
   return { received: true, processed: true };
 }

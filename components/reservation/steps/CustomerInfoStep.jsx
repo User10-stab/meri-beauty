@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { User, Mail, Phone, MessageSquare, LogIn, AlertCircle } from "lucide-react";
+import { User, Mail, Phone, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
-import { checkEmailExists } from "@/actions/reservation/check-email-exists";
+import { checkEmailExists } from "@/actions/shared/check-email-exists";
+import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 
@@ -25,44 +26,6 @@ function InputIcon({ children }) {
   return (
     <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
       {children}
-    </div>
-  );
-}
-
-// ─── Existing-account banner ──────────────────────────────────────────────────
-
-function ExistingAccountBanner({ email, onDismiss }) {
-  return (
-    <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-5">
-      <div className="flex items-start gap-3">
-        <AlertCircle size={20} className="mt-0.5 flex-shrink-0 text-amber-500" />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-amber-900">
-            Un compte existe déjà pour cette adresse email.
-          </p>
-          <p className="mt-1 text-sm text-amber-700">
-            Connectez-vous pour associer cette réservation à votre compte
-            existant, ou continuez en tant qu'invité si vous souhaitez créer un
-            nouveau compte.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <a
-              href={`/login?callbackUrl=/reservation&email=${encodeURIComponent(email)}`}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#2F3A2E] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#3d4e3b]"
-            >
-              <LogIn size={15} />
-              Se connecter
-            </a>
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-50"
-            >
-              Continuer quand même
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -212,6 +175,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
               <div className="mt-3">
                 <ExistingAccountBanner
                   email={formData.email}
+                  callbackUrl="/reservation"
                   onDismiss={() => setEmailStatus("dismissed")}
                 />
               </div>

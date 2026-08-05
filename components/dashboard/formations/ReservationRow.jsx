@@ -1,5 +1,7 @@
 "use client";
 
+import { RowActions } from "../Tables/RowActions";
+
 const STATUS_STYLES = {
   PENDING_DEPOSIT: "bg-amber-50 text-amber-700 border-amber-200",
   CONFIRMED: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -26,7 +28,7 @@ function formatSessionDate(date) {
   });
 }
 
-export function ReservationRow({ row }) {
+export function ReservationRow({ row, onDelete }) {
   const priceFormatted = (value) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
 
@@ -68,8 +70,12 @@ export function ReservationRow({ row }) {
         )}
       </td>
 
-      {/* No row actions for formation reservations — no change/cancel flow exists yet */}
-      <td className="px-4 py-4 pr-5 align-middle" />
+      {/* Cancel is the only action — admin-only internal tool, no session/seat change flow.
+          Same pattern as the atelier row: no client-side status guard, cancelFormationReservation
+          itself rejects an already-cancelled reservation and surfaces that as a toast. */}
+      <td className="px-4 py-4 pr-5 align-middle">
+        <RowActions row={row} onDelete={onDelete} />
+      </td>
     </tr>
   );
 }

@@ -23,6 +23,7 @@ import { Loader2, Sparkles, AlertCircle, Check, ArrowLeft, Eye, EyeOff } from "l
  * @param {string} [props.footerLinkText] - Bottom link label.
  * @param {function} [props.extraElements] - Render prop returning custom sub-fields (receives `{ register, isLoading }`).
  * @param {boolean} [props.backToSignIn=false] - If true, adds a "Back to Sign In" backlink.
+ * @param {object} [props.defaultValues] - Pre-fills form fields (e.g. email carried over from a checkout redirect).
  */
 export default function AuthForm({
   title,
@@ -37,6 +38,7 @@ export default function AuthForm({
   footerLinkText,
   extraElements,
   backToSignIn = false,
+  defaultValues,
 }) {
   const [showPassword, setShowPassword] = useState({});
   const [isLoading, setIsLoading] = useState(false);
@@ -49,6 +51,7 @@ export default function AuthForm({
     formState: { errors },
   } = useForm({
     resolver: zodResolver(schema),
+    defaultValues,
   });
 
   const togglePasswordVisibility = (fieldName) => {

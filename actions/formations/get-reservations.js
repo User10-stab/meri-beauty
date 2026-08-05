@@ -7,10 +7,11 @@ import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 
 /**
  * Récupère toutes les réservations de formations pour le tableau de bord.
- * Admin et staff voient toutes les formations, sans filtrage par créateur —
- * il n'y a pas d'action de modification/suppression pour l'instant (pas de
- * changement de séance/places ni d'annulation admin, contrairement aux
- * ateliers).
+ * Admin et staff voient toutes les formations, sans filtrage par créateur.
+ * Contrairement aux ateliers, il n'y a toujours pas de changement de
+ * séance/places pour les formations — seule l'annulation admin existe
+ * (actions/formations/manage-reservation.js), en tant qu'outil interne, pas
+ * une fonctionnalité self-service côté client.
  */
 export async function getFormationReservations() {
   try {

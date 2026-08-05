@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { requireAdmin } from "@/lib/route-protection";
+import { requireRole } from "@/lib/route-protection";
+import { DASHBOARD_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { getProducts } from "@/actions/boutique/products";
 import { getBrands } from "@/actions/boutique/brands";
 import { ProductsPageClient } from "@/components/dashboard/boutique/ProductsPageClient";
@@ -12,7 +13,8 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
-  await requireAdmin();
+  const { user } = await requireRole(DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK);
+  const isAdmin = isAdminRole(user.role);
 
   const [productsResult, brandsResult] = await Promise.all([
     getProducts({ pageSize: 50 }),
@@ -42,6 +44,7 @@ export default async function ProductsPage() {
         <ProductsPageClient
           initialProducts={productsResult.data ?? []}
           brands={brandsResult.data ?? []}
+          isAdmin={isAdmin}
         />
       </Suspense>
     </div>

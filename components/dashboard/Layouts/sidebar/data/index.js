@@ -87,11 +87,12 @@ const ALL_NAV_DATA = [
         title: "Boutique",
         icon: Icons.ShoppingBagIcon,
         items: [
-          { title: "Produits", url: "/dashboard/boutique/products" },
-          { title: "Catégories", url: "/dashboard/boutique/categories" },
-          { title: "Stock", url: "/dashboard/boutique/stock" },
+          // Staff: read-only catalogue browsing (no cost/margin data) + stock adjustments.
+          { title: "Produits", url: "/dashboard/boutique/products", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK },
+          { title: "Catégories", url: "/dashboard/boutique/categories", roles: DASHBOARD_PERMISSIONS.BOUTIQUE }, // Admin only — structural CRUD
+          { title: "Stock", url: "/dashboard/boutique/stock", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK },
         ],
-        roles: DASHBOARD_PERMISSIONS.BOUTIQUE, // Admin only
+        roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK, // Group visible to admin + staff; sub-items filtered individually above
       },
       {
         title: "Commandes",

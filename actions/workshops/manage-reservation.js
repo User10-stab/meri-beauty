@@ -89,6 +89,7 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
 
     // Deposits are non-refundable by default — never stripe.refunds.create()
     // here unless the admin explicitly granted an exception above.
+    let refundFailed = false;
     if (refundDeposit && reservation.payment?.transactionReference) {
       try {
         const checkoutSession = await stripe.checkout.sessions.retrieve(reservation.payment.transactionReference);
@@ -96,10 +97,12 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
           await stripe.refunds.create({ payment_intent: checkoutSession.payment_intent });
         }
       } catch (err) {
-        // The reservation is already cancelled — surface the refund failure
-        // loudly rather than rolling any of that back, same pattern as
-        // actions/boutique/orders.js#performOrderCancellation.
+        // The reservation is already cancelled — that stays. But don't let
+        // the customer email below claim a refund that didn't happen;
+        // surface this to staff instead (same pattern as
+        // actions/boutique/orders.js#performOrderCancellation).
         console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
+        refundFailed = true;
       }
     }
 
@@ -113,14 +116,31 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
         customerName: reservation.customer.fullName,
         activityTitle: reservation.session.workshop.title,
         sessionDate: formatSessionDate(reservation.session.startDate),
-        refunded: refundDeposit,
+        refunded: refundDeposit && !refundFailed,
       }),
     }).catch((err) => console.error("[cancelWorkshopReservation] email failed:", err));
+
+    if (refundFailed) {
+      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      if (salon?.email) {
+        sendEmail({
+          to: salon.email,
+          subject: `⚠️ Remboursement Stripe échoué – Réservation atelier n°${reservationId}`,
+          text: `Le remboursement Stripe pour la réservation atelier n°${reservationId} (client : ${reservation.customer.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
+          html: `<p>Le remboursement Stripe pour la réservation atelier n°${reservationId} (client : ${reservation.customer.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
+        }).catch((err) => console.error("[cancelWorkshopReservation] refund-failure alert email failed:", err));
+      }
+    }
 
     revalidatePath("/dashboard/workshops/reservations");
     return {
       success: true,
-      message: refundDeposit ? "Réservation annulée et acompte remboursé." : "Réservation annulée.",
+      message: refundDeposit
+        ? refundFailed
+          ? "Réservation annulée. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
+          : "Réservation annulée et acompte remboursé."
+        : "Réservation annulée.",
+      refundFailed,
     };
   } catch (error) {
     console.error("[cancelWorkshopReservation]", error);

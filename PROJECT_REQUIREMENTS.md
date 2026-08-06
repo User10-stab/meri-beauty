@@ -33,7 +33,8 @@ These should hold everywhere in the codebase without exception. If you find a pl
 
 | Requirement | Status |
 |---|---|
-| Belgium only, EUR, single 21% VAT rate, bpost as the only carrier | ✅ Confirmed |
+| Belgium only, EUR, single 21% VAT rate | ✅ Confirmed |
+| Mondial Relay as the only shipping carrier (pickup-point delivery, not home address) | 🔴 Changed 2026-08-06 — Marie dropped bpost as too expensive; confirmed exact Mondial Relay cost + 21% VAT, no markup, always base-tier pricing. **Two open blockers**: no real rate grid yet (checkout still runs on the old bpost weight tiers as a placeholder, see `lib/shipping.js`), and Marie is unsure whether her Mondial Relay API/Enseigne access from the old Shopify setup is still active. Label automation is stubbed (`actions/boutique/mondial-relay.js`) pending that. |
 | Belgian 14-day right-of-withdrawal (returns) on boutique orders | ✅ Legal requirement — the client's original instinct ("no refunds after delivery") was explicitly illegal for EU distance selling and had to be corrected, not just implemented as asked |
 | Exactly 3 boutique fulfilment modes: pickup-paid-online, pickup-paid-on-site, shipping-paid-online (no "shipping paid on-site") | ✅ Confirmed |
 | Pickup-on-site orders auto-expire and release stock after 7 days uncollected | ✅ Confirmed |
@@ -60,7 +61,7 @@ These should hold everywhere in the codebase without exception. If you find a pl
 - **⚠️ 50% deposit, balance due on-site.**
 - **⚠️ Deposit is never refunded on cancellation**, for any reason.
 - **⚠️ 10% fee to change session or seat count** — flat regardless of whether seats are being added or removed.
-- **⚠️ Two different "low seats" thresholds**: the public site banner triggers at 2 seats left, the automated email trigger at 0–1. Likely should be the same number — check before presenting to the client, this might just be a bug rather than an intentional two-tier warning.
+- ~~Two different "low seats" thresholds~~ — **was a real bug, fixed 2026-08-06.** `actions/workshops/notify-low-seats.js` and `actions/formations/notify-low-seats.js` used to broadcast at `available >= 0` while the homepage banner only shows at `available > 0` — so booking a session's literal last seat fired a newsletter email reading "Il ne reste plus que 0 place !" at the exact moment there was nothing left to book. Both guards now match the banner's `0 < available < 3` exactly. Verified against real seeded DB data: at `available=0` the broadcast no longer fires; `available=1/2` unaffected.
 - **⚠️ Uncapped waiting list, first-to-pay-wins** — when a seat frees up, *everyone* waiting gets notified simultaneously; there's no queue order beyond who pays fastest.
 - **⚠️ Unpaid reservation hold expires after 15 minutes.**
 
@@ -83,9 +84,10 @@ These should hold everywhere in the codebase without exception. If you find a pl
 - **Cron never wired up.** `expireStaleOrders()` and the reminder-email job both exist and work correctly when called, but only via `GET /api/cron` guarded by `CRON_SECRET`. No `vercel.json` cron config and no external scheduler currently calls this route in any environment. Until this is wired, abandoned boutique orders/holds only clear when a customer happens to retry checkout on the same cart (which now correctly supersedes the stale hold — see §6) — they don't clean up on their own.
 - **`STRIPE_WEBHOOK_SECRET`** in `.env` is the local `stripe listen` dev secret. Production needs the real secret from the Stripe Dashboard's registered webhook endpoint, or webhooks silently never process (see §7 for what that looks like when it happens).
 - **Bancontact** is implemented in code (`payment_method_types: ["card", "bancontact"]` on every checkout session) but needs to actually be enabled in the Stripe Dashboard's payment methods settings for the live account — code-side readiness doesn't guarantee Stripe will offer it to customers.
-- **No invoice download from `/mon-compte`.** Needs an ownership check across all 4 polymorphic `Payment` sources before it's safe to expose `/api/invoices/[id]/pdf` to customers directly — not built yet.
+- ~~No invoice download from `/mon-compte`~~ — **stale, already built.** `/api/invoices/[id]/pdf` (`app/api/invoices/[id]/pdf/route.js`) already does the ownership check across all 4 polymorphic `Payment` sources (order/appointment/workshopReservation/formationReservation), and invoice links already appear on `/mon-compte` (boutique orders, ateliers/événements, formations) and on the separate `/appointments` page. Verified live 2026-08-06: a customer can download their own invoice (200) and is rejected on someone else's (403).
 - **Staff vs. Admin catalogue (products/categories/brands) permission split** — proposed, never confirmed with anyone, independent of the client entirely.
-- **Client questionnaire still open**: barcode usage, whether prior/legacy invoice numbering needs to be respected, commission-on-product-sales for staff, promo codes. None of these are blocking current features, but several smaller boutique features can't be finished without answers.
+- **Client questionnaire partially resolved 2026-08-06**: Marie answered shipping-carrier and promo-code questions (see §2 and the promo codes feature, now built). Still open: whether prior/legacy invoice numbering needs to be respected, commission-on-product-sales for staff.
+- **Mondial Relay pickup-point widget not live yet.** `components/boutique/MondialRelayPicker.jsx` embeds the real Mondial Relay widget (map + native geolocation search) when `NEXT_PUBLIC_MONDIAL_RELAY_BRAND_ID` is set; until Marie provides that Enseigne/Brand ID, checkout falls back to a manual pickup-point text form so the flow keeps working end-to-end.
 
 ---
 

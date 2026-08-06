@@ -15,6 +15,7 @@ import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { resolvePromoCode } from "@/actions/promo-codes";
 
 /** Order items (+ shipping, if any) as invoice line snapshots. */
 function orderInvoiceLines(order) {
@@ -147,12 +148,13 @@ function serializeOrder(order) {
     subtotal: Number(order.subtotal),
     shippingCost: Number(order.shippingCost),
     totalAmount: Number(order.totalAmount),
-    shippingLine1: order.shippingLine1,
-    shippingLine2: order.shippingLine2,
-    shippingCity: order.shippingCity,
-    shippingPostalCode: order.shippingPostalCode,
-    shippingCountry: order.shippingCountry,
-    bpostTrackingCode: order.bpostTrackingCode,
+    shippingCarrier: order.shippingCarrier,
+    pickupPointId: order.pickupPointId,
+    pickupPointName: order.pickupPointName,
+    pickupPointAddress: order.pickupPointAddress,
+    pickupPointPostalCode: order.pickupPointPostalCode,
+    pickupPointCity: order.pickupPointCity,
+    trackingCode: order.trackingCode,
     shippedAt: order.shippedAt,
     pickupCode: order.pickupCode,
     pickedUpAt: order.pickedUpAt,
@@ -209,12 +211,12 @@ export async function createOrderFromCart(input) {
       success: false,
       message:
         errors.fulfilmentMode?.[0] ??
-        errors.shippingAddress?.[0] ??
+        errors.pickupPoint?.[0] ??
         errors.customerInfo?.[0] ??
         "Données invalides.",
     };
   }
-  const { fulfilmentMode, customerInfo, shippingAddress, notes } = parsed.data;
+  const { fulfilmentMode, customerInfo, pickupPoint, notes, promoCode } = parsed.data;
 
   try {
     const authSession = await auth();
@@ -303,7 +305,19 @@ export async function createOrderFromCart(input) {
       }
     }
 
-    const totalAmount = subtotal + shippingCost;
+    // Re-validated here regardless of the client's live preview — a code
+    // could have been deactivated between preview and submit, and the
+    // discount amount is never trusted from the client.
+    let promoCodeId = null;
+    let discountAmount = 0;
+    if (promoCode) {
+      const promoResult = await resolvePromoCode(promoCode, subtotal);
+      if (!promoResult.success) return { success: false, message: promoResult.message };
+      promoCodeId = promoResult.promoCodeId;
+      discountAmount = promoResult.discountAmount;
+    }
+
+    const totalAmount = Math.max(0, subtotal + shippingCost - discountAmount);
 
     const isOnSite = fulfilmentMode === "PICKUP_ON_SITE";
     const pickupCode = fulfilmentMode !== "SHIPPING_PREPAID" ? await uniquePickupCode() : null;
@@ -374,10 +388,13 @@ export async function createOrderFromCart(input) {
           subtotal,
           shippingCost,
           totalAmount,
-          shippingLine1: shippingAddress?.line1 ?? null,
-          shippingLine2: shippingAddress?.line2 ?? null,
-          shippingCity: shippingAddress?.city ?? null,
-          shippingPostalCode: shippingAddress?.postalCode ?? null,
+          promoCodeId,
+          discountAmount,
+          pickupPointId: pickupPoint?.id ?? null,
+          pickupPointName: pickupPoint?.name ?? null,
+          pickupPointAddress: pickupPoint?.address ?? null,
+          pickupPointPostalCode: pickupPoint?.postalCode ?? null,
+          pickupPointCity: pickupPoint?.city ?? null,
           pickupCode,
           expiresAt,
           notes: notes || null,
@@ -609,7 +626,36 @@ export async function fulfillOrderPayment(session) {
   const paidAmount = (session.amount_total ?? 0) / 100;
   const nextStatus = order.fulfilmentMode === "SHIPPING_PREPAID" ? "PROCESSING" : "PAID";
 
-  const { invoice } = await prisma.$transaction(async (tx) => {
+  // Paranoid check: line items are built server-side, but the webhook is the
+  // last line of defense on money.
+  const expectedAmount = Number(order.totalAmount);
+  if (paidAmount + 0.01 < expectedAmount) {
+    console.error(`[fulfillOrderPayment] UNDERPAYMENT: paid ${paidAmount} expected ${expectedAmount} for session ${session.id}`);
+    if (session.payment_intent) {
+      await stripe.refunds.create({ payment_intent: session.payment_intent }).catch((err) => {
+        console.error("[fulfillOrderPayment] underpayment REFUND FAILED for", session.id, err);
+        throw err;
+      });
+    }
+    return { received: true, refunded: true, reason: "underpayment" };
+  }
+
+  let invoice;
+  try {
+  ({ invoice } = await prisma.$transaction(async (tx) => {
+    // Atomic claim, gated on the order still being PENDING_PAYMENT — the read
+    // above is only a fast-path check. Without this, a customer cancellation
+    // (cancelMyOrder, gated on the same statuses) landing at the same instant
+    // as this webhook delivery could have its CANCELLED write silently
+    // overwritten back to PAID by the order.update further below committing
+    // after it. Claiming it now, up front, means everything else in this
+    // transaction (payment, stock, invoice) only happens for the winner.
+    const claim = await tx.order.updateMany({
+      where: { id: order.id, status: "PENDING_PAYMENT" },
+      data: { status: nextStatus, expiresAt: null },
+    });
+    if (claim.count === 0) throw new Error("ORDER_NO_LONGER_PENDING");
+
     const payment = await tx.payment.create({
       data: {
         orderId: order.id,
@@ -620,6 +666,8 @@ export async function fulfillOrderPayment(session) {
         status: "PAID",
         paidAt: new Date(),
         transactionReference: session.id,
+        promoCodeId: order.promoCodeId,
+        discountAmount: order.discountAmount,
       },
     });
 
@@ -666,8 +714,6 @@ export async function fulfillOrderPayment(session) {
       });
     }
 
-    await tx.order.update({ where: { id: order.id }, data: { status: nextStatus, expiresAt: null } });
-
     // Only now — payment confirmed — does the source cart actually empty. It was
     // deliberately left ACTIVE at checkout time so an abandoned Stripe session
     // wouldn't wipe the customer's cart (see createOrderFromCart).
@@ -686,12 +732,37 @@ export async function fulfillOrderPayment(session) {
     });
 
     return { invoice };
-  });
+  }));
+  } catch (err) {
+    // The Payment.transactionReference unique constraint is the real
+    // idempotency guarantee — the findFirst check above is just a fast path
+    // that two near-simultaneous webhook deliveries can both pass before
+    // either commits. A P2002 here means the other delivery won the race;
+    // this one is done, not failed.
+    if (err.code === "P2002") {
+      return { received: true, alreadyProcessed: true };
+    }
+    // A concurrent cancellation (cancelMyOrder/cancelOrder) won the race and
+    // moved the order out of PENDING_PAYMENT between this function's initial
+    // read and this transaction — the salon can't honor a sale it already
+    // voided, so refund rather than resurrect the cancelled order.
+    if (err.message === "ORDER_NO_LONGER_PENDING") {
+      console.warn("[fulfillOrderPayment] order cancelled during payment, refunding:", session.id);
+      if (session.payment_intent) {
+        await stripe.refunds.create({ payment_intent: session.payment_intent }).catch((refundErr) => {
+          console.error("[fulfillOrderPayment] race REFUND FAILED for", session.id, refundErr);
+          throw refundErr;
+        });
+      }
+      return { received: true, refunded: true, reason: "order cancelled during payment" };
+    }
+    throw err;
+  }
 
   const pickupNote =
     order.fulfilmentMode === "PICKUP_PREPAID"
       ? `Nous vous préviendrons dès qu'elle sera prête à être retirée. Code de retrait : ${order.pickupCode}.`
-      : "Elle sera expédiée sous peu — vous recevrez le numéro de suivi bpost par e-mail.";
+      : "Elle sera expédiée sous peu vers votre point relais Mondial Relay — vous recevrez le numéro de suivi par e-mail.";
 
   const invoicePdf = await renderInvoicePdf(invoice).catch((err) => {
     console.error("[fulfillOrderPayment] invoice PDF render failed:", err);
@@ -731,7 +802,7 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
         ? {
             OR: [
               { pickupCode: { contains: search, mode: "insensitive" } },
-              { bpostTrackingCode: { contains: search, mode: "insensitive" } },
+              { trackingCode: { contains: search, mode: "insensitive" } },
               { user: { fullName: { contains: search, mode: "insensitive" } } },
               { user: { email: { contains: search, mode: "insensitive" } } },
             ],
@@ -855,6 +926,8 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
             paymentType: "ON_SITE",
             status: "PAID",
             paidAt: new Date(),
+            promoCodeId: order.promoCodeId,
+            discountAmount: order.discountAmount,
           },
         });
 
@@ -945,9 +1018,9 @@ export async function markOrderShipped(input) {
   const parsed = shipOrderSchema.safeParse(input);
   if (!parsed.success) {
     const errors = parsed.error.flatten().fieldErrors;
-    return { success: false, message: errors.bpostTrackingCode?.[0] ?? errors.orderId?.[0] ?? "Données invalides." };
+    return { success: false, message: errors.trackingCode?.[0] ?? errors.orderId?.[0] ?? "Données invalides." };
   }
-  const { orderId, bpostTrackingCode } = parsed.data;
+  const { orderId, trackingCode } = parsed.data;
 
   try {
     const order = await prisma.order.findUnique({
@@ -964,7 +1037,7 @@ export async function markOrderShipped(input) {
 
     await prisma.order.update({
       where: { id: orderId },
-      data: { status: "SHIPPED", bpostTrackingCode, shippedAt: new Date() },
+      data: { status: "SHIPPED", trackingCode, shippedAt: new Date() },
     });
 
     sendEmail({
@@ -972,11 +1045,11 @@ export async function markOrderShipped(input) {
       subject: `Commande expédiée – n°${order.orderNumber} – Meri Beauty`,
       text:
         `Bonjour ${order.user.fullName},\n\n` +
-        `Votre commande n°${order.orderNumber} a été expédiée via bpost. Numéro de suivi : ${bpostTrackingCode}\n\n` +
+        `Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : ${trackingCode}\n\n` +
         `L'équipe Meri Beauty`,
       html:
         `<p>Bonjour ${order.user.fullName},</p>` +
-        `<p>Votre commande n°${order.orderNumber} a été expédiée via bpost. Numéro de suivi : <strong>${bpostTrackingCode}</strong></p>` +
+        `<p>Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : <strong>${trackingCode}</strong></p>` +
         `<p>L'équipe Meri Beauty</p>`,
     }).catch((err) => console.error("[markOrderShipped] email failed:", err));
 
@@ -1014,12 +1087,27 @@ export async function markOrderCompleted(orderId) {
  * cancelMyOrder — every authorization/ownership/status decision happens in
  * the caller, this just performs the cancellation once that's settled.
  */
+const CANCELLABLE_ORDER_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP", "SHIPPED"];
+
 async function performOrderCancellation(order, reason) {
   const orderId = order.id;
   try {
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
 
-    const { creditNote } = await prisma.$transaction(async (tx) => {
+    const { claimed, creditNote } = await prisma.$transaction(async (tx) => {
+      // Atomic claim, gated on the order still being in a cancellable status —
+      // without this, two concurrent cancel calls (e.g. a double-click, or the
+      // customer and staff cancelling at once) both pass a plain read-then-check
+      // and both restock + refund + credit-note. Only the request that actually
+      // flips the row wins; everyone else gets a clean "already processed".
+      const claim = await tx.order.updateMany({
+        where: { id: orderId, status: { in: CANCELLABLE_ORDER_STATUSES } },
+        data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: reason ?? null },
+      });
+      if (claim.count === 0) {
+        return { claimed: false, creditNote: null };
+      }
+
       for (const item of order.items) {
         if (wasSold) {
           const updated = await tx.productVariant.update({
@@ -1045,11 +1133,6 @@ async function performOrderCancellation(order, reason) {
         }
       }
 
-      await tx.order.update({
-        where: { id: orderId },
-        data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: reason ?? null },
-      });
-
       let creditNote = null;
       if (wasSold && order.payment.invoice) {
         creditNote = await issueCreditNote(tx, {
@@ -1059,19 +1142,48 @@ async function performOrderCancellation(order, reason) {
         });
       }
 
-      return { creditNote };
+      return { claimed: true, creditNote };
     });
 
+    if (!claimed) {
+      return { success: true, message: "Cette commande a déjà été annulée." };
+    }
+
+    let refundFailed = false;
     if (wasSold && order.payment.transactionReference) {
-      try {
-        const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
-        if (session.payment_intent) {
-          await stripe.refunds.create({ payment_intent: session.payment_intent });
+      // Idempotency guard: if a REFUND transaction already exists for this
+      // payment (e.g. a retry after a prior partial failure, or the DB claim
+      // above was somehow bypassed), don't ask Stripe to refund twice.
+      const alreadyRefunded = await prisma.transaction.findFirst({
+        where: { paymentId: order.payment.id, transactionType: "REFUND" },
+        select: { id: true },
+      });
+
+      if (!alreadyRefunded) {
+        try {
+          const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
+          if (session.payment_intent) {
+            await stripe.refunds.create({ payment_intent: session.payment_intent });
+            await prisma.$transaction([
+              prisma.transaction.create({
+                data: {
+                  paymentId: order.payment.id,
+                  amount: order.payment.paidAmount,
+                  method: "ONLINE",
+                  transactionType: "REFUND",
+                  paidAt: new Date(),
+                },
+              }),
+              prisma.payment.update({ where: { id: order.payment.id }, data: { status: "REFUNDED" } }),
+            ]);
+          }
+        } catch (err) {
+          // The order is already cancelled and stock restored — that's correct
+          // and stays. But don't let the customer email below claim a refund
+          // that didn't happen; surface this to staff instead.
+          console.error("[performOrderCancellation] REFUND FAILED for order", orderId, err);
+          refundFailed = true;
         }
-      } catch (err) {
-        // The order is already cancelled and stock restored — surface the
-        // refund failure loudly rather than rolling any of that back.
-        console.error("[performOrderCancellation] REFUND FAILED for order", orderId, err);
       }
     }
 
@@ -1083,19 +1195,23 @@ async function performOrderCancellation(order, reason) {
       });
     }
 
+    const refundNote = wasSold
+      ? refundFailed
+        ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
+        : " Le remboursement apparaîtra sur votre compte sous quelques jours."
+      : "";
+
     sendEmail({
       to: order.user.email,
       subject: `Commande annulée – n°${order.orderNumber} – Meri Beauty`,
       text:
         `Bonjour ${order.user.fullName},\n\n` +
-        `Votre commande n°${order.orderNumber} a été annulée.` +
-        (wasSold ? " Le remboursement apparaîtra sur votre compte sous quelques jours." : "") +
+        `Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
         (reason ? ` Raison : ${reason}` : "") +
         `\n\nL'équipe Meri Beauty`,
       html:
         `<p>Bonjour ${order.user.fullName},</p>` +
-        `<p>Votre commande n°${order.orderNumber} a été annulée.` +
-        (wasSold ? " Le remboursement apparaîtra sur votre compte sous quelques jours." : "") +
+        `<p>Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
         (reason ? ` Raison : ${reason}` : "") +
         `</p><p>L'équipe Meri Beauty</p>`,
       ...(creditNotePdf
@@ -1103,9 +1219,27 @@ async function performOrderCancellation(order, reason) {
         : {}),
     }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
 
+    if (refundFailed) {
+      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      if (salon?.email) {
+        sendEmail({
+          to: salon.email,
+          subject: `⚠️ Remboursement Stripe échoué – Commande n°${order.orderNumber}`,
+          text: `Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
+          html: `<p>Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
+        }).catch((err) => console.error("[performOrderCancellation] refund-failure alert email failed:", err));
+      }
+    }
+
     revalidatePath("/dashboard/boutique/orders");
     revalidatePath("/mon-compte");
-    return { success: true, message: "Commande annulée." };
+    return {
+      success: true,
+      message: refundFailed
+        ? "Commande annulée. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
+        : "Commande annulée.",
+      refundFailed,
+    };
   } catch (error) {
     console.error("[performOrderCancellation]", error);
     return { success: false, message: "Impossible d'annuler la commande." };
@@ -1199,19 +1333,19 @@ export async function expireStaleOrders() {
 
   for (const order of stale) {
     try {
-      await prisma.$transaction(async (tx) => {
-        for (const item of order.items) {
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: { reservedQuantity: { decrement: item.quantity } },
-          });
-        }
+      // Atomic claim gated on the status read above: if a customer paid,
+      // cancelled, or picked up between the findMany and here — or an
+      // overlapping cron run already claimed this same order — the WHERE
+      // clause no longer matches and this update affects zero rows. Only
+      // the run that actually flips the row goes on to decrement stock and
+      // email the customer.
+      const claimed = await prisma.$transaction(async (tx) => {
         // cancelledAt is set for BOTH branches now — it previously stayed
         // null for on-site pickup expirations, which broke any "cancelled
         // orders" query filtering on that column even though the order was
         // just as dead as a payment-timeout cancellation.
-        await tx.order.update({
-          where: { id: order.id },
+        const claim = await tx.order.updateMany({
+          where: { id: order.id, status: order.status },
           data: {
             status: order.status === "PENDING_PAYMENT" ? "CANCELLED" : "EXPIRED",
             cancelledAt: new Date(),
@@ -1221,7 +1355,18 @@ export async function expireStaleOrders() {
                 : "Retrait non effectué dans le délai imparti",
           },
         });
+        if (claim.count === 0) return false;
+
+        for (const item of order.items) {
+          await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { reservedQuantity: { decrement: item.quantity } },
+          });
+        }
+        return true;
       });
+
+      if (!claimed) continue;
 
       sendEmail({
         to: order.user.email,

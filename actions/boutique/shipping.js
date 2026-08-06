@@ -81,7 +81,7 @@ export async function requestShippingQuote(input) {
       message: errors.fullName?.[0] ?? errors.email?.[0] ?? errors.phone?.[0] ?? "Données invalides.",
     };
   }
-  const { fullName, email, phone, shippingAddress, notes } = parsed.data;
+  const { fullName, email, phone, pickupPoint, notes } = parsed.data;
 
   try {
     const cart = await getOrCreateActiveCart();
@@ -120,7 +120,7 @@ export async function requestShippingQuote(input) {
         items,
         totalWeightKg,
         subtotal,
-        shippingAddress: shippingAddress ?? null,
+        pickupPoint: pickupPoint ?? null,
         notes: notes ?? null,
         salonName,
       });

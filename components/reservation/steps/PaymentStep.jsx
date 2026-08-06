@@ -7,6 +7,7 @@ import { computePaymentDecision } from "@/lib/reservation-payment";
 import { signIn } from "next-auth/react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { PromoCodeField } from "@/components/shared/PromoCodeField";
 
 // ─── Success screen ───────────────────────────────────────────────────────────
 
@@ -153,9 +154,12 @@ export default function PaymentStep({ data, customerSession }) {
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [completedMeta, setCompletedMeta] = useState(null);
+  const [appliedPromo, setAppliedPromo] = useState(null);
   const router = useRouter();
 
   const drafts = data.appointmentDrafts ?? [];
+  const rawTotal = drafts.reduce((sum, d) => sum + Number(d.price ?? 0), 0);
+  const discountAmount = appliedPromo?.discountAmount ?? 0;
 
   // All amounts and flags from the single source of truth
   const {
@@ -163,7 +167,7 @@ export default function PaymentStep({ data, customerSession }) {
     depositRequired,
     depositAmount,
     depositPercentage,
-  } = computePaymentDecision({ drafts });
+  } = computePaymentDecision({ drafts, discountAmount });
 
   // The amount the customer will pay online right now, per chosen method:
   //   "online" → full price (Stripe, charged immediately)
@@ -260,6 +264,7 @@ export default function PaymentStep({ data, customerSession }) {
         customerInfo,
         paymentMethod,
         notes:         data.notes,
+        promoCode:     appliedPromo?.code ?? null,
       });
 
       if (!reservationResult.success) {
@@ -270,6 +275,16 @@ export default function PaymentStep({ data, customerSession }) {
         );
         setProcessing(false);
         return;
+      }
+
+      const { isNewUser, autologinToken, user } = reservationResult.data;
+
+      // confirmPayment now requires the caller to be authenticated as the
+      // appointment's owner — a brand-new guest has no session yet at this
+      // point, so sign them in first (via the autologin token) or the
+      // ownership check below would reject their own payment.
+      if (!customerSession) {
+        await handleAutoSignIn(isNewUser, autologinToken, user?.email);
       }
 
       // Simulate / process payment
@@ -291,13 +306,8 @@ export default function PaymentStep({ data, customerSession }) {
         return;
       }
 
-      const { isNewUser, autologinToken, user } = reservationResult.data;
-
-      // Auto-login + info toast for new accounts
       if (customerSession) {
         toast.success("Réservation confirmée avec succès !");
-      } else {
-        await handleAutoSignIn(isNewUser, autologinToken, user?.email);
       }
 
       setCompletedMeta({
@@ -337,6 +347,7 @@ export default function PaymentStep({ data, customerSession }) {
         customerInfo,
         paymentMethod: "cash",
         notes:         data.notes,
+        promoCode:     appliedPromo?.code ?? null,
       });
 
       toast.dismiss(loadingToastId);
@@ -418,9 +429,19 @@ export default function PaymentStep({ data, customerSession }) {
           <p className="text-sm font-medium text-gray-600">
             Prix total du service
           </p>
-          <p className="mt-1 text-4xl font-bold text-[#C8A46A]">
-            €{Number(totalAmount).toFixed(2)}
-          </p>
+          {discountAmount > 0 ? (
+            <>
+              <p className="mt-1 text-lg text-gray-400 line-through">€{rawTotal.toFixed(2)}</p>
+              <p className="text-4xl font-bold text-[#C8A46A]">€{Number(totalAmount).toFixed(2)}</p>
+              <p className="mt-1 text-sm font-medium text-emerald-600">
+                Réduction ({appliedPromo.code}) : -€{discountAmount.toFixed(2)}
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-4xl font-bold text-[#C8A46A]">
+              €{Number(totalAmount).toFixed(2)}
+            </p>
+          )}
           {depositRequired && paymentMethod === "cash" && (
             <p className="mt-2 text-sm text-gray-500">
               Acompte en ligne :{" "}
@@ -439,6 +460,8 @@ export default function PaymentStep({ data, customerSession }) {
             </p>
           )}
         </div>
+
+        <PromoCodeField subtotal={rawTotal} onApplied={setAppliedPromo} />
 
         {/* ── Payment options ─────────────────────────────────── */}
         <div className="space-y-4">

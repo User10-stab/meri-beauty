@@ -7,7 +7,10 @@ import { toast } from "sonner";
 import { createOrderFromCart, createOrderCheckoutSession } from "@/actions/boutique/orders";
 import { getCartShippingCost, requestShippingQuote } from "@/actions/boutique/shipping";
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
+import { validatePromoCode } from "@/actions/promo-codes";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
+import { PromoCodeField } from "@/components/shared/PromoCodeField";
+import { MondialRelayPicker } from "@/components/boutique/MondialRelayPicker";
 
 const MODES = [
   {
@@ -25,8 +28,8 @@ const MODES = [
   {
     value: "SHIPPING_PREPAID",
     icon: Truck,
-    title: "Livraison à domicile",
-    description: "Payez maintenant, livraison bpost. Frais de port calculés au poids — gratuite dès €150.",
+    title: "Livraison en point relais",
+    description: "Payez maintenant, livraison Mondial Relay. Frais de port calculés au poids — gratuite dès €150.",
   },
 ];
 
@@ -38,12 +41,13 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const [customerInfo, setCustomerInfo] = useState(
     customerSession ?? { fullName: "", email: "", phone: "", newsletterSubscribed: false }
   );
-  const [shippingAddress, setShippingAddress] = useState({ line1: "", line2: "", city: "", postalCode: "" });
+  const [pickupPoint, setPickupPoint] = useState(null);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
   const [shippingDetails, setShippingDetails] = useState({ cost: 0, isFree: true, loading: true, quoteRequired: false });
   const [quoteRequest, setQuoteRequest] = useState({ submitting: false, sent: false });
+  const [appliedPromo, setAppliedPromo] = useState(null);
 
   // null = not checked yet | "exists" = verified account found | "dismissed" = user chose to continue as guest
   const [emailStatus, setEmailStatus] = useState(null);
@@ -104,17 +108,13 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const shippingCost = shippingDetails.cost;
   const quoteRequired = fulfilmentMode === "SHIPPING_PREPAID" && shippingDetails.quoteRequired;
 
-  const total = cart.subtotal + shippingCost;
+  const discountAmount = appliedPromo?.discountAmount ?? 0;
+  const total = Math.max(0, cart.subtotal + shippingCost - discountAmount);
 
   function handleCustomerChange(e) {
     const { name, value, type, checked } = e.target;
     setCustomerInfo((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
     if (name === "email") setEmailStatus(null);
-  }
-
-  function handleAddressChange(e) {
-    const { name, value } = e.target;
-    setShippingAddress((prev) => ({ ...prev, [name]: value }));
   }
 
   async function handleSubmit(e) {
@@ -141,8 +141,8 @@ export function CheckoutPageClient({ cart, customerSession }) {
       }
     }
     if (fulfilmentMode === "SHIPPING_PREPAID") {
-      if (!shippingAddress.line1.trim() || !shippingAddress.city.trim() || !/^\d{4}$/.test(shippingAddress.postalCode.trim())) {
-        toast.error("Veuillez compléter une adresse de livraison valide (code postal belge à 4 chiffres).");
+      if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !/^\d{4}$/.test((pickupPoint?.postalCode ?? "").trim())) {
+        toast.error("Veuillez choisir un point relais Mondial Relay valide.");
         return;
       }
     }
@@ -154,8 +154,9 @@ export function CheckoutPageClient({ cart, customerSession }) {
         customerInfo: isAuthenticated
           ? { userId: customerSession.id, fullName: customerSession.fullName, email: customerSession.email, phone: customerSession.phone }
           : customerInfo,
-        shippingAddress: fulfilmentMode === "SHIPPING_PREPAID" ? shippingAddress : null,
+        pickupPoint: fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint : null,
         notes: notes || null,
+        promoCode: appliedPromo?.code ?? null,
       };
 
       const result = await createOrderFromCart(payload);
@@ -196,8 +197,8 @@ export function CheckoutPageClient({ cart, customerSession }) {
       toast.error("Veuillez compléter vos informations de contact.");
       return;
     }
-    if (!shippingAddress.line1.trim() || !shippingAddress.city.trim() || !/^\d{4}$/.test(shippingAddress.postalCode.trim())) {
-      toast.error("Veuillez compléter une adresse de livraison valide (code postal belge à 4 chiffres).");
+    if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !/^\d{4}$/.test((pickupPoint?.postalCode ?? "").trim())) {
+      toast.error("Veuillez choisir un point relais Mondial Relay valide.");
       return;
     }
 
@@ -206,7 +207,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
       fullName: info.fullName,
       email: info.email,
       phone: info.phone,
-      shippingAddress,
+      pickupPoint,
       notes: notes || null,
     });
 
@@ -274,49 +275,13 @@ export function CheckoutPageClient({ cart, customerSession }) {
             </div>
           </section>
 
-          {/* Shipping address */}
+          {/* Pickup point (Mondial Relay) */}
           {fulfilmentMode === "SHIPPING_PREPAID" && (
             <section className="border border-neutral-200 p-6">
               <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
-                Adresse de livraison
+                Point relais Mondial Relay
               </h2>
-              <div className="space-y-4">
-                <input
-                  name="line1"
-                  value={shippingAddress.line1}
-                  onChange={handleAddressChange}
-                  placeholder="Rue et numéro"
-                  className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                  required
-                />
-                <input
-                  name="line2"
-                  value={shippingAddress.line2}
-                  onChange={handleAddressChange}
-                  placeholder="Complément d'adresse (optionnel)"
-                  className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                />
-                <div className="grid grid-cols-2 gap-4">
-                  <input
-                    name="postalCode"
-                    value={shippingAddress.postalCode}
-                    onChange={handleAddressChange}
-                    placeholder="Code postal"
-                    maxLength={4}
-                    className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                    required
-                  />
-                  <input
-                    name="city"
-                    value={shippingAddress.city}
-                    onChange={handleAddressChange}
-                    placeholder="Ville"
-                    className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                    required
-                  />
-                </div>
-                <p className="text-xs text-gray-400">Livraison en Belgique uniquement.</p>
-              </div>
+              <MondialRelayPicker value={pickupPoint} onChange={setPickupPoint} />
             </section>
           )}
 
@@ -411,11 +376,21 @@ export function CheckoutPageClient({ cart, customerSession }) {
               </li>
             ))}
           </ul>
+          <div className="mt-4">
+            <PromoCodeField subtotal={cart.subtotal} onApplied={setAppliedPromo} />
+          </div>
+
           <div className="mt-4 space-y-1.5 border-t border-neutral-100 pt-4 text-sm">
             <div className="flex justify-between text-gray-600">
               <span>Sous-total</span>
               <span>€{cart.subtotal.toFixed(2)}</span>
             </div>
+            {discountAmount > 0 && (
+              <div className="flex justify-between text-emerald-600">
+                <span>Réduction ({appliedPromo.code})</span>
+                <span>-€{discountAmount.toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-gray-600">
               <span>Livraison</span>
               <span>

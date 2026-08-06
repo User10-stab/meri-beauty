@@ -1,7 +1,19 @@
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { expireStaleOrders } from "@/actions/boutique/orders";
 import { sendWorkshopReservationReminders } from "@/actions/workshops/send-reminders";
 import { sendFormationReservationReminders } from "@/actions/formations/send-reminders";
+
+// timingSafeEqual requires equal-length buffers and throws otherwise — an
+// attacker-controlled header of the wrong length must fail closed, not
+// leak timing information via a length mismatch (see lib/autologin.js).
+function isValidCronSecret(authHeader, secret) {
+  if (!secret || !authHeader) return false;
+  const provided = Buffer.from(authHeader);
+  const expected = Buffer.from(`Bearer ${secret}`);
+  if (provided.length !== expected.length) return false;
+  return crypto.timingSafeEqual(provided, expected);
+}
 
 /**
  * Secured job runner — boutique order expiry + atelier/formation reminders.
@@ -27,7 +39,7 @@ export async function GET(req) {
   const authHeader = req.headers.get("authorization");
   const secret = process.env.CRON_SECRET;
 
-  if (!secret || authHeader !== `Bearer ${secret}`) {
+  if (!isValidCronSecret(authHeader, secret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -245,6 +245,14 @@ function AutomaticPaymentPreview({ paymentDecision }) {
   );
 }
 
+// No promo-code field here: a MANUAL-mode request has no Payment row (and no
+// online charge) until staff confirms it, and confirmation
+// (actions/appointment/manage-appointment.js#confirmAppointment) rebuilds the
+// price from scratch off the raw StaffService price for its own separate
+// payment link — there's nowhere downstream a discount applied at this step
+// would actually survive to. Promo codes for appointments only apply to the
+// AUTOMATIC/pay-now path (PaymentStep.jsx), where Payment is created
+// immediately with the discount already baked in.
 function ManualModeNotice() {
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-amber-200 bg-gradient-to-br from-amber-50 to-white">

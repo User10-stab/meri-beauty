@@ -116,6 +116,13 @@ const ALL_NAV_DATA = [
         roles: DASHBOARD_PERMISSIONS.INVOICES, // Admin only
       },
       {
+        title: "Codes promo",
+        icon: Icons.ReceiptIcon,
+        url: "/dashboard/promo-codes",
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.PROMO_CODES, // Admin only
+      },
+      {
         title: "Newsletter",
         icon: Icons.MailIcon,
         url: "/dashboard/newsletter",

@@ -20,6 +20,9 @@ import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
 import { sendFormationLowSeatsBroadcast } from "@/actions/formations/notify-low-seats";
 
 const BCRYPT_SALT_ROUNDS = 12;
+// 1-cent tolerance for float/rounding when comparing Stripe's amount_total
+// against our own expected-price calculation.
+const UNDERPAYMENT_EPSILON = 0.01;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
   ? `${process.env.NEXT_PUBLIC_APP_URL}/login`
   : "https://meribeauty.com/login";
@@ -276,6 +279,19 @@ async function processCheckoutSession(session) {
   const paidAmount = (session.amount_total ?? 0) / 100;
   const isFullPayment = paymentMethod === "ONLINE";
 
+  // Paranoid check: the webhook is the last line of defense on money, even
+  // though checkout line items are built server-side. NOTE: the deposit
+  // figure here (10%) matches the current createCheckoutSession.js stub, not
+  // computeDepositAmount's real staff-configured percentage — this whole
+  // appointment-prepayment path is a known stub pending a product decision
+  // (see SECURITY_FIXES_SPEC.md C2); update this the moment that's replaced.
+  const expectedAmount = isFullPayment ? totalAmount : totalAmount * 0.1;
+  if (paidAmount + UNDERPAYMENT_EPSILON < expectedAmount) {
+    console.error(`[stripe-webhook] UNDERPAYMENT: paid ${paidAmount} expected ${expectedAmount} for session ${session.id}`);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "underpayment" };
+  }
+
   // ── 9. Create appointment + payment + transaction atomically ─────────────
   // The findFirst check above (step 6) is a fast-path check, not the real
   // guard — two concurrent webhook deliveries can both pass it before either
@@ -363,6 +379,12 @@ async function processCheckoutSession(session) {
   } catch (err) {
     if (isAppointmentOverlapViolation(err)) {
       return handleAppointmentSlotConflict(session, customerFullName, customerEmail);
+    }
+    // Payment.transactionReference is @unique — a P2002 here means another
+    // concurrent delivery of this same event already won the idempotency
+    // check above and committed first. Not a failure, just a duplicate.
+    if (err.code === "P2002") {
+      return { received: true, alreadyProcessed: true };
     }
     throw err;
   }
@@ -507,7 +529,16 @@ async function processWorkshopCheckoutSession(session) {
   const totalAmount = Number(reservation.totalPrice);
   const paidAmount = (session.amount_total ?? 0) / 100;
 
-  const { invoice } = await prisma.$transaction(async (tx) => {
+  const expectedAmount = isFullPayment ? totalAmount : Number(reservation.depositAmount);
+  if (paidAmount + UNDERPAYMENT_EPSILON < expectedAmount) {
+    console.error(`[stripe-webhook] UNDERPAYMENT: paid ${paidAmount} expected ${expectedAmount} for session ${session.id}`);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "underpayment" };
+  }
+
+  let invoice;
+  try {
+  ({ invoice } = await prisma.$transaction(async (tx) => {
     await tx.workshopReservation.update({
       where: { id: reservation.id },
       data: { status: "CONFIRMED", holdExpiresAt: null },
@@ -522,6 +553,8 @@ async function processWorkshopCheckoutSession(session) {
         remainingAmount: Math.max(totalAmount - paidAmount, 0),
         paymentType: isFullPayment ? "ONLINE" : "DEPOSIT",
         status: isFullPayment ? "PAID" : "PARTIALLY_PAID",
+        promoCodeId: reservation.promoCodeId,
+        discountAmount: reservation.discountAmount,
         paidAt: new Date(),
         transactionReference: session.id, // idempotency key
       },
@@ -566,7 +599,13 @@ async function processWorkshopCheckoutSession(session) {
     }
 
     return { invoice };
-  });
+  }));
+  } catch (err) {
+    if (err.code === "P2002") {
+      return { received: true, alreadyProcessed: true };
+    }
+    throw err;
+  }
 
   const sessionDate = new Date(reservation.session.startDate).toLocaleDateString("fr-FR", {
     weekday: "long",
@@ -656,7 +695,16 @@ async function processFormationCheckoutSession(session) {
   const totalAmount = Number(reservation.totalPrice);
   const paidAmount = (session.amount_total ?? 0) / 100;
 
-  const { invoice } = await prisma.$transaction(async (tx) => {
+  const expectedAmount = isFullPayment ? totalAmount : Number(reservation.depositAmount);
+  if (paidAmount + UNDERPAYMENT_EPSILON < expectedAmount) {
+    console.error(`[stripe-webhook] UNDERPAYMENT: paid ${paidAmount} expected ${expectedAmount} for session ${session.id}`);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "underpayment" };
+  }
+
+  let invoice;
+  try {
+  ({ invoice } = await prisma.$transaction(async (tx) => {
     await tx.formationReservation.update({
       where: { id: reservation.id },
       data: { status: "CONFIRMED", holdExpiresAt: null },
@@ -673,6 +721,8 @@ async function processFormationCheckoutSession(session) {
         status: isFullPayment ? "PAID" : "PARTIALLY_PAID",
         paidAt: new Date(),
         transactionReference: session.id, // idempotency key
+        promoCodeId: reservation.promoCodeId,
+        discountAmount: reservation.discountAmount,
       },
     });
 
@@ -712,7 +762,13 @@ async function processFormationCheckoutSession(session) {
     }
 
     return { invoice };
-  });
+  }));
+  } catch (err) {
+    if (err.code === "P2002") {
+      return { received: true, alreadyProcessed: true };
+    }
+    throw err;
+  }
 
   const sessionDate = new Date(reservation.session.startDate).toLocaleDateString("fr-FR", {
     weekday: "long",
@@ -804,15 +860,21 @@ async function applyWorkshopSessionChangeFee(session, meta) {
   const oldSessionId = reservation.sessionId;
   const oldSessionDate = new Date(reservation.session.startDate);
 
-  await prisma.$transaction(async (tx) => {
-    await tx.workshopReservation.update({
-      where: { id: reservation.id },
+  const claimed = await prisma.$transaction(async (tx) => {
+    // Atomic claim gated on the reservation still pointing at the OLD
+    // session — this Payment row has no unique transactionReference to lean
+    // on (it's a Transaction against an existing Payment, not a new one), so
+    // without this, two near-simultaneous deliveries of the same event both
+    // pass the plain read-check above and both apply the fee.
+    const claim = await tx.workshopReservation.updateMany({
+      where: { id: reservation.id, sessionId: { not: newSessionId } },
       data: {
         sessionId: newSessionId,
         previousSessionId: oldSessionId,
         changeFeeAmount: { increment: changeFeeAmount },
       },
     });
+    if (claim.count === 0) return false;
 
     if (reservation.payment) {
       await tx.transaction.create({
@@ -825,7 +887,12 @@ async function applyWorkshopSessionChangeFee(session, meta) {
         },
       });
     }
+    return true;
   });
+
+  if (!claimed) {
+    return { received: true, alreadyProcessed: true };
+  }
 
   // The old session just freed up the seats this reservation held.
   notifyAllInWaitingList(oldSessionId).catch((err) =>
@@ -893,9 +960,13 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
   const previousSeatsCount = reservation.seatsCount;
   const isIncrease = seats > previousSeatsCount;
 
-  await prisma.$transaction(async (tx) => {
-    await tx.workshopReservation.update({
-      where: { id: reservation.id },
+  const claimed = await prisma.$transaction(async (tx) => {
+    // Atomic claim gated on the seat count still being the OLD value — same
+    // reasoning as the session-change fee above: no unique transactionReference
+    // to lean on here, so two near-simultaneous deliveries of the same event
+    // would otherwise both pass the plain read-check and both apply the fee.
+    const claim = await tx.workshopReservation.updateMany({
+      where: { id: reservation.id, seatsCount: { not: seats } },
       data: {
         seatsCount: seats,
         changeFeeAmount: { increment: changeFeeAmount },
@@ -914,6 +985,7 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
           : {}),
       },
     });
+    if (claim.count === 0) return false;
 
     if (reservation.payment) {
       await tx.transaction.create({
@@ -926,7 +998,12 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
         },
       });
     }
+    return true;
   });
+
+  if (!claimed) {
+    return { received: true, alreadyProcessed: true };
+  }
 
   sendEmail({
     to: reservation.customer.email,

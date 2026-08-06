@@ -6,6 +6,7 @@ import { stripe } from "@/lib/stripe";
 import bcrypt from "bcrypt";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { resolvePromoCode } from "@/actions/promo-codes";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -146,7 +147,7 @@ export async function checkFormationSessionAvailability(sessionId) {
 
 export async function createFormationReservation(data) {
   try {
-    const { sessionId, formationId, customerInfo, paymentMethod, isPriority, waitingListEntryId } = data;
+    const { sessionId, formationId, customerInfo, paymentMethod, isPriority, waitingListEntryId, promoCode } = data;
     const isFullPayment = paymentMethod === "FULL";
 
     if (!sessionId || !formationId || !customerInfo?.email) {
@@ -230,8 +231,21 @@ export async function createFormationReservation(data) {
     const depositPct = formation.depositPercentage ?? 30;
     const unitPrice = Number(formation.price);
     const totalPrice = unitPrice * seatsCount;
-    const depositAmount = isFullPayment ? totalPrice : (totalPrice * depositPct) / 100;
-    const balanceDue = totalPrice - depositAmount;
+
+    // Re-validated here regardless of the client's live preview — never
+    // trust a client-computed discount amount.
+    let promoCodeId = null;
+    let discountAmount = 0;
+    if (promoCode) {
+      const promoResult = await resolvePromoCode(promoCode, totalPrice);
+      if (!promoResult.success) return { success: false, message: promoResult.message };
+      promoCodeId = promoResult.promoCodeId;
+      discountAmount = promoResult.discountAmount;
+    }
+    const discountedTotal = Math.max(0, totalPrice - discountAmount);
+
+    const depositAmount = isFullPayment ? discountedTotal : (discountedTotal * depositPct) / 100;
+    const balanceDue = discountedTotal - depositAmount;
 
     // An unverified customer (brand new, or a previous guest checkout that
     // was never confirmed) reuses their still-live hold on this session
@@ -291,9 +305,11 @@ export async function createFormationReservation(data) {
               sessionId,
               customerId: user.id,
               seatsCount,
-              totalPrice,
+              totalPrice: discountedTotal,
               depositAmount,
               balanceDue,
+              promoCodeId,
+              discountAmount,
               status: "PENDING_DEPOSIT",
               holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000), // Expiration dans 15 minutes
             },

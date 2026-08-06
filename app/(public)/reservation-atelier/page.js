@@ -10,6 +10,7 @@ import { getPublicActivityById } from "@/actions/workshops/get-public-activities
 import { joinWaitingList, validateWaitingListPriority, convertWaitingListEntry } from "@/actions/workshops/waiting-list";
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
+import { PromoCodeField } from "@/components/shared/PromoCodeField";
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
@@ -57,6 +58,7 @@ function ReservationAtelierContent() {
   const [seats, setSeats] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState("DEPOSIT");
   const [form, setForm] = useState({ fullName: "", email: "", phone: "", vatNumber: "" });
+  const [appliedPromo, setAppliedPromo] = useState(null);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
 
@@ -150,10 +152,12 @@ function ReservationAtelierContent() {
   const depositPct = activity?.depositPercentage ?? 50;
   const unitPrice = Number(activity?.price || 0);
   const totalPrice = unitPrice * seats;
-  const depositAmount = (totalPrice * depositPct) / 100;
-  const balanceDue = totalPrice - depositAmount;
+  const discountAmount = appliedPromo?.discountAmount ?? 0;
+  const discountedTotal = Math.max(0, totalPrice - discountAmount);
+  const depositAmount = (discountedTotal * depositPct) / 100;
+  const balanceDue = discountedTotal - depositAmount;
   const isFullPayment = paymentMethod === "FULL";
-  const chargeAmount = isFullPayment ? totalPrice : depositAmount;
+  const chargeAmount = isFullPayment ? discountedTotal : depositAmount;
   const displayBalanceDue = isFullPayment ? 0 : balanceDue;
 
   const priceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
@@ -206,6 +210,7 @@ function ReservationAtelierContent() {
       isPriority: priorityValid,
       waitingListEntryId: waitingListId,
       paymentMethod,
+      promoCode: appliedPromo?.code ?? null,
     });
 
     if (result.success && result.url) {
@@ -569,6 +574,12 @@ function ReservationAtelierContent() {
                     <span className="text-ink/60">{unitPrice > 0 ? `${priceFormatted.format(unitPrice)} × ${seats} place${seats > 1 ? "s" : ""}` : "Gratuit"}</span>
                     <span className="font-medium text-ink">{priceFormatted.format(totalPrice)}</span>
                   </div>
+                  {discountAmount > 0 && (
+                    <div className="flex items-center justify-between text-sm text-emerald-600">
+                      <span>Réduction ({appliedPromo.code})</span>
+                      <span>-{priceFormatted.format(discountAmount)}</span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-ink/60">{isFullPayment ? "Montant total" : `Acompte (${depositPct}%)`}</span>
                     <span className="font-semibold text-gold">{priceFormatted.format(chargeAmount)}</span>
@@ -579,11 +590,18 @@ function ReservationAtelierContent() {
                   </div>
                 </div>
 
+                {unitPrice > 0 && (
+                  <>
+                    <hr className="border-ink/8" />
+                    <PromoCodeField subtotal={totalPrice} onApplied={setAppliedPromo} />
+                  </>
+                )}
+
                 <hr className="border-ink/8" />
 
                 <div className="rounded-lg bg-gold/5 px-3 py-2.5 text-xs leading-relaxed text-ink/60">
                   {isFullPayment ? (
-                    <>Vous réglez aujourd&apos;hui la totalité, soit <strong className="text-gold">{priceFormatted.format(totalPrice)}</strong>. Aucun solde ne restera à payer.</>
+                    <>Vous réglez aujourd&apos;hui la totalité, soit <strong className="text-gold">{priceFormatted.format(discountedTotal)}</strong>. Aucun solde ne restera à payer.</>
                   ) : (
                     <>Vous ne réglez aujourd&apos;hui que <strong className="text-gold">{priceFormatted.format(depositAmount)}</strong>.
                     Le solde de <strong className="text-ink/80">{priceFormatted.format(balanceDue)}</strong> sera à payer sur place.</>

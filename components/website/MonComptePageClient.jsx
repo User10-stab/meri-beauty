@@ -46,7 +46,7 @@ const STATUS_STYLE = {
 const FULFILMENT_LABELS = {
   PICKUP_PREPAID: "Retrait en boutique — payé en ligne",
   PICKUP_ON_SITE: "Retrait en boutique — à payer sur place",
-  SHIPPING_PREPAID: "Livraison à domicile",
+  SHIPPING_PREPAID: "Livraison en point relais",
 };
 
 function formatPrice(n) {

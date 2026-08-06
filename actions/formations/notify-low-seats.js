@@ -7,17 +7,19 @@ import { checkFormationSessionAvailability } from "@/actions/formations/create-f
 
 /**
  * Formation equivalent of actions/workshops/notify-low-seats.js — same
- * threshold (<3 seats left) and same audience (newsletter-opted-in
- * customers), per her explicit instruction that formation emails go out to
- * everyone on the newsletter, matching how the atelier broadcast already
- * works. PRIVATE formations are always capacity 1, so a "hurry" broadcast
- * doesn't make sense there — callers only ever invoke this for PUBLIC/GROUP
- * sessions (see the webhook call site).
+ * threshold (1-2 seats left, matching the homepage banner exactly —
+ * available === 0 must be excluded too, or booking the last seat sends
+ * "plus que 0 place !" to the newsletter) and same audience
+ * (newsletter-opted-in customers), per her explicit instruction that
+ * formation emails go out to everyone on the newsletter, matching how the
+ * atelier broadcast already works. PRIVATE formations are always capacity 1,
+ * so a "hurry" broadcast doesn't make sense there — callers only ever invoke
+ * this for PUBLIC/GROUP sessions (see the webhook call site).
  */
 export async function sendFormationLowSeatsBroadcast(sessionId) {
   try {
     const availability = await checkFormationSessionAvailability(sessionId);
-    if (!availability.success || availability.data.available >= 3 || availability.data.available < 0) {
+    if (!availability.success || availability.data.available >= 3 || availability.data.available <= 0) {
       return { success: true, sent: 0 };
     }
 

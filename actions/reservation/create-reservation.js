@@ -14,6 +14,8 @@ import {
 } from "@/lib/email-templates";
 import { computeDepositAmount } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
+import { resolvePromoCode } from "@/actions/promo-codes";
+import { isAdminRole } from "@/lib/authorization";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -304,7 +306,7 @@ export async function checkEmailExists(email) {
 export async function createReservation(data) {
   try {
     const authSession = await auth();
-    const { staffServiceId, date, time, customerInfo, paymentMethod, notes, isManualMode = false } = data;
+    const { staffServiceId, date, time, customerInfo, paymentMethod, notes, isManualMode = false, promoCode } = data;
 
     // ── 1. Validate required fields ──────────────────────────────────────────
     if (!staffServiceId || !date || !time || !customerInfo) {
@@ -376,8 +378,22 @@ export async function createReservation(data) {
     //              depending on the staff member's depositEnabled setting.
     //
     // computeDepositAmount is the single source of truth (lib/reservation-payment.js).
-    const totalAmount = Number(staffService.price);
+    const rawTotalAmount = Number(staffService.price);
     const paymentType = paymentMethod === "online" ? "ONLINE" : "ON_SITE";
+
+    // Only meaningful for the automatic pay-now path (a Payment row is
+    // created below only when !isManualMode && paymentMethod) — re-validated
+    // here regardless of any client-side preview, never trusted from the
+    // client.
+    let promoCodeId = null;
+    let discountAmount = 0;
+    if (!isManualMode && paymentMethod && promoCode) {
+      const promoResult = await resolvePromoCode(promoCode, rawTotalAmount);
+      if (!promoResult.success) return { success: false, message: promoResult.message };
+      promoCodeId = promoResult.promoCodeId;
+      discountAmount = promoResult.discountAmount;
+    }
+    const totalAmount = Math.max(0, rawTotalAmount - discountAmount);
 
     const depositEnabled = Boolean(staffService.staff?.depositEnabled);
     const depositPercentage = Number(staffService.staff?.depositPercentage ?? 0);
@@ -415,6 +431,8 @@ export async function createReservation(data) {
             remainingAmount: totalAmount,
             paymentType,
             status: "PENDING",
+            promoCodeId,
+            discountAmount,
           },
         });
       }
@@ -493,17 +511,34 @@ export async function createReservation(data) {
 /**
  * Confirms a payment and transitions the appointment to CONFIRMED.
  *
+ * Callable only by the appointment's own owner (or a dashboard role) — a
+ * paymentId alone is not proof of anything, it's just a database id that
+ * appears in the reservation response and URLs. PaymentStep.jsx signs the
+ * caller in (via the autologin token, for brand-new guests) before ever
+ * calling this, specifically so this check has a session to compare against.
+ *
  * @param {string} paymentId
  * @param {string|null} transactionReference
  */
 export async function confirmPayment(paymentId, transactionReference = null) {
   try {
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, message: "Authentification requise." };
+    }
+
     const payment = await prisma.payment.findUnique({
       where: { id: paymentId },
       include: { appointment: true },
     });
 
-    if (!payment) {
+    if (!payment || !payment.appointment) {
+      return { success: false, message: "Paiement introuvable" };
+    }
+
+    if (payment.appointment.userId !== session.user.id && !isAdminRole(session.user.role)) {
+      // Same generic message as "not found" — don't confirm existence to a
+      // caller who isn't the owner.
       return { success: false, message: "Paiement introuvable" };
     }
 

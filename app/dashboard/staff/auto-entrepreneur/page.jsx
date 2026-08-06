@@ -48,6 +48,11 @@ export default async function AutoEntrepreneurPage() {
             color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
           />
           <StatBadge
+            label="Stripe non connecté"
+            value={staffList.filter((s) => !s.stripeChargesEnabled || !s.stripePayoutsEnabled).length}
+            color="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+          />
+          <StatBadge
             label="Inactifs"
             value={staffList.filter((s) => !s.isActive).length}
             color="bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-dark-6"

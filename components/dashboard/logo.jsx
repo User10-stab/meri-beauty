@@ -23,9 +23,9 @@ export function Logo() {
       <span className="text-lg font-bold text-dark dark:text-white">
         Meri Beauty
       </span> 
-      <Link href="/dashboard" className="absolute inset-0">
+      {/* <Link href="/dashboard" className="absolute inset-0">
         <span className="sr-only">Meri Beauty Dashboard</span>
-      </Link>
+      </Link> */}
     </div>
   );
 }

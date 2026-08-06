@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
  *   success: boolean,
  *   data?: {
  *     stripeAccountId: string | null,
+ *     stripeAccountType: string | null,
  *     stripeChargesEnabled: boolean,
  *     stripePayoutsEnabled: boolean,
  *   },
@@ -29,6 +30,7 @@ export async function getStripeStatus() {
       select: {
         id: true,
         stripeAccountId: true,
+        stripeAccountType: true,
         stripeChargesEnabled: true,
         stripePayoutsEnabled: true,
       },
@@ -42,6 +44,7 @@ export async function getStripeStatus() {
       success: true,
       data: {
         stripeAccountId: staff.stripeAccountId,
+        stripeAccountType: staff.stripeAccountType,
         stripeChargesEnabled: staff.stripeChargesEnabled,
         stripePayoutsEnabled: staff.stripePayoutsEnabled,
       },

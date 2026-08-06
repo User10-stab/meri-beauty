@@ -11,8 +11,9 @@ import {
   welcomeWithCredentialsEmail,
   multiReservationConfirmationEmail,
 } from "@/lib/email-templates";
-import { computeDepositAmount } from "@/lib/reservation-payment";
+import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
+import { parseLocalDateString } from "@/lib/slot-availability";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -91,15 +92,6 @@ async function resolveOrCreateCustomer(customerInfo) {
   });
 
   if (user) {
-    if (!user.emailVerified || !user.isActive) {
-      user = await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          emailVerified: true,
-          isActive: true,
-        },
-      });
-    }
     return { user, isNewUser: false, temporaryPassword: null };
   }
 
@@ -115,7 +107,7 @@ async function resolveOrCreateCustomer(customerInfo) {
         phone: customerInfo.phone.trim(),
         password: hashedPassword,
         role: "CUSTOMER",
-        emailVerified: true, // verified implicitly via reservation flow
+        emailVerified: false,
         isActive: true,
         newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
       },
@@ -184,6 +176,11 @@ async function resolveOrCreateCustomer(customerInfo) {
  * Builds the date-only appointment date plus start/end Date objects for a
  * given calendar date, "HH:mm" time string, and service duration.
  *
+ * Accepts either a "YYYY-MM-DD" string (preferred — timezone-safe) or a Date
+ * object. Always uses parseLocalDateString so the calendar day is anchored to
+ * local midnight, preventing UTC-offset drift when the value has been
+ * serialised through a Server Action boundary.
+ *
  * @param {Date|string} date
  * @param {string} time - "HH:mm"
  * @param {number} durationMinutes
@@ -192,8 +189,9 @@ async function resolveOrCreateCustomer(customerInfo) {
 function buildAppointmentWindow(date, time, durationMinutes) {
   const [hour, minute] = time.split(":").map(Number);
 
-  const appointmentDate = new Date(date);
-  appointmentDate.setHours(0, 0, 0, 0); // date-only — no time component
+  // parseLocalDateString handles both "YYYY-MM-DD" strings and Date objects,
+  // always producing a local-midnight Date with no UTC shift.
+  const appointmentDate = parseLocalDateString(date);
 
   const startTime = new Date(appointmentDate);
   startTime.setHours(hour, minute, 0, 0);
@@ -206,7 +204,11 @@ function buildAppointmentWindow(date, time, durationMinutes) {
 
 /**
  * Checks whether an overlapping, still-active appointment already exists
- * for the given staff service and time window.
+ * for the given staff member and time window.
+ *
+ * Business rule: the conflict check is performed per staff member, not per
+ * StaffService, and each existing appointment occupies its service duration
+ * plus its own post-service margin.
  *
  * @param {string} staffServiceId
  * @param {Date} appointmentDate
@@ -214,17 +216,43 @@ function buildAppointmentWindow(date, time, durationMinutes) {
  * @param {Date} endTime
  * @returns {Promise<object|null>}
  */
-function findConflictingAppointment(staffServiceId, appointmentDate, startTime, endTime) {
-  return prisma.appointment.findFirst({
+async function findConflictingAppointment(staffServiceId, appointmentDate, startTime, endTime) {
+  const staffService = await prisma.staffService.findUnique({
+    where: { id: staffServiceId },
+    select: { staffId: true },
+  });
+
+  if (!staffService) {
+    return null;
+  }
+
+  const appointments = await prisma.appointment.findMany({
     where: {
-      staffServiceId,
+      staffService: {
+        staffId: staffService.staffId,
+      },
       date: appointmentDate,
-      startTime: { lte: endTime },
-      endTime: { gte: startTime },
       status: { in: ["PENDING", "CONFIRMED"] },
       isDeleted: false,
     },
+    include: {
+      staffService: {
+        select: { margin: true },
+      },
+    },
   });
+
+  return (
+    appointments.find((appointment) => {
+      const occupiedStart = new Date(appointment.startTime);
+      const occupiedEnd = new Date(appointment.endTime);
+      occupiedEnd.setMinutes(
+        occupiedEnd.getMinutes() + Number(appointment.staffService?.margin ?? 0)
+      );
+
+      return startTime < occupiedEnd && endTime > occupiedStart;
+    }) ?? null
+  );
 }
 
 /**
@@ -363,26 +391,20 @@ export async function createReservation(data) {
       throw err;
     }
 
-    // ── 6. Calculate payment amounts ─────────────────────────────────────────
-    //
-    // Payment method determines the charge strategy:
-    //   "online" → customer pays the full price upfront via Stripe
-    //   "cash"   → customer pays at the salon; a deposit may be required
-    //              depending on the staff member's depositEnabled setting.
-    //
-    // computeDepositAmount is the single source of truth (lib/reservation-payment.js).
+    // ── 6. Resolve the server-side payment decision ───────────────────────
     const totalAmount = Number(staffService.price);
-    const paymentType = paymentMethod === "online" ? "ONLINE" : "ON_SITE";
-
-    const depositEnabled = Boolean(staffService.staff?.depositEnabled);
-    const depositPercentage = Number(staffService.staff?.depositPercentage ?? 0);
-
-    // For online payment, the full amount is charged immediately.
-    // For salon payment, only a deposit is charged (or nothing if not required).
-    const depositAmount =
-      paymentMethod === "online"
-        ? totalAmount
-        : computeDepositAmount(totalAmount, depositEnabled, depositPercentage);
+    const paymentDecision = getReservationPaymentDecision({
+      appointmentCount: 1,
+      confirmationMode: isManualMode ? "MANUAL" : staffService.staff?.reservationConfirmationMode ?? "MANUAL",
+      depositEnabled: Boolean(staffService.staff?.depositEnabled),
+      depositPercentage: Number(staffService.staff?.depositPercentage ?? 0),
+      totalAmount,
+      paymentMethod,
+    });
+    const depositAmount = paymentDecision.depositAmount;
+    const paymentType = paymentDecision.paymentType;
+    const effectiveIsManualMode = Boolean(isManualMode || paymentDecision.isManualMode);
+    const appointmentStatus = paymentDecision.appointmentStatusBeforePayment;
 
     // ── 7. Create appointment + payment atomically ───────────────────────────
     const { appointment, payment } = await prisma.$transaction(async (tx) => {
@@ -393,14 +415,13 @@ export async function createReservation(data) {
           date: appointmentDate,
           startTime,
           endTime,
-          status: "PENDING",
+          status: appointmentStatus,
           notes: notes || null,
         },
       });
 
-      // Only create payment for automatic mode
       let payment = null;
-      if (!isManualMode && paymentMethod) {
+      if (paymentDecision.shouldCreatePaymentRecord) {
         payment = await tx.payment.create({
           data: {
             appointmentId: appointment.id,
@@ -422,13 +443,8 @@ export async function createReservation(data) {
     const serviceName = staffService.service?.name ?? "votre service";
 
     // 8a. Reservation confirmation — sent to all customers
-    //
-    // NOTE: the original file called an unimported `reservationConfirmationEmail`
-    // in the automatic-mode branch, which would throw a ReferenceError at runtime.
-    // The closest imported template is `reservationConfirmedWithPaymentLinkEmail`
-    // — using that here. Double-check this matches the intended template.
-    if (isManualMode) {
-      // Manual mode: send "reservation received" email
+    if (effectiveIsManualMode) {
+      // Manual mode: "reservation received, pending staff review" email
       await sendEmail({
         to: user.email,
         ...reservationReceivedEmail({
@@ -440,16 +456,20 @@ export async function createReservation(data) {
         }),
       }).catch((err) => console.error("[createReservation] reservation received email failed:", err));
     } else {
-      // Automatic mode: send standard confirmation email
+      // Automatic mode, cash/no-deposit path: appointment is confirmed immediately.
+      // No online payment was taken, so we send a payment confirmation showing €0
+      // paid and the full amount remaining (to be paid at the salon).
       await sendEmail({
         to: user.email,
-        ...reservationConfirmedWithPaymentLinkEmail({
+        ...paymentConfirmationEmail({
           customerName: user.fullName,
           serviceName,
           staffName,
           date: appointmentDate,
           time,
-          depositAmount,
+          paidAmount: 0,
+          totalAmount,
+          paymentMethod: "ON_SITE",
         }),
       }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
     }
@@ -460,7 +480,7 @@ export async function createReservation(data) {
     // ── 9. Return result ─────────────────────────────────────────────────────
     return {
       success: true,
-      message: isManualMode ? "Demande de réservation envoyée" : "Réservation créée avec succès",
+      message: effectiveIsManualMode ? "Demande de réservation envoyée" : "Réservation créée avec succès",
       data: {
         appointment,
         payment: payment || null, // null for manual mode
@@ -486,7 +506,13 @@ export async function createReservation(data) {
 }
 
 /**
- * Confirms a payment and transitions the appointment to CONFIRMED.
+ * Confirms an ON_SITE (cash) payment and transitions the appointment to CONFIRMED.
+ *
+ * This function is ONLY for cash/on-site payments confirmed by staff at the
+ * salon. It must NEVER be called for ONLINE or DEPOSIT payments — those are
+ * exclusively confirmed by the Stripe webhook (checkout.session.completed).
+ * Calling this on an online payment would mark it paid without Stripe
+ * verification, which is a critical security violation.
  *
  * @param {string} paymentId
  * @param {string|null} transactionReference
@@ -502,13 +528,31 @@ export async function confirmPayment(paymentId, transactionReference = null) {
       return { success: false, message: "Paiement introuvable" };
     }
 
+    // Safety guard: refuse to confirm online/deposit payments from this function.
+    // Those must be confirmed exclusively by the Stripe webhook.
+    if (payment.paymentType === "ONLINE" || payment.paymentType === "DEPOSIT") {
+      console.error(
+        `[confirmPayment] Attempted to confirm a ${payment.paymentType} payment (id=${paymentId}) outside of the Stripe webhook. This is not allowed.`
+      );
+      return {
+        success: false,
+        message: "Ce paiement doit être confirmé par Stripe. Opération refusée.",
+      };
+    }
+
     await prisma.$transaction(async (tx) => {
+      // ON_SITE cash payment: the customer pays the full remaining amount at the salon.
+      // paidAmount  = totalAmount (full price paid in one go at the salon)
+      // remainingAmount = 0 (nothing left to pay)
+      // status      = PAID
+      const totalAmount = Number(payment.totalAmount);
+
       await tx.payment.update({
         where: { id: paymentId },
         data: {
-          paidAmount: Number(payment.depositAmount),
-          remainingAmount: Number(payment.totalAmount) - Number(payment.depositAmount),
-          status: payment.paymentType === "ONLINE" ? "PAID" : "PARTIALLY_PAID",
+          paidAmount: totalAmount,
+          remainingAmount: 0,
+          status: "PAID",
           paidAt: new Date(),
           transactionReference,
         },
@@ -517,9 +561,9 @@ export async function confirmPayment(paymentId, transactionReference = null) {
       await tx.transaction.create({
         data: {
           paymentId,
-          amount: Number(payment.depositAmount),
-          method: payment.paymentType === "ONLINE" ? "ONLINE" : "CARD",
-          transactionType: "DEPOSIT",
+          amount: totalAmount,
+          method: "CASH",
+          transactionType: "FINAL_PAYMENT",
           paidAt: new Date(),
         },
       });

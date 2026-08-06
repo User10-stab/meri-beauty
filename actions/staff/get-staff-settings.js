@@ -51,6 +51,7 @@ export async function getStaffSettings() {
         reservationConfirmationMode: staff.reservationConfirmationMode,
         depositEnabled: staff.depositEnabled,
         depositPercentage: Number(staff.depositPercentage),
+        allowedPaymentMethods: staff.allowedPaymentMethods,
         contract: staff.contracts[0]
           ? {
               id: staff.contracts[0].id,

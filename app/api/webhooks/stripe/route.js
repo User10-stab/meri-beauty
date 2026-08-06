@@ -1,6 +1,54 @@
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 
+function toDecimal(value) {
+  return Number(value ?? 0);
+}
+
+function toMinorUnitCents(value) {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 0;
+  }
+
+  return Math.round(numericValue * 100);
+}
+
+function normalizePaymentScenario(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function validateCheckoutSessionMetadata(session) {
+  const metadata = session?.metadata ?? {};
+  const appointmentId = String(metadata.appointmentId ?? "").trim();
+  const paymentId = String(metadata.paymentId ?? "").trim();
+  const paymentScenario = normalizePaymentScenario(metadata.paymentScenario);
+  const issues = [];
+
+  if (!appointmentId) {
+    issues.push("missing appointmentId");
+  }
+
+  if (!paymentId) {
+    issues.push("missing paymentId");
+  }
+
+  if (!paymentScenario || (paymentScenario !== "FULL_ONLINE" && paymentScenario !== "DEPOSIT_ONLINE")) {
+    issues.push(`unsupported paymentScenario: ${paymentScenario || "<empty>"}`);
+  }
+
+  return {
+    appointmentId,
+    paymentId,
+    paymentScenario,
+    issues,
+  };
+}
+
 /**
  * Stripe Connect Webhook Endpoint
  *
@@ -66,6 +114,197 @@ async function handleAccountUpdated(account) {
   );
 }
 
+async function handleCheckoutSessionCompleted(session) {
+  const checkoutSessionId = session?.id || null;
+  const paymentIntentId = session?.payment_intent || null;
+
+  if (!checkoutSessionId) {
+    console.warn("[Stripe Webhook] checkout.session.completed missing checkout session ID");
+    return;
+  }
+
+  const metadataValidation = validateCheckoutSessionMetadata(session);
+  const { appointmentId, paymentId, paymentScenario, issues } = metadataValidation;
+
+  if (!appointmentId || !paymentId || issues.length > 0) {
+    console.warn(
+      `[Stripe Webhook] checkout.session.completed metadata validation failed for ${checkoutSessionId}`,
+      { issues, metadata: session?.metadata ?? {} }
+    );
+    return;
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${paymentId} FOR UPDATE`;
+
+    const existingPayment = await tx.payment.findUnique({
+      where: { id: paymentId },
+      include: {
+        appointment: {
+          include: {
+            staffService: {
+              include: {
+                staff: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!existingPayment) {
+      console.warn(`[Stripe Webhook] Payment not found for checkout session ${checkoutSessionId}`);
+      return { processed: false, reason: "payment-not-found" };
+    }
+
+    if (existingPayment.status === "PAID" || existingPayment.status === "PARTIALLY_PAID") {
+      console.info(`[Stripe Webhook] Payment ${paymentId} already processed (status=${existingPayment.status}), skipping`);
+      return { processed: false, reason: "already-processed" };
+    }
+
+    const amountReceivedCents = Number(session?.amount_total ?? 0);
+    const totalAmount = toDecimal(existingPayment.totalAmount);
+    const depositAmount = toDecimal(existingPayment.depositAmount);
+    const expectedAmountCents = paymentScenario === "FULL_ONLINE"
+      ? toMinorUnitCents(totalAmount)
+      : toMinorUnitCents(depositAmount);
+
+    if (amountReceivedCents !== expectedAmountCents) {
+      console.error(
+        `[Stripe Webhook] Amount mismatch for checkout session ${checkoutSessionId}: expected ${expectedAmountCents} cents, received ${amountReceivedCents} cents`
+      );
+      return { processed: false, reason: "amount-mismatch" };
+    }
+
+    const nextPaidAmount = paymentScenario === "FULL_ONLINE" ? totalAmount : depositAmount;
+    const nextRemainingAmount = Math.max(0, totalAmount - nextPaidAmount);
+    const nextPaymentStatus = nextRemainingAmount > 0 ? "PARTIALLY_PAID" : "PAID";
+
+    const appointment = existingPayment.appointment;
+    const confirmationMode = appointment?.staffService?.staff?.reservationConfirmationMode ?? "MANUAL";
+
+    // Appointment confirmation rule for AUTOMATIC mode:
+    //
+    // The appointment becomes CONFIRMED as soon as the customer completes
+    // the required online payment — regardless of whether a remaining
+    // balance is still owed at the salon.
+    //
+    //   FULL_ONLINE  → full amount paid now  → CONFIRMED
+    //   DEPOSIT_ONLINE → deposit paid now, rest at salon → CONFIRMED
+    //   MANUAL mode  → staff must approve manually → stays PENDING
+    //
+    // We confirm on any successful Stripe payment (PAID or PARTIALLY_PAID)
+    // when the staff's confirmation mode is AUTOMATIC.
+    const nextAppointmentStatus = confirmationMode === "AUTOMATIC" ? "CONFIRMED" : "PENDING";
+
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        paidAmount: nextPaidAmount,
+        remainingAmount: nextRemainingAmount,
+        status: nextPaymentStatus,
+        paidAt: new Date(),
+        transactionReference: checkoutSessionId,
+      },
+    });
+
+    await tx.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        status: nextAppointmentStatus,
+      },
+    });
+
+    await tx.transaction.create({
+      data: {
+        paymentId,
+        amount: nextPaidAmount,
+        method: "ONLINE",
+        transactionType: paymentScenario === "FULL_ONLINE" ? "FINAL_PAYMENT" : "DEPOSIT",
+        paidAt: new Date(),
+        stripeCheckoutSessionId: checkoutSessionId,
+        stripePaymentIntentId: paymentIntentId,
+      },
+    });
+
+    console.info(
+      `[Stripe Webhook] Processed checkout session ${checkoutSessionId}`,
+      {
+        paymentId,
+        appointmentId,
+        paymentScenario,
+        amountReceivedCents,
+        expectedAmountCents,
+        nextPaymentStatus,
+        nextAppointmentStatus,
+      }
+    );
+
+    return { processed: true };
+  });
+
+  if (!result?.processed) {
+    if (result?.reason === "amount-mismatch") {
+      return;
+    }
+  }
+}
+
+async function handlePaymentIntentFailed(paymentIntent) {
+  const paymentIntentId = paymentIntent?.id || null;
+
+  if (!paymentIntentId) {
+    console.warn("[Stripe Webhook] payment_intent.payment_failed missing payment intent ID");
+    return;
+  }
+
+  // Find the transaction by payment intent ID
+  const transaction = await prisma.transaction.findFirst({
+    where: {
+      stripePaymentIntentId: paymentIntentId,
+    },
+    include: {
+      payment: {
+        include: {
+          appointment: true,
+        },
+      },
+    },
+  });
+
+  if (!transaction) {
+    console.warn(`[Stripe Webhook] Transaction not found for payment intent ${paymentIntentId}`);
+    return;
+  }
+
+  const payment = transaction.payment;
+
+  // Update payment status to FAILED
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      status: "FAILED",
+    },
+  });
+
+  // Cancel the appointment if payment failed
+  await prisma.appointment.update({
+    where: { id: payment.appointmentId },
+    data: {
+      status: "CANCELLED",
+    },
+  });
+
+  console.info(
+    `[Stripe Webhook] Payment failed for payment intent ${paymentIntentId}`,
+    {
+      paymentId: payment.id,
+      appointmentId: payment.appointmentId,
+      failureReason: paymentIntent?.last_payment_error?.message || "Unknown",
+    }
+  );
+}
+
 // ─── POST /api/webhooks/stripe ──────────────────────────────────────────────
 
 export async function POST(request) {
@@ -82,11 +321,24 @@ export async function POST(request) {
     }
 
     // ── 3. Verify the webhook secret is configured ───────────────────────
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    // Direct charges fire on connected accounts and are delivered via a
+    // Connect webhook endpoint. The signing secret for a Connect webhook
+    // is different from the platform webhook secret. Store it in
+    // STRIPE_CONNECT_WEBHOOK_SECRET in your environment variables.
+    //
+    // How to set this up in the Stripe Dashboard:
+    //   Developers → Webhooks → Add endpoint
+    //   URL: https://yourdomain.com/api/webhooks/stripe
+    //   Listen to: "Events on Connected accounts"
+    //   Events: checkout.session.completed, account.updated
+    //
+    // The signing secret shown for that endpoint is your
+    // STRIPE_CONNECT_WEBHOOK_SECRET value.
+    const webhookSecret = process.env.STRIPE_CONNECT_WEBHOOK_SECRET;
 
     if (!webhookSecret) {
       console.error(
-        "[Stripe Webhook] STRIPE_WEBHOOK_SECRET environment variable is not set"
+        "[Stripe Webhook] STRIPE_CONNECT_WEBHOOK_SECRET environment variable is not set"
       );
       return new Response("Webhook secret not configured", { status: 500 });
     }
@@ -109,17 +361,28 @@ export async function POST(request) {
     }
 
     // ── 5. Route the event to the appropriate handler ────────────────────
+    // For Connect webhooks, event.account identifies the connected account
+    // that triggered the event (e.g. the staff's Stripe account for a
+    // direct charge checkout.session.completed).
+    const connectedAccountId = event.account ?? null;
+
     switch (event.type) {
       case "account.updated":
         await handleAccountUpdated(event.data.object);
         break;
 
+      case "checkout.session.completed":
+        await handleCheckoutSessionCompleted(event.data.object);
+        break;
+
+      case "payment_intent.payment_failed":
+        await handlePaymentIntentFailed(event.data.object);
+        break;
+
       default:
-        // Log unhandled event types for debugging — Stripe sends many
-        // event types (payment_intent.*, charge.*, etc.) that we don't
-        // need to handle for this integration.
         console.log(
-          `[Stripe Webhook] Unhandled event type: ${event.type}`
+          `[Stripe Webhook] Unhandled event type: ${event.type}`,
+          connectedAccountId ? `(account: ${connectedAccountId})` : ""
         );
     }
 

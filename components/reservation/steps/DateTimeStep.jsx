@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { findNearestAvailability } from "@/actions/reservation/find-nearest-availability";
 import { getAvailableSlots, getMonthAvailability } from "@/actions/reservation/get-available-slots";
+import { hasReservationWindow } from "@/lib/slot-availability";
 import {
   ChevronLeft,
   ChevronRight,
@@ -12,9 +13,77 @@ import {
   CalendarDays,
   Sparkles,
   CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import Image from "next/image";
 import toast from "react-hot-toast";
+
+// ─── Availability re-validation helpers ───────────────────────────────────────
+
+/**
+ * Re-validates a single (staffServiceId, date, time) reservation window right
+ * before the user advances to the next step. Returns true when the window is
+ * still free, false (and shows an error toast) when it is no longer available.
+ *
+ * @param {string} staffServiceId
+ * @param {Date}   date
+ * @param {string} time           — "HH:MM"
+ * @returns {Promise<boolean>}
+ */
+async function validateSlotAvailability(staffServiceId, date, time) {
+  if (!staffServiceId || !date || !time) return false;
+
+  const result = await getAvailableSlots(staffServiceId, date);
+
+  if (!result.success) {
+    toast.error(result.message || "Impossible de vérifier la disponibilité du créneau.");
+    return false;
+  }
+
+  if (!result.data.isWorkingDay) {
+    const reason = result.data.reason;
+    const msg =
+      UNAVAILABLE_REASON_MESSAGES[reason] ||
+      "Ce jour n'est plus disponible. Veuillez choisir une autre date.";
+    toast.error(msg);
+    return false;
+  }
+
+  const windowStillAvailable = hasReservationWindow(
+    result.data.reservationWindows ?? [],
+    time
+  );
+
+  if (!windowStillAvailable) {
+    toast.error(
+      "Ce créneau n'est plus disponible. Veuillez en sélectionner un autre."
+    );
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Re-validates every (staffServiceId, date, time) pair in a multi-draft
+ * schedule.  Returns true only when all slots are still free.
+ *
+ * @param {Array<{ staffService: { id: string }, duration: number }>} drafts
+ * @param {{ draftIndex: number, date: string, time: string }[]}       appointments
+ * @returns {Promise<boolean>}
+ */
+async function validateMultiSlotAvailability(drafts, appointments) {
+  for (const appt of appointments) {
+    const draft = drafts[appt.draftIndex];
+    const staffServiceId = draft?.staffService?.id;
+    const date = new Date(appt.date);
+    const time = appt.time;
+
+    const ok = await validateSlotAvailability(staffServiceId, date, time);
+    if (!ok) return false;
+  }
+  return true;
+}
 
 // ─── Calendar constants & helpers ─────────────────────────────────────────────
 
@@ -50,6 +119,12 @@ function isDateInPast(date) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return date < today;
+}
+
+function formatTimeFromMinutes(minutes) {
+  const hour = Math.floor(minutes / 60);
+  const minute = minutes % 60;
+  return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 
 const UNAVAILABLE_REASON_MESSAGES = {
@@ -267,7 +342,16 @@ function EmptyState({ message }) {
 
 // ─── Proposal cards ───────────────────────────────────────────────────────────
 
-function SingleProposalCard({ proposal, selected, onSelect, index }) {
+function SingleProposalCard({ proposal, drafts, selected, onSelect, index }) {
+  const draft = drafts[0];
+  const duration = draft?.duration ?? 60;
+  
+  // Calculate end time
+  const [hours, minutes] = proposal.time.split(':').map(Number);
+  const endMinutes = hours * 60 + minutes + duration;
+  const endTime = formatTimeFromMinutes(endMinutes);
+  const timeRange = `${proposal.time} → ${endTime}`;
+
   return (
     <button
       type="button"
@@ -293,7 +377,7 @@ function SingleProposalCard({ proposal, selected, onSelect, index }) {
           <p className="text-base font-semibold text-[#2F3A2E]">{formatDateLabel(proposal.date)}</p>
           <p className="mt-1 flex items-center gap-1.5 text-sm text-[#C8A46A]">
             <Clock size={15} />
-            {proposal.time}
+            {timeRange}
           </p>
         </div>
         {selected && <CheckCircle2 size={22} className="flex-shrink-0 text-[#C8A46A]" />}
@@ -336,6 +420,12 @@ function SameDayProposalCard({ proposal, drafts, selected, onSelect, index }) {
           <div className="mt-4 space-y-2">
             {proposal.appointments.map((appt) => {
               const draft = drafts[appt.draftIndex];
+              const duration = draft?.duration ?? 60;
+              const [hours, minutes] = appt.time.split(':').map(Number);
+              const endMinutes = hours * 60 + minutes + duration;
+              const endTime = formatTimeFromMinutes(endMinutes);
+              const timeRange = `${appt.time} → ${endTime}`;
+              
               return (
                 <div
                   key={appt.draftIndex}
@@ -344,7 +434,7 @@ function SameDayProposalCard({ proposal, drafts, selected, onSelect, index }) {
                   <span className="font-medium text-[#2F3A2E]">
                     {draft?.service?.name ?? `Rendez-vous ${appt.draftIndex + 1}`}
                   </span>
-                  <span className="text-[#C8A46A]">{appt.time}</span>
+                  <span className="text-[#C8A46A]">{timeRange}</span>
                 </div>
               );
             })}
@@ -372,7 +462,7 @@ function AppointmentDateCard({
   onTimeSelect,
 }) {
   const [open, setOpen] = useState(true);
-  const [availableSlots, setAvailableSlots] = useState([]);
+  const [availableWindows, setAvailableWindows] = useState([]);
   const [disabledDates, setDisabledDates] = useState(new Set());
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(selectedDate ?? new Date());
@@ -388,22 +478,21 @@ function AppointmentDateCard({
 
   useEffect(() => {
     if (!selectedDate || !staffServiceId) {
-      setAvailableSlots([]);
+      setAvailableWindows([]);
       return;
     }
 
     setLoadingSlots(true);
     getAvailableSlots(staffServiceId, selectedDate).then((result) => {
       if (result.success) {
-        const slots = (result.data.slots || []).filter((s) => s.available);
-        setAvailableSlots(slots);
+        setAvailableWindows(result.data.reservationWindows || []);
 
         if (!result.data.isWorkingDay && result.data.reason) {
           toast.error(UNAVAILABLE_REASON_MESSAGES[result.data.reason] || "Ce jour n'est pas disponible");
         }
       } else {
         toast.error(result.message || "Erreur lors du chargement");
-        setAvailableSlots([]);
+        setAvailableWindows([]);
       }
       setLoadingSlots(false);
     });
@@ -490,25 +579,25 @@ function AppointmentDateCard({
               <div className="flex h-24 items-center justify-center">
                 <div className="h-7 w-7 animate-spin rounded-full border-4 border-[#C8A46A] border-t-transparent" />
               </div>
-            ) : availableSlots.length === 0 ? (
+            ) : availableWindows.length === 0 ? (
               <div className="flex h-24 items-center justify-center text-xs text-gray-400">
                 Aucun créneau disponible ce jour
               </div>
             ) : (
               <div className="grid max-h-48 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
-                {availableSlots.map((slot) => (
+                {availableWindows.map((window) => (
                   <button
-                    key={slot.time}
+                    key={window.startTime}
                     type="button"
-                    onClick={() => onTimeSelect(slot.time)}
+                    onClick={() => onTimeSelect(window.startTime)}
                     className={`rounded-lg px-2 py-2.5 text-xs font-medium transition-all ${
-                      selectedTime === slot.time
+                      selectedTime === window.startTime
                         ? "bg-[#C8A46A] text-white"
                         : "border-2 border-gray-200 bg-white text-[#2F3A2E] hover:border-[#C8A46A]"
                     }`}
                   >
                     <Clock size={13} className="mx-auto mb-1" />
-                    {slot.time}
+                    {window.label}
                   </button>
                 ))}
               </div>
@@ -549,9 +638,9 @@ function MultiDayManualView({ drafts, perDraftDates, perDraftTimes, onDraftDateS
 
 // ─── Single-draft direct calendar + slot picker ───────────────────────────────
 
-function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTimeSelect, onConfirm }) {
+function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTimeSelect, onConfirm, validating }) {
   const [disabledDates, setDisabledDates] = useState(new Set());
-  const [availableSlots, setAvailableSlots] = useState([]);
+  const [availableWindows, setAvailableWindows] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [currentMonth, setCurrentMonth] = useState(selectedDate ?? new Date());
 
@@ -565,16 +654,16 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
     });
   }, [staffServiceId, currentMonth]);
 
-  // Load available slots whenever the selected date changes
+  // Load available reservation windows whenever the selected date changes
   useEffect(() => {
     if (!selectedDate || !staffServiceId) {
-      setAvailableSlots([]);
+      setAvailableWindows([]);
       return;
     }
     setLoadingSlots(true);
     getAvailableSlots(staffServiceId, selectedDate).then((result) => {
       if (result.success) {
-        setAvailableSlots((result.data.slots || []).filter((s) => s.available));
+        setAvailableWindows(result.data.reservationWindows || []);
         if (!result.data.isWorkingDay && result.data.reason) {
           toast.error(
             UNAVAILABLE_REASON_MESSAGES[result.data.reason] || "Ce jour n'est pas disponible"
@@ -582,7 +671,7 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
         }
       } else {
         toast.error(result.message || "Erreur lors du chargement");
-        setAvailableSlots([]);
+        setAvailableWindows([]);
       }
       setLoadingSlots(false);
     });
@@ -622,25 +711,25 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
           <div className="flex h-28 items-center justify-center">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#C8A46A] border-t-transparent" />
           </div>
-        ) : availableSlots.length === 0 ? (
+        ) : availableWindows.length === 0 ? (
           <div className="flex h-28 items-center justify-center text-sm text-gray-400">
             Aucun créneau disponible ce jour
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-            {availableSlots.map((slot) => (
+            {availableWindows.map((window) => (
               <button
-                key={slot.time}
+                key={window.startTime}
                 type="button"
-                onClick={() => onTimeSelect(slot.time)}
+                onClick={() => onTimeSelect(window.startTime)}
                 className={`rounded-lg px-2 py-2.5 text-xs font-medium transition-all ${
-                  selectedTime === slot.time
+                  selectedTime === window.startTime
                     ? "bg-[#C8A46A] text-white"
                     : "border-2 border-gray-200 bg-white text-[#2F3A2E] hover:border-[#C8A46A]"
                 }`}
               >
                 <Clock size={13} className="mx-auto mb-1" />
-                {slot.time}
+                {window.label}
               </button>
             ))}
           </div>
@@ -652,9 +741,21 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
         <button
           type="button"
           onClick={onConfirm}
-          className="w-full rounded-xl bg-[#C8A46A] px-6 py-4 text-sm font-semibold text-white transition-all hover:bg-[#B8945A]"
+          disabled={validating}
+          className={`w-full rounded-xl px-6 py-4 text-sm font-semibold text-white transition-all ${
+            validating
+              ? "cursor-not-allowed bg-[#C8A46A]/60"
+              : "bg-[#C8A46A] hover:bg-[#B8945A]"
+          }`}
         >
-          Confirmer ce créneau
+          {validating ? (
+            <span className="flex items-center justify-center gap-2">
+              <Loader2 size={16} className="animate-spin" />
+              Vérification en cours…
+            </span>
+          ) : (
+            "Confirmer ce créneau"
+          )}
         </button>
       )}
     </div>
@@ -668,6 +769,7 @@ function AutoProposalView({
   selectedIndex,
   onSelect,
   onConfirm,
+  validating,
 }) {
   const [loading, setLoading] = useState(true);
   const [proposals, setProposals] = useState([]);
@@ -722,6 +824,7 @@ function AutoProposalView({
               <SingleProposalCard
                 key={`${proposal.date}-${proposal.time}`}
                 proposal={proposal}
+                drafts={drafts}
                 index={i}
                 selected={selectedIndex === i}
                 onSelect={() => onSelect(i, proposal)}
@@ -747,9 +850,21 @@ function AutoProposalView({
         <button
           type="button"
           onClick={onConfirm}
-          className="w-[200px] rounded-xl bg-[#C8A46A] px-6 py-4 text-sm font-semibold text-white transition-all hover:bg-[#B8945A]"
+          disabled={validating}
+          className={`w-[200px] rounded-xl px-6 py-4 text-sm font-semibold text-white transition-all ${
+            validating
+              ? "cursor-not-allowed bg-[#C8A46A]/60"
+              : "bg-[#C8A46A] hover:bg-[#B8945A]"
+          }`}
         >
-          Confirmer cet horaire
+          {validating ? (
+            <span className="flex items-center justify-center gap-2">
+              <Loader2 size={16} className="animate-spin" />
+              Vérification…
+            </span>
+          ) : (
+            "Confirmer cet horaire"
+          )}
         </button>
       )}
      </div>
@@ -784,6 +899,9 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
   // Single-draft direct selection state
   const [singleDate, setSingleDate] = useState(data.date ?? null);
   const [singleTime, setSingleTime] = useState(data.time ?? null);
+
+  // Shared validation-in-progress flag — shown on all confirm buttons
+  const [validating, setValidating] = useState(false);
 
   const handleModeChange = (mode) => {
     setSchedulingMode(mode);
@@ -829,12 +947,26 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
     updateData({ time });
   };
 
-  const handleSingleConfirm = () => {
+  const handleSingleConfirm = async () => {
     if (!singleDate || !singleTime) {
       toast.error("Veuillez sélectionner une date et une heure");
       return;
     }
+
     const draft = drafts[0];
+    const staffServiceId = draft?.staffService?.id ?? data.staffService?.id;
+
+    setValidating(true);
+    const slotOk = await validateSlotAvailability(staffServiceId, singleDate, singleTime);
+    setValidating(false);
+
+    if (!slotOk) {
+      // Clear the selected time so the user must pick another valid slot
+      setSingleTime(null);
+      updateData({ time: null });
+      return;
+    }
+
     updateData({
       date:        singleDate,
       time:        singleTime,
@@ -865,25 +997,56 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
     drafts.length > 0 &&
     drafts.every((_, i) => perDraftDates[i] && perDraftTimes[i]);
 
-  const handleAutoConfirm = () => {
+  const handleAutoConfirm = async () => {
     if (!selectedProposal) {
       toast.error("Veuillez sélectionner un créneau");
       return;
     }
+
+    // Build the appointments list from the proposal so we can re-validate
+    // each individual slot before advancing.
+    const appointments = selectedProposal.appointments
+      ? selectedProposal.appointments
+      : [{ draftIndex: 0, date: selectedProposal.date, time: selectedProposal.time }];
+
+    setValidating(true);
+    const allOk = await validateMultiSlotAvailability(drafts, appointments);
+    setValidating(false);
+
+    if (!allOk) {
+      // Clear the selection so the user must pick a new proposal
+      setSelectedIndex(null);
+      setSelectedProposal(null);
+      updateData({ selectedScheduleProposal: null, sameDayDate: null });
+      return;
+    }
+
     applySameDaySelection(selectedProposal);
     nextStep();
   };
 
-  const handleMultiDayConfirm = () => {
+  const handleMultiDayConfirm = async () => {
     if (!allMultiDaySelectionsComplete) {
       toast.error("Veuillez choisir une date et une heure pour chaque rendez-vous");
       return;
     }
+
     const appointments = drafts.map((_, i) => ({
       draftIndex: i,
       date: perDraftDates[i].toISOString(),
       time: perDraftTimes[i],
     }));
+
+    setValidating(true);
+    const allOk = await validateMultiSlotAvailability(drafts, appointments);
+    setValidating(false);
+
+    if (!allOk) {
+      // Don't clear dates/times — only the conflicting slot is invalid.
+      // The user can see which slot failed and pick a new time for it.
+      return;
+    }
+
     updateData({
       schedulingMode: "multi-day",
       perDraftDates,
@@ -916,6 +1079,7 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
             onDateSelect={handleSingleDateSelect}
             onTimeSelect={handleSingleTimeSelect}
             onConfirm={handleSingleConfirm}
+            validating={validating}
           />
         </div>
       )}
@@ -945,9 +1109,21 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
                     <button
                       type="button"
                       onClick={handleMultiDayConfirm}
-                      className="w-full rounded-xl bg-[#C8A46A] px-6 py-4 text-sm font-semibold text-white transition-all hover:bg-[#B8945A]"
+                      disabled={validating}
+                      className={`w-full rounded-xl px-6 py-4 text-sm font-semibold text-white transition-all ${
+                        validating
+                          ? "cursor-not-allowed bg-[#C8A46A]/60"
+                          : "bg-[#C8A46A] hover:bg-[#B8945A]"
+                      }`}
                     >
-                      Confirmer les horaires
+                      {validating ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Loader2 size={16} className="animate-spin" />
+                          Vérification en cours…
+                        </span>
+                      ) : (
+                        "Confirmer les horaires"
+                      )}
                     </button>
                   )}
                 </>
@@ -957,6 +1133,7 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
                   selectedIndex={selectedIndex}
                   onSelect={handleSelect}
                   onConfirm={handleAutoConfirm}
+                  validating={validating}
                 />
               )}
             </div>

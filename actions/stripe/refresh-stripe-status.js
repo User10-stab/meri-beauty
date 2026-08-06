@@ -56,6 +56,7 @@ export async function refreshStripeStatus() {
     await prisma.staff.update({
       where: { id: staff.id },
       data: {
+        stripeAccountType: account.type,
         stripeChargesEnabled: chargesEnabled,
         stripePayoutsEnabled: payoutsEnabled,
       },
@@ -64,6 +65,7 @@ export async function refreshStripeStatus() {
     return {
       success: true,
       data: {
+        accountType: account.type,
         chargesEnabled,
         payoutsEnabled,
         detailsSubmitted,

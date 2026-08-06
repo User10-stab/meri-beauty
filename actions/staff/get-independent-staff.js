@@ -29,6 +29,10 @@ export async function getIndependentStaff() {
         hireDate: true,
         createdAt: true,
         updatedAt: true,
+        stripeAccountId: true,
+        stripeAccountType: true,
+        stripeChargesEnabled: true,
+        stripePayoutsEnabled: true,
         user: {
           select: {
             id: true,
@@ -76,6 +80,11 @@ export async function getIndependentStaff() {
       hireDate: s.hireDate ? s.hireDate.toISOString() : null,
       createdAt: s.createdAt.toISOString(),
       updatedAt: s.updatedAt.toISOString(),
+      // Stripe Connect data
+      stripeAccountId: s.stripeAccountId,
+      stripeAccountType: s.stripeAccountType,
+      stripeChargesEnabled: s.stripeChargesEnabled,
+      stripePayoutsEnabled: s.stripePayoutsEnabled,
       // Compliance data
       workingHoursCount: s._count.workingHours,
       userIsDeleted: s.user.isDeleted,

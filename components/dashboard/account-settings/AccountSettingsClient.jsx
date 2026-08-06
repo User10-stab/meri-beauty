@@ -8,6 +8,7 @@ import {
   FileText,
   Settings2,
   Clock,
+  CreditCard,
   Loader2,
   Save,
   Upload,
@@ -24,6 +25,7 @@ import { updateStaffProfile } from "@/actions/staff/update-staff-profile";
 import { updateReservationSettings } from "@/actions/staff/update-reservation-settings";
 import { upsertMyWorkingHours } from "@/actions/staff/upsert-my-working-hours";
 import { createStaffTimeOff } from "@/actions/staff/manage-time-off";
+import { updatePaymentSettings } from "@/actions/staff/update-payment-settings";
 import Button from "@/components/ui/Button";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -170,6 +172,7 @@ export function AccountSettingsClient({ initialData }) {
         <ContractSection data={data} />
         <ReservationSettingsSection data={data} onSuccess={(updated) => setData((prev) => ({ ...prev, ...updated }))} />
       </div>
+      <PaymentSettingsSection data={data} onSuccess={(updated) => setData((prev) => ({ ...prev, ...updated }))} />
       <WorkingHoursSection data={data} onSuccess={(wh) => setData((prev) => ({ ...prev, workingHours: wh }))} />
       <TimeOffSection data={data} onSuccess={(timeOffs) => setData((prev) => ({ ...prev, timeOffs }))} />
     </div>
@@ -742,7 +745,84 @@ function ReservationSettingsSection({ data, onSuccess }) {
   );
 }
 
-// ─── Section 5: Working Hours ──────────────────────────────────────────────
+// ─── Section 5: Payment Settings ───────────────────────────────────────────
+
+const PAYMENT_METHOD_LABELS = {
+  BOTH: "Paiement en ligne et en espèces",
+  ONLINE_ONLY: "Paiement en ligne uniquement",
+  CASH_ONLY: "Paiement en espèces uniquement",
+};
+
+const PAYMENT_METHOD_DESCRIPTIONS = {
+  BOTH: "Les clients pourront payer en ligne ou au salon.",
+  ONLINE_ONLY: "Les clients ne pourront payer qu'en ligne.",
+  CASH_ONLY: "Les clients ne pourront payer qu'au salon.",
+};
+
+function PaymentSettingsSection({ data, onSuccess }) {
+  const [isPending, startTransition] = useTransition();
+
+  const [allowedPaymentMethods, setAllowedPaymentMethods] = useState(
+    data?.allowedPaymentMethods ?? "BOTH"
+  );
+
+  function handleSave() {
+    startTransition(async () => {
+      const res = await updatePaymentSettings({ allowedPaymentMethods });
+      if (res.success) {
+        toast.success(res.message);
+        onSuccess({ allowedPaymentMethods });
+      } else {
+        toast.error(res.message);
+      }
+    });
+  }
+
+  return (
+    <SectionCard
+      icon={CreditCard}
+      title="Paramètres de paiement"
+      description="Choisissez les modes de paiement que vous acceptez pour vos services."
+    >
+      <div className="space-y-4">
+        <div>
+          <Label required>Modes de paiement acceptés</Label>
+          <div className="mt-2 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+            {Object.entries(PAYMENT_METHOD_LABELS).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setAllowedPaymentMethods(key)}
+                className={`rounded-lg border px-3.5 py-2.5 text-left transition-all ${
+                  allowedPaymentMethods === key
+                    ? "border-gray-900 bg-gray-50 dark:border-white dark:bg-gray-800"
+                    : "border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:hover:bg-gray-800"
+                }`}
+              >
+                <div className="text-xs font-semibold text-gray-900 dark:text-white">{label}</div>
+                <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                  {PAYMENT_METHOD_DESCRIPTIONS[key]}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex justify-end border-t border-gray-100 pt-4 dark:border-gray-800">
+          <Button onClick={handleSave} disabled={isPending}>
+            {isPending ? (
+              <><Loader2 size={16} className="animate-spin" /> Enregistrement…</>
+            ) : (
+              <><Save size={16} /> Enregistrer les paramètres</>
+            )}
+          </Button>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+// ─── Section 6: Working Hours ──────────────────────────────────────────────
 
 function WorkingHoursSection({ data, onSuccess }) {
   const [isPending, startTransition] = useTransition();

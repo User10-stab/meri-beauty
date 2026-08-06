@@ -35,10 +35,18 @@ export function BarcodeLabelDialog({ variant, productName, onClose }) {
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <style>{`
+        /* Sized for small products (e.g. loose stones) where a standard
+           shipping-label-sized sticker would dwarf the item itself — matches
+           common small thermal label rolls (35x45mm). */
         @media print {
+          @page { size: 35mm 45mm; margin: 0; }
           body * { visibility: hidden; }
           #barcode-label, #barcode-label * { visibility: visible; }
-          #barcode-label { position: fixed; top: 2rem; left: 50%; transform: translateX(-50%); }
+          #barcode-label {
+            position: fixed; top: 0; left: 0;
+            width: 35mm; height: 45mm;
+            border: none; padding: 1.5mm;
+          }
         }
       `}</style>
 
@@ -50,11 +58,15 @@ export function BarcodeLabelDialog({ variant, productName, onClose }) {
           </button>
         </div>
 
-        <div id="barcode-label" className="flex flex-col items-center gap-2 border border-dashed border-gray-300 p-5 text-center">
-          <p className="text-xs font-medium text-gray-700">{productName}</p>
-          <p className="text-[11px] text-gray-500">{variant.name}</p>
-          {qr && <img src={qr} alt="QR code produit" width={140} height={140} className="my-1 h-[140px] w-[140px]" />}
-          <p className="font-mono text-xs tracking-wide text-gray-800">{variant.barcode}</p>
+        <div
+          id="barcode-label"
+          style={{ width: "35mm", height: "45mm" }}
+          className="mx-auto flex flex-col items-center justify-center gap-[1mm] overflow-hidden border border-dashed border-gray-300 text-center"
+        >
+          <p className="w-full truncate px-[1mm] text-[2.6mm] font-medium leading-tight text-gray-700">{productName}</p>
+          <p className="w-full truncate px-[1mm] text-[2.2mm] leading-tight text-gray-500">{variant.name}</p>
+          {qr && <img src={qr} alt="QR code produit" className="my-[0.5mm] h-[24mm] w-[24mm]" />}
+          <p className="font-mono text-[2.2mm] leading-tight tracking-wide text-gray-800">{variant.barcode}</p>
         </div>
 
         <button

@@ -233,6 +233,54 @@ async function processAppointmentCheckoutSession(session) {
     return { received: true, warning: "invalid metadata" };
   }
 
+  // ── Pre-transaction safety checks ───────────────────────────────────────
+  // Both of these must refund the customer and stop — we never want to
+  // confirm (or even leave PAID) a booking the salon can't honor. They are
+  // done outside the transaction so the Stripe refund call is not held under
+  // a row lock, and they mirror the workshop/formation paths.
+  const preCheck = await prisma.payment.findUnique({
+    where: { id: paymentId },
+    select: {
+      id: true,
+      status: true,
+      totalAmount: true,
+      depositAmount: true,
+      appointment: { select: { id: true, status: true } },
+    },
+  });
+
+  if (!preCheck || !preCheck.appointment) {
+    console.warn(`[stripe-webhook] Payment/appointment not found for checkout session ${checkoutSessionId}`);
+    return { received: true, reason: "payment-not-found" };
+  }
+
+  // (a) Cancelled-while-in-flight — the customer (or staff) cancelled this
+  // appointment while the Stripe charge was still clearing. Mirrors the
+  // workshop path's "reservation.status === CANCELLED" refund-and-skip.
+  // Without this, the webhook would resurrect the cancelled appointment and
+  // charge a customer who explicitly cancelled.
+  if (preCheck.appointment.status === "CANCELLED") {
+    console.warn(`[stripe-webhook] Appointment ${preCheck.appointment.id} cancelled before payment cleared, refunding: ${checkoutSessionId}`);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "appointment cancelled" };
+  }
+
+  // (b) Amount mismatch / underpayment — refund what was actually charged
+  // rather than silently leaving the customer's money taken with no booking.
+  // Uses an epsilon for float safety, matching the workshop/formation paths.
+  const amountReceivedCents = Number(session?.amount_total ?? 0);
+  const expectedAmountCents =
+    paymentScenario === "FULL_ONLINE"
+      ? toMinorUnitCents(toDecimal(preCheck.totalAmount))
+      : toMinorUnitCents(toDecimal(preCheck.depositAmount));
+  if (amountReceivedCents + UNDERPAYMENT_EPSILON < expectedAmountCents) {
+    console.error(
+      `[stripe-webhook] UNDERPAYMENT for checkout session ${checkoutSessionId}: expected ${expectedAmountCents} cents, received ${amountReceivedCents} cents`
+    );
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "underpayment" };
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     // Row lock: two deliveries of the same event (Stripe's at-least-once
     // guarantee) must not both flip this payment from PENDING.
@@ -254,20 +302,12 @@ async function processAppointmentCheckoutSession(session) {
       return { processed: false, reason: "already-processed" };
     }
 
-    // What Stripe actually charged is the source of truth, cross-checked
-    // against the expected amount for this scenario (full price vs deposit).
-    const amountReceivedCents = Number(session?.amount_total ?? 0);
+    // Amount verification + cancelled-appointment refund happen in the
+    // pre-transaction block above (so the Stripe refund isn't held under a
+    // row lock). If we reach here, the amount matched and the appointment is
+    // still in a payable state.
     const totalAmount = toDecimal(existingPayment.totalAmount);
     const depositAmount = toDecimal(existingPayment.depositAmount);
-    const expectedAmountCents =
-      paymentScenario === "FULL_ONLINE" ? toMinorUnitCents(totalAmount) : toMinorUnitCents(depositAmount);
-
-    if (amountReceivedCents !== expectedAmountCents) {
-      console.error(
-        `[stripe-webhook] Amount mismatch for checkout session ${checkoutSessionId}: expected ${expectedAmountCents} cents, received ${amountReceivedCents} cents`
-      );
-      return { processed: false, reason: "amount-mismatch" };
-    }
 
     const nextPaidAmount = paymentScenario === "FULL_ONLINE" ? totalAmount : depositAmount;
     const nextRemainingAmount = Math.max(0, totalAmount - nextPaidAmount);

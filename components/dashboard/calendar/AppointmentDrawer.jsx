@@ -15,8 +15,9 @@ import {
   FileText,
   CheckCircle,
   XCircle,
+  Loader2,
 } from "lucide-react";
-import { confirmAppointment, rejectAppointment } from "@/actions/appointment/manage-appointment";
+import { confirmAppointment, rejectAppointment, completeAppointment } from "@/actions/appointment/manage-appointment";
 import { getStaffColor } from "./staffColors";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -84,7 +85,10 @@ function DrawerRow({ icon: Icon, label, value, valueClassName = "" }) {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 /**
- * Slide-in drawer showing full appointment details.
+ * Slide-in drawer showing full appointment details, with the same
+ * Confirmer / Terminer / Annuler actions available from the dashboard's
+ * appointments list — kept in sync so managing a booking from the calendar
+ * isn't a reduced experience compared to the list view.
  *
  * @param {{
  *   appointment: object | null,
@@ -104,6 +108,8 @@ export function AppointmentDrawer({
   const drawerRef = useRef(null);
   const [isPending, setIsPending] = useState(false);
   const [feedback, setFeedback] = useState(null); // { type: "success"|"error", message }
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [completeMethod, setCompleteMethod] = useState("CASH");
 
   // Close on Escape
   useEffect(() => {
@@ -128,7 +134,65 @@ export function AppointmentDrawer({
   // Clear feedback when a new appointment opens
   useEffect(() => {
     setFeedback(null);
+    setShowPaymentDialog(false);
+    setCompleteMethod("CASH");
   }, [appointment?.id]);
+
+  async function handleConfirm() {
+    if (!appointment?.id || isPending) return;
+    setIsPending(true);
+    setFeedback(null);
+    try {
+      const result = await confirmAppointment(appointment.id);
+      if (result.success) {
+        setFeedback({ type: "success", message: result.message ?? "Rendez-vous confirmé." });
+        onAppointmentUpdated();
+      } else {
+        setFeedback({ type: "error", message: result.message ?? "Erreur." });
+      }
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function handleComplete() {
+    if (!appointment?.id || isPending) return;
+    if (appointment.paymentStatus === "PARTIALLY_PAID") {
+      setShowPaymentDialog(true);
+      return;
+    }
+    setIsPending(true);
+    setFeedback(null);
+    try {
+      const result = await completeAppointment(appointment.id);
+      if (result.success) {
+        setFeedback({ type: "success", message: result.message ?? "Rendez-vous terminé." });
+        onAppointmentUpdated();
+      } else {
+        setFeedback({ type: "error", message: result.message ?? "Erreur." });
+      }
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function handleCompleteWithPayment() {
+    if (!appointment?.id || isPending) return;
+    setIsPending(true);
+    setFeedback(null);
+    try {
+      const result = await completeAppointment(appointment.id, { method: completeMethod });
+      setShowPaymentDialog(false);
+      if (result.success) {
+        setFeedback({ type: "success", message: result.message ?? "Rendez-vous terminé." });
+        onAppointmentUpdated();
+      } else {
+        setFeedback({ type: "error", message: result.message ?? "Erreur." });
+      }
+    } finally {
+      setIsPending(false);
+    }
+  }
 
   async function handleCancel() {
     if (!appointment?.id || isPending) return;
@@ -151,6 +215,11 @@ export function AppointmentDrawer({
 
   const color = getStaffColor(appointment.staffId);
   const paymentConfig = PAYMENT_STATUS_LABELS[appointment.paymentStatus] ?? null;
+  const actionsDone = feedback?.type === "success";
+  const balanceDue =
+    appointment.totalAmount !== null && appointment.paidAmount !== null
+      ? appointment.totalAmount - appointment.paidAmount
+      : null;
 
   const startHour = appointment.startTime
     ? new Date(appointment.startTime).getHours() * 60 +
@@ -319,19 +388,100 @@ export function AppointmentDrawer({
               </div>
             </Section>
           )}
+
+          {/* ── Encaisser le solde (partial payment) ───────────────── */}
+          {showPaymentDialog && (
+            <div className="mt-2 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-800/30">
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Encaisser le solde restant</h3>
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                Le client doit encore régler{" "}
+                <span className="font-semibold text-gray-700 dark:text-gray-200">
+                  {formatPrice(balanceDue)}
+                </span>{" "}
+                sur place. Une facture sera émise pour le montant total dès l&apos;encaissement.
+              </p>
+              <label className="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">Mode de paiement</label>
+              <select
+                value={completeMethod}
+                onChange={(e) => setCompleteMethod(e.target.value)}
+                className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
+              >
+                <option value="CASH">Espèces</option>
+                <option value="CARD">Carte</option>
+              </select>
+              <div className="mt-3 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentDialog(false)}
+                  disabled={isPending}
+                  className="rounded-lg border border-gray-200 px-3.5 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCompleteWithPayment}
+                  disabled={isPending}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#3d4e3b] disabled:opacity-60"
+                >
+                  {isPending && <Loader2 size={12} className="animate-spin" />}
+                  Confirmer l&apos;encaissement
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Footer actions ───────────────────────────────────────────── */}
-        <div className="flex items-center gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-700">
-          <button
-            onClick={handleCancel}
-            disabled={isPending || feedback?.type === "success"}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
-          >
-            <XCircle size={15} />
-            {isPending ? "Annulation…" : "Annuler le RDV"}
-          </button>
-        </div>
+        {!actionsDone && !showPaymentDialog && (
+          <div className="flex items-center gap-3 border-t border-gray-100 px-5 py-4 dark:border-gray-700">
+            {appointment.status === "PENDING" && (
+              <>
+                <button
+                  onClick={handleConfirm}
+                  disabled={isPending}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[#2f3a2e] px-4 py-2.5 text-sm font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle size={15} />}
+                  Confirmer
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={isPending}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
+                >
+                  <XCircle size={15} />
+                  Refuser
+                </button>
+              </>
+            )}
+
+            {appointment.status === "CONFIRMED" && (
+              <>
+                <button
+                  onClick={handleComplete}
+                  disabled={isPending}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[#2f3a2e] px-4 py-2.5 text-sm font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle size={15} />}
+                  Terminer
+                </button>
+                <button
+                  onClick={handleCancel}
+                  disabled={isPending}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
+                >
+                  <XCircle size={15} />
+                  Annuler le RDV
+                </button>
+              </>
+            )}
+
+            {(appointment.status === "COMPLETED" || appointment.status === "CANCELLED" || appointment.status === "NO_SHOW") && (
+              <p className="w-full text-center text-xs text-gray-400">Ce rendez-vous ne peut plus être modifié.</p>
+            )}
+          </div>
+        )}
       </div>
     </>
   );

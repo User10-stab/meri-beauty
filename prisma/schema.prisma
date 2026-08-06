@@ -41,6 +41,7 @@ enum PaymentStatus {
   REFUNDED
   PARTIALLY_PAID
   PARTIALLY_REFUNDED
+  FAILED
 }
 
 enum PaymentType {
@@ -1076,6 +1077,7 @@ model Staff {
   workingHours  WorkingHour[]
   timeOffs      TimeOff[]
   contracts     Contract[]
+  appointments  Appointment[]
 }
 
 // StaffService
@@ -1115,6 +1117,14 @@ model Appointment {
   staffServiceId String
   staffService   StaffService @relation(fields: [staffServiceId], references: [id])
 
+  // Denormalized copy of staffService.staffId, set at creation time. Exists
+  // so the DB-level no-overlap exclusion constraint can key on the actual
+  // staff member instead of staffServiceId — a staff member offering
+  // multiple services would otherwise not be protected by the constraint
+  // against being double-booked across two different services at once.
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id])
+
   date      DateTime
   startTime DateTime
   endTime   DateTime
@@ -1130,6 +1140,7 @@ model Appointment {
   notifications Notification[]
 
   @@index([staffServiceId, startTime]) // conflict checks + calendar
+  @@index([staffId, startTime]) // cross-service overlap checks
   @@index([userId, startTime]) // "my appointments"
   @@index([isDeleted, status, startTime]) // dashboard filters
 }

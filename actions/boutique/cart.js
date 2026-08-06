@@ -23,6 +23,18 @@ async function currentCustomerId() {
   return session?.user?.role === "CUSTOMER" ? session.user.id : null;
 }
 
+/**
+ * The cart cookie survives sign-out/sign-in on the same browser, so a cart
+ * already claimed by one customer (cart.userId set) must not be readable or
+ * writable by anyone else who later shows up with that same cookie — a
+ * different customer, a signed-out guest, or a STAFF/OWNER/ADMIN account
+ * testing the storefront. An unclaimed cart (userId still null) is fair game
+ * for anyone, since that's the normal pre-login guest-cart state.
+ */
+function cartBelongsToSession(cart, currentUserId) {
+  return !cart.userId || cart.userId === currentUserId;
+}
+
 async function readOrIssueCartToken() {
   const jar = await cookies();
   const existing = jar.get(CART_COOKIE)?.value;
@@ -63,7 +75,7 @@ export async function getOrCreateActiveCart() {
 
   let cart = await prisma.cart.findUnique({ where: { token } });
 
-  if (cart && cart.status !== "ACTIVE") {
+  if (cart && (cart.status !== "ACTIVE" || !cartBelongsToSession(cart, userId))) {
     token = await reissueCartToken();
     cart = null;
   }
@@ -149,6 +161,7 @@ export async function getCart() {
 
     const cart = await prisma.cart.findUnique({ where: { token }, include: cartInclude });
     if (!cart || cart.status !== "ACTIVE") return { success: true, data: EMPTY_CART };
+    if (!cartBelongsToSession(cart, await currentCustomerId())) return { success: true, data: EMPTY_CART };
 
     return { success: true, data: serializeCart(cart) };
   } catch (error) {

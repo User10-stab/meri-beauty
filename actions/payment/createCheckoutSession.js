@@ -304,6 +304,7 @@ export async function createCheckoutSession(reservationData) {
         data: {
           userId: customerUser.id,
           staffServiceId,
+          staffId: staffService.staffId,
           date: appointmentDate,
           startTime,
           endTime,

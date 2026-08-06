@@ -1,23 +1,51 @@
 "use server";
 
 import { stripe } from "@/lib/stripe";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { ROLES, isAdminRole } from "@/lib/authorization";
 
 /**
  * Creates a Stripe Connect Express account for a staff member.
  *
- * This function:
- * 1. Validates the staff member exists
- * 2. Checks if a Stripe account already exists (idempotent)
- * 3. Creates a Stripe Connect Express account with the staff's info
- * 4. Saves the stripeAccountId to the Staff record
- * 5. Returns the account ID
+ * Authorization:
+ * - STAFF       → may only create an account for themselves (staffId is
+ *                 resolved from the session, the client value is ignored).
+ * - ADMIN/OWNER → may pass any staffId (onboarding a staff member on their
+ *                 behalf).
+ * - CUSTOMER (or unauthenticated) → rejected.
  *
- * @param {string} staffId - The ID of the staff member
+ * This action writes a brand-new Stripe account id onto a Staff row, so it
+ * must not be callable by customers or by a staff member targeting another
+ * staff's row — that would let an attacker link staff to Stripe accounts
+ * they never requested.
+ *
+ * @param {string} staffId - The ID of the staff member (ignored for STAFF, who are auto-scoped)
  * @returns {Promise<{ success: boolean, stripeAccountId?: string, message?: string }>}
  */
 export async function createConnectAccount(staffId) {
   try {
+    // ── 0. Auth + role ──────────────────────────────────────────────────────
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, message: "Authentification requise." };
+    }
+
+    // STAFF callers are auto-scoped to their own staff row; only
+    // ADMIN/OWNER may target an arbitrary staffId.
+    if (session.user.role === ROLES.STAFF) {
+      const ownStaff = await prisma.staff.findUnique({
+        where: { userId: session.user.id },
+        select: { id: true },
+      });
+      if (!ownStaff) {
+        return { success: false, message: "Aucun profil staff trouvé pour votre compte." };
+      }
+      staffId = ownStaff.id;
+    } else if (!isAdminRole(session.user.role)) {
+      return { success: false, message: "Accès réservé au personnel." };
+    }
+
     if (!staffId) {
       return { success: false, message: "L'identifiant du staff est requis." };
     }

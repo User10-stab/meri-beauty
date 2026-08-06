@@ -1,11 +1,14 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Search, X, Loader2, PackageSearch } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import Button from "@/components/ui/Button";
-import { approveReturnRequest, rejectReturnRequest, completeReturnRequest } from "@/actions/boutique/returns";
+import { approveReturnRequest, rejectReturnRequest, completeReturnRequest, listReturnRequests } from "@/actions/boutique/returns";
+import { Pagination } from "@/components/dashboard/Tables/Pagination";
+
+const PAGE_SIZE = 20;
 
 const STATUS_LABEL = {
   REQUESTED: "Demandée",
@@ -28,40 +31,68 @@ function formatDate(d) {
   return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" }) : "—";
 }
 
-export function ReturnsPageClient({ initialRequests }) {
-  const [requests] = useState(initialRequests);
+export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
+  const [requests, setRequests] = useState(initialRequests);
+  const [totalCount, setTotalCount] = useState(initialTotalCount);
+  const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
   const [active, setActive] = useState(null);
+  const [isPending, startTransition] = useTransition();
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return requests.filter((rr) => {
-      if (statusFilter && rr.status !== statusFilter) return false;
-      if (q) {
-        const hay = `${rr.order?.orderNumber ?? ""} ${rr.order?.user?.fullName ?? ""} ${rr.order?.user?.email ?? ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+  function refetch(next) {
+    const params = {
+      status: next.status !== undefined ? next.status : statusFilter,
+      search: next.search !== undefined ? next.search : search,
+      page: next.page !== undefined ? next.page : 1,
+    };
+    startTransition(async () => {
+      const result = await listReturnRequests({
+        status: params.status || undefined,
+        search: params.search || undefined,
+        page: params.page,
+        pageSize: PAGE_SIZE,
+      });
+      if (result.success) {
+        setRequests(result.data);
+        setTotalCount(result.totalCount);
+        setPage(params.page);
+      } else {
+        toast.error(result.message);
       }
-      return true;
     });
-  }, [requests, statusFilter, search]);
+  }
+
+  function handleSearchSubmit(e) {
+    e.preventDefault();
+    refetch({ search });
+  }
+
+  function handleReload() {
+    // Re-fetch the current page instead of a full window reload, now that
+    // pagination means "reload" must preserve page/filter state.
+    refetch({ page });
+  }
 
   return (
     <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-      <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center">
+      <form onSubmit={handleSearchSubmit} className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center">
         <div className="relative w-full max-w-xs">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher n°, client…"
+            placeholder="Rechercher n°, client… (Entrée)"
             className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           />
         </div>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          onChange={(e) => {
+            setStatusFilter(e.target.value);
+            refetch({ status: e.target.value });
+          }}
           className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
         >
           <option value="">Tous les statuts</option>
@@ -69,15 +100,16 @@ export function ReturnsPageClient({ initialRequests }) {
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
-      </div>
+        {isPending && <Loader2 size={16} className="animate-spin text-gray-400" />}
+      </form>
 
-      {filtered.length === 0 ? (
+      {requests.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
             <PackageSearch size={22} className="text-gray-300" />
           </div>
           <p className="font-medium text-gray-700">
-            {requests.length > 0 ? "Aucune demande ne correspond à votre recherche" : "Aucune demande de retour pour le moment"}
+            {totalCount > 0 ? "Aucune demande ne correspond à votre recherche" : "Aucune demande de retour pour le moment"}
           </p>
         </div>
       ) : (
@@ -92,7 +124,7 @@ export function ReturnsPageClient({ initialRequests }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((rr) => (
+            {requests.map((rr) => (
               <TableRow key={rr.id} className="cursor-pointer" onClick={() => setActive(rr)}>
                 <TableCell className="pl-6">
                   <span className="font-medium text-gray-800 dark:text-white">n°{rr.order?.orderNumber}</span>
@@ -120,12 +152,29 @@ export function ReturnsPageClient({ initialRequests }) {
         </Table>
       )}
 
-      <ReturnDetailDialog returnRequest={active} onClose={() => setActive(null)} />
+      {totalCount > PAGE_SIZE && (
+        <div className="flex items-center justify-between border-t border-stroke px-6 py-4 dark:border-dark-3">
+          <span className="text-xs text-gray-500 dark:text-dark-6">
+            {totalCount} demande{totalCount > 1 ? "s" : ""} au total
+          </span>
+          <Pagination
+            currentPage={page}
+            totalPages={Math.max(1, Math.ceil(totalCount / PAGE_SIZE))}
+            onPageChange={(p) => refetch({ page: p })}
+          />
+        </div>
+      )}
+
+      <ReturnDetailDialog
+        returnRequest={active}
+        onClose={() => setActive(null)}
+        onCompleted={handleReload}
+      />
     </div>
   );
 }
 
-function ReturnDetailDialog({ returnRequest, onClose }) {
+function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
   const [isPending, startTransition] = useTransition();
   const [staffNote, setStaffNote] = useState("");
 
@@ -138,9 +187,10 @@ function ReturnDetailDialog({ returnRequest, onClose }) {
       if (result.success) {
         toast.success(result.message);
         onClose();
-        // Reload rather than patch client state — completion changes stock,
-        // credit notes, and the order's own record, not just this row.
-        window.location.reload();
+        // Re-fetch the current page rather than patch client state —
+        // completion changes stock, credit notes, and the order's own
+        // record, not just this row.
+        onCompleted();
       } else {
         toast.error(result.message);
       }

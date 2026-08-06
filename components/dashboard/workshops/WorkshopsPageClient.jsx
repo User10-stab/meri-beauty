@@ -130,7 +130,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
           />
         </div>
 
-        {activeTab === "activities" && (
+        {isAdminOrOwner && activeTab === "activities" && (
           <Button
             onClick={() => {
               setEditingActivity(null);

@@ -13,6 +13,7 @@ export default async function CustomersPage() {
   const customersResult = await getCustomers();
 
   const customers = customersResult.data ?? [];
+  const totalCount = customersResult.totalCount ?? customers.length;
 
   return (
     <div className="space-y-6">
@@ -31,7 +32,7 @@ export default async function CustomersPage() {
         <div className="flex items-center gap-3">
           <StatBadge
             label="Clients"
-            value={customers.length}
+            value={totalCount}
             color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
           />
         </div>
@@ -50,7 +51,7 @@ export default async function CustomersPage() {
 
       {/* ── Client shell ───────────────────────────────────────────────── */}
       <Suspense fallback={<CustomersTableSkeleton />}>
-        <CustomersPageClient initialCustomers={customers} />
+        <CustomersPageClient initialCustomers={customers} initialTotalCount={totalCount} />
       </Suspense>
     </div>
   );

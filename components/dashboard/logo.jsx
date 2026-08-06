@@ -21,7 +21,10 @@ export function Logo() {
       </span>*/}
       <span className="text-lg font-bold text-dark dark:text-white">
         Meri Beauty
-      </span>
+      </span> 
+      {/* <Link href="/dashboard" className="absolute inset-0">
+        <span className="sr-only">Meri Beauty Dashboard</span>
+      </Link> */}
     </div>
   );
 }

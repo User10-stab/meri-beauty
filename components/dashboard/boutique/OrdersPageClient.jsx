@@ -1,12 +1,16 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, ScanLine, Camera, Package } from "lucide-react";
+import { Search, ScanLine, Camera, Package, Loader2 } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import Button from "@/components/ui/Button";
 import { PickupScannerDialog } from "@/components/dashboard/boutique/PickupScannerDialog";
+import { Pagination } from "@/components/dashboard/Tables/Pagination";
+import { listOrders } from "@/actions/boutique/orders";
+
+const PAGE_SIZE = 20;
 
 const MODE_LABEL = {
   PICKUP_PREPAID: "Retrait (payé)",
@@ -42,39 +46,64 @@ function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
 }
 
-export function OrdersPageClient({ initialOrders }) {
+export function OrdersPageClient({ initialOrders, initialTotalCount }) {
   const router = useRouter();
+  const [orders, setOrders] = useState(initialOrders);
+  const [totalCount, setTotalCount] = useState(initialTotalCount);
+  const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [modeFilter, setModeFilter] = useState("");
   const [pickupLookup, setPickupLookup] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return initialOrders.filter((o) => {
-      if (q) {
-        const hay = `${o.user?.fullName ?? ""} ${o.user?.email ?? ""} ${o.pickupCode ?? ""} ${o.bpostTrackingCode ?? ""} ${o.orderNumber}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+  function refetch(next) {
+    const params = {
+      search: next.search !== undefined ? next.search : search,
+      status: next.status !== undefined ? next.status : statusFilter,
+      mode: next.mode !== undefined ? next.mode : modeFilter,
+      page: next.page !== undefined ? next.page : 1,
+    };
+    startTransition(async () => {
+      const result = await listOrders({
+        search: params.search || undefined,
+        status: params.status || undefined,
+        fulfilmentMode: params.mode || undefined,
+        page: params.page,
+        pageSize: PAGE_SIZE,
+      });
+      if (result.success) {
+        setOrders(result.data);
+        setTotalCount(result.totalCount);
+        setPage(params.page);
+      } else {
+        toast.error(result.message);
       }
-      if (statusFilter && o.status !== statusFilter) return false;
-      if (modeFilter && o.fulfilmentMode !== modeFilter) return false;
-      return true;
     });
-  }, [initialOrders, search, statusFilter, modeFilter]);
+  }
+
+  function handleSearchSubmit(e) {
+    e.preventDefault();
+    refetch({ search });
+  }
 
   const lookupByPickupCode = useCallback(
-    (rawCode) => {
+    async (rawCode) => {
       const code = rawCode.trim().toUpperCase();
       if (!code) return;
-      const order = initialOrders.find((o) => o.pickupCode === code);
+      // The current page may not contain the order the code belongs to
+      // (pagination) — search the server directly by pickup code instead
+      // of only checking the page's already-loaded rows.
+      const result = await listOrders({ search: code, page: 1, pageSize: 1 });
+      const order = result.data?.find((o) => o.pickupCode === code);
       if (!order) {
         toast.error("Aucune commande ne correspond à ce code.");
         return;
       }
       router.push(`/dashboard/boutique/orders/${order.id}`);
     },
-    [initialOrders, router]
+    [router]
   );
 
   function handlePickupLookup(e) {
@@ -111,21 +140,24 @@ export function OrdersPageClient({ initialOrders }) {
       <PickupScannerDialog open={scannerOpen} onClose={() => setScannerOpen(false)} onDecoded={handleScanned} />
 
       <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-        <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center">
+        <form onSubmit={handleSearchSubmit} className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center">
           <div className="relative w-full max-w-xs">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Rechercher client, n°, code…"
+              placeholder="Rechercher client, n°, code… (Entrée)"
               className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
             />
           </div>
 
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              refetch({ status: e.target.value });
+            }}
             className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
             <option value="">Tous les statuts</option>
@@ -136,7 +168,10 @@ export function OrdersPageClient({ initialOrders }) {
 
           <select
             value={modeFilter}
-            onChange={(e) => setModeFilter(e.target.value)}
+            onChange={(e) => {
+              setModeFilter(e.target.value);
+              refetch({ mode: e.target.value });
+            }}
             className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
             <option value="">Tous les modes</option>
@@ -144,15 +179,17 @@ export function OrdersPageClient({ initialOrders }) {
               <option key={value} value={value}>{label}</option>
             ))}
           </select>
-        </div>
 
-        {filtered.length === 0 ? (
+          {isPending && <Loader2 size={16} className="animate-spin text-gray-400" />}
+        </form>
+
+        {orders.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
               <Package size={22} className="text-gray-300" />
             </div>
             <p className="font-medium text-gray-700">
-              {initialOrders.length > 0 ? "Aucune commande ne correspond à votre recherche" : "Aucune commande pour le moment"}
+              {totalCount > 0 ? "Aucune commande ne correspond à votre recherche" : "Aucune commande pour le moment"}
             </p>
           </div>
         ) : (
@@ -168,7 +205,7 @@ export function OrdersPageClient({ initialOrders }) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.map((o) => (
+              {orders.map((o) => (
                 <TableRow
                   key={o.id}
                   className="cursor-pointer"
@@ -202,6 +239,19 @@ export function OrdersPageClient({ initialOrders }) {
               ))}
             </TableBody>
           </Table>
+        )}
+
+        {totalCount > PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t border-stroke px-6 py-4 dark:border-dark-3">
+            <span className="text-xs text-gray-500 dark:text-dark-6">
+              {totalCount} commande{totalCount > 1 ? "s" : ""} au total
+            </span>
+            <Pagination
+              currentPage={page}
+              totalPages={Math.max(1, Math.ceil(totalCount / PAGE_SIZE))}
+              onPageChange={(p) => refetch({ page: p })}
+            />
+          </div>
         )}
       </div>
     </div>

@@ -53,10 +53,13 @@ export default async function WorkshopBanner() {
   if (!data || !data.activity) return null;
 
   const isLowSeats = data.mode === "low_seats";
+  const isFormation = data.kind === "formation";
   const sessionDate = formatSessionDate(data.session?.startDate);
 
   const href = isLowSeats
-    ? `/reservation-atelier?activity=${data.activity.id}&session=${data.session.id}`
+    ? isFormation
+      ? `/reservation-formation?formation=${data.activity.id}&session=${data.session.id}`
+      : `/reservation-atelier?activity=${data.activity.id}&session=${data.session.id}`
     : `/evenements/${data.activity.id}`;
 
   return (

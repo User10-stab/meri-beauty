@@ -9,11 +9,12 @@ import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PickupConfirmDialog } from "@/components/dashboard/boutique/PickupConfirmDialog";
 import { markOrderReadyForPickup, markOrderShipped, markOrderCompleted, cancelOrder } from "@/actions/boutique/orders";
+import { generateShippingLabel } from "@/actions/boutique/mondial-relay";
 
 const MODE_LABEL = {
   PICKUP_PREPAID: "Retrait en boutique (payé en ligne)",
   PICKUP_ON_SITE: "Retrait en boutique (paiement sur place)",
-  SHIPPING_PREPAID: "Livraison bpost",
+  SHIPPING_PREPAID: "Livraison Mondial Relay",
 };
 
 const STATUS_LABEL = {
@@ -67,7 +68,8 @@ export function OrderDetailClient({ order }) {
   const [isPending, startTransition] = useTransition();
   const [pickupDialogOrder, setPickupDialogOrder] = useState(null);
   const [cancelling, setCancelling] = useState(false);
-  const [trackingCode, setTrackingCode] = useState(order.bpostTrackingCode ?? "");
+  const [trackingCode, setTrackingCode] = useState(order.trackingCode ?? "");
+  const [generatingLabel, setGeneratingLabel] = useState(false);
 
   function runAction(action, ...args) {
     startTransition(async () => {
@@ -84,10 +86,24 @@ export function OrderDetailClient({ order }) {
   function handleShip(e) {
     e.preventDefault();
     if (!trackingCode.trim()) {
-      toast.error("Le numéro de suivi bpost est obligatoire.");
+      toast.error("Le numéro de suivi est obligatoire.");
       return;
     }
-    runAction(markOrderShipped, { orderId: order.id, bpostTrackingCode: trackingCode.trim() });
+    runAction(markOrderShipped, { orderId: order.id, trackingCode: trackingCode.trim() });
+  }
+
+  function handleGenerateLabel() {
+    setGeneratingLabel(true);
+    generateShippingLabel(order.id).then((result) => {
+      setGeneratingLabel(false);
+      if (result.success) {
+        toast.success(result.message);
+        if (result.data?.trackingCode) setTrackingCode(result.data.trackingCode);
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    });
   }
 
   function handleCancel() {
@@ -218,15 +234,15 @@ export function OrderDetailClient({ order }) {
                 <p className="flex items-start gap-2">
                   <MapPin size={14} className="mt-0.5 flex-shrink-0" />
                   <span>
-                    {order.shippingLine1}
-                    {order.shippingLine2 && <>, {order.shippingLine2}</>}
+                    {order.pickupPointName && <>{order.pickupPointName}<br /></>}
+                    {order.pickupPointAddress}
                     <br />
-                    {order.shippingPostalCode} {order.shippingCity}, {order.shippingCountry}
+                    {order.pickupPointPostalCode} {order.pickupPointCity}
                   </span>
                 </p>
-                {order.bpostTrackingCode && (
+                {order.trackingCode && (
                   <p className="flex items-center gap-2 text-gray-500">
-                    <Truck size={14} /> Suivi bpost : {order.bpostTrackingCode}
+                    <Truck size={14} /> Suivi Mondial Relay : {order.trackingCode}
                   </p>
                 )}
                 {order.shippedAt && <p className="text-gray-400">Expédiée le {formatDate(order.shippedAt)}</p>}
@@ -299,22 +315,33 @@ export function OrderDetailClient({ order }) {
               )}
 
               {canShip && (
-                <form onSubmit={handleShip} className="space-y-2">
-                  <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-                    Numéro de suivi bpost
-                  </label>
-                  <input
-                    type="text"
-                    value={trackingCode}
-                    onChange={(e) => setTrackingCode(e.target.value)}
-                    placeholder="ex : 1234567890123"
-                    className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-                  />
-                  <Button type="submit" className="w-full" disabled={isPending}>
-                    {isPending && <Loader2 size={14} className="animate-spin" />}
-                    Marquer expédiée
-                  </Button>
-                </form>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleGenerateLabel}
+                    disabled={generatingLabel || isPending}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#2f3a2e] px-4 py-2 text-sm font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/5 disabled:opacity-50 dark:border-dark-3 dark:text-dark-6"
+                  >
+                    {generatingLabel && <Loader2 size={14} className="animate-spin" />}
+                    Générer l&apos;étiquette Mondial Relay
+                  </button>
+                  <form onSubmit={handleShip} className="space-y-2">
+                    <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+                      Numéro de suivi (manuel si pas d&apos;étiquette générée)
+                    </label>
+                    <input
+                      type="text"
+                      value={trackingCode}
+                      onChange={(e) => setTrackingCode(e.target.value)}
+                      placeholder="ex : 1234567890123"
+                      className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                    />
+                    <Button type="submit" className="w-full" disabled={isPending}>
+                      {isPending && <Loader2 size={14} className="animate-spin" />}
+                      Marquer expédiée
+                    </Button>
+                  </form>
+                </div>
               )}
 
               {canCloseShipped && (

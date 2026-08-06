@@ -30,7 +30,7 @@ export default async function ReturnsPage() {
         </div>
       )}
 
-      <ReturnsPageClient initialRequests={result.data ?? []} />
+      <ReturnsPageClient initialRequests={result.data ?? []} initialTotalCount={result.totalCount ?? 0} />
     </div>
   );
 }

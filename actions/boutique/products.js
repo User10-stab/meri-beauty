@@ -1,5 +1,6 @@
 "use server";
 
+import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
@@ -26,6 +27,24 @@ async function requireAdmin() {
   if (!session?.user) return { error: "Non authentifié." };
   if (!isAdminRole(session.user.role)) return { error: "Accès non autorisé." };
   return { session };
+}
+
+/**
+ * `flatten().fieldErrors` only reports at the schema's top level — a variant
+ * price/SKU/barcode problem lands as an unindexed "variants" bucket that
+ * nothing renders, which is how a real validation reason (e.g. "prix barré
+ * doit être supérieur au prix de vente") used to surface to staff as just
+ * "Données invalides." with no clue which field or which variant. Reading
+ * the first raw issue keeps its full path, so a variant-scoped error can
+ * name which declinaison it's about instead of being swallowed.
+ */
+function firstZodErrorMessage(zodError) {
+  const issue = zodError.issues[0];
+  if (!issue) return "Données invalides.";
+  if (issue.path[0] === "variants" && typeof issue.path[1] === "number") {
+    return `Déclinaison ${issue.path[1] + 1} : ${issue.message}`;
+  }
+  return issue.message;
 }
 
 async function uniqueProductSlug(base, excludeId = null) {
@@ -56,6 +75,21 @@ function withMargin(variant) {
   };
 }
 
+/**
+ * STAFF can browse the catalogue (DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK) but
+ * cost price and profit margin stay admin-only information — this is the
+ * variant shape they get instead of withMargin(), with the sale price kept
+ * (needed to render the list) and every cost/profit figure left out.
+ */
+function withoutMargin({ costPrice, ...variant }) {
+  return {
+    ...variant,
+    price: Number(variant.price),
+    comparePrice: variant.comparePrice != null ? Number(variant.comparePrice) : null,
+    availableQuantity: variant.stockQuantity - variant.reservedQuantity,
+  };
+}
+
 // ─── Read ─────────────────────────────────────────────────────────────────────
 
 export async function getProducts({
@@ -68,6 +102,9 @@ export async function getProducts({
   page = 1,
   pageSize = 20,
 } = {}) {
+  const session = await auth();
+  const canSeeMargin = isAdminRole(session?.user?.role);
+
   try {
     const where = {
       isDeleted: includeDeleted ? undefined : false,
@@ -124,7 +161,7 @@ export async function getProducts({
         category: p.subcategory ? { id: p.subcategory.category.id, name: p.subcategory.category.name } : null,
         subcategory: p.subcategory ? { id: p.subcategory.id, name: p.subcategory.name } : null,
         thumbnail: p.images[0]?.path ?? null,
-        variants: p.variants.map(withMargin),
+        variants: p.variants.map(canSeeMargin ? withMargin : withoutMargin),
         totalStock: p.variants.reduce((sum, v) => sum + v.stockQuantity, 0),
         lowStock: p.variants.some((v) => v.stockQuantity - v.reservedQuantity <= v.lowStockThreshold),
       })),
@@ -133,6 +170,54 @@ export async function getProducts({
   } catch (error) {
     console.error("[getProducts]", error);
     return { success: false, message: "Impossible de charger les produits.", data: [] };
+  }
+}
+
+/**
+ * Backs the dashboard's "Scanner" flow on the products list: an unknown code
+ * means the product doesn't exist yet, so the caller opens the new-product
+ * form pre-filled with it instead of a dead-end error.
+ */
+export async function getProductByBarcode(barcode) {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const code = barcode?.trim();
+  if (!code) return { success: false, message: "Code-barres vide." };
+
+  try {
+    const variant = await prisma.productVariant.findFirst({
+      where: { barcode: code, isDeleted: false },
+      select: { productId: true },
+    });
+    return { success: true, found: !!variant, productId: variant?.productId ?? null };
+  } catch (error) {
+    console.error("[getProductByBarcode]", error);
+    return { success: false, message: "Recherche impossible." };
+  }
+}
+
+/**
+ * Unlike generateInternalBarcode() (client-side, relies on the DB unique
+ * constraint to catch a collision at save time), SKU generation is checked
+ * against the database up front and only ever returns a value confirmed
+ * unique at generation time — a staff member clicking "Générer" gets an
+ * immediate, guaranteed-unique code, not a maybe that only fails on save.
+ */
+export async function generateUniqueSku() {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, message: guard.error };
+
+  try {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = `SKU-${randomBytes(4).toString("hex").toUpperCase()}`;
+      const clash = await prisma.productVariant.findUnique({ where: { sku: candidate }, select: { id: true } });
+      if (!clash) return { success: true, sku: candidate };
+    }
+    return { success: false, message: "Impossible de générer une référence unique, réessayez." };
+  } catch (error) {
+    console.error("[generateUniqueSku]", error);
+    return { success: false, message: "Génération impossible." };
   }
 }
 
@@ -173,11 +258,10 @@ export async function createProduct(input) {
 
   const parsed = createProductSchema.safeParse(input);
   if (!parsed.success) {
-    const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: errors.name?.[0] ?? errors.subcategoryId?.[0] ?? "Données invalides.",
-      errors,
+      message: firstZodErrorMessage(parsed.error),
+      errors: parsed.error.flatten().fieldErrors,
     };
   }
 
@@ -284,11 +368,10 @@ export async function updateProduct(input) {
 
   const parsed = updateProductSchema.safeParse(input);
   if (!parsed.success) {
-    const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: errors.name?.[0] ?? errors.subcategoryId?.[0] ?? "Données invalides.",
-      errors,
+      message: firstZodErrorMessage(parsed.error),
+      errors: parsed.error.flatten().fieldErrors,
     };
   }
 

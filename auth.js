@@ -77,6 +77,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             password: true,
             emailVerified: true,
             sessionVersion: true,
+            fullName: true,
+            phone: true,
           },
         });
 
@@ -108,12 +110,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           }
         }
 
+        // Fetch profile fields needed across the app (reservation form, etc.)
         return {
-          id: user.id,
-          email: user.email,
-          role: user.role,
+          id:       user.id,
+          email:    user.email,
+          role:     user.role,
           isActive: user.isActive,
           sessionVersion: user.sessionVersion,
+          fullName: user.fullName ?? "",
+          phone:    user.phone    ?? "",
         };
       },
     }),
@@ -156,11 +161,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async jwt({ token, user }) {
       if (user) {
-        token.id = user.id;
-        token.email = user.email;
-        token.role = user.role;
+        token.id       = user.id;
+        token.email    = user.email;
+        token.role     = user.role;
         token.isActive = user.isActive;
         token.sessionVersion = user.sessionVersion;
+        token.fullName = user.fullName;
+        token.phone    = user.phone;
         token.validatedAt = Date.now();
         return token;
       }
@@ -192,10 +199,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     async session({ session, token }) {
       if (token) {
-        session.user.id = token.id;
-        session.user.role = token.role;
-        session.user.email = token.email;
+        session.user.id       = token.id;
+        session.user.role     = token.role;
+        session.user.email    = token.email;
         session.user.isActive = token.isActive;
+        session.user.fullName = token.fullName;
+        session.user.phone    = token.phone;
       }
       return session;
     },

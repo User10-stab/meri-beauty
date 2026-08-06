@@ -11,7 +11,7 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function FormationReservationsPage() {
-  await requireRole(DASHBOARD_PERMISSIONS.FORMATION_RESERVATIONS);
+  const { user } = await requireRole(DASHBOARD_PERMISSIONS.FORMATION_RESERVATIONS);
 
   const result = await getFormationReservations();
   const reservations = result.data ?? [];
@@ -35,7 +35,7 @@ export default async function FormationReservationsPage() {
         </div>
       )}
 
-      <ReservationsPageClient initialReservations={reservations} />
+      <ReservationsPageClient initialReservations={reservations} userRole={user.role} />
     </div>
   );
 }

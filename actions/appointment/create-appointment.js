@@ -105,16 +105,31 @@ export async function createAppointment(data) {
     const endTime = new Date(startTime);
     endTime.setMinutes(endTime.getMinutes() + staffService.duration);
 
-    // ── 4. Verify slot availability ──────────────────────────────────────────
-    const conflict = await prisma.appointment.findFirst({
+    // ── 4. Verify staff availability ─────────────────────────────────────────
+    const existingAppointments = await prisma.appointment.findMany({
       where: {
-        staffServiceId,
+        staffService: {
+          staffId: staffService.staffId,
+        },
         date: appointmentDate,
-        startTime: { lte: endTime },
-        endTime: { gte: startTime },
         status: { in: ["PENDING", "CONFIRMED"] },
         isDeleted: false,
       },
+      include: {
+        staffService: {
+          select: { margin: true },
+        },
+      },
+    });
+
+    const conflict = existingAppointments.find((appointment) => {
+      const occupiedStart = new Date(appointment.startTime);
+      const occupiedEnd = new Date(appointment.endTime);
+      occupiedEnd.setMinutes(
+        occupiedEnd.getMinutes() + Number(appointment.staffService?.margin ?? 0)
+      );
+
+      return startTime < occupiedEnd && endTime > occupiedStart;
     });
 
     if (conflict) {

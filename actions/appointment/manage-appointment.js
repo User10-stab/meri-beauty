@@ -210,41 +210,25 @@ export async function rejectAppointment(appointmentId, reason = null) {
       return { success: false, message: "Rendez-vous introuvable" };
     }
 
-    if (appointment.status === "CANCELLED") {
-      return {
-        success: false,
-        message: "Ce rendez-vous est déjà annulé",
-      };
-    }
-
     const payment = appointment.payment;
     const wasPaid = Boolean(payment) && ["PAID", "PARTIALLY_PAID"].includes(payment.status);
 
-    await prisma.$transaction(async (tx) => {
-      await tx.appointment.update({
-        where: { id: appointmentId },
+    const claimed = await prisma.$transaction(async (tx) => {
+      // Atomic claim, gated on the appointment not already being cancelled —
+      // without this, two concurrent rejects (double-click, or staff and a
+      // webhook racing) both pass a plain read-then-check and both refund.
+      const claim = await tx.appointment.updateMany({
+        where: { id: appointmentId, status: { in: ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW"] } },
         data: { status: "CANCELLED" },
       });
+      if (claim.count === 0) return false;
 
-      if (wasPaid) {
-        await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
-        await tx.transaction.create({
-          data: {
-            paymentId: payment.id,
-            amount: payment.paidAmount,
-            method: "ONLINE",
-            transactionType: "REFUND",
-            paidAt: new Date(),
-          },
+      if (wasPaid && payment.invoice) {
+        await issueCreditNote(tx, {
+          invoiceId: payment.invoice.id,
+          reason: reason ?? "Rendez-vous annulé",
+          totalInclVat: Number(payment.paidAmount),
         });
-
-        if (payment.invoice) {
-          await issueCreditNote(tx, {
-            invoiceId: payment.invoice.id,
-            reason: reason ?? "Rendez-vous annulé",
-            totalInclVat: Number(payment.paidAmount),
-          });
-        }
       }
 
       await tx.notification.create({
@@ -259,42 +243,93 @@ export async function rejectAppointment(appointmentId, reason = null) {
           status: "PENDING",
         },
       });
+
+      return true;
     });
 
-    // The DB side (status, payment, credit note) is already committed — a
-    // failed Stripe call here must not roll any of that back, just get
-    // logged loudly so it can be retried/handled manually.
+    if (!claimed) {
+      return { success: true, message: "Ce rendez-vous est déjà annulé." };
+    }
+
+    // Payment.status / the REFUND ledger row are only written once Stripe
+    // actually confirms the refund — writing them unconditionally beforehand
+    // would tell the customer "refunded" even if the Stripe call below fails.
+    let refundFailed = false;
     if (wasPaid && payment.transactionReference) {
-      try {
-        const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
-        if (stripeSession.payment_intent) {
-          await stripe.refunds.create({ payment_intent: stripeSession.payment_intent });
+      const alreadyRefunded = await prisma.transaction.findFirst({
+        where: { paymentId: payment.id, transactionType: "REFUND" },
+        select: { id: true },
+      });
+
+      if (!alreadyRefunded) {
+        try {
+          const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
+          if (stripeSession.payment_intent) {
+            await stripe.refunds.create({ payment_intent: stripeSession.payment_intent });
+            await prisma.$transaction([
+              prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } }),
+              prisma.transaction.create({
+                data: {
+                  paymentId: payment.id,
+                  amount: payment.paidAmount,
+                  method: "ONLINE",
+                  transactionType: "REFUND",
+                  paidAt: new Date(),
+                },
+              }),
+            ]);
+          }
+        } catch (err) {
+          // The appointment cancellation and credit note are already
+          // committed and stay — surface the refund failure loudly so it can
+          // be retried/handled manually, rather than silently swallowing it.
+          console.error("[rejectAppointment] REFUND FAILED for appointment", appointmentId, err);
+          refundFailed = true;
         }
-      } catch (err) {
-        console.error("[rejectAppointment] REFUND FAILED for appointment", appointmentId, err);
       }
     }
+
+    const refundNote = wasPaid
+      ? refundFailed
+        ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
+        : " Le remboursement apparaîtra sur votre compte sous quelques jours."
+      : "";
 
     sendEmail({
       to: appointment.user.email,
       subject: "Rendez-vous annulé – Meri Beauty",
       text:
         `Bonjour ${appointment.user.fullName},\n\n` +
-        `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé.` +
-        (wasPaid ? " Le remboursement apparaîtra sur votre compte sous quelques jours." : "") +
+        `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé.${refundNote}` +
         (reason ? ` Raison : ${reason}` : "") +
         `\n\nL'équipe Meri Beauty`,
       html:
         `<p>Bonjour ${appointment.user.fullName},</p>` +
-        `<p>Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé.` +
-        (wasPaid ? " Le remboursement apparaîtra sur votre compte sous quelques jours." : "") +
+        `<p>Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé.${refundNote}` +
         (reason ? ` Raison : ${reason}` : "") +
         `</p><p>L'équipe Meri Beauty</p>`,
     }).catch((err) => console.error("[rejectAppointment] cancellation email failed:", err));
 
+    if (refundFailed) {
+      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      if (salon?.email) {
+        sendEmail({
+          to: salon.email,
+          subject: `⚠️ Remboursement Stripe échoué – Rendez-vous ${appointment.user.fullName}`,
+          text: `Le remboursement Stripe pour le rendez-vous de ${appointment.user.fullName} (${appointment.user.email}) du ${appointment.date.toLocaleDateString("fr-FR")} a échoué. Traitement manuel requis dans le dashboard Stripe.`,
+          html: `<p>Le remboursement Stripe pour le rendez-vous de ${appointment.user.fullName} (${appointment.user.email}) du ${appointment.date.toLocaleDateString("fr-FR")} a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
+        }).catch((err) => console.error("[rejectAppointment] refund-failure alert email failed:", err));
+      }
+    }
+
     return {
       success: true,
-      message: wasPaid ? "Rendez-vous annulé — le client sera remboursé." : "Rendez-vous annulé",
+      message: wasPaid
+        ? refundFailed
+          ? "Rendez-vous annulé. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
+          : "Rendez-vous annulé — le client sera remboursé."
+        : "Rendez-vous annulé",
+      refundFailed,
     };
   } catch (error) {
     console.error("[rejectAppointment]", error);
@@ -438,6 +473,11 @@ export async function completeAppointment(appointmentId, { method } = {}) {
  * Gets an appointment by ID with all related data.
  * Used by the payment page.
  *
+ * Returns full customer PII (email, phone) and payment details, so this must
+ * never be reachable by anyone but the appointment's own owner or a
+ * dashboard role — appointment ids are cuids that show up in URLs and
+ * emails, not secrets.
+ *
  * @param {string} appointmentId
  * @returns {Promise<{ success: boolean, appointment?: any, message?: string }>}
  */
@@ -445,6 +485,11 @@ export async function getAppointmentById(appointmentId) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
+    }
+
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, message: "Authentification requise" };
     }
 
     const appointment = await prisma.appointment.findUnique({
@@ -475,6 +520,12 @@ export async function getAppointmentById(appointmentId) {
     });
 
     if (!appointment) {
+      return { success: false, message: "Rendez-vous introuvable" };
+    }
+
+    const isOwner = appointment.userId === session.user.id;
+    if (!isOwner && !isAdminRole(session.user.role) && session.user.role !== ROLES.STAFF) {
+      // Same message as "not found" — don't confirm an id belongs to someone else.
       return { success: false, message: "Rendez-vous introuvable" };
     }
 

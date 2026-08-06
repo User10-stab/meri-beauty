@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Search, Loader2, CalendarX } from "lucide-react";
+import { Search, Loader2, CalendarX, Star } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
@@ -28,6 +28,16 @@ function formatDateTime(date, startTime) {
   const d = new Date(date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
   const t = new Date(startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
   return `${d} · ${t}`;
+}
+
+function RatingStars({ rating }) {
+  return (
+    <div className="flex items-center gap-1 text-amber-400">
+      {Array.from({ length: 5 }, (_, index) => (
+        <Star key={index} size={12} className={index < rating ? "fill-current" : "text-gray-300"} />
+      ))}
+    </div>
+  );
 }
 
 export function AppointmentsPageClient({ initialAppointments, staffOptions, showStaffFilter }) {
@@ -182,6 +192,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                 <TableHead>Date</TableHead>
                 <TableHead>Paiement</TableHead>
                 <TableHead>Statut</TableHead>
+                <TableHead>Avis</TableHead>
                 <TableHead className="pr-6 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -215,6 +226,18 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                       {STATUS_LABEL[a.status]}
                     </span>
                   </TableCell>
+                  <TableCell>
+                    {a.review ? (
+                      <div className="space-y-1">
+                        <RatingStars rating={a.review.rating} />
+                        <p className="text-xs text-gray-400">Avis envoyé</p>
+                      </div>
+                    ) : a.status === "COMPLETED" ? (
+                      <span className="text-xs text-gray-400">En attente d'avis</span>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="pr-6 text-right">
                     {a.status === "PENDING" ? (
                       <div className="flex justify-end gap-2">
@@ -246,7 +269,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         disabled={rowLoadingId === a.id}
                         className="rounded-lg border border-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:opacity-50"
                       >
-                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer"}
+                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer le rendez-vous"}
                       </button>
                     ) : (
                       <span className="text-gray-300">—</span>

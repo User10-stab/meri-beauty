@@ -19,11 +19,61 @@ export async function getMyProfile() {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { fullName: true, email: true, phone: true },
+    select: {
+      fullName: true,
+      email: true,
+      phone: true,
+      appointments: {
+        where: { isDeleted: false },
+        orderBy: { startTime: "desc" },
+        select: {
+          id: true,
+          date: true,
+          startTime: true,
+          endTime: true,
+          status: true,
+          review: {
+            select: {
+              id: true,
+              rating: true,
+              comment: true,
+              createdAt: true,
+            },
+          },
+          staffService: {
+            select: {
+              service: { select: { name: true } },
+              staff: {
+                select: {
+                  user: { select: { fullName: true } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   });
   if (!user) return { success: false, message: "Utilisateur introuvable." };
 
-  return { success: true, data: user };
+  return {
+    success: true,
+    data: {
+      ...user,
+      appointments: user.appointments.map((appointment) => ({
+        ...appointment,
+        date: appointment.date?.toISOString() ?? null,
+        startTime: appointment.startTime?.toISOString() ?? null,
+        endTime: appointment.endTime?.toISOString() ?? null,
+        review: appointment.review
+          ? {
+              ...appointment.review,
+              createdAt: appointment.review.createdAt?.toISOString() ?? null,
+            }
+          : null,
+      })),
+    },
+  };
 }
 
 export async function updateMyProfile(input) {

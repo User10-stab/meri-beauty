@@ -1,7 +1,9 @@
 import { requireDashboard } from "@/lib/route-protection";
 import { getAllAppointments, getStaffFilterOptions } from "@/actions/appointment/list-appointments";
+import { getReviewDashboardData } from "@/actions/review/review-actions";
 import { isAdminRole } from "@/lib/authorization";
 import { AppointmentsPageClient } from "@/components/dashboard/appointments/AppointmentsPageClient";
+import { ReviewsDashboardCard } from "@/components/dashboard/reviews/ReviewsDashboardCard";
 
 export const metadata = {
   title: "Tous les rendez-vous — Dashboard",
@@ -12,9 +14,10 @@ export const dynamic = "force-dynamic";
 export default async function AllAppointmentsPage() {
   const { user } = await requireDashboard();
 
-  const [appointmentsResult, staffResult] = await Promise.all([
+  const [appointmentsResult, staffResult, reviewsResult] = await Promise.all([
     getAllAppointments(),
     isAdminRole(user.role) ? getStaffFilterOptions() : Promise.resolve({ data: [] }),
+    getReviewDashboardData(),
   ]);
 
   return (
@@ -34,6 +37,8 @@ export default async function AllAppointmentsPage() {
           {appointmentsResult.message}
         </div>
       )}
+
+      <ReviewsDashboardCard data={reviewsResult.data} />
 
       <AppointmentsPageClient
         initialAppointments={appointmentsResult.data ?? []}

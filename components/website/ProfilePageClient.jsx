@@ -2,8 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Lock, Star } from "lucide-react";
+import { Loader2, Lock, Star, Mail } from "lucide-react";
 import { updateMyProfile } from "@/actions/customer/profile";
+import { updateNewsletterPreference } from "@/actions/customer/settings";
 import { createAppointmentReview } from "@/actions/review/review-actions";
 import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/review-eligibility";
 
@@ -233,7 +234,28 @@ function AppointmentReviewCard({ appointment, onReviewCreated }) {
 const inputClass =
   "w-full border border-neutral-200 px-4 py-3 text-sm focus:border-gold focus:outline-none";
 
-export function ProfilePageClient({ user }) {
+function Toggle({ checked, onChange, disabled }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-gold disabled:opacity-60 ${
+        checked ? "bg-gold" : "bg-ink/15"
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+          checked ? "translate-x-6" : "translate-x-1"
+        }`}
+      />
+    </button>
+  );
+}
+
+export function ProfilePageClient({ user, initialNewsletterSubscribed }) {
   const [fullName, setFullName] = useState(user.fullName ?? "");
   const [email, setEmail] = useState(user.email ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
@@ -244,6 +266,8 @@ export function ProfilePageClient({ user }) {
   const [submitting, setSubmitting] = useState(false);
   const [appointments, setAppointments] = useState(user.appointments ?? []);
   const [reviewModalAppointment, setReviewModalAppointment] = useState(null);
+  const [newsletterSubscribed, setNewsletterSubscribed] = useState(initialNewsletterSubscribed);
+  const [newsletterPending, setNewsletterPending] = useState(false);
 
   const hasChanges =
     fullName !== user.fullName || email !== user.email || phone !== user.phone || newPassword.length > 0;
@@ -286,6 +310,21 @@ export function ProfilePageClient({ user }) {
     } else {
       toast.error(result.message);
     }
+  }
+
+  function handleNewsletterToggle(next) {
+    setNewsletterSubscribed(next);
+    setNewsletterPending(true);
+    (async () => {
+      const result = await updateNewsletterPreference(next);
+      setNewsletterPending(false);
+      if (result.success) {
+        toast.success(result.message);
+      } else {
+        toast.error(result.message);
+        setNewsletterSubscribed(!next);
+      }
+    })();
   }
 
   function handleOpenReview(appointment) {
@@ -389,6 +428,24 @@ export function ProfilePageClient({ user }) {
               </button>
             </div>
           </form>
+
+          <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <Mail className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.75} />
+                <div>
+                  <p className="text-sm font-bold text-ink">Newsletter</p>
+                  <p className="mt-0.5 text-xs text-ink/50">
+                    Recevez nos actualités, offres et nouveautés par email.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {newsletterPending && <Loader2 className="h-4 w-4 animate-spin text-ink/30" />}
+                <Toggle checked={newsletterSubscribed} onChange={handleNewsletterToggle} disabled={newsletterPending} />
+              </div>
+            </div>
+          </div>
 
           <section className="space-y-5">
             <div>

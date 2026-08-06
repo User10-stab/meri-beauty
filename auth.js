@@ -3,6 +3,38 @@ import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { authConfig } from "./auth.config";
+import { ROLES, canAccessDashboard, isAdminRole } from "@/lib/authorization";
+
+async function getStaffOnboardingState(userId) {
+  const staff = await prisma.staff.findUnique({
+    where: { userId },
+    select: {
+      id: true,
+      setupCompleted: true,
+      languages: true,
+      contracts: { select: { id: true }, take: 1 },
+      workingHours: { select: { id: true }, take: 1 },
+    },
+  });
+
+  if (!staff) {
+    return { isStaff: false, setupCompleted: false };
+  }
+
+  const hasLanguages = staff.languages.length > 0;
+  const hasContract = staff.contracts.length > 0;
+  const hasWorkingHours = staff.workingHours.length > 0;
+  const setupCompleted = hasLanguages && hasContract && hasWorkingHours;
+
+  if (setupCompleted && !staff.setupCompleted) {
+    await prisma.staff.update({
+      where: { id: staff.id },
+      data: { setupCompleted: true },
+    });
+  }
+
+  return { isStaff: true, setupCompleted };
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -80,6 +112,40 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     ...authConfig.callbacks,
+    async authorized({ auth, request: { nextUrl } }) {
+      const baseResult = await authConfig.callbacks.authorized({
+        auth,
+        request: { nextUrl },
+      });
+
+      if (baseResult !== true) {
+        return baseResult;
+      }
+
+      const isDashboardRoute = nextUrl.pathname.startsWith("/dashboard");
+      if (!isDashboardRoute) {
+        return true;
+      }
+
+      const userRole = auth?.user?.role;
+      if (userRole !== ROLES.STAFF) {
+        return true;
+      }
+
+      const accountPath = "/dashboard/account-settings";
+      const isAccountRoute = nextUrl.pathname === accountPath || nextUrl.pathname === "/dashboard";
+
+      if (isAccountRoute) {
+        return true;
+      }
+
+      const onboarding = await getStaffOnboardingState(auth.user.id);
+      if (!onboarding.isStaff || !onboarding.setupCompleted) {
+        return Response.redirect(new URL(accountPath, nextUrl));
+      }
+
+      return true;
+    },
     async jwt({ token, user }) {
       if (user) {
         token.id       = user.id;

@@ -7,7 +7,7 @@ import { Cormorant_Garamond } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
 import NextTopLoader from "nextjs-toploader";
-import { Toaster } from "sonner";
+import { AppToaster } from "@/components/AppToaster";
 
 const cormorant = Cormorant_Garamond({
   subsets: ["latin"],
@@ -34,16 +34,7 @@ export default function RootLayout({ children }) {
 
             {children}
 
-            <Toaster
-            position="bottom-right"
-            richColors
-            closeButton
-            duration={5000}
-            toastOptions={{
-              className:
-                "dark:bg-gray-dark dark:border-dark-3 dark:text-white",
-            }}
-          />
+            <AppToaster />
           </ConfirmProvider>
         </Providers>
       </body>

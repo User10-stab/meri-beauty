@@ -241,3 +241,43 @@ export function ArrowLeftIcon(props) {
     </svg>
   );
 }
+
+export function ShoppingBagIcon(props) {
+  return (
+    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6.5 8.25h11l.87 11.32a1.5 1.5 0 01-1.495 1.68H7.125a1.5 1.5 0 01-1.495-1.68l.87-11.32z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 8.25V6a3 3 0 016 0v2.25" />
+    </svg>
+  );
+}
+
+export function PackageIcon(props) {
+  return (
+    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M3.75 8.25l8.25-4.5 8.25 4.5-8.25 4.5-8.25-4.5z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 8.25v7.5l8.25 4.5 8.25-4.5v-7.5" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75v7.5" />
+    </svg>
+  );
+}
+
+export function ReceiptIcon(props) {
+  return (
+    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} {...props}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6 3.75h12v16.5l-2.25-1.5-2.25 1.5-2.25-1.5-2.25 1.5-2.25-1.5-2.25 1.5V3.75z"
+      />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M8.75 8.25h6.5M8.75 11.5h6.5M8.75 14.75h4" />
+    </svg>
+  );
+}

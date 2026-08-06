@@ -20,6 +20,7 @@ import {
   Save,
   Calendar,
   Pencil,
+  Receipt,
 } from "lucide-react";
 import { updateSalon } from "@/actions/salon/update-salon";
 import { updateWorkingDays } from "@/actions/salon/update-working-days";
@@ -147,6 +148,7 @@ function BusinessInfoSection({ salon, onSuccess }) {
       phone: salon?.phone ?? "",
       email: salon?.email ?? "",
       address: salon?.address ?? "",
+      vatNumber: salon?.vatNumber ?? "",
       instagram: salon?.instagram ?? "",
       facebook: salon?.facebook ?? "",
       tiktok: salon?.tiktok ?? "",
@@ -198,6 +200,19 @@ function BusinessInfoSection({ salon, onSuccess }) {
               <Label icon={MapPin}>Adresse</Label>
               <TextInput id="address" placeholder="123 Rue de la Beauté, Paris" error={errors.address} {...register("address")} />
               <FieldError message={errors.address?.message} />
+            </div>
+            <div>
+              <Label icon={Receipt}>Numéro de TVA</Label>
+              <TextInput
+                id="vatNumber"
+                placeholder="BE0123456789"
+                error={errors.vatNumber}
+                {...register("vatNumber")}
+              />
+              <FieldError message={errors.vatNumber?.message} />
+              <p className="mt-1 text-xs text-gray-400 dark:text-dark-5">
+                Imprimé sur chaque facture émise par la boutique.
+              </p>
             </div>
           </div>
 

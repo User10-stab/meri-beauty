@@ -10,7 +10,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
 // ENUMS
@@ -46,6 +46,18 @@ enum PaymentType {
   ON_SITE
   ONLINE
   DEPOSIT
+}
+
+enum InvoiceSource {
+  ORDER
+  APPOINTMENT
+}
+
+enum ReturnStatus {
+  REQUESTED // customer submitted it, awaiting staff review
+  APPROVED // staff accepted it — waiting for the item to actually come back
+  REJECTED
+  COMPLETED // item received, stock restored, refund/credit note issued
 }
 
 enum TransactionMethod {
@@ -115,10 +127,53 @@ enum RentalRequestStatus {
   CANCELLED
 }
 
+// BOUTIQUE ENUMS
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum MovementType {
+  SALE
+  RESTOCK
+  RETURN
+  LOSS
+  ADJUSTMENT
+  SALON_USAGE // product taken from retail stock during a service
+}
+
 enum CommissionType {
   PERCENTAGE
   FIXED
   HYBRID
+}
+
+// COMMERCE ENUMS
+
+enum CartStatus {
+  ACTIVE
+  CONVERTED // turned into an Order
+  ABANDONED
+}
+
+enum FulfilmentMode {
+  PICKUP_PREPAID // pay online, collect in salon
+  PICKUP_ON_SITE // reserve online, pay at counter on pickup
+  SHIPPING_PREPAID // pay online, bpost delivery
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT // prepaid modes — Stripe checkout started, not yet settled
+  PENDING_PICKUP // pickup+pay-on-site — confirmed, stock reserved, awaiting the customer
+  PAID // payment settled, not yet fulfilled
+  PROCESSING // shipping mode — preparing the parcel
+  READY_FOR_PICKUP // staff has set the order aside in the salon
+  SHIPPED // handed to bpost, tracking code set
+  COMPLETED // picked up, or shipped and closed out
+  CANCELLED
+  EXPIRED // pay-on-site pickup not collected within the deadline
 }
 
 enum WeekDay {
@@ -136,6 +191,7 @@ enum WeekDay {
 
   SUNDAY
 }
+
 enum ReservationConfirmationMode {
   AUTOMATIC
   MANUAL
@@ -146,10 +202,109 @@ enum AllowedPaymentMethods {
   ONLINE_ONLY
   CASH_ONLY
 }
+// ─── WORKSHOP / EVENT ENUMS ────────────────────────────────────────────────────
+
+enum WorkshopType {
+  WORKSHOP
+  EVENT
+}
+
+enum WorkshopStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+  ARCHIVED
+}
+
+enum SessionStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum WaitingListStatus {
+  WAITING
+  NOTIFIED
+  EXPIRED
+  CONVERTED
+  REMOVED
+}
+
+// ─── WORKSHOP / EVENT MODELS ───────────────────────────────────────────
+
+model Activity {
+  id                    String         @id @default(cuid())
+  type                  WorkshopType
+  title                 String
+  description           String?
+  cover                 String?
+  price                 Decimal        @db.Decimal(10, 2)
+  duration              Int
+  language              String?
+  capacity              Int
+  animatorId            String?
+  animator              Animator?      @relation(fields: [animatorId], references: [id])
+  status                WorkshopStatus @default(DRAFT)
+  allowMultipleSessions Boolean        @default(false)
+  depositPercentage     Int            @default(30)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  sessions WorkshopSession[]
+
+  @@map("workshops")
+}
+
+model WaitingListEntry {
+  id                       String            @id @default(cuid())
+  sessionId                String
+  session                  WorkshopSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId               String
+  customer                 User              @relation(fields: [customerId], references: [id])
+  seatsRequested           Int               @default(1)
+  position                 Int
+  status                   WaitingListStatus @default(WAITING)
+  notifiedAt               DateTime?
+  expiresAt                DateTime?
+  convertedToReservationId String?
+  createdAt                DateTime          @default(now())
+  updatedAt                DateTime          @updatedAt
+
+  @@index([sessionId, position])
+  @@index([sessionId, status])
+  @@map("waiting_list_entries")
+}
+
+model Animator {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique
+  phone     String?
+  bio       String?
+  avatar    String?
+  website   String?
+  instagram String?
+  facebook  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activities Activity[]
+  sessions   WorkshopSession[]
+
+  @@map("animators")
+}
+enum WorkshopReservationStatus {
+  PENDING_DEPOSIT
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
 
 // SALON
 model Salon {
-  id          String   @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
   description String?
   logo        String?
@@ -158,51 +313,88 @@ model Salon {
   phone       String
   email       String
   address     String?
+  vatNumber   String? // legal TVA/BCE number — printed on every issued invoice
 
-  instagram   String?
-  facebook    String?
-  tiktok      String?
+  instagram String?
+  facebook  String?
+  tiktok    String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  gallery      SalonGallery[]
-  workingDays  SalonWorkingDay[]
-  closures     SalonClosure[]
-  newsletters  Newsletter[]
+  gallery     SalonGallery[]
+  workingDays SalonWorkingDay[]
+  closures    SalonClosure[]
+  newsletters Newsletter[]
 }
+
+model WorkshopReservation {
+  id            String                    @id @default(cuid())
+  sessionId     String
+  session       WorkshopSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId    String
+  customer      User                      @relation(fields: [customerId], references: [id])
+  paymentId     String?
+  seatsCount    Int                       @default(1)
+  status        WorkshopReservationStatus @default(PENDING_DEPOSIT)
+  holdExpiresAt DateTime?
+  depositAmount Decimal                   @default(0) @db.Decimal(10, 2)
+  totalPrice    Decimal                   @db.Decimal(10, 2)
+  balanceDue    Decimal                   @default(0) @db.Decimal(10, 2)
+  participants  String?
+  notes         String?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  @@index([sessionId])
+  @@index([customerId])
+  @@map("workshop_reservations")
+}
+model WorkshopSession {
+  id                   String        @id @default(cuid())
+  workshopId           String
+  workshop             Activity      @relation(fields: [workshopId], references: [id], onDelete: Cascade)
+  animatorId           String?
+  animator             Animator?     @relation(fields: [animatorId], references: [id])
+  startDate            DateTime
+  endDate              DateTime?
+  capacity             Int
+  status               SessionStatus @default(SCHEDULED)
+  registrationDeadline DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  reservations WorkshopReservation[]
+  waitingList  WaitingListEntry[]
+
+  @@index([workshopId])
+  @@map("workshop_sessions")
+}
+
 model SalonWorkingDay {
-  id           String   @id @default(cuid())
-
-  day          WeekDay
-  isOpen       Boolean  @default(true)
-
-  openingTime  String
-  closingTime  String
-
-  salonId      String
-  salon        Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  id          String  @id @default(cuid())
+  day         WeekDay
+  isOpen      Boolean @default(true)
+  openingTime String
+  closingTime String
+  salonId     String
+  salon       Salon   @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
   @@unique([salonId, day])
 }
+
 model SalonClosure {
-  id          String   @id @default(cuid())
-
+  id          String    @id @default(cuid())
   title       String
-
   startDate   DateTime
   endDate     DateTime?
-
-  isFullDay   Boolean @default(true)
-
+  isFullDay   Boolean   @default(true)
   openingTime String?
   closingTime String?
-
   salonId     String
-  salon       Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  salon       Salon     @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 // USER
@@ -219,10 +411,11 @@ model User {
   isActive             Boolean   @default(true)
   lastLogin            DateTime?
   newsletterSubscribed Boolean   @default(false)
+  vatNumber            String?   // Client TVA number for B2B invoices
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
   staff                Staff?
   appointments         Appointment[]
@@ -231,15 +424,411 @@ model User {
   newsletterRecipients NewsletterRecipient[]
   createdStaffServices StaffService[]        @relation("CreatedBy")
   rentalRequests       RentalRequest[]
+  workshopReservations WorkshopReservation[]
+  waitingListEntries   WaitingListEntry[]
+  stockMovements       InventoryMovement[]   @relation("StockMovementBy")
+  carts                Cart[]
+  orders               Order[]               @relation("OrderBuyer")
+  pickedUpOrders       Order[]               @relation("OrderPickedUpBy")
+  processedReturns     ReturnRequest[]       @relation("ReturnProcessedBy")
 }
 
-// CATEGORY
+// CATEGORY — services only. Retail products use ProductCategory.
 model Category {
   id          String  @id @default(cuid())
   name        String  @unique
   description String?
 
   services Service[]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOUTIQUE — CATALOGUE
+// ─────────────────────────────────────────────────────────────────────────────
+
+// BRAND
+// Root of the catalogue tree: Brand → ProductCategory → ProductSubcategory →
+// Product. A category belongs to exactly one brand (client decision,
+// 29 Jul 2026) — two brands each having their own "Bases" category are two
+// separate ProductCategory rows, not a shared one.
+model Brand {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  logo        String?
+  description String?
+
+  isActive  Boolean   @default(true)
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories ProductCategory[]
+
+  @@index([slug])
+  @@index([isActive, isDeleted])
+}
+
+// PRODUCT CATEGORY
+// Brand-scoped — slug is unique per brand, not globally, since the same
+// category name ("Bases", "Accessoires"...) commonly recurs across brands.
+model ProductCategory {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String
+  description String?
+  position    Int     @default(0)
+  isActive    Boolean @default(true)
+
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subcategories ProductSubcategory[]
+
+  @@unique([brandId, slug])
+  @@index([brandId])
+}
+
+// PRODUCT SUBCATEGORY
+model ProductSubcategory {
+  id       String @id @default(cuid())
+  name     String
+  slug     String
+  position Int    @default(0)
+  isActive Boolean @default(true)
+
+  categoryId String
+  category   ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
+
+  @@unique([categoryId, slug])
+  @@index([categoryId])
+}
+
+// PRODUCT
+// Descriptive only — every sellable unit, price and stock level lives on
+// ProductVariant, so a product with one size still has exactly one variant.
+//
+// Brand is deliberately NOT stored directly on Product — it's derived via
+// subcategory.category.brand. Storing it a second time here would let a
+// product's brand disagree with its own category's brand; since the tree is
+// now Brand → Category → Subcategory → Product, subcategoryId alone already
+// determines the brand unambiguously.
+model Product {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+
+  // Nullable so a subcategory can actually be deleted once it has no active
+  // products left — an archived (soft-deleted) product's row still exists
+  // forever (see isDeleted below) and would otherwise block deletion forever
+  // too. onDelete: SetNull only ever fires for those already-archived rows,
+  // since deleteProductSubcategory() refuses to delete while any non-deleted
+  // product still references it.
+  subcategoryId String?
+  subcategory   ProductSubcategory? @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+
+  status ProductStatus @default(DRAFT)
+
+  // Never hard-delete: OrderItem references variants of this product forever.
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variants ProductVariant[]
+  images   ProductImage[]
+
+  @@index([slug])
+  @@index([subcategoryId])
+  @@index([status, isDeleted])
+}
+
+// PRODUCT VARIANT
+// The sellable unit: "250 ml", "Teinte 03". Carries sku, barcode, prices and stock.
+//
+// profit and margin are intentionally absent — both are derivations of
+// (price - costPrice). Stored, they go stale the moment either input changes
+// and leave three fields that can contradict each other. Compute on read.
+model ProductVariant {
+  id String @id @default(cuid())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  name    String // "250 ml", "Teinte 03" — "Standard" for single-variant products
+  sku     String  @unique
+  barcode String? @unique // EAN/UPC; null until an internal code is generated
+  weightGrams Int @default(0) // Weight in grams for shipping cost calculation
+
+  price        Decimal  @db.Decimal(10, 2) // selling price, TVA included
+  costPrice    Decimal  @db.Decimal(10, 2) // supplier cost — "prix initial"
+  comparePrice Decimal? @db.Decimal(10, 2) // struck-through price — "prix barré"
+
+  // Available to sell = stockQuantity - reservedQuantity.
+  // Reservation is NOT an InventoryMovement: it does not change stock on hand,
+  // and folding it in would break SUM(quantity) == stockQuantity.
+  stockQuantity     Int @default(0)
+  reservedQuantity  Int @default(0)
+  lowStockThreshold Int @default(3)
+
+  position Int     @default(0)
+  isActive Boolean @default(true)
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  inventoryMovements InventoryMovement[]
+  cartItems          CartItem[]
+  orderItems         OrderItem[]
+
+  @@index([productId])
+  @@index([sku])
+  @@index([barcode])
+  @@index([isActive, isDeleted])
+}
+
+// PRODUCT IMAGE
+model ProductImage {
+  id String @id @default(cuid())
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  path      String
+  alt       String?
+  position  Int     @default(0)
+  isPrimary Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([productId])
+}
+
+// INVENTORY MOVEMENT
+// Append-only ledger. quantity is signed, so SUM(quantity) reconciles to
+// ProductVariant.stockQuantity. Written in the same transaction as the stock
+// update, never after it.
+model InventoryMovement {
+  id String @id @default(cuid())
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  type     MovementType
+  quantity Int // negative for SALE / LOSS / SALON_USAGE, positive for RESTOCK / RETURN
+
+  previousStock Int
+  newStock      Int
+
+  reason String?
+
+  createdById String?
+  createdBy   User?   @relation("StockMovementBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([variantId, createdAt])
+  @@index([type])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOUTIQUE — COMMERCE (cart, checkout, orders)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// CART
+// Identified by a random `token` set in a cookie so a browsing session has a
+// cart before the customer is known; `userId` is attached once they log in /
+// check out. Never hard-delete CartItems on checkout — the cart is marked
+// CONVERTED and left as history, the Order is the new source of truth.
+model Cart {
+  id String @id @default(cuid())
+
+  token String @unique
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  status CartStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items  CartItem[]
+  orders Order[]
+
+  @@index([userId])
+}
+
+// CART ITEM
+model CartItem {
+  id String @id @default(cuid())
+
+  cartId String
+  cart   Cart   @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  quantity Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, variantId])
+  @@index([variantId])
+}
+
+// ORDER
+// `orderNumber` is a human-readable display number (gaps are fine — Belgian
+// gapless-sequence law applies to invoices, not orders; a separate Invoice
+// model will own that numbering). Shipping fields only apply to
+// SHIPPING_PREPAID; pickup fields only apply to the two PICKUP_* modes —
+// left nullable rather than split into subtype tables since an Order is
+// always exactly one fulfilment mode for its whole lifetime.
+model Order {
+  id          String @id @default(cuid())
+  orderNumber Int    @unique @default(autoincrement())
+
+  userId String
+  user   User   @relation("OrderBuyer", fields: [userId], references: [id])
+
+  // The cart this order was checked out from — null for older orders created
+  // before this field existed. Prepaid orders keep their source cart ACTIVE
+  // until payment actually succeeds (see fulfillOrderPayment), specifically so
+  // a customer who abandons the Stripe redirect still finds their cart intact
+  // instead of it looking silently cleared.
+  cartId String?
+  cart   Cart?   @relation(fields: [cartId], references: [id])
+
+  fulfilmentMode FulfilmentMode
+  status         OrderStatus    @default(PENDING_PAYMENT)
+
+  subtotal     Decimal @db.Decimal(10, 2)
+  shippingCost Decimal @default(0) @db.Decimal(10, 2)
+  totalAmount  Decimal @db.Decimal(10, 2)
+
+  // Shipping (SHIPPING_PREPAID)
+  shippingLine1      String?
+  shippingLine2      String?
+  shippingCity       String?
+  shippingPostalCode String?
+  shippingCountry    String?   @default("BE")
+  bpostTrackingCode  String?
+  shippedAt          DateTime?
+
+  // Pickup (PICKUP_PREPAID / PICKUP_ON_SITE)
+  pickupCode        String?   @unique // QR payload scanned by staff at collection
+  pickedUpAt        DateTime?
+  pickedUpByStaffId String?
+  pickedUpByStaff   User?     @relation("OrderPickedUpBy", fields: [pickedUpByStaffId], references: [id])
+
+  // PENDING_PICKUP orders auto-cancel + restock if not collected by this date
+  expiresAt     DateTime?
+  cancelledAt   DateTime?
+  cancelReason  String?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items   OrderItem[]
+  payment Payment?
+  returnRequests ReturnRequest[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ORDER ITEM
+// Snapshots product/variant name, sku and unitPrice at time of purchase —
+// the variant itself may be repriced or renamed later, but a placed order
+// must keep showing what the customer actually bought and paid.
+model OrderItem {
+  id String @id @default(cuid())
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id])
+
+  productName String
+  variantName String
+  sku         String
+
+  unitPrice Decimal @db.Decimal(10, 2)
+  quantity  Int
+
+  createdAt DateTime @default(now())
+
+  returnRequestItems ReturnRequestItem[]
+
+  @@index([orderId])
+  @@index([variantId])
+}
+
+// RETURN REQUEST
+// Belgian/EU 14-day withdrawal right. Customer-initiated (order lookup by
+// number + email, no account/login required — see actions/boutique/returns.js)
+// for any COMPLETED order still inside its withdrawal window. Supports
+// partial returns: one order can have several ReturnRequests over time as
+// long as the returned quantity per item never exceeds what was bought.
+model ReturnRequest {
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  status ReturnStatus @default(REQUESTED)
+  reason String
+
+  requestedAt DateTime @default(now())
+
+  processedAt         DateTime?
+  processedByStaffId  String?
+  processedByStaff    User?     @relation("ReturnProcessedBy", fields: [processedByStaffId], references: [id])
+  staffNote           String?
+
+  // Set only once COMPLETED with a refund — the credit note that
+  // documents the money actually credited back for this return.
+  creditNoteId String?     @unique
+  creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id])
+
+  items ReturnRequestItem[]
+
+  @@index([orderId])
+  @@index([status])
+}
+
+// RETURN REQUEST ITEM
+model ReturnRequestItem {
+  id String @id @default(cuid())
+
+  returnRequestId String
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
+
+  quantity Int
+
+  @@index([returnRequestId])
+  @@index([orderItemId])
 }
 
 // SERVICE
@@ -281,7 +870,7 @@ model Staff {
   allowedPaymentMethods       AllowedPaymentMethods @default(BOTH)
 
   // Account Setup
-  setupCompleted              Boolean @default(false)
+  setupCompleted Boolean @default(false)
 
   // Bank account details
   accountHolderName String?
@@ -347,20 +936,27 @@ model Appointment {
   status    AppointmentStatus
   notes     String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  isDeleted     Boolean        @default(false)
+  deletedAt     DateTime?
   payment       Payment?
   review        Review?
   notifications Notification[]
 }
 
-// PAYMENT 
+// PAYMENT
+// Polymorphic: exactly one of appointmentId / orderId is set, enforced by a
+// raw-SQL CHECK constraint added after the migration (see
+// prisma/migrations/*_add_commerce_cart_order/migration.sql) — Prisma has no
+// schema-level XOR. A future workshopReservationId branch can join this same
+// CHECK when that module exists.
 model Payment {
   id                   String        @id @default(cuid())
-  appointmentId        String        @unique
-  appointment          Appointment   @relation(fields: [appointmentId], references: [id])
+  appointmentId        String?       @unique
+  appointment          Appointment?  @relation(fields: [appointmentId], references: [id])
+  orderId              String?       @unique
+  order                Order?        @relation(fields: [orderId], references: [id])
   depositAmount        Decimal       @default(0)
   totalAmount          Decimal
   paidAmount           Decimal
@@ -368,11 +964,95 @@ model Payment {
   paymentType          PaymentType
   status               PaymentStatus
   paidAt               DateTime?
-  isDeleted            Boolean   @default(false)
+  isDeleted            Boolean       @default(false)
   deletedAt            DateTime?
   transactionReference String?
 
   transactions Transaction[]
+  invoice      Invoice?
+}
+
+// NUMBERING COUNTER
+// Atomic per-key counter backing legally-gapless sequential numbering
+// (invoices, credit notes — Belgian TVA law requires an unbroken sequence,
+// not just "usually in order"). One row per series+year, e.g. "invoice-2026".
+// Incremented via a single UPDATE...RETURNING inside the SAME transaction as
+// the document it numbers (see lib/invoicing.js), so a rolled-back
+// transaction never burns a number.
+model NumberingCounter {
+  key        String @id
+  lastNumber Int    @default(0)
+}
+
+// INVOICE
+// One per Payment, created the moment a sale is actually settled (Stripe
+// payment confirmed, or cash/card collected in person) — never at checkout
+// time, since an unpaid/abandoned order or appointment must never consume a
+// number. Seller/customer/line data is a frozen snapshot taken at issue
+// time (copied in, never joined live) because the invoice must keep
+// reflecting what was true when issued even if the product, customer, or
+// salon info changes afterwards.
+model Invoice {
+  id     String        @id @default(cuid())
+  number String        @unique // "2026-000001" — year + gapless in-year sequence
+  source InvoiceSource
+
+  paymentId String  @unique
+  payment   Payment @relation(fields: [paymentId], references: [id])
+
+  issuedAt DateTime @default(now())
+
+  sellerName      String
+  sellerAddress   String?
+  sellerVatNumber String?
+
+  customerName      String
+  customerEmail     String
+  customerVatNumber String?   // Client TVA number (copied from User.vatNumber at invoice time)
+  customerAddress   String?
+
+  subtotalExclVat Decimal @db.Decimal(10, 2)
+  vatRate         Decimal @default(21) @db.Decimal(4, 2)
+  vatAmount       Decimal @db.Decimal(10, 2)
+  totalInclVat    Decimal @db.Decimal(10, 2)
+
+  lines       InvoiceLine[]
+  creditNotes CreditNote[]
+
+  @@index([paymentId])
+}
+
+// INVOICE LINE
+model InvoiceLine {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  description String
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(10, 2)
+  lineTotal   Decimal @db.Decimal(10, 2)
+}
+
+// CREDIT NOTE
+// Issued alongside a refund whenever an already-invoiced order/appointment
+// is cancelled — never edits or deletes the original Invoice, Belgian law
+// requires the correction to be its own numbered document. Own gapless
+// sequence, separate counter from Invoice's.
+model CreditNote {
+  id     String @id @default(cuid())
+  number String @unique // "NC2026-000001"
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+
+  reason       String?
+  issuedAt     DateTime @default(now())
+  totalInclVat Decimal  @db.Decimal(10, 2)
+
+  returnRequest ReturnRequest?
+
+  @@index([invoiceId])
 }
 
 // TRANSACTION
@@ -486,7 +1166,7 @@ model Newsletter {
   updatedAt   DateTime         @updatedAt
 
   salonId String
-  salon   Salon @relation(fields: [salonId], references: [id], onDelete: Cascade)
+  salon   Salon  @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
   recipients NewsletterRecipient[]
 }
@@ -520,8 +1200,8 @@ model RentalRequest {
   message        String?
   ownerResponse  String?
   specialty      String?
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
+  isDeleted      Boolean             @default(false)
+  deletedAt      DateTime?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 }

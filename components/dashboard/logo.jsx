@@ -1,9 +1,8 @@
-import Link from "next/link";
 import Image from "next/image";
 
 export function Logo() {
   return (
-    <div className="relative flex items-center gap-2">
+    <div className="flex items-center gap-2">
       <div className="flex items-center justify-center w-[60px] h-[60px] bg-[#2f3a2e] rounded-full ">
             {/* <div className="flex items-center justify-center w-[85px] h-[85px] bg-[#2f3a2e] rounded-full"> */}
                <Image

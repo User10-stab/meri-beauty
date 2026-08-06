@@ -1,59 +1,41 @@
+import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "./auth.config";
-import { decryptToken, defaultCookies } from "./lib/middleware-auth";
 
-function getSessionToken(request, cookieName) {
-  const all = [...request.cookies];
-  const entries = all
-    .filter(([name]) => name === cookieName || name.startsWith(cookieName + "."))
-    .sort(([a], [b]) => {
-      const aIdx = parseInt(a.split(".").pop() || "0", 10);
-      const bIdx = parseInt(b.split(".").pop() || "0", 10);
-      return aIdx - bIdx;
-    });
-  return entries.map(([, v]) => v.value).join("") || null;
+const COOKIE_NAME = "meri_site_access";
+const GATE_PASSWORD = process.env.SITE_ACCESS_PASSWORD;
+
+async function sha256Hex(value) {
+  const data = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 export default async function middleware(request) {
-  const useSecureCookies = request.nextUrl.protocol === "https:";
-  const cookieName = defaultCookies(useSecureCookies).sessionToken.name;
+  const gateEnabled = !!GATE_PASSWORD;
 
-  const secret =
-    process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+  if (gateEnabled) {
+    const { pathname } = request.nextUrl;
+    const expected = await sha256Hex(GATE_PASSWORD);
+    const unlocked = request.cookies.get(COOKIE_NAME)?.value === expected;
 
-  const token = getSessionToken(request, cookieName);
-
-  let auth = null;
-  if (token && secret) {
-    const payload = await decryptToken(token, secret, cookieName);
-    if (payload) {
-      auth = {
-        user: {
-          id: payload.id,
-          email: payload.email,
-          role: payload.role,
-          isActive: payload.isActive,
-        },
-      };
+    if (pathname === "/acces") {
+      // Already unlocked — go straight to the site.
+      if (unlocked) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/";
+        url.search = "";
+        return NextResponse.redirect(url);
+      }
+    } else if (!unlocked) {
+      // Locked — send everyone to the gate page.
+      return NextResponse.redirect(new URL("/acces", request.url));
     }
   }
 
-  const result = await authConfig.callbacks.authorized({
-    auth,
-    request: { nextUrl: request.nextUrl },
-  });
-
-  if (result instanceof Response) return result;
-  if (result === true) return NextResponse.next();
-
-  const signInPage = authConfig.pages?.signIn ?? "/login";
-  if (request.nextUrl.pathname !== signInPage) {
-    const signInUrl = request.nextUrl.clone();
-    signInUrl.pathname = signInPage;
-    return NextResponse.redirect(signInUrl);
-  }
-
-  return NextResponse.next();
+  return NextAuth(authConfig).auth(request);
 }
 
 export const config = {

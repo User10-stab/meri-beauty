@@ -47,6 +47,11 @@ const ALL_NAV_DATA = [
         icon: Icons.CreditCardIcon,
         url: "/dashboard/payments",
         items: [],
+        title: "Workshops & Événements",
+        icon: Icons.Calendar,
+        url: "/dashboard/workshops",
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.SALON_SETTINGS,
       },
       {
         title: "Staff",
@@ -58,6 +63,37 @@ const ALL_NAV_DATA = [
           },
         ],
         roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT, // Admin only
+      },
+      {
+        title: "Boutique",
+        icon: Icons.ShoppingBagIcon,
+        items: [
+          { title: "Produits", url: "/dashboard/boutique/products" },
+          { title: "Catégories", url: "/dashboard/boutique/categories" },
+          { title: "Stock", url: "/dashboard/boutique/stock" },
+        ],
+        roles: DASHBOARD_PERMISSIONS.BOUTIQUE, // Admin only
+      },
+      {
+        title: "Commandes",
+        icon: Icons.PackageIcon,
+        url: "/dashboard/boutique/orders",
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.ORDERS, // Admin + staff — day-to-day counter work
+      },
+      {
+        title: "Retours",
+        icon: Icons.ReceiptIcon,
+        url: "/dashboard/boutique/returns",
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.ORDERS, // Same counter-work access as Commandes
+      },
+      {
+        title: "Factures",
+        icon: Icons.ReceiptIcon,
+        url: "/dashboard/invoices",
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.INVOICES, // Admin only
       },
       {
         title: "Newsletter",
@@ -82,7 +118,7 @@ const ALL_NAV_DATA = [
       },
     ],
   },
- 
+
 ];
 
 /**

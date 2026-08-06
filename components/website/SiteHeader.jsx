@@ -7,6 +7,7 @@ import { useState, useRef, useEffect } from "react";
 import { UserIcon, BagIcon, MenuIcon, CloseIcon } from "./icons";
 import { useSession, signOut } from "next-auth/react";
 import { AnimatePresence, motion } from "framer-motion";
+import { getCart } from "@/actions/boutique/cart";
 
 const NAV_LINKS = [
   { label: "Accueil", href: "/" },
@@ -20,8 +21,27 @@ const NAV_LINKS = [
 export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState("Accueil");
+  const [cartItemCount, setCartItemCount] = useState(0);
   const { data: session, status } = useSession();
   const isAuthed = status === "authenticated";
+
+  // Fetched client-side (not passed from the layout) so the shared public
+  // layout never touches cookies() — see app/(public)/layout.js. Re-fetches
+  // whenever a cart mutation fires the "boutique:cart-updated" event, since
+  // this component doesn't unmount on client-side navigation.
+  useEffect(() => {
+    let cancelled = false;
+    async function refresh() {
+      const result = await getCart();
+      if (!cancelled) setCartItemCount(result.data?.itemCount ?? 0);
+    }
+    refresh();
+    window.addEventListener("boutique:cart-updated", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("boutique:cart-updated", refresh);
+    };
+  }, []);
   
   // Check if user has one of the specified roles
   const hasDashboardRole = isAuthed && session?.user?.role && 
@@ -216,25 +236,30 @@ export default function Navbar() {
                   </motion.div>
                 )}
               </AnimatePresence>
-                {/* Bag icon */}
-          <button
-            aria-label="Mon panier"
-            className="rounded-full p-2 text-cream/70 transition-colors duration-200 hover:text-cream"
-          >
-            <BagIcon className="h-[18px] w-[18px]" />
-          </button>
 
-          {/* CTA — gold pill (only when authenticated) */}
-          {isAuthed && (
-            <Link
-              href="#reservation"
-              className="ml-2 hidden rounded-full border border-gold px-5 py-2 text-[13px] font-medium text-gold transition-all duration-200 hover:bg-gold hover:text-primary sm:inline-flex"
-            >
-              Réserver
-            </Link>
-          )}
+              {/* CTA — gold pill (only when authenticated) */}
+              <Link
+                href="#reservation"
+                className="ml-2 hidden rounded-full border border-gold px-5 py-2 text-[13px] font-medium text-gold transition-all duration-200 hover:bg-gold hover:text-primary sm:inline-flex"
+              >
+                Réserver
+              </Link>
             </>
           )}
+
+          {/* Bag icon — visible to everyone, guests included, since checkout supports guest orders */}
+          <Link
+            href="/boutique/cart"
+            aria-label={`Mon panier${cartItemCount > 0 ? ` (${cartItemCount} article${cartItemCount > 1 ? "s" : ""})` : ""}`}
+            className="relative rounded-full p-2 text-cream/70 transition-colors duration-200 hover:text-cream"
+          >
+            <BagIcon className="h-[18px] w-[18px]" />
+            {cartItemCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-gold px-1 text-[10px] font-semibold leading-none text-primary">
+                {cartItemCount > 9 ? "9+" : cartItemCount}
+              </span>
+            )}
+          </Link>
 
           {/* Login button (only when NOT authenticated) */}
           {!isAuthed && (

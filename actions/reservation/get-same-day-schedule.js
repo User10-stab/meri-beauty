@@ -41,18 +41,27 @@ export async function getSameDaySchedule({ drafts, date, maxProposals = DEFAULT_
       }),
       prisma.appointment.findMany({
         where: {
-          staffServiceId: { in: staffServiceIds },
+          staffService: {
+            staffId: { in: staffServices.map(ss => ss.staffId) },
+          },
           date: { gte: selectedDate, lte: endOfDay },
           status: { in: ["PENDING", "CONFIRMED"] },
           isDeleted: false,
         },
-        select: { staffServiceId: true, startTime: true, endTime: true },
+        include: {
+          staffService: {
+            select: {
+              id: true,
+              margin: true,
+            },
+          },
+        },
       }),
     ]);
 
     const ssById = Object.fromEntries(staffServices.map((ss) => [ss.id, ss]));
-    const apptsByStaffServiceId = staffServiceIds.reduce((acc, id) => {
-      acc[id] = allAppointments.filter((a) => a.staffServiceId === id);
+    const apptsByStaffId = staffServices.reduce((acc, ss) => {
+      acc[ss.staffId] = allAppointments.filter((a) => a.staffService?.staffId === ss.staffId);
       return acc;
     }, {});
 
@@ -61,7 +70,8 @@ export async function getSameDaySchedule({ drafts, date, maxProposals = DEFAULT_
       selectedDate,
       salon,
       ssById,
-      apptsByStaffServiceId,
+      apptsByStaffId,
+      allAppointments,
       now: new Date(),
     };
 

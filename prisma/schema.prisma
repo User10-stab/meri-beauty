@@ -205,6 +205,12 @@ enum ReservationConfirmationMode {
   MANUAL
 }
 
+enum AllowedPaymentMethods {
+  BOTH
+  ONLINE_ONLY
+  CASH_ONLY
+}
+
 // ─── WORKSHOP / EVENT ENUMS ────────────────────────────────────────────────────
 
 enum WorkshopType {
@@ -224,14 +230,6 @@ enum SessionStatus {
   ONGOING
   COMPLETED
   CANCELLED
-}
-
-enum WorkshopReservationStatus {
-  PENDING_DEPOSIT
-  CONFIRMED
-  CANCELLED
-  COMPLETED
-  NO_SHOW
 }
 
 enum WaitingListStatus {
@@ -398,6 +396,14 @@ model Animator {
   @@map("animators")
 }
 
+enum WorkshopReservationStatus {
+  PENDING_DEPOSIT
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
 // ─── FORMATION MODELS ───────────────────────────────────────────────────────
 // Training courses. Structurally parallel to Activity/WorkshopSession/
 // WorkshopReservation above, but deliberately kept as separate tables: none
@@ -486,6 +492,7 @@ model FormationReservation {
   @@map("formation_reservations")
 }
 
+// SALON
 model Salon {
   id          String  @id @default(cuid())
   name        String
@@ -1039,6 +1046,7 @@ model Staff {
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
   depositEnabled              Boolean                     @default(false)
   depositPercentage           Decimal                     @default(10.0) @db.Decimal(5, 2)
+  allowedPaymentMethods       AllowedPaymentMethods       @default(BOTH)
 
   // Account Setup
   setupCompleted Boolean @default(false)
@@ -1051,6 +1059,7 @@ model Staff {
 
   // Stripe Connect
   stripeAccountId      String? @unique
+  stripeAccountType    String?
   stripeChargesEnabled Boolean @default(false)
   stripePayoutsEnabled Boolean @default(false)
 
@@ -1287,13 +1296,15 @@ model Transaction {
   paymentId String
   payment   Payment @relation(fields: [paymentId], references: [id])
 
-  amount          Decimal
-  method          TransactionMethod
-  transactionType TransactionType
-  paidAt          DateTime
-  createdAt       DateTime          @default(now())
-  isDeleted       Boolean           @default(false)
-  deletedAt       DateTime?
+  amount                  Decimal
+  method                  TransactionMethod
+  transactionType         TransactionType
+  paidAt                  DateTime
+  stripeCheckoutSessionId String?
+  stripePaymentIntentId   String?
+  createdAt               DateTime          @default(now())
+  isDeleted               Boolean           @default(false)
+  deletedAt               DateTime?
 }
 
 // CONTRACT

@@ -1,25 +1,23 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { buildAvailabilityForDate } from "@/lib/slot-availability";
-
-function formatDateKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
+import {
+  buildAvailabilityForDate,
+  parseLocalDateString,
+  formatLocalDateKey,
+} from "@/lib/slot-availability";
 
 /**
- * Get available time slots for a staff member on a specific date
- * @param {string} staffServiceId - The staff service ID
- * @param {Date} date - The date to check
- * @returns {Promise<{success: boolean, data?: any, message?: string}>}
+ * Get available reservation windows for a staff member on a specific date.
+ *
+ * @param {string}        staffServiceId
+ * @param {string|Date}   date  — "YYYY-MM-DD" string (preferred) or a Date object.
+ *                                Always treated as a local calendar date; no UTC shift.
  */
 export async function getAvailableSlots(staffServiceId, date) {
   try {
     if (!staffServiceId || !date) {
-      return {
-        success: false,
-        message: "Paramètres manquants",
-      };
+      return { success: false, message: "Paramètres manquants" };
     }
 
     const staffService = await prisma.staffService.findUnique({
@@ -36,38 +34,39 @@ export async function getAvailableSlots(staffServiceId, date) {
     });
 
     if (!staffService) {
-      return {
-        success: false,
-        message: "Service du personnel introuvable",
-      };
+      return { success: false, message: "Service du personnel introuvable" };
     }
 
-    const selectedDate = new Date(date);
-    selectedDate.setHours(0, 0, 0, 0);
+    // ── Use parseLocalDateString so the calendar day is preserved across
+    //    the Server Action serialisation boundary (Date → ISO string → Date).
+    const selectedDate = parseLocalDateString(date);
 
     const salon = await prisma.salon.findFirst({
-      include: {
-        closures: true,
-        workingDays: true,
-      },
+      include: { closures: true, workingDays: true },
     });
 
-    const startOfDay = new Date(selectedDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(selectedDate);
+    // Query ALL existing appointments for this staff member on the selected day.
+    // A staff member cannot perform two services simultaneously, regardless of
+    // which service was booked, so we must consider all their appointments.
+    const startOfDay = parseLocalDateString(date);
+    const endOfDay   = parseLocalDateString(date);
     endOfDay.setHours(23, 59, 59, 999);
 
     const existingAppointments = await prisma.appointment.findMany({
       where: {
-        staffServiceId,
-        date: {
-          gte: startOfDay,
-          lte: endOfDay,
+        staffService: {
+          staffId: staffService.staff.id,
         },
-        status: {
-          in: ["PENDING", "CONFIRMED"],
-        },
+        date: { gte: startOfDay, lte: endOfDay },
+        status: { in: ["PENDING", "CONFIRMED"] },
         isDeleted: false,
+      },
+      include: {
+        staffService: {
+          select: {
+            margin: true,
+          },
+        },
       },
     });
 
@@ -81,7 +80,9 @@ export async function getAvailableSlots(staffServiceId, date) {
     return {
       success: true,
       data: {
-        slots: availability.slots,
+        reservationWindows: availability.reservationWindows,
+        freeIntervals: availability.freeIntervals,
+        occupiedIntervals: availability.occupiedIntervals,
         isWorkingDay: availability.isWorkingDay,
         workingHours: availability.workingHours,
         reason: availability.reason,
@@ -96,13 +97,19 @@ export async function getAvailableSlots(staffServiceId, date) {
   }
 }
 
+/**
+ * Return a set of "YYYY-MM-DD" keys for every day in the month that has no
+ * available slots (used by the calendar to grey-out unavailable dates).
+ *
+ * @param {string}  staffServiceId
+ * @param {Date}    monthDate  — any Date whose month/year identify the target month.
+ *                               This value comes from the client as a local Date and
+ *                               is safe to use directly via getFullYear/getMonth.
+ */
 export async function getMonthAvailability(staffServiceId, monthDate) {
   try {
     if (!staffServiceId || !monthDate) {
-      return {
-        success: false,
-        message: "Paramètres manquants",
-      };
+      return { success: false, message: "Paramètres manquants" };
     }
 
     const staffService = await prisma.staffService.findUnique({
@@ -119,35 +126,37 @@ export async function getMonthAvailability(staffServiceId, monthDate) {
     });
 
     if (!staffService) {
-      return {
-        success: false,
-        message: "Service du personnel introuvable",
-      };
+      return { success: false, message: "Service du personnel introuvable" };
     }
 
-    const startOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
-    const endOfMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
-    startOfMonth.setHours(0, 0, 0, 0);
+    // Build month boundaries using the local Date constructor so they are
+    // anchored to local midnight, not UTC midnight.
+    const year  = new Date(monthDate).getFullYear();
+    const month = new Date(monthDate).getMonth();
+
+    const startOfMonth = new Date(year, month, 1);          // local midnight 1st
+    const endOfMonth   = new Date(year, month + 1, 0);      // local midnight last day
     endOfMonth.setHours(23, 59, 59, 999);
 
     const salon = await prisma.salon.findFirst({
-      include: {
-        closures: true,
-        workingDays: true,
-      },
+      include: { closures: true, workingDays: true },
     });
 
     const existingAppointments = await prisma.appointment.findMany({
       where: {
-        staffServiceId,
-        date: {
-          gte: startOfMonth,
-          lte: endOfMonth,
+        staffService: {
+          staffId: staffService.staff.id,
         },
-        status: {
-          in: ["PENDING", "CONFIRMED"],
-        },
+        date: { gte: startOfMonth, lte: endOfMonth },
+        status: { in: ["PENDING", "CONFIRMED"] },
         isDeleted: false,
+      },
+      include: {
+        staffService: {
+          select: {
+            margin: true,
+          },
+        },
       },
     });
 
@@ -155,35 +164,33 @@ export async function getMonthAvailability(staffServiceId, monthDate) {
     const cursor = new Date(startOfMonth);
 
     while (cursor <= endOfMonth) {
-      const dayAppointments = existingAppointments.filter((appointment) => {
-        const appointmentDate = new Date(appointment.date);
+      // Filter pre-loaded appointments to this exact calendar day using local
+      // year/month/day comparison — avoids re-querying and UTC drift.
+      const dayAppointments = existingAppointments.filter((appt) => {
+        const d = new Date(appt.date);
         return (
-          appointmentDate.getFullYear() === cursor.getFullYear() &&
-          appointmentDate.getMonth() === cursor.getMonth() &&
-          appointmentDate.getDate() === cursor.getDate()
+          d.getFullYear() === cursor.getFullYear() &&
+          d.getMonth()    === cursor.getMonth()    &&
+          d.getDate()     === cursor.getDate()
         );
       });
 
       const availability = buildAvailabilityForDate({
         staffService,
-        selectedDate: new Date(cursor),
+        selectedDate: new Date(cursor), // cursor is already local midnight
         salon,
         existingAppointments: dayAppointments,
       });
 
       if (!availability.isAvailable) {
-        unavailableDates.push(formatDateKey(cursor));
+        // formatLocalDateKey reads local getFullYear/getMonth/getDate — no UTC shift
+        unavailableDates.push(formatLocalDateKey(cursor));
       }
 
       cursor.setDate(cursor.getDate() + 1);
     }
 
-    return {
-      success: true,
-      data: {
-        unavailableDates,
-      },
-    };
+    return { success: true, data: { unavailableDates } };
   } catch (error) {
     console.error("[getMonthAvailability]", error);
     return {

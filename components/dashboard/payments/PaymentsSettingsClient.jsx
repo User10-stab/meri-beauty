@@ -1,100 +1,37 @@
 "use client";
 
-import { useState, useTransition, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useTransition, useCallback, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
-  CreditCard,
-  CheckCircle2,
-  XCircle,
   AlertTriangle,
-  Loader2,
-  ExternalLink,
-  RefreshCw,
-  Shield,
   Banknote,
-  Clock,
-  ArrowRight,
+  CheckCircle2,
   CircleDot,
-  HelpCircle,
-  FileText,
-  UserCheck,
-  Building2,
-  Globe,
+  Clock,
+  CreditCard,
+  ExternalLink,
   Landmark,
-  ChevronRight,
+  Link2,
+  Loader2,
+  Shield,
+  XCircle,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
-import { refreshStripeStatus } from "@/actions/stripe/refresh-stripe-status";
+import { createLoginLink } from "@/actions/stripe/create-login-link";
 
 // ─── State Constants ─────────────────────────────────────────────────────────
 
 const STATE = {
   NOT_CONNECTED: "NOT_CONNECTED",
   ACTION_REQUIRED: "ACTION_REQUIRED",
-  VERIFICATION_IN_PROGRESS: "VERIFICATION_IN_PROGRESS",
   CONNECTED: "CONNECTED",
 };
 
-// ─── Requirement Translation Map ────────────────────────────────────────────
-
-const REQUIREMENT_LABELS = {
-  "individual.first_name": "Prénom",
-  "individual.last_name": "Nom",
-  "individual.dob.day": "Date de naissance (jour)",
-  "individual.dob.month": "Date de naissance (mois)",
-  "individual.dob.year": "Date de naissance (année)",
-  "individual.address.city": "Adresse (ville)",
-  "individual.address.line1": "Adresse (rue)",
-  "individual.address.postal_code": "Adresse (code postal)",
-  "individual.address.state": "Adresse (région)",
-  "individual.phone": "Numéro de téléphone",
-  "individual.email": "Adresse e-mail",
-  "individual.id_number": "Pièce d'identité",
-  "individual.ssn_last_4": "Numéro de sécurité sociale",
-  "business_profile.url": "Site web professionnel",
-  "business_profile.mcc": "Catégorie d'activité",
-  "business_profile.name": "Nom de l'entreprise",
-  "business_profile.product_description": "Description des services",
-  "external_account": "Compte bancaire",
-  "tos_acceptance.ip": "Acceptation des conditions générales",
-  "tos_acceptance.date": "Acceptation des conditions générales",
-  "company.name": "Nom de l'entreprise",
-  "company.phone": "Téléphone de l'entreprise",
-  "company.tax_id": "Numéro de TVA / SIRET",
-  "company.address.city": "Adresse de l'entreprise (ville)",
-  "company.address.line1": "Adresse de l'entreprise (rue)",
-  "company.address.postal_code": "Adresse de l'entreprise (code postal)",
-  "individual.verification.document": "Document d'identité",
-  "individual.verification.additional_document": "Document justificatif supplémentaire",
-};
-
-function translateRequirement(key) {
-  return REQUIREMENT_LABELS[key] || key;
-}
-
-function groupRequirements(requirements) {
-  const groups = {
-    identity: [],
-    business: [],
-    bank: [],
-    other: [],
-  };
-
-  requirements.forEach((req) => {
-    if (req.includes("individual.") || req.includes("tos_acceptance")) {
-      groups.identity.push(req);
-    } else if (req.includes("company.") || req.includes("business_profile.")) {
-      groups.business.push(req);
-    } else if (req.includes("external_account")) {
-      groups.bank.push(req);
-    } else {
-      groups.other.push(req);
-    }
-  });
-
-  return groups;
-}
+// Standard accounts have no platform-controlled onboarding (Account Links) nor
+// Express login links: the account holder manages everything — setup included —
+// in their own Stripe account at dashboard.stripe.com.
+const STANDARD_DASHBOARD_URL = "https://dashboard.stripe.com/";
 
 // ─── Reusable UI Primitives ────────────────────────────────────────────────
 
@@ -122,22 +59,12 @@ function SectionCard({ icon: Icon, title, description, children, className = "" 
 function getConnectionState(data) {
   if (!data?.stripeAccountId) return STATE.NOT_CONNECTED;
   
-  const detailsSubmitted = data.detailsSubmitted ?? false;
-  const currentlyDue = data.currentlyDue ?? [];
   const chargesEnabled = data.stripeChargesEnabled ?? false;
   const payoutsEnabled = data.stripePayoutsEnabled ?? false;
   
-  // Onboarding is complete when details are submitted and no requirements are due
-  const onboardingComplete = detailsSubmitted && currentlyDue.length === 0;
-  
-  // If onboarding is not complete, show action required
-  if (!onboardingComplete) {
-    return STATE.ACTION_REQUIRED;
-  }
-  
-  // If onboarding is complete but charges/payouts not enabled, it's verification in progress
+  // If charges or payouts are not enabled, action is required
   if (!chargesEnabled || !payoutsEnabled) {
-    return STATE.VERIFICATION_IN_PROGRESS;
+    return STATE.ACTION_REQUIRED;
   }
   
   // Fully connected
@@ -148,23 +75,15 @@ function getConnectionState(data) {
 
 export function PaymentsSettingsClient({ initialData }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [data, setData] = useState(initialData);
-  const [stripeData, setStripeData] = useState(null);
   const [isConnecting, startConnecting] = useTransition();
+  const [isConnectingExisting, startConnectingExisting] = useTransition();
   const [isOnboarding, startOnboarding] = useTransition();
-  const [isRefreshing, startRefreshing] = useTransition();
+  const [isManagingDashboard, startManagingDashboard] = useTransition();
 
-  // Merge DB data with Stripe API data (from refresh)
-  const mergedData = {
-    ...data,
-    ...(stripeData || {}),
-  };
-
-  const connectionState = getConnectionState(mergedData);
+  const connectionState = getConnectionState(data);
   const isConnected = connectionState === STATE.CONNECTED;
-  const hasDetails = stripeData?.detailsSubmitted ?? false;
-  const currentlyDue = stripeData?.currentlyDue ?? [];
-  const hasRequirements = currentlyDue.length > 0;
 
   // ── Connect Stripe ─────────────────────────────────────────────────────
   function handleConnect() {
@@ -198,6 +117,38 @@ export function PaymentsSettingsClient({ initialData }) {
     });
   }
 
+  // ── Connect Existing Stripe Account (OAuth) ────────────────────────────
+  function handleConnectExisting() {
+    startConnectingExisting(async () => {
+      try {
+        const res = await fetch("/api/stripe/oauth/authorize");
+
+        const json = await res.json();
+
+        if (!json.success) {
+          toast.error(json.message);
+          return;
+        }
+
+        // Navigate to Stripe's OAuth page. After the user authorizes, Stripe
+        // redirects back to /api/stripe/oauth/callback, which brings the user
+        // back to this page with ?success=true or ?stripeOAuthError=<key>.
+        window.location.href = json.data?.url;
+      } catch {
+        toast.error("Erreur de connexion au serveur.");
+      }
+    });
+  }
+
+  // ── Open Standard Stripe Dashboard ─────────────────────────────────────
+  // For Standard accounts there is no Account Link or Express login link to
+  // generate — the account holder completes setup and manages their account
+  // directly on Stripe's own dashboard.
+  function handleStandardDashboard() {
+    window.open(STANDARD_DASHBOARD_URL, "_blank");
+    toast.success("Dashboard Stripe ouvert dans un nouvel onglet.");
+  }
+
   // ── Generate Onboarding Link ────────────────────────────────────────────
   function handleOnboarding() {
     startOnboarding(async () => {
@@ -223,37 +174,31 @@ export function PaymentsSettingsClient({ initialData }) {
     });
   }
 
-  // ── Refresh Status from Stripe ──────────────────────────────────────────
-  const handleRefresh = useCallback(() => {
-    startRefreshing(async () => {
+  // ── Open Express Dashboard ───────────────────────────────────────────────
+  function handleDashboard() {
+    startManagingDashboard(async () => {
       try {
-        const result = await refreshStripeStatus();
+        const result = await createLoginLink();
 
         if (!result.success) {
           toast.error(result.message);
           return;
         }
 
-        setStripeData({
-          chargesEnabled: result.data.chargesEnabled,
-          payoutsEnabled: result.data.payoutsEnabled,
-          detailsSubmitted: result.data.detailsSubmitted,
-          currentlyDue: result.data.currentlyDue,
-        });
-
-        // Also sync the DB-backed fields
-        setData((prev) => ({
-          ...prev,
-          stripeChargesEnabled: result.data.chargesEnabled,
-          stripePayoutsEnabled: result.data.payoutsEnabled,
-        }));
-
-        toast.success("Statut Stripe mis à jour.");
+        window.open(result.data?.url, "_blank");
+        toast.success("Dashboard Stripe ouvert dans un nouvel onglet.");
       } catch {
-        toast.error("Erreur lors de la mise à jour du statut.");
+        toast.error("Erreur de connexion au serveur.");
       }
     });
-  }, []);
+  }
+
+  // ── Auto-refresh on successful onboarding ───────────────────────────────
+  useEffect(() => {
+    if (searchParams.get("success") === "true") {
+      router.refresh();
+    }
+  }, [searchParams, router]);
 
   // ── Loading State ───────────────────────────────────────────────────────
   if (!data) {
@@ -287,41 +232,35 @@ export function PaymentsSettingsClient({ initialData }) {
           <StatusBanner
             state={connectionState}
             isConnected={isConnected}
-            hasDetails={hasDetails}
-            hasRequirements={hasRequirements}
           />
 
           {/* Verification Progress Timeline */}
           {(connectionState !== STATE.NOT_CONNECTED) && (
             <ProgressTimeline
               isConnected={isConnected}
-              hasDetails={hasDetails}
-              hasRequirements={hasRequirements}
               connectionState={connectionState}
             />
           )}
 
-          {/* Missing Requirements */}
-          {hasRequirements && (
-            <RequirementsCard requirements={currentlyDue} />
-          )}
-
           {/* Capabilities */}
           <CapabilitiesCard
-            chargesEnabled={mergedData.stripeChargesEnabled}
-            payoutsEnabled={mergedData.stripePayoutsEnabled}
-            hasDetails={hasDetails}
+            chargesEnabled={data.stripeChargesEnabled}
+            payoutsEnabled={data.stripePayoutsEnabled}
           />
 
           {/* Action Buttons */}
           <ActionArea
             state={connectionState}
+            accountType={data?.stripeAccountType}
             isConnecting={isConnecting}
+            isConnectingExisting={isConnectingExisting}
             isOnboarding={isOnboarding}
-            isRefreshing={isRefreshing}
+            isManagingDashboard={isManagingDashboard}
             onConnect={handleConnect}
+            onConnectExisting={handleConnectExisting}
             onOnboarding={handleOnboarding}
-            onRefresh={handleRefresh}
+            onDashboard={handleDashboard}
+            onStandardDashboard={handleStandardDashboard}
           />
         </div>
       </SectionCard>
@@ -341,12 +280,12 @@ export function PaymentsSettingsClient({ initialData }) {
               1. Connectez Stripe
             </h3>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              Créez votre compte Stripe Connect Express en un clic.
+              Créez un compte Stripe ou connectez un compte Stripe existant.
             </p>
           </div>
           <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-800/30">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white shadow-sm dark:bg-gray-800">
-              <UserCheck size={18} className="text-gray-600 dark:text-gray-400" />
+              <Shield size={18} className="text-gray-600 dark:text-gray-400" />
             </div>
             <h3 className="mt-3 text-sm font-semibold text-gray-900 dark:text-white">
               2. Vérification Stripe
@@ -374,7 +313,7 @@ export function PaymentsSettingsClient({ initialData }) {
 
 // ─── Status Banner ──────────────────────────────────────────────────────────
 
-function StatusBanner({ state, isConnected, hasDetails, hasRequirements }) {
+function StatusBanner({ state, isConnected }) {
   let config;
 
   if (state === STATE.NOT_CONNECTED) {
@@ -390,22 +329,12 @@ function StatusBanner({ state, isConnected, hasDetails, hasRequirements }) {
   } else if (state === STATE.ACTION_REQUIRED) {
     config = {
       icon: AlertTriangle,
-      iconColor: "text-red-500 dark:text-red-400",
-      bgColor: "bg-red-50 dark:bg-red-900/10",
-      borderColor: "border-red-200 dark:border-red-900/30",
-      dot: "🔴",
-      title: "Action requise",
-      description: "Des informations sont nécessaires pour finaliser votre compte Stripe.",
-    };
-  } else if (state === STATE.VERIFICATION_IN_PROGRESS) {
-    config = {
-      icon: Clock,
       iconColor: "text-amber-500 dark:text-amber-400",
       bgColor: "bg-amber-50 dark:bg-amber-900/10",
       borderColor: "border-amber-200 dark:border-amber-900/30",
       dot: "🟡",
-      title: "Configuration Stripe terminée",
-      description: "Votre compte Stripe est configuré. Stripe vérifie actuellement vos informations.",
+      title: "Configuration en cours",
+      description: "Finalisez votre configuration Stripe pour activer les paiements en ligne.",
     };
   } else {
     // CONNECTED
@@ -456,7 +385,7 @@ function StatusBanner({ state, isConnected, hasDetails, hasRequirements }) {
 
 // ─── Progress Timeline ──────────────────────────────────────────────────────
 
-function ProgressTimeline({ isConnected, hasDetails, hasRequirements, connectionState }) {
+function ProgressTimeline({ isConnected, connectionState }) {
   const steps = [
     {
       label: "Compte Stripe connecté",
@@ -466,27 +395,14 @@ function ProgressTimeline({ isConnected, hasDetails, hasRequirements, connection
       bgColor: "bg-green-50 dark:bg-green-900/20",
     },
     {
-      label: "Informations d'identité soumises",
-      done: hasDetails,
-      icon: hasDetails ? CheckCircle2 : Clock,
-      color: hasDetails
+      label: "Configuration terminée",
+      done: isConnected,
+      icon: isConnected ? CheckCircle2 : Clock,
+      color: isConnected
         ? "text-green-500 dark:text-green-400"
         : "text-amber-500 dark:text-amber-400",
-      bgColor: hasDetails
+      bgColor: isConnected
         ? "bg-green-50 dark:bg-green-900/20"
-        : "bg-amber-50 dark:bg-amber-900/20",
-    },
-    {
-      label: hasRequirements
-        ? "Informations supplémentaires requises"
-        : "Vérification Stripe en cours",
-      done: false,
-      icon: hasRequirements ? AlertTriangle : Clock,
-      color: hasRequirements
-        ? "text-red-500 dark:text-red-400"
-        : "text-amber-500 dark:text-amber-400",
-      bgColor: hasRequirements
-        ? "bg-red-50 dark:bg-red-900/20"
         : "bg-amber-50 dark:bg-amber-900/20",
     },
     {
@@ -542,88 +458,9 @@ function ProgressTimeline({ isConnected, hasDetails, hasRequirements, connection
   );
 }
 
-// ─── Requirements Card ──────────────────────────────────────────────────────
-
-function RequirementsCard({ requirements }) {
-  const groups = groupRequirements(requirements);
-  const hasAny = Object.values(groups).some((g) => g.length > 0);
-
-  if (!hasAny) return null;
-
-  return (
-    <div className="rounded-lg border border-red-200 bg-red-50/50 p-4 dark:border-red-900/30 dark:bg-red-900/10">
-      <div className="flex items-start gap-2.5">
-        <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-500 dark:text-red-400" />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-xs font-semibold text-red-800 dark:text-red-300">
-            Informations requises
-          </h3>
-          <p className="mt-0.5 text-[11px] text-red-600 dark:text-red-400">
-            Complétez les informations suivantes pour finaliser votre compte Stripe :
-          </p>
-          <div className="mt-3 space-y-3">
-            {groups.identity.length > 0 && (
-              <div>
-                <h4 className="mb-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300">Identité</h4>
-                <ul className="space-y-1">
-                  {groups.identity.map((req) => (
-                    <li key={req} className="flex items-center gap-1.5 text-[11px] text-red-600 dark:text-red-400">
-                      <span className="h-1 w-1 rounded-full bg-red-400 dark:bg-red-500" />
-                      {translateRequirement(req)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {groups.business.length > 0 && (
-              <div>
-                <h4 className="mb-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300">Entreprise</h4>
-                <ul className="space-y-1">
-                  {groups.business.map((req) => (
-                    <li key={req} className="flex items-center gap-1.5 text-[11px] text-red-600 dark:text-red-400">
-                      <span className="h-1 w-1 rounded-full bg-red-400 dark:bg-red-500" />
-                      {translateRequirement(req)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {groups.bank.length > 0 && (
-              <div>
-                <h4 className="mb-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300">Compte bancaire</h4>
-                <ul className="space-y-1">
-                  {groups.bank.map((req) => (
-                    <li key={req} className="flex items-center gap-1.5 text-[11px] text-red-600 dark:text-red-400">
-                      <span className="h-1 w-1 rounded-full bg-red-400 dark:bg-red-500" />
-                      {translateRequirement(req)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {groups.other.length > 0 && (
-              <div>
-                <h4 className="mb-1.5 text-[11px] font-semibold text-red-700 dark:text-red-300">Autres</h4>
-                <ul className="space-y-1">
-                  {groups.other.map((req) => (
-                    <li key={req} className="flex items-center gap-1.5 text-[11px] text-red-600 dark:text-red-400">
-                      <span className="h-1 w-1 rounded-full bg-red-400 dark:bg-red-500" />
-                      {translateRequirement(req)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Capabilities Card ──────────────────────────────────────────────────────
 
-function CapabilitiesCard({ chargesEnabled, payoutsEnabled, hasDetails }) {
+function CapabilitiesCard({ chargesEnabled, payoutsEnabled }) {
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-800/30">
       <h3 className="mb-3 text-xs font-semibold text-gray-700 dark:text-gray-300">
@@ -634,20 +471,18 @@ function CapabilitiesCard({ chargesEnabled, payoutsEnabled, hasDetails }) {
           icon={CreditCard}
           label="Paiements par carte"
           enabled={chargesEnabled}
-          hasDetails={hasDetails}
         />
         <CapabilityItem
           icon={Landmark}
           label="Virements bancaires"
           enabled={payoutsEnabled}
-          hasDetails={hasDetails}
         />
       </div>
     </div>
   );
 }
 
-function CapabilityItem({ icon: Icon, label, enabled, hasDetails }) {
+function CapabilityItem({ icon: Icon, label, enabled }) {
   let badge;
 
   if (enabled) {
@@ -655,13 +490,6 @@ function CapabilityItem({ icon: Icon, label, enabled, hasDetails }) {
       <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/20 dark:text-green-400">
         <CheckCircle2 size={10} />
         Activé
-      </span>
-    );
-  } else if (hasDetails) {
-    badge = (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-        <Clock size={10} />
-        En attente
       </span>
     );
   } else {
@@ -686,25 +514,25 @@ function CapabilityItem({ icon: Icon, label, enabled, hasDetails }) {
 
 // ─── Action Area ────────────────────────────────────────────────────────────
 
-function ActionArea({ state, isConnecting, isOnboarding, isRefreshing, onConnect, onOnboarding, onRefresh }) {
+function ActionArea({ state, accountType, isConnecting, isConnectingExisting, isOnboarding, isManagingDashboard, onConnect, onConnectExisting, onOnboarding, onDashboard, onStandardDashboard }) {
+  // Accounts created before the type column existed are Express (the legacy
+  // flow only created Express accounts), so a missing type behaves as Express.
+  const isStandard = accountType === "standard";
+
   return (
     <div className="space-y-3">
       {/* Primary Action */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex-1">
           {state === STATE.NOT_CONNECTED && (
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Créez un compte Stripe pour commencer à accepter les paiements en ligne.
+              Créez un nouveau compte Stripe ou connectez un compte Stripe
+              existant pour commencer à accepter les paiements en ligne.
             </p>
           )}
           {state === STATE.ACTION_REQUIRED && (
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              Ouvrez le dashboard Stripe pour compléter les informations manquantes.
-            </p>
-          )}
-          {state === STATE.VERIFICATION_IN_PROGRESS && (
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Votre compte Stripe est configuré. Stripe vérifie actuellement vos informations. Utilisez le bouton de synchronisation pour mettre à jour le statut.
+              Finalisez votre configuration Stripe pour activer les paiements en ligne.
             </p>
           )}
           {state === STATE.CONNECTED && (
@@ -714,18 +542,28 @@ function ActionArea({ state, isConnecting, isOnboarding, isRefreshing, onConnect
           )}
         </div>
 
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           {state === STATE.NOT_CONNECTED && (
-            <Button onClick={onConnect} disabled={isConnecting}>
-              {isConnecting ? (
-                <><Loader2 size={16} className="animate-spin" /> Connexion…</>
-              ) : (
-                <><CreditCard size={16} /> Connecter Stripe</>
-              )}
-            </Button>
+            <>
+              <Button onClick={onConnect} disabled={isConnecting}>
+                {isConnecting ? (
+                  <><Loader2 size={16} className="animate-spin" /> Création…</>
+                ) : (
+                  <><CreditCard size={16} /> Créer un compte Stripe</>
+                )}
+              </Button>
+
+              <Button onClick={onConnectExisting} disabled={isConnectingExisting} variant="secondary">
+                {isConnectingExisting ? (
+                  <><Loader2 size={16} className="animate-spin" /> Redirection…</>
+                ) : (
+                  <><Link2 size={16} /> Connecter un compte existant</>
+                )}
+              </Button>
+            </>
           )}
 
-          {state === STATE.ACTION_REQUIRED && (
+          {state === STATE.ACTION_REQUIRED && !isStandard && (
             <>
               <Button onClick={onOnboarding} disabled={isOnboarding} variant="primary">
                 {isOnboarding ? (
@@ -734,55 +572,40 @@ function ActionArea({ state, isConnecting, isOnboarding, isRefreshing, onConnect
                   <><ExternalLink size={16} /> Continue Stripe Setup</>
                 )}
               </Button>
-              <Button onClick={onOnboarding} disabled={isOnboarding} variant="secondary">
-                {isOnboarding ? (
-                  <><Loader2 size={16} className="animate-spin" /> Génération…</>
+
+              <Button onClick={onDashboard} disabled={isManagingDashboard} variant="secondary">
+                {isManagingDashboard ? (
+                  <><Loader2 size={16} className="animate-spin" /> Ouverture…</>
                 ) : (
-                  <><ExternalLink size={16} /> Dashboard Stripe</>
+                  <><ExternalLink size={16} /> Gérer mon compte Stripe</>
                 )}
               </Button>
             </>
           )}
 
-          {state === STATE.VERIFICATION_IN_PROGRESS && (
-            <Button onClick={onOnboarding} disabled={isOnboarding} variant="secondary">
-              {isOnboarding ? (
-                <><Loader2 size={16} className="animate-spin" /> Génération…</>
+          {state === STATE.ACTION_REQUIRED && isStandard && (
+            <Button onClick={onStandardDashboard} variant="primary">
+              <><ExternalLink size={16} /> Finaliser la configuration sur Stripe</>
+            </Button>
+          )}
+
+          {state === STATE.CONNECTED && !isStandard && (
+            <Button onClick={onDashboard} disabled={isManagingDashboard} variant="secondary">
+              {isManagingDashboard ? (
+                <><Loader2 size={16} className="animate-spin" /> Ouverture…</>
               ) : (
-                <><ExternalLink size={16} /> Dashboard Stripe</>
+                <><ExternalLink size={16} /> Gérer mon compte Stripe</>
               )}
             </Button>
           )}
 
-          {state === STATE.CONNECTED && (
-            <Button onClick={onOnboarding} disabled={isOnboarding}>
-              {isOnboarding ? (
-                <><Loader2 size={16} className="animate-spin" /> Génération…</>
-              ) : (
-                <><ExternalLink size={16} /> Dashboard Stripe</>
-              )}
+          {state === STATE.CONNECTED && isStandard && (
+            <Button onClick={onStandardDashboard} variant="secondary">
+              <><ExternalLink size={16} /> Gérer mon compte Stripe</>
             </Button>
           )}
         </div>
       </div>
-
-      {/* Refresh Button */}
-      {state !== STATE.NOT_CONNECTED && (
-        <div className="flex justify-end border-t border-gray-100 pt-3 dark:border-gray-800">
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={isRefreshing}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm transition-all hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700"
-          >
-            {isRefreshing ? (
-              <><Loader2 size={12} className="animate-spin" /> Synchronisation…</>
-            ) : (
-              <><RefreshCw size={12} /> Synchroniser avec Stripe</>
-            )}
-          </button>
-        </div>
-      )}
     </div>
   );
 }

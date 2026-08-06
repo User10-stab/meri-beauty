@@ -17,6 +17,50 @@ async function hashToken(token) {
   return bcrypt.hash(token, BCRYPT_SALT_ROUNDS);
 }
 
+export async function sendVerificationEmail(user) {
+  if (!user?.email) return;
+
+  try {
+    const plainToken = crypto.randomUUID();
+    const tokenHash = await hashToken(plainToken);
+    const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MINUTES * 60 * 1000);
+
+    await prisma.emailVerificationToken.deleteMany({
+      where: {
+        email: user.email,
+        OR: [{ used: true }, { expiresAt: { lt: new Date() } }],
+      },
+    });
+
+    await prisma.emailVerificationToken.create({
+      data: {
+        email: user.email,
+        tokenHash,
+        expiresAt,
+      },
+    });
+
+    const verificationUrl = `${
+      process.env.NEXTAUTH_URL || "http://localhost:3000"
+    }/verify-email?token=${encodeURIComponent(plainToken)}`;
+
+    const emailTemplate = emailVerificationEmail({
+      customerName: user.fullName,
+      verificationUrl,
+      expiresInMinutes: TOKEN_EXPIRY_MINUTES,
+    });
+
+    await sendEmail({
+      to: user.email,
+      subject: emailTemplate.subject,
+      text: emailTemplate.text,
+      html: emailTemplate.html,
+    });
+  } catch (err) {
+    console.error("[sendVerificationEmail] failed:", err);
+  }
+}
+
 export async function verifyEmail(rawToken) {
   if (!rawToken || typeof rawToken !== "string" || rawToken.trim().length === 0) {
     return {

@@ -20,7 +20,11 @@ async function loadSchedulingContext(drafts, maxDaysToScan) {
 
   const staffServiceIds = drafts.map((d) => d.staffService.id);
 
-  const [salon, staffServices, allAppointments] = await Promise.all([
+  // Load salon and staff services in parallel first, then use the resolved
+  // staffIds to query ALL appointments for those staff members.
+  // (allAppointments cannot be parallel with staffServices because it needs
+  // the resolved staffId values from the staffServices rows.)
+  const [salon, staffServices] = await Promise.all([
     prisma.salon.findFirst({ include: { closures: true, workingDays: true } }),
     prisma.staffService.findMany({
       where: { id: { in: staffServiceIds } },
@@ -35,16 +39,34 @@ async function loadSchedulingContext(drafts, maxDaysToScan) {
         },
       },
     }),
-    prisma.appointment.findMany({
-      where: {
-        staffServiceId: { in: staffServiceIds },
-        date: { gte: fromDate, lte: toDate },
-        status: { in: ["PENDING", "CONFIRMED"] },
-        isDeleted: false,
-      },
-      select: { staffServiceId: true, date: true, startTime: true, endTime: true },
-    }),
   ]);
+
+  // Deduplicate staff IDs — a staff member shared across multiple drafts
+  // must not be queried twice.
+  const staffIds = [...new Set(staffServices.map((ss) => ss.staffId))];
+
+  // Load ALL appointments for these staff members across the scan window.
+  // We do not filter by staffServiceId because a staff member is busy
+  // regardless of which service was booked.
+  const allAppointments = await prisma.appointment.findMany({
+    where: {
+      staffService: {
+        staffId: { in: staffIds },
+      },
+      date: { gte: fromDate, lte: toDate },
+      status: { in: ["PENDING", "CONFIRMED"] },
+      isDeleted: false,
+    },
+    include: {
+      staffService: {
+        select: {
+          id: true,
+          margin: true,
+          staffId: true,
+        },
+      },
+    },
+  });
 
   return {
     now,

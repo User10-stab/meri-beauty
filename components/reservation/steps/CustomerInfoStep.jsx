@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { User, Mail, Phone, MessageSquare } from "lucide-react";
+import { User, Mail, Phone, MessageSquare, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
+import { initCustomerVerification } from "@/actions/reservation/init-customer-verification";
 
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 
@@ -50,6 +51,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
   // null = not checked yet | "exists" = account found | "dismissed" = user chose to continue anyway
   const [emailStatus, setEmailStatus] = useState(null);
   const [checkingEmail, setCheckingEmail] = useState(false);
+  const [sendingVerification, setSendingVerification] = useState(false);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -96,16 +98,36 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
       return;
     }
 
-    // If account exists and user hasn't explicitly dismissed the warning, block submit
-    if (emailStatus === "exists") {
-      toast.error(
-        "Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même »."
-      );
-      return;
-    }
+    // Create the customer account and send a verification email.
+    // The user is blocked from advancing until they click the verification
+    // link sent to their inbox (which sets emailVerified = true in the DB).
+    setSendingVerification(true);
+     try {
+      const result = await initCustomerVerification({
+        fullName: formData.fullName.trim(),
+        email: formData.email.trim().toLowerCase(),
+        phone: formData.phone.trim(),
+        newsletterSubscribed: formData.newsletterSubscribed,
+      });
 
-    updateData({ customerInfo: formData, notes });
-    nextStep();
+      //toast.dismiss(loadingToastId);
+      //toast.success("Email de vérification envoyé ! Veuillez vérifier votre boîte de réception.", { duration: 6000 });
+
+      if (result.verified) {
+        // Email already verified in DB — safe to proceed
+        updateData({ customerInfo: formData, notes });
+        nextStep();
+      } 
+      else {
+        // Not verified yet — inform the user that a verification email was sent
+        toast.success(result.message, { duration: 6000 });
+      }
+    } catch (err) {
+      console.error("[CustomerInfoStep] initCustomerVerification failed:", err);
+      toast.error("Une erreur est survenue. Veuillez réessayer.");
+    } finally {
+      setSendingVerification(false);
+    }
   };
 
   return (
@@ -237,9 +259,21 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
 
         <button
           type="submit"
-          className="w-full rounded-lg bg-[#C8A46A] px-6 py-4 text-base font-semibold text-white transition-all hover:bg-[#B8945A]"
+          disabled={sendingVerification}
+          className={`w-full rounded-lg px-6 py-4 text-base font-semibold text-white transition-all ${
+            sendingVerification
+              ? "cursor-not-allowed bg-gray-400"
+              : "bg-[#C8A46A] hover:bg-[#B8945A]"
+          }`}
         >
-          Continuer vers le récapitulatif
+          {sendingVerification ? (
+            <span className="flex items-center justify-center gap-2">
+              <Loader2 size={18} className="animate-spin" />
+              Envoi de l'email de vérification…
+            </span>
+          ) : (
+            "Continuer vers le récapitulatif"
+          )}
         </button>
       </form>
     </div>

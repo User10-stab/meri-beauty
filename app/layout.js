@@ -46,7 +46,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="fr-BE" suppressHydrationWarning className={cormorant.variable}>
-      <body className="antialiased">
+      <body className="antialiased" suppressHydrationWarning>
         <Providers>
           <ConfirmProvider>
             <NextTopLoader color="#5750F1" showSpinner={false} />

@@ -60,30 +60,48 @@ export async function createConnectAccount(staffId) {
     }
 
     // ── 3. Create Stripe Connect Express account ────────────────────────────
+    const salon = await prisma.salon.findFirst();
+
     const account = await stripe.accounts.create({
-      type: "express",
-      email: staff.user.email,
-      business_profile: {
-        url: process.env.NEXT_PUBLIC_APP_URL,
-      },
-      company: {
-        address: {
-          line1: salon.address,
-          city: "Jette",
-          state: "Bruxelles",
-          postal_code: 1000,
-        },
-      },
-      metadata: {
-        staffId: staff.id,
-        userId: staff.userId,
-      },
-    });
+  type: "express",
+  country: "BE",
+  email: staff.user.email,
+  business_type: "individual",
+  business_profile: {
+     url: "https://meribeautystudio.com/",
+  },
+  metadata: {
+    staffId: staff.id,
+    userId: staff.userId,
+  },
+});
+    // const account = await stripe.accounts.create({
+    //   type: "express",
+    //   email: staff.user.email,
+    //   business_profile: {
+    //     url: "https://meribeautystudio.com/",
+    //   },
+    //   company: {
+    //     address: {
+    //       line1: salon.address,
+    //       city: "Jette",
+    //       state: "Bruxelles",
+    //       postal_code: 1000,
+    //     },
+    //   },
+    //   metadata: {
+    //     staffId: staff.id,
+    //     userId: staff.userId,
+    //   },
+    // });
 
     // ── 4. Save the stripeAccountId to the Staff record ─────────────────────
     await prisma.staff.update({
       where: { id: staffId },
-      data: { stripeAccountId: account.id },
+      data: {
+        stripeAccountId: account.id,
+        stripeAccountType: account.type,
+      },
     });
 
     return {

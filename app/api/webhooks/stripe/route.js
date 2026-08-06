@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
-import { randomBytes } from "crypto";
-import bcrypt from "bcrypt";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import {
   paymentConfirmationEmail,
-  welcomeWithCredentialsEmail,
   workshopReservationConfirmationEmail,
   workshopSessionChangeEmail,
   workshopSeatsChangeEmail,
@@ -19,35 +16,36 @@ import { sendLowSeatsBroadcast } from "@/actions/workshops/notify-low-seats";
 import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
 import { sendFormationLowSeatsBroadcast } from "@/actions/formations/notify-low-seats";
 
-const BCRYPT_SALT_ROUNDS = 12;
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
 const UNDERPAYMENT_EPSILON = 0.01;
-const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
-  ? `${process.env.NEXT_PUBLIC_APP_URL}/login`
-  : "https://meribeauty.com/login";
 
 /**
  * Stripe webhook handler.
  *
- * Handles two independent event families:
- *   - `checkout.session.completed` — boutique orders and appointment
- *     reservation payments created by createOrderCheckoutSession /
- *     actions/payment/createCheckoutSession.js. All reservation data
- *     travels in the session metadata — no DB records exist until this
- *     handler runs for the appointment path.
+ * Handles three independent event families:
+ *   - `checkout.session.completed` — boutique orders, workshops, and
+ *     formations are all metadata-driven: no DB records exist until this
+ *     handler creates them. Appointments are the exception — the Appointment
+ *     + Payment rows already exist (PENDING) by the time Stripe redirects
+ *     back here, created by actions/payment/createCheckoutSession.js under
+ *     an advisory lock; this handler only confirms the amount and flips
+ *     their status. Appointment payments are Stripe Connect direct charges
+ *     on the staff member's own connected account.
  *   - `account.updated` — Stripe Connect status changes for staff payout
  *     accounts (onboarding completed, charges/payouts enabled toggled).
+ *   - `payment_intent.payment_failed` — cancels the appointment tied to a
+ *     failed direct-charge payment intent so it doesn't sit PENDING forever.
  *
  * Idempotency (checkout.session.completed): the session id is stored on
- * Payment.transactionReference and checked before processing, so Stripe's
+ * Payment.transactionReference (orders/workshops/formations) or checked via
+ * a locked Payment.status read (appointments) before processing, so Stripe's
  * retry deliveries are harmless. account.updated is naturally idempotent —
  * it always just overwrites the staff row with the latest snapshot.
  *
- * Edge case (checkout.session.completed, appointments only): if the slot
- * was taken between checkout start and payment completion, the payment is
- * automatically refunded and the customer notified — no appointment is
- * created.
+ * Edge case (checkout.session.completed, orders/workshops/formations only):
+ * if the slot/stock was taken between checkout start and payment completion,
+ * the payment is automatically refunded and the customer notified.
  */
 export async function POST(req) {
   // ── 1. Verify the signature against the raw body ─────────────────────────
@@ -79,6 +77,16 @@ export async function POST(req) {
     }
   }
 
+  if (event.type === "payment_intent.payment_failed") {
+    try {
+      await handlePaymentIntentFailed(event.data.object);
+      return NextResponse.json({ received: true });
+    } catch (err) {
+      console.error("[stripe-webhook] payment_intent.payment_failed processing failed:", err);
+      return NextResponse.json({ error: "Processing failed" }, { status: 500 });
+    }
+  }
+
   if (event.type !== "checkout.session.completed") {
     return NextResponse.json({ received: true });
   }
@@ -104,7 +112,7 @@ export async function POST(req) {
     } else if (session.metadata?.kind === "formation") {
       result = await processFormationCheckoutSession(session);
     } else {
-      result = await processCheckoutSession(session);
+      result = await processAppointmentCheckoutSession(session);
     }
     return NextResponse.json(result);
   } catch (err) {
@@ -158,314 +166,221 @@ async function handleAccountUpdated(account) {
 }
 
 // ─── checkout.session.completed (appointments) ───────────────────────────────
+//
+// Unlike orders/workshops/formations, the Appointment + Payment rows already
+// exist (status PENDING) before Stripe is ever involved — created by
+// actions/payment/createCheckoutSession.js at the moment the customer chose
+// to pay online, inside a transaction guarded by a Postgres advisory lock
+// keyed on the reservation's fingerprint. This handler's job is narrower: to
+// confirm the payment amount, mark it PAID/PARTIALLY_PAID, and confirm the
+// appointment — never to create the reservation itself.
+//
+// Payments are Stripe Connect **direct charges** on the staff member's own
+// connected account (see createCheckoutSession.js) — the platform never
+// holds these funds.
 
-async function processCheckoutSession(session) {
-  const meta = session.metadata ?? {};
-  const {
-    staffServiceId,
-    date,
-    time,
-    notes,
-    customerFullName,
-    customerEmail,
-    customerPhone,
-    customerUserId,
-    newsletterSubscribed,
-    paymentMethod,
-  } = meta;
+function toDecimal(value) {
+  return Number(value ?? 0);
+}
 
-  if (!staffServiceId || !date || !time || !customerEmail) {
-    // Malformed metadata is not retryable — acknowledge and log loudly.
-    console.error("[stripe-webhook] Session missing metadata:", session.id, meta);
-    return { received: true, warning: "missing metadata" };
+function toMinorUnitCents(value) {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return 0;
+  }
+  return Math.round(numericValue * 100);
+}
+
+function normalizePaymentScenario(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function validateCheckoutSessionMetadata(session) {
+  const metadata = session?.metadata ?? {};
+  const appointmentId = String(metadata.appointmentId ?? "").trim();
+  const paymentId = String(metadata.paymentId ?? "").trim();
+  const paymentScenario = normalizePaymentScenario(metadata.paymentScenario);
+  const issues = [];
+
+  if (!appointmentId) issues.push("missing appointmentId");
+  if (!paymentId) issues.push("missing paymentId");
+  if (!paymentScenario || (paymentScenario !== "FULL_ONLINE" && paymentScenario !== "DEPOSIT_ONLINE")) {
+    issues.push(`unsupported paymentScenario: ${paymentScenario || "<empty>"}`);
   }
 
-  // ── 3. Idempotency — was this session already processed? ─────────────────
-  const existing = await prisma.payment.findFirst({
-    where: { transactionReference: session.id },
-    select: { id: true },
-  });
-  if (existing) {
-    return { received: true, alreadyProcessed: true };
+  return { appointmentId, paymentId, paymentScenario, issues };
+}
+
+async function processAppointmentCheckoutSession(session) {
+  const checkoutSessionId = session?.id || null;
+  const paymentIntentId = session?.payment_intent || null;
+
+  if (!checkoutSessionId) {
+    console.warn("[stripe-webhook] checkout.session.completed missing checkout session ID");
+    return { received: true, warning: "missing session id" };
   }
 
-  // ── 4. Load the staff service ─────────────────────────────────────────────
-  const staffService = await prisma.staffService.findUnique({
-    where: { id: staffServiceId },
-    include: {
-      service: true,
-      staff: { include: { user: { select: { fullName: true } } } },
-    },
-  });
+  const { appointmentId, paymentId, paymentScenario, issues } = validateCheckoutSessionMetadata(session);
 
-  if (!staffService) {
-    // Paid for a service that no longer exists — refund and stop.
-    console.error("[stripe-webhook] StaffService gone, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "service deleted" };
-  }
-
-  // ── 5. Rebuild appointment times (same logic as createCheckoutSession) ───
-  const [hour, minute] = time.split(":").map(Number);
-  const appointmentDate = new Date(date);
-  appointmentDate.setHours(0, 0, 0, 0);
-
-  const startTime = new Date(appointmentDate);
-  startTime.setHours(hour, minute, 0, 0);
-
-  const endTime = new Date(startTime);
-  endTime.setMinutes(endTime.getMinutes() + staffService.duration);
-
-  // ── 6. Slot still free? If not: refund, notify, create nothing ───────────
-  const conflict = await prisma.appointment.findFirst({
-    where: {
-      staffServiceId,
-      date: appointmentDate,
-      startTime: { lte: endTime },
-      endTime: { gte: startTime },
-      status: { in: ["PENDING", "CONFIRMED"] },
-      isDeleted: false,
-    },
-  });
-
-  if (conflict) {
-    return handleAppointmentSlotConflict(session, customerFullName, customerEmail);
-  }
-
-  // ── 7. Resolve or create the customer (mirrors createReservation) ────────
-  let user = null;
-  let isNewUser = false;
-  let temporaryPassword = null;
-
-  if (customerUserId) {
-    user = await prisma.user.findUnique({
-      where: { id: customerUserId, isDeleted: false },
+  if (!appointmentId || !paymentId || issues.length > 0) {
+    console.warn(`[stripe-webhook] checkout.session.completed metadata validation failed for ${checkoutSessionId}`, {
+      issues,
+      metadata: session?.metadata ?? {},
     });
+    return { received: true, warning: "invalid metadata" };
   }
 
-  if (!user) {
-    user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: customerEmail.trim().toLowerCase() },
-          ...(customerPhone ? [{ phone: customerPhone.trim() }] : []),
-        ],
-        isDeleted: false,
-      },
-    });
-  }
+  const result = await prisma.$transaction(async (tx) => {
+    // Row lock: two deliveries of the same event (Stripe's at-least-once
+    // guarantee) must not both flip this payment from PENDING.
+    await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${paymentId} FOR UPDATE`;
 
-  if (!user) {
-    temporaryPassword = randomBytes(9).toString("base64url");
-    const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
-
-    user = await prisma.user.create({
-      data: {
-        fullName: (customerFullName || customerEmail).trim(),
-        email: customerEmail.trim().toLowerCase(),
-        phone: (customerPhone || "").trim(),
-        password: hashedPassword,
-        role: "CUSTOMER",
-        emailVerified: true,
-        isActive: true,
-        newsletterSubscribed: newsletterSubscribed === "true",
-      },
-    });
-    isNewUser = true;
-  }
-
-  // ── 8. Amounts — what Stripe actually charged is the source of truth ─────
-  const totalAmount = Number(staffService.price);
-  const paidAmount = (session.amount_total ?? 0) / 100;
-  const isFullPayment = paymentMethod === "ONLINE";
-
-  // Paranoid check: the webhook is the last line of defense on money, even
-  // though checkout line items are built server-side. NOTE: the deposit
-  // figure here (10%) matches the current createCheckoutSession.js stub, not
-  // computeDepositAmount's real staff-configured percentage — this whole
-  // appointment-prepayment path is a known stub pending a product decision
-  // (see SECURITY_FIXES_SPEC.md C2); update this the moment that's replaced.
-  const expectedAmount = isFullPayment ? totalAmount : totalAmount * 0.1;
-  if (paidAmount + UNDERPAYMENT_EPSILON < expectedAmount) {
-    console.error(`[stripe-webhook] UNDERPAYMENT: paid ${paidAmount} expected ${expectedAmount} for session ${session.id}`);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "underpayment" };
-  }
-
-  // ── 9. Create appointment + payment + transaction atomically ─────────────
-  // The findFirst check above (step 6) is a fast-path check, not the real
-  // guard — two concurrent webhook deliveries can both pass it before either
-  // commits. The actual guard is the "Appointment_no_overlap" DB exclusion
-  // constraint (see prisma/migrations/20260804090000_appointment_no_overlap):
-  // if this create() loses that race, it throws here and is handled exactly
-  // like a pre-existing conflict, refunding this payment instead of
-  // double-booking the slot.
-  let invoice;
-  try {
-    ({ invoice } = await prisma.$transaction(async (tx) => {
-    const appointment = await tx.appointment.create({
-      data: {
-        userId: user.id,
-        staffServiceId,
-        date: appointmentDate,
-        startTime,
-        endTime,
-        status: "CONFIRMED", // money received — confirmed immediately
-        notes: notes || null,
+    const existingPayment = await tx.payment.findUnique({
+      where: { id: paymentId },
+      include: {
+        appointment: { include: { staffService: { include: { staff: true } } } },
       },
     });
 
-    const payment = await tx.payment.create({
+    if (!existingPayment || !existingPayment.appointment) {
+      console.warn(`[stripe-webhook] Payment/appointment not found for checkout session ${checkoutSessionId}`);
+      return { processed: false, reason: "payment-not-found" };
+    }
+
+    if (existingPayment.status === "PAID" || existingPayment.status === "PARTIALLY_PAID") {
+      return { processed: false, reason: "already-processed" };
+    }
+
+    // What Stripe actually charged is the source of truth, cross-checked
+    // against the expected amount for this scenario (full price vs deposit).
+    const amountReceivedCents = Number(session?.amount_total ?? 0);
+    const totalAmount = toDecimal(existingPayment.totalAmount);
+    const depositAmount = toDecimal(existingPayment.depositAmount);
+    const expectedAmountCents =
+      paymentScenario === "FULL_ONLINE" ? toMinorUnitCents(totalAmount) : toMinorUnitCents(depositAmount);
+
+    if (amountReceivedCents !== expectedAmountCents) {
+      console.error(
+        `[stripe-webhook] Amount mismatch for checkout session ${checkoutSessionId}: expected ${expectedAmountCents} cents, received ${amountReceivedCents} cents`
+      );
+      return { processed: false, reason: "amount-mismatch" };
+    }
+
+    const nextPaidAmount = paymentScenario === "FULL_ONLINE" ? totalAmount : depositAmount;
+    const nextRemainingAmount = Math.max(0, totalAmount - nextPaidAmount);
+    const nextPaymentStatus = nextRemainingAmount > 0 ? "PARTIALLY_PAID" : "PAID";
+
+    const appointment = existingPayment.appointment;
+    const confirmationMode = appointment.staffService?.staff?.reservationConfirmationMode ?? "MANUAL";
+    // AUTOMATIC mode confirms as soon as the required online payment clears,
+    // regardless of any remaining salon balance. MANUAL mode still needs
+    // staff review — the payment is recorded but the appointment stays PENDING.
+    const nextAppointmentStatus = confirmationMode === "AUTOMATIC" ? "CONFIRMED" : "PENDING";
+
+    await tx.payment.update({
+      where: { id: paymentId },
       data: {
-        appointmentId: appointment.id,
-        depositAmount: isFullPayment ? 0 : paidAmount,
-        totalAmount,
-        paidAmount,
-        remainingAmount: Math.max(totalAmount - paidAmount, 0),
-        paymentType: isFullPayment ? "ONLINE" : "DEPOSIT",
-        status: isFullPayment ? "PAID" : "PARTIALLY_PAID",
+        paidAmount: nextPaidAmount,
+        remainingAmount: nextRemainingAmount,
+        status: nextPaymentStatus,
         paidAt: new Date(),
-        transactionReference: session.id, // idempotency key
+        transactionReference: checkoutSessionId,
       },
+    });
+
+    await tx.appointment.update({
+      where: { id: appointmentId },
+      data: { status: nextAppointmentStatus },
     });
 
     await tx.transaction.create({
       data: {
-        paymentId: payment.id,
-        amount: paidAmount,
+        paymentId,
+        amount: nextPaidAmount,
         method: "ONLINE",
-        transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
+        transactionType: paymentScenario === "FULL_ONLINE" ? "FINAL_PAYMENT" : "DEPOSIT",
         paidAt: new Date(),
+        stripeCheckoutSessionId: checkoutSessionId,
+        stripePaymentIntentId: paymentIntentId,
       },
     });
 
-    await tx.notification.create({
-      data: {
-        userId: user.id,
-        appointmentId: appointment.id,
-        type: "APPOINTMENT_CONFIRMED",
-        title: "Réservation confirmée",
-        message: `Votre réservation du ${appointmentDate.toLocaleDateString("fr-FR")} à ${time} est confirmée.`,
-        status: "PENDING",
-      },
-    });
+    return {
+      processed: true,
+      appointment,
+      user: appointment.userId,
+      nextPaidAmount,
+      totalAmount,
+      nextAppointmentStatus,
+    };
+  });
 
-    await tx.notification.create({
-      data: {
-        userId: user.id,
-        appointmentId: appointment.id,
-        type: "PAYMENT_RECEIVED",
-        title: "Paiement reçu",
-        message: `Paiement de €${paidAmount.toFixed(2)} reçu avec succès.`,
-        status: "PENDING",
-      },
-    });
-
-    // Only fully-settled payments are invoiced — a deposit (PARTIALLY_PAID)
-    // has a balance still due in-salon, invoiced once that's collected.
-    let invoice = null;
-    if (isFullPayment) {
-      invoice = await issueInvoice(tx, {
-        paymentId: payment.id,
-        source: "APPOINTMENT",
-        totalInclVat: paidAmount,
-        customer: { fullName: user.fullName, email: user.email, vatNumber: user.vatNumber },
-        lines: [{ description: staffService.service?.name ?? "Prestation", quantity: 1, unitPrice: totalAmount }],
-      });
-    }
-
-    return { invoice };
-    }));
-  } catch (err) {
-    if (isAppointmentOverlapViolation(err)) {
-      return handleAppointmentSlotConflict(session, customerFullName, customerEmail);
-    }
-    // Payment.transactionReference is @unique — a P2002 here means another
-    // concurrent delivery of this same event already won the idempotency
-    // check above and committed first. Not a failure, just a duplicate.
-    if (err.code === "P2002") {
-      return { received: true, alreadyProcessed: true };
-    }
-    throw err;
+  if (!result?.processed) {
+    return { received: true, alreadyProcessed: result?.reason === "already-processed", reason: result?.reason };
   }
 
-  // ── 10. Emails — fire-and-forget, never fail the webhook ─────────────────
-  const staffName = staffService.staff?.user?.fullName ?? "votre experte";
-  const serviceName = staffService.service?.name ?? "votre service";
-
-  const invoicePdf = invoice
-    ? await renderInvoicePdf(invoice).catch((err) => {
-        console.error("[stripe-webhook] invoice PDF render failed:", err);
-        return null;
-      })
-    : null;
-
-  sendEmail({
-    to: user.email,
-    ...paymentConfirmationEmail({
-      customerName: user.fullName,
-      serviceName,
-      staffName,
-      date: appointmentDate,
-      time,
-      paidAmount,
-      totalAmount,
-      paymentMethod: "Carte bancaire",
+  // ── Emails — fire-and-forget, never fail the webhook ────────────────────
+  const [user, staffService] = await Promise.all([
+    prisma.user.findUnique({ where: { id: result.appointment.userId } }),
+    prisma.staffService.findUnique({
+      where: { id: result.appointment.staffServiceId },
+      include: { service: true, staff: { include: { user: { select: { fullName: true } } } } },
     }),
-    ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
-  }).catch((err) => console.error("[stripe-webhook] confirmation email failed:", err));
+  ]);
 
-  if (isNewUser && temporaryPassword) {
+  if (user) {
+    const staffName = staffService?.staff?.user?.fullName ?? "votre experte";
+    const serviceName = staffService?.service?.name ?? "votre service";
+
     sendEmail({
       to: user.email,
-      ...welcomeWithCredentialsEmail({
+      ...paymentConfirmationEmail({
         customerName: user.fullName,
-        email: user.email,
-        temporaryPassword,
-        loginUrl: LOGIN_URL,
+        serviceName,
+        staffName,
+        date: result.appointment.date,
+        time: result.appointment.startTime.toTimeString().slice(0, 5),
+        paidAmount: result.nextPaidAmount,
+        totalAmount: result.totalAmount,
+        paymentMethod: "Carte bancaire",
       }),
-    }).catch((err) => console.error("[stripe-webhook] welcome email failed:", err));
+    }).catch((err) => console.error("[stripe-webhook] appointment confirmation email failed:", err));
   }
 
   return { received: true, processed: true };
 }
 
-/**
- * True if `err` is a violation of the "Appointment_no_overlap" DB exclusion
- * constraint (Postgres SQLSTATE 23P01). Prisma doesn't recognize exclusion
- * constraints the way it does unique/foreign-key ones, so this surfaces as a
- * PrismaClientUnknownRequestError with no structured `code` — the constraint
- * name and SQLSTATE only show up in the raw message text (verified directly
- * against the dev DB), so that's what this checks.
- */
-function isAppointmentOverlapViolation(err) {
-  const text = String(err?.message ?? "");
-  return text.includes("Appointment_no_overlap") || text.includes("23P01");
-}
+/** Stripe Connect `account.updated` — see handleAccountUpdated above; kept as a case in the same dispatcher. */
+async function handlePaymentIntentFailed(paymentIntent) {
+  const paymentIntentId = paymentIntent?.id || null;
+  if (!paymentIntentId) {
+    console.warn("[stripe-webhook] payment_intent.payment_failed missing payment intent ID");
+    return;
+  }
 
-/** Refunds a payment that lost the race for its appointment slot and tells the customer. */
-async function handleAppointmentSlotConflict(session, customerFullName, customerEmail) {
-  console.warn("[stripe-webhook] Slot conflict after payment, refunding:", session.id);
-  await refundSession(session);
+  const transaction = await prisma.transaction.findFirst({
+    where: { stripePaymentIntentId: paymentIntentId },
+    include: { payment: { include: { appointment: true } } },
+  });
 
-  sendEmail({
-    to: customerEmail,
-    subject: "Créneau indisponible – Remboursement effectué – Meri Beauty",
-    text:
-      `Bonjour ${customerFullName},\n\n` +
-      `Le créneau que vous aviez choisi a malheureusement été réservé pendant votre paiement. ` +
-      `Votre paiement a été intégralement remboursé — le remboursement apparaîtra sur votre compte sous quelques jours.\n\n` +
-      `Nous vous invitons à choisir un autre créneau sur notre site.\n\n` +
-      `Toutes nos excuses pour ce contretemps,\nL'équipe Meri Beauty`,
-    html:
-      `<p>Bonjour ${customerFullName},</p>` +
-      `<p>Le créneau que vous aviez choisi a malheureusement été réservé pendant votre paiement. ` +
-      `Votre paiement a été <strong>intégralement remboursé</strong> — il apparaîtra sur votre compte sous quelques jours.</p>` +
-      `<p>Nous vous invitons à choisir un autre créneau sur notre site.</p>` +
-      `<p>Toutes nos excuses pour ce contretemps,<br/>L'équipe Meri Beauty</p>`,
-  }).catch((err) => console.error("[stripe-webhook] conflict email failed:", err));
+  if (!transaction?.payment?.appointment) {
+    console.warn(`[stripe-webhook] Transaction/appointment not found for payment intent ${paymentIntentId}`);
+    return;
+  }
 
-  return { received: true, refunded: true, reason: "slot conflict" };
+  const payment = transaction.payment;
+
+  await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+  await prisma.appointment.update({ where: { id: payment.appointmentId }, data: { status: "CANCELLED" } });
+
+  console.info(`[stripe-webhook] Payment failed for payment intent ${paymentIntentId}`, {
+    paymentId: payment.id,
+    appointmentId: payment.appointmentId,
+    failureReason: paymentIntent?.last_payment_error?.message || "Unknown",
+  });
 }
 
 // ─── checkout.session.completed (workshops/events) ───────────────────────────

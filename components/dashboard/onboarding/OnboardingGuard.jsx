@@ -20,9 +20,14 @@ export function OnboardingGuard({ userRole }) {
     if (!status || !status.isStaff) return;
 
     const isAccountRoute = pathname === "/dashboard/account-settings" || pathname === "/dashboard";
+    const isPaymentsRoute = pathname.startsWith("/dashboard/payments");
 
     if (!status.setupCompleted && !isAccountRoute) {
       router.replace("/dashboard/account-settings");
+    }
+
+    if (status.setupCompleted && status.stripeRequired && !isPaymentsRoute) {
+      router.replace("/dashboard/payments");
     }
   }, [pathname, router, status]);
 
@@ -30,7 +35,8 @@ export function OnboardingGuard({ userRole }) {
 
   if (
     pathname === "/dashboard/account-settings" ||
-    pathname.startsWith("/dashboard/services")
+    pathname.startsWith("/dashboard/services") ||
+    pathname.startsWith("/dashboard/payments")
   ) {
     return null;
   }
@@ -41,6 +47,10 @@ export function OnboardingGuard({ userRole }) {
 
   if (!status.hasServices) {
     return <OnboardingModal step="services" />;
+  }
+
+  if (status.stripeRequired) {
+    return <OnboardingModal step="stripe" />;
   }
 
   return null;

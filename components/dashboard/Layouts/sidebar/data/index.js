@@ -26,7 +26,7 @@ const ALL_NAV_DATA = [
           },
           {
             title: "Tous les rendez-vous",
-            url: "/dashboard/allAppointments",
+            url: "/dashboard/appointments",
           },
         ],
       },

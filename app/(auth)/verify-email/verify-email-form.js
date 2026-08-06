@@ -55,6 +55,8 @@ export default function VerifyEmailForm({
     },
   });
 
+  // Defined before any early-return blocks below so it's always initialized
+  // when referenced via handleSubmit(onSubmit) further down.
   const onSubmit = async (data) => {
     setIsLoading(true);
     setServerError(null);

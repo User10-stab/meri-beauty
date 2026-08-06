@@ -9,7 +9,7 @@ import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ProductImages } from "@/components/dashboard/boutique/ProductImages";
 import { BarcodeLabelDialog } from "@/components/dashboard/boutique/BarcodeLabelDialog";
-import { createProduct, updateProduct, deleteProduct } from "@/actions/boutique/products";
+import { createProduct, updateProduct, deleteProduct, generateUniqueSku } from "@/actions/boutique/products";
 import { getProductCategories } from "@/actions/boutique/categories";
 
 /** Not a real EAN/UPC — a locally-unique fallback so a product with no
@@ -27,13 +27,18 @@ const STATUS_OPTIONS = [
   { value: "ARCHIVED", label: "Archivé", hint: "Retiré de la boutique" },
 ];
 
-function emptyVariant() {
+function emptyVariant(barcode) {
   return {
     _key: crypto.randomUUID(),
     id: null,
     name: "Standard",
     sku: "",
-    barcode: "",
+    // Defaults to an internal code rather than blank — per Marie, some
+    // products (small/loose items with no supplier packaging) never get an
+    // EAN/UPC, and leaving this optional meant staff had to remember to
+    // click "Générer" or the product ended up with no scannable code at
+    // all. Still freely overwritable with a real supplier barcode.
+    barcode: barcode || generateInternalBarcode(),
     price: "",
     costPrice: "",
     comparePrice: "",
@@ -65,9 +70,9 @@ const inputClass =
  * rather than a modal, since a product carries images, multiple variants
  * and stock: too much to reason about inside a dialog.
  *
- * @param {{ product: object|null, brands: object[] }} props
+ * @param {{ product: object|null, brands: object[], initialBarcode?: string|null }} props
  */
-export function ProductEditor({ product, brands }) {
+export function ProductEditor({ product, brands, initialBarcode = null }) {
   const router = useRouter();
   const isEdit = !!product;
 
@@ -85,7 +90,7 @@ export function ProductEditor({ product, brands }) {
   const [variants, setVariants] = useState(
     product?.variants?.length
       ? product.variants.map((v) => ({ ...v, _key: v.id }))
-      : [emptyVariant()]
+      : [emptyVariant(initialBarcode ?? "")]
   );
   const [errors, setErrors] = useState({});
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -224,6 +229,13 @@ export function ProductEditor({ product, brands }) {
           </Button>
         </div>
       </div>
+
+      {!isEdit && initialBarcode && (
+        <div className="rounded-lg border border-[#2f3a2e]/15 bg-[#2f3a2e]/5 px-4 py-3 text-sm text-[#2f3a2e]">
+          Code-barres <span className="font-semibold">{initialBarcode}</span> scanné — aucun produit ne l'utilisait
+          encore, il a été pré-rempli sur la première déclinaison ci-dessous.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         {/* ── Main column ─────────────────────────────────────────────── */}
@@ -403,6 +415,19 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
   const price = Number(variant.price) || 0;
   const cost = Number(variant.costPrice) || 0;
   const margin = price > 0 ? (((price - cost) / price) * 100).toFixed(1) : null;
+  const [generatingSku, setGeneratingSku] = useState(false);
+
+  async function handleGenerateSku() {
+    if (variant.sku && !window.confirm("Remplacer la référence actuelle par une nouvelle référence générée ?")) return;
+    setGeneratingSku(true);
+    const result = await generateUniqueSku();
+    setGeneratingSku(false);
+    if (!result.success) {
+      toast.error(result.message);
+      return;
+    }
+    onChange({ sku: result.sku });
+  }
 
   return (
     <div className="rounded-lg border border-gray-200 p-4">
@@ -437,13 +462,24 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Field label="Référence (SKU)" required>
-          <input
-            type="text"
-            value={variant.sku}
-            onChange={(e) => onChange({ sku: e.target.value })}
-            required
-            className={inputClass}
-          />
+          <div className="flex gap-1.5">
+            <input
+              type="text"
+              value={variant.sku}
+              onChange={(e) => onChange({ sku: e.target.value })}
+              required
+              className={`${inputClass} flex-1`}
+            />
+            <button
+              type="button"
+              title="Générer une référence unique"
+              onClick={handleGenerateSku}
+              disabled={generatingSku}
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {generatingSku ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            </button>
+          </div>
         </Field>
         <Field label="Code-barres" hint="Code fournisseur (EAN/UPC) ou un code interne généré">
           <div className="flex gap-1.5">

@@ -1,4 +1,5 @@
-import { requireAdmin } from "@/lib/route-protection";
+import { requireRole } from "@/lib/route-protection";
+import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getAllVariants } from "@/actions/boutique/stock";
 import { StockPageClient } from "@/components/dashboard/boutique/StockPageClient";
 
@@ -10,7 +11,7 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function StockPage() {
-  await requireAdmin();
+  await requireRole(DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK);
 
   const result = await getAllVariants();
   const variants = result.data ?? [];

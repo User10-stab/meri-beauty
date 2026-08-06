@@ -3,7 +3,6 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { signIn } from "next-auth/react";
 import { Loader2 } from "lucide-react";
 
 export default function ReservationAtelierSuccesPage() {
@@ -24,14 +23,6 @@ function ReservationAtelierSuccesContent() {
     if (!reservationId) {
       setStatus("error");
       return;
-    }
-
-    // Auto-login if credentials stored before Stripe redirect
-    const stored = sessionStorage.getItem("workshop_signin");
-    if (stored) {
-      sessionStorage.removeItem("workshop_signin");
-      const { email, password } = JSON.parse(stored);
-      signIn("credentials", { email, password, redirect: false }).catch(() => {});
     }
 
     // Fetch reservation details. The webhook that confirms payment runs

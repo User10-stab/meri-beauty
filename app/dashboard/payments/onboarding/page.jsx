@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2, CheckCircle2, RefreshCw } from "lucide-react";
+import { refreshStripeStatus } from "@/actions/stripe/refresh-stripe-status";
 
 /**
  * Stripe Connect Onboarding Redirect Handler
@@ -32,39 +33,33 @@ export default function StripeOnboardingPage() {
       setMessage("Finalisation de votre connexion Stripe…");
       setIcon("success");
 
-      // TODO: Verify the Stripe account status and update the database.
-      // This will be properly implemented when webhooks are added.
-      // For now, we simply redirect back to the payments settings page.
+      // The account.updated webhook will eventually sync charges/payouts
+      // status, but relying on it alone here left this page redirecting
+      // back to the settings page before the DB was updated — pulling the
+      // latest status directly from Stripe closes that race.
+      refreshStripeStatus()
+        .catch((err) => console.error("[StripeOnboardingPage] refreshStripeStatus failed:", err))
+        .finally(() => {
+          router.push("/dashboard/payments");
+        });
 
-      const timer = setTimeout(() => {
-        router.push("/dashboard/settings/payments");
-      }, 3000);
-
-      return () => clearTimeout(timer);
+      return;
     }
 
     // ── Refresh: user needs a new onboarding link ─────────────────────────
     if (isRefresh) {
-      setMessage("Génération d'un nouveau lien d'onboarding Stripe…");
+      setMessage("Redirection…");
       setIcon("refresh");
 
-      // TODO: Generate a new onboarding link by calling the server action:
-      //   import { createAccountLink } from "@/actions/stripe/createAccountLink";
-      //   const result = await createAccountLink(staffId);
-      //   if (result.success) {
-      //     window.location.href = result.url;  // Redirect to new Stripe URL
-      //   }
-      // For now, we simply redirect back to the payments settings page.
-
       const timer = setTimeout(() => {
-        router.push("/dashboard/settings/payments");
-      }, 3000);
+        router.push("/dashboard/payments");
+      }, 1500);
 
       return () => clearTimeout(timer);
     }
 
     // ── No valid query parameter — redirect directly ──────────────────────
-    router.push("/dashboard/settings/payments");
+    router.push("/dashboard/payments");
   }, [isSuccess, isRefresh, router]);
 
   // If neither success nor refresh, we're redirecting — show nothing

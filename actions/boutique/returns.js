@@ -25,7 +25,7 @@ import { renderCreditNotePdf } from "@/lib/pdf/render";
  * this is the same day-to-day counter work, not a separate admin area.
  *
  * Withdrawal window: starts at pickup (pickedUpAt) or shipping (shippedAt —
- * a proxy for delivery, since bpost tracking isn't integrated; the +3 day
+ * a proxy for delivery, since carrier tracking isn't integrated; the +3 day
  * grace on top of the legal 14 covers typical transit time so the window
  * never closes before the customer could plausibly have received the
  * parcel). Partial returns are supported: an order can have several
@@ -193,27 +193,49 @@ export async function requestReturn(input) {
       return { success: false, message: "Le délai de rétractation de 14 jours pour cette commande est dépassé." };
     }
 
-    const claimed = claimedQuantities(order);
-    for (const requested of items) {
-      const orderItem = order.items.find((i) => i.id === requested.orderItemId);
-      if (!orderItem) return { success: false, message: "Article introuvable sur cette commande." };
-      const remaining = orderItem.quantity - (claimed.get(orderItem.id) ?? 0);
-      if (requested.quantity > remaining) {
-        return {
-          success: false,
-          message: `Quantité invalide pour "${orderItem.productName}" — ${remaining} disponible(s) au retour.`,
-        };
-      }
-    }
+    // Serialize return-request creation per order: two concurrent requests
+    // for the same item would otherwise both read the same "claimed" snapshot
+    // before either commits, both pass the remaining-quantity check, and both
+    // insert — over-claiming units that get double-refunded when staff later
+    // completes both. Locking the order row (same FOR UPDATE pattern as
+    // createOrderFromCart) and recomputing claimed quantities after
+    // acquiring it closes that window.
+    const { returnRequest, validationError } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${order.id} FOR UPDATE`;
 
-    const returnRequest = await prisma.returnRequest.create({
-      data: {
-        orderId: order.id,
-        reason,
-        items: { create: items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity })) },
-      },
-      include: { items: { include: { orderItem: true } } },
+      const freshOrder = await tx.order.findUnique({
+        where: { id: order.id },
+        include: { items: true, returnRequests: { include: { items: true } } },
+      });
+      const freshClaimed = claimedQuantities(freshOrder);
+
+      for (const requested of items) {
+        const orderItem = freshOrder.items.find((i) => i.id === requested.orderItemId);
+        if (!orderItem) return { returnRequest: null, validationError: "Article introuvable sur cette commande." };
+        const remaining = orderItem.quantity - (freshClaimed.get(orderItem.id) ?? 0);
+        if (requested.quantity > remaining) {
+          return {
+            returnRequest: null,
+            validationError: `Quantité invalide pour "${orderItem.productName}" — ${remaining} disponible(s) au retour.`,
+          };
+        }
+      }
+
+      const created = await tx.returnRequest.create({
+        data: {
+          orderId: order.id,
+          reason,
+          items: { create: items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity })) },
+        },
+        include: { items: { include: { orderItem: true } } },
+      });
+
+      return { returnRequest: created, validationError: null };
     });
+
+    if (validationError) {
+      return { success: false, message: validationError };
+    }
 
     const itemsSummary = returnRequest.items
       .map((i) => `- ${i.orderItem.productName} (${i.orderItem.variantName}) × ${i.quantity}`)
@@ -234,23 +256,47 @@ export async function requestReturn(input) {
 
 // ─── Dashboard: read ────────────────────────────────────────────────────────────
 
-export async function listReturnRequests({ status } = {}) {
+const DEFAULT_RETURNS_PAGE_SIZE = 20;
+
+export async function listReturnRequests({ status, search, page = 1, pageSize = DEFAULT_RETURNS_PAGE_SIZE } = {}) {
   const guard = await requireOrdersAccess();
-  if (guard.error) return { success: false, message: guard.error, data: [] };
+  if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page: 1, pageSize };
 
   try {
-    const requests = await prisma.returnRequest.findMany({
-      where: status ? { status } : {},
-      orderBy: { requestedAt: "desc" },
-      include: {
-        order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
-        items: { include: { orderItem: true } },
-      },
-    });
-    return { success: true, data: requests.map(serializeReturnRequest) };
+    const searchAsOrderNumber = search && /^\d+$/.test(search.trim()) ? Number(search.trim()) : null;
+
+    const where = {
+      ...(status ? { status } : {}),
+      ...(search
+        ? {
+            OR: [
+              { order: { user: { fullName: { contains: search, mode: "insensitive" } } } },
+              { order: { user: { email: { contains: search, mode: "insensitive" } } } },
+              ...(searchAsOrderNumber !== null ? [{ order: { orderNumber: searchAsOrderNumber } }] : []),
+            ],
+          }
+        : {}),
+    };
+
+    // Same issue as listOrders: this fetched every return request ever
+    // filed with no limit. Paginate at the DB level instead.
+    const [totalCount, requests] = await Promise.all([
+      prisma.returnRequest.count({ where }),
+      prisma.returnRequest.findMany({
+        where,
+        orderBy: { requestedAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: {
+          order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
+          items: { include: { orderItem: true } },
+        },
+      }),
+    ]);
+    return { success: true, data: requests.map(serializeReturnRequest), totalCount, page, pageSize };
   } catch (error) {
     console.error("[listReturnRequests]", error);
-    return { success: false, message: "Impossible de charger les demandes de retour.", data: [] };
+    return { success: false, message: "Impossible de charger les demandes de retour.", data: [], totalCount: 0, page, pageSize };
   }
 }
 
@@ -399,8 +445,9 @@ export async function completeReturnRequest(input) {
     const fullyReturned = rr.order.items.every((oi) => (claimed.get(oi.id) ?? 0) >= oi.quantity);
     const shippingRefund = fullyReturned ? Number(rr.order.shippingCost) : 0;
     const totalRefund = refundAmount + shippingRefund;
+    const REFUND_EPSILON = 0.01;
 
-    const { creditNote } = await prisma.$transaction(async (tx) => {
+    const { creditNote, alreadyRefunded, paidAmount } = await prisma.$transaction(async (tx) => {
       // Atomically claim this return: the WHERE clause only matches while
       // status is still APPROVED, so if two requests race here only one
       // update actually affects a row — the loser's count is 0 and it
@@ -415,6 +462,19 @@ export async function completeReturnRequest(input) {
         },
       });
       if (claim.count === 0) throw new Error("ALREADY_PROCESSED");
+
+      // Lock the payment row so two return requests on the same order can't
+      // both read "nothing refunded yet" and both slip under the cap.
+      await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${rr.order.payment.id} FOR UPDATE`;
+      const priorRefunds = await tx.transaction.aggregate({
+        where: { paymentId: rr.order.payment.id, transactionType: "REFUND" },
+        _sum: { amount: true },
+      });
+      const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
+      const paidAmount = Number(rr.order.payment.paidAmount);
+      if (totalRefund + alreadyRefunded > paidAmount + REFUND_EPSILON) {
+        throw new Error("REFUND_CAP_EXCEEDED");
+      }
 
       for (const item of rr.items) {
         const updated = await tx.productVariant.update({
@@ -441,9 +501,16 @@ export async function completeReturnRequest(input) {
 
       await tx.returnRequest.update({ where: { id: rr.id }, data: { creditNoteId: creditNote.id } });
 
-      return { creditNote };
+      return { creditNote, alreadyRefunded, paidAmount };
     });
 
+    // Payment.status / the REFUND ledger row are only written once the
+    // refund is actually settled — for a Stripe payment that means only
+    // after the refund call succeeds, so a failed refund never tells the
+    // customer/dashboard money moved when it didn't (see C4/C5's same
+    // pattern). A cash/card on-site payment has no async step here, so its
+    // ledger entry is written immediately.
+    let refundFailed = false;
     if (rr.order.payment.transactionReference) {
       try {
         const session = await stripe.checkout.sessions.retrieve(rr.order.payment.transactionReference);
@@ -452,7 +519,28 @@ export async function completeReturnRequest(input) {
         }
       } catch (err) {
         console.error("[completeReturnRequest] REFUND FAILED for return", rr.id, err);
+        refundFailed = true;
       }
+    }
+
+    if (!refundFailed) {
+      const newTotalRefunded = alreadyRefunded + totalRefund;
+      const fullyRefunded = newTotalRefunded + REFUND_EPSILON >= paidAmount;
+      await prisma.$transaction([
+        prisma.transaction.create({
+          data: {
+            paymentId: rr.order.payment.id,
+            amount: totalRefund,
+            method: rr.order.payment.transactionReference ? "ONLINE" : "CASH",
+            transactionType: "REFUND",
+            paidAt: new Date(),
+          },
+        }),
+        prisma.payment.update({
+          where: { id: rr.order.payment.id },
+          data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+        }),
+      ]);
     }
 
     const creditNotePdf = await renderCreditNotePdf(creditNote, rr.order.payment.invoice).catch((err) => {
@@ -462,15 +550,41 @@ export async function completeReturnRequest(input) {
 
     sendEmail({
       to: rr.order.user.email,
-      ...returnCompletedEmail({ customerName: rr.order.user.fullName, orderNumber: rr.order.orderNumber, refundAmount: totalRefund }),
+      ...returnCompletedEmail({
+        customerName: rr.order.user.fullName,
+        orderNumber: rr.order.orderNumber,
+        refundAmount: totalRefund,
+        refundFailed,
+      }),
       ...(creditNotePdf ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] } : {}),
     }).catch((err) => console.error("[completeReturnRequest] email failed:", err));
 
+    if (refundFailed) {
+      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      if (salon?.email) {
+        sendEmail({
+          to: salon.email,
+          subject: `⚠️ Remboursement Stripe échoué – Retour commande n°${rr.order.orderNumber}`,
+          text: `Le remboursement Stripe pour le retour de la commande n°${rr.order.orderNumber} (client : ${rr.order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
+          html: `<p>Le remboursement Stripe pour le retour de la commande n°${rr.order.orderNumber} (client : ${rr.order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
+        }).catch((err) => console.error("[completeReturnRequest] refund-failure alert email failed:", err));
+      }
+    }
+
     revalidatePath("/dashboard/boutique/returns");
-    return { success: true, message: `Retour finalisé — €${totalRefund.toFixed(2)} remboursé(s).` };
+    return {
+      success: true,
+      message: refundFailed
+        ? `Retour finalisé. Le remboursement de €${totalRefund.toFixed(2)} n'a pas pu être traité automatiquement — notre équipe s'en occupe.`
+        : `Retour finalisé — €${totalRefund.toFixed(2)} remboursé(s).`,
+      refundFailed,
+    };
   } catch (error) {
     if (error.message === "ALREADY_PROCESSED") {
       return { success: false, message: "Ce retour vient d'être finalisé (par vous ou un autre membre de l'équipe)." };
+    }
+    if (error.message === "REFUND_CAP_EXCEEDED") {
+      return { success: false, message: "Ce remboursement dépasserait le montant réellement payé pour cette commande." };
     }
     console.error("[completeReturnRequest]", error);
     return { success: false, message: "Impossible de finaliser ce retour." };

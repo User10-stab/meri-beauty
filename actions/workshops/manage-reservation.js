@@ -26,11 +26,15 @@ function formatSessionDate(date) {
 
 /**
  * Admin-only: cancels a reservation on a customer's behalf. Deposits are
- * never refunded (see req: "no refund once paid the deposit"), and a
- * booking can't be cancelled within 48h of its session — both enforced
- * here since there's no customer self-service cancel flow in this app.
+ * non-refundable by default (see req: "no refund once paid the deposit"),
+ * and a booking can't be cancelled within 48h of its session — both
+ * enforced here since there's no customer self-service cancel flow in this
+ * app. The client confirmed exceptions should exist for medical reasons,
+ * death, or genuine force majeure — `refundDeposit` is the admin's manual
+ * case-by-case call, never automatic, so `reason` is required whenever it's
+ * used (it's what justifies the exception in the reservation's own record).
  */
-export async function cancelWorkshopReservation(reservationId, { reason } = {}) {
+export async function cancelWorkshopReservation(reservationId, { reason, refundDeposit = false } = {}) {
   try {
     const session = await auth();
     if (!session?.user) {
@@ -41,9 +45,13 @@ export async function cancelWorkshopReservation(reservationId, { reason } = {}) 
       return { success: false, message: "Non autorisé." };
     }
 
+    if (refundDeposit && !reason?.trim()) {
+      return { success: false, message: "Un motif est requis pour rembourser l'acompte à titre exceptionnel." };
+    }
+
     const reservation = await prisma.workshopReservation.findUnique({
       where: { id: reservationId },
-      include: { session: { include: { workshop: true } }, customer: true },
+      include: { session: { include: { workshop: true } }, customer: true, payment: true },
     });
     if (!reservation) {
       return { success: false, message: "Réservation introuvable." };
@@ -63,18 +71,40 @@ export async function cancelWorkshopReservation(reservationId, { reason } = {}) 
       };
     }
 
+    const noteLine = refundDeposit
+      ? `Annulation (acompte remboursé à titre exceptionnel) : ${reason}`
+      : reason
+      ? `Annulation : ${reason}`
+      : null;
+
     await prisma.workshopReservation.update({
       where: { id: reservationId },
       data: {
         status: "CANCELLED",
         cancelledAt: new Date(),
         cancelledByUserId: session.user.id,
-        notes: reason ? `${reservation.notes ? `${reservation.notes}\n` : ""}Annulation : ${reason}` : reservation.notes,
+        notes: noteLine ? `${reservation.notes ? `${reservation.notes}\n` : ""}${noteLine}` : reservation.notes,
       },
     });
 
-    // Never stripe.refunds.create() here — deposits are non-refundable once
-    // paid, unlike actions/boutique/orders.js#cancelOrder which does refund.
+    // Deposits are non-refundable by default — never stripe.refunds.create()
+    // here unless the admin explicitly granted an exception above.
+    let refundFailed = false;
+    if (refundDeposit && reservation.payment?.transactionReference) {
+      try {
+        const checkoutSession = await stripe.checkout.sessions.retrieve(reservation.payment.transactionReference);
+        if (checkoutSession.payment_intent) {
+          await stripe.refunds.create({ payment_intent: checkoutSession.payment_intent });
+        }
+      } catch (err) {
+        // The reservation is already cancelled — that stays. But don't let
+        // the customer email below claim a refund that didn't happen;
+        // surface this to staff instead (same pattern as
+        // actions/boutique/orders.js#performOrderCancellation).
+        console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
+        refundFailed = true;
+      }
+    }
 
     notifyAllInWaitingList(reservation.sessionId).catch((err) =>
       console.error("[cancelWorkshopReservation] waiting-list notify failed:", err)
@@ -86,11 +116,32 @@ export async function cancelWorkshopReservation(reservationId, { reason } = {}) 
         customerName: reservation.customer.fullName,
         activityTitle: reservation.session.workshop.title,
         sessionDate: formatSessionDate(reservation.session.startDate),
+        refunded: refundDeposit && !refundFailed,
       }),
     }).catch((err) => console.error("[cancelWorkshopReservation] email failed:", err));
 
+    if (refundFailed) {
+      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      if (salon?.email) {
+        sendEmail({
+          to: salon.email,
+          subject: `⚠️ Remboursement Stripe échoué – Réservation atelier n°${reservationId}`,
+          text: `Le remboursement Stripe pour la réservation atelier n°${reservationId} (client : ${reservation.customer.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
+          html: `<p>Le remboursement Stripe pour la réservation atelier n°${reservationId} (client : ${reservation.customer.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
+        }).catch((err) => console.error("[cancelWorkshopReservation] refund-failure alert email failed:", err));
+      }
+    }
+
     revalidatePath("/dashboard/workshops/reservations");
-    return { success: true, message: "Réservation annulée." };
+    return {
+      success: true,
+      message: refundDeposit
+        ? refundFailed
+          ? "Réservation annulée. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
+          : "Réservation annulée et acompte remboursé."
+        : "Réservation annulée.",
+      refundFailed,
+    };
   } catch (error) {
     console.error("[cancelWorkshopReservation]", error);
     return { success: false, message: "Erreur lors de l'annulation." };

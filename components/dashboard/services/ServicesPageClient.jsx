@@ -181,6 +181,7 @@ export function ServicesPageClient({ initialCategories, initialServices, userRol
             onClose={handleServiceModalClose}
             onCreated={() => router.refresh()}
             service={editingService}
+            userRole={userRole}
           />
 
           <ServiceDetailsDrawer

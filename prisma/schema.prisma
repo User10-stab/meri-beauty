@@ -40,6 +40,7 @@ enum PaymentStatus {
   PAID
   REFUNDED
   PARTIALLY_PAID
+  PARTIALLY_REFUNDED
 }
 
 enum PaymentType {
@@ -53,6 +54,11 @@ enum InvoiceSource {
   APPOINTMENT
   WORKSHOP
   FORMATION
+}
+
+enum PromoCodeType {
+  PERCENTAGE
+  FIXED
 }
 
 enum ReturnStatus {
@@ -199,6 +205,12 @@ enum ReservationConfirmationMode {
   MANUAL
 }
 
+enum AllowedPaymentMethods {
+  BOTH
+  ONLINE_ONLY
+  CASH_ONLY
+}
+
 // ─── WORKSHOP / EVENT ENUMS ────────────────────────────────────────────────────
 
 enum WorkshopType {
@@ -218,14 +230,6 @@ enum SessionStatus {
   ONGOING
   COMPLETED
   CANCELLED
-}
-
-enum WorkshopReservationStatus {
-  PENDING_DEPOSIT
-  CONFIRMED
-  CANCELLED
-  COMPLETED
-  NO_SHOW
 }
 
 enum WaitingListStatus {
@@ -321,6 +325,12 @@ model WorkshopReservation {
   depositAmount     Decimal                   @default(0) @db.Decimal(10, 2)
   totalPrice        Decimal                   @db.Decimal(10, 2)
   balanceDue        Decimal                   @default(0) @db.Decimal(10, 2)
+  // `totalPrice` above is already the post-discount figure; these two are
+  // kept only so the eventual Payment row (created later, once Stripe
+  // confirms) can copy which code was used and how much it took off.
+  promoCodeId       String?
+  promoCode         PromoCode?                @relation(fields: [promoCodeId], references: [id])
+  discountAmount    Decimal                   @default(0) @db.Decimal(10, 2)
   previousSessionId String?
   previousSession   WorkshopSession?          @relation("ReservationPreviousSession", fields: [previousSessionId], references: [id])
   changeFeeAmount   Decimal                   @default(0) @db.Decimal(10, 2)
@@ -338,10 +348,15 @@ model WorkshopReservation {
   @@map("workshop_reservations")
 }
 
+// Polymorphic: exactly one of sessionId (atelier) / formationSessionId
+// (formation) is set — same pattern as Payment's exactly-one-source CHECK,
+// see WaitingListEntry_exactly_one_session in the formation migration.
 model WaitingListEntry {
   id                       String            @id @default(cuid())
-  sessionId                String
-  session                  WorkshopSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId                String?
+  session                  WorkshopSession?  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  formationSessionId       String?
+  formationSession         FormationSession? @relation(fields: [formationSessionId], references: [id], onDelete: Cascade)
   customerId               String
   customer                 User              @relation(fields: [customerId], references: [id])
   seatsRequested           Int               @default(1)
@@ -355,6 +370,8 @@ model WaitingListEntry {
 
   @@index([sessionId, position])
   @@index([sessionId, status])
+  @@index([formationSessionId, position])
+  @@index([formationSessionId, status])
   @@map("waiting_list_entries")
 }
 
@@ -377,6 +394,14 @@ model Animator {
   formationSessions FormationSession[]
 
   @@map("animators")
+}
+
+enum WorkshopReservationStatus {
+  PENDING_DEPOSIT
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
 }
 
 // ─── FORMATION MODELS ───────────────────────────────────────────────────────
@@ -423,39 +448,51 @@ model FormationSession {
   capacity             Int
   status               SessionStatus @default(SCHEDULED)
   registrationDeadline DateTime?
+  lowSeatsNotifiedAt   DateTime?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 
   reservations FormationReservation[]
+  waitingList  WaitingListEntry[]
 
   @@index([formationId])
   @@map("formation_sessions")
 }
 
 model FormationReservation {
-  id             String                     @id @default(cuid())
-  sessionId      String
-  session        FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  customerId     String
-  customer       User                       @relation(fields: [customerId], references: [id])
-  payment        Payment?
-  seatsCount     Int                        @default(1) // always 1 for PRIVATE
-  status         FormationReservationStatus @default(PENDING_DEPOSIT)
-  holdExpiresAt  DateTime?
-  depositAmount  Decimal                    @default(0) @db.Decimal(10, 2)
-  totalPrice     Decimal                    @db.Decimal(10, 2)
-  balanceDue     Decimal                    @default(0) @db.Decimal(10, 2)
-  participants   String?
-  notes          String?
-  reminderSentAt DateTime?
-  createdAt      DateTime                   @default(now())
-  updatedAt      DateTime                   @updatedAt
+  id                String                     @id @default(cuid())
+  sessionId         String
+  session           FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customerId        String
+  customer          User                       @relation(fields: [customerId], references: [id])
+  payment           Payment?
+  seatsCount        Int                        @default(1) // always 1 for PRIVATE
+  status            FormationReservationStatus @default(PENDING_DEPOSIT)
+  holdExpiresAt     DateTime?
+  depositAmount     Decimal                    @default(0) @db.Decimal(10, 2)
+  totalPrice        Decimal                    @db.Decimal(10, 2)
+  balanceDue        Decimal                    @default(0) @db.Decimal(10, 2)
+  // `totalPrice` above is already the post-discount figure; these two are
+  // kept only so the eventual Payment row (created later, once Stripe
+  // confirms) can copy which code was used and how much it took off.
+  promoCodeId       String?
+  promoCode         PromoCode?                 @relation(fields: [promoCodeId], references: [id])
+  discountAmount    Decimal                    @default(0) @db.Decimal(10, 2)
+  participants      String?
+  notes             String?
+  cancelledAt       DateTime?
+  cancelledByUserId String?
+  cancelledBy       User?                      @relation("FormationReservationCancelledBy", fields: [cancelledByUserId], references: [id])
+  reminderSentAt    DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
 
   @@index([sessionId])
   @@index([customerId])
   @@map("formation_reservations")
 }
 
+// SALON
 model Salon {
   id          String  @id @default(cuid())
   name        String
@@ -531,24 +568,25 @@ model User {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  staff                 Staff?
-  appointments          Appointment[]
-  reviews               Review[]
-  notifications         Notification[]
-  newsletterRecipients  NewsletterRecipient[]
-  createdStaffServices  StaffService[]         @relation("CreatedBy")
-  rentalRequests        RentalRequest[]
-  workshopReservations  WorkshopReservation[]
-  waitingListEntries    WaitingListEntry[]
-  createdActivities     Activity[]             @relation("ActivityCreatedBy")
-  cancelledReservations WorkshopReservation[]  @relation("ReservationCancelledBy")
-  formationReservations FormationReservation[]
-  createdFormations     Formation[]            @relation("FormationCreatedBy")
-  stockMovements        InventoryMovement[]    @relation("StockMovementBy")
-  carts                 Cart[]
-  orders                Order[]                @relation("OrderBuyer")
-  pickedUpOrders        Order[]                @relation("OrderPickedUpBy")
-  processedReturns      ReturnRequest[]        @relation("ReturnProcessedBy")
+  staff                          Staff?
+  appointments                   Appointment[]
+  reviews                        Review[]
+  notifications                  Notification[]
+  newsletterRecipients           NewsletterRecipient[]
+  createdStaffServices           StaffService[]         @relation("CreatedBy")
+  rentalRequests                 RentalRequest[]
+  workshopReservations           WorkshopReservation[]
+  waitingListEntries             WaitingListEntry[]
+  createdActivities              Activity[]             @relation("ActivityCreatedBy")
+  cancelledReservations          WorkshopReservation[]  @relation("ReservationCancelledBy")
+  formationReservations          FormationReservation[]
+  cancelledFormationReservations FormationReservation[] @relation("FormationReservationCancelledBy")
+  createdFormations              Formation[]            @relation("FormationCreatedBy")
+  stockMovements                 InventoryMovement[]    @relation("StockMovementBy")
+  carts                          Cart[]
+  orders                         Order[]                @relation("OrderBuyer")
+  pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
+  processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
 }
 
 // CATEGORY — services only. Retail products use ProductCategory.
@@ -840,7 +878,17 @@ model Order {
   shippingCost Decimal @default(0) @db.Decimal(10, 2)
   totalAmount  Decimal @db.Decimal(10, 2)
 
-  // Shipping (SHIPPING_PREPAID)
+  // `totalAmount` above is already the post-discount figure; these two are
+  // kept only so the eventual Payment row (created later, once Stripe
+  // confirms or the on-site pickup is completed) can copy which code was
+  // used and how much it took off.
+  promoCodeId    String?
+  promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
+  discountAmount Decimal    @default(0) @db.Decimal(10, 2)
+
+  // Shipping (SHIPPING_PREPAID) — legacy bpost home-delivery fields, kept
+  // nullable/unused so historical bpost orders keep their data rather than
+  // being dropped when the carrier switched to Mondial Relay pickup points.
   shippingLine1      String?
   shippingLine2      String?
   shippingCity       String?
@@ -848,6 +896,17 @@ model Order {
   shippingCountry    String?   @default("BE")
   bpostTrackingCode  String?
   shippedAt          DateTime?
+
+  // Mondial Relay pickup point (current carrier). pickupPointId is null for
+  // orders placed through the manual fallback form (no widget credentials
+  // configured yet) — name/address/postalCode/city are always required either way.
+  shippingCarrier       String? @default("MONDIAL_RELAY")
+  pickupPointId         String?
+  pickupPointName       String?
+  pickupPointAddress    String?
+  pickupPointPostalCode String?
+  pickupPointCity       String?
+  trackingCode          String?
 
   // Pickup (PICKUP_PREPAID / PICKUP_ON_SITE)
   pickupCode        String?   @unique // QR payload scanned by staff at collection
@@ -871,6 +930,8 @@ model Order {
 
   @@index([userId])
   @@index([status])
+  @@index([expiresAt])
+  @@index([fulfilmentMode])
 }
 
 // ORDER ITEM
@@ -985,6 +1046,7 @@ model Staff {
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
   depositEnabled              Boolean                     @default(false)
   depositPercentage           Decimal                     @default(10.0) @db.Decimal(5, 2)
+  allowedPaymentMethods       AllowedPaymentMethods       @default(BOTH)
 
   // Account Setup
   setupCompleted Boolean @default(false)
@@ -997,6 +1059,7 @@ model Staff {
 
   // Stripe Connect
   stripeAccountId      String? @unique
+  stripeAccountType    String?
   stripeChargesEnabled Boolean @default(false)
   stripePayoutsEnabled Boolean @default(false)
 
@@ -1065,6 +1128,10 @@ model Appointment {
   payment       Payment?
   review        Review?
   notifications Notification[]
+
+  @@index([staffServiceId, startTime]) // conflict checks + calendar
+  @@index([userId, startTime]) // "my appointments"
+  @@index([isDeleted, status, startTime]) // dashboard filters
 }
 
 // PAYMENT
@@ -1091,10 +1158,52 @@ model Payment {
   paidAt                 DateTime?
   isDeleted              Boolean               @default(false)
   deletedAt              DateTime?
-  transactionReference   String?
+  // @unique is safe on a nullable column in Postgres — NULLs are never
+  // considered duplicates of each other, so ON_SITE/cash payments (which
+  // never set this) are unaffected. This turns the webhook's idempotency
+  // check from a race-prone findFirst-then-create into a real DB guarantee:
+  // a second concurrent insert with the same session id throws P2002 instead
+  // of silently succeeding and double-fulfilling.
+  transactionReference   String?               @unique
+
+  // Recorded here rather than on each of the 4 source models (Order,
+  // WorkshopReservation, FormationReservation, Appointment) — Payment is
+  // the one row every flow already creates, and Appointment in particular
+  // has no price field of its own to sit a discount next to (it's derived
+  // from StaffService.price at booking time). `totalAmount` above is
+  // already the post-discount figure; this is purely for reporting which
+  // code was used and how much it took off.
+  promoCodeId    String?
+  promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
+  discountAmount Decimal    @default(0) @db.Decimal(10, 2)
 
   transactions Transaction[]
   invoice      Invoice?
+
+  @@index([promoCodeId])
+}
+
+// PROMO CODE
+// Reusable across customers (not single-use) and never auto-expires — only
+// a manual `isActive` toggle retires one, per the client's explicit call.
+// `code` is stored uppercase so lookups are case-insensitive without a DB
+// collation dependency.
+model PromoCode {
+  id             String        @id @default(cuid())
+  code           String        @unique
+  type           PromoCodeType
+  value          Decimal       @db.Decimal(10, 2) // percentage points (0-100) or a flat EUR amount, per `type`
+  minOrderAmount Decimal?      @db.Decimal(10, 2) // null = no minimum
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  payments              Payment[]
+  orders                Order[]
+  workshopReservations  WorkshopReservation[]
+  formationReservations FormationReservation[]
+
+  @@index([isActive])
 }
 
 // NUMBERING COUNTER
@@ -1187,13 +1296,15 @@ model Transaction {
   paymentId String
   payment   Payment @relation(fields: [paymentId], references: [id])
 
-  amount          Decimal
-  method          TransactionMethod
-  transactionType TransactionType
-  paidAt          DateTime
-  createdAt       DateTime          @default(now())
-  isDeleted       Boolean           @default(false)
-  deletedAt       DateTime?
+  amount                  Decimal
+  method                  TransactionMethod
+  transactionType         TransactionType
+  paidAt                  DateTime
+  stripeCheckoutSessionId String?
+  stripePaymentIntentId   String?
+  createdAt               DateTime          @default(now())
+  isDeleted               Boolean           @default(false)
+  deletedAt               DateTime?
 }
 
 // CONTRACT
@@ -1361,6 +1472,13 @@ model EmailVerificationToken {
   expiresAt DateTime
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  // Set only for tokens issued mid-checkout (guest order/reservation awaiting
+  // confirmation before payment can start) — null for plain registration
+  // tokens. Looked up from this row server-side on verify, never trusted
+  // from a URL param, so a hand-edited link can't ride someone else's order.
+  resumeType String? // "ORDER" | "WORKSHOP" | "FORMATION"
+  resumeId   String?
 
   @@index([email])
   @@index([expiresAt])

@@ -65,10 +65,18 @@ const DEFAULT_COLUMNS = [
  * @param {string} [props.searchPlaceholder] - placeholder for search bar
  * @param {(row: object, query: string) => boolean} [props.searchFilter] - custom search filter
  * @param {React.ComponentType} [props.emptyState] - custom empty state component
+ * @param {{ page: number, pageSize: number, totalCount: number, onPageChange: (page: number) => void, onPerPageChange?: (perPage: number) => void }} [props.serverPagination] -
+ *   when provided, `data` is treated as an already-filtered, already-paginated
+ *   page fetched from the server (search/sort/slicing below are skipped —
+ *   the caller owns fetching each page). Omit for the original fully
+ *   client-side behavior.
+ * @param {(query: string) => void} [props.onSearchChange] - required alongside
+ *   `serverPagination` to make the search box re-fetch from the server
+ *   instead of filtering the (already-partial) `data` in memory.
  */
-export function DataTable({ 
-  data, 
-  isLoading = false, 
+export function DataTable({
+  data,
+  isLoading = false,
   title,
   columns = DEFAULT_COLUMNS,
   onView,
@@ -80,9 +88,11 @@ export function DataTable({
   searchPlaceholder,
   searchFilter,
   emptyState: CustomEmptyState,
+  serverPagination,
+  onSearchChange,
 }) {
   const [search, setSearch] = useState("");
-  const [perPage, setPerPage] = useState(5);
+  const [perPage, setPerPage] = useState(serverPagination?.pageSize ?? 5);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState(null); // "asc" | "desc"
@@ -105,14 +115,19 @@ export function DataTable({
   );
 
   // ── Filter ────────────────────────────────────────────────────────────────
+  // In server-pagination mode, `data` IS the current page already filtered
+  // server-side — skip client-side filtering entirely (filtering only the
+  // current page's rows would silently miss matches on every other page).
   const filtered = useMemo(() => {
+    if (serverPagination) return data;
+
     const q = search.trim().toLowerCase();
     if (!q) return data;
-    
+
     if (searchFilter) {
       return data.filter(row => searchFilter(row, q));
     }
-    
+
     // Default filter for backward compatibility
     return data.filter(
       (row) =>
@@ -120,9 +135,12 @@ export function DataTable({
         row.name?.toLowerCase().includes(q) ||
         row.email?.toLowerCase().includes(q),
     );
-  }, [data, search, searchFilter]);
+  }, [data, search, searchFilter, serverPagination]);
 
   // ── Sort ──────────────────────────────────────────────────────────────────
+  // Sorting still happens client-side even in server-pagination mode — it
+  // only reorders the current page's rows, which is a reasonable trade-off
+  // against adding server-side sort params for what's a "nice to have" here.
   const sorted = useMemo(() => {
     if (!sortKey || !sortDir) return filtered;
     return [...filtered].sort((a, b) => {
@@ -139,18 +157,27 @@ export function DataTable({
   }, [filtered, sortKey, sortDir]);
 
   // ── Paginate ──────────────────────────────────────────────────────────────
-  const totalPages = Math.max(1, Math.ceil(sorted.length / perPage));
-  const safePage = Math.min(currentPage, totalPages);
-  const pageRows = sorted.slice((safePage - 1) * perPage, safePage * perPage);
+  const totalPages = serverPagination
+    ? Math.max(1, Math.ceil(serverPagination.totalCount / serverPagination.pageSize))
+    : Math.max(1, Math.ceil(sorted.length / perPage));
+  const safePage = serverPagination ? serverPagination.page : Math.min(currentPage, totalPages);
+  const pageRows = serverPagination ? sorted : sorted.slice((safePage - 1) * perPage, safePage * perPage);
 
   function handleSearchChange(value) {
     setSearch(value);
     setCurrentPage(1);
+    if (serverPagination) onSearchChange?.(value);
   }
 
   function handlePerPageChange(value) {
     setPerPage(value);
     setCurrentPage(1);
+    if (serverPagination) serverPagination.onPerPageChange?.(value);
+  }
+
+  function handlePageChange(value) {
+    if (serverPagination) serverPagination.onPageChange(value);
+    else setCurrentPage(value);
   }
 
   // ── Action stubs (wire up real handlers as needed) ─────────────────────
@@ -237,12 +264,12 @@ export function DataTable({
       </div>
 
       {/* ── Pagination ───────────────────────────────────────────────────── */}
-      {!isLoading && sorted.length > 0 && (
+      {!isLoading && (serverPagination ? serverPagination.totalCount > 0 : sorted.length > 0) && (
         <div className="flex items-center justify-start gap-2 border-t border-gray-100 px-5 py-4">
           <Pagination
             currentPage={safePage}
             totalPages={totalPages}
-            onPageChange={setCurrentPage}
+            onPageChange={handlePageChange}
           />
         </div>
       )}

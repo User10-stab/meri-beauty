@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { CheckCircle2, AlertCircle } from "lucide-react";
+import { CheckCircle2, AlertCircle, CreditCard } from "lucide-react";
 import Button from "@/components/ui/Button";
 
 export function OnboardingModal({ step }) {
@@ -99,6 +99,47 @@ export function OnboardingModal({ step }) {
               onClick={() => router.push("/dashboard/services")}
             >
               Voir mes services
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (step === "stripe") {
+    return (
+      <div {...overlayProps}>
+        <div {...dialogProps}>
+          <div className="text-center">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-purple-100">
+              <CreditCard size={28} className="text-purple-600" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Configurez Stripe Connect</h2>
+            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+              Pour recevoir des paiements en ligne et des commissions, vous devez connecter votre compte Stripe.
+              Cette étape est obligatoire pour tous les membres du staff.
+            </p>
+          </div>
+
+          <div className="mt-6 space-y-3">
+            {["Recevoir des paiements en ligne", "Gérer vos commissions", "Sécurité des transactions"].map(
+              (label) => (
+                <div
+                  key={label}
+                  className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 dark:border-gray-700 dark:bg-gray-800/50"
+                >
+                  <CheckCircle2 size={18} className="text-gray-400" />
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+                </div>
+              )
+            )}
+          </div>
+          <div className="mt-6 flex justify-center">
+            <button
+              className="w-[230px] flex justify-center bg-primary text-white py-3 rounded-lg hover:bg-primary/90 focus:outline-none"
+              onClick={() => router.push("/dashboard/payments/")}
+            >
+              Configurer Stripe
             </button>
           </div>
         </div>

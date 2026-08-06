@@ -47,9 +47,10 @@ const updateActivitySchema = activitySchema.extend({
 });
 
 /**
- * Gate for activity mutations: admin/owner may act on any activity; staff
- * may only create (no existing row to own yet) or, when requireOwnerForEdit
- * is set, act on an activity they created themselves.
+ * Gate for activity mutations: admin/owner may act on any activity. Per the
+ * client's decision, staff can no longer create ateliers/événements at all
+ * (unlike formations, which stay open to them) — they may still edit/delete
+ * one they created earlier (when requireOwnerForEdit is set).
  */
 async function requireActivityAccess(activityId, { requireOwnerForEdit = false } = {}) {
   const session = await auth();
@@ -58,6 +59,7 @@ async function requireActivityAccess(activityId, { requireOwnerForEdit = false }
     return { error: "Non autorisé." };
   }
   if (isAdminRole(session.user.role)) return { session };
+  if (!activityId) return { error: "Seul un administrateur peut créer un atelier ou un évènement." };
   if (!requireOwnerForEdit) return { session };
 
   const activity = await prisma.activity.findUnique({

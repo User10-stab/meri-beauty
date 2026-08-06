@@ -19,7 +19,7 @@ export default async function OrdersPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-bold text-dark dark:text-white">Commandes</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Commandes de la boutique en ligne — retrait en salon ou livraison bpost.
+          Commandes de la boutique en ligne — retrait en salon ou livraison Mondial Relay.
         </p>
       </div>
 
@@ -30,7 +30,7 @@ export default async function OrdersPage() {
         </div>
       )}
 
-      <OrdersPageClient initialOrders={result.data ?? []} />
+      <OrdersPageClient initialOrders={result.data ?? []} initialTotalCount={result.totalCount ?? 0} />
     </div>
   );
 }

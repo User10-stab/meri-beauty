@@ -13,6 +13,80 @@ import ReviewStep from "./steps/ReviewStep";
 import PaymentStep from "./steps/PaymentStep";
 import { computePaymentDecision } from "@/lib/reservation-payment";
 
+/**
+ * Returns true when the data collected for a given step is complete enough
+ * to allow moving forward.  Steps that self-advance on click (Category,
+ * Service, Staff) still benefit from this guard so the stepper breadcrumb
+ * cannot be used to skip ahead.
+ *
+ * @param {number}  stepId          — ALL_STEPS id for the step to validate
+ * @param {object}  reservationData — current shared state
+ * @returns {boolean}
+ */
+function isStepValid(stepId, reservationData) {
+  switch (stepId) {
+    // ── Step 1 · Category ──────────────────────────────────────────────────
+    case 1:
+      return Boolean(reservationData.category);
+
+    // ── Step 2 · Service ───────────────────────────────────────────────────
+    case 2:
+      return Boolean(reservationData.service);
+
+    // ── Step 3 · Staff ─────────────────────────────────────────────────────
+    case 3:
+      return Boolean(reservationData.staff && reservationData.staffService);
+
+    // ── Step 4 · Appointment drafts summary ────────────────────────────────
+    // The user can only reach this step after committing a draft, so drafts
+    // is always non-empty here; guard anyway for safety.
+    case 4:
+      return (reservationData.appointmentDrafts ?? []).length > 0;
+
+    // ── Step 5 · Date & Time ───────────────────────────────────────────────
+    // DateTimeStep manages its own confirm buttons and calls nextStep()
+    // internally — the global Suivant button is hidden for this step.
+    // We still need a validity signal for the stepper breadcrumb guard.
+    case 5: {
+      const drafts = reservationData.appointmentDrafts ?? [];
+      const isMulti = drafts.length > 1;
+      if (!isMulti) {
+        // Single draft: need date + time committed to shared state
+        return Boolean(reservationData.date && reservationData.time);
+      }
+      // Multi-draft: a confirmed schedule proposal must be stored
+      return Boolean(reservationData.selectedScheduleProposal);
+    }
+
+    // ── Step 6 · Customer information (guest only) ─────────────────────────
+    // CustomerInfoStep validates its own form before calling nextStep().
+    // The global Suivant button is NOT used for this step (it has its own
+    // submit button).  Validity here is used only for the breadcrumb guard.
+    case 6: {
+      const info = reservationData.customerInfo;
+      if (!info) return false;
+      return Boolean(
+        info.fullName?.trim() &&
+        info.email?.trim() &&
+        info.email.includes("@") &&
+        info.phone?.trim()
+      );
+    }
+
+    // ── Step 7 · Review / Récapitulatif ────────────────────────────────────
+    // ReviewStep has its own action buttons; the global Suivant is hidden.
+    case 7:
+      return true;
+
+    // ── Step 8 · Payment ───────────────────────────────────────────────────
+    case 8:
+      return true;
+
+    default:
+      return true;
+  }
+}
+
 const ALL_STEPS = [
   { id: 1, name: "Catégorie",      component: CategoryStep },
   { id: 2, name: "Service",        component: ServiceStep },
@@ -94,8 +168,14 @@ export default function ReservationForm({ customerSession = null }) {
     if (currentStep > 1) setCurrentStep((prev) => prev - 1);
   };
 
+  /**
+   * Allow clicking a breadcrumb step only when going backward (or to the
+   * current step).  Forward jumps via the breadcrumb are blocked so the user
+   * cannot skip a step whose validation has not been satisfied yet.
+   */
   const goToStep = (step) => {
-    if (step <= currentStep || step === 1) setCurrentStep(step);
+    if (step < currentStep) setCurrentStep(step);
+    // Equal or forward: do nothing — the user must complete the current step first.
   };
 
   // ── Draft-step specific handlers ─────────────────────────────────────────
@@ -173,6 +253,9 @@ export default function ReservationForm({ customerSession = null }) {
   // Staff step is always step 3 (id 3) regardless of guest/auth filtering
   const isStaffStep     = currentStepDef.id === 3;
 
+  /** Whether the current step's data is valid so Suivant can be clicked */
+  const canProceed = isStepValid(currentStepDef.id, reservationData);
+
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
       {/* ── Progress Indicator ─────────────────────────────────── */}
@@ -183,14 +266,14 @@ export default function ReservationForm({ customerSession = null }) {
               <div className="flex flex-col items-center">
                 <button
                   onClick={() => goToStep(index + 1)}
-                  disabled={index + 1 > currentStep}
+                  disabled={index + 1 >= currentStep}
                   className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-semibold transition-all ${
                     index + 1 < currentStep
                       ? "border-[#C8A46A] bg-[#C8A46A] text-white"
                       : index + 1 === currentStep
                       ? "border-[#C8A46A] bg-white text-[#C8A46A]"
                       : "border-gray-300 bg-white text-gray-400"
-                  } ${index + 1 <= currentStep ? "cursor-pointer hover:scale-110" : "cursor-not-allowed"}`}
+                  } ${index + 1 < currentStep ? "cursor-pointer hover:scale-110" : "cursor-not-allowed"}`}
                 >
                   {index + 1 < currentStep ? (
                     <Check size={18} />
@@ -272,9 +355,9 @@ export default function ReservationForm({ customerSession = null }) {
 
           <button
             onClick={nextStep}
-            disabled={isLastStep}
+            disabled={isLastStep || !canProceed}
             className={`inline-flex items-center gap-2 rounded-lg px-6 py-3 text-sm font-semibold transition-all ${
-              isLastStep
+              isLastStep || !canProceed
                 ? "cursor-not-allowed bg-gray-200 text-gray-400"
                 : "bg-[#C8A46A] text-white hover:bg-[#B8945A]"
             }`}

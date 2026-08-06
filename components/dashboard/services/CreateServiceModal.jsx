@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { X, Loader2, Tag, Layers, FileText, Plus, Trash2 } from "lucide-react";
+import { X, Loader2, Tag, Layers, FileText, Plus, Trash2, Check, Package } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { PhotoUpload } from "@/components/ui/PhotoUpload";
 import { createService, updateService, getCategories, getStaffOptions } from "@/actions/services/create-service";
+import { assignServiceToMe } from "@/actions/services/assign-service-to-me";
 import { InlineCategoryCreate } from "@/components/dashboard/services/InlineCategoryCreate";
 
 function FieldError({ message }) {
@@ -128,8 +129,9 @@ function StaffAssignmentCard({ staff, index, assignment, onChange, onRemove, can
 }
 
 
-export function CreateServiceModal({ open, onClose, onCreated, service }) {
+export function CreateServiceModal({ open, onClose, onCreated, service, userRole }) {
   const isEditing = !!service;
+  const isStaff = userRole === "STAFF";
   const [categories, setCategories] = useState([]);
   const [staffOptions, setStaffOptions] = useState([]);
   const [loading, startLoading] = useTransition();
@@ -141,6 +143,8 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
   });
   const [staffAssignments, setStaffAssignments] = useState([]);
   const [errors, setErrors] = useState({});
+  const [assigningServiceId, setAssigningServiceId] = useState(null);
+  const [assignedServiceIds, setAssignedServiceIds] = useState([]);
 
   useEffect(() => {
     if (!open) return;
@@ -153,6 +157,14 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
 
       if (catsRes.success) {
         setCategories(catsRes.data ?? []);
+        // Initialize assigned service IDs from the fetched data
+        const assigned = [];
+        (catsRes.data ?? []).forEach((cat) => {
+          (cat.services ?? []).forEach((svc) => {
+            if (svc.isAssignedToMe) assigned.push(svc.id);
+          });
+        });
+        setAssignedServiceIds(assigned);
       }
       if (staffRes.success) {
         setStaffOptions((prev) => {
@@ -244,6 +256,25 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
     });
   }
 
+  async function handleAssignExistingService(serviceId) {
+    if (assigningServiceId) return;
+    setAssigningServiceId(serviceId);
+    try {
+      const res = await assignServiceToMe(serviceId);
+      if (res.success) {
+        toast.success(res.message);
+        setAssignedServiceIds((prev) => [...prev, serviceId]);
+        onCreated?.();
+      } else {
+        toast.error(res.message);
+      }
+    } catch {
+      toast.error("Une erreur est survenue.");
+    } finally {
+      setAssigningServiceId(null);
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     setErrors({});
@@ -305,6 +336,10 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
   const staffNotSelected = staffOptions.filter(
     (s) => !selectedStaffIds.includes(s.id)
   );
+
+  // For staff: find existing services in the selected category
+  const selectedCategory = categories.find((c) => c.id === form.categoryId);
+  const existingServicesInCategory = selectedCategory?.services ?? [];
 
   return (
     <div
@@ -380,6 +415,81 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
               <FieldError message={errors.categoryId} />
             </ModalField>
 
+            {/* Existing services in selected category (staff only) */}
+            {isStaff && !isEditing && form.categoryId && (
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
+                <div className="mb-2.5 flex items-center gap-2">
+                  <Package size={14} className="text-indigo-600" />
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-indigo-700">
+                    Services existants dans « {selectedCategory?.name} »
+                  </h3>
+                </div>
+
+                {existingServicesInCategory.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic">
+                    Aucun service existant dans cette catégorie. Vous pouvez en créer un ci-dessous.
+                  </p>
+                ) : (
+                  <div className="max-h-40 space-y-1.5 overflow-y-auto pr-1">
+                    {existingServicesInCategory.map((svc) => {
+                      const isAssigned = assignedServiceIds.includes(svc.id);
+                      const isAssigning = assigningServiceId === svc.id;
+                      return (
+                        <div
+                          key={svc.id}
+                          className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
+                            isAssigned
+                              ? "border-emerald-200 bg-emerald-50"
+                              : "border-gray-200 bg-white"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${
+                              isAssigned ? "bg-emerald-100 text-emerald-600" : "bg-gray-100 text-gray-400"
+                            }`}>
+                              {isAssigned ? <Check size={12} /> : <Package size={12} />}
+                            </span>
+                            <span className={`truncate font-medium ${isAssigned ? "text-emerald-700" : "text-gray-700"}`}>
+                              {svc.name}
+                            </span>
+                            {svc.staffServicesCount > 0 && (
+                              <span className="flex-shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">
+                                {svc.staffServicesCount} pro(s)
+                              </span>
+                            )}
+                          </div>
+                          {isAssigned ? (
+                            <span className="flex-shrink-0 text-xs font-medium text-emerald-600">
+                              Ajouté ✓
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleAssignExistingService(svc.id)}
+                              disabled={isAssigning}
+                              className="flex-shrink-0 inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-indigo-700 disabled:opacity-50"
+                            >
+                              {isAssigning ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : (
+                                <Plus size={11} />
+                              )}
+                              Ajouter
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <p className="mt-2.5 border-t border-indigo-100 pt-2 text-[11px] text-indigo-500">
+                  Un service peut être proposé par plusieurs professionnels. Sélectionnez un service existant
+                  pour l'ajouter à votre profil, ou créez un nouveau service ci-dessous.
+                </p>
+              </div>
+            )}
+
             {/* Nom */}
             <ModalField label="Nom du service" required>
               <div className="relative">
@@ -410,7 +520,8 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
               <FieldError message={errors.description} />
             </ModalField>
 
-            {/* Staff Assignments */}
+            {/* Staff Assignments (admin/owner only — staff auto-assign to themselves) */}
+            {!isStaff && (
             <div className="border-t border-gray-100 pt-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600">
@@ -461,6 +572,7 @@ export function CreateServiceModal({ open, onClose, onCreated, service }) {
                 </div>
               )}
             </div>
+            )}
           </div>
 
           {/* Footer */}

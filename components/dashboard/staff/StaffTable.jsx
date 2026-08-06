@@ -17,6 +17,8 @@ import {
   ShieldCheck,
   ShieldOff,
   Clock,
+  CreditCard,
+  AlertCircle,
 } from "lucide-react";
 import { deleteIndependentStaff } from "@/actions/staff/delete-independent-staff";
 import { updateIndependentStaff } from "@/actions/staff/update-independent-staff";
@@ -46,6 +48,7 @@ const COLUMNS = [
   { key: "languages", label: "Langues" },
   { key: "services", label: "Services" },
   { key: "hireDate", label: "Date d'embauche" },
+  { key: "stripeStatus", label: "Stripe" },
   { key: "isActive", label: "Statut" },
 ];
 
@@ -173,7 +176,7 @@ function PageBtn({ children, isActive, disabled, onClick, ...rest }) {
 function SkeletonRow({ cols }) {
   return (
     <tr className="border-b border-gray-100">
-      {Array.from({ length: cols }).map((_, i) => (
+      {Array.from({ length: cols + 1 }).map((_, i) => (
         <td key={i} className="px-4 py-4">
           {i === 0 ? (
             <div className="flex items-center justify-center">
@@ -191,7 +194,7 @@ function SkeletonRow({ cols }) {
 function EmptyState({ hasSearch }) {
   return (
     <tr>
-      <td colSpan={COLUMNS.length + 1}>
+      <td colSpan={COLUMNS.length + 2}>
         <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-100">
             <Users size={24} className="text-gray-400" />
@@ -637,6 +640,21 @@ function StaffRow({ staff, onAction, onDelete, isPending }) {
       {/* Date d'embauche */}
       <td className="px-4 py-4 align-middle text-gray-600 whitespace-nowrap">
         {formatDate(staff.hireDate)}
+      </td>
+
+      {/* Stripe Status */}
+      <td className="px-4 py-4 align-middle">
+        {staff.stripeChargesEnabled && staff.stripePayoutsEnabled ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 border border-emerald-200">
+            <CreditCard size={12} />
+            Connecté
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 border border-amber-200">
+            <AlertCircle size={12} />
+            Non connecté
+          </span>
+        )}
       </td>
 
       {/* Statut */}

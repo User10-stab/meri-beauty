@@ -1,103 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { CreditCard, Wallet, Check, Loader2, Mail } from "lucide-react";
-import { createReservation, confirmPayment } from "@/actions/reservation/create-reservation";
+import { CreditCard, Wallet, Check, Loader2 } from "lucide-react";
+import { createReservation } from "@/actions/reservation/create-reservation";
+import { createCheckoutSession } from "@/actions/payment/createCheckoutSession";
 import { computePaymentDecision } from "@/lib/reservation-payment";
 import { signIn } from "next-auth/react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
-
-// ─── Success screen ───────────────────────────────────────────────────────────
-
-function SuccessScreen({ data, paidAmount, isNewUser, customerEmail }) {
-  const draft = data.appointmentDrafts?.[0];
-  const dateLabel = data.date
-    ? new Date(data.date).toLocaleDateString("fr-FR", {
-        weekday: "long",
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-      })
-    : "—";
-
-  return (
-    <div className="mx-auto max-w-2xl">
-      <div className="rounded-2xl border-2 border-green-200 bg-gradient-to-br from-green-50 to-white p-10 text-center">
-        <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-green-500">
-          <Check size={40} className="text-white" />
-        </div>
-
-        <h2 className="mb-3 text-3xl font-bold text-[#2F3A2E]">
-          Réservation confirmée !
-        </h2>
-        <p className="mb-8 text-gray-600">
-          Votre rendez-vous a été enregistré avec succès.
-        </p>
-
-        <div className="mx-auto mb-8 max-w-md space-y-3 rounded-xl bg-white p-6 text-left shadow-md">
-          <Row
-            label="Service"
-            value={draft?.service?.name ?? data.service?.name ?? "—"}
-          />
-          <Row label="Date" value={`${dateLabel} à ${data.time}`} />
-          <Row
-            label="Experte"
-            value={
-              draft?.staff?.user?.fullName ??
-              data.staff?.user?.fullName ??
-              "—"
-            }
-          />
-          {paidAmount > 0 && (
-            <div className="border-t border-gray-100 pt-3">
-              <Row
-                label="Montant réglé"
-                value={`€${Number(paidAmount).toFixed(2)}`}
-                valueClass="font-bold text-green-600"
-              />
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg bg-white px-4 py-3 text-left text-sm text-gray-600 shadow-sm">
-            <Mail size={16} className="mt-0.5 flex-shrink-0 text-[#C8A46A]" />
-            <p>
-              Un email de confirmation a été envoyé à{" "}
-              <span className="font-medium text-[#2F3A2E]">{customerEmail}</span>.
-            </p>
-          </div>
-
-          {isNewUser && (
-            <div className="flex items-start gap-2 rounded-lg border border-[#C8A46A]/30 bg-[#C8A46A]/5 px-4 py-3 text-left text-sm text-gray-700 shadow-sm">
-              <Mail size={16} className="mt-0.5 flex-shrink-0 text-[#C8A46A]" />
-              <p>
-                Un compte a été créé automatiquement pour vous. Vos identifiants
-                de connexion ont été envoyés à la même adresse email.{" "}
-                <span className="font-medium text-[#2F3A2E]">
-                  Pensez à changer votre mot de passe après votre première
-                  connexion.
-                </span>
-              </p>
-            </div>
-          )}
-        </div>
-
-        <p className="mt-6 text-sm text-gray-400">Redirection en cours…</p>
-      </div>
-    </div>
-  );
-}
-
-function Row({ label, value, valueClass = "font-semibold text-[#2F3A2E]" }) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-gray-500">{label}</span>
-      <span className={valueClass}>{value}</span>
-    </div>
-  );
-}
+import { PromoCodeField } from "@/components/shared/PromoCodeField";
 
 // ─── Payment option button ────────────────────────────────────────────────────
 
@@ -151,11 +62,12 @@ function PaymentOption({ icon, title, description, badge, selected, disabled, on
 export default function PaymentStep({ data, customerSession }) {
   const [paymentMethod, setPaymentMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
-  const [completed, setCompleted] = useState(false);
-  const [completedMeta, setCompletedMeta] = useState(null);
+  const [appliedPromo, setAppliedPromo] = useState(null);
   const router = useRouter();
 
   const drafts = data.appointmentDrafts ?? [];
+  const rawTotal = drafts.reduce((sum, d) => sum + Number(d.price ?? 0), 0);
+  const discountAmount = appliedPromo?.discountAmount ?? 0;
 
   // All amounts and flags from the single source of truth
   const {
@@ -163,9 +75,10 @@ export default function PaymentStep({ data, customerSession }) {
     depositRequired,
     depositAmount,
     depositPercentage,
-  } = computePaymentDecision({ drafts });
+  } = computePaymentDecision({ drafts, discountAmount });
 
-  // The amount the customer will pay online right now, per chosen method:
+  // The amount the customer will pay online right now, per chosen method —
+  // used only to display in UI labels, never sent to the server.
   //   "online" → full price (Stripe, charged immediately)
   //   "cash"   → deposit if depositRequired, otherwise €0
   const amountDueNow =
@@ -178,54 +91,6 @@ export default function PaymentStep({ data, customerSession }) {
   const draft = drafts[0];
   const staffServiceId = draft?.staffService?.id ?? data.staffService?.id;
 
-  // ── Auto-login helper ─────────────────────────────────────────────────────
-
-  /**
-   * Attempts auto-login after a successful reservation.
-   * Runs for guest flows where autologinToken and email are returned by the server.
-   * Never throws — a login failure must not cancel the reservation.
-   */
-  const handleAutoSignIn = async (isNewUser, autologinToken, email) => {
-    // Already authenticated — nothing to do
-    if (customerSession) return;
-
-    if (autologinToken && email) {
-      try {
-        const result = await signIn("credentials", {
-          email,
-          autologinToken,
-          redirect: false,
-        });
-
-        if (result?.error) {
-          console.warn("[PaymentStep] auto-signin error:", result.error);
-          toast.error(
-            "Votre réservation a été confirmée, mais la connexion automatique a échoué. Veuillez vous connecter.",
-            { duration: 6000 }
-          );
-        } else {
-          if (isNewUser) {
-            toast.success(
-              "Réservation créée avec succès ! Votre compte a été créé et vous avez été connecté(e) automatiquement. Un email de bienvenue contenant vos accès vous a été envoyé.",
-              { duration: 8000 }
-            );
-          } else {
-            toast.success(
-              "Réservation créée avec succès et vous avez été connecté(e) automatiquement.",
-              { duration: 6000 }
-            );
-          }
-        }
-      } catch (err) {
-        console.warn("[PaymentStep] auto-signin failed:", err);
-        toast.error(
-          "Votre réservation a été confirmée, mais la connexion automatique a échoué. Veuillez vous connecter.",
-          { duration: 6000 }
-        );
-      }
-    }
-  };
-
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handlePayment = async () => {
@@ -234,14 +99,17 @@ export default function PaymentStep({ data, customerSession }) {
       return;
     }
 
-    // "Payer au salon" with no deposit → create appointment directly, no payment record
+    // "Payer au salon" with no deposit → create appointment directly, no Stripe
     if (paymentMethod === "cash" && !depositRequired) {
       await handleSalonNoDeposit();
       return;
     }
 
+    // All other cases require Stripe Checkout:
+    //   • "online"               → full amount
+    //   • "cash" + depositRequired → deposit amount
     setProcessing(true);
-    const loadingToastId = toast.loading("Traitement de votre réservation…");
+    const loadingToastId = toast.loading("Redirection vers le paiement sécurisé…");
     try {
       const customerInfo = customerSession
         ? {
@@ -252,62 +120,55 @@ export default function PaymentStep({ data, customerSession }) {
           }
         : data.customerInfo;
 
-      // Create reservation + payment record
-      const reservationResult = await createReservation({
+      // Creates Appointment + Payment (status: PENDING) in DB, then returns
+      // the Stripe Checkout session URL. No payment is confirmed here.
+      // The webhook is the sole authority for marking a payment as completed.
+      const result = await createCheckoutSession({
         staffServiceId,
         date:          data.date,
         time:          data.time,
         customerInfo,
         paymentMethod,
         notes:         data.notes,
+        promoCode:     appliedPromo?.code ?? null,
       });
-
-      if (!reservationResult.success) {
-        toast.dismiss(loadingToastId);
-        toast.error(
-          reservationResult.message ||
-            "La réservation a échoué. Veuillez réessayer dans quelques instants."
-        );
-        setProcessing(false);
-        return;
-      }
-
-      // Simulate / process payment
-      await new Promise((r) => setTimeout(r, 1500));
-
-      const paymentResult = await confirmPayment(
-        reservationResult.data.payment.id,
-        `DEMO_${Date.now()}`
-      );
 
       toast.dismiss(loadingToastId);
 
-      if (!paymentResult.success) {
+      if (!result.success || !result.url) {
         toast.error(
-          paymentResult.message ||
-            "Le paiement a échoué. Veuillez réessayer ou choisir un autre mode de paiement."
+          (result.message || "Impossible de créer la session de paiement. Veuillez réessayer.") +
+            (result.error ? ` — ${result.error}` : "")
         );
         setProcessing(false);
         return;
       }
 
-      const { isNewUser, autologinToken, user } = reservationResult.data;
-
-      // Auto-login + info toast for new accounts
-      if (customerSession) {
-        toast.success("Réservation confirmée avec succès !");
-      } else {
-        await handleAutoSignIn(isNewUser, autologinToken, user?.email);
+      // If the customer was just created as a guest, sign them in silently
+      // before navigating to Stripe. This means if they abandon the Stripe
+      // checkout page, they will already be authenticated when they come back
+      // and can resume payment from /mes-reservations.
+      if (!customerSession && result.autologinToken && result.customerEmail) {
+        try {
+          await signIn("credentials", {
+            email:         result.customerEmail,
+            autologinToken: result.autologinToken,
+            redirect:      false,
+          });
+        } catch {
+          // Login failure must never block the Stripe redirect.
+          // The customer can still pay — they just won't be auto-authenticated.
+        }
       }
 
-      setCompletedMeta({
-        paidAmount: amountDueNow,
-        isNewUser:  Boolean(isNewUser),
-        email:      reservationResult.data.user.email,
-      });
-      setCompleted(true);
+      // Hard-navigate to Stripe Checkout. The browser leaves this page.
+      // On completion Stripe redirects to /reservation/success?session_id=...
+      // On cancellation Stripe redirects to /reservation?canceled=true
+      window.location.href = result.url;
 
-      setTimeout(() => router.push("/"), 4000);
+      // Note: setProcessing(false) is intentionally omitted — the page is
+      // navigating away. Keeping processing=true prevents double-clicks while
+      // the redirect is in flight.
     } catch (err) {
       console.error("[PaymentStep] unexpected error:", err);
       toast.dismiss(loadingToastId);
@@ -316,7 +177,7 @@ export default function PaymentStep({ data, customerSession }) {
     }
   };
 
-  // "Payer au salon", no deposit required → create appointment without payment
+  // "Payer au salon", no deposit required → create appointment without Stripe
   const handleSalonNoDeposit = async () => {
     setProcessing(true);
     const loadingToastId = toast.loading("Traitement de votre réservation…");
@@ -337,6 +198,7 @@ export default function PaymentStep({ data, customerSession }) {
         customerInfo,
         paymentMethod: "cash",
         notes:         data.notes,
+        promoCode:     appliedPromo?.code ?? null,
       });
 
       toast.dismiss(loadingToastId);
@@ -349,22 +211,18 @@ export default function PaymentStep({ data, customerSession }) {
         return;
       }
 
+      // Auto-login for guest accounts so they land on the site authenticated
       const { isNewUser, autologinToken, user } = result.data;
-
-      // Auto-login + info toast for new accounts
-      if (customerSession) {
-        toast.success("Réservation confirmée avec succès !");
-      } else {
-        await handleAutoSignIn(isNewUser, autologinToken, user?.email);
+      if (!customerSession && autologinToken && user?.email) {
+        try {
+          await signIn("credentials", { email: user.email, autologinToken, redirect: false });
+        } catch {
+          // login failure must never block the reservation confirmation
+        }
       }
 
-      setCompletedMeta({
-        paidAmount: 0,
-        isNewUser:  Boolean(isNewUser),
-        email:      result.data.user.email,
-      });
-      setCompleted(true);
-      setTimeout(() => router.push("/"), 4000);
+      toast.success("Réservation confirmée avec succès !");
+      setTimeout(() => router.push("/"), 2000);
     } catch (err) {
       console.error("[PaymentStep] handleSalonNoDeposit:", err);
       toast.dismiss(loadingToastId);
@@ -372,19 +230,6 @@ export default function PaymentStep({ data, customerSession }) {
       setProcessing(false);
     }
   };
-
-  // ── Success screen ────────────────────────────────────────────────────────
-
-  if (completed && completedMeta) {
-    return (
-      <SuccessScreen
-        data={data}
-        paidAmount={completedMeta.paidAmount}
-        isNewUser={completedMeta.isNewUser}
-        customerEmail={completedMeta.email}
-      />
-    );
-  }
 
   // ── Payment form ──────────────────────────────────────────────────────────
 
@@ -418,9 +263,19 @@ export default function PaymentStep({ data, customerSession }) {
           <p className="text-sm font-medium text-gray-600">
             Prix total du service
           </p>
-          <p className="mt-1 text-4xl font-bold text-[#C8A46A]">
-            €{Number(totalAmount).toFixed(2)}
-          </p>
+          {discountAmount > 0 ? (
+            <>
+              <p className="mt-1 text-lg text-gray-400 line-through">€{rawTotal.toFixed(2)}</p>
+              <p className="text-4xl font-bold text-[#C8A46A]">€{Number(totalAmount).toFixed(2)}</p>
+              <p className="mt-1 text-sm font-medium text-emerald-600">
+                Réduction ({appliedPromo.code}) : -€{discountAmount.toFixed(2)}
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-4xl font-bold text-[#C8A46A]">
+              €{Number(totalAmount).toFixed(2)}
+            </p>
+          )}
           {depositRequired && paymentMethod === "cash" && (
             <p className="mt-2 text-sm text-gray-500">
               Acompte en ligne :{" "}
@@ -439,6 +294,8 @@ export default function PaymentStep({ data, customerSession }) {
             </p>
           )}
         </div>
+
+        <PromoCodeField subtotal={rawTotal} onApplied={setAppliedPromo} />
 
         {/* ── Payment options ─────────────────────────────────── */}
         <div className="space-y-4">

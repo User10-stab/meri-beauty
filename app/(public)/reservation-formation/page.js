@@ -1,12 +1,20 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Loader2, ArrowLeft, Calendar, CheckCircle } from "lucide-react";
+import { Loader2, ArrowLeft, Calendar, CheckCircle, Bell, AlertTriangle } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { checkFormationSessionAvailability, createFormationReservation } from "@/actions/formations/create-formation-reservation";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
+import {
+  joinFormationWaitingList,
+  validateFormationWaitingListPriority,
+  convertFormationWaitingListEntry,
+} from "@/actions/formations/waiting-list";
+import { checkEmailExists } from "@/actions/shared/check-email-exists";
+import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
+import { PromoCodeField } from "@/components/shared/PromoCodeField";
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
@@ -34,11 +42,16 @@ export default function ReservationFormationPage() {
 
 function ReservationFormationContent() {
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const { data: session } = useSession();
   const isAuthed = !!session?.user;
+  const callbackUrl = `${pathname}?${searchParams.toString()}`;
 
   const formationId = searchParams.get("formation");
   const sessionId = searchParams.get("session");
+  const isPriority = searchParams.get("priority") === "true";
+  const waitingListId = searchParams.get("wl");
+  const wantsWaitingList = searchParams.get("waitingList") === "true";
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -47,9 +60,36 @@ function ReservationFormationContent() {
   const [available, setAvailable] = useState(0);
   const [seats, setSeats] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState("DEPOSIT");
-  const [form, setForm] = useState({ fullName: "", email: "", phone: "" });
+  const [form, setForm] = useState({ fullName: "", email: "", phone: "", vatNumber: "" });
+  const [appliedPromo, setAppliedPromo] = useState(null);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
+
+  // null = not checked yet | "exists" = verified account found | "dismissed" = user chose to continue as guest
+  const [emailStatus, setEmailStatus] = useState(null);
+  const [checkingEmail, setCheckingEmail] = useState(false);
+
+  async function handleEmailBlur() {
+    const email = form.email.trim();
+    if (!email || !email.includes("@")) return;
+
+    setCheckingEmail(true);
+    try {
+      const result = await checkEmailExists(email);
+      if (result.exists) setEmailStatus("exists");
+    } catch {
+      // Non-critical — silently ignore, the person can still proceed
+    } finally {
+      setCheckingEmail(false);
+    }
+  }
+
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
+
+  // Waiting list state
+  const [wlSuccess, setWlSuccess] = useState(null); // { position }
+  const [priorityValid, setPriorityValid] = useState(false);
+  const [priorityMessage, setPriorityMessage] = useState("");
 
   const isPrivate = formation?.type === "PRIVATE";
 
@@ -89,11 +129,20 @@ function ReservationFormationContent() {
         setSeats(1);
       }
 
+      if (isPriority && waitingListId) {
+        const priorityRes = await validateFormationWaitingListPriority(waitingListId);
+        if (priorityRes.valid) {
+          setPriorityValid(true);
+        } else {
+          setPriorityMessage(priorityRes.message || "Lien d'accès prioritaire expiré ou invalide.");
+        }
+      }
+
       setLoading(false);
     }
 
     load();
-  }, [formationId, sessionId]);
+  }, [formationId, sessionId, isPriority, waitingListId]);
 
   useEffect(() => {
     if (session?.user) {
@@ -105,15 +154,18 @@ function ReservationFormationContent() {
     }
   }, [session]);
 
-  const isFull = available <= 0;
+  const isFull = available <= 0 && !priorityValid;
+  const showWaitingListForm = (isFull || wantsWaitingList) && !priorityValid;
 
   const depositPct = formation?.depositPercentage ?? 30;
   const unitPrice = Number(formation?.price || 0);
   const totalPrice = unitPrice * seats;
-  const depositAmount = (totalPrice * depositPct) / 100;
-  const balanceDue = totalPrice - depositAmount;
+  const discountAmount = appliedPromo?.discountAmount ?? 0;
+  const discountedTotal = Math.max(0, totalPrice - discountAmount);
+  const depositAmount = (discountedTotal * depositPct) / 100;
+  const balanceDue = discountedTotal - depositAmount;
   const isFullPayment = paymentMethod === "FULL";
-  const chargeAmount = isFullPayment ? totalPrice : depositAmount;
+  const chargeAmount = isFullPayment ? discountedTotal : depositAmount;
   const displayBalanceDue = isFullPayment ? 0 : balanceDue;
 
   const priceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
@@ -123,7 +175,38 @@ function ReservationFormationContent() {
     e.preventDefault();
     setError("");
     setFieldErrors({});
+
+    if (!isAuthed && emailStatus === "exists") {
+      setError("Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même ».");
+      return;
+    }
+
     setSubmitting(true);
+
+    if (showWaitingListForm) {
+      const result = await joinFormationWaitingList({
+        sessionId,
+        customerInfo: { ...form, seatsRequested: isPrivate ? 1 : seats },
+      });
+
+      if (result.success) {
+        if (result.isNewUser) {
+          sessionStorage.setItem("workshop_signin", JSON.stringify({
+            email: result.email,
+            password: result.temporaryPassword,
+          }));
+        }
+        setWlSuccess({ position: result.position });
+      } else {
+        if (result.field) {
+          setFieldErrors({ [result.field]: result.message });
+        } else {
+          setError(result.message || "Erreur lors de l'inscription à la liste d'attente.");
+        }
+      }
+      setSubmitting(false);
+      return;
+    }
 
     const result = await createFormationReservation({
       sessionId,
@@ -131,16 +214,20 @@ function ReservationFormationContent() {
       seatsCount: isPrivate ? 1 : seats,
       customerInfo: form,
       paymentMethod,
+      isPriority: priorityValid,
+      waitingListEntryId: waitingListId,
+      promoCode: appliedPromo?.code ?? null,
     });
 
     if (result.success && result.url) {
-      if (result.isNewUser) {
-        sessionStorage.setItem("workshop_signin", JSON.stringify({
-          email: result.email,
-          password: result.temporaryPassword,
-        }));
+      if (waitingListId) {
+        await convertFormationWaitingListEntry(waitingListId, result.reservationId);
       }
+
       window.location.href = result.url;
+    } else if (result.success && result.requiresEmailVerification) {
+      setPendingVerificationEmail(result.email);
+      setSubmitting(false);
     } else {
       if (result.field) {
         setFieldErrors({ [result.field]: result.message });
@@ -170,6 +257,21 @@ function ReservationFormationContent() {
     );
   }
 
+  if (pendingVerificationEmail) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center bg-cream gap-4 px-6 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gold/10 text-gold">
+          <CheckCircle size={28} />
+        </div>
+        <h1 className="text-xl font-bold text-ink">Confirmez votre email</h1>
+        <p className="max-w-md text-sm text-ink/60">
+          Nous avons envoyé un email de confirmation à <strong>{pendingVerificationEmail}</strong>. Une fois confirmée,
+          vous recevrez vos identifiants de connexion par email et pourrez finaliser votre paiement.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-cream">
       <div className="mx-auto max-w-[800px] px-6 py-12 md:px-10 lg:py-16">
@@ -186,13 +288,31 @@ function ReservationFormationContent() {
             {isPrivate ? "Formation privée" : "Formation groupe"}
           </span>
           <h1 className="text-2xl font-bold text-ink sm:text-3xl">{formation.title}</h1>
+
+          {priorityValid && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800 border border-emerald-200">
+              <CheckCircle size={16} className="text-emerald-600 shrink-0" />
+              <span>Une place s&apos;est libérée ! Finalisez votre réservation rapidement : elle sera attribuée à la première personne qui réserve.</span>
+            </div>
+          )}
+
+          {priorityMessage && !priorityValid && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3.5 py-2 text-xs font-semibold text-amber-800 border border-amber-200">
+              <AlertTriangle size={16} className="text-amber-600 shrink-0" />
+              <span>{priorityMessage}</span>
+            </div>
+          )}
         </div>
 
-        {isFull ? (
-          <div className="rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm space-y-4">
-            <h2 className="text-xl font-bold text-ink">Cette session est complète</h2>
+        {wlSuccess ? (
+          <div className="rounded-2xl border border-emerald-200 bg-white p-8 text-center shadow-sm space-y-4">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+              <Bell size={28} />
+            </div>
+            <h2 className="text-xl font-bold text-ink">Vous êtes inscrit(e) sur la liste d&apos;attente !</h2>
             <p className="text-sm text-ink/70 max-w-md mx-auto">
-              Il n&apos;y a plus de place disponible pour cette session. Contactez le salon pour connaître les prochaines dates.
+              Vous êtes en <strong className="text-gold font-bold">position #{wlSuccess.position}</strong> sur la liste d&apos;attente.
+              Dès qu&apos;une place se libère, un email sera envoyé à toutes les personnes inscrites. La place sera attribuée à la première personne qui finalise sa réservation — soyez rapide !
             </p>
             <div className="pt-4 flex justify-center gap-4">
               <Link
@@ -224,52 +344,58 @@ function ReservationFormationContent() {
                     <button
                       type="button"
                       onClick={() => setSeats(Math.min(maxSeats, seats + 1))}
-                      disabled={seats >= maxSeats}
+                      disabled={seats >= maxSeats || isFull}
                       className="flex h-9 w-9 items-center justify-center rounded-full border border-ink/15 text-ink transition-colors hover:bg-gold/10 hover:border-gold/30 disabled:opacity-30 disabled:cursor-not-allowed"
                     >
                       +
                     </button>
                     <span className="text-xs text-ink/40">
-                      max. {maxSeats} place{maxSeats > 1 ? "s" : ""} disponible{maxSeats > 1 ? "s" : ""}
+                      {showWaitingListForm
+                        ? "Places demandées"
+                        : `max. ${maxSeats} place${maxSeats > 1 ? "s" : ""} disponible${maxSeats > 1 ? "s" : ""}`}
                     </span>
                   </div>
                 </div>
               )}
 
               {/* Payment method */}
-              <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
-                <h2 className="mb-4 text-sm font-semibold text-ink">Mode de paiement</h2>
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod("DEPOSIT")}
-                    className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
-                      paymentMethod === "DEPOSIT" ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
-                    }`}
-                  >
-                    <span>
-                      <span className="block text-sm font-medium text-ink">Payer un acompte</span>
-                      <span className="block text-xs text-ink/50">Payez l&apos;acompte maintenant et le reste sur place.</span>
-                    </span>
-                    <span className="text-sm font-semibold text-ink">{priceFormatted.format(depositAmount)}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod("FULL")}
-                    className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
-                      paymentMethod === "FULL" ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
-                    }`}
-                  >
-                    <span className="block text-sm font-medium text-ink">Payer le montant total</span>
-                    <span className="text-sm font-semibold text-ink">{priceFormatted.format(totalPrice)}</span>
-                  </button>
+              {!showWaitingListForm && (
+                <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
+                  <h2 className="mb-4 text-sm font-semibold text-ink">Mode de paiement</h2>
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("DEPOSIT")}
+                      className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                        paymentMethod === "DEPOSIT" ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
+                      }`}
+                    >
+                      <span>
+                        <span className="block text-sm font-medium text-ink">Payer un acompte</span>
+                        <span className="block text-xs text-ink/50">Payez l&apos;acompte maintenant et le reste sur place.</span>
+                      </span>
+                      <span className="text-sm font-semibold text-ink">{priceFormatted.format(depositAmount)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod("FULL")}
+                      className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
+                        paymentMethod === "FULL" ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
+                      }`}
+                    >
+                      <span className="block text-sm font-medium text-ink">Payer le montant total</span>
+                      <span className="text-sm font-semibold text-ink">{priceFormatted.format(totalPrice)}</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Non-refundable notice */}
-              <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs leading-relaxed text-red-800">
-                ⚠️ L&apos;acompte et le solde ne sont remboursables en aucun cas, que vous participiez ou non à la formation.
-              </div>
+              {!showWaitingListForm && (
+                <div className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-xs leading-relaxed text-red-800">
+                  ⚠️ L&apos;acompte et le solde ne sont remboursables en aucun cas, que vous participiez ou non à la formation.
+                </div>
+              )}
 
               {/* Customer info */}
               <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
@@ -302,6 +428,16 @@ function ReservationFormationContent() {
                       />
                       {fieldErrors.phone && <p className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
                     </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA (optionnel)</label>
+                      <input
+                        type="text"
+                        value={form.vatNumber}
+                        onChange={(e) => setForm((p) => ({ ...p, vatNumber: e.target.value }))}
+                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
+                        placeholder="BE0123456789"
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -318,15 +454,32 @@ function ReservationFormationContent() {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-ink/60">Email *</label>
-                      <input
-                        type="email"
-                        required
-                        value={form.email}
-                        onChange={(e) => { setForm((p) => ({ ...p, email: e.target.value })); setFieldErrors((p) => ({ ...p, email: undefined })); }}
-                        className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.email ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                        placeholder="votre@email.com"
-                      />
+                      <div className="relative">
+                        <input
+                          type="email"
+                          required
+                          value={form.email}
+                          onChange={(e) => { setForm((p) => ({ ...p, email: e.target.value })); setFieldErrors((p) => ({ ...p, email: undefined })); setEmailStatus(null); }}
+                          onBlur={handleEmailBlur}
+                          className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.email || emailStatus === "exists" ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                          placeholder="votre@email.com"
+                        />
+                        {checkingEmail && (
+                          <div className="absolute inset-y-0 right-3 flex items-center">
+                            <Loader2 className="h-4 w-4 animate-spin text-ink/30" />
+                          </div>
+                        )}
+                      </div>
                       {fieldErrors.email && <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>}
+                      {emailStatus === "exists" && (
+                        <div className="mt-3">
+                          <ExistingAccountBanner
+                            email={form.email}
+                            callbackUrl={callbackUrl}
+                            onDismiss={() => setEmailStatus("dismissed")}
+                          />
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-ink/60">Téléphone</label>
@@ -339,6 +492,16 @@ function ReservationFormationContent() {
                       />
                       {fieldErrors.phone && <p className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
                     </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA (optionnel)</label>
+                      <input
+                        type="text"
+                        value={form.vatNumber}
+                        onChange={(e) => setForm((p) => ({ ...p, vatNumber: e.target.value }))}
+                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
+                        placeholder="BE0123456789"
+                      />
+                    </div>
                     <p className="text-xs text-ink/40">Un compte sera créé automatiquement avec votre email.</p>
                   </div>
                 )}
@@ -348,28 +511,47 @@ function ReservationFormationContent() {
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
               )}
 
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full rounded-full bg-gold py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {submitting ? (
-                  <span className="inline-flex items-center gap-2">
-                    <Loader2 size={18} className="animate-spin" />
-                    Réservation en cours…
-                  </span>
-                ) : isFullPayment ? (
-                  `Payer le montant total de ${priceFormatted.format(totalPrice)}`
-                ) : (
-                  `Payer l'acompte de ${priceFormatted.format(depositAmount)}`
-                )}
-              </button>
+              {showWaitingListForm ? (
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full rounded-full bg-amber-600 py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-amber-600/20 transition-all duration-200 hover:bg-amber-700 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {submitting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 size={18} className="animate-spin" />
+                      Inscription en cours…
+                    </span>
+                  ) : (
+                    "S'inscrire à la liste d'attente"
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="w-full rounded-full bg-gold py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {submitting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 size={18} className="animate-spin" />
+                      Réservation en cours…
+                    </span>
+                  ) : isFullPayment ? (
+                    `Payer le montant total de ${priceFormatted.format(totalPrice)}`
+                  ) : (
+                    `Payer l'acompte de ${priceFormatted.format(depositAmount)}`
+                  )}
+                </button>
+              )}
 
-              <p className="text-center text-xs text-ink/40">
-                Paiement sécurisé par Stripe. {isFullPayment
-                  ? "Vous réglez la totalité aujourd'hui."
-                  : "Vous ne serez débité que du montant de l'acompte."}
-              </p>
+              {!showWaitingListForm && (
+                <p className="text-center text-xs text-ink/40">
+                  Paiement sécurisé par Stripe. {isFullPayment
+                    ? "Vous réglez la totalité aujourd'hui."
+                    : "Vous ne serez débité que du montant de l'acompte."}
+                </p>
+              )}
             </form>
 
             {/* Sidebar - Summary */}
@@ -401,6 +583,12 @@ function ReservationFormationContent() {
                     </span>
                     <span className="font-medium text-ink">{priceFormatted.format(totalPrice)}</span>
                   </div>
+                  {discountAmount > 0 && (
+                    <div className="flex items-center justify-between text-sm text-emerald-600">
+                      <span>Réduction ({appliedPromo.code})</span>
+                      <span>-{priceFormatted.format(discountAmount)}</span>
+                    </div>
+                  )}
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-ink/60">{isFullPayment ? "Montant total" : `Acompte (${depositPct}%)`}</span>
                     <span className="font-semibold text-gold">{priceFormatted.format(chargeAmount)}</span>
@@ -411,11 +599,18 @@ function ReservationFormationContent() {
                   </div>
                 </div>
 
+                {unitPrice > 0 && (
+                  <>
+                    <hr className="border-ink/8" />
+                    <PromoCodeField subtotal={totalPrice} onApplied={setAppliedPromo} />
+                  </>
+                )}
+
                 <hr className="border-ink/8" />
 
                 <div className="rounded-lg bg-gold/5 px-3 py-2.5 text-xs leading-relaxed text-ink/60">
                   {isFullPayment ? (
-                    <>Vous réglez aujourd&apos;hui la totalité, soit <strong className="text-gold">{priceFormatted.format(totalPrice)}</strong>. Aucun solde ne restera à payer.</>
+                    <>Vous réglez aujourd&apos;hui la totalité, soit <strong className="text-gold">{priceFormatted.format(discountedTotal)}</strong>. Aucun solde ne restera à payer.</>
                   ) : (
                     <>Vous ne réglez aujourd&apos;hui que <strong className="text-gold">{priceFormatted.format(depositAmount)}</strong>.
                     Le solde de <strong className="text-ink/80">{priceFormatted.format(balanceDue)}</strong> sera à payer sur place.</>

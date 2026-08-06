@@ -8,8 +8,9 @@ import FinalCTA from "@/components/website/FinalCTA";
 import { fetchInstagramPosts, fetchInstagramProfile } from "@/lib/instagram";
 
 export const metadata = {
-  title: "Meri Beauty | Premium Salon Management Platform",
-  description: "Manage appointments, independent professionals, employees, and billing seamlessly.",
+  title: "Meri Beauty — Salon de beauté à Jette, Bruxelles",
+  description:
+    "Salon de beauté & bien-être à Jette, Bruxelles — coiffure, soins visage, manucure, massage et rituels corps sur mesure. Réservez votre rendez-vous en ligne.",
 };
 
 export default async function Home() {

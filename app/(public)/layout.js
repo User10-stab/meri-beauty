@@ -3,6 +3,57 @@ import Footer from "@/components/website/Footer";
 import { getSalon } from "@/actions/salon/get-salon";
 import { getPublicServices } from "@/actions/services/get-services";
 
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+
+const SCHEMA_DAY = {
+  MONDAY: "Monday",
+  TUESDAY: "Tuesday",
+  WEDNESDAY: "Wednesday",
+  THURSDAY: "Thursday",
+  FRIDAY: "Friday",
+  SATURDAY: "Saturday",
+  SUNDAY: "Sunday",
+};
+
+/** LocalBusiness/HairSalon structured data — lets Google show address,
+ * hours, phone, and (once reviews exist) a rating directly in search
+ * results instead of just a plain blue link. */
+function buildLocalBusinessSchema(salon) {
+  if (!salon) return null;
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "HairSalon",
+    name: salon.name,
+    url: SITE_URL,
+    ...(salon.logo ? { image: salon.logo } : {}),
+    ...(salon.phone ? { telephone: salon.phone } : {}),
+    ...(salon.email ? { email: salon.email } : {}),
+    ...(salon.address
+      ? {
+          address: {
+            "@type": "PostalAddress",
+            streetAddress: salon.address,
+            addressCountry: "BE",
+          },
+        }
+      : {}),
+    ...(salon.workingDays?.length
+      ? {
+          openingHoursSpecification: salon.workingDays
+            .filter((wd) => wd.isOpen)
+            .map((wd) => ({
+              "@type": "OpeningHoursSpecification",
+              dayOfWeek: SCHEMA_DAY[wd.day] ?? wd.day,
+              opens: wd.openingTime,
+              closes: wd.closingTime,
+            })),
+        }
+      : {}),
+    sameAs: [salon.instagram, salon.facebook, salon.tiktok].filter(Boolean),
+  };
+}
+
 // Deliberately NOT fetching the cart here: this layout wraps every public
 // page including the marketing homepage, and getCart() touches cookies() —
 // doing that in a shared layout would force cookies() during static
@@ -18,9 +69,19 @@ export default async function PublicLayout({ children }) {
   ]);
   const salon = salonResult.data;
   const services = servicesResult.data ?? [];
+  const localBusinessSchema = buildLocalBusinessSchema(salon);
 
   return (
     <>
+      {localBusinessSchema && (
+        <script
+          type="application/ld+json"
+          // Escape "<" so a salon-editable field (name, address) can never
+          // break out of the script tag or inject markup.
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(localBusinessSchema).replace(/</g, "\\u003c") }}
+        />
+      )}
+
       <SiteHeader />
 
       {/*

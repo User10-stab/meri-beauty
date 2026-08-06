@@ -24,7 +24,7 @@ export async function checkOnboardingStatus() {
   });
 
   if (!staff) {
-    return { isStaff: true, setupCompleted: false, hasServices: false };
+    return { isStaff: true, setupCompleted: false, hasServices: false, stripeConnected: false };
   }
 
   const hasLanguages = staff.languages.length > 0;
@@ -39,9 +39,18 @@ export async function checkOnboardingStatus() {
     });
   }
 
+  const stripeConnected = staff.stripeChargesEnabled && staff.stripePayoutsEnabled;
+
+  // Stripe is only required for staff who accept online payments
+  const acceptsOnlinePayments =
+    staff.allowedPaymentMethods === "BOTH" || staff.allowedPaymentMethods === "ONLINE_ONLY";
+  const stripeRequired = acceptsOnlinePayments && !stripeConnected;
+
   return {
     isStaff: true,
     setupCompleted,
     hasServices: staff._count.staffServices > 0,
+    stripeConnected,
+    stripeRequired,
   };
 }

@@ -195,6 +195,7 @@ export async function createAppointment(data) {
       data: {
         userId: user.id,
         staffServiceId,
+        staffId: staffService.staffId,
         date: appointmentDate,
         startTime,
         endTime,

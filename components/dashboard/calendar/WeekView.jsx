@@ -8,11 +8,13 @@ import {
   getTopOffset,
   getEventHeight,
   appointmentsForDay,
+  activityEventsForDay,
   formatDayHeader,
   isSameDay,
   isToday,
 } from "./calendarUtils";
 import { AppointmentCard } from "./AppointmentCard";
+import { ActivityPill } from "./ActivityPill";
 
 const SLOT_HEIGHT = 64; // px per 30-min row
 const TIME_COL_W = 56; // px
@@ -24,6 +26,8 @@ const GRID_TOP_PAD = 16; // px — space above first row so the 09:00 label is f
  * @param {{
  *   currentDate: Date,
  *   appointments: Array<object>,
+ *   activityEvents: Array<object>,
+ *   showActivityLane: boolean,
  *   openingTime: string,
  *   closingTime: string,
  *   workingDays: Array<{ day: string, isOpen: boolean }>,
@@ -34,6 +38,8 @@ const GRID_TOP_PAD = 16; // px — space above first row so the 09:00 label is f
 export function WeekView({
   currentDate,
   appointments,
+  activityEvents = [],
+  showActivityLane = false,
   openingTime = "09:00",
   closingTime = "19:00",
   workingDays = [],
@@ -94,6 +100,9 @@ export function WeekView({
     return !openJsDays.has(date.getDay());
   }
 
+  const activitiesByDay = days.map((day) => activityEventsForDay(activityEvents, day));
+  const hasAnyActivities = showActivityLane && activitiesByDay.some((list) => list.length > 0);
+
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-dark">
       {/* ── Day headers ──────────────────────────────────────────────────── */}
@@ -135,6 +144,26 @@ export function WeekView({
           );
         })}
       </div>
+
+      {/* ── Ateliers & Formations strip (admin only, non-scrolling) ────────── */}
+      {hasAnyActivities && (
+        <div
+          className="grid border-b border-gray-200 dark:border-gray-700"
+          style={{ gridTemplateColumns: `${TIME_COL_W}px repeat(7, minmax(0, 1fr))` }}
+        >
+          <div className="border-r border-gray-100 dark:border-gray-700" />
+          {activitiesByDay.map((dayActivities, i) => (
+            <div
+              key={days[i].toISOString()}
+              className="space-y-1 border-r border-gray-100 p-1.5 last:border-r-0 dark:border-gray-700"
+            >
+              {dayActivities.map((ev) => (
+                <ActivityPill key={ev.id} event={ev} />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── Scrollable time grid ─────────────────────────────────────────── */}
       <div ref={gridRef} className="overflow-y-auto" style={{ maxHeight: "70vh" }}>

@@ -7,11 +7,13 @@ import {
   getTopOffset,
   getEventHeight,
   appointmentsForDay,
+  activityEventsForDay,
   formatDayFull,
   isToday,
 } from "./calendarUtils";
 import { AppointmentCard } from "./AppointmentCard";
-import { Calendar } from "lucide-react";
+import { ActivityPill } from "./ActivityPill";
+import { Calendar, PartyPopper } from "lucide-react";
 
 const SLOT_HEIGHT = 64;
 const TIME_COL_W = 64;
@@ -23,6 +25,8 @@ const GRID_TOP_PAD = 16; // px — space above first row so the opening-time lab
  * @param {{
  *   currentDate: Date,
  *   appointments: Array<object>,
+ *   activityEvents: Array<object>,
+ *   showActivityLane: boolean,
  *   openingTime: string,
  *   closingTime: string,
  *   workingDays: Array<{ day: string, isOpen: boolean }>,
@@ -32,12 +36,15 @@ const GRID_TOP_PAD = 16; // px — space above first row so the opening-time lab
 export function DayView({
   currentDate,
   appointments,
+  activityEvents = [],
+  showActivityLane = false,
   openingTime = "09:00",
   closingTime = "19:00",
   workingDays = [],
   onAppointmentClick,
 }) {
   const dayAppts = appointmentsForDay(appointments, currentDate);
+  const dayActivities = activityEventsForDay(activityEvents, currentDate);
   const slots = buildTimeSlots(openingTime, closingTime);
   const gridRef = useRef(null);
   const today = isToday(currentDate);
@@ -120,106 +127,127 @@ export function DayView({
         </div>
       </div>
 
-      {/* ── Closed state ──────────────────────────────────────────────────── */}
-      {isClosed ? (
-        <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden py-24 text-center">
-          {/* Diagonal stripe background */}
-          <div
-            className="absolute inset-0 opacity-20 dark:opacity-10"
-            style={{
-              backgroundImage:
-                "repeating-linear-gradient(135deg, #9ca3af 0px, #9ca3af 1px, transparent 1px, transparent 14px)",
-            }}
-          />
-          <div className="relative z-10 mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
-            <Calendar className="h-7 w-7 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
-          </div>
-          <p className="relative z-10 text-sm font-semibold text-gray-400 dark:text-gray-500">
-            Le salon est fermé ce jour.
-          </p>
-        </div>
-      ) : /* ── Empty state ─────────────────────────────────────────────────── */
-      dayAppts.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center py-24 text-center">
-          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
-            <Calendar className="h-7 w-7 text-gray-400" strokeWidth={1.5} />
-          </div>
-          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-            Aucune réservation confirmée pour cette journée.
-          </p>
-        </div>
-      ) : (
-        /* ── Scrollable time grid ──────────────────────────────────────── */
-        <div ref={gridRef} className="overflow-y-auto" style={{ maxHeight: "70vh" }}>
-          <div
-            className="relative flex"
-            style={{ minHeight: `${GRID_TOP_PAD + slots.length * SLOT_HEIGHT}px` }}
-          >
-            {/* Time column */}
-            <div
-              className="relative flex-shrink-0 border-r border-gray-100 dark:border-gray-700"
-              style={{ width: TIME_COL_W }}
-            >
-              {slots.map((slot, i) => (
-                <div
-                  key={slot}
-                  className="absolute right-0 pr-2 text-right text-[11px] font-medium text-gray-400"
-                  style={{
-                    top: GRID_TOP_PAD + i * SLOT_HEIGHT - 8,
-                    width: TIME_COL_W,
-                  }}
-                >
-                  {slot}
-                </div>
-              ))}
+      <div className="flex flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden">
+          {/* ── Closed state ──────────────────────────────────────────────── */}
+          {isClosed ? (
+            <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden py-24 text-center">
+              {/* Diagonal stripe background */}
+              <div
+                className="absolute inset-0 opacity-20 dark:opacity-10"
+                style={{
+                  backgroundImage:
+                    "repeating-linear-gradient(135deg, #9ca3af 0px, #9ca3af 1px, transparent 1px, transparent 14px)",
+                }}
+              />
+              <div className="relative z-10 mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
+                <Calendar className="h-7 w-7 text-gray-300 dark:text-gray-600" strokeWidth={1.5} />
+              </div>
+              <p className="relative z-10 text-sm font-semibold text-gray-400 dark:text-gray-500">
+                Le salon est fermé ce jour.
+              </p>
             </div>
-
-            {/* Event column */}
-            <div className="relative flex-1">
-              {/* Row lines */}
-              {slots.map((_, i) => (
+          ) : /* ── Empty state ─────────────────────────────────────────────────── */
+          dayAppts.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center py-24 text-center">
+              <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 dark:bg-gray-800">
+                <Calendar className="h-7 w-7 text-gray-400" strokeWidth={1.5} />
+              </div>
+              <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                Aucune réservation confirmée pour cette journée.
+              </p>
+            </div>
+          ) : (
+            /* ── Scrollable time grid ──────────────────────────────────────── */
+            <div ref={gridRef} className="overflow-y-auto" style={{ maxHeight: "70vh" }}>
+              <div
+                className="relative flex"
+                style={{ minHeight: `${GRID_TOP_PAD + slots.length * SLOT_HEIGHT}px` }}
+              >
+                {/* Time column */}
                 <div
-                  key={i}
-                  className="absolute left-0 right-0 border-b border-gray-100 dark:border-gray-800"
-                  style={{ top: GRID_TOP_PAD + i * SLOT_HEIGHT }}
-                />
-              ))}
-
-              {/* Current time indicator */}
-              {today && nowTop !== null && (
-                <div
-                  className="pointer-events-none absolute left-0 right-0 z-20 flex items-center"
-                  style={{ top: GRID_TOP_PAD + nowTop }}
+                  className="relative flex-shrink-0 border-r border-gray-100 dark:border-gray-700"
+                  style={{ width: TIME_COL_W }}
                 >
-                  <span className="ml-[-5px] h-3 w-3 flex-shrink-0 rounded-full bg-red-500 shadow shadow-red-300" />
-                  <span className="h-[2px] flex-1 bg-red-500" />
+                  {slots.map((slot, i) => (
+                    <div
+                      key={slot}
+                      className="absolute right-0 pr-2 text-right text-[11px] font-medium text-gray-400"
+                      style={{
+                        top: GRID_TOP_PAD + i * SLOT_HEIGHT - 8,
+                        width: TIME_COL_W,
+                      }}
+                    >
+                      {slot}
+                    </div>
+                  ))}
                 </div>
-              )}
 
-              {/* Appointment cards */}
-              {dayAppts.map((appt) => {
-                const top = getTopOffset(appt.startTime, openingTime, SLOT_HEIGHT);
-                const height = getEventHeight(appt.startTime, appt.endTime, SLOT_HEIGHT);
-                const compact = height < 56;
-
-                return (
-                  <div
-                    key={appt.id}
-                    className="absolute left-2 right-2 z-10 overflow-hidden"
-                    style={{ top: GRID_TOP_PAD + top + 2, height: height - 4 }}
-                  >
-                    <AppointmentCard
-                      appointment={appt}
-                      onClick={onAppointmentClick}
-                      compact={compact}
+                {/* Event column */}
+                <div className="relative flex-1">
+                  {/* Row lines */}
+                  {slots.map((_, i) => (
+                    <div
+                      key={i}
+                      className="absolute left-0 right-0 border-b border-gray-100 dark:border-gray-800"
+                      style={{ top: GRID_TOP_PAD + i * SLOT_HEIGHT }}
                     />
-                  </div>
-                );
-              })}
+                  ))}
+
+                  {/* Current time indicator */}
+                  {today && nowTop !== null && (
+                    <div
+                      className="pointer-events-none absolute left-0 right-0 z-20 flex items-center"
+                      style={{ top: GRID_TOP_PAD + nowTop }}
+                    >
+                      <span className="ml-[-5px] h-3 w-3 flex-shrink-0 rounded-full bg-red-500 shadow shadow-red-300" />
+                      <span className="h-[2px] flex-1 bg-red-500" />
+                    </div>
+                  )}
+
+                  {/* Appointment cards */}
+                  {dayAppts.map((appt) => {
+                    const top = getTopOffset(appt.startTime, openingTime, SLOT_HEIGHT);
+                    const height = getEventHeight(appt.startTime, appt.endTime, SLOT_HEIGHT);
+                    const compact = height < 56;
+
+                    return (
+                      <div
+                        key={appt.id}
+                        className="absolute left-2 right-2 z-10 overflow-hidden"
+                        style={{ top: GRID_TOP_PAD + top + 2, height: height - 4 }}
+                      >
+                        <AppointmentCard
+                          appointment={appt}
+                          onClick={onAppointmentClick}
+                          compact={compact}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Ateliers & Formations lane (admin only) ────────────────────────── */}
+        {showActivityLane && (
+          <div className="w-64 flex-shrink-0 border-l border-gray-100 dark:border-gray-700">
+            <div className="flex h-12 items-center gap-1.5 border-b border-gray-100 px-4 text-xs font-semibold text-gray-700 dark:border-gray-700 dark:text-white">
+              <PartyPopper size={13} className="text-violet-400" />
+              Ateliers &amp; Formations
+            </div>
+            <div className="space-y-1.5 overflow-y-auto p-2" style={{ maxHeight: "70vh" }}>
+              {dayActivities.length === 0 ? (
+                <p className="px-1 py-6 text-center text-[11px] text-gray-300">Aucune session ce jour</p>
+              ) : (
+                dayActivities.map((ev) => <ActivityPill key={ev.id} event={ev} />)
+              )}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── Legend ────────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-4 border-t border-gray-100 px-4 py-2.5 dark:border-gray-700">

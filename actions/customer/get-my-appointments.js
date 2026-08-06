@@ -38,6 +38,7 @@ export async function getMyAppointments() {
       endTime: a.endTime,
       status: a.status,
       notes: a.notes,
+      staffServiceId: a.staffServiceId,
       serviceName: a.staffService.service.name,
       staffName: a.staffService.staff?.user?.fullName ?? "—",
       payment: a.payment,

@@ -175,6 +175,26 @@ export function appointmentsForDay(appointments, targetDate) {
   });
 }
 
+/**
+ * Return only activity events (ateliers/formations, shaped by
+ * getCalendarEvents — { start, end, ... }, no "date" field) whose start
+ * falls on `targetDate`.
+ *
+ * @param {Array<{ start: string }>} events
+ * @param {Date} targetDate
+ */
+export function activityEventsForDay(events, targetDate) {
+  const y = targetDate.getFullYear();
+  const m = targetDate.getMonth();
+  const d = targetDate.getDate();
+
+  return events.filter((ev) => {
+    if (!ev.start) return false;
+    const dt = new Date(ev.start);
+    return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+  });
+}
+
 // ─── Label formatters ─────────────────────────────────────────────────────────
 
 const FR_DAYS_SHORT = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];

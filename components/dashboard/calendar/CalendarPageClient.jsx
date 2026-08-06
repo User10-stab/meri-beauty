@@ -1,300 +1,362 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
-import {
-  addDays,
-  startOfWeek,
-  endOfWeek,
-  startOfDay,
-  endOfDay,
-  isSameDay,
-  format,
-} from "date-fns";
-import { fr } from "date-fns/locale";
-import { ChevronLeft, ChevronRight, Loader2, GraduationCap, PartyPopper, User } from "lucide-react";
+import { useCallback, useEffect, useState, useTransition } from "react";
+import { CalendarToolbar } from "./CalendarToolbar";
+import { StaffFilterChips } from "./StaffFilterChips";
+import { WeekView } from "./WeekView";
+import { DayView } from "./DayView";
+import { MonthView } from "./MonthView";
+import { AppointmentDrawer } from "./AppointmentDrawer";
+import { getCalendarAppointments } from "@/actions/appointment/get-calendar-appointments";
 import { getCalendarEvents } from "@/actions/dashboard/get-calendar-events";
+import {
+  weekRange,
+  dayRange,
+  monthRange,
+  formatWeekLabel,
+  formatMonthLabel,
+  formatDayFull,
+  getWeekDays,
+  getMonthGrid,
+} from "./calendarUtils";
 
-const GRID_START_HOUR = 7;
-const GRID_END_HOUR = 21;
-const HOUR_HEIGHT = 56; // px
+// ─── Loading skeleton ─────────────────────────────────────────────────────────
 
-const STATUS_STYLE = {
-  PENDING: "bg-amber-50 border-amber-300 text-amber-800",
-  CONFIRMED: "bg-blue-50 border-blue-300 text-blue-800",
-  COMPLETED: "bg-emerald-50 border-emerald-300 text-emerald-800",
-  CANCELLED: "bg-gray-100 border-gray-300 text-gray-500 line-through",
-  NO_SHOW: "bg-red-50 border-red-300 text-red-700",
-};
-
-function clampMinutesFromGridStart(date) {
-  const minutes = date.getHours() * 60 + date.getMinutes();
-  const gridStartMin = GRID_START_HOUR * 60;
-  const gridEndMin = GRID_END_HOUR * 60;
-  return Math.min(Math.max(minutes, gridStartMin), gridEndMin) - gridStartMin;
-}
-
-function eventStyle(start, end) {
-  const top = (clampMinutesFromGridStart(start) / 60) * HOUR_HEIGHT;
-  const bottom = (clampMinutesFromGridStart(end) / 60) * HOUR_HEIGHT;
-  const height = Math.max(bottom - top, 22);
-  return { top: `${top}px`, height: `${height}px` };
-}
-
-function AppointmentBlock({ event }) {
-  const style = eventStyle(new Date(event.start), new Date(event.end));
-  const colorClass = STATUS_STYLE[event.status] ?? "bg-gray-50 border-gray-300 text-gray-700";
+function CalendarSkeleton() {
   return (
-    <div
-      className={`absolute left-1 right-1 overflow-hidden rounded-md border px-2 py-1 text-[11px] leading-tight shadow-sm ${colorClass}`}
-      style={style}
-      title={`${event.title} — ${event.subtitle} (${format(new Date(event.start), "HH:mm")}–${format(new Date(event.end), "HH:mm")})`}
-    >
-      <p className="truncate font-semibold">{event.title}</p>
-      <p className="truncate">{event.subtitle}</p>
-    </div>
-  );
-}
-
-function ActivityPill({ event }) {
-  const Icon = event.kind === "formation" ? GraduationCap : PartyPopper;
-  return (
-    <div
-      className="flex items-start gap-1.5 rounded-md border border-violet-200 bg-violet-50 px-2 py-1 text-[11px] leading-tight text-violet-800"
-      title={`${event.title} — ${event.subtitle} (${format(new Date(event.start), "HH:mm")})`}
-    >
-      <Icon size={12} className="mt-0.5 flex-shrink-0" />
-      <div className="min-w-0">
-        <p className="truncate font-semibold">{format(new Date(event.start), "HH:mm")} · {event.title}</p>
-        <p className="truncate text-violet-600">{event.subtitle}</p>
+    <div className="animate-pulse overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-dark">
+      {/* Header row */}
+      <div className="grid grid-cols-8 border-b border-gray-100">
+        <div className="h-12 border-r border-gray-100" />
+        {Array.from({ length: 7 }).map((_, i) => (
+          <div key={i} className="flex h-12 flex-col items-center justify-center gap-1 border-r border-gray-100 last:border-r-0">
+            <div className="h-2 w-6 rounded bg-gray-100" />
+            <div className="h-5 w-5 rounded-full bg-gray-100" />
+          </div>
+        ))}
       </div>
+      {/* Time rows */}
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="grid grid-cols-8 border-b border-gray-100">
+          <div className="border-r border-gray-100 py-4 pr-2 text-right">
+            <div className="ml-auto h-2 w-8 rounded bg-gray-100" />
+          </div>
+          {Array.from({ length: 7 }).map((_, j) => (
+            <div key={j} className="h-16 border-r border-gray-100 last:border-r-0 p-1">
+              {i === 1 && j === 2 && (
+                <div className="h-10 rounded-lg bg-purple-100" />
+              )}
+              {i === 3 && j === 4 && (
+                <div className="h-12 rounded-lg bg-blue-100" />
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
 
-export function CalendarPageClient({ isAdmin }) {
-  const [view, setView] = useState("day");
-  const [anchorDate, setAnchorDate] = useState(() => startOfDay(new Date()));
-  const [data, setData] = useState({ staff: [], appointments: [], activityEvents: [] });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+// ─── Component ────────────────────────────────────────────────────────────────
 
-  const range = useMemo(() => {
-    if (view === "day") {
-      return { start: startOfDay(anchorDate), end: endOfDay(anchorDate) };
-    }
-    const start = startOfWeek(anchorDate, { weekStartsOn: 1 });
-    const end = endOfWeek(anchorDate, { weekStartsOn: 1 });
-    return { start, end: endOfDay(end) };
-  }, [view, anchorDate]);
+/**
+ * Main calendar page client — orchestrates views, navigation, and filters.
+ *
+ * @param {{
+ *   initialAppointments: Array<object>,
+ *   initialActivityEvents: Array<object>,
+ *   staff: Array<object>,
+ *   openingTime: string,
+ *   closingTime: string,
+ *   workingDays: Array<{ day: string, isOpen: boolean }>,
+ *   isAdmin: boolean,
+ * }} props
+ */
+export function CalendarPageClient({
+  initialAppointments,
+  initialActivityEvents = [],
+  staff,
+  openingTime = "09:00",
+  closingTime = "19:00",
+  workingDays = [],
+  isAdmin,
+}) {
+  // ── State ────────────────────────────────────────────────────────────────
+  const [view, setView] = useState("week"); // "day" | "week" | "month"
+  const [currentDate, setCurrentDate] = useState(() => new Date());
+  const [selectedStaffId, setSelectedStaffId] = useState(null); // null = all
+  const [appointments, setAppointments] = useState(initialAppointments);
+  const [activityEvents, setActivityEvents] = useState(initialActivityEvents);
+  const [selectedAppointment, setSelectedAppointment] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const result = await getCalendarEvents({ from: range.start.toISOString(), to: range.end.toISOString() });
-    if (!result.success) {
-      setError(result.message || "Erreur inconnue.");
-    } else {
-      setData(result.data);
-    }
-    setLoading(false);
-  }, [range]);
+  // ── Date range for current view ──────────────────────────────────────────
+  function getRange(v, d) {
+    if (v === "day") return dayRange(d);
+    if (v === "month") return monthRange(d);
+    return weekRange(d); // week default
+  }
 
+  // ── Fetch appointments + activity events for the current period ─────────
+  // Ateliers/formations (getCalendarEvents) are only fetched for admins —
+  // the action itself returns an empty list for STAFF, since Animator
+  // (workshop/formation trainers) is a separate, unlinked directory.
+  const fetchAppointments = useCallback(
+    (v, d) => {
+      startTransition(async () => {
+        const range = getRange(v, d);
+        const [apptResult, eventsResult] = await Promise.all([
+          getCalendarAppointments(range),
+          isAdmin ? getCalendarEvents(range) : Promise.resolve({ success: true, data: { activityEvents: [] } }),
+        ]);
+        if (apptResult.success) {
+          setAppointments(apptResult.data ?? []);
+        }
+        if (eventsResult.success) {
+          setActivityEvents(eventsResult.data?.activityEvents ?? []);
+        }
+      });
+    },
+    [isAdmin],
+  );
+
+  // Re-fetch whenever view or date changes
   useEffect(() => {
-    load();
-  }, [load]);
+    fetchAppointments(view, currentDate);
+  }, [view, currentDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const hours = useMemo(() => {
-    const list = [];
-    for (let h = GRID_START_HOUR; h <= GRID_END_HOUR; h++) list.push(h);
-    return list;
-  }, []);
+  // ── Filtered appointments (staff chip) ───────────────────────────────────
+  const visibleAppointments =
+    selectedStaffId === null
+      ? appointments
+      : appointments.filter((a) => a.staffId === selectedStaffId);
 
-  const days = useMemo(() => {
-    if (view === "day") return [anchorDate];
-    const start = startOfWeek(anchorDate, { weekStartsOn: 1 });
-    return Array.from({ length: 7 }, (_, i) => addDays(start, i));
-  }, [view, anchorDate]);
-
-  function goPrev() {
-    setAnchorDate((d) => addDays(d, view === "day" ? -1 : -7));
+  // ── Toolbar period label ─────────────────────────────────────────────────
+  function getPeriodLabel() {
+    if (view === "day") return formatDayFull(currentDate);
+    if (view === "month") return formatMonthLabel(currentDate);
+    return formatWeekLabel(currentDate);
   }
-  function goNext() {
-    setAnchorDate((d) => addDays(d, view === "day" ? 1 : 7));
+
+  // ── Navigation ───────────────────────────────────────────────────────────
+  function navigate(dir) {
+    setCurrentDate((prev) => {
+      const d = new Date(prev);
+      if (view === "day") d.setDate(d.getDate() + dir);
+      else if (view === "week") d.setDate(d.getDate() + dir * 7);
+      else d.setMonth(d.getMonth() + dir);
+      return d;
+    });
   }
+
   function goToday() {
-    setAnchorDate(startOfDay(new Date()));
+    setCurrentDate(new Date());
   }
 
-  const activityEventsByDay = useMemo(() => {
-    const map = new Map();
-    for (const day of days) map.set(day.toDateString(), []);
-    for (const ev of data.activityEvents) {
-      const key = new Date(ev.start).toDateString();
-      if (map.has(key)) map.get(key).push(ev);
-    }
-    return map;
-  }, [data.activityEvents, days]);
+  // ── View switching ───────────────────────────────────────────────────────
+  function handleViewChange(v) {
+    setView(v);
+  }
+
+  // ── Day click (from month or week header) ────────────────────────────────
+  function handleDayClick(day) {
+    setCurrentDate(day);
+    setView("day");
+  }
+
+  // ── Appointment click ────────────────────────────────────────────────────
+  function handleAppointmentClick(appt) {
+    setSelectedAppointment(appt);
+    setDrawerOpen(true);
+  }
+
+  function handleDrawerClose() {
+    setDrawerOpen(false);
+  }
+
+  function handleAppointmentUpdated() {
+    fetchAppointments(view, currentDate);
+    // Keep drawer open to show success feedback
+  }
+
+  // ── Responsive: mobile agenda list ───────────────────────────────────────
+  // (Agenda view renders on screens < md)
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* ── Toolbar ───────────────────────────────────────────────────────── */}
+      <CalendarToolbar
+        view={view}
+        onViewChange={handleViewChange}
+        periodLabel={getPeriodLabel()}
+        onPrev={() => navigate(-1)}
+        onNext={() => navigate(1)}
+        onToday={goToday}
+      />
+
+      {/* ── Staff filter (admin only) ──────────────────────────────────────── */}
+      {isAdmin && staff.length > 0 && (
+        <StaffFilterChips
+          staff={staff}
+          selectedStaffId={selectedStaffId}
+          onSelect={setSelectedStaffId}
+        />
+      )}
+
+      {/* ── Calendar view ─────────────────────────────────────────────────── */}
+      {isPending ? (
+        <CalendarSkeleton />
+      ) : (
+        <>
+          {/* Desktop: full grid — hidden on small screens */}
+          <div className="hidden md:block">
+            {view === "week" && (
+              <WeekView
+                currentDate={currentDate}
+                appointments={visibleAppointments}
+                activityEvents={activityEvents}
+                showActivityLane={isAdmin}
+                openingTime={openingTime}
+                closingTime={closingTime}
+                workingDays={workingDays}
+                onAppointmentClick={handleAppointmentClick}
+                onDayClick={handleDayClick}
+              />
+            )}
+            {view === "day" && (
+              <DayView
+                currentDate={currentDate}
+                appointments={visibleAppointments}
+                activityEvents={activityEvents}
+                showActivityLane={isAdmin}
+                openingTime={openingTime}
+                closingTime={closingTime}
+                workingDays={workingDays}
+                onAppointmentClick={handleAppointmentClick}
+              />
+            )}
+            {view === "month" && (
+              <MonthView
+                currentDate={currentDate}
+                appointments={visibleAppointments}
+                onDayClick={handleDayClick}
+                onAppointmentClick={handleAppointmentClick}
+              />
+            )}
+          </div>
+
+          {/* Mobile: agenda list — always shown on small screens */}
+          <div className="block md:hidden">
+            <AgendaView
+              appointments={visibleAppointments}
+              view={view}
+              currentDate={currentDate}
+              onAppointmentClick={handleAppointmentClick}
+            />
+          </div>
+        </>
+      )}
+
+      {/* ── Appointment drawer ─────────────────────────────────────────────── */}
+      <AppointmentDrawer
+        appointment={selectedAppointment}
+        isOpen={drawerOpen}
+        onClose={handleDrawerClose}
+        onAppointmentUpdated={handleAppointmentUpdated}
+        isAdmin={isAdmin}
+      />
+    </div>
+  );
+}
+
+// ─── Mobile Agenda View ───────────────────────────────────────────────────────
+
+/**
+ * Chronological list of appointments — rendered on mobile instead of a grid.
+ */
+function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
+  if (appointments.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white py-16 text-center shadow-sm dark:border-gray-700 dark:bg-gray-dark">
+        <p className="text-sm text-gray-400">
+          Aucune réservation confirmée pour cette période.
+        </p>
+      </div>
+    );
+  }
+
+  // Group by day
+  const byDay = {};
+  for (const appt of appointments) {
+    if (!appt.date) continue;
+    const key = appt.date.slice(0, 10); // "YYYY-MM-DD"
+    if (!byDay[key]) byDay[key] = [];
+    byDay[key].push(appt);
+  }
+
+  const sortedDays = Object.keys(byDay).sort();
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 rounded-[10px] border border-stroke bg-white px-5 py-4 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={goPrev}
-            aria-label="Période précédente"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-dark-3 dark:text-dark-6"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <button
-            onClick={goToday}
-            className="h-8 rounded-lg border border-gray-200 px-3 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-dark-3 dark:text-dark-6"
-          >
-            Aujourd'hui
-          </button>
-          <button
-            onClick={goNext}
-            aria-label="Période suivante"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 dark:border-dark-3 dark:text-dark-6"
-          >
-            <ChevronRight size={16} />
-          </button>
-          <span className="ml-2 text-sm font-semibold text-gray-800 dark:text-white">
-            {view === "day"
-              ? format(anchorDate, "EEEE d MMMM yyyy", { locale: fr })
-              : `${format(range.start, "d MMM", { locale: fr })} – ${format(days[6], "d MMM yyyy", { locale: fr })}`}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-1 dark:border-dark-3">
-          {["day", "week"].map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
-                view === v ? "bg-[#2f3a2e] text-white" : "text-gray-500 hover:bg-gray-50 dark:text-dark-6"
-              }`}
-            >
-              {v === "day" ? "Jour" : "Semaine"}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {error && (
-        <div role="alert" className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="flex items-center justify-center gap-2 rounded-[10px] border border-stroke bg-white py-24 text-sm text-gray-400 dark:border-dark-3 dark:bg-gray-dark">
-          <Loader2 size={16} className="animate-spin" /> Chargement du calendrier…
-        </div>
-      ) : view === "day" ? (
-        <DayGrid hours={hours} staff={data.staff} appointments={data.appointments} activityEvents={data.activityEvents} isAdmin={isAdmin} />
-      ) : (
-        <WeekAgenda days={days} appointments={data.appointments} activityEventsByDay={activityEventsByDay} />
-      )}
-    </div>
-  );
-}
-
-function DayGrid({ hours, staff, appointments, activityEvents, isAdmin }) {
-  const columns = staff.length > 0 ? staff : [{ id: null, name: "—" }];
-  const showActivityLane = isAdmin;
-
-  return (
-    <div className="overflow-x-auto rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-      <div className="flex min-w-max">
-        <div className="w-16 flex-shrink-0 border-r border-stroke dark:border-dark-3">
-          <div className="h-10 border-b border-stroke dark:border-dark-3" />
-          {hours.map((h) => (
-            <div key={h} className="flex items-start justify-end pr-2 text-[11px] text-gray-400" style={{ height: HOUR_HEIGHT }}>
-              {String(h).padStart(2, "0")}:00
-            </div>
-          ))}
-        </div>
-
-        {columns.map((s) => (
-          <div key={s.id ?? "none"} className="w-48 flex-shrink-0 border-r border-stroke last:border-r-0 dark:border-dark-3">
-            <div className="flex h-10 items-center justify-center gap-1.5 border-b border-stroke px-2 text-xs font-semibold text-gray-700 dark:border-dark-3 dark:text-white">
-              <User size={12} className="text-gray-400" />
-              <span className="truncate">{s.name}</span>
-            </div>
-            <div className="relative" style={{ height: hours.length * HOUR_HEIGHT }}>
-              {hours.map((h) => (
-                <div key={h} className="border-b border-gray-50 dark:border-dark-3/50" style={{ height: HOUR_HEIGHT }} />
-              ))}
-              {appointments
-                .filter((a) => a.staffId === s.id)
-                .map((a) => (
-                  <AppointmentBlock key={a.id} event={a} />
-                ))}
-            </div>
-          </div>
-        ))}
-
-        {showActivityLane && (
-          <div className="w-56 flex-shrink-0">
-            <div className="flex h-10 items-center justify-center gap-1.5 border-b border-stroke px-2 text-xs font-semibold text-gray-700 dark:border-dark-3 dark:text-white">
-              <PartyPopper size={12} className="text-violet-400" />
-              <span>Ateliers &amp; Formations</span>
-            </div>
-            <div className="space-y-1.5 p-1.5">
-              {activityEvents.length === 0 ? (
-                <p className="px-1 py-3 text-center text-[11px] text-gray-300">Aucune session ce jour</p>
-              ) : (
-                activityEvents.map((ev) => <ActivityPill key={ev.id} event={ev} />)
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function WeekAgenda({ days, appointments, activityEventsByDay }) {
-  return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
-      {days.map((day) => {
-        const dayAppointments = appointments
-          .filter((a) => isSameDay(new Date(a.start), day))
-          .sort((a, b) => new Date(a.start) - new Date(b.start));
-        const dayActivities = activityEventsByDay.get(day.toDateString()) ?? [];
-        const isToday = isSameDay(day, new Date());
+      {sortedDays.map((day) => {
+        const date = new Date(day);
+        const dayAppts = byDay[day].sort((a, b) =>
+          (a.startTime ?? "").localeCompare(b.startTime ?? ""),
+        );
 
         return (
           <div
-            key={day.toDateString()}
-            className={`flex flex-col rounded-[10px] border bg-white shadow-1 dark:bg-gray-dark dark:shadow-card ${
-              isToday ? "border-[#2f3a2e]" : "border-stroke dark:border-dark-3"
-            }`}
+            key={day}
+            className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-dark"
           >
-            <div className={`border-b px-3 py-2 text-center text-xs font-semibold ${isToday ? "bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-stroke text-gray-700 dark:border-dark-3 dark:text-white"}`}>
-              {format(day, "EEE d MMM", { locale: fr })}
+            {/* Day header */}
+            <div className="border-b border-gray-100 bg-gray-50/60 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/30">
+              <p className="text-sm font-semibold capitalize text-gray-700 dark:text-gray-200">
+                {date.toLocaleDateString("fr-FR", {
+                  weekday: "long",
+                  day: "numeric",
+                  month: "long",
+                })}
+              </p>
             </div>
-            <div className="flex-1 space-y-1.5 p-2">
-              {dayAppointments.length === 0 && dayActivities.length === 0 ? (
-                <p className="py-4 text-center text-[11px] text-gray-300">Rien de prévu</p>
-              ) : (
-                <>
-                  {dayAppointments.map((a) => (
-                    <div
-                      key={a.id}
-                      className={`truncate rounded-md border px-2 py-1 text-[11px] ${STATUS_STYLE[a.status] ?? "bg-gray-50 border-gray-300 text-gray-700"}`}
-                      title={`${a.title} — ${a.subtitle}`}
-                    >
-                      {format(new Date(a.start), "HH:mm")} · {a.title} · {a.subtitle}
-                    </div>
-                  ))}
-                  {dayActivities.map((ev) => (
-                    <ActivityPill key={ev.id} event={ev} />
-                  ))}
-                </>
-              )}
+
+            {/* Appointments */}
+            <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
+              {dayAppts.map((appt) => (
+                <button
+                  key={appt.id}
+                  onClick={() => onAppointmentClick(appt)}
+                  className="flex w-full items-start gap-4 px-4 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
+                >
+                  {/* Time */}
+                  <div className="w-12 flex-shrink-0 text-center">
+                    <p className="text-sm font-bold tabular-nums text-gray-700 dark:text-gray-200">
+                      {appt.startTime
+                        ? new Date(appt.startTime).toLocaleTimeString("fr-FR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "—"}
+                    </p>
+                    <p className="text-[10px] text-gray-400">
+                      {appt.duration ? `${appt.duration}min` : ""}
+                    </p>
+                  </div>
+
+                  {/* Info */}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
+                      {appt.serviceName}
+                    </p>
+                    <p className="truncate text-xs text-gray-500">{appt.customerName}</p>
+                    <p className="truncate text-xs text-gray-400">{appt.staffName}</p>
+                  </div>
+
+                  {/* Confirmed dot */}
+                  <span className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-emerald-500" />
+                </button>
+              ))}
             </div>
           </div>
         );

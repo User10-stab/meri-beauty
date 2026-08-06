@@ -99,6 +99,7 @@ export function OrderDetailClient({ order }) {
       if (result.success) {
         toast.success(result.message);
         if (result.data?.trackingCode) setTrackingCode(result.data.trackingCode);
+        if (result.data?.labelUrl) window.open(result.data.labelUrl, "_blank");
         router.refresh();
       } else {
         toast.error(result.message);

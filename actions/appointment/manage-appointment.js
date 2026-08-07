@@ -553,7 +553,12 @@ export async function getAppointmentById(appointmentId) {
     }
 
     const isOwner = appointment.userId === session.user.id;
-    if (!isOwner && !isAdminRole(session.user.role) && session.user.role !== ROLES.STAFF) {
+    let isAssignedStaff = false;
+    if (!isOwner && session.user.role === ROLES.STAFF) {
+      const staffId = await getCurrentStaffId();
+      isAssignedStaff = !!staffId && appointment.staffService.staffId === staffId;
+    }
+    if (!isOwner && !isAdminRole(session.user.role) && !isAssignedStaff) {
       // Same message as "not found" — don't confirm an id belongs to someone else.
       return { success: false, message: "Rendez-vous introuvable" };
     }

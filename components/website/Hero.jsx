@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { ArrowIcon, StarIcon, ClockIcon, MapPinIcon } from "./icons";
+import { ArrowIcon, ClockIcon, MapPinIcon } from "./icons";
 import { getSalon } from "@/actions/salon/get-salon";
 import { groupWorkingDays } from "@/lib/groupWorkingDays";
 import WorkshopBanner from "./WorkshopBanner";
@@ -67,7 +67,7 @@ export default async function Hero() {
 
           {/* Sub-copy */}
           <p className="mt-8 max-w-xl text-[17px] leading-relaxed text-white/70 sm:text-[18px] lg:text-[19px]">
-            Chez Mery Beauty, chaque rituel est pensé sur-mesure — des mains
+            Chez Meri Beauty, chaque rituel est pensé sur-mesure — des mains
             expertes, des produits nobles et un cadre conçu pour ralentir le temps.
           </p>
 
@@ -88,19 +88,6 @@ export default async function Hero() {
             </a>
           </div>
 
-          {/* Trust row */}
-          <div className="mt-14 flex items-center gap-5">
-            <div>
-              <div className="flex items-center gap-1 text-gold">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <StarIcon key={i} className="h-4 w-4" />
-                ))}
-              </div>
-              <p className="mt-1 text-[13px] text-white/55">
-                4.9 / 5 — plus de 2 000 clientes conquises
-              </p>
-            </div>
-          </div>
         </div>
 
         {/* ── Marquee strip — last child, sits on the hero background ── */}

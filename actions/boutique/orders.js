@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
-import { ROLES, DASHBOARD_PERMISSIONS, hasPermission } from "@/lib/authorization";
+import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
@@ -914,11 +914,18 @@ export async function markOrderReadyForPickup(orderId) {
     if (order.fulfilmentMode === "SHIPPING_PREPAID") {
       return { success: false, message: "Cette commande est à expédier, pas à retirer." };
     }
-    if (!["PAID", "PENDING_PICKUP"].includes(order.status)) {
+
+    // Atomic claim, gated on the prior status — without this, two concurrent
+    // clicks (double-click, or two staff members racing) both pass a plain
+    // read-then-check and both fire the transition.
+    const claim = await prisma.order.updateMany({
+      where: { id: orderId, status: { in: ["PAID", "PENDING_PICKUP"] } },
+      data: { status: "READY_FOR_PICKUP" },
+    });
+    if (claim.count === 0) {
       return { success: false, message: "Cette commande ne peut pas être marquée prête pour le moment." };
     }
 
-    await prisma.order.update({ where: { id: orderId }, data: { status: "READY_FOR_PICKUP" } });
     revalidatePath("/dashboard/boutique/orders");
     return { success: true, message: "Commande marquée comme prête pour le retrait." };
   } catch (error) {
@@ -1074,14 +1081,17 @@ export async function markOrderShipped(input) {
     if (order.fulfilmentMode !== "SHIPPING_PREPAID") {
       return { success: false, message: "Cette commande n'est pas à expédier." };
     }
-    if (order.status !== "PROCESSING") {
-      return { success: false, message: "Cette commande n'est pas prête à être expédiée." };
-    }
 
-    await prisma.order.update({
-      where: { id: orderId },
+    // Atomic claim, gated on the prior status — prevents a double-click (or
+    // two staff members racing) from double-sending the shipped-notification
+    // email for the same order.
+    const claim = await prisma.order.updateMany({
+      where: { id: orderId, status: "PROCESSING" },
       data: { status: "SHIPPED", trackingCode, shippedAt: new Date() },
     });
+    if (claim.count === 0) {
+      return { success: false, message: "Cette commande n'est pas prête à être expédiée." };
+    }
 
     sendEmail({
       to: order.user.email,
@@ -1111,11 +1121,17 @@ export async function markOrderCompleted(orderId) {
   try {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) return { success: false, message: "Commande introuvable." };
-    if (order.status !== "SHIPPED") {
+
+    // Atomic claim, gated on the prior status — same double-click/race guard
+    // as markOrderShipped/markOrderReadyForPickup above.
+    const claim = await prisma.order.updateMany({
+      where: { id: orderId, status: "SHIPPED" },
+      data: { status: "COMPLETED" },
+    });
+    if (claim.count === 0) {
       return { success: false, message: "Seule une commande expédiée peut être clôturée." };
     }
 
-    await prisma.order.update({ where: { id: orderId }, data: { status: "COMPLETED" } });
     revalidatePath("/dashboard/boutique/orders");
     return { success: true, message: "Commande clôturée." };
   } catch (error) {
@@ -1312,6 +1328,16 @@ export async function cancelOrder(input) {
   if (!order) return { success: false, message: "Commande introuvable." };
   if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
     return { success: false, message: "Cette commande ne peut plus être annulée." };
+  }
+
+  // Cancelling an unpaid order is routine order management — but cancelling
+  // a paid one triggers restock + a real Stripe refund, which per policy
+  // only OWNER/ADMIN may issue. STAFF can still cancel unpaid/pending orders.
+  if (order.payment && !isAdminRole(guard.session.user.role)) {
+    return {
+      success: false,
+      message: "Seul un administrateur peut annuler une commande déjà payée (remboursement requis). Contactez un administrateur.",
+    };
   }
 
   return performOrderCancellation(order, reason);

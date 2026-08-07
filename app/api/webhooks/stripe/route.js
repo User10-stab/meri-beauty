@@ -10,7 +10,7 @@ import {
   formationReservationConfirmationEmail,
 } from "@/lib/email-templates";
 import { fulfillOrderPayment } from "@/actions/boutique/orders";
-import { issueInvoice } from "@/lib/invoicing";
+import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
 import { renderInvoicePdf } from "@/lib/pdf/render";
 import { sendLowSeatsBroadcast } from "@/actions/workshops/notify-low-seats";
 import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
@@ -87,14 +87,70 @@ export async function POST(req) {
     }
   }
 
-  if (event.type !== "checkout.session.completed") {
+  // Dashboard-initiated refunds (staff refunding directly in Stripe instead
+  // of through our own refund actions) would otherwise leave Payment.status
+  // stuck on PAID and the ledger silently wrong — this keeps them in sync.
+  // Only reaches platform-account charges (boutique/workshop/formation);
+  // appointment payments are Connect direct charges on the staff's own
+  // account, which this platform-level webhook doesn't receive events for
+  // (needs the separate Connect webhook endpoint — see P10 in
+  // PRE_LAUNCH_FIXES.md).
+  if (event.type === "charge.refunded") {
+    try {
+      await handleChargeRefunded(event.data.object);
+      return NextResponse.json({ received: true });
+    } catch (err) {
+      console.error("[stripe-webhook] charge.refunded processing failed:", err);
+      return NextResponse.json({ error: "Processing failed" }, { status: 500 });
+    }
+  }
+
+  if (event.type === "charge.dispute.created") {
+    try {
+      await handleChargeDisputeCreated(event.data.object);
+      return NextResponse.json({ received: true });
+    } catch (err) {
+      console.error("[stripe-webhook] charge.dispute.created processing failed:", err);
+      return NextResponse.json({ error: "Processing failed" }, { status: 500 });
+    }
+  }
+
+  // Delayed-notification payment methods (bank debits, etc.) resolve after
+  // the initial checkout.session.completed delivery already saw
+  // payment_status "unpaid" and was ignored below. Neither of Meri Beauty's
+  // enabled methods (card, Bancontact) actually work this way today, but
+  // handling both explicitly means nothing silently falls through if that
+  // ever changes.
+  if (event.type === "checkout.session.async_payment_failed") {
+    const failedSession = event.data.object;
+    console.warn(`[stripe-webhook] async payment failed for checkout session ${failedSession.id}`, {
+      kind: failedSession.metadata?.kind ?? "appointment",
+      metadata: failedSession.metadata,
+    });
+    return NextResponse.json({ received: true });
+  }
+
+  if (event.type === "checkout.session.expired") {
+    const expiredSession = event.data.object;
+    console.info(`[stripe-webhook] checkout session expired: ${expiredSession.id}`, {
+      kind: expiredSession.metadata?.kind ?? "appointment",
+    });
+    return NextResponse.json({ received: true });
+  }
+
+  if (
+    event.type !== "checkout.session.completed" &&
+    event.type !== "checkout.session.async_payment_succeeded"
+  ) {
     return NextResponse.json({ received: true });
   }
 
   const session = event.data.object;
 
   // Async payment methods can complete with payment_status "unpaid" — ignore
-  // until the payment actually settles.
+  // until the payment actually settles. (checkout.session.async_payment_succeeded
+  // only ever fires once it has, but this stays as a shared safety check for
+  // both event types rather than being duplicated per-branch.)
   if (session.payment_status !== "paid") {
     return NextResponse.json({ received: true });
   }
@@ -163,6 +219,119 @@ async function handleAccountUpdated(account) {
     `[stripe-webhook] Updated staff ${staff.id}: ` +
     `charges_enabled=${charges_enabled}, payouts_enabled=${payouts_enabled}`
   );
+}
+
+// ─── charge.refunded / charge.dispute.created ────────────────────────────────
+
+function round2(n) {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Resolve a Stripe charge back to our Payment row. All 4 flows store the
+ * Checkout Session id on Payment.transactionReference (see
+ * createCheckoutSession.js, createOrderCheckoutSession, workshop/formation
+ * reservation actions), so payment_intent -> session -> Payment is the one
+ * lookup path that works everywhere a session id is all we're given.
+ */
+async function findPaymentByChargePaymentIntent(paymentIntentId) {
+  if (!paymentIntentId) return null;
+  const sessions = await stripe.checkout.sessions.list({ payment_intent: paymentIntentId, limit: 1 });
+  const session = sessions.data[0];
+  if (!session) return null;
+  return prisma.payment.findUnique({
+    where: { transactionReference: session.id },
+    include: { invoice: true, transactions: true },
+  });
+}
+
+/**
+ * Keeps our ledger honest when a refund happens outside our own refund
+ * actions — most commonly staff refunding directly from the Stripe
+ * Dashboard. Without this, Payment.status stays PAID and there's no
+ * Transaction{REFUND} row, so the dashboard and any TVA/accounting export
+ * silently disagree with what Stripe actually did.
+ */
+async function handleChargeRefunded(charge) {
+  const payment = await findPaymentByChargePaymentIntent(charge.payment_intent);
+  if (!payment) {
+    // Most likely an appointment (Connect direct charge) — not reachable
+    // from this platform-level webhook, see the P10 note above.
+    console.warn(`[stripe-webhook] charge.refunded: no matching Payment for payment_intent ${charge.payment_intent}`);
+    return;
+  }
+
+  const alreadyRecorded = payment.transactions
+    .filter((t) => t.transactionType === "REFUND")
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+  const stripeRefundedTotal = round2((charge.amount_refunded ?? 0) / 100);
+  const newlyRefunded = round2(stripeRefundedTotal - alreadyRecorded);
+
+  // Nothing new — either our own refund action already recorded this
+  // exact amount, or this is a duplicate delivery of an event we've seen.
+  if (newlyRefunded <= 0.01) return;
+
+  const fullyRefunded = charge.refunded === true || stripeRefundedTotal + 0.01 >= Number(payment.paidAmount);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.transaction.create({
+      data: {
+        paymentId: payment.id,
+        amount: newlyRefunded,
+        method: "ONLINE",
+        transactionType: "REFUND",
+        paidAt: new Date(),
+      },
+    });
+    await tx.payment.update({
+      where: { id: payment.id },
+      data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+    });
+    if (payment.invoice) {
+      await issueCreditNote(tx, {
+        invoiceId: payment.invoice.id,
+        reason: "Remboursement effectué depuis le Dashboard Stripe",
+        totalInclVat: newlyRefunded,
+      });
+    }
+  });
+
+  console.info(`[stripe-webhook] Synced Dashboard-initiated refund for payment ${payment.id}: €${newlyRefunded}`);
+}
+
+/**
+ * A dispute is provisional (Stripe hasn't decided the outcome yet) and has
+ * a response deadline, so this deliberately does NOT change Payment.status
+ * — there's no correct status to set until it resolves. This only makes
+ * sure a human finds out, since disputes lost by default (no response) cost
+ * both the sale and a Stripe dispute fee.
+ */
+async function handleChargeDisputeCreated(dispute) {
+  const payment = await findPaymentByChargePaymentIntent(dispute.payment_intent);
+  const salon = await prisma.salon.findFirst({ select: { email: true } });
+  if (!salon?.email) return;
+
+  const amount = round2((dispute.amount ?? 0) / 100);
+  const deadline = dispute.evidence_details?.due_by
+    ? new Date(dispute.evidence_details.due_by * 1000).toLocaleDateString("fr-FR")
+    : "non communiquée";
+
+  await sendEmail({
+    to: salon.email,
+    subject: `⚠️ Litige Stripe ouvert — €${amount.toFixed(2)}`,
+    text:
+      `Un client a contesté un paiement de €${amount.toFixed(2)} (motif Stripe : ${dispute.reason}).\n` +
+      `Paiement interne : ${payment?.id ?? "introuvable — vérifier manuellement dans Stripe"}\n` +
+      `Date limite de réponse : ${deadline}\n\n` +
+      `Répondez directement depuis le Dashboard Stripe (Paiements > Litiges).`,
+    html:
+      `<p>Un client a contesté un paiement de <strong>€${amount.toFixed(2)}</strong> (motif Stripe : ${dispute.reason}).</p>` +
+      `<p>Paiement interne : ${payment?.id ?? "introuvable — vérifier manuellement dans Stripe"}</p>` +
+      `<p>Date limite de réponse : <strong>${deadline}</strong></p>` +
+      `<p>Répondez directement depuis le Dashboard Stripe (Paiements &gt; Litiges).</p>`,
+  }).catch((err) => console.error("[stripe-webhook] dispute alert email failed:", err));
+
+  console.warn(`[stripe-webhook] Dispute opened for payment_intent ${dispute.payment_intent}, payment ${payment?.id ?? "unknown"}`);
 }
 
 // ─── checkout.session.completed (appointments) ───────────────────────────────

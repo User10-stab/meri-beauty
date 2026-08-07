@@ -342,18 +342,24 @@ export default function Footer({ salon, services = [] }) {
             >
               Retourner un article
             </Link>
-            <a
-              href="#"
+            <Link
+              href="/cgv"
+              className="text-[12px] text-white/30 transition-colors hover:text-white/60"
+            >
+              CGV
+            </Link>
+            <Link
+              href="/mentions-legales"
               className="text-[12px] text-white/30 transition-colors hover:text-white/60"
             >
               Mentions légales
-            </a>
-            <a
-              href="#"
+            </Link>
+            <Link
+              href="/politique-de-confidentialite"
               className="text-[12px] text-white/30 transition-colors hover:text-white/60"
             >
               Politique de confidentialité
-            </a>
+            </Link>
           </div>
         </div>
       </div>

@@ -301,6 +301,7 @@ function MultiAppointmentNotice({ totalAmount }) {
 
 export default function ReviewStep({ data, nextStep, customerSession }) {
   const [processing, setProcessing] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const router = useRouter();
 
   const drafts = data.appointmentDrafts ?? [];
@@ -334,6 +335,10 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
   };
 
   const handleDirectBooking = async () => {
+    if (!acceptedTerms) {
+      toast.error("Veuillez accepter les CGV et la politique de confidentialité.");
+      return;
+    }
     setProcessing(true);
     const loadingToastId = toast.loading("Traitement de votre réservation…");
     try {
@@ -515,12 +520,37 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
           <AutomaticPaymentPreview paymentDecision={paymentDecision} />
         )}
 
+        {/* ── Terms acceptance ─────────────────────────────────── */}
+        {/* Only shown here when this screen is the actual commitment point —
+            the AUTOMATIC/payment path shows its own checkbox on PaymentStep. */}
+        {!requiresPaymentStep && (
+          <label className="flex items-start gap-2.5 text-xs text-gray-500">
+            <input
+              type="checkbox"
+              checked={acceptedTerms}
+              onChange={(e) => setAcceptedTerms(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              J&apos;ai lu et j&apos;accepte les{" "}
+              <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                Conditions générales de vente
+              </a>{" "}
+              et la{" "}
+              <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                Politique de confidentialité
+              </a>
+              .
+            </span>
+          </label>
+        )}
+
         {/* ── CTA ─────────────────────────────────────────────── */}
         <button
           onClick={handleContinue}
-          disabled={processing}
+          disabled={processing || (!requiresPaymentStep && !acceptedTerms)}
           className={`w-full rounded-lg px-6 py-4 text-base font-semibold text-white transition-all ${
-            processing
+            processing || (!requiresPaymentStep && !acceptedTerms)
               ? "cursor-not-allowed bg-gray-300"
               : "bg-[#C8A46A] hover:bg-[#B8945A]"
           }`}

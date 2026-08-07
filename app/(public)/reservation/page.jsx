@@ -36,7 +36,7 @@ export default async function Page() {
 
       {/* Reservation Form */}
       <div className=" flex flex-col items-center justify-center pt-20 pb-10">
-        <h1 className="mb-3 font-display text-[2rem] font-bold leading-[1.08] tracking-tight text-primary sm:text-[2.4rem] lg:text-[3rem]"> Réservez votre rendez-vous</h1>
+        <h2 className="mb-3 font-display text-[2rem] font-bold leading-[1.08] tracking-tight text-primary sm:text-[2.4rem] lg:text-[3rem]"> Réservez votre rendez-vous</h2>
         <p>Prenez soin de vous, nous nous occupons du reste. </p>
       </div>
       <div id="booking" className="bg-gradient-to-b from-white to-gray-50">

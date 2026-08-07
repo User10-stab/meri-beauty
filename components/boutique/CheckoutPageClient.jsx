@@ -48,6 +48,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const [shippingDetails, setShippingDetails] = useState({ cost: 0, isFree: true, loading: true, quoteRequired: false });
   const [quoteRequest, setQuoteRequest] = useState({ submitting: false, sent: false });
   const [appliedPromo, setAppliedPromo] = useState(null);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // null = not checked yet | "exists" = verified account found | "dismissed" = user chose to continue as guest
   const [emailStatus, setEmailStatus] = useState(null);
@@ -126,6 +127,10 @@ export function CheckoutPageClient({ cart, customerSession }) {
     }
     if (quoteRequired) {
       toast.error("Votre commande dépasse 30 kg. Contactez-nous pour un devis de livraison personnalisé.");
+      return;
+    }
+    if (!acceptedTerms) {
+      toast.error("Veuillez accepter les CGV et la politique de confidentialité.");
       return;
     }
     if (!isAuthenticated) {
@@ -437,10 +442,30 @@ export function CheckoutPageClient({ cart, customerSession }) {
             )
           )}
 
+          <label className="mt-4 flex items-start gap-2.5 text-xs text-neutral-600">
+            <input
+              type="checkbox"
+              checked={acceptedTerms}
+              onChange={(e) => setAcceptedTerms(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              J&apos;ai lu et j&apos;accepte les{" "}
+              <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                Conditions générales de vente
+              </a>{" "}
+              et la{" "}
+              <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                Politique de confidentialité
+              </a>
+              .
+            </span>
+          </label>
+
           <button
             type="submit"
-            disabled={submitting || quoteRequired}
-            className="mt-6 flex w-full items-center justify-center gap-2 bg-[#C8A46A] px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-[#B8945A] disabled:cursor-not-allowed disabled:bg-gray-300"
+            disabled={submitting || quoteRequired || !acceptedTerms}
+            className="mt-3 flex w-full items-center justify-center gap-2 bg-[#C8A46A] px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-[#B8945A] disabled:cursor-not-allowed disabled:bg-gray-300"
           >
             {submitting ? (
               <>

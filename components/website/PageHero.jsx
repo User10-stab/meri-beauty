@@ -45,7 +45,7 @@ export default function PageHero({
             </div>
 
             {/* Stats */}
-            <div className="mt-16 grid max-w-md grid-cols-3 gap-8">
+            <div className="mt-16 grid max-w-md grid-cols-2 gap-8">
               <div>
                 <h3 className="text-3xl font-bold text-[#F8F6F2]">500+</h3>
                 <p className="mt-2 text-sm uppercase tracking-widest text-gray-300">Clientes</p>
@@ -53,10 +53,6 @@ export default function PageHero({
               <div>
                 <h3 className="text-3xl font-bold text-[#F8F6F2]">12</h3>
                 <p className="mt-2 text-sm uppercase tracking-widest text-gray-300">Expertes</p>
-              </div>
-              <div>
-                <h3 className="text-3xl font-bold text-[#F8F6F2]">4.9★</h3>
-                <p className="mt-2 text-sm uppercase tracking-widest text-gray-300">Avis</p>
               </div>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import SiteHeader from "@/components/website/SiteHeader";
 import Footer from "@/components/website/Footer";
+import SiteTermsNotice from "@/components/website/SiteTermsNotice";
 import { getSalon } from "@/actions/salon/get-salon";
 import { getPublicServices } from "@/actions/services/get-services";
 import { getAppBaseUrl } from "@/lib/site-url";
@@ -95,6 +96,8 @@ export default async function PublicLayout({ children }) {
       </main>
 
       <Footer salon={salon} services={services} />
+
+      <SiteTermsNotice />
     </>
   );
 }

@@ -146,21 +146,6 @@ export default function ClientReviews() {
             Elles nous font{" "}
             <em className="font-light text-gold/80 not-italic">confiance.</em>
           </h2>
-
-          {/* Rating */}
-          <div className="inline-flex flex-col items-center">
-            <div className="flex items-center gap-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <StarIcon key={i} className="h-6 w-6 text-gold" />
-              ))}
-            </div>
-            <p className="mt-2 text-[2rem] font-bold leading-none text-ink">
-              4.9
-            </p>
-            <p className="mt-1 text-[13px] text-ink/45">
-              Basé sur 2 341 avis
-            </p>
-          </div>
         </div>
 
         {/* Carousel */}

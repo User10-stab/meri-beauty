@@ -1153,6 +1153,25 @@ async function performOrderCancellation(order, reason) {
   try {
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
 
+    // Cap against what's actually still outstanding — a prior partial return
+    // can already have refunded part of this payment, so summing (not just
+    // checking existence of) prior REFUND transactions is what stops this
+    // from either re-refunding the full original amount or, worse, silently
+    // skipping the remaining balance once any refund exists at all. Mirrors
+    // completeReturnRequest's exact pattern. Computed once up front so the
+    // credit note (below) and the Stripe refund (further down) agree on the
+    // same capped amount.
+    const REFUND_EPSILON = 0.01;
+    let remaining = 0;
+    if (wasSold) {
+      const priorRefunds = await prisma.transaction.aggregate({
+        where: { paymentId: order.payment.id, transactionType: "REFUND" },
+        _sum: { amount: true },
+      });
+      const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
+      remaining = Number(order.payment.paidAmount) - alreadyRefunded;
+    }
+
     const { claimed, creditNote } = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the order still being in a cancellable status —
       // without this, two concurrent cancel calls (e.g. a double-click, or the
@@ -1193,11 +1212,11 @@ async function performOrderCancellation(order, reason) {
       }
 
       let creditNote = null;
-      if (wasSold && order.payment.invoice) {
+      if (wasSold && order.payment.invoice && remaining > REFUND_EPSILON) {
         creditNote = await issueCreditNote(tx, {
           invoiceId: order.payment.invoice.id,
           reason: reason ?? "Commande annulée",
-          totalInclVat: Number(order.payment.paidAmount),
+          totalInclVat: remaining,
         });
       }
 
@@ -1210,30 +1229,26 @@ async function performOrderCancellation(order, reason) {
 
     let refundFailed = false;
     if (wasSold && order.payment.transactionReference) {
-      // Idempotency guard: if a REFUND transaction already exists for this
-      // payment (e.g. a retry after a prior partial failure, or the DB claim
-      // above was somehow bypassed), don't ask Stripe to refund twice.
-      const alreadyRefunded = await prisma.transaction.findFirst({
-        where: { paymentId: order.payment.id, transactionType: "REFUND" },
-        select: { id: true },
-      });
-
-      if (!alreadyRefunded) {
+      if (remaining > REFUND_EPSILON) {
         try {
           const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
           if (session.payment_intent) {
-            await stripe.refunds.create({ payment_intent: session.payment_intent });
+            await stripe.refunds.create({ payment_intent: session.payment_intent, amount: Math.round(remaining * 100) });
+            const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
             await prisma.$transaction([
               prisma.transaction.create({
                 data: {
                   paymentId: order.payment.id,
-                  amount: order.payment.paidAmount,
+                  amount: remaining,
                   method: "ONLINE",
                   transactionType: "REFUND",
                   paidAt: new Date(),
                 },
               }),
-              prisma.payment.update({ where: { id: order.payment.id }, data: { status: "REFUNDED" } }),
+              prisma.payment.update({
+                where: { id: order.payment.id },
+                data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+              }),
             ]);
           }
         } catch (err) {

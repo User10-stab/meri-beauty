@@ -223,6 +223,9 @@ export async function generateUniqueSku() {
 
 export async function getProductById(id) {
   try {
+    const session = await auth();
+    const canSeeMargin = isAdminRole(session?.user?.role);
+
     const product = await prisma.product.findUnique({
       where: { id, isDeleted: false },
       include: {
@@ -241,7 +244,7 @@ export async function getProductById(id) {
       data: {
         ...product,
         brandId: product.subcategory.category.brandId,
-        variants: product.variants.map(withMargin),
+        variants: product.variants.map(canSeeMargin ? withMargin : withoutMargin),
       },
     };
   } catch (error) {

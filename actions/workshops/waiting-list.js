@@ -5,6 +5,10 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
 import { welcomeWithCredentialsEmail, waitingListNotificationEmail, waitingListJoinConfirmationEmail } from "@/lib/email-templates";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 3;
 
 function formatSessionDate(date) {
   return new Date(date).toLocaleDateString("fr-FR", {
@@ -32,6 +36,13 @@ export async function joinWaitingList({ sessionId, customerInfo }) {
     if (!sessionId || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
     }
+
+    const rateLimitIp = await getClientIp();
+    const rateLimitKey = `${customerInfo.email.trim().toLowerCase()}:${rateLimitIp}`;
+    if (isRateLimited("join-waiting-list", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+      return { success: false, message: "Trop de tentatives. Veuillez patienter avant de réessayer." };
+    }
+    recordRateLimitHit("join-waiting-list", rateLimitKey);
 
     // Load session + workshop
     const session = await prisma.workshopSession.findUnique({
@@ -287,9 +298,33 @@ export async function validateWaitingListPriority(waitingListEntryId) {
 
 /**
  * Mark a waiting list entry as converted after successful reservation.
+ *
+ * Both ids are client-supplied (called right after createWorkshopReservation
+ * returns its new id), so we verify the reservation actually belongs to the
+ * same customer + session as the waiting-list entry before writing anything
+ * — otherwise any caller who knows/guesses a waiting-list entry id could
+ * attach an unrelated reservationId to it.
  */
 export async function convertWaitingListEntry(waitingListEntryId, reservationId) {
   try {
+    const entry = await prisma.waitingListEntry.findUnique({
+      where: { id: waitingListEntryId },
+      select: { sessionId: true, customerId: true },
+    });
+    if (!entry) return { success: false };
+
+    const reservation = await prisma.workshopReservation.findUnique({
+      where: { id: reservationId },
+      select: { sessionId: true, customerId: true },
+    });
+    if (
+      !reservation ||
+      reservation.sessionId !== entry.sessionId ||
+      reservation.customerId !== entry.customerId
+    ) {
+      return { success: false };
+    }
+
     await prisma.waitingListEntry.update({
       where: { id: waitingListEntryId },
       data: {

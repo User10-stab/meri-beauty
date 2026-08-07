@@ -6,9 +6,12 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { emailVerificationEmail } from "@/lib/email-templates";
 import { registerSchema } from "@/lib/validations/register";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 3;
 
 const userSelect = {
   id: true,
@@ -49,6 +52,16 @@ export async function registerUser(input) {
   }
 
   const { fullName, nickName, email, phone, password, newsletterSubscribed } = parsed.data;
+
+  const ip = await getClientIp();
+  const rateLimitKey = `${email}:${ip}`;
+  if (isRateLimited("register", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+    return {
+      success: false,
+      message: "Too many attempts. Please wait a few minutes before trying again.",
+    };
+  }
+  recordRateLimitHit("register", rateLimitKey);
 
   try {
     const hashedPassword = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);

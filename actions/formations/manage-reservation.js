@@ -54,8 +54,12 @@ export async function cancelFormationReservation(reservationId, { reason } = {})
       return { success: false, message: "Cette réservation est déjà annulée." };
     }
 
-    await prisma.formationReservation.update({
-      where: { id: reservationId },
+    // Atomic claim gated on the reservation not already being cancelled —
+    // without this, two concurrent cancels (double-click, or two admins)
+    // both pass the plain read-then-check above and both fire the
+    // waiting-list notification / email twice.
+    const claim = await prisma.formationReservation.updateMany({
+      where: { id: reservationId, status: { not: "CANCELLED" } },
       data: {
         status: "CANCELLED",
         cancelledAt: new Date(),
@@ -63,6 +67,9 @@ export async function cancelFormationReservation(reservationId, { reason } = {})
         notes: reason ? `${reservation.notes ? `${reservation.notes}\n` : ""}Annulation : ${reason}` : reservation.notes,
       },
     });
+    if (claim.count === 0) {
+      return { success: false, message: "Cette réservation est déjà annulée." };
+    }
 
     notifyAllInFormationWaitingList(reservation.sessionId).catch((err) =>
       console.error("[cancelFormationReservation] waiting-list notify failed:", err)

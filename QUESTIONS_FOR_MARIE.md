@@ -60,16 +60,28 @@ Status as of 07/08/2026, after Marie's account screenshot:
       way.
 - [x] Label format: confirmed **thermique 10×15** — already the default in code.
 - [ ] The real **rate grid** (price per weight tier) — checkout still runs on placeholder
-      weight-tier pricing, not real Mondial Relay rates. Not covered by this form, needs a
-      separate ask once production access is unblocked.
+      weight-tier pricing, not real Mondial Relay rates. We found two Belgium-origin
+      professional/business rate tables on Mondial Relay's own site, but they don't fully agree
+      with each other and neither is confirmed to match your actual contract (they're the
+      public "Offre Start" starter-tier list, not necessarily your negotiated rate) — can you
+      confirm which one (if either) matches what you're actually billed, or ask Mondial Relay
+      support directly since you're already in touch with them about the API access?
+      - [Tarifs et paiement](https://www.mondialrelay.be/fr-be/solutionspro/offres-et-services/offre-start/tarifs-et-paiement)
+        (general table, prices "au départ de la Belgique")
+      - [Offre Start — tarifs](https://www.mondialrelay.be/solutions-professionnels/nos-offres-ecommercants/offre-start)
+        (volume-tiered table, by colis/month)
+      - Note: we confirmed the API itself can't give us a live price quote — Mondial Relay's
+        API only creates real (billable) shipments, it doesn't have a separate "get me a
+        quote" endpoint. So this rate table has to come from you/them either way.
 
 ## 3. Stripe / production payments
 
 - [ ] Switch from test keys (`sk_test_...`) to **live keys** (`sk_live_...`) when ready to
       accept real payments.
-- [ ] Enable **Bancontact** in the Stripe Dashboard's payment methods settings (the code
-      already requests it on every checkout — it just needs to be turned on for the live
-      account).
+- [x] **Bancontact — disabled for now** (your call). Checkout only offers card payments across
+      boutique, ateliers, formations. Trivial to re-enable later (one line per checkout call
+      site) if you change your mind — nothing needs to be enabled in the Stripe Dashboard for
+      now.
 - [ ] A small Stripe configuration step (a second webhook for Connect account events) still
       needs doing — no action from you beyond giving access when we're ready for it.
 

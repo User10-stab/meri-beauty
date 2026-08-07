@@ -159,11 +159,10 @@ export default function AboutUs() {
           </div>
 
           {/* Stats */}
-          <div className="mt-10 grid grid-cols-3 gap-4 border-t border-gold/15 pt-8">
+          <div className="mt-10 grid grid-cols-2 gap-4 border-t border-gold/15 pt-8">
             {[
               { value: "10+", label: "Années d'expérience" },
               { value: "2k+", label: "Clientes fidèles"    },
-              { value: "4.9", label: "Note moyenne"        },
             ].map(({ value, label }) => (
               <div key={label}>
                 <p className="text-[1.6rem] font-bold leading-none text-ink">{value}</p>

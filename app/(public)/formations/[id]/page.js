@@ -5,6 +5,8 @@ import { getAppBaseUrl } from "@/lib/site-url";
 
 const SITE_URL = getAppBaseUrl();
 
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+
 export async function generateMetadata({ params }) {
   const { id } = await params;
   const result = await getPublicFormationById(id);

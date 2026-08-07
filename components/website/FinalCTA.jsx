@@ -157,24 +157,6 @@ export default function FinalCTA() {
           </a>
         </div>
 
-        {/* Trust badge */}
-        <div
-          className={`mt-10 flex items-center gap-3 text-white/50 transition-all duration-700 ease-out delay-600 ${
-            ctaInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
-          }`}
-        >
-          <div className="flex -space-x-2">
-            {[1, 2, 3, 4].map((i) => (
-              <div
-                key={i}
-                className="h-8 w-8 rounded-full border-2 border-primary bg-cream"
-              />
-            ))}
-          </div>
-          <p className="text-[12px] font-medium">
-            <span className="text-gold">+2000 clientes</span> nous font confiance
-          </p>
-        </div>
       </div>
     </section>
   );

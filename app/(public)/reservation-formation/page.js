@@ -66,6 +66,7 @@ function ReservationFormationContent() {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [vatCheck, setVatCheck] = useState(null); // { loading } | { valid, message } | { error, message }
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // null = not checked yet | "exists" = verified account found | "dismissed" = user chose to continue as guest
   const [emailStatus, setEmailStatus] = useState(null);
@@ -202,6 +203,11 @@ function ReservationFormationContent() {
 
     if (!isAuthed && emailStatus === "exists") {
       setError("Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même ».");
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setError("Veuillez accepter les CGV et la politique de confidentialité.");
       return;
     }
 
@@ -599,10 +605,31 @@ function ReservationFormationContent() {
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
               )}
 
+              {/* Terms acceptance */}
+              <label className="flex items-start gap-2.5 text-xs text-ink/60">
+                <input
+                  type="checkbox"
+                  checked={acceptedTerms}
+                  onChange={(e) => setAcceptedTerms(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  J&apos;ai lu et j&apos;accepte les{" "}
+                  <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-gold">
+                    Conditions générales de vente
+                  </a>{" "}
+                  et la{" "}
+                  <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-gold">
+                    Politique de confidentialité
+                  </a>
+                  .
+                </span>
+              </label>
+
               {showWaitingListForm ? (
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || !acceptedTerms}
                   className="w-full rounded-full bg-amber-600 py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-amber-600/20 transition-all duration-200 hover:bg-amber-700 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? (
@@ -617,7 +644,7 @@ function ReservationFormationContent() {
               ) : (
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || !acceptedTerms}
                   className="w-full rounded-full bg-gold py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? (

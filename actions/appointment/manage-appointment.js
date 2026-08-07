@@ -213,6 +213,20 @@ export async function rejectAppointment(appointmentId, reason = null) {
     const payment = appointment.payment;
     const wasPaid = Boolean(payment) && ["PAID", "PARTIALLY_PAID"].includes(payment.status);
 
+    // Cancelling an unpaid request is routine appointment management (STAFF
+    // may do it for their own appointments, per authorizeAppointmentAction
+    // above) — but cancelling a paid one triggers a real Stripe refund, which
+    // per policy only OWNER/ADMIN may issue.
+    if (wasPaid) {
+      const session = await auth();
+      if (!isAdminRole(session?.user?.role)) {
+        return {
+          success: false,
+          message: "Seul un administrateur peut annuler un rendez-vous déjà payé (remboursement requis). Contactez un administrateur.",
+        };
+      }
+    }
+
     const claimed = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the appointment not already being cancelled —
       // without this, two concurrent rejects (double-click, or staff and a

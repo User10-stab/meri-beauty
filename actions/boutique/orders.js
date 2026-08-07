@@ -606,7 +606,7 @@ export async function createOrderCheckoutSession(orderId) {
     const metadata = { kind: "order", orderId: order.id };
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
       line_items: lineItems,
       mode: "payment",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/boutique/order/success?session_id={CHECKOUT_SESSION_ID}`,

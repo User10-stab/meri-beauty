@@ -117,10 +117,10 @@ export async function POST(req) {
 
   // Delayed-notification payment methods (bank debits, etc.) resolve after
   // the initial checkout.session.completed delivery already saw
-  // payment_status "unpaid" and was ignored below. Neither of Meri Beauty's
-  // enabled methods (card, Bancontact) actually work this way today, but
-  // handling both explicitly means nothing silently falls through if that
-  // ever changes.
+  // payment_status "unpaid" and was ignored below. Card (the only method
+  // currently enabled) doesn't work this way today, but handling both
+  // explicitly means nothing silently falls through if that ever changes
+  // (e.g. Bancontact gets re-enabled).
   if (event.type === "checkout.session.async_payment_failed") {
     const failedSession = event.data.object;
     console.warn(`[stripe-webhook] async payment failed for checkout session ${failedSession.id}`, {

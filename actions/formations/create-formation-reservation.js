@@ -55,7 +55,7 @@ export async function createFormationReservationCheckoutSession(reservationId) {
     const formationAction = isFullPayment ? "full_payment" : "deposit";
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
       line_items: [
         {
           price_data: {

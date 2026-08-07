@@ -102,10 +102,10 @@ export default function ContactFormSection({ salon }) {
     });
   }
 
-  const phone = salon?.phone || "+32 123 456 789";
-  const email = salon?.email || "contact@meribeauty.be";
-  const address = salon?.address || "66 Broklyn Golden Street\nJette, Belgique";
-  const workingHours = salon?.workingDays ? formatHours(salon.workingDays) : ["Lun - Ven: 8:00 - 19:00", "Sam: 8:00 - 15:30"];
+  const phone = salon?.phone || "";
+  const email = salon?.email || "";
+  const address = salon?.address || "";
+  const workingHours = salon?.workingDays ? formatHours(salon.workingDays) : [];
 
   return (
     <section className="w-full bg-cream py-16 lg:py-24">

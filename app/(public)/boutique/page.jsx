@@ -4,6 +4,7 @@ import { BoutiquePageClient } from "@/components/boutique/BoutiquePageClient";
 export const metadata = {
   title: "Boutique – Meri Beauty",
   description: "Découvrez notre sélection de produits de beauté.",
+  alternates: { canonical: "/boutique" },
 };
 
 export default async function BoutiquePage() {

@@ -130,7 +130,7 @@ export async function GET(request) {
   // ── 5. Build the OAuth authorization URL ────────────────────────────────
   let url;
   try {
-    url = buildStripeOAuthUrl({ staffId: staff.id });
+    url = buildStripeOAuthUrl({ staffId: staff.id, userId: session.user.id });
   } catch (error) {
     console.error("[GET /api/stripe/oauth/authorize]", error);
     return serverError();

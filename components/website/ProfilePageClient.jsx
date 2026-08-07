@@ -2,9 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Lock, Star, Mail } from "lucide-react";
+import { Loader2, Lock, Star, Mail, Receipt, BadgeCheck, BadgeX, ShieldQuestion } from "lucide-react";
 import { updateMyProfile } from "@/actions/customer/profile";
-import { updateNewsletterPreference } from "@/actions/customer/settings";
+import { updateNewsletterPreference, updateMyVatNumber } from "@/actions/customer/settings";
+import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { createAppointmentReview } from "@/actions/review/review-actions";
 import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/review-eligibility";
 
@@ -255,7 +256,113 @@ function Toggle({ checked, onChange, disabled }) {
   );
 }
 
-export function ProfilePageClient({ user, initialNewsletterSubscribed }) {
+function VatNumberCard({ initialVatNumber }) {
+  const [vatNumber, setVatNumber] = useState(initialVatNumber ?? "");
+  const [savedVatNumber, setSavedVatNumber] = useState(initialVatNumber ?? "");
+  const [saving, setSaving] = useState(false);
+  const [vatCheck, setVatCheck] = useState(null); // { loading } | { valid, message } | { error, message }
+
+  const hasVatChanges = vatNumber.trim() !== (savedVatNumber ?? "");
+
+  async function handleSave() {
+    setSaving(true);
+    const result = await updateMyVatNumber(vatNumber);
+    setSaving(false);
+    if (result.success) {
+      toast.success(result.message);
+      setSavedVatNumber(vatNumber.trim());
+      setVatCheck(null);
+    } else {
+      toast.error(result.message);
+    }
+  }
+
+  async function handleVerify() {
+    if (!vatNumber.trim()) {
+      toast.error("Renseignez d'abord un numéro de TVA.");
+      return;
+    }
+    setVatCheck({ loading: true });
+    const result = await verifyVatNumber(vatNumber);
+    if (!result.success) {
+      setVatCheck({ error: true, message: result.message });
+      return;
+    }
+    setVatCheck({
+      valid: result.valid,
+      message: result.valid
+        ? result.name
+          ? `Actif — enregistré au nom de « ${result.name} ».`
+          : "Actif dans le registre VIES."
+        : "Ce numéro n'est pas reconnu par le registre européen VIES.",
+    });
+  }
+
+  return (
+    <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
+      <div className="flex items-start gap-3">
+        <Receipt className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.75} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-ink">Numéro de TVA</p>
+          <p className="mt-0.5 text-xs text-ink/50">
+            Réservez en tant que professionnel(le) et ce numéro apparaîtra sur vos factures — de quoi
+            déduire la TVA et passer l&apos;achat en frais professionnels.
+          </p>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <input
+              type="text"
+              value={vatNumber}
+              onChange={(e) => {
+                setVatNumber(e.target.value);
+                setVatCheck(null);
+              }}
+              placeholder="BE0123456789"
+              className="h-10 min-w-0 flex-1 border border-neutral-200 px-4 text-sm focus:border-gold focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleVerify}
+              disabled={vatCheck?.loading}
+              className="inline-flex items-center gap-1.5 border border-neutral-200 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
+            >
+              {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
+              Vérifier
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !hasVatChanges}
+              className="inline-flex items-center gap-1.5 bg-gold px-4 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-gold/90 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Enregistrer
+            </button>
+          </div>
+
+          {vatCheck && !vatCheck.loading && (
+            <p
+              className={`mt-2 flex items-center gap-1.5 text-xs font-medium ${
+                vatCheck.error ? "text-amber-600" : vatCheck.valid ? "text-emerald-600" : "text-red-600"
+              }`}
+            >
+              {vatCheck.error ? (
+                <ShieldQuestion className="h-3.5 w-3.5" />
+              ) : vatCheck.valid ? (
+                <BadgeCheck className="h-3.5 w-3.5" />
+              ) : (
+                <BadgeX className="h-3.5 w-3.5" />
+              )}
+              {vatCheck.message}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVatNumber }) {
   const [fullName, setFullName] = useState(user.fullName ?? "");
   const [email, setEmail] = useState(user.email ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
@@ -446,6 +553,8 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed }) {
               </div>
             </div>
           </div>
+
+          <VatNumberCard initialVatNumber={initialVatNumber} />
 
           <section className="space-y-5">
             <div>

@@ -19,6 +19,13 @@ export default async function ProfilePage() {
 
   const settingsResult = await getMySettings();
   const newsletterSubscribed = settingsResult.success ? settingsResult.data.newsletterSubscribed : false;
+  const vatNumber = settingsResult.success ? settingsResult.data.vatNumber : null;
 
-  return <ProfilePageClient user={profileResult.data} initialNewsletterSubscribed={newsletterSubscribed} />;
+  return (
+    <ProfilePageClient
+      user={profileResult.data}
+      initialNewsletterSubscribed={newsletterSubscribed}
+      initialVatNumber={vatNumber}
+    />
+  );
 }

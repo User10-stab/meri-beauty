@@ -252,6 +252,41 @@ export async function createOrderFromCart(input) {
         include: { items: true },
       });
       if (supersededOrder) {
+        // Our local PENDING_PAYMENT status can be stale: the customer may
+        // have already paid on Stripe's hosted page moments ago, and the
+        // webhook just hasn't landed yet (real-world delay, or the customer
+        // clicked back/retry before the redirect finished). Blindly
+        // cancelling here would silently swallow that payment — the money
+        // is charged, but no Payment row, no stock decrement, no
+        // confirmation ever gets created, because the webhook later finds
+        // the order no longer PENDING_PAYMENT and no-ops. This happened for
+        // real in testing (order #79: paid on Stripe, cancelled here 13
+        // minutes later by a retry, payment never fulfilled). Check with
+        // Stripe directly before assuming abandonment.
+        let alreadyPaidSession = null;
+        if (supersededOrder.stripeCheckoutSessionId) {
+          try {
+            const priorSession = await stripe.checkout.sessions.retrieve(supersededOrder.stripeCheckoutSessionId);
+            if (priorSession.payment_status === "paid") {
+              alreadyPaidSession = priorSession;
+            }
+          } catch (err) {
+            console.error("[createOrderFromCart] Stripe session check failed, proceeding with supersede:", err);
+          }
+        }
+
+        if (alreadyPaidSession) {
+          // Fulfil it now instead of waiting on a webhook that may already
+          // be in flight — fulfillOrderPayment is idempotent (claims via
+          // Payment.transactionReference), so this is safe even if the real
+          // webhook delivery lands moments later too.
+          await fulfillOrderPayment(alreadyPaidSession);
+          return {
+            success: false,
+            message: "Un paiement pour ce panier a déjà été confirmé. Consultez vos commandes — la confirmation arrive sous peu.",
+          };
+        }
+
         await prisma.$transaction(async (tx) => {
           for (const item of supersededOrder.items) {
             await tx.productVariant.update({
@@ -579,6 +614,14 @@ export async function createOrderCheckoutSession(orderId) {
       customer_email: order.user.email,
       metadata,
       payment_intent_data: { metadata },
+    });
+
+    // Recorded so a later checkout attempt on the same cart can check with
+    // Stripe directly whether *this* order was actually already paid before
+    // assuming it's abandoned (see the supersede logic in createOrderFromCart).
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { stripeCheckoutSessionId: session.id },
     });
 
     return { success: true, url: session.url };

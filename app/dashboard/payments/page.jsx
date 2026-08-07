@@ -18,6 +18,8 @@ const OAUTH_ERROR_MESSAGES = {
     "Vous avez annulé la connexion de votre compte Stripe existant.",
   invalid_state:
     "La demande de connexion est invalide ou a expiré. Veuillez réessayer.",
+  session_mismatch:
+    "Vous devez rester connecté avec le même compte pendant toute la connexion Stripe. Reconnectez-vous et réessayez.",
   no_code:
     "Stripe n'a pas renvoyé de code d'autorisation. Veuillez réessayer.",
   staff_not_found:

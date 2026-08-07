@@ -8,7 +8,7 @@ import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/actions/promo-codes";
-import { isValidVatFormat } from "@/lib/vat-validation";
+import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -203,12 +203,38 @@ export async function createWorkshopReservation(data) {
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
     const vatNumber = customerInfo.vatNumber?.trim() || null;
-    if (vatNumber && !isValidVatFormat(vatNumber)) {
-      return {
-        success: false,
-        message: "Numéro de TVA invalide (format attendu : BE0123456789).",
-        field: "vatNumber",
-      };
+    // Never persist a VAT number nobody has confirmed is real — it ends up
+    // printed on the invoice as the customer's basis for a tax deduction.
+    // Same strict gate as the profile-settings save (updateMyVatNumber):
+    // VIES must actively confirm it, a network error/timeout blocks too,
+    // not just a confirmed-invalid number. Consistency across every entry
+    // point beats the alternative (silently accepting an unconfirmed number
+    // whenever VIES happens to be slow) — the customer can just retry.
+    let vatNumberToSave = null;
+    if (vatNumber) {
+      if (!isValidVatFormat(vatNumber)) {
+        return {
+          success: false,
+          message: "Numéro de TVA invalide (format attendu : BE0123456789).",
+          field: "vatNumber",
+        };
+      }
+      const viesResult = await verifyVatWithVies(vatNumber);
+      if (!viesResult.success) {
+        return {
+          success: false,
+          message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
+          field: "vatNumber",
+        };
+      }
+      if (!viesResult.valid) {
+        return {
+          success: false,
+          message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
+          field: "vatNumber",
+        };
+      }
+      vatNumberToSave = vatNumber;
     }
     let user = await prisma.user.findUnique({ where: { email } });
 
@@ -235,13 +261,13 @@ export async function createWorkshopReservation(data) {
           password: placeholderHash,
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
-          vatNumber,
+          vatNumber: vatNumberToSave,
         },
       });
-    } else if (vatNumber && user.vatNumber !== vatNumber) {
+    } else if (vatNumberToSave && user.vatNumber !== vatNumberToSave) {
       // B2B customer supplying (or updating) their VAT number for invoicing —
       // never clear it just because a later booking leaves the field blank.
-      user = await prisma.user.update({ where: { id: user.id }, data: { vatNumber } });
+      user = await prisma.user.update({ where: { id: user.id }, data: { vatNumber: vatNumberToSave } });
     }
 
     // Calculate pricing

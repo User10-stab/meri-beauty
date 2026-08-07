@@ -1,14 +1,17 @@
 import Link from "next/link";
+import Image from "next/image";
 
 export function ProductCard({ product }) {
   return (
     <Link href={`/boutique/${product.slug}`} className="group block">
       <div className="relative aspect-square overflow-hidden bg-neutral-50">
         {product.image ? (
-          <img
+          <Image
             src={product.image}
             alt={product.name}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+            fill
+            sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
+            className="object-cover transition-transform duration-500 group-hover:scale-105"
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-wide text-gray-300">

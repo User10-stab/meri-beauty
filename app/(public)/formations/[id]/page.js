@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
+import { getAppBaseUrl } from "@/lib/site-url";
 
-const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+const SITE_URL = getAppBaseUrl();
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -132,7 +133,7 @@ export default async function FormationDetailPage({ params }) {
   }
 
   const isPrivate = formation.type === "PRIVATE";
-  const depositPct = formation.depositPercentage ?? 30;
+  const depositPct = formation.depositPercentage ?? 50;
   const depositAmount = (formation.price * depositPct) / 100;
   const balanceAmount = formation.price - depositAmount;
 

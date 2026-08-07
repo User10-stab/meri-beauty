@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import {
@@ -25,10 +26,16 @@ import {
  *   7. Save stripeAccountId + synchronize charges/payouts
  *   8. Redirect back to the Payments page with a result
  *
- * The callback never relies on the session: identity comes from the signed
- * state token, so it still works if the user's session expired while they
- * were on Stripe's pages. The redirect URI is /api/... which the middleware
- * does not intercept.
+ * The staff/account identity comes from the signed state token (not the
+ * session), so lookups still work even if the session cookie expired while
+ * the user was on Stripe's pages. But `state` itself travels through a
+ * redirected URL and can leak (browser history, a referrer header, a shared
+ * screen) within its 10-minute window — so the callback DOES still check
+ * the live session once, purely to confirm whoever is completing the flow
+ * right now is the same person who started it (state's embedded `userId`
+ * must match `session.user.id`). No session at all is treated as a
+ * mismatch, not silently allowed. The redirect URI is /api/... which the
+ * middleware does not intercept.
  */
 
 // ─── Redirect error keys ───────────────────────────────────────────────────────
@@ -39,6 +46,7 @@ import {
 const ERROR_KEYS = {
   DECLINED: "declined",
   INVALID_STATE: "invalid_state",
+  SESSION_MISMATCH: "session_mismatch",
   NO_CODE: "no_code",
   STAFF_NOT_FOUND: "staff_not_found",
   STAFF_INACTIVE: "staff_inactive",
@@ -95,6 +103,16 @@ export async function GET(request) {
   }
 
   const staffId = decoded.staffId;
+
+  // ── 2b. The person completing this flow must be the one who started it ──
+  // state's signature/expiry only proves the token wasn't forged — it says
+  // nothing about who currently holds it. Re-checking against the live
+  // session closes that gap (see the file-level comment above).
+  const session = await auth();
+  if (!session?.user?.id || session.user.id !== decoded.userId) {
+    console.warn("[GET /api/stripe/oauth/callback] Session/state userId mismatch");
+    return redirectToPayments(request, { error: ERROR_KEYS.SESSION_MISMATCH });
+  }
 
   if (!code) {
     return redirectToPayments(request, { error: ERROR_KEYS.NO_CODE });

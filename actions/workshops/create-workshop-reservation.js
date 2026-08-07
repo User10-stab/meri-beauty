@@ -8,6 +8,7 @@ import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/actions/promo-codes";
+import { isValidVatFormat } from "@/lib/vat-validation";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -202,6 +203,13 @@ export async function createWorkshopReservation(data) {
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
     const vatNumber = customerInfo.vatNumber?.trim() || null;
+    if (vatNumber && !isValidVatFormat(vatNumber)) {
+      return {
+        success: false,
+        message: "Numéro de TVA invalide (format attendu : BE0123456789).",
+        field: "vatNumber",
+      };
+    }
     let user = await prisma.user.findUnique({ where: { email } });
 
     if (!user) {

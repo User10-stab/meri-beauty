@@ -21,11 +21,15 @@ import {
   Calendar,
   Pencil,
   Receipt,
+  BadgeCheck,
+  BadgeX,
+  ShieldQuestion,
 } from "lucide-react";
 import { updateSalon } from "@/actions/salon/update-salon";
 import { updateWorkingDays } from "@/actions/salon/update-working-days";
 import { createClosure } from "@/actions/salon/create-closure";
 import { deleteClosure } from "@/actions/salon/delete-closure";
+import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { updateSalonSchema } from "@/lib/validations/salon";
 import Button from "@/components/ui/Button";
 
@@ -135,10 +139,12 @@ export function SalonSettingsClient({ initialData }) {
 
 function BusinessInfoSection({ salon, onSuccess }) {
   const [isPending, startTransition] = useTransition();
+  const [vatCheck, setVatCheck] = useState(null); // { loading } | { valid, name, message } | { error, message }
 
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(updateSalonSchema),
@@ -154,6 +160,29 @@ function BusinessInfoSection({ salon, onSuccess }) {
       tiktok: salon?.tiktok ?? "",
     },
   });
+
+  async function handleVerifyVat() {
+    const value = watch("vatNumber");
+    if (!value?.trim()) {
+      toast.error("Renseignez d'abord un numéro de TVA.");
+      return;
+    }
+    setVatCheck({ loading: true });
+    const result = await verifyVatNumber(value);
+    if (!result.success) {
+      setVatCheck({ error: true, message: result.message });
+      return;
+    }
+    setVatCheck({
+      valid: result.valid,
+      name: result.name,
+      message: result.valid
+        ? result.name
+          ? `Actif — enregistré au nom de « ${result.name} ».`
+          : "Actif dans le registre VIES."
+        : "Ce numéro n'est pas reconnu par le registre européen VIES.",
+    });
+  }
 
   function onSubmit(data) {
     startTransition(async () => {
@@ -203,15 +232,46 @@ function BusinessInfoSection({ salon, onSuccess }) {
             </div>
             <div>
               <Label icon={Receipt}>Numéro de TVA</Label>
-              <TextInput
-                id="vatNumber"
-                placeholder="BE0123456789"
-                error={errors.vatNumber}
-                {...register("vatNumber")}
-              />
+              <div className="flex gap-2">
+                <TextInput
+                  id="vatNumber"
+                  placeholder="BE0123456789"
+                  error={errors.vatNumber}
+                  {...register("vatNumber", { onChange: () => setVatCheck(null) })}
+                />
+                <button
+                  type="button"
+                  onClick={handleVerifyVat}
+                  disabled={vatCheck?.loading}
+                  className="flex h-10 shrink-0 items-center gap-1.5 rounded-xl border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] disabled:opacity-50 dark:border-dark-3 dark:text-dark-6"
+                >
+                  {vatCheck?.loading ? <Loader2 size={14} className="animate-spin" /> : <ShieldQuestion size={14} />}
+                  Vérifier
+                </button>
+              </div>
               <FieldError message={errors.vatNumber?.message} />
+              {vatCheck && !vatCheck.loading && (
+                <p
+                  className={`mt-1.5 flex items-center gap-1.5 text-xs font-medium ${
+                    vatCheck.error
+                      ? "text-amber-600"
+                      : vatCheck.valid
+                      ? "text-emerald-600"
+                      : "text-red-600"
+                  }`}
+                >
+                  {vatCheck.error ? (
+                    <ShieldQuestion size={13} />
+                  ) : vatCheck.valid ? (
+                    <BadgeCheck size={13} />
+                  ) : (
+                    <BadgeX size={13} />
+                  )}
+                  {vatCheck.message}
+                </p>
+              )}
               <p className="mt-1 text-xs text-gray-400 dark:text-dark-5">
-                Imprimé sur chaque facture émise par la boutique.
+                Imprimé sur chaque facture émise par la boutique. « Vérifier » interroge le registre européen VIES.
               </p>
             </div>
           </div>

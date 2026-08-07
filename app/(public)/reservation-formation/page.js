@@ -434,9 +434,10 @@ function ReservationFormationContent() {
                         type="text"
                         value={form.vatNumber}
                         onChange={(e) => setForm((p) => ({ ...p, vatNumber: e.target.value }))}
-                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
+                        className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
                         placeholder="BE0123456789"
                       />
+                      {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
                     </div>
                   </div>
                 ) : (
@@ -498,9 +499,10 @@ function ReservationFormationContent() {
                         type="text"
                         value={form.vatNumber}
                         onChange={(e) => setForm((p) => ({ ...p, vatNumber: e.target.value }))}
-                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
+                        className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
                         placeholder="BE0123456789"
                       />
+                      {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
                     </div>
                     <p className="text-xs text-ink/40">Un compte sera créé automatiquement avec votre email.</p>
                   </div>

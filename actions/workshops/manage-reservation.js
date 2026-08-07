@@ -9,6 +9,7 @@ import { workshopCancellationEmail } from "@/lib/email-templates";
 import { isAdminRole } from "@/lib/authorization";
 import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
 import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-workshop-reservation";
+import { issueCreditNote } from "@/lib/invoicing";
 
 const CANCELLATION_CUTOFF_HOURS = 48;
 const SESSION_CHANGE_FEE_RATE = 0.1; // 10% of the reservation's total price
@@ -51,7 +52,11 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
 
     const reservation = await prisma.workshopReservation.findUnique({
       where: { id: reservationId },
-      include: { session: { include: { workshop: true } }, customer: true, payment: true },
+      include: {
+        session: { include: { workshop: true } },
+        customer: true,
+        payment: { include: { invoice: true } },
+      },
     });
     if (!reservation) {
       return { success: false, message: "Réservation introuvable." };
@@ -77,8 +82,11 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       ? `Annulation : ${reason}`
       : null;
 
-    await prisma.workshopReservation.update({
-      where: { id: reservationId },
+    // Atomic claim gated on the reservation not already being cancelled —
+    // without this, two concurrent cancels (double-click, or two admins)
+    // both pass the plain read-then-check above and both refund.
+    const claim = await prisma.workshopReservation.updateMany({
+      where: { id: reservationId, status: { not: "CANCELLED" } },
       data: {
         status: "CANCELLED",
         cancelledAt: new Date(),
@@ -86,15 +94,42 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
         notes: noteLine ? `${reservation.notes ? `${reservation.notes}\n` : ""}${noteLine}` : reservation.notes,
       },
     });
+    if (claim.count === 0) {
+      return { success: false, message: "Cette réservation est déjà annulée." };
+    }
 
     // Deposits are non-refundable by default — never stripe.refunds.create()
-    // here unless the admin explicitly granted an exception above.
+    // here unless the admin explicitly granted an exception above. The
+    // Transaction{REFUND} row / credit note are only written once Stripe
+    // actually confirms the refund, same reasoning as
+    // actions/appointment/manage-appointment.js#rejectAppointment.
     let refundFailed = false;
     if (refundDeposit && reservation.payment?.transactionReference) {
       try {
         const checkoutSession = await stripe.checkout.sessions.retrieve(reservation.payment.transactionReference);
         if (checkoutSession.payment_intent) {
           await stripe.refunds.create({ payment_intent: checkoutSession.payment_intent });
+
+          const payment = reservation.payment;
+          await prisma.$transaction(async (tx) => {
+            await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
+            await tx.transaction.create({
+              data: {
+                paymentId: payment.id,
+                amount: payment.paidAmount,
+                method: "ONLINE",
+                transactionType: "REFUND",
+                paidAt: new Date(),
+              },
+            });
+            if (payment.invoice) {
+              await issueCreditNote(tx, {
+                invoiceId: payment.invoice.id,
+                reason: reason || "Annulation atelier — remboursement exceptionnel",
+                totalInclVat: Number(payment.paidAmount),
+              });
+            }
+          });
         }
       } catch (err) {
         // The reservation is already cancelled — that stays. But don't let

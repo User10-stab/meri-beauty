@@ -69,6 +69,19 @@ export async function verifyEmail(rawToken) {
     };
   }
 
+  // Rate-limit the bcrypt table-scan below (it compares against every
+  // pending token) — without this, a caller could hammer this action to
+  // burn CPU proportional to however many tokens are currently pending,
+  // independent of whether their own token is even real.
+  const ip = await getClientIp();
+  if (isRateLimited("verify-email-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+    return {
+      success: false,
+      message: "Too many attempts. Please wait a few minutes before trying again.",
+    };
+  }
+  recordRateLimitHit("verify-email-submit", ip);
+
   try {
     const allTokens = await prisma.emailVerificationToken.findMany({
       where: { used: false, expiresAt: { gt: new Date() } },

@@ -468,7 +468,20 @@ async function processAppointmentCheckoutSession(session) {
     }
 
     if (existingPayment.status === "PAID" || existingPayment.status === "PARTIALLY_PAID") {
-      return { processed: false, reason: "already-processed" };
+      // Same session retried (Stripe's at-least-once delivery) is harmless —
+      // nothing to do. But a DIFFERENT session settling here means the
+      // customer abandoned this one, resumed via resumeReservationPayment
+      // (which creates a fresh session for the same Payment row), paid
+      // through the new one, and then this original session *also* cleared
+      // late (e.g. a delayed-notification method). That's a real second
+      // charge Stripe actually captured — refund it below rather than
+      // silently dropping the event, or the customer is out that money with
+      // no record of why.
+      return {
+        processed: false,
+        reason: "already-processed",
+        strayCharge: checkoutSessionId !== existingPayment.transactionReference,
+      };
     }
 
     // Re-check cancellation here, after the lock: the pre-transaction check
@@ -544,6 +557,23 @@ async function processAppointmentCheckoutSession(session) {
     console.warn(`[stripe-webhook] Appointment ${appointmentId} cancelled during payment processing, refunding: ${checkoutSessionId}`);
     await refundSession(session);
     return { received: true, refunded: true, reason: "appointment cancelled" };
+  }
+
+  if (result?.strayCharge) {
+    console.error(
+      `[stripe-webhook] STRAY DUPLICATE CHARGE for appointment ${appointmentId}: session ${checkoutSessionId} settled after payment ${paymentId} was already paid via a different session. Refunding.`
+    );
+    await refundSession(session);
+    const salon = await prisma.salon.findFirst({ select: { email: true } });
+    if (salon?.email) {
+      sendEmail({
+        to: salon.email,
+        subject: `⚠️ Double paiement remboursé — rendez-vous n°${appointmentId}`,
+        text: `Un client a payé deux fois le même rendez-vous (session ${checkoutSessionId}, en plus du paiement déjà enregistré). Le second paiement vient d'être automatiquement remboursé via Stripe.`,
+        html: `<p>Un client a payé deux fois le même rendez-vous (session ${checkoutSessionId}, en plus du paiement déjà enregistré). Le second paiement vient d'être automatiquement remboursé via Stripe.</p>`,
+      }).catch((err) => console.error("[stripe-webhook] stray-charge alert email failed:", err));
+    }
+    return { received: true, refunded: true, reason: "stray-duplicate-charge" };
   }
 
   if (!result?.processed) {

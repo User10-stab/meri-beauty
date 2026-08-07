@@ -7,6 +7,10 @@ import {
   contactVisitorAutoReplyEmail,
 } from "@/lib/email-templates";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 3;
 
 /**
  * Server action for the public contact form.
@@ -39,6 +43,15 @@ export async function sendContactMessage(input) {
   }
 
   const { name, email, phone, subject, message } = parsed.data;
+
+  const ip = await getClientIp();
+  if (isRateLimited("contact-message", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+    return {
+      success: false,
+      message: "Trop de messages envoyés. Veuillez patienter avant de réessayer.",
+    };
+  }
+  recordRateLimitHit("contact-message", ip);
 
   try {
     // 2. Fetch salon info (name + email for the owner)

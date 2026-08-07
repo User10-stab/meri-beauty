@@ -881,7 +881,7 @@ model Order {
   // actually already paid before assuming it's abandoned and cancelling it.
   // Without this, a webhook-delivery race could see a genuinely-paid order
   // get silently cancelled by a retry click, swallowing the payment.
-  stripeCheckoutSessionId String?
+  stripeCheckoutSessionId String? @unique
 
   subtotal     Decimal @db.Decimal(10, 2)
   shippingCost Decimal @default(0) @db.Decimal(10, 2)

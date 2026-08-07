@@ -10,9 +10,9 @@ export const metadata = {
 export default async function ContactPage() {
   const { data: salon } = await getSalon();
 
-  const phone = salon?.phone || "+32 123 456 789";
-  const email = salon?.email || "contact@meribeauty.be";
-  const address = salon?.address || "66 Broklyn Golden Street\nJette, Belgique";
+  const phone = salon?.phone || "";
+  const email = salon?.email || "";
+  const address = salon?.address || "";
 
   return (
     <>
@@ -63,7 +63,7 @@ export default async function ContactPage() {
                   Carte interactive bientôt disponible
                 </p>
                 <p className="mt-2 text-sm text-ink/50">
-                  66 Broklyn Golden Street, Jette, Belgique
+                  {salon?.address ?? ""}
                 </p>
               </div>
             </div> */}

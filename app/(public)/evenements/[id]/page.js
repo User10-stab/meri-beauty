@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicActivityById } from "@/actions/workshops/get-public-activities";
 
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+
 export async function generateMetadata({ params }) {
   const { id } = await params;
   const result = await getPublicActivityById(id);
@@ -14,7 +16,55 @@ export async function generateMetadata({ params }) {
   return {
     title: `${activity.title} — Meri Beauty`,
     description: activity.description,
+    alternates: { canonical: `/evenements/${id}` },
   };
+}
+
+/** Event JSON-LD — Google can render these as rich results (date, location,
+ *  price, availability) in search. All fields from the server-fetched
+ *  activity; nothing client-trusted. One Event per scheduled session. */
+function buildEventSchema(activity) {
+  if (!activity) return null;
+  const sessions = activity.sessions ?? [];
+
+  const baseOffer = (session) => {
+    const taken = session.reservations?.reduce((sum, r) => sum + r.seatsCount, 0) ?? 0;
+    const cap = session.capacity ?? activity.capacity ?? 0;
+    const seatsLeft = Math.max(cap - taken, 0);
+    return {
+      "@type": "Offer",
+      price: String(activity.price ?? 0),
+      priceCurrency: "EUR",
+      availability: cap > 0 && seatsLeft === 0 ? "https://schema.org/SoldOut" : "https://schema.org/InStock",
+      url: `${SITE_URL}/reservation-atelier?activity=${activity.id}&session=${session.id}`,
+      validFrom: new Date().toISOString(),
+    };
+  };
+
+  const events = (sessions.length > 0 ? sessions : [null]).map((session) => ({
+    "@context": "https://schema.org",
+    "@type": "Event",
+    name: activity.title,
+    ...(activity.description ? { description: activity.description } : {}),
+    ...(session
+      ? {
+          startDate: new Date(session.startDate).toISOString(),
+          ...(session.endDate ? { endDate: new Date(session.endDate).toISOString() } : {}),
+        }
+      : {}),
+    eventStatus: "https://schema.org/EventScheduled",
+    eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
+    location: {
+      "@type": "Place",
+      name: "Merri Beauty",
+      address: { "@type": "PostalAddress", addressCountry: "BE" },
+    },
+    ...(activity.cover ? { image: [activity.cover] } : {}),
+    offers: baseOffer(session ?? {}),
+    organizer: { "@type": "Organization", name: "Merri Beauty", url: SITE_URL },
+  }));
+
+  return events;
 }
 
 function formatDate(dateStr) {
@@ -109,8 +159,21 @@ export default async function EvenementDetailPage({ params }) {
 
   const isWorkshop = activity.type === "WORKSHOP";
 
+  const eventSchemas = buildEventSchema(activity);
+
   return (
     <>
+      {eventSchemas?.map((schema, i) => (
+        <script
+          key={i}
+          type="application/ld+json"
+          // Escape "<" so a salon-editable field can never break out of the
+          // script tag. Same guard the HairSalon schema uses in (public)/layout.js.
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(schema).replace(/</g, "\\u003c"),
+          }}
+        />
+      ))}
       {/* Hero / Cover */}
       <section className="relative w-full overflow-hidden bg-primary" style={{ minHeight: "50vh" }}>
         {activity.cover ? (

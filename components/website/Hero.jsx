@@ -13,15 +13,6 @@ const SERVICES = [
   "Rituels corps",
 ];
 
-// Placeholder working hours — swap with a DB/API fetch later
-const WORKING_HOURS = [
-  { days: "Monday",            hours: "12:00 pm – 19:00 pm" },
-  { days: "Tuesday to Friday", hours: "8:00 am – 19:00 pm"  },
-  { days: "Saturday",          hours: "8:00 am to 3:30 pm"  },
-];
-
-const ADDRESS = "66 Broklyn Golden Street\nNew York, USA";
-
 export default async function Hero() {
    const salon = await getSalon();
    

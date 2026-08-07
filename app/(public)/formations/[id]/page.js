@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
 
+const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+
 export async function generateMetadata({ params }) {
   const { id } = await params;
   const result = await getPublicFormationById(id);
@@ -14,6 +16,47 @@ export async function generateMetadata({ params }) {
   return {
     title: `${formation.title} — Meri Beauty`,
     description: formation.description,
+    alternates: { canonical: `/formations/${id}` },
+  };
+}
+
+/** Course JSON-LD — formations are educational and target queries like
+ *  "formation brow lamination Bruxelles". The provider/instructor signals
+ *  feed E-E-A-T for both classical SEO and AI citation. */
+function buildCourseSchema(formation) {
+  if (!formation) return null;
+  return {
+    "@context": "https://schema.org",
+    "@type": "Course",
+    name: formation.title,
+    ...(formation.description ? { description: formation.description } : {}),
+    provider: {
+      "@type": "Organization",
+      name: "Merri Beauty",
+      sameAs: SITE_URL,
+    },
+    offers: {
+      "@type": "Offer",
+      price: String(formation.price ?? 0),
+      priceCurrency: "EUR",
+      category: "paid",
+      url: `${SITE_URL}/formations/${formation.id}`,
+    },
+    ...(formation.sessions?.length
+      ? {
+          hasCourseInstance: formation.sessions.map((session) => ({
+            "@type": "CourseInstance",
+            courseMode: "onsite",
+            location: {
+              "@type": "Place",
+              name: "Merri Beauty",
+              address: { "@type": "PostalAddress", addressCountry: "BE" },
+            },
+            startDate: new Date(session.startDate).toISOString(),
+            ...(session.endDate ? { endDate: new Date(session.endDate).toISOString() } : {}),
+          })),
+        }
+      : {}),
   };
 }
 
@@ -97,8 +140,20 @@ export default async function FormationDetailPage({ params }) {
   const depositFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(depositAmount);
   const balanceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(balanceAmount);
 
+  const courseSchema = buildCourseSchema(formation);
+
   return (
     <>
+      {courseSchema && (
+        <script
+          type="application/ld+json"
+          // Escape "<" so a salon-editable field can never break out of the
+          // script tag. Same guard the HairSalon schema uses in (public)/layout.js.
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(courseSchema).replace(/</g, "\\u003c"),
+          }}
+        />
+      )}
       {/* Hero / Cover */}
       <section className="relative w-full overflow-hidden bg-primary" style={{ minHeight: "50vh" }}>
         {formation.cover ? (

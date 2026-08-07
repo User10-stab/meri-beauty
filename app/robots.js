@@ -1,4 +1,6 @@
-const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+import { getAppBaseUrl } from "@/lib/site-url";
+
+const SITE_URL = getAppBaseUrl();
 
 export default function robots() {
   return {
@@ -16,7 +18,6 @@ export default function robots() {
         "/verify-email",
         "/mon-compte",
         "/profile",
-        "/settings",
         "/appointments",
         "/boutique/cart",
         "/boutique/checkout",

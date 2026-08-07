@@ -427,7 +427,7 @@ model Formation {
   animator              Animator?       @relation(fields: [animatorId], references: [id])
   status                FormationStatus @default(DRAFT)
   allowMultipleSessions Boolean         @default(false)
-  depositPercentage     Int             @default(30)
+  depositPercentage     Int             @default(50)
   createdById           String?
   createdBy             User?           @relation("FormationCreatedBy", fields: [createdById], references: [id])
   createdAt             DateTime        @default(now())
@@ -874,6 +874,14 @@ model Order {
 
   fulfilmentMode FulfilmentMode
   status         OrderStatus    @default(PENDING_PAYMENT)
+
+  // Set the moment a Checkout Session is created for this order (before
+  // Stripe confirms anything) — lets createOrderFromCart check with Stripe
+  // directly whether an existing PENDING_PAYMENT order on the same cart was
+  // actually already paid before assuming it's abandoned and cancelling it.
+  // Without this, a webhook-delivery race could see a genuinely-paid order
+  // get silently cancelled by a retry click, swallowing the payment.
+  stripeCheckoutSessionId String?
 
   subtotal     Decimal @db.Decimal(10, 2)
   shippingCost Decimal @default(0) @db.Decimal(10, 2)

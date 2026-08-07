@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Minus, Plus, ShoppingBag, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { addToCart } from "@/actions/boutique/cart";
@@ -50,12 +51,15 @@ export function ProductDetailClient({ product, initialVariantId }) {
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
           {/* Images */}
           <div>
-            <div className="aspect-square overflow-hidden bg-neutral-50">
+            <div className="relative aspect-square overflow-hidden bg-neutral-50">
               {product.images[activeImage] ? (
-                <img
+                <Image
                   src={product.images[activeImage].path}
                   alt={product.images[activeImage].alt ?? product.name}
-                  className="h-full w-full object-cover"
+                  fill
+                  sizes="(min-width: 1024px) 50vw, 100vw"
+                  priority
+                  className="object-cover"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-sm uppercase tracking-wide text-gray-300">
@@ -70,11 +74,11 @@ export function ProductDetailClient({ product, initialVariantId }) {
                     key={img.path + i}
                     type="button"
                     onClick={() => setActiveImage(i)}
-                    className={`h-16 w-16 overflow-hidden border-2 transition-colors ${
+                    className={`relative h-16 w-16 overflow-hidden border-2 transition-colors ${
                       activeImage === i ? "border-[#C8A46A]" : "border-transparent"
                     }`}
                   >
-                    <img src={img.path} alt="" className="h-full w-full object-cover" />
+                    <Image src={img.path} alt="" fill sizes="64px" className="object-cover" />
                   </button>
                 ))}
               </div>

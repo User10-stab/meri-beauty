@@ -19,7 +19,7 @@ export default async function Home({ searchParams }) {
     <>
       {/* <Suspense fallback={<OverviewCardsSkeleton />}>
         <OverviewCardsGroup />
-      </Suspense>
+      </Suspense> */}
 
       <div className="mt-4 grid grid-cols-12 gap-4 md:mt-6 md:gap-6 2xl:mt-9 2xl:gap-7.5">
         <PaymentsOverview
@@ -40,7 +40,7 @@ export default async function Home({ searchParams }) {
           timeFrame={extractTimeFrame("used_devices")?.split(":")[1]}
         />
 
-        <RegionLabels />
+        {/* <RegionLabels /> */}
 
         <div className="col-span-12 grid xl:col-span-8">
           <Suspense fallback={<TopChannelsSkeleton />}>
@@ -48,10 +48,10 @@ export default async function Home({ searchParams }) {
           </Suspense>
         </div>
 
-        <Suspense fallback={null}>
+        {/* <Suspense fallback={null}>
           <ChatsCard />
-        </Suspense>
-      </div> */}
+        </Suspense> */}
+      </div>
     </>
   );
 }

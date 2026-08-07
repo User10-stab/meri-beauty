@@ -232,14 +232,6 @@ export default function Navbar() {
                       >
                         Mon profil
                       </a>
-                      <a
-                        href="/settings"
-                        onClick={() => setMenuOpen(false)}
-                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                        role="menuitem"
-                      >
-                        Paramètres
-                      </a>
                     </div>
 
                     <div className="-my-1 h-px bg-cream/10" />

@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicActivityById } from "@/actions/workshops/get-public-activities";
+import { getAppBaseUrl } from "@/lib/site-url";
+
+const SITE_URL = getAppBaseUrl();
 
 const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
 
@@ -138,7 +141,7 @@ export default async function EvenementDetailPage({ params }) {
     notFound();
   }
 
-  const depositPct = activity.depositPercentage ?? 30;
+  const depositPct = activity.depositPercentage ?? 50;
   const depositAmount = (activity.price * depositPct) / 100;
   const balanceAmount = activity.price - depositAmount;
 

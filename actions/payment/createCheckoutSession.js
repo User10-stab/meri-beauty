@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
 import { parseLocalDateString } from "@/lib/slot-availability";
+import { resolvePromoCode } from "@/actions/promo-codes";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -105,7 +106,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
 export async function createCheckoutSession(reservationData) {
   try {
     const authSession = await auth();
-    const { staffServiceId, date, time, customerInfo, paymentMethod, notes } = reservationData;
+    const { staffServiceId, date, time, customerInfo, paymentMethod, notes, promoCode } = reservationData;
 
     // ── 1. Validate required fields ──────────────────────────────────────────
     if (!staffServiceId || !date || !time || !customerInfo) {
@@ -232,15 +233,29 @@ export async function createCheckoutSession(reservationData) {
         message: "Méthode de paiement invalide.",
       };
     }
-    const totalAmount = Number(staffService.price);
+    const rawTotalAmount = Number(staffService.price);
+
+    // Re-validated here regardless of any client-side preview — never trust
+    // a client-computed discount amount. Mirrors create-reservation.js.
+    let promoCodeId = null;
+    let discountAmount = 0;
+    if (promoCode) {
+      const promoResult = await resolvePromoCode(promoCode, rawTotalAmount);
+      if (!promoResult.success) return { success: false, message: promoResult.message };
+      promoCodeId = promoResult.promoCodeId;
+      discountAmount = promoResult.discountAmount;
+    }
+
     const paymentDecision = getReservationPaymentDecision({
       appointmentCount: 1,
       confirmationMode: staff.reservationConfirmationMode ?? "MANUAL",
       depositEnabled:   Boolean(staff.depositEnabled),
       depositPercentage: Number(staff.depositPercentage ?? 0),
-      totalAmount,
+      totalAmount: rawTotalAmount,
       paymentMethod: normalizedPaymentMethod,
+      discountAmount,
     });
+    const totalAmount = paymentDecision.totalAmount; // already net of discountAmount
 
     if (!paymentDecision.requiresOnlinePaymentNow) {
       return {
@@ -322,6 +337,8 @@ export async function createCheckoutSession(reservationData) {
           remainingAmount: totalAmount,
           paymentType: paymentDecision.paymentType,
           status: "PENDING",
+          promoCodeId,
+          discountAmount,
         },
       });
 

@@ -269,7 +269,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         disabled={rowLoadingId === a.id}
                         className="rounded-lg border border-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:opacity-50"
                       >
-                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer le rendez-vous"}
+                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "le rendez-vous est terminé"}
                       </button>
                     ) : (
                       <span className="text-gray-300">—</span>

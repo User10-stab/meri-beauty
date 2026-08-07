@@ -59,6 +59,13 @@ const nextConfig = {
           // calls navigator.geolocation from our own page — geolocation=() would
           // silently block that button for every visitor.
           { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=(self)" },
+          // Production-only: browsers cache HSTS per-origin, so sending this
+          // over local http://localhost dev would be harmless (spec-ignored
+          // on non-https), but scoping it to prod avoids any confusion during
+          // local development entirely.
+          ...(process.env.NODE_ENV === "production"
+            ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }]
+            : []),
         ],
       },
     ];
@@ -79,6 +86,13 @@ const nextConfig = {
         // Local uploads served from /public/uploads
         protocol: "http",
         hostname: "localhost",
+      },
+      {
+        // Legacy product/service/gallery images imported from the original
+        // Wix site — still hotlinked from there, not re-hosted locally
+        // (see lib/wixImport.js's WIX_MEDIA_BASE).
+        protocol: "https",
+        hostname: "**.wixstatic.com",
       },
     ],
   },

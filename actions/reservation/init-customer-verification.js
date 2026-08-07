@@ -4,6 +4,9 @@ import { randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { sendVerificationEmail } from "@/actions/auth/verify-email";
+import { sendEmail } from "@/lib/email";
+import { welcomeWithCredentialsEmail } from "@/lib/email-templates";
+import { getAbsoluteUrl } from "@/lib/site-url";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -41,7 +44,9 @@ export async function initCustomerVerification({ fullName, email, phone, newslet
   }
 
   // 2. Create the user if they don't exist yet
+  let isNewUser = false;
   if (!existingUser) {
+    isNewUser = true;
     const temporaryPassword = randomBytes(9).toString("base64url");
     const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
 
@@ -56,6 +61,22 @@ export async function initCustomerVerification({ fullName, email, phone, newslet
         isActive: true,
         newsletterSubscribed: newsletterSubscribed ?? false,
       },
+    });
+
+    // Send welcome email with login credentials (fire-and-forget)
+    const loginUrl = getAbsoluteUrl("/login");
+    const emailTemplate = welcomeWithCredentialsEmail({
+      customerName: fullName.trim(),
+      email: normalizedEmail,
+      temporaryPassword,
+      loginUrl,
+    });
+
+    await sendEmail({
+      to: normalizedEmail,
+      subject: emailTemplate.subject,
+      text: emailTemplate.text,
+      html: emailTemplate.html,
     });
   }
 

@@ -33,13 +33,6 @@ export function ExistingAccountBanner({ email, callbackUrl, onDismiss }) {
               <LogIn size={15} />
               Se connecter
             </a>
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-medium text-amber-800 transition-colors hover:bg-amber-50"
-            >
-              Continuer quand même
-            </button>
           </div>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { getAppBaseUrl } from "@/lib/site-url";
 
-const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+const SITE_URL = getAppBaseUrl();
 
 // Regenerate at most once an hour — cheap enough for how often new
 // products/activities/formations actually get published, and avoids

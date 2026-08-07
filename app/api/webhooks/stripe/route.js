@@ -302,6 +302,19 @@ async function processAppointmentCheckoutSession(session) {
       return { processed: false, reason: "already-processed" };
     }
 
+    // Re-check cancellation here, after the lock: the pre-transaction check
+    // above only rules out an appointment that was already cancelled before
+    // we started. There's a real gap between that check and this point — a
+    // customer/staff cancellation doesn't take the Payment row's FOR UPDATE
+    // lock, so it can slip in and commit in between. Without this re-check,
+    // this transaction would still confirm/PAID an appointment the customer
+    // explicitly cancelled moments before the charge cleared. The refund
+    // itself stays outside the transaction (same reasoning as the
+    // pre-transaction block: don't hold the Stripe call under a row lock).
+    if (existingPayment.appointment.status === "CANCELLED") {
+      return { processed: false, reason: "appointment-cancelled" };
+    }
+
     // Amount verification + cancelled-appointment refund happen in the
     // pre-transaction block above (so the Stripe refund isn't held under a
     // row lock). If we reach here, the amount matched and the appointment is
@@ -357,6 +370,12 @@ async function processAppointmentCheckoutSession(session) {
       nextAppointmentStatus,
     };
   });
+
+  if (result?.reason === "appointment-cancelled") {
+    console.warn(`[stripe-webhook] Appointment ${appointmentId} cancelled during payment processing, refunding: ${checkoutSessionId}`);
+    await refundSession(session);
+    return { received: true, refunded: true, reason: "appointment cancelled" };
+  }
 
   if (!result?.processed) {
     return { received: true, alreadyProcessed: result?.reason === "already-processed", reason: result?.reason };

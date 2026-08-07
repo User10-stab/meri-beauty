@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { toast } from "sonner";
 import { CameraOff, ShoppingBag, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
@@ -117,9 +118,9 @@ export function ProductScanClient() {
             <div className="absolute inset-0 flex flex-col justify-end bg-black/60 p-4">
               <div className="w-full bg-white p-4 text-left shadow-xl">
                 <div className="flex items-center gap-3">
-                  <div className="h-16 w-16 flex-shrink-0 overflow-hidden bg-neutral-50">
+                  <div className="relative h-16 w-16 flex-shrink-0 overflow-hidden bg-neutral-50">
                     {found.image ? (
-                      <img src={found.image} alt="" className="h-full w-full object-cover" />
+                      <Image src={found.image} alt="" fill sizes="64px" className="object-cover" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-[10px] uppercase text-gray-300">
                         Meri Beauty

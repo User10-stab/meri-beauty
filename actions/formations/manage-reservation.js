@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { formationCancellationEmail } from "@/lib/email-templates";
 import { isAdminRole } from "@/lib/authorization";
-import { notifyAllInFormationWaitingList } from "@/actions/formations/waiting-list";
+import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting-list";
 
 function formatSessionDate(date) {
   return new Date(date).toLocaleDateString("fr-FR", {

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { isAdminRole } from "@/lib/authorization";
 import { promoCodeSchema, updatePromoCodeSchema } from "@/lib/validations/promo-codes";
+import { resolvePromoCode } from "@/lib/promo-codes";
 
 /**
  * Promo codes apply across all four purchase flows (boutique, ateliers,
@@ -29,40 +30,6 @@ function serializePromoCode(p) {
     isActive: p.isActive,
     createdAt: p.createdAt,
   };
-}
-
-/**
- * Computes the discount a code grants against a given subtotal, without
- * touching the DB — shared by validatePromoCode's live preview and every
- * create action's server-side re-validation, so the two can never diverge.
- */
-function computeDiscount(promo, subtotal) {
-  const raw = promo.type === "PERCENTAGE" ? (subtotal * Number(promo.value)) / 100 : Number(promo.value);
-  return Math.min(raw, subtotal); // never discount below zero
-}
-
-/**
- * Looks up a code and validates it against a subtotal — used both for the
- * client-side live preview (`validatePromoCode`) and internally by every
- * create action right before charging, so a client can never hand over a
- * pre-computed discount and have it trusted.
- */
-export async function resolvePromoCode(rawCode, subtotal) {
-  const code = rawCode?.trim().toUpperCase();
-  if (!code) return { success: false, message: "Veuillez entrer un code." };
-
-  const promo = await prisma.promoCode.findUnique({ where: { code } });
-  if (!promo || !promo.isActive) {
-    return { success: false, message: "Ce code promo n'existe pas ou n'est plus valide." };
-  }
-  if (promo.minOrderAmount != null && subtotal < Number(promo.minOrderAmount)) {
-    return {
-      success: false,
-      message: `Ce code nécessite un montant minimum de ${Number(promo.minOrderAmount).toFixed(2)} €.`,
-    };
-  }
-
-  return { success: true, promoCodeId: promo.id, discountAmount: computeDiscount(promo, subtotal) };
 }
 
 /** Public — called from the 4 checkout UIs for a live discount preview. */

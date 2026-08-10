@@ -8,7 +8,8 @@ import { prisma } from "@/lib/prisma";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
 import { parseLocalDateString } from "@/lib/slot-availability";
-import { resolvePromoCode } from "@/actions/promo-codes";
+import { resolvePromoCode } from "@/lib/promo-codes";
+import { validateAppointmentSlot } from "@/lib/appointment-scheduling";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -39,7 +40,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
     });
 
     if (existingUser) {
-      return existingUser;
+      return { user: existingUser, isNewUser: false };
     }
   }
 
@@ -57,7 +58,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   });
 
   if (user) {
-    return user;
+    return { user, isNewUser: false };
   }
 
   const temporaryPassword = randomBytes(9).toString("base64url");
@@ -76,7 +77,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
     },
   });
 
-  return user;
+  return { user, isNewUser: true };
 }
 
 /**
@@ -214,10 +215,19 @@ export async function createCheckoutSession(reservationData) {
     });
 
     if (conflict) {
-      return { 
-        success: false, 
-        message: "Ce créneau n'est plus disponible. Veuillez en sélectionner un autre." 
+      return {
+        success: false,
+        message: "Ce créneau n'est plus disponible. Veuillez en sélectionner un autre."
       };
+    }
+
+    // The check above only rules out collision with another appointment —
+    // it says nothing about salon closures, staff time off, working hours,
+    // or a past date/time. Re-validate against the same rules the booking
+    // calendar itself uses to offer slots in the first place.
+    const slotCheck = await validateAppointmentSlot(staffServiceId, appointmentDate, startTime, time);
+    if (!slotCheck.valid) {
+      return { success: false, message: slotCheck.message };
     }
 
     // ── 5. Resolve the payment decision from the shared engine ─────────────
@@ -268,11 +278,14 @@ export async function createCheckoutSession(reservationData) {
       ? paymentDecision.totalAmount
       : paymentDecision.depositAmount;
 
-    const customerUser = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
-    // Generate an autologin token for the customer. PaymentStep uses this to
-    // sign the customer in before navigating to Stripe, so that if the payment
-    // is interrupted they can return to /mes-reservations while authenticated.
-    const autologinToken = generateAutologinToken(customerUser.email);
+    const { user: customerUser, isNewUser } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    // Generate an autologin token for the customer — but only when this
+    // request just created the account. If `resolveOrCreateCustomer` matched
+    // an existing account (by email or phone, with no password check), a
+    // token here would sign the *caller's* browser into a stranger's real
+    // account — anyone who knows a customer's email could take it over.
+    // Existing accounts must go through normal login instead.
+    const autologinToken = isNewUser ? generateAutologinToken(customerUser.email) : null;
 
     const lockId = buildReservationLockKey({
       staffServiceId,

@@ -6,7 +6,7 @@ import { stripe } from "@/lib/stripe";
 import bcrypt from "bcrypt";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
-import { resolvePromoCode } from "@/actions/promo-codes";
+import { resolvePromoCode } from "@/lib/promo-codes";
 import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
 
 const BCRYPT_SALT_ROUNDS = 12;
@@ -174,8 +174,16 @@ export async function createFormationReservation(data) {
       if (!waitingListEntryId) {
         return { success: false, message: "Accès prioritaire invalide." };
       }
-      const wlEntry = await prisma.waitingListEntry.findUnique({ where: { id: waitingListEntryId } });
-      if (!wlEntry || wlEntry.formationSessionId !== sessionId || wlEntry.status !== "NOTIFIED") {
+      const wlEntry = await prisma.waitingListEntry.findUnique({
+        where: { id: waitingListEntryId },
+        include: { customer: { select: { email: true } } },
+      });
+      if (
+        !wlEntry ||
+        wlEntry.formationSessionId !== sessionId ||
+        wlEntry.status !== "NOTIFIED" ||
+        wlEntry.customer.email.toLowerCase() !== customerInfo.email.trim().toLowerCase()
+      ) {
         return {
           success: false,
           message: "Votre accès prioritaire n'est plus valide. Réinscrivez-vous sur la liste d'attente.",

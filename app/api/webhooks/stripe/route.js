@@ -9,12 +9,12 @@ import {
   workshopSeatsChangeEmail,
   formationReservationConfirmationEmail,
 } from "@/lib/email-templates";
-import { fulfillOrderPayment } from "@/actions/boutique/orders";
+import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
 import { renderInvoicePdf } from "@/lib/pdf/render";
-import { sendLowSeatsBroadcast } from "@/actions/workshops/notify-low-seats";
-import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
-import { sendFormationLowSeatsBroadcast } from "@/actions/formations/notify-low-seats";
+import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
+import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
+import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.

@@ -35,17 +35,33 @@ export async function getPaymentStatusBySession(stripeSessionId) {
     // - customer (buyer's fullName/email/phone)
     // - staff.user (staff member's fullName/email/phone)
     // - transaction.stripePaymentIntentId / stripeCheckoutSessionId
-    const { customer, staff, transactions, ...safe } = full;
     return {
       found: true,
       data: {
-        ...safe,
-        staff: staff
-          ? {
-              id: staff.id,
-              reservationConfirmationMode: staff.reservationConfirmationMode,
-            }
-          : undefined,
+        payment: {
+          totalAmount: full.payment.totalAmount,
+          paidAmount: full.payment.paidAmount,
+          remainingAmount: full.payment.remainingAmount,
+          paymentType: full.payment.paymentType,
+          status: full.payment.status,
+          paidAt: full.payment.paidAt,
+        },
+        appointment: {
+          date: full.appointment.date,
+          startTime: full.appointment.startTime,
+          endTime: full.appointment.endTime,
+          status: full.appointment.status,
+        },
+        staff: {
+          reservationConfirmationMode: full.staff.reservationConfirmationMode,
+          user: { fullName: full.staff.user.fullName },
+        },
+        service: { name: full.service.name },
+        staffService: {
+          price: full.staffService.price,
+          duration: full.staffService.duration,
+        },
+        transactions: [],
       },
     };
   } catch (error) {

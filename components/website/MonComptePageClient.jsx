@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Package, Sparkles, GraduationCap, Loader2, FileDown } from "lucide-react";
+import { Package, Sparkles, GraduationCap, Loader2, FileDown, ExternalLink, Truck } from "lucide-react";
 import { cancelMyOrder } from "@/actions/boutique/orders";
+import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 
 const CUSTOMER_CANCELLABLE_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP"];
 
@@ -151,6 +152,23 @@ function OrderCard({ order }) {
         )}
         <span className="text-sm font-bold text-gold">{formatPrice(order.totalAmount)}</span>
       </div>
+
+      {order.fulfilmentMode === "SHIPPING_PREPAID" && order.trackingCode && (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-cream px-3 py-2.5 text-xs text-ink/65">
+          <span className="inline-flex items-center gap-1.5">
+            <Truck className="h-3.5 w-3.5 text-gold" strokeWidth={1.75} />
+            Suivi : <strong className="font-mono text-ink">{order.trackingCode}</strong>
+          </span>
+          <a
+            href={MONDIAL_RELAY_TRACKING_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 font-semibold text-ink hover:text-gold"
+          >
+            Suivre le colis <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
+          </a>
+        </div>
+      )}
 
       {canCancel && (
         <div className="mt-3 flex items-center justify-end gap-2 border-t border-ink/8 pt-3">

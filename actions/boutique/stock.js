@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { DASHBOARD_PERMISSIONS, hasPermission, isAdminRole, ROLES } from "@/lib/authorization";
 import { stockAdjustmentSchema, stockCountSchema } from "@/lib/validations/boutique";
+import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 
 /**
  * Stock movements.
@@ -110,6 +111,16 @@ export async function recordStockMovement(input) {
         },
       });
 
+      await writeAuditLog(tx, {
+        action: AUDIT_ACTIONS.STOCK_MOVED,
+        entityType: "ProductVariant",
+        entityId: variantId,
+        before: { stockQuantity: previousStock },
+        after: { stockQuantity: newStock },
+        metadata: { movementId: movement.id, type, quantity: signedQuantity, reason: reason ?? null },
+        actor: guard.session.user,
+      });
+
       return { updated, movement };
     });
 
@@ -186,6 +197,16 @@ export async function recordStockCount(input) {
           reason: reason ?? "Comptage physique",
           createdById: guard.session.user.id,
         },
+      });
+
+      await writeAuditLog(tx, {
+        action: AUDIT_ACTIONS.STOCK_MOVED,
+        entityType: "ProductVariant",
+        entityId: variantId,
+        before: { stockQuantity: variant.stockQuantity },
+        after: { stockQuantity: countedQuantity },
+        metadata: { movementId: movement.id, type: "ADJUSTMENT", quantity: delta, reason: reason ?? "Comptage physique" },
+        actor: guard.session.user,
       });
 
       return { updated, movement };

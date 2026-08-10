@@ -2,12 +2,15 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { getCurrentStaffId } from "@/lib/route-protection";
 import { revalidatePath } from "next/cache";
 
 /**
  * Updates a draft newsletter.
- * Only DRAFT newsletters can be edited.
+ * Only DRAFT newsletters can be edited. A STAFF author may only edit their
+ * own drafts; OWNER/ADMIN may edit any (see schema comment on
+ * Newsletter.createdByStaffId).
  *
  * @param {string} newsletterId
  * @param {{ title: string, subject: string, content: string }} input
@@ -15,7 +18,7 @@ import { revalidatePath } from "next/cache";
  */
 export async function updateNewsletter(newsletterId, input) {
   const session = await auth();
-  if (!session?.user || !isAdminRole(session.user.role)) {
+  if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.NEWSLETTER)) {
     return { success: false, message: "Permissions insuffisantes" };
   }
 
@@ -45,7 +48,7 @@ export async function updateNewsletter(newsletterId, input) {
   try {
     const existing = await prisma.newsletter.findUnique({
       where: { id: newsletterId },
-      select: { status: true },
+      select: { status: true, createdByStaffId: true },
     });
 
     if (!existing) {
@@ -57,6 +60,13 @@ export async function updateNewsletter(newsletterId, input) {
         success: false,
         message: "Seules les newsletters en brouillon peuvent être modifiées.",
       };
+    }
+
+    if (session.user.role === "STAFF") {
+      const currentStaffId = await getCurrentStaffId();
+      if (existing.createdByStaffId !== currentStaffId) {
+        return { success: false, message: "Vous ne pouvez modifier que vos propres newsletters." };
+      }
     }
 
     // ── 3. Update ──────────────────────────────────────────────────────────

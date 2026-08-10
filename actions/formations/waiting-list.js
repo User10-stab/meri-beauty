@@ -8,6 +8,7 @@ import {
   formationWaitingListJoinConfirmationEmail,
 } from "@/lib/email-templates";
 import { sendEmail } from "@/lib/email";
+import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 
 /**
  * Formation equivalent of actions/workshops/waiting-list.js — same shape
@@ -36,11 +37,18 @@ function generateTemporaryPassword() {
 }
 
 /** Join the waiting list for a formation session. */
-export async function joinFormationWaitingList({ sessionId, customerInfo }) {
+export async function joinFormationWaitingList({ sessionId, customerInfo: submittedCustomerInfo }) {
   try {
+    let customerInfo = submittedCustomerInfo;
     if (!sessionId || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
     }
+
+    const customerValidation = validateCustomerIdentity(customerInfo);
+    if (!customerValidation.success) {
+      return { success: false, field: customerValidation.field, message: customerValidation.message };
+    }
+    customerInfo = { ...customerInfo, ...customerValidation.data };
 
     const session = await prisma.formationSession.findUnique({
       where: { id: sessionId },

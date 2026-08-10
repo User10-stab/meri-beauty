@@ -11,6 +11,7 @@ import { validatePromoCode } from "@/actions/promo-codes";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { MondialRelayPicker } from "@/components/boutique/MondialRelayPicker";
+import { isDisposableEmail } from "@/lib/validations/customer-identity";
 
 const MODES = [
   {
@@ -138,6 +139,10 @@ export function CheckoutPageClient({ cart, customerSession }) {
         toast.error("Veuillez compléter vos informations de contact.");
         return;
       }
+      if (isDisposableEmail(customerInfo.email)) {
+        toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
+        return;
+      }
       if (emailStatus === "exists") {
         toast.error(
           "Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même »."
@@ -200,6 +205,10 @@ export function CheckoutPageClient({ cart, customerSession }) {
     const info = isAuthenticated ? customerSession : customerInfo;
     if (!info?.fullName?.trim() || !info?.email?.trim() || !info?.phone?.trim()) {
       toast.error("Veuillez compléter vos informations de contact.");
+      return;
+    }
+    if (!isAuthenticated && isDisposableEmail(info.email)) {
+      toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
       return;
     }
     if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !/^\d{4}$/.test((pickupPoint?.postalCode ?? "").trim())) {

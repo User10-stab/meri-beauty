@@ -607,6 +607,31 @@ model User {
   orders                         Order[]                @relation("OrderBuyer")
   pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
+  auditLogs                      AuditLog[]             @relation("AuditActor")
+}
+
+// Immutable operational trail. Target records are intentionally represented
+// by type + id rather than foreign keys so an audit entry survives soft or
+// hard deletion of its target.
+model AuditLog {
+  id String @id @default(cuid())
+
+  actorId   String?
+  actor     User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorRole UserRole?
+
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
 }
 
 // CATEGORY — services only. Retail products use ProductCategory.
@@ -1105,6 +1130,7 @@ model Staff {
   timeOffs      TimeOff[]
   contracts     Contract[]
   appointments  Appointment[]
+  newsletters   Newsletter[]
 }
 
 // StaffService
@@ -1449,7 +1475,19 @@ model Newsletter {
   salonId String
   salon   Salon  @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
+  // Attribution only, not an audience filter (client decision, 10 Aug 2026):
+  // any STAFF member can author and send a newsletter, and it still goes to
+  // every newsletter-subscribed customer of the salon, same audience as an
+  // OWNER/ADMIN-authored one. Null = created by OWNER/ADMIN; non-null =
+  // that staff member authored it. See actions/newsletter/*.js — a STAFF
+  // author may only edit/delete/send their OWN still-DRAFT newsletters,
+  // OWNER/ADMIN may act on any.
+  createdByStaffId String?
+  createdByStaff   Staff?  @relation(fields: [createdByStaffId], references: [id])
+
   recipients NewsletterRecipient[]
+
+  @@index([createdByStaffId])
 }
 
 // NEWSLETTER RECIPIENT

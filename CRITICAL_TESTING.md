@@ -46,4 +46,12 @@ The suite has two layers:
 1. Behavioral unit tests execute pure financial and authorization logic with isolated transaction mocks.
 2. Security contract tests inspect critical production modules and fail if required locks, ownership checks, idempotency keys, or deduplication markers are removed.
 
-These tests never call Stripe, Resend, or the production database. They are fast and safe for every pull request, but they do not replace staging integration tests. Before release, run sandbox tests against a disposable migrated database and Stripe test mode for full webhook replay and real concurrency verification.
+These tests never call Stripe, Resend, or the production database. They are fast and safe for every pull request, but they do not replace staging integration tests.
+
+A security contract test proves the source still *contains* `FOR UPDATE` and
+`STOCK_RACE` — it never runs two real concurrent requests, so it can't prove
+the locking actually works under contention. `tests/integration/` does that,
+against a real (disposable, branched) Postgres database. See
+`tests/integration/README.md` for setup and `npm run test:integration` to run
+it. Not part of `npm test` / CI — it needs a `TEST_DATABASE_URL` secret CI
+doesn't have. Run it locally before a release.

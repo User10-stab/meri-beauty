@@ -7,6 +7,7 @@ import { expireStaleFormationHolds } from "@/lib/formations/expire-stale-holds";
 import { retryFailedRefunds } from "@/lib/payments/retry-failed-refunds";
 import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds";
 import { isValidCronSecret } from "@/lib/cron-auth";
+import { captureCriticalError } from "@/lib/monitoring";
 
 /**
  * Secured job runner — boutique order expiry + atelier/formation reminders.
@@ -28,6 +29,16 @@ import { isValidCronSecret } from "@/lib/cron-auth";
  * needs adding to Vercel's project env vars for the deployed site — that's
  * a dashboard action, not something this code can do).
  */
+const JOBS = [
+  ["expireStaleOrders", expireStaleOrders],
+  ["sendWorkshopReservationReminders", sendWorkshopReservationReminders],
+  ["sendFormationReservationReminders", sendFormationReservationReminders],
+  ["expireStaleWorkshopHolds", expireStaleWorkshopHolds],
+  ["expireStaleFormationHolds", expireStaleFormationHolds],
+  ["retryFailedRefunds", retryFailedRefunds],
+  ["reconcileMissedRefunds", reconcileMissedRefunds],
+];
+
 export async function GET(req) {
   const authHeader = req.headers.get("authorization");
   const secret = process.env.CRON_SECRET;
@@ -36,31 +47,38 @@ export async function GET(req) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const [orders, workshopReminders, formationReminders, workshopHolds, formationHolds, refundRetries, missedRefunds] = await Promise.all([
-      expireStaleOrders(),
-      sendWorkshopReservationReminders(),
-      sendFormationReservationReminders(),
-      expireStaleWorkshopHolds(),
-      expireStaleFormationHolds(),
-      retryFailedRefunds(),
-      reconcileMissedRefunds(),
-    ]);
+  // allSettled, not all: one job throwing (e.g. a stale Stripe Connect
+  // account inside reconcileMissedRefunds) must never mask whether the other
+  // six actually ran — a single bad account previously turned this whole
+  // endpoint into a 500 with no way to tell which job(s) were the problem.
+  const settled = await Promise.allSettled(JOBS.map(([, run]) => run()));
 
-    return NextResponse.json({
-      success: true,
-      ordersExpired: orders.expiredCount,
-      workshopRemindersSent: workshopReminders.sentCount,
-      formationRemindersSent: formationReminders.sentCount,
-      workshopHoldsExpired: workshopHolds.expiredCount,
-      formationHoldsExpired: formationHolds.expiredCount,
-      refundsRetried: refundRetries.retried,
-      refundsRecovered: refundRetries.succeeded,
-      missedRefundsChecked: missedRefunds.checked,
-      missedRefundsRecovered: missedRefunds.reconciled,
-    });
-  } catch (error) {
-    console.error("[api/cron] job failed:", error);
-    return NextResponse.json({ error: "Job failed" }, { status: 500 });
-  }
+  const results = {};
+  let anyFailed = false;
+  settled.forEach((outcome, i) => {
+    const [name] = JOBS[i];
+    if (outcome.status === "fulfilled") {
+      results[name] = outcome.value;
+    } else {
+      results[name] = null;
+      anyFailed = true;
+      captureCriticalError(outcome.reason, { area: "background-jobs", job: name, trigger: "http-cron" });
+    }
+  });
+
+  return NextResponse.json({
+    success: !anyFailed,
+    ordersExpired: results.expireStaleOrders?.expiredCount ?? null,
+    workshopRemindersSent: results.sendWorkshopReservationReminders?.sentCount ?? null,
+    formationRemindersSent: results.sendFormationReservationReminders?.sentCount ?? null,
+    workshopHoldsExpired: results.expireStaleWorkshopHolds?.expiredCount ?? null,
+    formationHoldsExpired: results.expireStaleFormationHolds?.expiredCount ?? null,
+    refundsRetried: results.retryFailedRefunds?.retried ?? null,
+    refundsRecovered: results.retryFailedRefunds?.succeeded ?? null,
+    missedRefundsChecked: results.reconcileMissedRefunds?.checked ?? null,
+    missedRefundsRecovered: results.reconcileMissedRefunds?.reconciled ?? null,
+    failedJobs: settled
+      .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
+      .filter(Boolean),
+  }, { status: anyFailed ? 207 : 200 });
 }

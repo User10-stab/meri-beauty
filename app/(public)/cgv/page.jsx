@@ -9,7 +9,7 @@ export const metadata = {
 
 export default function CGVPage() {
   return (
-    <LegalPageLayout eyebrow="Avant de commander" title="Conditions générales de vente" updated="7 août 2026">
+    <LegalPageLayout eyebrow="Avant de commander" title="Conditions générales de vente" updated="10 août 2026">
       <Note>
         Ce document est un projet à faire valider avant publication. Il couvre les quatre
         parcours proposés par le Site : boutique en ligne, rendez-vous en institut, ateliers et
@@ -130,7 +130,13 @@ export default function CGVPage() {
         À titre exceptionnel, et à sa seule discrétion, Meri Beauty peut accorder un
         remboursement en cas de force majeure dûment justifié (maladie grave, décès, etc.).
         Cette exception n'est jamais automatique : contactez-nous directement par téléphone ou
-        email en exposant votre situation ; nous l'examinerons au cas par cas.
+        email en exposant votre situation ; nous l'examinerons au cas par cas. Seul un membre
+        autorisé de l'équipe Meri Beauty peut valider et traiter ce remboursement.
+      </P>
+      <P>
+        Lorsqu'un remboursement est accordé, Meri Beauty émet, lorsque la réglementation l'exige,
+        une note de crédit liée à la facture initiale. Un remboursement ou une annulation accordé(e)
+        par exception libère la place concernée afin qu'elle puisse être proposée à une autre personne.
       </P>
 
       <H2>10. Garantie légale de conformité</H2>

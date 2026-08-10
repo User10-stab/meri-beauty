@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
 
 // Catches crashes in the root layout itself, which app/error.js cannot —
 // it must render its own <html>/<body> since it replaces the whole root
@@ -9,6 +10,7 @@ import { useEffect } from "react";
 export default function GlobalError({ error, reset }) {
   useEffect(() => {
     console.error("[root layout error boundary]", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (

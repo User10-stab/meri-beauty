@@ -9,6 +9,8 @@ import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-ve
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
+import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
+import { captureWarning } from "@/lib/monitoring";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -154,12 +156,20 @@ export async function checkWorkshopSessionAvailability(sessionId) {
 
 export async function createWorkshopReservation(data) {
   try {
-    const { sessionId, activityId, seatsCount, customerInfo, isPriority, waitingListEntryId, paymentMethod, promoCode } = data;
+    let { sessionId, activityId, seatsCount, customerInfo, isPriority, waitingListEntryId, paymentMethod, promoCode } = data;
     const isFullPayment = paymentMethod === "FULL";
 
     if (!sessionId || !activityId || !seatsCount || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
     }
+
+    // This action can be called without the browser form and creates both a
+    // customer account and a seat hold, so validate the payload here too.
+    const customerValidation = validateCustomerIdentity(customerInfo);
+    if (!customerValidation.success) {
+      return { success: false, field: customerValidation.field, message: customerValidation.message };
+    }
+    customerInfo = { ...customerInfo, ...customerValidation.data };
 
     // Load activity + session
     const activity = await prisma.activity.findUnique({
@@ -369,6 +379,7 @@ export async function createWorkshopReservation(data) {
       } catch (err) {
         if (typeof err.message === "string" && err.message.startsWith("SOLD_OUT:")) {
           const available = Number(err.message.slice("SOLD_OUT:".length));
+          captureWarning("Workshop session sold out during checkout", { area: "stock-capacity", sessionId, available });
           // A priority user who lost the race goes back on the waiting list
           if (isPriority && waitingListEntryId) {
             await prisma.waitingListEntry.updateMany({

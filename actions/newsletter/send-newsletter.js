@@ -2,7 +2,8 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
 import { newsletterEmail } from "@/lib/email-templates";
 import { buildUnsubscribeUrl } from "@/lib/newsletter-consent";
@@ -10,7 +11,11 @@ import { getAppBaseUrl } from "@/lib/site-url";
 import { revalidatePath } from "next/cache";
 
 /**
- * Sends a draft newsletter to all subscribed customers of the salon.
+ * Sends a draft newsletter to all subscribed customers of the salon —
+ * every OWNER/ADMIN/STAFF-authored newsletter reaches the same salon-wide
+ * audience (client decision, 10 Aug 2026 — createdByStaffId is attribution
+ * only, not an audience filter). A STAFF author may only send their own
+ * drafts; OWNER/ADMIN may send any.
  * Creates NewsletterRecipient records for each recipient.
  *
  * @param {string} newsletterId
@@ -18,7 +23,7 @@ import { revalidatePath } from "next/cache";
  */
 export async function sendNewsletter(newsletterId) {
   const session = await auth();
-  if (!session?.user || !isAdminRole(session.user.role)) {
+  if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.NEWSLETTER)) {
     return { success: false, message: "Permissions insuffisantes" };
   }
 
@@ -42,6 +47,13 @@ export async function sendNewsletter(newsletterId) {
         success: false,
         message: "Cette newsletter a déjà été envoyée ou programmée.",
       };
+    }
+
+    if (session.user.role === "STAFF") {
+      const currentStaffId = await getCurrentStaffId();
+      if (newsletter.createdByStaffId !== currentStaffId) {
+        return { success: false, message: "Vous ne pouvez envoyer que vos propres newsletters." };
+      }
     }
 
     // ── 2. Get subscribed customers ────────────────────────────────────────

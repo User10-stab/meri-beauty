@@ -2,18 +2,19 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 
 /**
- * Fetches all newsletters for the current salon.
- * Only available to ADMIN/OWNER roles.
+ * Fetches all newsletters for the current salon — every OWNER/ADMIN/STAFF
+ * sees the full salon-wide list (not just their own), so nobody drafts
+ * duplicate content without realizing someone already covered it.
  *
  * @returns {{ success: boolean, data?: Array<object>, message?: string }}
  */
 export async function getNewsletters() {
   try {
     const session = await auth();
-    if (!session?.user || !isAdminRole(session.user.role)) {
+    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.NEWSLETTER)) {
       return { success: false, data: [], message: "Permissions insuffisantes" };
     }
 
@@ -35,6 +36,9 @@ export async function getNewsletters() {
         _count: {
           select: { recipients: true },
         },
+        createdByStaff: {
+          select: { id: true, user: { select: { fullName: true } } },
+        },
       },
     });
 
@@ -49,6 +53,8 @@ export async function getNewsletters() {
       createdAt: n.createdAt.toISOString(),
       updatedAt: n.updatedAt.toISOString(),
       recipientCount: n._count.recipients,
+      createdByStaffId: n.createdByStaff?.id ?? null,
+      createdByName: n.createdByStaff?.user?.fullName ?? "Salon",
     }));
 
     return { success: true, data: serialised };

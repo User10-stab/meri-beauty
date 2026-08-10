@@ -8,6 +8,8 @@ import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-ve
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
+import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
+import { captureWarning } from "@/lib/monitoring";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -148,12 +150,18 @@ export async function checkFormationSessionAvailability(sessionId) {
 
 export async function createFormationReservation(data) {
   try {
-    const { sessionId, formationId, customerInfo, paymentMethod, isPriority, waitingListEntryId, promoCode } = data;
+    let { sessionId, formationId, customerInfo, paymentMethod, isPriority, waitingListEntryId, promoCode } = data;
     const isFullPayment = paymentMethod === "FULL";
 
     if (!sessionId || !formationId || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
     }
+
+    const customerValidation = validateCustomerIdentity(customerInfo);
+    if (!customerValidation.success) {
+      return { success: false, field: customerValidation.field, message: customerValidation.message };
+    }
+    customerInfo = { ...customerInfo, ...customerValidation.data };
 
     const formation = await prisma.formation.findUnique({
       where: { id: formationId },
@@ -360,6 +368,7 @@ export async function createFormationReservation(data) {
       } catch (err) {
         if (typeof err.message === "string" && err.message.startsWith("SOLD_OUT:")) {
           const available = Number(err.message.slice("SOLD_OUT:".length));
+          captureWarning("Formation session sold out during checkout", { area: "stock-capacity", sessionId, available });
           // A priority user who lost the race goes back on the waiting list
           if (isPriority && waitingListEntryId) {
             await prisma.waitingListEntry.updateMany({

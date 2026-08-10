@@ -6,6 +6,7 @@ import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
 import { welcomeWithCredentialsEmail, waitingListJoinConfirmationEmail } from "@/lib/email-templates";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
@@ -31,11 +32,18 @@ function generateTemporaryPassword() {
  * Join the waiting list for a workshop session.
  * Creates the user account if needed (same logic as reservation).
  */
-export async function joinWaitingList({ sessionId, customerInfo }) {
+export async function joinWaitingList({ sessionId, customerInfo: submittedCustomerInfo }) {
   try {
+    let customerInfo = submittedCustomerInfo;
     if (!sessionId || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
     }
+
+    const customerValidation = validateCustomerIdentity(customerInfo);
+    if (!customerValidation.success) {
+      return { success: false, field: customerValidation.field, message: customerValidation.message };
+    }
+    customerInfo = { ...customerInfo, ...customerValidation.data };
 
     const rateLimitIp = await getClientIp();
     const rateLimitKey = `${customerInfo.email.trim().toLowerCase()}:${rateLimitIp}`;

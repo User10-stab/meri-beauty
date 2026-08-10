@@ -2,20 +2,25 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { getCurrentStaffId } from "@/lib/route-protection";
 import { revalidatePath } from "next/cache";
 
 /**
- * Creates a new newsletter (DRAFT status).
+ * Creates a new newsletter (DRAFT status). Any OWNER/ADMIN/STAFF may create
+ * one — a STAFF-authored newsletter is tagged via createdByStaffId (pure
+ * attribution, see the schema comment) but goes to the same salon-wide
+ * subscriber audience as an admin one.
  *
  * @param {{ title: string, subject: string, content: string }} input
  * @returns {{ success: boolean, message: string, errors?: object, newsletterId?: string }}
  */
 export async function createNewsletter(input) {
   const session = await auth();
-  if (!session?.user || !isAdminRole(session.user.role)) {
+  if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.NEWSLETTER)) {
     return { success: false, message: "Permissions insuffisantes" };
   }
+  const createdByStaffId = session.user.role === "STAFF" ? await getCurrentStaffId() : null;
 
   // ── 1. Validate ──────────────────────────────────────────────────────────
   const { title, subject, content } = input;
@@ -58,6 +63,7 @@ export async function createNewsletter(input) {
         content: content.trim(),
         status: "DRAFT",
         salonId: salon.id,
+        createdByStaffId,
       },
     });
 

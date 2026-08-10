@@ -18,6 +18,8 @@ import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-order-payment";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
+import { captureError, captureWarning } from "@/lib/monitoring";
 
 /**
  * Checkout + order fulfilment.
@@ -486,9 +488,10 @@ export async function createOrderFromCart(input) {
     };
   } catch (error) {
     if (error.message === "STOCK_RACE") {
+      captureWarning("Stock race lost during checkout", { area: "stock-capacity" });
       return { success: false, message: "Le stock a changé entre-temps — vérifiez votre panier et réessayez." };
     }
-    console.error("[createOrderFromCart]", error);
+    captureError(error, { area: "stock-capacity", context: "createOrderFromCart" });
     return { success: false, message: "Impossible de créer la commande." };
   }
 }
@@ -889,11 +892,14 @@ export async function markOrderShipped(input) {
       subject: `Commande expédiée – n°${order.orderNumber} – Meri Beauty`,
       text:
         `Bonjour ${order.user.fullName},\n\n` +
-        `Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : ${trackingCode}\n\n` +
+        `Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : ${trackingCode}\n` +
+        `Suivez votre colis : ${MONDIAL_RELAY_TRACKING_URL}\n\n` +
         `L'équipe Meri Beauty`,
       html:
         `<p>Bonjour ${order.user.fullName},</p>` +
-        `<p>Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : <strong>${trackingCode}</strong></p>` +
+        `<p>Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : <strong>${trackingCode}</strong>.</p>` +
+        `<p><a href="${MONDIAL_RELAY_TRACKING_URL}" style="display:inline-block;padding:12px 18px;background:#2F3A2E;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;">Suivre mon colis</a></p>` +
+        `<p>Sur la page Mondial Relay, saisissez le numéro de suivi : <strong>${trackingCode}</strong>.</p>` +
         `<p>L'équipe Meri Beauty</p>`,
     }).catch((err) => console.error("[markOrderShipped] email failed:", err));
 

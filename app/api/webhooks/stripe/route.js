@@ -21,6 +21,7 @@ import {
   reconcileExceptionalReservationFullRefund,
   RESERVATION_REFUND_AUTHORIZATION,
 } from "@/lib/payments/reconcile-reservation-refund";
+import { captureCriticalError } from "@/lib/monitoring";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -78,7 +79,7 @@ export async function POST(req) {
       await handleAccountUpdated(event.data.object);
       return NextResponse.json({ received: true });
     } catch (err) {
-      console.error("[stripe-webhook] account.updated processing failed:", err);
+      captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
       return NextResponse.json({ error: "Processing failed" }, { status: 500 });
     }
   }
@@ -88,7 +89,7 @@ export async function POST(req) {
       await handlePaymentIntentFailed(event.data.object);
       return NextResponse.json({ received: true });
     } catch (err) {
-      console.error("[stripe-webhook] payment_intent.payment_failed processing failed:", err);
+      captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
       return NextResponse.json({ error: "Processing failed" }, { status: 500 });
     }
   }
@@ -106,7 +107,7 @@ export async function POST(req) {
       await handleChargeRefunded(event.data.object);
       return NextResponse.json({ received: true });
     } catch (err) {
-      console.error("[stripe-webhook] charge.refunded processing failed:", err);
+      captureCriticalError(err, { area: "refund-reconciliation", eventType: event.type, eventId: event.id });
       return NextResponse.json({ error: "Processing failed" }, { status: 500 });
     }
   }
@@ -116,7 +117,7 @@ export async function POST(req) {
       await handleChargeDisputeCreated(event.data.object);
       return NextResponse.json({ received: true });
     } catch (err) {
-      console.error("[stripe-webhook] charge.dispute.created processing failed:", err);
+      captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
       return NextResponse.json({ error: "Processing failed" }, { status: 500 });
     }
   }
@@ -178,7 +179,13 @@ export async function POST(req) {
     }
     return NextResponse.json(result);
   } catch (err) {
-    console.error("[stripe-webhook] Processing failed:", err);
+    captureCriticalError(err, {
+      area: "stripe-webhook",
+      eventType: event.type,
+      eventId: event.id,
+      kind: session.metadata?.kind ?? "appointment",
+      sessionId: session.id,
+    });
     // 500 → Stripe retries the delivery. Idempotency check makes retries safe.
     return NextResponse.json({ error: "Processing failed" }, { status: 500 });
   }
@@ -1279,8 +1286,8 @@ async function refundSession(session) {
   try {
     await stripe.refunds.create({ payment_intent: session.payment_intent });
   } catch (err) {
-    // Log — the money question must never be silently swallowed.
-    console.error("[stripe-webhook] REFUND FAILED for", session.id, err);
+    // The money question must never be silently swallowed.
+    captureCriticalError(err, { area: "refund-reconciliation", sessionId: session.id, kind: session.metadata?.kind });
     throw err; // 500 → Stripe retries → refund retried
   }
 }

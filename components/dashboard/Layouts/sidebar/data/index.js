@@ -45,8 +45,10 @@ const ALL_NAV_DATA = [
       {
         title: "Paiements",
         icon: Icons.CreditCardIcon,
-        url: "/dashboard/payments",
-        items: [],
+        items: [
+          { title: "Compte Stripe", url: "/dashboard/payments" },
+          { title: "Réconciliation", url: "/dashboard/payments/reconciliation", roles: DASHBOARD_PERMISSIONS.PAYMENT_RECONCILIATION },
+        ],
       },
       {
         title: "Workshops & Événements",

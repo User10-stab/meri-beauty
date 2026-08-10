@@ -18,6 +18,7 @@ import { sendNewsletter } from "@/actions/newsletter/send-newsletter";
 const NEWSLETTER_COLUMNS = [
   { key: "title", label: "Titre" },
   { key: "subject", label: "Objet" },
+  { key: "createdByName", label: "Créée par" },
   { key: "createdAt", label: "Créée le" },
   { key: "sentAt", label: "Envoyée le" },
   { key: "status", label: "Statut" },
@@ -26,8 +27,12 @@ const NEWSLETTER_COLUMNS = [
 
 /**
  * Client shell for the newsletter management page.
+ *
+ * @param {string} currentRole - session role, used to gate edit/send/delete
+ *   to a STAFF author's own newsletters (OWNER/ADMIN act on any).
+ * @param {string|null} currentStaffId
  */
-export function NewsletterPageClient({ initialData }) {
+export function NewsletterPageClient({ initialData, currentRole, currentStaffId }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(initialData);
@@ -206,7 +211,9 @@ export function NewsletterPageClient({ initialData }) {
         data={data}
         isLoading={loading}
         columns={NEWSLETTER_COLUMNS}
-        renderRow={(props) => <NewsletterRow {...props} />}
+        renderRow={(props) => (
+          <NewsletterRow {...props} currentRole={currentRole} currentStaffId={currentStaffId} />
+        )}
         emptyState={NewsletterEmptyState}
         searchPlaceholder="Rechercher par titre, objet, statut..."
         searchFilter={searchFilter}

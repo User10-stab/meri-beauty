@@ -16,6 +16,7 @@ import { checkEmailExists } from "@/actions/shared/check-email-exists";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
+import { isDisposableEmail } from "@/lib/validations/customer-identity";
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
@@ -203,6 +204,11 @@ function ReservationFormationContent() {
 
     if (!isAuthed && emailStatus === "exists") {
       setError("Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même ».");
+      return;
+    }
+
+    if (!isAuthed && isDisposableEmail(form.email)) {
+      setFieldErrors({ email: "Les adresses e-mail temporaires ne sont pas acceptées." });
       return;
     }
 

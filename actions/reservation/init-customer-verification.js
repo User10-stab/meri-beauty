@@ -9,6 +9,7 @@ import { welcomeWithCredentialsEmail } from "@/lib/email-templates";
 import { getAbsoluteUrl } from "@/lib/site-url";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -29,7 +30,11 @@ const RATE_LIMIT_MAX_REQUESTS = 3;
  * @returns {Promise<{ verified: boolean, message: string }>}
  */
 export async function initCustomerVerification({ fullName, email, phone, newsletterSubscribed }) {
-  const normalizedEmail = email.trim().toLowerCase();
+  const validation = validateCustomerIdentity({ fullName, email, phone }, { requirePhone: true });
+  if (!validation.success) {
+    return { verified: false, field: validation.field, message: validation.message };
+  }
+  const { fullName: validFullName, email: normalizedEmail, phone: validPhone } = validation.data;
 
   const ip = await getClientIp();
   const rateLimitKey = `${normalizedEmail}:${ip}`;
@@ -66,9 +71,9 @@ export async function initCustomerVerification({ fullName, email, phone, newslet
 
     await prisma.user.create({
       data: {
-        fullName: fullName.trim(),
+        fullName: validFullName,
         email: normalizedEmail,
-        phone: phone.trim(),
+        phone: validPhone,
         password: hashedPassword,
         role: "CUSTOMER",
         emailVerified: false,
@@ -80,7 +85,7 @@ export async function initCustomerVerification({ fullName, email, phone, newslet
     // Send welcome email with login credentials (fire-and-forget)
     const loginUrl = getAbsoluteUrl("/login");
     const emailTemplate = welcomeWithCredentialsEmail({
-      customerName: fullName.trim(),
+      customerName: validFullName,
       email: normalizedEmail,
       temporaryPassword,
       loginUrl,
@@ -98,7 +103,7 @@ export async function initCustomerVerification({ fullName, email, phone, newslet
   //    the action always succeeds if email is reachable; failures are logged
   //    internally by sendVerificationEmail)
   await sendVerificationEmail({
-    fullName: fullName.trim(),
+    fullName: validFullName,
     email: normalizedEmail,
   });
 

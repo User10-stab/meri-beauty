@@ -1,3 +1,5 @@
+import { withSentryConfig } from "@sentry/nextjs";
+
 const CSP = [
   "default-src 'self'",
   // 'unsafe-inline' is needed for Next's hydration bootstrap and Tailwind/
@@ -26,7 +28,10 @@ const CSP = [
   // fonts.gstatic.com: actual font files served by the Google Fonts stylesheet above.
   "font-src 'self' data: https://fonts.gstatic.com",
   // *.mondialrelay.com: the pickup-point widget's own point-search XHR calls.
-  "connect-src 'self' https://*.mondialrelay.com",
+  // *.pusher.com: Pusher notifications client — wss://ws-<cluster>.pusher.com
+  // for the live socket, plus https://sockjs-<cluster>.pusher.com and
+  // stats.pusher.com that the same client falls back to/reports to.
+  "connect-src 'self' https://*.mondialrelay.com wss://*.pusher.com https://*.pusher.com",
   // Google Maps embed on the Contact page.
   "frame-src 'self' https://www.google.com",
   "object-src 'none'",
@@ -98,4 +103,11 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Only used for source-map upload — silent no-op locally/without a token,
+  // so this is safe to leave configured even before SENTRY_AUTH_TOKEN exists.
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  silent: true,
+});

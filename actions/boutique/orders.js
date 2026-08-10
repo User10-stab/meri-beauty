@@ -17,6 +17,7 @@ import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-ve
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-order-payment";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 
 /**
  * Checkout + order fulfilment.
@@ -120,7 +121,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
       password: placeholderHash,
       role: "CUSTOMER",
       isActive: true,
-      newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
+      ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "boutique_checkout"),
     },
   });
 
@@ -1020,6 +1021,10 @@ async function performOrderCancellation(order, reason) {
     let refundFailed = false;
     if (wasSold && order.payment.transactionReference) {
       if (remaining > REFUND_EPSILON) {
+        // Recorded before the Stripe call, not just in the catch block below —
+        // a crash/timeout mid-call would otherwise leave nothing durable to
+        // retry against; see lib/payments/retry-failed-refunds.js.
+        await prisma.payment.update({ where: { id: order.payment.id }, data: { status: "REFUND_PENDING" } });
         try {
           const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
           if (session.payment_intent) {
@@ -1044,9 +1049,20 @@ async function performOrderCancellation(order, reason) {
         } catch (err) {
           // The order is already cancelled and stock restored — that's correct
           // and stays. But don't let the customer email below claim a refund
-          // that didn't happen; surface this to staff instead.
+          // that didn't happen; surface this to staff instead, AND persist it
+          // durably so the cron retry job (lib/payments/retry-failed-refunds.js)
+          // can pick it up even if this email is missed.
           console.error("[performOrderCancellation] REFUND FAILED for order", orderId, err);
           refundFailed = true;
+          await prisma.payment.update({
+            where: { id: order.payment.id },
+            data: {
+              status: "REFUND_FAILED",
+              refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+              refundAttemptedAt: new Date(),
+              refundRetryCount: { increment: 1 },
+            },
+          });
         }
       }
     }

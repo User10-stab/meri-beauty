@@ -100,20 +100,34 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
 
     // Deposits are non-refundable by default — never stripe.refunds.create()
     // here unless the admin explicitly granted an exception above. The
-    // Transaction{REFUND} row / credit note are only written once Stripe
-    // actually confirms the refund, same reasoning as
-    // actions/appointment/manage-appointment.js#rejectAppointment.
+    // credit note is issued as soon as that exception is granted (same
+    // decoupled-from-Stripe-success pattern as orders.js/manage-appointment.js
+    // — it's a record of the business decision to credit the customer, not
+    // of the money having actually moved yet), so a failed/retried Stripe
+    // call never leaves it missing.
     let refundFailed = false;
     if (refundDeposit && reservation.payment?.transactionReference) {
+      const payment = reservation.payment;
+
+      await prisma.$transaction(async (tx) => {
+        await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
+        if (payment.invoice) {
+          await issueCreditNote(tx, {
+            invoiceId: payment.invoice.id,
+            reason: reason || "Annulation atelier — remboursement exceptionnel",
+            totalInclVat: Number(payment.paidAmount),
+          });
+        }
+      });
+
       try {
-        const checkoutSession = await stripe.checkout.sessions.retrieve(reservation.payment.transactionReference);
+        const checkoutSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
         if (checkoutSession.payment_intent) {
           await stripe.refunds.create({ payment_intent: checkoutSession.payment_intent });
 
-          const payment = reservation.payment;
-          await prisma.$transaction(async (tx) => {
-            await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
-            await tx.transaction.create({
+          await prisma.$transaction([
+            prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } }),
+            prisma.transaction.create({
               data: {
                 paymentId: payment.id,
                 amount: payment.paidAmount,
@@ -121,23 +135,27 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
                 transactionType: "REFUND",
                 paidAt: new Date(),
               },
-            });
-            if (payment.invoice) {
-              await issueCreditNote(tx, {
-                invoiceId: payment.invoice.id,
-                reason: reason || "Annulation atelier — remboursement exceptionnel",
-                totalInclVat: Number(payment.paidAmount),
-              });
-            }
-          });
+            }),
+          ]);
         }
       } catch (err) {
-        // The reservation is already cancelled — that stays. But don't let
-        // the customer email below claim a refund that didn't happen;
-        // surface this to staff instead (same pattern as
-        // actions/boutique/orders.js#performOrderCancellation).
+        // The reservation is already cancelled and the credit note already
+        // issued — that stays. But don't let the customer email below claim
+        // a refund that didn't happen; surface this to staff instead, AND
+        // persist it durably so the cron retry job
+        // (lib/payments/retry-failed-refunds.js) can pick it up even if
+        // this email is missed.
         console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
         refundFailed = true;
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: "REFUND_FAILED",
+            refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+            refundAttemptedAt: new Date(),
+            refundRetryCount: { increment: 1 },
+          },
+        });
       }
     }
 

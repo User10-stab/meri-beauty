@@ -1,4 +1,5 @@
 import LegalPageLayout, { H2, H3, P, Ul, Note } from "@/components/website/LegalPageLayout";
+import Link from "next/link";
 
 export const metadata = {
   title: "Conditions générales de vente | Meri Beauty",
@@ -95,7 +96,7 @@ export default function CGVPage() {
         pénalité.
       </P>
       <P>Pour exercer ce droit, utilisez le formulaire disponible sur la page{" "}
-        <a className="text-gold underline" href="/boutique/returns">Retourner un article</a>. Le
+        <Link className="text-gold underline" href="/boutique/returns">Retourner un article</Link>. Le
         droit de rétractation ne s'applique pas :
       </P>
       <Ul>

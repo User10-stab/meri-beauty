@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { auth } from "@/auth";
 import { getCustomers } from "@/actions/customers/get-customers";
 import { CustomersPageClient } from "@/components/dashboard/customers/CustomersPageClient";
 
@@ -10,6 +11,9 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function CustomersPage() {
+  const session = await auth();
+  const userRole = session?.user?.role;
+
   const customersResult = await getCustomers();
 
   const customers = customersResult.data ?? [];
@@ -51,7 +55,7 @@ export default async function CustomersPage() {
 
       {/* ── Client shell ───────────────────────────────────────────────── */}
       <Suspense fallback={<CustomersTableSkeleton />}>
-        <CustomersPageClient initialCustomers={customers} initialTotalCount={totalCount} />
+        <CustomersPageClient initialCustomers={customers} initialTotalCount={totalCount} userRole={userRole} />
       </Suspense>
     </div>
   );

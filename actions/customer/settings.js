@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 
 export async function getMySettings() {
   const session = await auth();
@@ -97,7 +98,7 @@ export async function updateNewsletterPreference(subscribed) {
   try {
     await prisma.user.update({
       where: { id: session.user.id },
-      data: { newsletterSubscribed: Boolean(subscribed) },
+      data: buildNewsletterConsentUpdate(Boolean(subscribed), "account_settings"),
     });
 
     revalidatePath("/settings");

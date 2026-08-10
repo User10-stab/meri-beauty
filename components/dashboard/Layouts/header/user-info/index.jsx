@@ -21,7 +21,7 @@ export function UserInfo({ user }) {
   async function handleLogout() {
     setIsOpen(false);
     await logoutUser();
-    window.location.href = "/login";
+    window.location.href = "/";
   }
 
   return (

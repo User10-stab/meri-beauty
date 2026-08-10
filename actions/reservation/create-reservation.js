@@ -15,6 +15,7 @@ import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { isAdminRole } from "@/lib/authorization";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
 
 const BCRYPT_SALT_ROUNDS = 12;
@@ -114,7 +115,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         role: "CUSTOMER",
         emailVerified: false,
         isActive: true,
-        newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
+        ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
       },
     });
 
@@ -153,7 +154,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
             isActive: true,
             isDeleted: false,
             deletedAt: null,
-            newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
+            ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
           },
         });
 

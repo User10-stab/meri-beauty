@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { emailVerificationEmail } from "@/lib/email-templates";
 import { registerSchema } from "@/lib/validations/register";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
@@ -80,7 +81,7 @@ export async function registerUser(input) {
           role: "CUSTOMER",
           emailVerified: false,
           isActive: true,
-          newsletterSubscribed: newsletterSubscribed ?? false,
+          ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "registration"),
         },
         select: userSelect,
       });

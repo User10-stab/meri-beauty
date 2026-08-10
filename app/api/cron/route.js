@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { expireStaleOrders } from "@/lib/orders/expire-stale-orders";
 import { sendWorkshopReservationReminders } from "@/lib/reminders/send-workshop-reminders";
 import { sendFormationReservationReminders } from "@/lib/reminders/send-formation-reminders";
+import { expireStaleWorkshopHolds } from "@/lib/workshops/expire-stale-holds";
+import { expireStaleFormationHolds } from "@/lib/formations/expire-stale-holds";
+import { retryFailedRefunds } from "@/lib/payments/retry-failed-refunds";
 import { isValidCronSecret } from "@/lib/cron-auth";
 
 /**
@@ -33,10 +36,13 @@ export async function GET(req) {
   }
 
   try {
-    const [orders, workshopReminders, formationReminders] = await Promise.all([
+    const [orders, workshopReminders, formationReminders, workshopHolds, formationHolds, refundRetries] = await Promise.all([
       expireStaleOrders(),
       sendWorkshopReservationReminders(),
       sendFormationReservationReminders(),
+      expireStaleWorkshopHolds(),
+      expireStaleFormationHolds(),
+      retryFailedRefunds(),
     ]);
 
     return NextResponse.json({
@@ -44,6 +50,10 @@ export async function GET(req) {
       ordersExpired: orders.expiredCount,
       workshopRemindersSent: workshopReminders.sentCount,
       formationRemindersSent: formationReminders.sentCount,
+      workshopHoldsExpired: workshopHolds.expiredCount,
+      formationHoldsExpired: formationHolds.expiredCount,
+      refundsRetried: refundRetries.retried,
+      refundsRecovered: refundRetries.succeeded,
     });
   } catch (error) {
     console.error("[api/cron] job failed:", error);

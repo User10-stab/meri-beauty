@@ -9,6 +9,7 @@ import {
   reservationReceivedEmail,
   welcomeWithCredentialsEmail,
 } from "@/lib/email-templates";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -182,7 +183,7 @@ export async function createAppointment(data) {
             role: "CUSTOMER",
             emailVerified: true,  // verified implicitly via reservation flow
             isActive: true,
-            newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
+            ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
           },
         });
 

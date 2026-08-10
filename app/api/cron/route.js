@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { expireStaleOrders } from "@/actions/boutique/orders";
-import { sendWorkshopReservationReminders } from "@/actions/workshops/send-reminders";
-import { sendFormationReservationReminders } from "@/actions/formations/send-reminders";
+import { expireStaleOrders } from "@/lib/orders/expire-stale-orders";
+import { sendWorkshopReservationReminders } from "@/lib/reminders/send-workshop-reminders";
+import { sendFormationReservationReminders } from "@/lib/reminders/send-formation-reminders";
 import { isValidCronSecret } from "@/lib/cron-auth";
 
 /**

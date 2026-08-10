@@ -4,10 +4,10 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import bcrypt from "bcrypt";
-import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
+import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
-import { resolvePromoCode } from "@/actions/promo-codes";
+import { resolvePromoCode } from "@/lib/promo-codes";
 import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
 
 const BCRYPT_SALT_ROUNDS = 12;
@@ -183,11 +183,13 @@ export async function createWorkshopReservation(data) {
       }
       const wlEntry = await prisma.waitingListEntry.findUnique({
         where: { id: waitingListEntryId },
+        include: { customer: { select: { email: true } } },
       });
       if (
         !wlEntry ||
         wlEntry.sessionId !== sessionId ||
-        wlEntry.status !== "NOTIFIED"
+        wlEntry.status !== "NOTIFIED" ||
+        wlEntry.customer.email.toLowerCase() !== customerInfo.email.trim().toLowerCase()
       ) {
         return {
           success: false,

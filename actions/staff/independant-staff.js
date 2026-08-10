@@ -3,8 +3,15 @@
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { auth } from "@/auth";
+import { isAdminRole } from "@/lib/authorization";
 
 const VALID_LANGUAGES = ["ARABIC", "FRENCH", "ENGLISH"];
+
+async function requireAdmin() {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) throw new Error("Acces non autorise.");
+}
 
 function normalizeLanguages(value) {
   return value
@@ -15,6 +22,7 @@ function normalizeLanguages(value) {
 }
 
 export async function createIndependentStaff(formData) {
+  await requireAdmin();
   const userId = formData.get("userId")?.toString().trim();
   const bio = formData.get("bio")?.toString().trim() || null;
   const languages = normalizeLanguages(formData.get("languages")?.toString() || "");
@@ -49,6 +57,7 @@ export async function createIndependentStaff(formData) {
 }
 
 export async function updateIndependentStaff(formData) {
+  await requireAdmin();
   const id = formData.get("id")?.toString().trim();
   const bio = formData.get("bio")?.toString().trim() || null;
   const languages = normalizeLanguages(formData.get("languages")?.toString() || "");
@@ -77,6 +86,7 @@ export async function updateIndependentStaff(formData) {
 }
 
 export async function deleteIndependentStaff(formData) {
+  await requireAdmin();
   const id = formData.get("id")?.toString().trim();
 
   if (!id) {

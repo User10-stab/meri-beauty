@@ -147,7 +147,7 @@ function NotFound() {
 
 /** The main success card rendered once we have confirmed payment data. */
 function SuccessCard({ data }) {
-  const { payment, appointment, customer, staff, service, staffService, transactions } = data;
+  const { payment, appointment, staff, service, transactions = [] } = data;
 
   const isManual    = staff.reservationConfirmationMode === "MANUAL";
   const isConfirmed = appointment.status === "CONFIRMED";
@@ -212,7 +212,6 @@ function SuccessCard({ data }) {
           <InfoRow label="Experte"  value={staff.user.fullName} />
           <InfoRow label="Date"     value={formatDate(appointment.date)} />
           <InfoRow label="Heure"    value={appointmentTime} />
-          <InfoRow label="Client"   value={customer.fullName} />
         </div>
       </div>
 

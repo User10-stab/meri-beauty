@@ -2,6 +2,8 @@
 
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
+import { isAdminRole, ROLES } from "@/lib/authorization";
 
 /**
  * Generates a Stripe Account Link for onboarding a staff member's
@@ -23,15 +25,22 @@ export async function createAccountLink(staffId) {
       return { success: false, message: "L'identifiant du staff est requis." };
     }
 
+    const session = await auth();
+    if (!session?.user) return { success: false, message: "Authentification requise." };
+
     // ── 1. Fetch staff record from the database ────────────────────────────
     const staff = await prisma.staff.findUnique({
       where: { id: staffId },
-      select: { stripeAccountId: true },
+      select: { stripeAccountId: true, userId: true, isDeleted: true },
     });
 
     if (!staff) {
       return { success: false, message: "Staff introuvable." };
     }
+
+    const canManage = isAdminRole(session.user.role)
+      || (session.user.role === ROLES.STAFF && staff.userId === session.user.id);
+    if (!canManage || staff.isDeleted) return { success: false, message: "Acces non autorise." };
 
     if (!staff.stripeAccountId) {
       return {

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isAdminRole, ROLES } from "@/lib/authorization";
+import { DASHBOARD_PERMISSIONS, hasPermission, isAdminRole, ROLES } from "@/lib/authorization";
 import { stockAdjustmentSchema, stockCountSchema } from "@/lib/validations/boutique";
 
 /**
@@ -26,6 +26,15 @@ async function requireStaff() {
   // RESTOCK/LOSS/ADJUSTMENT beyond that stay admin-only via the UI layer.
   const allowed = [ROLES.OWNER, ROLES.ADMIN, ROLES.STAFF];
   if (!allowed.includes(session.user.role)) return { error: "Accès non autorisé." };
+  return { session };
+}
+
+async function requireStockAccess() {
+  const session = await auth();
+  if (!session?.user) return { error: "Non authentifie." };
+  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK)) {
+    return { error: "Acces non autorise." };
+  }
   return { session };
 }
 
@@ -208,6 +217,9 @@ export async function recordStockCount(input) {
 
 /** Flat, variant-centric inventory listing — the Stock page's main table. */
 export async function getAllVariants({ search, lowStockOnly = false } = {}) {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
+
   try {
     const variants = await prisma.productVariant.findMany({
       where: {
@@ -259,6 +271,9 @@ export async function getAllVariants({ search, lowStockOnly = false } = {}) {
 
 /** Variants at or below their low-stock threshold, for the dashboard alert. */
 export async function getLowStockVariants() {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
+
   try {
     const variants = await prisma.$queryRaw`
       SELECT v.id, v.name, v.sku, v."stockQuantity", v."reservedQuantity", v."lowStockThreshold",
@@ -288,6 +303,8 @@ export async function getLowStockVariants() {
 
 /** Movement history for one variant, most recent first. */
 export async function getStockMovements(variantId, { take = 50 } = {}) {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
   if (!variantId) return { success: false, message: "Identifiant manquant.", data: [] };
 
   try {

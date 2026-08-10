@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { sendAppointmentReminders } from "@/actions/appointment/reminders";
+import { sendAppointmentReminders } from "@/lib/reminders/send-appointment-reminders";
 import { isValidCronSecret } from "@/lib/cron-auth";
 
 /**

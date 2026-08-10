@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import {
   welcomeWithCredentialsEmail,
-  formationWaitingListNotificationEmail,
   formationWaitingListJoinConfirmationEmail,
 } from "@/lib/email-templates";
 import { sendEmail } from "@/lib/email";
@@ -157,50 +156,6 @@ export async function joinFormationWaitingList({ sessionId, customerInfo }) {
   }
 }
 
-/**
- * Notify everyone on the waiting list that a spot is available — same
- * broadcast-to-all/first-paid-wins model as ateliers.
- */
-export async function notifyAllInFormationWaitingList(sessionId) {
-  try {
-    const waitingEntries = await prisma.waitingListEntry.findMany({
-      where: { formationSessionId: sessionId, status: "WAITING" },
-      orderBy: { position: "asc" },
-      include: { customer: true, formationSession: { include: { formation: true } } },
-    });
-
-    if (waitingEntries.length === 0) {
-      return { success: true, notified: 0, message: "Personne en liste d'attente." };
-    }
-
-    await prisma.waitingListEntry.updateMany({
-      where: { formationSessionId: sessionId, status: "WAITING" },
-      data: { status: "NOTIFIED", notifiedAt: new Date() },
-    });
-
-    const session = waitingEntries[0].formationSession;
-    const sessionDate = formatSessionDate(session.startDate);
-
-    for (const entry of waitingEntries) {
-      const reservationUrl = `${process.env.NEXT_PUBLIC_APP_URL}/reservation-formation?formation=${session.formationId}&session=${sessionId}&priority=true&wl=${entry.id}`;
-      sendEmail({
-        to: entry.customer.email,
-        ...formationWaitingListNotificationEmail({
-          customerName: entry.customer.fullName,
-          formationTitle: session.formation.title,
-          sessionDate,
-          reservationUrl,
-        }),
-      }).catch(() => {});
-    }
-
-    return { success: true, notified: waitingEntries.length };
-  } catch (error) {
-    console.error("[notifyAllInFormationWaitingList]", error?.message || error);
-    return { success: false, message: "Erreur lors de la notification." };
-  }
-}
-
 /** Check if a user is already on the waiting list for a formation session. */
 export async function checkFormationWaitingListStatus(sessionId, customerEmail) {
   try {
@@ -235,7 +190,7 @@ export async function validateFormationWaitingListPriority(waitingListEntryId) {
     const entry = await prisma.waitingListEntry.findUnique({ where: { id: waitingListEntryId } });
     if (!entry) return { valid: false, message: "Entrée introuvable." };
     if (entry.status !== "NOTIFIED") return { valid: false, message: "Cette entrée n'est plus valide." };
-    return { valid: true, entry };
+    return { valid: true };
   } catch (error) {
     console.error("[validateFormationWaitingListPriority]", error);
     return { valid: false, message: "Erreur de validation." };
@@ -245,11 +200,25 @@ export async function validateFormationWaitingListPriority(waitingListEntryId) {
 /** Mark a waiting list entry as converted after a successful reservation. */
 export async function convertFormationWaitingListEntry(waitingListEntryId, reservationId) {
   try {
-    await prisma.waitingListEntry.update({
+    const entry = await prisma.waitingListEntry.findUnique({
       where: { id: waitingListEntryId },
+      select: { formationSessionId: true, customerId: true },
+    });
+    if (!entry) return { success: false };
+
+    const reservation = await prisma.formationReservation.findUnique({
+      where: { id: reservationId },
+      select: { sessionId: true, customerId: true },
+    });
+    if (!reservation || reservation.sessionId !== entry.formationSessionId || reservation.customerId !== entry.customerId) {
+      return { success: false };
+    }
+
+    const converted = await prisma.waitingListEntry.updateMany({
+      where: { id: waitingListEntryId, status: "NOTIFIED" },
       data: { status: "CONVERTED", convertedToReservationId: reservationId },
     });
-    return { success: true };
+    return { success: converted.count === 1 };
   } catch (error) {
     console.error("[convertFormationWaitingListEntry]", error);
     return { success: false };

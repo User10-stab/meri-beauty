@@ -7,7 +7,7 @@ import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
 import { workshopCancellationEmail } from "@/lib/email-templates";
 import { isAdminRole } from "@/lib/authorization";
-import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
+import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-workshop-reservation";
 import { issueCreditNote } from "@/lib/invoicing";
 

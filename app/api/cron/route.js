@@ -5,6 +5,7 @@ import { sendFormationReservationReminders } from "@/lib/reminders/send-formatio
 import { expireStaleWorkshopHolds } from "@/lib/workshops/expire-stale-holds";
 import { expireStaleFormationHolds } from "@/lib/formations/expire-stale-holds";
 import { retryFailedRefunds } from "@/lib/payments/retry-failed-refunds";
+import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds";
 import { isValidCronSecret } from "@/lib/cron-auth";
 
 /**
@@ -36,13 +37,14 @@ export async function GET(req) {
   }
 
   try {
-    const [orders, workshopReminders, formationReminders, workshopHolds, formationHolds, refundRetries] = await Promise.all([
+    const [orders, workshopReminders, formationReminders, workshopHolds, formationHolds, refundRetries, missedRefunds] = await Promise.all([
       expireStaleOrders(),
       sendWorkshopReservationReminders(),
       sendFormationReservationReminders(),
       expireStaleWorkshopHolds(),
       expireStaleFormationHolds(),
       retryFailedRefunds(),
+      reconcileMissedRefunds(),
     ]);
 
     return NextResponse.json({
@@ -54,6 +56,8 @@ export async function GET(req) {
       formationHoldsExpired: formationHolds.expiredCount,
       refundsRetried: refundRetries.retried,
       refundsRecovered: refundRetries.succeeded,
+      missedRefundsChecked: missedRefunds.checked,
+      missedRefundsRecovered: missedRefunds.reconciled,
     });
   } catch (error) {
     console.error("[api/cron] job failed:", error);

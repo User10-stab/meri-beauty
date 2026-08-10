@@ -42,6 +42,16 @@ enum PaymentStatus {
   PARTIALLY_PAID
   PARTIALLY_REFUNDED
   FAILED
+  // A refund was decided (cancellation/return approved) but the Stripe call
+  // hasn't been confirmed successful yet — set right before attempting it,
+  // so a crash/timeout mid-call still leaves a durably queryable row for
+  // the retry job to pick up, not just whatever the synchronous try/catch
+  // managed to report. See lib/payments/retry-failed-refunds.js.
+  REFUND_PENDING
+  // The Stripe refund call itself errored (network, card issuer, etc.) —
+  // previously only surfaced via a best-effort staff email that could be
+  // missed; now durably retryable via the same job.
+  REFUND_FAILED
 }
 
 enum PaymentType {
@@ -563,6 +573,15 @@ model User {
   // before the change — see auth.js#jwt.
   sessionVersion       Int       @default(0)
   newsletterSubscribed Boolean   @default(false)
+  // Demonstrable, timestamped marketing consent — GDPR/ePrivacy requires
+  // being able to show when/how/under-what-policy-version someone opted
+  // in, not just the current boolean. Only ever set together (see
+  // lib/newsletter-consent.js#buildNewsletterConsentUpdate) whenever
+  // newsletterSubscribed transitions to true; left untouched on
+  // unsubscribe so the original consent record stays intact as history.
+  newsletterConsentedAt   DateTime?
+  newsletterConsentSource String? // e.g. "registration", "boutique_checkout", "appointment_booking", "account_settings"
+  newsletterConsentVersion String? // which marketing-consent copy version was shown at opt-in time
   vatNumber            String? // Client TVA number for B2B invoices
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
@@ -1184,6 +1203,15 @@ model Payment {
   // a second concurrent insert with the same session id throws P2002 instead
   // of silently succeeding and double-fulfilling.
   transactionReference   String?               @unique
+
+  // Durable refund-retry bookkeeping — see PaymentStatus.REFUND_PENDING/
+  // REFUND_FAILED above and lib/payments/retry-failed-refunds.js. Cleared
+  // implicitly by moving on to REFUNDED/PARTIALLY_REFUNDED; not reset to
+  // null on success since a resolved failure history is still worth
+  // keeping for reporting.
+  refundFailureReason String?
+  refundAttemptedAt   DateTime?
+  refundRetryCount    Int       @default(0)
 
   // Recorded here rather than on each of the 4 source models (Order,
   // WorkshopReservation, FormationReservation, Appointment) — Payment is

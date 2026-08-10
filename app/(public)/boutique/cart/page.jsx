@@ -1,6 +1,8 @@
 import { getCart } from "@/actions/boutique/cart";
 import { CartPageClient } from "@/components/boutique/CartPageClient";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = { title: "Mon panier – Meri Beauty" };
 
 export default async function CartPage() {

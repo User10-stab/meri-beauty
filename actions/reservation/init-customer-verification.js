@@ -8,6 +8,7 @@ import { sendEmail } from "@/lib/email";
 import { welcomeWithCredentialsEmail } from "@/lib/email-templates";
 import { getAbsoluteUrl } from "@/lib/site-url";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -72,7 +73,7 @@ export async function initCustomerVerification({ fullName, email, phone, newslet
         role: "CUSTOMER",
         emailVerified: false,
         isActive: true,
-        newsletterSubscribed: newsletterSubscribed ?? false,
+        ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
       },
     });
 

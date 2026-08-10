@@ -10,6 +10,7 @@ import { generateAutologinToken } from "@/lib/autologin";
 import { parseLocalDateString } from "@/lib/slot-availability";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { validateAppointmentSlot } from "@/lib/appointment-scheduling";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -73,7 +74,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
       role: "CUSTOMER",
       emailVerified: false,
       isActive: true,
-      newsletterSubscribed: Boolean(customerInfo.newsletterSubscribed ?? false),
+      ...buildNewsletterConsentUpdate(Boolean(customerInfo.newsletterSubscribed ?? false), "appointment_booking"),
     },
   });
 

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { sendEmail } from "@/lib/email";
 import { newsletterEmail } from "@/lib/email-templates";
+import { buildUnsubscribeUrl } from "@/lib/newsletter-consent";
+import { getAppBaseUrl } from "@/lib/site-url";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -76,12 +78,14 @@ export async function sendNewsletter(newsletterId) {
 
     // ── 4. Send emails (non-blocking — fire and forget) ────────────────────
     // We send emails asynchronously without awaiting them all to avoid timeout
+    const baseUrl = getAppBaseUrl();
     const emailPromises = subscribedUsers.map((user) => {
       const { subject, text, html } = newsletterEmail({
         customerName: user.fullName,
         title: newsletter.title,
         content: newsletter.content,
         salonName,
+        unsubscribeUrl: buildUnsubscribeUrl(baseUrl, user.id),
       });
 
       return sendEmail({

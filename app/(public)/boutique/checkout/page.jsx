@@ -4,6 +4,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { CheckoutPageClient } from "@/components/boutique/CheckoutPageClient";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = { title: "Commande – Meri Beauty" };
 
 export default async function CheckoutPage() {

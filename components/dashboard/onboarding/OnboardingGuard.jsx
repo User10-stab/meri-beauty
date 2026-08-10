@@ -10,13 +10,13 @@ export function OnboardingGuard({ userRole }) {
   const router = useRouter();
   const [status, setStatus] = useState(null);
 
-  if (userRole !== "STAFF") return null;
-
   useEffect(() => {
+    if (userRole !== "STAFF") return;
     checkOnboardingStatus().then(setStatus);
-  }, [pathname]);
+  }, [pathname, userRole]);
 
   useEffect(() => {
+    if (userRole !== "STAFF") return;
     if (!status || !status.isStaff) return;
 
     const isAccountRoute = pathname === "/dashboard/account-settings" || pathname === "/dashboard";
@@ -29,7 +29,9 @@ export function OnboardingGuard({ userRole }) {
     if (status.setupCompleted && status.stripeRequired && !isPaymentsRoute) {
       router.replace("/dashboard/payments");
     }
-  }, [pathname, router, status]);
+  }, [pathname, router, status, userRole]);
+
+  if (userRole !== "STAFF") return null;
 
   if (!status || !status.isStaff) return null;
 

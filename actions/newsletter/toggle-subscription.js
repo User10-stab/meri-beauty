@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 
 /**
  * Toggles the newsletter subscription for the currently authenticated user.
@@ -36,7 +37,7 @@ export async function toggleNewsletterSubscription() {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { newsletterSubscribed: newStatus },
+      data: buildNewsletterConsentUpdate(newStatus, "account_settings"),
     });
 
     revalidatePath("/");

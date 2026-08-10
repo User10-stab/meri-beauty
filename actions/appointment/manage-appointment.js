@@ -288,6 +288,10 @@ export async function rejectAppointment(appointmentId, reason = null) {
     // would tell the customer "refunded" even if the Stripe call below fails.
     let refundFailed = false;
     if (wasPaid && payment.transactionReference && remaining > REFUND_EPSILON) {
+      // Recorded before the Stripe call, not just in the catch block below —
+      // a crash/timeout mid-call would otherwise leave nothing durable to
+      // retry against; see lib/payments/retry-failed-refunds.js.
+      await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
       try {
         const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
         if (stripeSession.payment_intent) {
@@ -313,8 +317,20 @@ export async function rejectAppointment(appointmentId, reason = null) {
         // The appointment cancellation and credit note are already
         // committed and stay — surface the refund failure loudly so it can
         // be retried/handled manually, rather than silently swallowing it.
+        // Also persisted durably so the cron retry job
+        // (lib/payments/retry-failed-refunds.js) can pick it up even if
+        // this email is missed.
         console.error("[rejectAppointment] REFUND FAILED for appointment", appointmentId, err);
         refundFailed = true;
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: "REFUND_FAILED",
+            refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+            refundAttemptedAt: new Date(),
+            refundRetryCount: { increment: 1 },
+          },
+        });
       }
     }
 

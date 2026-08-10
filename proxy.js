@@ -13,7 +13,7 @@ async function sha256Hex(value) {
     .join("");
 }
 
-export default async function middleware(request) {
+export default async function proxy(request) {
   const gateEnabled = !!GATE_PASSWORD;
 
   if (gateEnabled) {

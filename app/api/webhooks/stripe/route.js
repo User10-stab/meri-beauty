@@ -15,6 +15,12 @@ import { renderInvoicePdf } from "@/lib/pdf/render";
 import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
+import { Prisma } from "@prisma/client";
+import { reconcileStripeProductOrderRefund } from "@/lib/orders/reconcile-stripe-refund";
+import {
+  reconcileExceptionalReservationFullRefund,
+  RESERVATION_REFUND_AUTHORIZATION,
+} from "@/lib/payments/reconcile-reservation-refund";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -241,7 +247,13 @@ async function findPaymentByChargePaymentIntent(paymentIntentId) {
   if (!session) return null;
   return prisma.payment.findUnique({
     where: { transactionReference: session.id },
-    include: { invoice: true, transactions: true },
+    include: {
+      invoice: true,
+      transactions: true,
+      order: { include: { items: true } },
+      workshopReservation: true,
+      formationReservation: true,
+    },
   });
 }
 
@@ -261,42 +273,105 @@ async function handleChargeRefunded(charge) {
     return;
   }
 
-  const alreadyRecorded = payment.transactions
-    .filter((t) => t.transactionType === "REFUND")
-    .reduce((sum, t) => sum + Number(t.amount), 0);
   const stripeRefundedTotal = round2((charge.amount_refunded ?? 0) / 100);
-  const newlyRefunded = round2(stripeRefundedTotal - alreadyRecorded);
+  const stripePaymentIntentId =
+    typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id ?? null;
+  const stripeRefundId = charge.refunds?.data?.at(-1)?.id ?? null;
+  let reservationReconciliation = null;
 
-  // Nothing new — either our own refund action already recorded this
-  // exact amount, or this is a duplicate delivery of an event we've seen.
-  if (newlyRefunded <= 0.01) return;
+  const result = await prisma.$transaction(async (tx) => {
+    if (payment.orderId) {
+      const orderResult = await reconcileStripeProductOrderRefund(tx, {
+        paymentId: payment.id,
+        stripeRefundedTotal,
+        stripePaymentIntentId,
+        stripeRefundId,
+      });
+      if (orderResult.newlyRefunded > 0.01 && payment.invoice) {
+        await issueCreditNote(tx, {
+          invoiceId: payment.invoice.id,
+          reason: "Remboursement effectué depuis le Dashboard Stripe",
+          totalInclVat: orderResult.newlyRefunded,
+        });
+      }
+      return orderResult;
+    }
 
-  const fullyRefunded = charge.refunded === true || stripeRefundedTotal + 0.01 >= Number(payment.paidAmount);
+    await tx.$executeRaw(
+      Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`external-refund:${payment.id}`}))`,
+    );
+    const lockedPayment = await tx.payment.findUnique({
+      where: { id: payment.id },
+      include: {
+        invoice: true,
+        transactions: true,
+        workshopReservation: true,
+        formationReservation: true,
+      },
+    });
+    const alreadyRecorded = lockedPayment.transactions
+      .filter((transaction) => transaction.transactionType === "REFUND")
+      .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+    const newlyRefunded = round2(stripeRefundedTotal - alreadyRecorded);
+    const fullyRefunded = stripeRefundedTotal + 0.01 >= Number(lockedPayment.paidAmount);
 
-  await prisma.$transaction(async (tx) => {
+    if (stripePaymentIntentId) {
+      await tx.transaction.updateMany({
+        where: {
+          paymentId: lockedPayment.id,
+          transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
+          stripePaymentIntentId: null,
+        },
+        data: { stripePaymentIntentId },
+      });
+    }
+    if (newlyRefunded <= 0.01) {
+      return { handled: true, newlyRefunded: 0, fullyRefunded, alreadyProcessed: true };
+    }
+
     await tx.transaction.create({
       data: {
-        paymentId: payment.id,
+        paymentId: lockedPayment.id,
         amount: newlyRefunded,
         method: "ONLINE",
         transactionType: "REFUND",
         paidAt: new Date(),
+        stripePaymentIntentId,
       },
     });
     await tx.payment.update({
-      where: { id: payment.id },
+      where: { id: lockedPayment.id },
       data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
     });
-    if (payment.invoice) {
+    if (lockedPayment.invoice) {
       await issueCreditNote(tx, {
-        invoiceId: payment.invoice.id,
+        invoiceId: lockedPayment.invoice.id,
         reason: "Remboursement effectué depuis le Dashboard Stripe",
         totalInclVat: newlyRefunded,
       });
     }
+
+    reservationReconciliation = await reconcileExceptionalReservationFullRefund(tx, {
+      payment: lockedPayment,
+      stripeRefundedTotal,
+      authorization: RESERVATION_REFUND_AUTHORIZATION.ADMIN_EXTERNAL_STRIPE_REFUND,
+    });
+    return { handled: true, newlyRefunded, fullyRefunded, stripeRefundId };
   });
 
-  console.info(`[stripe-webhook] Synced Dashboard-initiated refund for payment ${payment.id}: €${newlyRefunded}`);
+  if (reservationReconciliation?.reconciled) {
+    const notification = reservationReconciliation.reservationKind === "workshop"
+      ? notifyAllInWaitingList(reservationReconciliation.sessionId)
+      : import("@/lib/formations/notify-waiting-list").then(({ notifyAllInFormationWaitingList }) =>
+          notifyAllInFormationWaitingList(reservationReconciliation.sessionId));
+    notification.catch((err) =>
+      console.error("[stripe-webhook] refund waiting-list notification failed:", err));
+  }
+
+  console.info(
+    `[stripe-webhook] Synced Dashboard-initiated refund for payment ${payment.id}: €${result.newlyRefunded ?? 0}`,
+    { stripePaymentIntentId, stripeRefundId },
+  );
 }
 
 /**
@@ -740,6 +815,9 @@ async function processWorkshopCheckoutSession(session) {
         method: "ONLINE",
         transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
         paidAt: new Date(),
+        stripeCheckoutSessionId: session.id,
+        stripePaymentIntentId:
+          typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null,
       },
     });
 
@@ -906,6 +984,9 @@ async function processFormationCheckoutSession(session) {
         method: "ONLINE",
         transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
         paidAt: new Date(),
+        stripeCheckoutSessionId: session.id,
+        stripePaymentIntentId:
+          typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null,
       },
     });
 

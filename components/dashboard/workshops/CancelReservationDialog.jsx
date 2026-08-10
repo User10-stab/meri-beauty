@@ -12,7 +12,7 @@ import Button from "@/components/ui/Button";
  *
  * @param {{ reservation: object|null, onClose: () => void, onConfirm: (args: { reason: string, refundDeposit: boolean }) => void, loading: boolean }} props
  */
-export function CancelReservationDialog({ reservation, onClose, onConfirm, loading }) {
+export function CancelReservationDialog({ reservation, onClose, onConfirm, loading, formationMode = false }) {
   const [refundDeposit, setRefundDeposit] = useState(false);
   const [reason, setReason] = useState("");
 
@@ -48,7 +48,7 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
         </div>
 
         <p className="text-sm text-gray-600 dark:text-dark-6">
-          « {reservation.customer?.fullName} » — {reservation.session?.workshop?.title}
+          « {reservation.customer?.fullName} » — {reservation.session?.workshop?.title ?? reservation.session?.formation?.title}
         </p>
 
         <label className="mt-4 flex items-start gap-2.5 rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-3">
@@ -60,10 +60,10 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
           />
           <span>
             <span className="font-medium text-gray-800 dark:text-white">
-              Rembourser l'acompte à titre exceptionnel
+              {formationMode ? "Rembourser le montant payé à titre exceptionnel" : "Rembourser l'acompte à titre exceptionnel"}
             </span>
             <span className="mt-0.5 block text-xs text-gray-400">
-              Réservé aux cas exceptionnels (maladie, décès, force majeure). Par défaut, l'acompte n'est jamais remboursé.
+              Réservé aux cas exceptionnels validés par un administrateur. Par défaut, le paiement n'est jamais remboursé.
             </span>
           </span>
         </label>
@@ -83,8 +83,8 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
 
         <p className="mt-3 text-xs text-gray-400">
           {refundDeposit
-            ? "L'acompte versé sera remboursé via Stripe."
-            : "L'acompte versé ne sera pas remboursé."}
+            ? `${formationMode ? "Le montant payé" : "L'acompte versé"} sera remboursé via Stripe.`
+            : `${formationMode ? "Le montant payé" : "L'acompte versé"} ne sera pas remboursé.`}
         </p>
 
         <div className="mt-5 flex justify-end gap-2">

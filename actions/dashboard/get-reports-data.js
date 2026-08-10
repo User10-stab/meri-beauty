@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
 
 // Same convention as getDashboardStats — a refund is its own ledger event,
 // it doesn't erase that the sale happened, so it still counts as revenue.
@@ -51,19 +52,19 @@ export async function getReportsData() {
     ] = await Promise.all([
       prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, orderId: { not: null } },
-        select: { paidAmount: true, paidAt: true },
+        select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
       prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, appointmentId: { not: null } },
-        select: { paidAmount: true, paidAt: true },
+        select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
       prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, workshopReservationId: { not: null } },
-        select: { paidAmount: true, paidAt: true },
+        select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
       prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, formationReservationId: { not: null } },
-        select: { paidAmount: true, paidAt: true },
+        select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
       prisma.orderItem.groupBy({
         by: ["productName"],
@@ -107,7 +108,7 @@ export async function getReportsData() {
     function addTo(field, rows) {
       for (const p of rows) {
         const key = monthKey(p.paidAt);
-        if (buckets[key]) buckets[key][field] += Number(p.paidAmount);
+        if (buckets[key]) buckets[key][field] += summarizePaymentAmounts(p).netCollectedAmount;
       }
     }
     addTo("boutique", boutiquePayments);

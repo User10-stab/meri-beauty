@@ -1028,9 +1028,19 @@ async function performOrderCancellation(order, reason) {
         try {
           const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
           if (session.payment_intent) {
-            await stripe.refunds.create({ payment_intent: session.payment_intent, amount: Math.round(remaining * 100) });
+            const stripePaymentIntentId =
+              typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent.id;
+            await stripe.refunds.create({ payment_intent: stripePaymentIntentId, amount: Math.round(remaining * 100) });
             const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
             await prisma.$transaction([
+              prisma.transaction.updateMany({
+                where: {
+                  paymentId: order.payment.id,
+                  transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
+                  stripePaymentIntentId: null,
+                },
+                data: { stripePaymentIntentId },
+              }),
               prisma.transaction.create({
                 data: {
                   paymentId: order.payment.id,
@@ -1038,6 +1048,8 @@ async function performOrderCancellation(order, reason) {
                   method: "ONLINE",
                   transactionType: "REFUND",
                   paidAt: new Date(),
+                  stripeCheckoutSessionId: order.payment.transactionReference,
+                  stripePaymentIntentId,
                 },
               }),
               prisma.payment.update({

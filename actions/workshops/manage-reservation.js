@@ -123,10 +123,25 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       try {
         const checkoutSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
         if (checkoutSession.payment_intent) {
-          await stripe.refunds.create({ payment_intent: checkoutSession.payment_intent });
+          const stripePaymentIntentId =
+            typeof checkoutSession.payment_intent === "string"
+              ? checkoutSession.payment_intent
+              : checkoutSession.payment_intent.id;
+          await stripe.refunds.create({
+            payment_intent: stripePaymentIntentId,
+            metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
+          });
 
           await prisma.$transaction([
             prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } }),
+            prisma.transaction.updateMany({
+              where: {
+                paymentId: payment.id,
+                transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
+                stripePaymentIntentId: null,
+              },
+              data: { stripePaymentIntentId },
+            }),
             prisma.transaction.create({
               data: {
                 paymentId: payment.id,
@@ -134,6 +149,8 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
                 method: "ONLINE",
                 transactionType: "REFUND",
                 paidAt: new Date(),
+                stripeCheckoutSessionId: payment.transactionReference,
+                stripePaymentIntentId,
               },
             }),
           ]);

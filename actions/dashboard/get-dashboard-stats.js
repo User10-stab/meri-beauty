@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getLowStockVariants } from "@/actions/boutique/stock";
+import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
 
 // Revenue = money that has actually landed, regardless of a later partial/
 // full refund — a refund is its own ledger event, it doesn't erase that the
@@ -53,9 +54,9 @@ export async function getDashboardStats() {
       recentOrders,
       revenueLast7Days,
     ] = await Promise.all([
-      prisma.payment.aggregate({
+      prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfMonth } },
-        _sum: { paidAmount: true },
+        select: { paidAmount: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
       prisma.appointment.count({
         where: {
@@ -103,7 +104,11 @@ export async function getDashboardStats() {
       }),
       prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: sevenDaysAgo } },
-        select: { paidAmount: true, paidAt: true },
+        select: {
+          paidAmount: true,
+          paidAt: true,
+          transactions: { select: { transactionType: true, amount: true } },
+        },
       }),
     ]);
 
@@ -118,7 +123,7 @@ export async function getDashboardStats() {
     for (const p of revenueLast7Days) {
       const key = dateKey(p.paidAt);
       if (dailyTotals.has(key)) {
-        dailyTotals.set(key, dailyTotals.get(key) + Number(p.paidAmount));
+        dailyTotals.set(key, dailyTotals.get(key) + summarizePaymentAmounts(p).netCollectedAmount);
       }
     }
     const revenueTrend = Array.from(dailyTotals.entries()).map(([date, total]) => ({ date, total }));
@@ -126,7 +131,10 @@ export async function getDashboardStats() {
     return {
       success: true,
       data: {
-        revenueThisMonth: Number(revenueThisMonth._sum.paidAmount ?? 0),
+        revenueThisMonth: revenueThisMonth.reduce(
+          (sum, payment) => sum + summarizePaymentAmounts(payment).netCollectedAmount,
+          0,
+        ),
         appointmentsToday,
         newCustomersThisMonth,
         lowStockCount: lowStock.data?.length ?? 0,

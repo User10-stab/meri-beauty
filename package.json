@@ -8,6 +8,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --test tests/reservation-payment.test.js && npm run test:critical",
+    "test:critical": "vitest run --reporter=default --reporter=junit --reporter=json --outputFile.junit=test-results/critical.xml --outputFile.json=test-results/critical.json",
+    "audit:prod": "npm audit --omit=dev && npm run lint && npm test && npm run build",
     "seed": "node prisma/seed.mjs"
   },
   "prisma": {
@@ -54,6 +57,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
-    "typescript": "5.8.2"
+    "typescript": "5.8.2",
+    "vitest": "4.1.10"
   }
 }

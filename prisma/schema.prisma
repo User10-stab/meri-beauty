@@ -35,6 +35,15 @@ enum AppointmentStatus {
   NO_SHOW
 }
 
+enum AppointmentCancellationSource {
+  CUSTOMER
+  STAFF
+  ADMIN
+  STRIPE
+  REFUND_RECONCILIATION
+  SYSTEM
+}
+
 enum PaymentStatus {
   PENDING
   PAID
@@ -512,7 +521,10 @@ model FormationReservation {
 
 // SALON
 model Salon {
-  id          String  @id @default(cuid())
+  // The application has exactly one salon. The database migration also adds
+  // a CHECK constraint so a caller cannot bypass this invariant by supplying
+  // another id explicitly.
+  id          String  @id @default("main-salon")
   name        String
   description String?
   logo        String?
@@ -633,6 +645,7 @@ model User {
   cancelledReservations          WorkshopReservation[]  @relation("ReservationCancelledBy")
   formationReservations          FormationReservation[]
   cancelledFormationReservations FormationReservation[] @relation("FormationReservationCancelledBy")
+  cancelledAppointments          Appointment[]          @relation("AppointmentCancelledBy")
   createdFormations              Formation[]            @relation("FormationCreatedBy")
   stockMovements                 InventoryMovement[]    @relation("StockMovementBy")
   carts                          Cart[]
@@ -1231,11 +1244,16 @@ model Appointment {
   staffId String
   staff   Staff  @relation(fields: [staffId], references: [id])
 
-  date      DateTime
-  startTime DateTime
-  endTime   DateTime
-  status    AppointmentStatus
-  notes     String?
+  date               DateTime
+  startTime          DateTime
+  endTime            DateTime
+  status             AppointmentStatus
+  notes              String?
+  cancelledAt        DateTime?
+  cancelledByUserId  String?
+  cancelledBy        User?                          @relation("AppointmentCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  cancellationReason String?
+  cancellationSource AppointmentCancellationSource?
 
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -1256,6 +1274,7 @@ model Appointment {
   @@index([staffId, startTime]) // cross-service overlap checks
   @@index([userId, startTime]) // "my appointments"
   @@index([isDeleted, status, startTime]) // dashboard filters
+  @@index([cancelledByUserId])
 }
 
 // PAYMENT
@@ -1467,6 +1486,8 @@ model Contract {
   notes                String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
+
+  rentalRequest RentalRequest?
 }
 
 // WORKING HOUR
@@ -1602,6 +1623,8 @@ model RentalRequest {
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
+  contractId     String?             @unique
+  contract       Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
 }
 
 // SALON GALLERY

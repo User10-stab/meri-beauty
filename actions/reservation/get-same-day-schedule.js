@@ -25,7 +25,7 @@ export async function getSameDaySchedule({ drafts, date, maxProposals = DEFAULT_
     const staffServiceIds = drafts.map((d) => d.staffService.id);
 
     const [salon, staffServices, allAppointments] = await Promise.all([
-      prisma.salon.findFirst({ include: { closures: true, workingDays: true } }),
+      prisma.salon.findUnique({ where: { id: "main-salon" }, include: { closures: true, workingDays: true } }),
       prisma.staffService.findMany({
         where: { id: { in: staffServiceIds } },
         include: {

@@ -88,7 +88,7 @@ export async function createConnectAccount(staffId) {
     }
 
     // ── 3. Create Stripe Connect Express account ────────────────────────────
-    const salon = await prisma.salon.findFirst();
+    const salon = await prisma.salon.findUnique({ where: { id: "main-salon" } });
 
     const account = await stripe.accounts.create({
   type: "express",

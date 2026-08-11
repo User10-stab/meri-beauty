@@ -50,6 +50,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [statusFilter, setStatusFilter] = useState("");
   const [staffFilter, setStaffFilter] = useState("");
   const [toReject, setToReject] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState("");
   const [toComplete, setToComplete] = useState(null);
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [isPending, startTransition] = useTransition();
@@ -134,9 +135,10 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     if (!toReject) return;
     setRowLoadingId(toReject.id);
     startTransition(async () => {
-      const result = await rejectAppointment(toReject.id);
+      const result = await rejectAppointment(toReject.id, rejectionReason);
       setRowLoadingId(null);
       setToReject(null);
+      setRejectionReason("");
       if (result.success) {
         toast.success(result.message);
         refetch({});
@@ -242,6 +244,12 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[a.status]}`}>
                       {STATUS_LABEL[a.status]}
                     </span>
+                    {a.status === "CANCELLED" && (
+                      <div className="mt-1 max-w-48 text-xs text-gray-400">
+                        <div>{a.cancelledBy?.fullName ?? a.cancellationSource ?? "Système"}</div>
+                        {a.cancellationReason && <div className="truncate" title={a.cancellationReason}>{a.cancellationReason}</div>}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     {a.review ? (
@@ -268,7 +276,10 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         </button>
                         <button
                           type="button"
-                          onClick={() => setToReject(a)}
+                          onClick={() => {
+                            setRejectionReason("");
+                            setToReject(a);
+                          }}
                           disabled={rowLoadingId === a.id}
                           className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
                         >
@@ -307,8 +318,23 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         danger
         loading={isPending}
         onConfirm={handleReject}
-        onCancel={() => setToReject(null)}
-      />
+        onCancel={() => {
+          setToReject(null);
+          setRejectionReason("");
+        }}
+      >
+        <label htmlFor="appointment-cancellation-reason" className="mb-1 block text-sm font-medium text-gray-700">
+          Motif de l&apos;annulation
+        </label>
+        <textarea
+          id="appointment-cancellation-reason"
+          value={rejectionReason}
+          onChange={(event) => setRejectionReason(event.target.value.slice(0, 1000))}
+          rows={3}
+          placeholder="Expliquez pourquoi ce rendez-vous est annulé…"
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+        />
+      </ConfirmDialog>
 
       {toComplete && (
         <div

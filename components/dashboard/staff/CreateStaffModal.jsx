@@ -251,7 +251,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       const res = await action(data);
       if (res.success) {
         toast.success(res.message);
-        onSuccess?.();
+        onSuccess?.(res);
         onClose();
       } else {
         if (res.errors) {

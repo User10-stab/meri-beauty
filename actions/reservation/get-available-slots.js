@@ -47,7 +47,8 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
     //    the Server Action serialisation boundary (Date → ISO string → Date).
     const selectedDate = parseLocalDateString(date);
 
-    const salon = await prisma.salon.findFirst({
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
       include: { closures: true, workingDays: true },
     });
 
@@ -148,7 +149,8 @@ export async function getMonthAvailability(staffServiceId, monthDate, excludeApp
     const endOfMonth   = new Date(year, month + 1, 0);      // local midnight last day
     endOfMonth.setHours(23, 59, 59, 999);
 
-    const salon = await prisma.salon.findFirst({
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
       include: { closures: true, workingDays: true },
     });
 

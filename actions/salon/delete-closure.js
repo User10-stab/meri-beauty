@@ -18,7 +18,7 @@ export async function deleteClosure(input) {
   }
 
   try {
-    const salon = await prisma.salon.findFirst();
+    const salon = await prisma.salon.findUnique({ where: { id: "main-salon" } });
     if (!salon) {
       return { success: false, message: "Aucun salon trouvé." };
     }

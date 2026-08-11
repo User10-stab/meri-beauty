@@ -41,6 +41,7 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
       orderBy: { startTime: "desc" },
       include: {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
+        cancelledBy: { select: { id: true, fullName: true, role: true } },
         staffService: {
           include: {
             service: { select: { name: true } },
@@ -61,6 +62,10 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
         endTime: a.endTime,
         status: a.status,
         notes: a.notes,
+        cancelledAt: a.cancelledAt,
+        cancellationReason: a.cancellationReason,
+        cancellationSource: a.cancellationSource,
+        cancelledBy: a.cancelledBy,
         customer: a.user,
         serviceName: a.staffService.service.name,
         staffId: a.staffService.staff?.id ?? null,

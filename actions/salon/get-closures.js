@@ -10,7 +10,7 @@ export async function getClosures() {
     if (!session?.user || !isAdminRole(session.user.role)) {
       return { success: false, message: "Permissions insuffisantes", data: [] };
     }
-    const salon = await prisma.salon.findFirst();
+    const salon = await prisma.salon.findUnique({ where: { id: "main-salon" } });
     if (!salon) {
       return { success: true, data: [] };
     }

@@ -111,7 +111,13 @@ export async function cancelReservation(appointmentId) {
       // CONFIRMED right after this thinks it succeeded.
       const claim = await tx.appointment.updateMany({
         where: { id: appointmentId, status: { in: CANCELLABLE_STATUSES } },
-        data: { status: "CANCELLED" },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelledByUserId: session.user.id,
+          cancellationReason: "Annulation demandée par le client",
+          cancellationSource: "CUSTOMER",
+        },
       });
       if (claim.count === 0) return null;
 

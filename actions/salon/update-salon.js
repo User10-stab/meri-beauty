@@ -25,27 +25,15 @@ export async function updateSalon(input) {
   }
 
   try {
-    const existing = await prisma.salon.findFirst();
-
-    let updatedSalon;
-    if (existing) {
-      updatedSalon = await prisma.salon.update({
-        where: { id: existing.id },
-        data: parsed.data,
-        include: {
-          workingDays: { orderBy: { day: "asc" } },
-          closures: { orderBy: { startDate: "desc" } },
-        },
-      });
-    } else {
-      updatedSalon = await prisma.salon.create({ 
-        data: parsed.data,
-        include: {
-          workingDays: { orderBy: { day: "asc" } },
-          closures: { orderBy: { startDate: "desc" } },
-        },
-      });
-    }
+    const updatedSalon = await prisma.salon.upsert({
+      where: { id: "main-salon" },
+      update: parsed.data,
+      create: { id: "main-salon", ...parsed.data },
+      include: {
+        workingDays: { orderBy: { day: "asc" } },
+        closures: { orderBy: { startDate: "desc" } },
+      },
+    });
 
     revalidatePath("/dashboard/settings");
     return {

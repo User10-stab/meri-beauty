@@ -23,6 +23,7 @@ export function ConfirmDialog({
   cancelLabel = "Annuler",
   danger = false,
   loading = false,
+  children,
   onConfirm,
   onCancel,
 }) {
@@ -70,6 +71,7 @@ export function ConfirmDialog({
             <p className="mt-1 text-sm text-gray-500">{message}</p>
           </div>
         </div>
+        {children && <div className="mb-4">{children}</div>}
         <div className="flex justify-end gap-3">
           <button
             type="button"

@@ -13,7 +13,7 @@ function invoicingTx({ invoiceTotal = 121, credited = 0 } = {}) {
     $queryRaw: vi.fn()
       .mockResolvedValueOnce([{ lastNumber: 7 }])
       .mockResolvedValueOnce([{ lastNumber: 3 }]),
-    salon: { findFirst: vi.fn().mockResolvedValue({ name: "Meri Beauty", vatNumber: "BE0751854027" }) },
+    salon: { findUnique: vi.fn().mockResolvedValue({ name: "Meri Beauty", vatNumber: "BE0751854027" }) },
     invoice: {
       create: vi.fn(async ({ data }) => ({ id: "inv-1", ...data })),
       findUnique: vi.fn().mockResolvedValue({ totalInclVat: invoiceTotal }),

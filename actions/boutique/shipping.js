@@ -103,7 +103,7 @@ export async function requestShippingQuote(input) {
       return { success: false, message: "Un devis n'est pas nécessaire pour cette commande — le tarif automatique s'applique." };
     }
 
-    const salon = await prisma.salon.findFirst({ select: { name: true, email: true } });
+    const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { name: true, email: true } });
     const salonName = salon?.name || "Meri Beauty";
 
     const items = fullCart.items.map((item) => ({

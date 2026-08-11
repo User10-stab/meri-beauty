@@ -408,7 +408,7 @@ async function handleChargeRefunded(charge) {
  */
 async function handleChargeDisputeCreated(dispute) {
   const payment = await findPaymentByChargePaymentIntent(dispute.payment_intent);
-  const salon = await prisma.salon.findFirst({ select: { email: true } });
+  const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
   if (!salon?.email) return;
 
   const amount = round2((dispute.amount ?? 0) / 100);
@@ -703,7 +703,7 @@ async function processAppointmentCheckoutSession(session) {
       `[stripe-webhook] STRAY DUPLICATE CHARGE for appointment ${appointmentId}: session ${checkoutSessionId} settled after payment ${paymentId} was already paid via a different session. Refunding.`
     );
     await refundSession(session);
-    const salon = await prisma.salon.findFirst({ select: { email: true } });
+    const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
     if (salon?.email) {
       sendEmail({
         to: salon.email,
@@ -794,7 +794,15 @@ async function handlePaymentIntentFailed(paymentIntent) {
   // Atomic: payment FAILED + appointment CANCELLED commit together
   await prisma.$transaction(async (tx) => {
     await tx.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
-    await tx.appointment.update({ where: { id: payment.appointmentId }, data: { status: "CANCELLED" } });
+    await tx.appointment.update({
+      where: { id: payment.appointmentId },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+        cancellationReason: "Paiement Stripe échoué",
+        cancellationSource: "STRIPE",
+      },
+    });
   });
 
   // Dashboard notifications (outside transaction - business operation already committed)
@@ -1063,4 +1071,3 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
 
   return { received: true, processed: true };
 }
-

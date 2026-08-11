@@ -45,7 +45,8 @@ export async function createNewsletter(input) {
   }
 
   // ── 2. Get the salon ─────────────────────────────────────────────────────
-  const salon = await prisma.salon.findFirst({
+  const salon = await prisma.salon.findUnique({
+    where: { id: "main-salon" },
     orderBy: { createdAt: "asc" },
     select: { id: true },
   });

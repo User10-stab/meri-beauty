@@ -1209,7 +1209,7 @@ async function performOrderCancellation(order, reason) {
     }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
 
     if (refundFailed) {
-      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
       if (salon?.email) {
         sendEmail({
           to: salon.email,

@@ -198,10 +198,12 @@ export function AppointmentDrawer({
 
   async function handleCancel() {
     if (!appointment?.id || isPending) return;
+    const reason = window.prompt("Motif de l'annulation :", "");
+    if (reason === null) return;
     setIsPending(true);
     setFeedback(null);
     try {
-      const result = await rejectAppointment(appointment.id);
+      const result = await rejectAppointment(appointment.id, reason);
       if (result.success) {
         setFeedback({ type: "success", message: "Rendez-vous annulé." });
         onAppointmentUpdated();

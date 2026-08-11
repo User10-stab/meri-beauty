@@ -566,7 +566,7 @@ export async function completeReturnRequest(input) {
     }).catch((err) => console.error("[completeReturnRequest] email failed:", err));
 
     if (refundFailed) {
-      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
       if (salon?.email) {
         sendEmail({
           to: salon.email,

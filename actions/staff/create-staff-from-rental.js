@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
+import { sendEmail } from "@/lib/email";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
 
@@ -24,10 +25,14 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * @param {object} input  Raw form data (validated against createIndependentStaffSchema)
  * @returns {{ success: boolean, message: string, errors?: object, staffId?: string }}
  */
-export async function createStaffFromRental(input) {
+export async function createStaffFromRental(input, rentalRequestId) {
   const session = await auth();
   if (!session?.user || !isAdminRole(session.user.role)) {
     return { success: false, message: "Permissions insuffisantes" };
+  }
+
+  if (typeof rentalRequestId !== "string" || !rentalRequestId.trim()) {
+    return { success: false, message: "Demande de location manquante." };
   }
 
   // ── 1. Validate ──────────────────────────────────────────────────────────
@@ -93,6 +98,31 @@ export async function createStaffFromRental(input) {
   // ── 4. Transaction ───────────────────────────────────────────────────────
   try {
     const staff = await prisma.$transaction(async (tx) => {
+      const rentalRequest = await tx.rentalRequest.findFirst({
+        where: {
+          id: rentalRequestId,
+          isDeleted: false,
+          status: "PENDING",
+          contractId: null,
+        },
+        include: { user: { select: { email: true, fullName: true } } },
+      });
+
+      if (!rentalRequest) {
+        const error = new Error("RENTAL_REQUEST_ALREADY_CONVERTED");
+        error.code = "RENTAL_REQUEST_ALREADY_CONVERTED";
+        throw error;
+      }
+
+      if (
+        rentalRequest.user?.email &&
+        rentalRequest.user.email.toLowerCase() !== email.toLowerCase()
+      ) {
+        const error = new Error("RENTAL_REQUEST_APPLICANT_MISMATCH");
+        error.code = "RENTAL_REQUEST_APPLICANT_MISMATCH";
+        throw error;
+      }
+
       let userId;
 
       if (existingUser) {
@@ -164,7 +194,7 @@ export async function createStaffFromRental(input) {
       });
 
       // ── Create Contract (always FIXED_RENT — mandatory for all staff) ──
-      await tx.contract.create({
+      const newContract = await tx.contract.create({
         data: {
           staffId: newStaff.id,
           type: "FIXED_RENT",
@@ -175,6 +205,25 @@ export async function createStaffFromRental(input) {
           notes: contract.notes ?? null,
         },
       });
+
+      const linked = await tx.rentalRequest.updateMany({
+        where: {
+          id: rentalRequestId,
+          status: "PENDING",
+          contractId: null,
+          isDeleted: false,
+        },
+        data: {
+          status: "APPROVED",
+          contractId: newContract.id,
+        },
+      });
+
+      if (linked.count !== 1) {
+        const error = new Error("RENTAL_REQUEST_ALREADY_CONVERTED");
+        error.code = "RENTAL_REQUEST_ALREADY_CONVERTED";
+        throw error;
+      }
 
       // ── Assign services ──────────────────────────────────────────────
       if (ids.length > 0) {
@@ -196,6 +245,14 @@ export async function createStaffFromRental(input) {
     });
 
     revalidatePath(REVALIDATE_PATH);
+    revalidatePath("/dashboard/rental-requests");
+
+    sendEmail({
+      to: email,
+      subject: "Votre demande de location a été approuvée – Meri Beauty",
+      text: `Bonjour ${fullName},\n\nVotre demande de location a été approuvée et votre contrat a été créé.\n\nL'équipe Meri Beauty`,
+      html: `<p>Bonjour ${fullName},</p><p>Votre demande de location a été approuvée et votre contrat a été créé.</p><p>L'équipe Meri Beauty</p>`,
+    }).catch((err) => console.error("[createStaffFromRental] approval email failed:", err));
 
     return {
       success: true,
@@ -205,6 +262,20 @@ export async function createStaffFromRental(input) {
       staffId: staff.id,
     };
   } catch (error) {
+    if (error.code === "RENTAL_REQUEST_ALREADY_CONVERTED") {
+      return {
+        success: false,
+        message: "Cette demande a déjà été traitée ou liée à un contrat.",
+      };
+    }
+
+    if (error.code === "RENTAL_REQUEST_APPLICANT_MISMATCH") {
+      return {
+        success: false,
+        message: "L'adresse e-mail ne correspond pas au demandeur.",
+      };
+    }
+
     if (error.code === "P2002") {
       const fields = error.meta?.target ?? [];
 

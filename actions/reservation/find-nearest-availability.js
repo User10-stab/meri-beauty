@@ -25,7 +25,7 @@ async function loadSchedulingContext(drafts, maxDaysToScan) {
   // (allAppointments cannot be parallel with staffServices because it needs
   // the resolved staffId values from the staffServices rows.)
   const [salon, staffServices] = await Promise.all([
-    prisma.salon.findFirst({ include: { closures: true, workingDays: true } }),
+    prisma.salon.findUnique({ where: { id: "main-salon" }, include: { closures: true, workingDays: true } }),
     prisma.staffService.findMany({
       where: { id: { in: staffServiceIds } },
       include: {

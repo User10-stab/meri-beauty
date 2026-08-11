@@ -34,7 +34,7 @@ async function authorizeAppointmentAction(appointmentId) {
 
   // ADMIN/OWNER can manage any appointment
   if (isAdminRole(userRole)) {
-    return { authorized: true };
+    return { authorized: true, userId: session.user.id, userRole };
   }
 
   // STAFF can only manage appointments linked to them
@@ -62,7 +62,7 @@ async function authorizeAppointmentAction(appointmentId) {
       return { authorized: false, message: "Vous n'êtes pas autorisé à gérer ce rendez-vous" };
     }
 
-    return { authorized: true };
+    return { authorized: true, userId: session.user.id, userRole };
   }
 
   return { authorized: false, message: "Permissions insuffisantes" };
@@ -225,6 +225,11 @@ export async function rejectAppointment(appointmentId, reason = null) {
       return { success: false, message: authCheck.message };
     }
 
+    const cancellationReason =
+      typeof reason === "string" && reason.trim()
+        ? reason.trim().slice(0, 1000)
+        : "Rendez-vous annulé depuis le tableau de bord";
+
     // Load appointment
     const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId, isDeleted: false },
@@ -291,14 +296,20 @@ export async function rejectAppointment(appointmentId, reason = null) {
       // webhook racing) both pass a plain read-then-check and both refund.
       const claim = await tx.appointment.updateMany({
         where: { id: appointmentId, status: { in: ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW"] } },
-        data: { status: "CANCELLED" },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelledByUserId: authCheck.userId,
+          cancellationReason,
+          cancellationSource: isAdminRole(authCheck.userRole) ? "ADMIN" : "STAFF",
+        },
       });
       if (claim.count === 0) return false;
 
       if (wasPaid && payment.invoice && remaining > REFUND_EPSILON) {
         await issueCreditNote(tx, {
           invoiceId: payment.invoice.id,
-          reason: reason ?? "Rendez-vous annulé",
+          reason: cancellationReason,
           totalInclVat: remaining,
         });
       }
@@ -405,7 +416,7 @@ export async function rejectAppointment(appointmentId, reason = null) {
     }).catch((err) => console.error("[rejectAppointment] cancellation email failed:", err));
 
     if (refundFailed) {
-      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
       if (salon?.email) {
         sendEmail({
           to: salon.email,

@@ -215,7 +215,7 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
     }).catch((err) => console.error("[cancelWorkshopReservation] email failed:", err));
 
     if (refundFailed) {
-      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
       if (salon?.email) {
         sendEmail({
           to: salon.email,

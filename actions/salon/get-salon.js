@@ -7,7 +7,8 @@ import { isAdminRole } from "@/lib/authorization";
 export async function getSalon() {
   try {
    
-    const salon = await prisma.salon.findFirst({
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
       include: {
         workingDays: { orderBy: { day: "asc" } },
         closures: { orderBy: { startDate: "desc" } },

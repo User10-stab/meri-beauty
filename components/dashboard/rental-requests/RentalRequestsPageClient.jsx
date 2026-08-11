@@ -69,41 +69,15 @@ export function RentalRequestsPageClient({ initialData, services = [] }) {
     setShowCreateStaff(true);
   }, []);
 
-  const handleStaffCreated = useCallback(async () => {
+  const handleStaffCreated = useCallback(() => {
     const pending = approvingRef.current;
     if (!pending) {
       console.warn("[handleStaffCreated] No pending approval request found.");
       return;
     }
 
-    try {
-      setLoading(true);
-      const response = await fetch(`/api/rental-requests/${pending.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ status: "APPROVED" }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Erreur HTTP: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      if (result.success) {
-        toast.success("Demande approuvée avec succès.");
-        updateLocalRequest(pending.id, { status: "APPROVED" });
-        handleMutated();
-      } else {
-        toast.error(result.message || "Erreur lors de l'approbation");
-      }
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setLoading(false);
-    }
+    updateLocalRequest(pending.id, { status: "APPROVED" });
+    handleMutated();
   }, [handleMutated, updateLocalRequest]);
 
   const handleCloseCreateStaff = useCallback(() => {
@@ -222,7 +196,7 @@ export function RentalRequestsPageClient({ initialData, services = [] }) {
           services={services}
           onClose={handleCloseCreateStaff}
           onSuccess={handleStaffCreated}
-          serverAction={createStaffFromRental}
+          serverAction={(data) => createStaffFromRental(data, approvingRef.current.id)}
           initialValues={{
             fullName: approvingRef.current.user?.fullName ?? "",
             email: approvingRef.current.user?.email ?? "",

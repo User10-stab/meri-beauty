@@ -78,7 +78,7 @@ These should hold everywhere in the codebase without exception. If you find a pl
 - Invoice numbering (`lib/invoicing.js`, `NumberingCounter` model) is built to be legally gapless per Belgian TVA rules — this is implemented correctly and atomically (verified: uses a single `UPDATE ... RETURNING` inside the same transaction as the document, not a racy `SELECT MAX+1`). Don't "simplify" this later without understanding why it's built this way.
 
 ---
-
+اكدح
 ## 5. Known technical/ops gaps (not client decisions — just unfinished work)
 
 - **Cron never wired up.** `expireStaleOrders()` and the reminder-email job both exist and work correctly when called, but only via `GET /api/cron` guarded by `CRON_SECRET`. No `vercel.json` cron config and no external scheduler currently calls this route in any environment. Until this is wired, abandoned boutique orders/holds only clear when a customer happens to retry checkout on the same cart (which now correctly supersedes the stale hold — see §6) — they don't clean up on their own.

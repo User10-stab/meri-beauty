@@ -112,6 +112,7 @@ export function AppointmentDrawer({
   const [feedback, setFeedback] = useState(null); // { type: "success"|"error", message }
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [completeMethod, setCompleteMethod] = useState("CASH");
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
 
   // Close on Escape
   useEffect(() => {
@@ -138,6 +139,7 @@ export function AppointmentDrawer({
     setFeedback(null);
     setShowPaymentDialog(false);
     setCompleteMethod("CASH");
+    setPaymentConfirmed(false);
   }, [appointment?.id]);
 
   async function handleConfirm() {
@@ -179,11 +181,11 @@ export function AppointmentDrawer({
   }
 
   async function handleCompleteWithPayment() {
-    if (!appointment?.id || isPending) return;
+    if (!appointment?.id || isPending || !paymentConfirmed) return;
     setIsPending(true);
     setFeedback(null);
     try {
-      const result = await completeAppointment(appointment.id, { method: completeMethod });
+      const result = await completeAppointment(appointment.id, { method: completeMethod, paymentConfirmed });
       setShowPaymentDialog(false);
       if (result.success) {
         setFeedback({ type: "success", message: result.message ?? "Rendez-vous terminé." });
@@ -413,6 +415,15 @@ export function AppointmentDrawer({
                 <option value="CASH">Espèces</option>
                 <option value="CARD">Carte</option>
               </select>
+              <label className="mt-3 flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={paymentConfirmed}
+                  onChange={(e) => setPaymentConfirmed(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300"
+                />
+                Je confirme avoir bien reçu ce paiement (espèces en main, ou carte APPROUVÉE sur le terminal).
+              </label>
               <div className="mt-3 flex justify-end gap-2">
                 <button
                   type="button"
@@ -425,7 +436,7 @@ export function AppointmentDrawer({
                 <button
                   type="button"
                   onClick={handleCompleteWithPayment}
-                  disabled={isPending}
+                  disabled={isPending || !paymentConfirmed}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#3d4e3b] disabled:opacity-60"
                 >
                   {isPending && <Loader2 size={12} className="animate-spin" />}

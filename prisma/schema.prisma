@@ -659,6 +659,7 @@ model User {
   createdPointOfSaleOrders       Order[]                @relation("OrderCreatedByStaff")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
   auditLogs                      AuditLog[]             @relation("AuditActor")
+  assignedDisputes               StripeDispute[]        @relation("DisputeAssignee")
 
   @@index([role])
   @@index([isActive, isDeleted])
@@ -1334,6 +1335,19 @@ model Payment {
   refundAttemptedAt   DateTime?
   refundRetryCount    Int       @default(0)
 
+  // The exact amount (and a stable Stripe idempotency key) for the refund
+  // operation currently in flight. Set atomically with status:
+  // REFUND_PENDING, before the Stripe call — so a retry after a crash or a
+  // failed attempt replays this exact amount instead of recomputing "what's
+  // left" from the Transaction ledger, which would wrongly resolve to the
+  // full outstanding balance whenever no REFUND row was ever written (the
+  // very reason the payment is stuck). Cleared once the operation resolves
+  // (REFUNDED/PARTIALLY_REFUNDED); kept through REFUND_FAILED so retries
+  // keep using it. While either is set, no new refund may be started against
+  // this payment — see the "already pending" guard at each call site.
+  pendingRefundAmount         Decimal?
+  pendingRefundIdempotencyKey String?
+
   // Recorded here rather than on each of the 4 source models (Order,
   // WorkshopReservation, FormationReservation, Appointment) — Payment is
   // the one row every flow already creates, and Appointment in particular
@@ -1347,8 +1361,55 @@ model Payment {
 
   transactions Transaction[]
   invoice      Invoice?
+  disputes     StripeDispute[]
 
   @@index([promoCodeId])
+}
+
+enum DisputeStatus {
+  NEEDS_RESPONSE
+  UNDER_REVIEW
+  WARNING_NEEDS_RESPONSE
+  WARNING_UNDER_REVIEW
+  WARNING_CLOSED
+  WON
+  LOST
+  CHARGE_REFUNDED
+}
+
+// Persistent dossier for a Stripe dispute/chargeback — before this, the only
+// record was a best-effort staff alert email (see
+// app/api/webhooks/stripe/route.js#handleChargeDisputeCreated), with no
+// durable place to track who's handling it, what was submitted, or the
+// eventual outcome. Created/updated by the charge.dispute.created /
+// charge.dispute.updated / charge.dispute.closed webhook handlers; the
+// dossier fields below (assignedStaff/responseSentAt/proof/conclusion) are
+// filled in by staff from the dashboard.
+model StripeDispute {
+  id String @id @default(cuid())
+
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id])
+
+  stripeDisputeId String        @unique
+  stripeChargeId  String?
+  amount          Decimal
+  reason          String? // Stripe's dispute reason code (e.g. "fraudulent", "product_not_received")
+  status          DisputeStatus @default(NEEDS_RESPONSE)
+  dueBy           DateTime? // evidence submission deadline from Stripe
+
+  // The dossier itself — filled in by staff, not by the webhook.
+  assignedStaffId          String?
+  assignedStaff            User?     @relation("DisputeAssignee", fields: [assignedStaffId], references: [id])
+  responseSentAt           DateTime? // when evidence was actually submitted to Stripe
+  proofOfShipmentReference String? // tracking code / pickup confirmation cited in the response
+  conclusion               String? // free-text outcome notes once resolved
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([paymentId])
+  @@index([status])
 }
 
 // PROMO CODE
@@ -1482,6 +1543,11 @@ model Transaction {
   // Receipt / transaction identifier entered after a physical terminal
   // refund. Stripe refunds keep their identifiers in the Stripe fields.
   manualReference         String?
+  // Cash-drawer audit trail for CASH POS sales — what the cashier actually
+  // received and how much change they handed back, so a till shortfall can
+  // be traced to a specific sale instead of only ever showing the sale total.
+  cashReceived            Decimal?
+  changeGiven             Decimal?
   createdAt               DateTime          @default(now())
   isDeleted               Boolean           @default(false)
   deletedAt               DateTime?

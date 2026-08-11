@@ -456,7 +456,7 @@ export async function rejectAppointment(appointmentId, reason = null) {
  * @param {{ method?: "CASH" | "CARD" }} [options] - method is required only
  *   when a balance is actually due.
  */
-export async function completeAppointment(appointmentId, { method } = {}) {
+export async function completeAppointment(appointmentId, { method, paymentConfirmed } = {}) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -499,6 +499,14 @@ export async function completeAppointment(appointmentId, { method } = {}) {
 
     if (hasBalanceDue && !["CASH", "CARD"].includes(method)) {
       return { success: false, message: "Mode de paiement requis pour encaisser le solde restant." };
+    }
+    // The system has no way to observe a physical cash handoff or a card
+    // terminal's "APPROUVÉ" screen — without this, staff could mark the
+    // balance paid (and the system would treat it as real, invoiceable
+    // revenue) before any money actually changed hands, exactly like the
+    // POS terminal-sale risk this mirrors. See PRODUCTION_ISSUES.md #2.
+    if (hasBalanceDue && paymentConfirmed !== true) {
+      return { success: false, message: "Confirmez avoir bien reçu le paiement avant de terminer le rendez-vous.", requiresPaymentConfirmation: true };
     }
 
     const { invoice, balance } = await prisma.$transaction(async (tx) => {

@@ -171,7 +171,7 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, items, method, attemptKey } = parsed.data;
+  const { customer: requestedCustomer, items, method, attemptKey, terminalReference, cashReceived } = parsed.data;
   if (!attemptKey) {
     return { success: false, message: "Identifiant de tentative de caisse manquant. Rechargez la page." };
   }
@@ -251,6 +251,10 @@ export async function completePointOfSaleSale(input) {
       }
 
       const subtotal = saleItems.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+      if (method === "CASH" && cashReceived < subtotal) {
+        throw new Error("POS_CASH_INSUFFICIENT");
+      }
+      const changeGiven = method === "CASH" ? Math.round((cashReceived - subtotal) * 100) / 100 : null;
       const taxTotals = calculateVatTotals(subtotal, BELGIUM_VAT_RATE);
       const order = await tx.order.create({
         data: {
@@ -326,6 +330,11 @@ export async function completePointOfSaleSale(input) {
           method: method === "CASH" ? "CASH" : "CARD",
           transactionType: "FINAL_PAYMENT",
           paidAt: new Date(),
+          // Terminal ticket reference — the only record tying this sale to an
+          // actual approved charge on the external card terminal.
+          manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
+          cashReceived: method === "CASH" ? cashReceived : null,
+          changeGiven: method === "CASH" ? changeGiven : null,
         },
       });
 
@@ -369,7 +378,12 @@ export async function completePointOfSaleSale(input) {
           entityType: "Order",
           entityId: order.id,
           after: { status: "COMPLETED", totalAmount: subtotal, paymentMethod: method },
-          metadata: { orderNumber: order.orderNumber, customerId: customer.id, itemCount: saleItems.length },
+          metadata: {
+            orderNumber: order.orderNumber,
+            customerId: customer.id,
+            itemCount: saleItems.length,
+            ...(method === "EXTERNAL_TERMINAL" ? { terminalReference: terminalReference.trim() } : {}),
+          },
         },
       });
 
@@ -435,6 +449,9 @@ export async function completePointOfSaleSale(input) {
     if (error.message === "POS_PRODUCT_UNAVAILABLE") return { success: false, message: "Un produit du panier n'est plus disponible." };
     if (typeof error.message === "string" && error.message.startsWith("POS_STOCK_UNAVAILABLE:")) {
       return { success: false, message: `Stock insuffisant pour ${error.message.slice("POS_STOCK_UNAVAILABLE:".length)}.` };
+    }
+    if (error.message === "POS_CASH_INSUFFICIENT") {
+      return { success: false, message: "Le montant reçu est inférieur au total de la vente." };
     }
     if (error.code === "P2002" && error.meta?.target?.includes?.("posAttemptKey")) {
       const order = await prisma.order.findUnique({

@@ -9,14 +9,7 @@ export const metadata = {
 
 export default function CGVPage() {
   return (
-    <LegalPageLayout eyebrow="Avant de commander" title="Conditions générales de vente" updated="10 août 2026">
-      <Note>
-        Ce document est un projet à faire valider avant publication. Il couvre les quatre
-        parcours proposés par le Site : boutique en ligne, rendez-vous en institut, ateliers et
-        formations. Les clauses reflètent les règles réellement appliquées par le Site
-        (acompte, délais de rétractation, TVA) — merci de les confirmer avant mise en ligne.
-      </Note>
-
+    <LegalPageLayout eyebrow="Avant de commander" title="Conditions générales de vente" updated="11 août 2026">
       <H2>1. Champ d'application et identification du vendeur</H2>
       <P>
         Les présentes conditions générales de vente (« CGV ») régissent toute commande de
@@ -24,7 +17,7 @@ export default function CGVPage() {
         meribeautystudio.com (le « Site »), exploité par :
       </P>
       <Ul>
-        <li>[Nom et prénom complets de la responsable — à compléter], personne physique exploitant Meri Beauty</li>
+        <li>Marie Mercier, personne physique exploitant Meri Beauty</li>
         <li>Numéro d'entreprise / TVA : BE 0751.854.027</li>
         <li>Adresse : Rue Bonaventure 113, 1090 Jette, Belgique</li>
         <li>Téléphone : +32 484 64 36 65 — Email : contact@meribeautystudio.com</li>

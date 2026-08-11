@@ -84,6 +84,24 @@ describe("point-of-sale security contracts", () => {
     expect(migration).toContain('CREATE UNIQUE INDEX "Order_posAttemptKey_key"');
   });
 
+  test("cash sales require an amount received that covers the total and record change given", () => {
+    const validation = source("lib/validations/point-of-sale.js");
+    expect(validation).toContain('data.method !== "CASH" || data.cashReceived != null');
+
+    expect(pos).toContain('method === "CASH" && cashReceived < subtotal');
+    expect(pos).toContain('throw new Error("POS_CASH_INSUFFICIENT")');
+    expect(pos).toContain('cashReceived: method === "CASH" ? cashReceived : null');
+    expect(pos).toContain('changeGiven: method === "CASH" ? changeGiven : null');
+
+    const schema = source("prisma/schema.prisma");
+    expect(schema).toContain("cashReceived");
+    expect(schema).toContain("changeGiven");
+
+    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    expect(ui).toContain("pos-cash-received");
+    expect(ui).toContain("Monnaie à rendre");
+  });
+
   test("shared Stripe fulfillment completes POS orders and attributes stock to the cashier", () => {
     const fulfillment = source("lib/orders/fulfill-order-payment.js");
     expect(fulfillment).toContain('order.source === "POS"');
@@ -91,6 +109,21 @@ describe("point-of-sale security contracts", () => {
     expect(fulfillment).toContain("pickedUpByStaffId: order.createdByStaffId");
     expect(fulfillment).toContain("createdById: isPointOfSale ? order.createdByStaffId : null");
     expect(fulfillment).toContain('action: "order.point_of_sale_qr_paid"');
+  });
+
+  test("external terminal sales require explicit approval and a ticket reference before completing", () => {
+    const validation = source("lib/validations/point-of-sale.js");
+    expect(validation).toContain('data.method !== "EXTERNAL_TERMINAL" || data.terminalApproved === true');
+    expect(validation).toContain('data.method !== "EXTERNAL_TERMINAL" || Boolean(data.terminalReference?.trim())');
+
+    expect(pos).toContain('manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null');
+
+    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    expect(ui).toContain("terminalApproved");
+    expect(ui).toContain("terminalReference");
+    expect(ui).toContain("APPROUVÉ");
+    expect(ui).toContain("Confirmer le paiement par terminal externe");
+    expect(ui).toContain("confirmDisabled={!terminalApproved || !terminalReference.trim()}");
   });
 
   test("the counter accepts both USB scans and QR camera results", () => {

@@ -53,6 +53,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [rejectionReason, setRejectionReason] = useState("");
   const [toComplete, setToComplete] = useState(null);
   const [completeMethod, setCompleteMethod] = useState("CASH");
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [rowLoadingId, setRowLoadingId] = useState(null);
 
@@ -116,10 +117,10 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   }
 
   function handleCompleteWithPayment() {
-    if (!toComplete) return;
+    if (!toComplete || !paymentConfirmed) return;
     setRowLoadingId(toComplete.id);
     startTransition(async () => {
-      const result = await completeAppointment(toComplete.id, { method: completeMethod });
+      const result = await completeAppointment(toComplete.id, { method: completeMethod, paymentConfirmed });
       setRowLoadingId(null);
       setToComplete(null);
       if (result.success) {
@@ -289,11 +290,14 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     ) : a.status === "CONFIRMED" ? (
                       <button
                         type="button"
-                        onClick={() =>
-                          a.payment?.status === "PARTIALLY_PAID"
-                            ? setToComplete(a)
-                            : handleCompleteDirect(a.id)
-                        }
+                        onClick={() => {
+                          if (a.payment?.status === "PARTIALLY_PAID") {
+                            setPaymentConfirmed(false);
+                            setToComplete(a);
+                          } else {
+                            handleCompleteDirect(a.id);
+                          }
+                        }}
                         disabled={rowLoadingId === a.id}
                         className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
                       >
@@ -363,6 +367,16 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               <option value="CARD">Carte</option>
             </select>
 
+            <label className="mt-4 flex items-start gap-2 text-xs font-medium text-gray-700">
+              <input
+                type="checkbox"
+                checked={paymentConfirmed}
+                onChange={(e) => setPaymentConfirmed(e.target.checked)}
+                className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300"
+              />
+              Je confirme avoir bien reçu ce paiement (espèces en main, ou carte APPROUVÉE sur le terminal).
+            </label>
+
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -375,7 +389,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               <button
                 type="button"
                 onClick={handleCompleteWithPayment}
-                disabled={isPending}
+                disabled={isPending || !paymentConfirmed}
                 className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f3a2e]/90 disabled:opacity-50"
               >
                 {isPending ? <Loader2 size={14} className="animate-spin" /> : "Encaisser et terminer"}

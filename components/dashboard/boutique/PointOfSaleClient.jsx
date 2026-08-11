@@ -7,6 +7,7 @@ import { BrowserMultiFormatReader } from "@zxing/browser";
 import QRCode from "qrcode";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   completePointOfSaleSale,
   cancelPointOfSaleCheckout,
@@ -26,6 +27,10 @@ export function PointOfSaleClient() {
   const [matches, setMatches] = useState([]);
   const [method, setMethod] = useState("CARD_QR");
   const [attemptKey, setAttemptKey] = useState(null);
+  const [terminalConfirmOpen, setTerminalConfirmOpen] = useState(false);
+  const [terminalApproved, setTerminalApproved] = useState(false);
+  const [terminalReference, setTerminalReference] = useState("");
+  const [cashReceived, setCashReceived] = useState("");
   const [qrModal, setQrModal] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [isCancellingQr, setIsCancellingQr] = useState(false);
@@ -38,6 +43,8 @@ export function PointOfSaleClient() {
   const [isPending, startTransition] = useTransition();
 
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0), [cart]);
+  const cashReceivedNumber = Number(cashReceived);
+  const changeDue = cashReceived !== "" && !Number.isNaN(cashReceivedNumber) ? cashReceivedNumber - total : null;
 
   function resetAttempt() {
     const next = crypto.randomUUID();
@@ -193,16 +200,35 @@ export function PointOfSaleClient() {
     setCustomer((current) => ({ ...current, id: null, [field]: value }));
   }
 
+  function selectMethod(next) {
+    setMethod(next);
+    if (next !== "EXTERNAL_TERMINAL") {
+      setTerminalApproved(false);
+      setTerminalReference("");
+    }
+    if (next !== "CASH") setCashReceived("");
+  }
+
   function submitSale() {
     if (!cart.length) return toast.error("Scannez au moins un produit.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
+    if (method === "EXTERNAL_TERMINAL" && !terminalConfirmOpen) {
+      setTerminalConfirmOpen(true);
+      return;
+    }
+    if (method === "CASH" && (cashReceived === "" || Number.isNaN(cashReceivedNumber) || cashReceivedNumber < total)) {
+      return toast.error("Le montant reçu doit couvrir le total de la vente.");
+    }
     startTransition(async () => {
       const result = await completePointOfSaleSale({
         customer,
         items: cart.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
         method,
         attemptKey,
+        ...(method === "EXTERNAL_TERMINAL" ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
+        ...(method === "CASH" ? { cashReceived: cashReceivedNumber } : {}),
       });
+      setTerminalConfirmOpen(false);
       if (!result.success) {
         toast.error(result.message);
         return;
@@ -336,15 +362,72 @@ export function PointOfSaleClient() {
         <div className="space-y-2 border-t border-gray-100 pt-5 dark:border-dark-3">
           <p className="text-sm font-medium text-gray-700 dark:text-dark-6">Paiement encaissé</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <button type="button" onClick={() => setMethod("CARD_QR")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CARD_QR" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte QR</button>
-            <button type="button" onClick={() => setMethod("CASH")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CASH" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><Banknote size={16} />Espèces</button>
-            <button type="button" onClick={() => setMethod("EXTERNAL_TERMINAL")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "EXTERNAL_TERMINAL" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Terminal externe</button>
+            <button type="button" onClick={() => selectMethod("CARD_QR")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CARD_QR" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte QR</button>
+            <button type="button" onClick={() => selectMethod("CASH")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CASH" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><Banknote size={16} />Espèces</button>
+            <button type="button" onClick={() => selectMethod("EXTERNAL_TERMINAL")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "EXTERNAL_TERMINAL" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Terminal externe</button>
           </div>
+          {method === "CASH" && (
+            <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-dark-3">
+              <label className="text-xs font-medium text-gray-500" htmlFor="pos-cash-received">Montant reçu du client</label>
+              <input
+                id="pos-cash-received"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                value={cashReceived}
+                onChange={(event) => setCashReceived(event.target.value)}
+                placeholder="0.00"
+                className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              />
+              {changeDue !== null && (
+                <p className={`text-sm font-medium ${changeDue < 0 ? "text-red-600" : "text-gray-700 dark:text-dark-6"}`}>
+                  {changeDue < 0 ? `Il manque ${Math.abs(changeDue).toFixed(2)} €` : `Monnaie à rendre : ${changeDue.toFixed(2)} €`}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-end justify-between border-t border-gray-100 pt-5 dark:border-dark-3"><span className="text-sm text-gray-500">Total</span><strong className="text-3xl text-[#2f3a2e]">{total.toFixed(2)} €</strong></div>
-        <Button className="w-full" onClick={submitSale} disabled={isPending || !attemptKey || cart.length === 0}>{isPending ? "Enregistrement…" : method === "CARD_QR" ? "Générer le QR de paiement" : "Encaisser et envoyer le reçu"}</Button>
+        <Button
+          className="w-full"
+          onClick={submitSale}
+          disabled={isPending || !attemptKey || cart.length === 0 || (method === "CASH" && (cashReceived === "" || changeDue < 0))}
+        >
+          {isPending ? "Enregistrement…" : method === "CARD_QR" ? "Générer le QR de paiement" : "Encaisser et envoyer le reçu"}
+        </Button>
       </aside>
+
+      <ConfirmDialog
+        open={terminalConfirmOpen}
+        title="Confirmer le paiement par terminal externe"
+        message={`Vérifiez que le terminal affiche « APPROUVÉ » avant de continuer — ${total.toFixed(2)} € pour ${customer.fullName || "ce client"}.`}
+        confirmLabel="Encaisser et envoyer le reçu"
+        loading={isPending}
+        confirmDisabled={!terminalApproved || !terminalReference.trim()}
+        onConfirm={submitSale}
+        onCancel={() => setTerminalConfirmOpen(false)}
+      >
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <label className="flex items-start gap-2 font-medium">
+            <input
+              type="checkbox"
+              checked={terminalApproved}
+              onChange={(event) => setTerminalApproved(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-amber-400"
+            />
+            Je confirme que le terminal affiche « APPROUVÉ » pour ce paiement.
+          </label>
+          <input
+            value={terminalReference}
+            onChange={(event) => setTerminalReference(event.target.value)}
+            maxLength={100}
+            placeholder="Référence / numéro du ticket terminal (obligatoire)"
+            className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#2f3a2e]"
+          />
+        </div>
+      </ConfirmDialog>
 
       {qrModal && (
         <div role="dialog" aria-modal="true" aria-labelledby="pos-qr-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">

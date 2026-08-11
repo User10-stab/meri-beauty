@@ -1,6 +1,6 @@
 "use server";
 
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
@@ -1062,6 +1062,18 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
   try {
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
 
+    // A refund on this same payment (e.g. from a partial return on the same
+    // order) may already be in flight — its exact pending amount lives in a
+    // single pair of columns on Payment, so starting a second refund now
+    // would overwrite it and strand that amount from ever being safely
+    // retried. Must resolve (succeed or be manually reconciled) first.
+    if (wasSold && ["REFUND_PENDING", "REFUND_FAILED"].includes(order.payment.status)) {
+      return {
+        success: false,
+        message: "Un remboursement est déjà en cours de traitement pour cette commande — attendez sa résolution (ou réessayez-le depuis la page Réconciliation) avant d'annuler.",
+      };
+    }
+
     // Cap against what's actually still outstanding — a prior partial return
     // can already have refunded part of this payment, so summing (not just
     // checking existence of) prior REFUND transactions is what stops this
@@ -1197,14 +1209,24 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
       if (remaining > REFUND_EPSILON) {
         // Recorded before the Stripe call, not just in the catch block below —
         // a crash/timeout mid-call would otherwise leave nothing durable to
-        // retry against; see lib/payments/retry-failed-refunds.js.
-        await prisma.payment.update({ where: { id: order.payment.id }, data: { status: "REFUND_PENDING" } });
+        // retry against; see lib/payments/retry-failed-refunds.js. Pinning
+        // the exact amount + a stable idempotency key here (not recomputed
+        // later) is what lets a retry replay precisely this operation
+        // instead of resolving to the full remaining balance on the payment.
+        const refundIdempotencyKey = `cancel-${orderId}-${randomUUID()}`;
+        await prisma.payment.update({
+          where: { id: order.payment.id },
+          data: { status: "REFUND_PENDING", pendingRefundAmount: remaining, pendingRefundIdempotencyKey: refundIdempotencyKey },
+        });
         try {
           const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
           if (session.payment_intent) {
             const stripePaymentIntentId =
               typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent.id;
-            await stripe.refunds.create({ payment_intent: stripePaymentIntentId, amount: Math.round(remaining * 100) });
+            await stripe.refunds.create(
+              { payment_intent: stripePaymentIntentId, amount: Math.round(remaining * 100) },
+              { idempotencyKey: refundIdempotencyKey }
+            );
             const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
             await prisma.$transaction([
               prisma.transaction.updateMany({
@@ -1228,7 +1250,11 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
               }),
               prisma.payment.update({
                 where: { id: order.payment.id },
-                data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+                data: {
+                  status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
+                  pendingRefundAmount: null,
+                  pendingRefundIdempotencyKey: null,
+                },
               }),
               prisma.auditLog.create({
                 data: {

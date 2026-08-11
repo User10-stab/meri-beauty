@@ -128,6 +128,19 @@ export async function POST(req) {
     }
   }
 
+  // Keeps the dashboard dossier's status in sync as Stripe moves the dispute
+  // through review and to a final outcome — the dossier fields staff fill in
+  // (assignee, response sent, proof, conclusion) are untouched here.
+  if (event.type === "charge.dispute.updated" || event.type === "charge.dispute.closed") {
+    try {
+      await handleChargeDisputeStatusChanged(event.data.object);
+      return NextResponse.json({ received: true });
+    } catch (err) {
+      captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
+      return NextResponse.json({ error: "Processing failed" }, { status: 500 });
+    }
+  }
+
   // Delayed-notification payment methods (bank debits, etc.) resolve after
   // the initial checkout.session.completed delivery already saw
   // payment_status "unpaid" and was ignored below. Card (the only method
@@ -399,19 +412,65 @@ async function handleChargeRefunded(charge) {
   );
 }
 
+// Stripe's raw dispute.status values, mapped to our DisputeStatus enum.
+function mapStripeDisputeStatus(status) {
+  const known = [
+    "NEEDS_RESPONSE",
+    "UNDER_REVIEW",
+    "WARNING_NEEDS_RESPONSE",
+    "WARNING_UNDER_REVIEW",
+    "WARNING_CLOSED",
+    "WON",
+    "LOST",
+    "CHARGE_REFUNDED",
+  ];
+  const upper = String(status ?? "").toUpperCase();
+  return known.includes(upper) ? upper : "NEEDS_RESPONSE";
+}
+
 /**
  * A dispute is provisional (Stripe hasn't decided the outcome yet) and has
  * a response deadline, so this deliberately does NOT change Payment.status
  * — there's no correct status to set until it resolves. This only makes
  * sure a human finds out, since disputes lost by default (no response) cost
  * both the sale and a Stripe dispute fee.
+ *
+ * Also creates the persistent dashboard dossier (StripeDispute) — the email
+ * alert alone was a one-shot notification with nowhere durable to track who's
+ * handling it, what was submitted, or the eventual outcome.
  */
 async function handleChargeDisputeCreated(dispute) {
   const payment = await findPaymentByChargePaymentIntent(dispute.payment_intent);
+  const amount = round2((dispute.amount ?? 0) / 100);
+
+  if (payment) {
+    await prisma.stripeDispute.upsert({
+      where: { stripeDisputeId: dispute.id },
+      create: {
+        stripeDisputeId: dispute.id,
+        paymentId: payment.id,
+        stripeChargeId: typeof dispute.charge === "string" ? dispute.charge : dispute.charge?.id ?? null,
+        amount,
+        reason: dispute.reason ?? null,
+        status: mapStripeDisputeStatus(dispute.status),
+        dueBy: dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000) : null,
+      },
+      // Redelivery of the same event — refresh the Stripe-owned fields only,
+      // never the staff-filled dossier fields (assignee/response/proof/conclusion).
+      update: {
+        amount,
+        reason: dispute.reason ?? null,
+        status: mapStripeDisputeStatus(dispute.status),
+        dueBy: dispute.evidence_details?.due_by ? new Date(dispute.evidence_details.due_by * 1000) : null,
+      },
+    });
+  } else {
+    console.warn(`[stripe-webhook] charge.dispute.created: no matching Payment for payment_intent ${dispute.payment_intent} — dossier not created`);
+  }
+
   const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
   if (!salon?.email) return;
 
-  const amount = round2((dispute.amount ?? 0) / 100);
   const deadline = dispute.evidence_details?.due_by
     ? new Date(dispute.evidence_details.due_by * 1000).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })
     : "non communiquée";
@@ -423,15 +482,37 @@ async function handleChargeDisputeCreated(dispute) {
       `Un client a contesté un paiement de €${amount.toFixed(2)} (motif Stripe : ${dispute.reason}).\n` +
       `Paiement interne : ${payment?.id ?? "introuvable — vérifier manuellement dans Stripe"}\n` +
       `Date limite de réponse : ${deadline}\n\n` +
-      `Répondez directement depuis le Dashboard Stripe (Paiements > Litiges).`,
+      `Un dossier a été créé dans le Dashboard (Paiements > Litiges Stripe) — assignez-le à un responsable.`,
     html:
       `<p>Un client a contesté un paiement de <strong>€${amount.toFixed(2)}</strong> (motif Stripe : ${dispute.reason}).</p>` +
       `<p>Paiement interne : ${payment?.id ?? "introuvable — vérifier manuellement dans Stripe"}</p>` +
       `<p>Date limite de réponse : <strong>${deadline}</strong></p>` +
-      `<p>Répondez directement depuis le Dashboard Stripe (Paiements &gt; Litiges).</p>`,
+      `<p>Un dossier a été créé dans le Dashboard (Paiements &gt; Litiges Stripe) — assignez-le à un responsable.</p>`,
   }).catch((err) => console.error("[stripe-webhook] dispute alert email failed:", err));
 
   console.warn(`[stripe-webhook] Dispute opened for payment_intent ${dispute.payment_intent}, payment ${payment?.id ?? "unknown"}`);
+}
+
+/**
+ * charge.dispute.updated / charge.dispute.closed — Stripe moving the dispute
+ * through review (under_review) or to its final outcome (won/lost/
+ * warning_closed/charge_refunded). Only touches the Stripe-owned fields; the
+ * staff-filled dossier stays exactly as they left it.
+ */
+async function handleChargeDisputeStatusChanged(dispute) {
+  const existing = await prisma.stripeDispute.findUnique({ where: { stripeDisputeId: dispute.id } });
+  if (!existing) {
+    // No dossier row — most likely the dispute.created event predates this
+    // feature, or its Payment couldn't be matched at creation time. Nothing
+    // durable to update; the Stripe Dashboard remains the source of truth.
+    console.warn(`[stripe-webhook] ${dispute.id}: no dossier row to update status on`);
+    return;
+  }
+
+  await prisma.stripeDispute.update({
+    where: { stripeDisputeId: dispute.id },
+    data: { status: mapStripeDisputeStatus(dispute.status) },
+  });
 }
 
 // ─── checkout.session.completed (appointments) ───────────────────────────────
@@ -1013,7 +1094,31 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
   const previousSeatsCount = reservation.seatsCount;
   const isIncrease = seats > previousSeatsCount;
 
-  const claimed = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
+    // Capacity re-check for an increase, under the same session-row lock
+    // createWorkshopReservation takes for the initial booking. Without this,
+    // two admins each increasing seats on the same near-full session both
+    // see room available (checked only at fee-link creation, minutes
+    // earlier, no lock) and both webhooks land here and both apply —
+    // overbooking the session. Locking + re-aggregating here, inside the
+    // same transaction as the claim below, closes that window.
+    if (isIncrease) {
+      await tx.$queryRaw`SELECT id FROM workshop_sessions WHERE id = ${reservation.sessionId} FOR UPDATE`;
+      const reserved = await tx.workshopReservation.aggregate({
+        where: {
+          sessionId: reservation.sessionId,
+          id: { not: reservation.id },
+          status: { in: ["CONFIRMED", "COMPLETED"] },
+        },
+        _sum: { seatsCount: true },
+      });
+      const takenByOthers = reserved._sum.seatsCount ?? 0;
+      const capacity = reservation.session.capacity ?? reservation.session.workshop.capacity;
+      if (takenByOthers + seats > capacity) {
+        return { claimed: false, capacityExceeded: true };
+      }
+    }
+
     // Atomic claim gated on the seat count still being the OLD value — same
     // reasoning as the session-change fee above: no unique transactionReference
     // to lean on here, so two near-simultaneous deliveries of the same event
@@ -1038,7 +1143,7 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
           : {}),
       },
     });
-    if (claim.count === 0) return false;
+    if (claim.count === 0) return { claimed: false };
 
     if (reservation.payment) {
       await tx.transaction.create({
@@ -1051,10 +1156,36 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
         },
       });
     }
-    return true;
+    return { claimed: true };
   });
 
-  if (!claimed) {
+  if (result.capacityExceeded) {
+    // The session filled up between the admin starting this change and the
+    // customer paying the fee — refund it rather than silently dropping the
+    // increase, and tell the customer why instead of leaving them guessing
+    // why their card was charged then refunded.
+    console.warn(`[stripe-webhook] Seats increase for reservation ${reservation.id} would exceed capacity, refunding:`, session.id);
+    await refundSession(session);
+    sendEmail({
+      to: reservation.customer.email,
+      subject: `Places non disponibles — ${reservation.session.workshop.title} — Meri Beauty`,
+      text:
+        `Bonjour ${reservation.customer.fullName},\n\n` +
+        `La session "${reservation.session.workshop.title}" s'est complétée entre-temps : nous ne pouvons pas ajouter la ou les places supplémentaires demandées. ` +
+        `Le paiement correspondant a été intégralement remboursé et votre réservation reste inchangée (${previousSeatsCount} place(s)).\n\n` +
+        `N'hésitez pas à nous contacter si vous souhaitez être mis(e) sur liste d'attente.\n\n` +
+        `L'équipe Meri Beauty`,
+      html:
+        `<p>Bonjour ${reservation.customer.fullName},</p>` +
+        `<p>La session "${reservation.session.workshop.title}" s'est complétée entre-temps : nous ne pouvons pas ajouter la ou les places supplémentaires demandées. ` +
+        `Le paiement correspondant a été intégralement remboursé et votre réservation reste inchangée (${previousSeatsCount} place(s)).</p>` +
+        `<p>N'hésitez pas à nous contacter si vous souhaitez être mis(e) sur liste d'attente.</p>` +
+        `<p>L'équipe Meri Beauty</p>`,
+    }).catch((err) => console.error("[stripe-webhook] seats-capacity-refund email failed:", err));
+    return { received: true, refunded: true, reason: "capacity exceeded" };
+  }
+
+  if (!result.claimed) {
     return { received: true, alreadyProcessed: true };
   }
 

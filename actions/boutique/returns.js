@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
@@ -488,6 +489,7 @@ export async function completeReturnRequest(input) {
     const REFUND_EPSILON = 0.01;
 
     const manualRefund = isManualOrderRefund(rr.order.payment);
+    const refundIdempotencyKey = `return-${rr.id}-${randomUUID()}`;
     const { creditNote, alreadyRefunded, paidAmount } = await prisma.$transaction(async (tx) => {
       // Atomically claim this return: the WHERE clause only matches while
       // status is still APPROVED, so if two requests race here only one
@@ -506,7 +508,15 @@ export async function completeReturnRequest(input) {
 
       // Lock the payment row so two return requests on the same order can't
       // both read "nothing refunded yet" and both slip under the cap.
-      await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${rr.order.payment.id} FOR UPDATE`;
+      const lockedPayment = await tx.$queryRaw`SELECT status FROM "Payment" WHERE id = ${rr.order.payment.id} FOR UPDATE`;
+      if (["REFUND_PENDING", "REFUND_FAILED"].includes(lockedPayment[0]?.status)) {
+        // A prior refund on this same payment (this return or another one)
+        // hasn't resolved yet — its exact pending amount lives in a single
+        // pair of columns on Payment, so starting a second operation now
+        // would overwrite it and strand that amount from ever being safely
+        // retried. Must resolve (succeed or be manually reconciled) first.
+        throw new Error("REFUND_ALREADY_PENDING");
+      }
       const priorRefunds = await tx.transaction.aggregate({
         where: { paymentId: rr.order.payment.id, transactionType: "REFUND" },
         _sum: { amount: true },
@@ -562,10 +572,18 @@ export async function completeReturnRequest(input) {
       } else {
         // Persist this before contacting Stripe: a process crash or timeout
         // after the external call remains visible to the retry/reconciliation
-        // jobs instead of silently looking paid forever.
+        // jobs instead of silently looking paid forever. Pinning the exact
+        // amount + a stable idempotency key here (not recomputed later) is
+        // what lets a retry replay precisely this operation instead of
+        // resolving to the full remaining balance on the payment.
         await tx.payment.update({
           where: { id: rr.order.payment.id },
-          data: { status: "REFUND_PENDING", refundAttemptedAt: new Date() },
+          data: {
+            status: "REFUND_PENDING",
+            refundAttemptedAt: new Date(),
+            pendingRefundAmount: totalRefund,
+            pendingRefundIdempotencyKey: refundIdempotencyKey,
+          },
         });
       }
 
@@ -605,7 +623,10 @@ export async function completeReturnRequest(input) {
         const stripePaymentIntentId =
           typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
         if (!stripePaymentIntentId) throw new Error("STRIPE_PAYMENT_INTENT_MISSING");
-        await stripe.refunds.create({ payment_intent: stripePaymentIntentId, amount: Math.round(totalRefund * 100) });
+        await stripe.refunds.create(
+          { payment_intent: stripePaymentIntentId, amount: Math.round(totalRefund * 100) },
+          { idempotencyKey: refundIdempotencyKey }
+        );
       } catch (err) {
         console.error("[completeReturnRequest] REFUND FAILED for return", rr.id, err);
         refundFailed = true;
@@ -636,7 +657,11 @@ export async function completeReturnRequest(input) {
         }),
         prisma.payment.update({
           where: { id: rr.order.payment.id },
-          data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+          data: {
+            status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
+            pendingRefundAmount: null,
+            pendingRefundIdempotencyKey: null,
+          },
         }),
         prisma.auditLog.create({
           data: {
@@ -700,6 +725,12 @@ export async function completeReturnRequest(input) {
     }
     if (error.message === "REFUND_CAP_EXCEEDED") {
       return { success: false, message: "Ce remboursement dépasserait le montant réellement payé pour cette commande." };
+    }
+    if (error.message === "REFUND_ALREADY_PENDING") {
+      return {
+        success: false,
+        message: "Un remboursement est déjà en cours de traitement pour cette commande — attendez sa résolution (ou réessayez-le depuis la page Réconciliation) avant d'en lancer un autre.",
+      };
     }
     console.error("[completeReturnRequest]", error);
     return { success: false, message: "Impossible de finaliser ce retour." };

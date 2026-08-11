@@ -48,6 +48,7 @@ const ALL_NAV_DATA = [
         items: [
           { title: "Compte Stripe", url: "/dashboard/payments" },
           { title: "Réconciliation", url: "/dashboard/payments/reconciliation", roles: DASHBOARD_PERMISSIONS.PAYMENT_RECONCILIATION },
+          { title: "Litiges Stripe", url: "/dashboard/payments/disputes", roles: DASHBOARD_PERMISSIONS.STRIPE_DISPUTES },
         ],
       },
       {

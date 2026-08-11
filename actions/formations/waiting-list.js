@@ -9,6 +9,7 @@ import {
 } from "@/lib/email-templates";
 import { sendEmail } from "@/lib/email";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 
 /**
  * Formation equivalent of actions/workshops/waiting-list.js — same shape
@@ -18,6 +19,9 @@ import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
  * the atelier one, matching this project's existing convention of keeping
  * atelier and formation business logic structurally independent.
  */
+
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 3;
 
 function formatSessionDate(date) {
   return new Date(date).toLocaleDateString("fr-FR", {
@@ -49,6 +53,13 @@ export async function joinFormationWaitingList({ sessionId, customerInfo: submit
       return { success: false, field: customerValidation.field, message: customerValidation.message };
     }
     customerInfo = { ...customerInfo, ...customerValidation.data };
+
+    const rateLimitIp = await getClientIp();
+    const rateLimitKey = `${customerInfo.email.trim().toLowerCase()}:${rateLimitIp}`;
+    if (isRateLimited("join-waiting-list-formation", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+      return { success: false, message: "Trop de tentatives. Veuillez patienter avant de réessayer." };
+    }
+    recordRateLimitHit("join-waiting-list-formation", rateLimitKey);
 
     const session = await prisma.formationSession.findUnique({
       where: { id: sessionId },

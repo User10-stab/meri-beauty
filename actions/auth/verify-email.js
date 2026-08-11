@@ -4,17 +4,25 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
-import { emailVerificationEmail } from "@/lib/email-templates";
+import { emailVerificationEmail, welcomeWithCredentialsEmail } from "@/lib/email-templates";
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-verification";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
+const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
+  ? `${process.env.NEXT_PUBLIC_APP_URL}/login`
+  : "https://meribeauty.com/login";
 
 async function hashToken(token) {
   return bcrypt.hash(token, BCRYPT_SALT_ROUNDS);
+}
+
+function generateTemporaryPassword() {
+  return crypto.randomBytes(9).toString("base64url");
 }
 
 export async function sendVerificationEmail(user) {
@@ -105,7 +113,7 @@ export async function verifyEmail(rawToken) {
 
     const user = await prisma.user.findUnique({
       where: { email: matchedToken.email },
-      select: { id: true },
+      select: { id: true, fullName: true },
     });
 
     if (!user) {
@@ -134,15 +142,58 @@ export async function verifyEmail(rawToken) {
       },
     });
 
+    // Checkout-issued token: generate real credentials (the placeholder
+    // password set at submit time was never shown to anyone) and try to
+    // actually start payment. Deliberately done here, inline, using the
+    // user.id this same function just resolved from the validated token —
+    // never as a separately "use server"-exported function taking a
+    // client-supplied userId. That used to be resumeCheckoutAfterVerification
+    // in actions/shared/resume-checkout-after-verification.js: any caller
+    // could invoke it directly with an arbitrary userId and force-overwrite
+    // that account's password (a forced-reset/lockout + email-spam vector).
+    // Plain registration tokens have no resumeType — nothing further to do.
+    let resumeSuccess = null;
+    let resumeUrl = null;
+    let resumeMessage = null;
+
+    if (matchedToken.resumeType) {
+      const temporaryPassword = generateTemporaryPassword();
+      const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
+      await prisma.user.update({ where: { id: user.id }, data: { password: hashedPassword } });
+
+      sendEmail({
+        to: matchedToken.email,
+        ...welcomeWithCredentialsEmail({
+          customerName: user.fullName,
+          email: matchedToken.email,
+          temporaryPassword,
+          loginUrl: LOGIN_URL,
+        }),
+      }).catch((err) => console.error("[verifyEmail] credentials email failed:", err));
+
+      // If this fails (e.g. a Stripe API hiccup), the token has already been
+      // consumed and the account is verified either way — the caller shows a
+      // manual retry-payment screen rather than leaving the person stuck.
+      const resumeResult = await retryCheckoutSession({
+        resumeType: matchedToken.resumeType,
+        resumeId: matchedToken.resumeId,
+      });
+      resumeSuccess = resumeResult.success;
+      resumeUrl = resumeResult.success ? resumeResult.url : null;
+      resumeMessage = resumeResult.message ?? null;
+    }
+
     return {
       success: true,
       message: "Your email has been verified successfully. You can now log in.",
       userId: user.id,
       // Set only for tokens issued mid-checkout — null for plain
-      // registration tokens. The caller decides what, if anything, to do
-      // with these; verifyEmail itself has no opinion on orders/payments.
+      // registration tokens.
       resumeType: matchedToken.resumeType,
       resumeId: matchedToken.resumeId,
+      resumeSuccess,
+      resumeUrl,
+      resumeMessage,
     };
   } catch (error) {
     console.error("[verifyEmail]", error);

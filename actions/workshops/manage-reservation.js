@@ -106,73 +106,96 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
     // of the money having actually moved yet), so a failed/retried Stripe
     // call never leaves it missing.
     let refundFailed = false;
+    const REFUND_EPSILON = 0.01;
     if (refundDeposit && reservation.payment?.transactionReference) {
       const payment = reservation.payment;
 
-      await prisma.$transaction(async (tx) => {
-        await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
-        if (payment.invoice) {
-          await issueCreditNote(tx, {
-            invoiceId: payment.invoice.id,
-            reason: reason || "Annulation atelier — remboursement exceptionnel",
-            totalInclVat: Number(payment.paidAmount),
-          });
-        }
+      // Cap against what's actually still outstanding — a prior partial
+      // refund (e.g. issued manually from the Stripe Dashboard, reconciled
+      // via the charge.refunded webhook) can already have refunded part of
+      // this payment. Mirrors rejectAppointment's exact pattern — without
+      // it, this over-counts in the ledger (and could double-refund on
+      // Stripe's side if the payment_intent still had a partial balance).
+      const priorRefunds = await prisma.transaction.aggregate({
+        where: { paymentId: payment.id, transactionType: "REFUND" },
+        _sum: { amount: true },
       });
+      const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
+      const remaining = Number(payment.paidAmount) - alreadyRefunded;
 
-      try {
-        const checkoutSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
-        if (checkoutSession.payment_intent) {
-          const stripePaymentIntentId =
-            typeof checkoutSession.payment_intent === "string"
-              ? checkoutSession.payment_intent
-              : checkoutSession.payment_intent.id;
-          await stripe.refunds.create({
-            payment_intent: stripePaymentIntentId,
-            metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
-          });
-
-          await prisma.$transaction([
-            prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } }),
-            prisma.transaction.updateMany({
-              where: {
-                paymentId: payment.id,
-                transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
-                stripePaymentIntentId: null,
-              },
-              data: { stripePaymentIntentId },
-            }),
-            prisma.transaction.create({
-              data: {
-                paymentId: payment.id,
-                amount: payment.paidAmount,
-                method: "ONLINE",
-                transactionType: "REFUND",
-                paidAt: new Date(),
-                stripeCheckoutSessionId: payment.transactionReference,
-                stripePaymentIntentId,
-              },
-            }),
-          ]);
-        }
-      } catch (err) {
-        // The reservation is already cancelled and the credit note already
-        // issued — that stays. But don't let the customer email below claim
-        // a refund that didn't happen; surface this to staff instead, AND
-        // persist it durably so the cron retry job
-        // (lib/payments/retry-failed-refunds.js) can pick it up even if
-        // this email is missed.
-        console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
-        refundFailed = true;
-        await prisma.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: "REFUND_FAILED",
-            refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
-            refundAttemptedAt: new Date(),
-            refundRetryCount: { increment: 1 },
-          },
+      if (remaining <= REFUND_EPSILON) {
+        await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
+      } else {
+        await prisma.$transaction(async (tx) => {
+          await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
+          if (payment.invoice) {
+            await issueCreditNote(tx, {
+              invoiceId: payment.invoice.id,
+              reason: reason || "Annulation atelier — remboursement exceptionnel",
+              totalInclVat: remaining,
+            });
+          }
         });
+
+        try {
+          const checkoutSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
+          if (checkoutSession.payment_intent) {
+            const stripePaymentIntentId =
+              typeof checkoutSession.payment_intent === "string"
+                ? checkoutSession.payment_intent
+                : checkoutSession.payment_intent.id;
+            await stripe.refunds.create({
+              payment_intent: stripePaymentIntentId,
+              amount: Math.round(remaining * 100),
+              metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
+            });
+
+            const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
+            await prisma.$transaction([
+              prisma.payment.update({
+                where: { id: payment.id },
+                data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+              }),
+              prisma.transaction.updateMany({
+                where: {
+                  paymentId: payment.id,
+                  transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
+                  stripePaymentIntentId: null,
+                },
+                data: { stripePaymentIntentId },
+              }),
+              prisma.transaction.create({
+                data: {
+                  paymentId: payment.id,
+                  amount: remaining,
+                  method: "ONLINE",
+                  transactionType: "REFUND",
+                  paidAt: new Date(),
+                  stripeCheckoutSessionId: payment.transactionReference,
+                  stripePaymentIntentId,
+                },
+              }),
+            ]);
+          }
+        } catch (err) {
+          // The reservation is already cancelled and the credit note already
+          // issued — that stays. But don't let the customer email below claim
+          // a refund that didn't happen; surface this to staff instead, AND
+          // persist it durably so the cron retry job
+          // (lib/payments/retry-failed-refunds.js) can pick it up even if
+          // this email is missed.
+          console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
+          refundFailed = true;
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: "REFUND_FAILED",
+              refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+              refundAttemptedAt: new Date(),
+              refundRetryCount: { increment: 1 },
+            },
+          });
+        }
       }
     }
 

@@ -60,6 +60,7 @@ inventory_from_wix.csv
 
 # Google Forms response exports (client survey answers, not app code)
 Merri Beauty — Points de suivi*.csv
+Merri Beauty — Derniers points*.csv
 Mondial Relay — Informations*.csv
 
 # local dev tool binary, not app code

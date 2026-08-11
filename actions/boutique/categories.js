@@ -48,6 +48,15 @@ async function uniqueCategorySlug(brandId, base, excludeId = null) {
 export async function getProductCategories({ brandId, includeInactive = false } = {}) {
   if (!brandId) return { success: false, message: "La marque est obligatoire.", data: [] };
 
+  // includeInactive is only ever passed by dashboard callers (the product
+  // editor) — a "use server" export is directly invocable regardless of who
+  // the UI intends as the caller, so an unauthenticated request could
+  // otherwise pass it too and enumerate disabled categories.
+  if (includeInactive) {
+    const { error } = await requireAdmin();
+    if (error) return { success: false, message: error, data: [] };
+  }
+
   try {
     const categories = await prisma.productCategory.findMany({
       where: { brandId, ...(includeInactive ? {} : { isActive: true }) },
@@ -93,6 +102,13 @@ export async function getProductCategories({ brandId, includeInactive = false } 
  * Brand → Category → Subcategory shape in one read.
  */
 export async function getCatalogueTree({ includeInactive = false, includeProducts = false } = {}) {
+  // Same reasoning as getProductCategories above — includeInactive must not
+  // be trustable from an unauthenticated direct call to this server action.
+  if (includeInactive) {
+    const { error } = await requireAdmin();
+    if (error) return { success: false, message: error, data: [] };
+  }
+
   try {
     const brands = await prisma.brand.findMany({
       where: { isDeleted: false, ...(includeInactive ? {} : { isActive: true }) },

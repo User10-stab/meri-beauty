@@ -309,6 +309,7 @@ export async function rejectAppointment(appointmentId, reason = null) {
                 method: "ONLINE",
                 transactionType: "REFUND",
                 paidAt: new Date(),
+                stripePaymentIntentId: stripeSession.payment_intent,
               },
             }),
           ]);

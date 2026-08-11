@@ -12,8 +12,7 @@ export default function MentionsLegalesPage() {
       <Note>
         Ce document est un projet rédigé à partir des informations transmises par l'exploitante
         et des éléments techniques du site. Il doit être relu et validé — au besoin avec un
-        conseil juridique — avant publication définitive, en particulier le champ signalé
-        « à compléter » ci-dessous.
+        conseil juridique — avant publication définitive.
       </Note>
 
       <H2>1. Éditeur du site</H2>
@@ -22,7 +21,7 @@ export default function MentionsLegalesPage() {
       </P>
       <Ul>
         <li><strong>Nom commercial :</strong> Meri Beauty</li>
-        <li><strong>Exploitée par :</strong> [Nom et prénom complets de la responsable — à compléter], agissant à titre personnel</li>
+        <li><strong>Exploitée par :</strong> Marie Mercier, agissant à titre personnel</li>
         <li><strong>Statut juridique :</strong> Personne physique (entreprise individuelle / indépendante)</li>
         <li><strong>Numéro d'entreprise (BCE) :</strong> BE 0751.854.027</li>
         <li><strong>Numéro de TVA :</strong> BE 0751.854.027</li>

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isAdminRole, ROLES } from "@/lib/authorization";
+import { isAdminRole, canAccessDashboard, ROLES } from "@/lib/authorization";
 
 const staffAssignmentSchema = z.object({
   staffId: z.string().min(1, "Le professionnel est obligatoire."),
@@ -115,6 +115,14 @@ export async function createService(input) {
 
   const { name, categoryId, description, staffAssignments } = parsed.data;
 
+  const session = await auth();
+  if (!session?.user) {
+    return { success: false, message: "Non authentifié" };
+  }
+  if (!canAccessDashboard(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+
   try {
     // Verify the category exists
     const category = await prisma.category.findUnique({
@@ -126,15 +134,10 @@ export async function createService(input) {
       return {
         success: false,
         message: "La catégorie sélectionnée est introuvable.",
-        errors: { 
+        errors: {
           categoryId: "Catégorie introuvable.",
         },
       };
-    }
-
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, message: "Non authentifié" };
     }
 
     // Check if a service with the same name already exists (case-insensitive)

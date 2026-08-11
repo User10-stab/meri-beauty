@@ -79,6 +79,7 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
           phone: true,
           avatar: true,
           isActive: true,
+          vatNumber: true,
           lastLogin: true,
           createdAt: true,
           _count: {
@@ -98,6 +99,7 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
       phone: c.phone,
       avatar: c.avatar ?? null,
       isActive: c.isActive,
+      vatNumber: c.vatNumber ?? null,
       lastLogin: c.lastLogin?.toISOString() ?? null,
       joinedAt: c.createdAt.toISOString(),
       appointmentsCount: c._count.appointments,

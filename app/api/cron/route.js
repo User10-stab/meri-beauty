@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { expireStaleOrders } from "@/lib/orders/expire-stale-orders";
 import { sendWorkshopReservationReminders } from "@/lib/reminders/send-workshop-reminders";
 import { sendFormationReservationReminders } from "@/lib/reminders/send-formation-reminders";
@@ -47,38 +48,58 @@ export async function GET(req) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // allSettled, not all: one job throwing (e.g. a stale Stripe Connect
-  // account inside reconcileMissedRefunds) must never mask whether the other
-  // six actually ran — a single bad account previously turned this whole
-  // endpoint into a 500 with no way to tell which job(s) were the problem.
-  const settled = await Promise.allSettled(JOBS.map(([, run]) => run()));
+  // Non-blocking: if a previous invocation is still running (the external
+  // scheduler firing again before the last run finished, or two schedulers
+  // configured by mistake), skip this one outright rather than let both
+  // execute concurrently — retryFailedRefunds and reconcileMissedRefunds in
+  // particular can otherwise both act on the same stuck Payment in the same
+  // window and duplicate a refund's ledger row. Transaction-scoped
+  // (pg_try_advisory_xact_lock, not the plain session-level variant) so it
+  // always releases on the connection that acquired it regardless of
+  // Prisma's pooling, and auto-releases even if this request crashes.
+  return prisma.$transaction(
+    async (tx) => {
+      const [{ locked }] = await tx.$queryRaw`SELECT pg_try_advisory_xact_lock(hashtext('meri-beauty-cron-runner')) AS locked`;
+      if (!locked) {
+        return NextResponse.json({ success: true, skipped: "A previous run is still in progress." }, { status: 200 });
+      }
 
-  const results = {};
-  let anyFailed = false;
-  settled.forEach((outcome, i) => {
-    const [name] = JOBS[i];
-    if (outcome.status === "fulfilled") {
-      results[name] = outcome.value;
-    } else {
-      results[name] = null;
-      anyFailed = true;
-      captureCriticalError(outcome.reason, { area: "background-jobs", job: name, trigger: "http-cron" });
-    }
-  });
+      // allSettled, not all: one job throwing (e.g. a stale Stripe Connect
+      // account inside reconcileMissedRefunds) must never mask whether the
+      // other six actually ran — a single bad account previously turned this
+      // whole endpoint into a 500 with no way to tell which job(s) were the
+      // problem.
+      const settled = await Promise.allSettled(JOBS.map(([, run]) => run()));
 
-  return NextResponse.json({
-    success: !anyFailed,
-    ordersExpired: results.expireStaleOrders?.expiredCount ?? null,
-    workshopRemindersSent: results.sendWorkshopReservationReminders?.sentCount ?? null,
-    formationRemindersSent: results.sendFormationReservationReminders?.sentCount ?? null,
-    workshopHoldsExpired: results.expireStaleWorkshopHolds?.expiredCount ?? null,
-    formationHoldsExpired: results.expireStaleFormationHolds?.expiredCount ?? null,
-    refundsRetried: results.retryFailedRefunds?.retried ?? null,
-    refundsRecovered: results.retryFailedRefunds?.succeeded ?? null,
-    missedRefundsChecked: results.reconcileMissedRefunds?.checked ?? null,
-    missedRefundsRecovered: results.reconcileMissedRefunds?.reconciled ?? null,
-    failedJobs: settled
-      .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
-      .filter(Boolean),
-  }, { status: anyFailed ? 207 : 200 });
+      const results = {};
+      let anyFailed = false;
+      settled.forEach((outcome, i) => {
+        const [name] = JOBS[i];
+        if (outcome.status === "fulfilled") {
+          results[name] = outcome.value;
+        } else {
+          results[name] = null;
+          anyFailed = true;
+          captureCriticalError(outcome.reason, { area: "background-jobs", job: name, trigger: "http-cron" });
+        }
+      });
+
+      return NextResponse.json({
+        success: !anyFailed,
+        ordersExpired: results.expireStaleOrders?.expiredCount ?? null,
+        workshopRemindersSent: results.sendWorkshopReservationReminders?.sentCount ?? null,
+        formationRemindersSent: results.sendFormationReservationReminders?.sentCount ?? null,
+        workshopHoldsExpired: results.expireStaleWorkshopHolds?.expiredCount ?? null,
+        formationHoldsExpired: results.expireStaleFormationHolds?.expiredCount ?? null,
+        refundsRetried: results.retryFailedRefunds?.retried ?? null,
+        refundsRecovered: results.retryFailedRefunds?.succeeded ?? null,
+        missedRefundsChecked: results.reconcileMissedRefunds?.checked ?? null,
+        missedRefundsRecovered: results.reconcileMissedRefunds?.reconciled ?? null,
+        failedJobs: settled
+          .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
+          .filter(Boolean),
+      }, { status: anyFailed ? 207 : 200 });
+    },
+    { timeout: 120_000, maxWait: 5_000 }
+  );
 }

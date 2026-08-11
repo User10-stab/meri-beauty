@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { updateCustomer } from "@/actions/customers/update-customer";
+import { setCustomerVatNumberManually } from "@/actions/customers/set-customer-vat-number";
 
 /**
  * @param {{ customer: object|null, onClose: () => void, onSaved: () => void }} props
@@ -11,6 +12,7 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [isActive, setIsActive] = useState(true);
+  const [vatNumber, setVatNumber] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -18,6 +20,7 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
       setFullName(customer.fullName ?? "");
       setPhone(customer.phone ?? "");
       setIsActive(customer.isActive ?? true);
+      setVatNumber(customer.vatNumber ?? "");
     }
   }, [customer]);
 
@@ -26,13 +29,24 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setIsSaving(true);
+
     const result = await updateCustomer({ id: customer.id, fullName, phone, isActive });
+
+    // Separate action/validation path from the identity fields above — only
+    // touch it if the value actually changed, so re-saving an unrelated
+    // field doesn't re-log a VAT override that didn't happen.
+    let vatResult = { success: true, message: null };
+    if (vatNumber.trim() !== (customer.vatNumber ?? "")) {
+      vatResult = await setCustomerVatNumberManually(customer.id, vatNumber);
+    }
+
     setIsSaving(false);
-    if (result.success) {
-      toast.success(result.message);
+
+    if (result.success && vatResult.success) {
+      toast.success(vatResult.message ?? result.message);
       onSaved();
     } else {
-      toast.error(result.message);
+      toast.error(!result.success ? result.message : vatResult.message);
     }
   }
 
@@ -81,6 +95,23 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
             />
             Compte actif
           </label>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              Numéro de TVA (B2B)
+            </label>
+            <input
+              type="text"
+              value={vatNumber}
+              onChange={(e) => setVatNumber(e.target.value)}
+              placeholder="BE0123456789"
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#2f3a2e] focus:outline-none"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Enregistré ici sans revérification VIES — à utiliser quand le client a un numéro
+              actif mais que VIES le refuse ou est injoignable.
+            </p>
+          </div>
         </div>
 
         <div className="mt-6 flex justify-end gap-3">

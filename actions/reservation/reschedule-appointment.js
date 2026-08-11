@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
-import { buildAppointmentWindow, findConflictingAppointment } from "@/lib/appointment-scheduling";
+import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
 
 const RESCHEDULABLE_STATUSES = ["PENDING", "CONFIRMED"];
 
@@ -79,6 +79,16 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
     );
     if (conflict) {
       return { success: false, message: "Ce créneau vient d'être réservé. Veuillez en choisir un autre." };
+    }
+
+    // findConflictingAppointment only rules out collision with another
+    // appointment — it says nothing about closures, staff time off, working
+    // hours. Re-validate against the same rules the booking calendar itself
+    // uses to offer slots, exactly like createReservation does, so a
+    // reschedule can't land on a closed day or outside working hours.
+    const slotCheck = await validateAppointmentSlot(appointment.staffServiceId, appointmentDate, startTime, time, appointmentId);
+    if (!slotCheck.valid) {
+      return { success: false, message: slotCheck.message };
     }
 
     const previousDate = appointment.date;

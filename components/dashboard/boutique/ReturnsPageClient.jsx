@@ -175,22 +175,33 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
   );
 }
 
+const CONDITION_OPTIONS = [
+  { value: "SEALED_RESELLABLE", label: "Scellé, revendable" },
+  { value: "OPENED_HYGIENE", label: "Descellé (exception hygiène)" },
+  { value: "DAMAGED", label: "Endommagé" },
+  { value: "DEFECTIVE", label: "Défectueux" },
+  { value: "WRONG_ITEM", label: "Mauvais article envoyé" },
+];
+
 function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
   const [isPending, startTransition] = useTransition();
   const [staffNote, setStaffNote] = useState("");
   const [manualRefundConfirmed, setManualRefundConfirmed] = useState(false);
   const [manualRefundReference, setManualRefundReference] = useState("");
+  const [itemConditions, setItemConditions] = useState({}); // returnRequestItemId -> condition
 
   if (!returnRequest) return null;
   const rr = returnRequest;
+  const allConditionsSet = rr.items.every((item) => Boolean(itemConditions[item.id]));
 
-  function run(action) {
+  function run(action, extra) {
     startTransition(async () => {
       const result = await action({
         returnRequestId: rr.id,
         staffNote: staffNote || undefined,
         manualRefundConfirmed,
         manualRefundReference: manualRefundReference || undefined,
+        ...extra,
       });
       if (result.success) {
         toast.success(result.message);
@@ -227,18 +238,38 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
 
         <div className="mb-4 space-y-2">
           {rr.items.map((item) => (
-            <div key={item.id} className="flex justify-between text-sm">
-              <span className="text-gray-700 dark:text-dark-6">
-                {item.productName} ({item.variantName}) × {item.quantity}
-              </span>
-              <span className="text-gray-500">{item.unitPrice != null ? formatPrice(item.unitPrice * item.quantity) : ""}</span>
+            <div key={item.id} className="space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-700 dark:text-dark-6">
+                  {item.productName} ({item.variantName}) × {item.quantity}
+                </span>
+                <span className="text-gray-500">{item.unitPrice != null ? formatPrice(item.unitPrice * item.quantity) : ""}</span>
+              </div>
+              {rr.status === "APPROVED" && (
+                <select
+                  value={itemConditions[item.id] ?? ""}
+                  onChange={(e) => setItemConditions((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                >
+                  <option value="" disabled>État de l&apos;article reçu — à sélectionner</option>
+                  {CONDITION_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              )}
+              {item.conditionLabel && rr.status !== "APPROVED" && (
+                <span className="inline-block rounded-full border border-gray-200 px-2 py-0.5 text-xs text-gray-500 dark:border-dark-3">
+                  État constaté : {item.conditionLabel}
+                </span>
+              )}
             </div>
           ))}
         </div>
 
         <div className="mb-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-dark-2 dark:text-dark-6">
           <span className="font-medium text-gray-700 dark:text-white">Motif : </span>
-          {rr.reason}
+          {rr.reasonCategoryLabel ?? rr.reasonCategory}
+          {rr.reason && <span className="text-gray-500"> — {rr.reason}</span>}
         </div>
 
         {rr.status === "APPROVED" && (
@@ -275,7 +306,7 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
         {["REQUESTED", "APPROVED"].includes(rr.status) && (
           <div className="mb-4">
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Note interne (optionnel)
+              Note interne — obligatoire en cas de refus (envoyée au client)
             </label>
             <textarea
               value={staffNote}
@@ -296,7 +327,8 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
               <button
                 type="button"
                 onClick={() => run(rejectReturnRequest)}
-                disabled={isPending}
+                disabled={isPending || !staffNote.trim()}
+                title={!staffNote.trim() ? "Indiquez un motif — il sera envoyé au client" : undefined}
                 className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
               >
                 Refuser
@@ -312,14 +344,23 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
               <button
                 type="button"
                 onClick={() => run(rejectReturnRequest)}
-                disabled={isPending}
+                disabled={isPending || !staffNote.trim()}
+                title={!staffNote.trim() ? "Indiquez un motif — il sera envoyé au client" : undefined}
                 className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
               >
                 Refuser
               </button>
               <Button
-                onClick={() => run(completeReturnRequest)}
-                disabled={isPending || (rr.order?.requiresManualRefund && (!manualRefundConfirmed || (rr.order?.paymentMethod === "CARD" && !manualRefundReference.trim())))}
+                onClick={() =>
+                  run(completeReturnRequest, {
+                    itemConditions: rr.items.map((item) => ({ returnRequestItemId: item.id, condition: itemConditions[item.id] })),
+                  })
+                }
+                disabled={
+                  isPending ||
+                  !allConditionsSet ||
+                  (rr.order?.requiresManualRefund && (!manualRefundConfirmed || (rr.order?.paymentMethod === "CARD" && !manualRefundReference.trim())))
+                }
               >
                 {isPending && <Loader2 size={14} className="animate-spin" />}
                 Confirmer réception &amp; rembourser

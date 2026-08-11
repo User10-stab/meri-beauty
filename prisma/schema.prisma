@@ -88,6 +88,23 @@ enum ReturnStatus {
   COMPLETED // item received, stock restored, refund/credit note issued
 }
 
+// Distinguishes the 14-day withdrawal right (CHANGED_MIND — the only
+// category actually bound by withdrawalWindow()) from claims governed by
+// other legal bases entirely: the 2-year statutory guarantee (DEFECTIVE),
+// the shop's own fulfilment error (WRONG_ITEM, DAMAGED_IN_TRANSIT), a
+// carrier issue (NOT_RECEIVED), or a discretionary exception (GOODWILL).
+// Conflating these behind one "délai dépassé" rejection is what
+// bigbatch.txt P1 "Rétractation et produit défectueux sont confondus"
+// flagged — see actions/boutique/returns.js.
+enum ReturnReasonCategory {
+  CHANGED_MIND
+  DEFECTIVE
+  WRONG_ITEM
+  DAMAGED_IN_TRANSIT
+  NOT_RECEIVED
+  GOODWILL
+}
+
 enum TransactionMethod {
   CASH
   CARD
@@ -170,6 +187,23 @@ enum MovementType {
   LOSS
   ADJUSTMENT
   SALON_USAGE // product taken from retail stock during a service
+  // A returned item pulled aside for inspection/disposal instead of going
+  // back into vendable stock — see ReturnItemCondition. stockQuantity is
+  // deliberately left unchanged by this movement; it exists purely as the
+  // audit trail of the item physically coming back.
+  RETURN_QUARANTINE
+}
+
+// Physical condition staff record for each returned line item at
+// completeReturnRequest time, before any restock decision is made — see
+// actions/boutique/returns.js. Only SEALED_RESELLABLE ever increments
+// ProductVariant.stockQuantity.
+enum ReturnItemCondition {
+  SEALED_RESELLABLE // unopened, resalable as-is
+  OPENED_HYGIENE // hygiene-exempt product opened/unsealed — never resold
+  DAMAGED // packaging or product damaged — quarantine for assessment
+  DEFECTIVE // faulty product — quarantine for supplier return
+  WRONG_ITEM // shop's shipping error — inspect before any restock
 }
 
 enum CommissionType {
@@ -1031,6 +1065,15 @@ model Order {
   bpostTrackingCode  String?
   shippedAt          DateTime?
 
+  // Set when staff closes a SHIPPING_PREPAID order and confirms — from the
+  // Mondial Relay tracking portal, since there is no delivery/collection
+  // webhook integrated yet — the date the customer actually collected the
+  // parcel from the relay point. This, not shippedAt, is the legal start of
+  // the 14-day withdrawal window (SPF Économie: le lendemain de la prise de
+  // possession réelle du bien). See withdrawalWindow() in
+  // actions/boutique/returns.js.
+  collectedAt DateTime?
+
   // Mondial Relay pickup point (current carrier). pickupPointId is null for
   // orders placed through the manual fallback form (no widget credentials
   // configured yet) — name/address/postalCode/city are always required either way.
@@ -1109,8 +1152,9 @@ model ReturnRequest {
   orderId String
   order   Order  @relation(fields: [orderId], references: [id])
 
-  status ReturnStatus @default(REQUESTED)
-  reason String
+  status         ReturnStatus         @default(REQUESTED)
+  reasonCategory ReturnReasonCategory @default(CHANGED_MIND)
+  reason         String
 
   requestedAt DateTime @default(now())
 
@@ -1141,6 +1185,11 @@ model ReturnRequestItem {
   orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
 
   quantity Int
+
+  // Set by staff at completeReturnRequest time (null until then — a
+  // REQUESTED/APPROVED return hasn't been physically inspected yet).
+  // Gates whether this item's quantity is restocked as vendable.
+  condition ReturnItemCondition?
 
   @@index([returnRequestId])
   @@index([orderItemId])

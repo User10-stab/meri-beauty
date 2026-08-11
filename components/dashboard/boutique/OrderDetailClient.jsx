@@ -72,6 +72,8 @@ export function OrderDetailClient({ order }) {
   const [manualRefundReference, setManualRefundReference] = useState("");
   const [trackingCode, setTrackingCode] = useState(order.trackingCode ?? "");
   const [generatingLabel, setGeneratingLabel] = useState(false);
+  const [closingShipped, setClosingShipped] = useState(false);
+  const [collectedAt, setCollectedAt] = useState("");
 
   function runAction(action, ...args) {
     startTransition(async () => {
@@ -102,6 +104,19 @@ export function OrderDetailClient({ order }) {
         toast.success(result.message);
         if (result.data?.trackingCode) setTrackingCode(result.data.trackingCode);
         if (result.data?.labelUrl) window.open(result.data.labelUrl, "_blank");
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
+
+  function handleCloseShipped() {
+    startTransition(async () => {
+      const result = await markOrderCompleted({ orderId: order.id, collectedAt });
+      if (result.success) {
+        toast.success(result.message);
+        setClosingShipped(false);
         router.refresh();
       } else {
         toast.error(result.message);
@@ -253,6 +268,7 @@ export function OrderDetailClient({ order }) {
                   </p>
                 )}
                 {order.shippedAt && <p className="text-gray-400">Expédiée le {formatDate(order.shippedAt)}</p>}
+                {order.collectedAt && <p className="text-gray-400">Récupérée le {formatDate(order.collectedAt)}</p>}
               </div>
             )}
           </div>
@@ -352,8 +368,14 @@ export function OrderDetailClient({ order }) {
               )}
 
               {canCloseShipped && (
-                <Button className="w-full" onClick={() => runAction(markOrderCompleted, order.id)} disabled={isPending}>
-                  {isPending && <Loader2 size={14} className="animate-spin" />}
+                <Button
+                  className="w-full"
+                  onClick={() => {
+                    setCollectedAt(new Date().toISOString().slice(0, 10));
+                    setClosingShipped(true);
+                  }}
+                  disabled={isPending}
+                >
                   Clôturer la commande
                 </Button>
               )}
@@ -385,6 +407,28 @@ export function OrderDetailClient({ order }) {
           router.refresh();
         }}
       />
+
+      <ConfirmDialog
+        open={closingShipped}
+        title="Clôturer la commande"
+        message="Vérifiez le suivi Mondial Relay et indiquez la date à laquelle la cliente a récupéré le colis au point relais — cette date déclenche son délai légal de rétractation de 14 jours."
+        confirmLabel="Clôturer"
+        loading={isPending}
+        confirmDisabled={!collectedAt}
+        onConfirm={handleCloseShipped}
+        onCancel={() => setClosingShipped(false)}
+      >
+        <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+          Date de retrait au point relais
+        </label>
+        <input
+          type="date"
+          value={collectedAt}
+          max={new Date().toISOString().slice(0, 10)}
+          onChange={(e) => setCollectedAt(e.target.value)}
+          className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
+        />
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={cancelling}

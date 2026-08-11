@@ -8,7 +8,7 @@ import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
 import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
-import { checkoutSchema, shipOrderSchema, cancelOrderSchema } from "@/lib/validations/commerce";
+import { checkoutSchema, shipOrderSchema, cancelOrderSchema, closeShippedOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
 import { formatUserAddress } from "@/lib/format-address";
@@ -162,6 +162,7 @@ function serializeOrder(order) {
     pickupPointCity: order.pickupPointCity,
     trackingCode: order.trackingCode,
     shippedAt: order.shippedAt,
+    collectedAt: order.collectedAt,
     pickupCode: order.pickupCode,
     pickedUpAt: order.pickedUpAt,
     expiresAt: order.expiresAt,
@@ -1019,19 +1020,37 @@ export async function markOrderShipped(input) {
   }
 }
 
-export async function markOrderCompleted(orderId) {
+/**
+ * Closes a shipped order. Requires the date staff confirmed (from the
+ * Mondial Relay tracking portal) that the customer actually collected the
+ * parcel — this becomes Order.collectedAt, the legal start of the 14-day
+ * withdrawal window (see withdrawalWindow() in actions/boutique/returns.js).
+ * Closing without a real date would let the return window silently start
+ * from nothing, the exact gap this action exists to close.
+ */
+export async function markOrderCompleted(input) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
+
+  const parsed = closeShippedOrderSchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return { success: false, message: errors.collectedAt?.[0] ?? errors.orderId?.[0] ?? "Données invalides." };
+  }
+  const { orderId, collectedAt } = parsed.data;
 
   try {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) return { success: false, message: "Commande introuvable." };
+    if (order.shippedAt && collectedAt.getTime() < order.shippedAt.getTime()) {
+      return { success: false, message: "La date de retrait ne peut pas être antérieure à la date d'expédition." };
+    }
 
     // Atomic claim, gated on the prior status — same double-click/race guard
     // as markOrderShipped/markOrderReadyForPickup above.
     const claim = await prisma.order.updateMany({
       where: { id: orderId, status: "SHIPPED" },
-      data: { status: "COMPLETED" },
+      data: { status: "COMPLETED", collectedAt },
     });
     if (claim.count === 0) {
       return { success: false, message: "Seule une commande expédiée peut être clôturée." };
@@ -1254,6 +1273,16 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
                   status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
                   pendingRefundAmount: null,
                   pendingRefundIdempotencyKey: null,
+                },
+              }),
+              prisma.auditLog.create({
+                data: {
+                  actorId: manualRefund.actorId ?? null,
+                  actorRole: manualRefund.actorRole ?? null,
+                  action: "order.cancellation_refund_completed",
+                  entityType: "Order",
+                  entityId: orderId,
+                  metadata: { orderNumber: order.orderNumber, amount: remaining, method: "ONLINE", automatedByStripe: true },
                 },
               }),
               prisma.auditLog.create({

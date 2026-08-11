@@ -393,7 +393,9 @@ function VatNumberCard({ initialVatNumber }) {
     setSaving(false);
     if (result.success) {
       toast.success(result.message);
-      setSavedVatNumber(vatNumber.trim());
+      const savedValue = result.vatNumber ?? vatNumber.trim();
+      setVatNumber(savedValue);
+      setSavedVatNumber(savedValue);
       setVatCheck(null);
     } else {
       toast.error(result.message);

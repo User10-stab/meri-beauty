@@ -85,6 +85,7 @@ export async function updateMyVatNumber(vatNumber) {
       return {
         success: true,
         verificationPending: true,
+        vatNumber: normalized,
         message: "Numéro de TVA enregistré en attente de vérification VIES. La TVA normale reste appliquée jusqu’à sa confirmation.",
       };
     } catch (error) {
@@ -110,6 +111,7 @@ export async function updateMyVatNumber(vatNumber) {
     revalidatePath("/profile");
     return {
       success: true,
+      vatNumber: normalized,
       message: viesResult.name
         ? `Numéro de TVA vérifié et enregistré (${viesResult.name}).`
         : "Numéro de TVA vérifié et enregistré.",

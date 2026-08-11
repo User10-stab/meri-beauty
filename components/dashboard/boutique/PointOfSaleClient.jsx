@@ -4,11 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useRouter } from "next/navigation";
 import { Banknote, Camera, CameraOff, CreditCard, Loader2, Minus, Plus, ScanLine, Trash2, UserRound, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
+import QRCode from "qrcode";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
 import {
   completePointOfSaleSale,
+  cancelPointOfSaleCheckout,
   getPointOfSaleProductByBarcode,
+  getPointOfSaleOrderStatus,
+  recoverPointOfSaleCheckout,
   searchPointOfSaleCustomers,
 } from "@/actions/boutique/point-of-sale";
 
@@ -20,7 +24,11 @@ export function PointOfSaleClient() {
   const [cart, setCart] = useState([]);
   const [customer, setCustomer] = useState(emptyCustomer);
   const [matches, setMatches] = useState([]);
-  const [method, setMethod] = useState("CARD");
+  const [method, setMethod] = useState("CARD_QR");
+  const [attemptKey, setAttemptKey] = useState(null);
+  const [qrModal, setQrModal] = useState(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [isCancellingQr, setIsCancellingQr] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState(null);
   const [cameraReady, setCameraReady] = useState(false);
@@ -30,6 +38,70 @@ export function PointOfSaleClient() {
   const [isPending, startTransition] = useTransition();
 
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0), [cart]);
+
+  function resetAttempt() {
+    const next = crypto.randomUUID();
+    localStorage.setItem("meri-pos-attempt-key", next);
+    setAttemptKey(next);
+    return next;
+  }
+
+  useEffect(() => {
+    const stored = localStorage.getItem("meri-pos-attempt-key") || crypto.randomUUID();
+    localStorage.setItem("meri-pos-attempt-key", stored);
+    setAttemptKey(stored);
+    recoverPointOfSaleCheckout(stored).then((result) => {
+      if (result.success && result.data?.completed) {
+        localStorage.removeItem("meri-pos-attempt-key");
+        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+      } else if (result.success && result.data?.checkoutUrl) {
+        setQrModal(result.data);
+      } else if (result.terminal || result.notFound) {
+        resetAttempt();
+      }
+    }).catch(() => {});
+  }, [router]);
+
+  useEffect(() => {
+    if (!qrModal?.checkoutUrl) {
+      setQrDataUrl("");
+      return;
+    }
+    let active = true;
+    QRCode.toDataURL(qrModal.checkoutUrl, { width: 320, margin: 1, errorCorrectionLevel: "M" })
+      .then((url) => active && setQrDataUrl(url))
+      .catch(() => active && toast.error("Impossible de générer le QR de paiement."));
+    return () => { active = false; };
+  }, [qrModal?.checkoutUrl]);
+
+  useEffect(() => {
+    if (!qrModal?.orderId) return undefined;
+    let active = true;
+    let busy = false;
+    const poll = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        const result = await getPointOfSaleOrderStatus(qrModal.orderId);
+        if (!active || !result.success) return;
+        if (result.status === "COMPLETED") {
+          localStorage.removeItem("meri-pos-attempt-key");
+          setQrModal(null);
+          toast.success("Paiement Stripe confirmé.");
+          router.push(`/dashboard/boutique/orders/${qrModal.orderId}`);
+        } else if (["CANCELLED", "EXPIRED"].includes(result.status)) {
+          setQrModal(null);
+          resetAttempt();
+          toast.error("Le paiement a été annulé ou a expiré.");
+        }
+      } finally {
+        busy = false;
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 2500);
+    return () => { active = false; clearInterval(interval); };
+  }, [qrModal?.orderId, router]);
 
   useEffect(() => {
     const query = customer.email || customer.fullName;
@@ -123,14 +195,32 @@ export function PointOfSaleClient() {
 
   function submitSale() {
     if (!cart.length) return toast.error("Scannez au moins un produit.");
+    if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
     startTransition(async () => {
       const result = await completePointOfSaleSale({
         customer,
         items: cart.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
         method,
+        attemptKey,
       });
       if (!result.success) {
         toast.error(result.message);
+        return;
+      }
+      if (method === "CARD_QR") {
+        if (!result.data.completed) {
+          setQrModal({ ...result.data, totalAmount: total });
+          return;
+        }
+        localStorage.removeItem("meri-pos-attempt-key");
+        toast.success("Paiement Stripe confirmé.");
+        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+        return;
+      }
+      localStorage.removeItem("meri-pos-attempt-key");
+      if (result.data.alreadyProcessed) {
+        toast.success(`La vente n°${result.data.orderNumber} était déjà enregistrée.`);
+        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
         return;
       }
       if (result.data.receiptEmailSent) {
@@ -140,6 +230,29 @@ export function PointOfSaleClient() {
       }
       router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
     });
+  }
+
+  async function cancelQrPayment() {
+    if (!qrModal?.orderId || isCancellingQr) return;
+    setIsCancellingQr(true);
+    try {
+      const result = await cancelPointOfSaleCheckout(qrModal.orderId);
+      if (result.paid) {
+        toast.success("Le paiement venait d'être confirmé.");
+        localStorage.removeItem("meri-pos-attempt-key");
+        router.push(`/dashboard/boutique/orders/${qrModal.orderId}`);
+        return;
+      }
+      if (!result.success) {
+        toast.error(result.message);
+        return;
+      }
+      setQrModal(null);
+      resetAttempt();
+      toast.success(result.message);
+    } finally {
+      setIsCancellingQr(false);
+    }
   }
 
   return (
@@ -222,15 +335,37 @@ export function PointOfSaleClient() {
 
         <div className="space-y-2 border-t border-gray-100 pt-5 dark:border-dark-3">
           <p className="text-sm font-medium text-gray-700 dark:text-dark-6">Paiement encaissé</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setMethod("CARD")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CARD" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte</button>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <button type="button" onClick={() => setMethod("CARD_QR")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CARD_QR" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte QR</button>
             <button type="button" onClick={() => setMethod("CASH")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CASH" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><Banknote size={16} />Espèces</button>
+            <button type="button" onClick={() => setMethod("EXTERNAL_TERMINAL")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "EXTERNAL_TERMINAL" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Terminal externe</button>
           </div>
         </div>
 
         <div className="flex items-end justify-between border-t border-gray-100 pt-5 dark:border-dark-3"><span className="text-sm text-gray-500">Total</span><strong className="text-3xl text-[#2f3a2e]">{total.toFixed(2)} €</strong></div>
-        <Button className="w-full" onClick={submitSale} disabled={isPending || cart.length === 0}>{isPending ? "Enregistrement…" : "Encaisser et envoyer le reçu"}</Button>
+        <Button className="w-full" onClick={submitSale} disabled={isPending || !attemptKey || cart.length === 0}>{isPending ? "Enregistrement…" : method === "CARD_QR" ? "Générer le QR de paiement" : "Encaisser et envoyer le reçu"}</Button>
       </aside>
+
+      {qrModal && (
+        <div role="dialog" aria-modal="true" aria-labelledby="pos-qr-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-xl dark:bg-gray-dark">
+            <h2 id="pos-qr-title" className="text-xl font-bold text-gray-900 dark:text-white">Paiement par carte</h2>
+            <p className="mt-1 text-sm text-gray-500">Scannez ce QR avec le téléphone du client.</p>
+            <p className="mt-4 text-3xl font-bold text-[#2f3a2e]">{Number(qrModal.totalAmount ?? total).toFixed(2)} €</p>
+            <div className="mx-auto mt-5 flex h-80 w-80 max-w-full items-center justify-center rounded-xl border border-gray-200 bg-white p-3">
+              {qrDataUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={qrDataUrl} alt="QR code Stripe Checkout" width={320} height={320} className="h-full w-full object-contain" />
+              ) : <Loader2 size={28} className="animate-spin text-[#2f3a2e]" />}
+            </div>
+            <div className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-500"><Loader2 size={15} className="animate-spin" />En attente de confirmation Stripe…</div>
+            <a href={qrModal.checkoutUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-sm font-medium text-[#2f3a2e] underline">Ouvrir le paiement dans un nouvel onglet</a>
+            <button type="button" onClick={cancelQrPayment} disabled={isCancellingQr} className="mt-5 w-full rounded-lg border border-red-200 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50">
+              {isCancellingQr ? "Annulation…" : "Annuler ce paiement"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {scannerOpen && (
         <div

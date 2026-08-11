@@ -211,6 +211,11 @@ enum OrderStatus {
   EXPIRED // pay-on-site pickup not collected within the deadline
 }
 
+enum OrderSource {
+  ONLINE
+  POS
+}
+
 enum WeekDay {
   MONDAY
 
@@ -651,6 +656,7 @@ model User {
   carts                          Cart[]
   orders                         Order[]                @relation("OrderBuyer")
   pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
+  createdPointOfSaleOrders       Order[]                @relation("OrderCreatedByStaff")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
   auditLogs                      AuditLog[]             @relation("AuditActor")
 
@@ -977,6 +983,14 @@ model Order {
 
   fulfilmentMode FulfilmentMode
   status         OrderStatus    @default(PENDING_PAYMENT)
+  source         OrderSource    @default(ONLINE)
+
+  // Counter-sale attribution and idempotency. The attempt key is generated
+  // by the POS client and reused across retries, so double-clicks/network
+  // retries cannot create a second order or Stripe Checkout Session.
+  createdByStaffId String?
+  createdByStaff   User?   @relation("OrderCreatedByStaff", fields: [createdByStaffId], references: [id], onDelete: SetNull)
+  posAttemptKey    String? @unique
 
   // Set the moment a Checkout Session is created for this order (before
   // Stripe confirms anything) — lets createOrderFromCart check with Stripe
@@ -1051,6 +1065,8 @@ model Order {
   @@index([status])
   @@index([expiresAt])
   @@index([fulfilmentMode])
+  @@index([source, status, createdAt])
+  @@index([createdByStaffId, createdAt])
 }
 
 // ORDER ITEM
@@ -1463,6 +1479,9 @@ model Transaction {
   paidAt                  DateTime
   stripeCheckoutSessionId String?
   stripePaymentIntentId   String?
+  // Receipt / transaction identifier entered after a physical terminal
+  // refund. Stripe refunds keep their identifiers in the Stripe fields.
+  manualReference         String?
   createdAt               DateTime          @default(now())
   isDeleted               Boolean           @default(false)
   deletedAt               DateTime?

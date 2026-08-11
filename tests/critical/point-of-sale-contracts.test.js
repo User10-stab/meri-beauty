@@ -23,6 +23,25 @@ describe("point-of-sale security contracts", () => {
     expect(pos).toContain('action: "order.point_of_sale_completed"');
   });
 
+  test("QR checkout is idempotent, reserves stock, and never records a manual card payment", () => {
+    expect(pos).toContain('method === "CARD_QR"');
+    expect(pos).toContain("posAttemptKey: attemptKey");
+    expect(pos).toContain('source: "POS"');
+    expect(pos).toContain("reservedQuantity: { increment: item.quantity }");
+    expect(pos).toContain("idempotencyKey: `pos-qr-${order.posAttemptKey}`");
+    expect(pos).toContain('metadata = { kind: "order", orderId: order.id, source: "pos" }');
+  });
+
+  test("status, recovery, and cancellation actions enforce POS ownership", () => {
+    expect(pos).toContain("getPointOfSaleOrderStatus");
+    expect(pos).toContain("recoverPointOfSaleCheckout");
+    expect(pos).toContain("cancelPointOfSaleCheckout");
+    expect(pos).toContain("canAccessPosOrder");
+    expect(pos).toContain('order.source !== "POS"');
+    expect(pos).toContain("stripe.checkout.sessions.expire");
+    expect(pos).toContain("reservedQuantity: { decrement: item.quantity }");
+  });
+
   test("locks each stock row before checking availability", () => {
     expect(pos).toContain('FROM "ProductVariant"');
     expect(pos).toContain("FOR UPDATE");
@@ -42,6 +61,36 @@ describe("point-of-sale security contracts", () => {
     expect(ui).toContain("BrowserMultiFormatReader");
     expect(ui).toContain("decodeFromConstraints");
     expect(ui).toContain("facingMode");
+  });
+
+  test("the counter UI renders, polls, recovers, and explicitly cancels Stripe QR payments", () => {
+    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    expect(ui).toContain('from "qrcode"');
+    expect(ui).toContain("recoverPointOfSaleCheckout");
+    expect(ui).toContain("getPointOfSaleOrderStatus");
+    expect(ui).toContain("cancelPointOfSaleCheckout");
+    expect(ui).toContain('localStorage.setItem("meri-pos-attempt-key"');
+    expect(ui).toContain("QR code Stripe Checkout");
+    expect(ui).toContain("Terminal externe");
+  });
+
+  test("POS identity and idempotency are database-enforced", () => {
+    const schema = source("prisma/schema.prisma");
+    const migration = source("prisma/migrations/20260811203000_add_pos_qr_order_identity/migration.sql");
+    expect(schema).toContain("posAttemptKey");
+    expect(schema).toContain("createdByStaffId");
+    expect(schema).toContain("source");
+    expect(migration).toContain('CONSTRAINT "Order_pos_identity_check"');
+    expect(migration).toContain('CREATE UNIQUE INDEX "Order_posAttemptKey_key"');
+  });
+
+  test("shared Stripe fulfillment completes POS orders and attributes stock to the cashier", () => {
+    const fulfillment = source("lib/orders/fulfill-order-payment.js");
+    expect(fulfillment).toContain('order.source === "POS"');
+    expect(fulfillment).toContain('? "COMPLETED"');
+    expect(fulfillment).toContain("pickedUpByStaffId: order.createdByStaffId");
+    expect(fulfillment).toContain("createdById: isPointOfSale ? order.createdByStaffId : null");
+    expect(fulfillment).toContain('action: "order.point_of_sale_qr_paid"');
   });
 
   test("the counter accepts both USB scans and QR camera results", () => {

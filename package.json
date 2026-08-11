@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev ",
+    "dev:stripe": "node scripts/dev-with-stripe-webhooks.mjs",
     "postinstall": "prisma generate",
     "build": "next build",
     "start": "next start",

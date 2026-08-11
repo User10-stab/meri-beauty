@@ -68,6 +68,8 @@ export function OrderDetailClient({ order }) {
   const [isPending, startTransition] = useTransition();
   const [pickupDialogOrder, setPickupDialogOrder] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const [manualRefundConfirmed, setManualRefundConfirmed] = useState(false);
+  const [manualRefundReference, setManualRefundReference] = useState("");
   const [trackingCode, setTrackingCode] = useState(order.trackingCode ?? "");
   const [generatingLabel, setGeneratingLabel] = useState(false);
 
@@ -109,7 +111,11 @@ export function OrderDetailClient({ order }) {
 
   function handleCancel() {
     startTransition(async () => {
-      const result = await cancelOrder({ orderId: order.id });
+      const result = await cancelOrder({
+        orderId: order.id,
+        manualRefundConfirmed,
+        manualRefundReference: manualRefundReference || undefined,
+      });
       if (result.success) {
         toast.success(result.message);
         setCancelling(false);
@@ -355,7 +361,11 @@ export function OrderDetailClient({ order }) {
               {canCancel && (
                 <button
                   type="button"
-                  onClick={() => setCancelling(true)}
+                  onClick={() => {
+                    setManualRefundConfirmed(false);
+                    setManualRefundReference("");
+                    setCancelling(true);
+                  }}
                   disabled={isPending}
                   className="w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
                 >
@@ -380,16 +390,46 @@ export function OrderDetailClient({ order }) {
         open={cancelling}
         title="Annuler cette commande ?"
         message={
-          order.hasPayment
-            ? "Le client a déjà payé en ligne — un remboursement Stripe sera automatiquement déclenché et le stock sera remis en vente."
+          order.payment?.requiresManualRefund
+            ? order.payment.refundInstruction
+            : order.hasPayment
+              ? "Le client a déjà payé en ligne — un remboursement Stripe sera automatiquement déclenché et le stock sera remis en vente."
             : "Le stock réservé sera libéré."
         }
         confirmLabel="Annuler la commande"
         danger
         loading={isPending}
+        confirmDisabled={Boolean(
+          order.payment?.requiresManualRefund &&
+            (!manualRefundConfirmed || (order.payment.paymentMethod === "CARD" && !manualRefundReference.trim()))
+        )}
         onConfirm={handleCancel}
         onCancel={() => setCancelling(false)}
-      />
+      >
+        {order.payment?.requiresManualRefund && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p><span className="font-semibold">Paiement d'origine : </span>{order.payment.paymentMethodLabel}</p>
+            <label className="mt-3 flex items-start gap-2 font-medium">
+              <input
+                type="checkbox"
+                checked={manualRefundConfirmed}
+                onChange={(event) => setManualRefundConfirmed(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-amber-400"
+              />
+              Je confirme que le remboursement a déjà été effectué au client.
+            </label>
+            {order.payment.paymentMethod === "CARD" && (
+              <input
+                value={manualRefundReference}
+                onChange={(event) => setManualRefundReference(event.target.value)}
+                maxLength={100}
+                placeholder="Référence du ticket terminal (obligatoire)"
+                className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#2f3a2e]"
+              />
+            )}
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

@@ -14,6 +14,13 @@ import { DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authori
 import { lookupOrderForReturnSchema, requestReturnSchema, returnActionSchema } from "@/lib/validations/commerce";
 import { issueCreditNote } from "@/lib/invoicing";
 import { renderCreditNotePdf } from "@/lib/pdf/render";
+import {
+  getOrderPaymentMethod,
+  isManualOrderRefund,
+  manualRefundInstruction,
+  refundMethodLabel,
+  validateManualRefundConfirmation,
+} from "@/lib/payments/refund-method";
 
 /**
  * Belgian/EU 14-day right of withdrawal.
@@ -67,6 +74,7 @@ function claimedQuantities(order) {
 }
 
 function serializeReturnRequest(rr) {
+  const paymentMethod = getOrderPaymentMethod(rr.order?.payment);
   return {
     id: rr.id,
     status: rr.status,
@@ -79,6 +87,10 @@ function serializeReturnRequest(rr) {
       ? {
           id: rr.order.id,
           orderNumber: rr.order.orderNumber,
+          paymentMethod,
+          paymentMethodLabel: refundMethodLabel(paymentMethod),
+          requiresManualRefund: isManualOrderRefund(rr.order.payment),
+          refundInstruction: manualRefundInstruction(paymentMethod),
           user: rr.order.user
             ? { fullName: rr.order.user.fullName, email: rr.order.user.email }
             : null,
@@ -288,7 +300,14 @@ export async function listReturnRequests({ status, search, page = 1, pageSize = 
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              user: { select: { fullName: true, email: true } },
+              payment: { select: { transactionReference: true, transactions: { select: { method: true, transactionType: true } } } },
+            },
+          },
           items: { include: { orderItem: true } },
         },
       }),
@@ -309,7 +328,14 @@ export async function getReturnRequestById(id) {
     const rr = await prisma.returnRequest.findUnique({
       where: { id },
       include: {
-        order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            user: { select: { fullName: true, email: true } },
+            payment: { select: { transactionReference: true, transactions: { select: { method: true, transactionType: true } } } },
+          },
+        },
         items: { include: { orderItem: true } },
       },
     });
@@ -393,8 +419,8 @@ export async function rejectReturnRequest(input) {
 /**
  * Staff confirms the item(s) are physically back: restocks, issues a credit
  * note against the order's invoice, and refunds — Stripe if the order was
- * paid online, otherwise it's a cash/card reimbursement handled at the
- * counter (nothing further for this action to do about the money itself).
+ * paid online, otherwise it requires an explicit confirmation that the
+ * physical cash/card-terminal reimbursement has happened at the counter.
  * Shipping is only refunded if this completion returns every remaining
  * item on the order — a partial return never touches the delivery fee.
  */
@@ -410,7 +436,7 @@ export async function completeReturnRequest(input) {
 
   const parsed = returnActionSchema.safeParse(input);
   if (!parsed.success) return { success: false, message: "Données invalides." };
-  const { returnRequestId, staffNote } = parsed.data;
+  const { returnRequestId, staffNote, manualRefundConfirmed, manualRefundReference } = parsed.data;
 
   try {
     const rr = await prisma.returnRequest.findUnique({
@@ -420,7 +446,7 @@ export async function completeReturnRequest(input) {
         order: {
           include: {
             items: true,
-            payment: { include: { invoice: true } },
+            payment: { include: { invoice: true, transactions: true } },
             user: true,
             returnRequests: { include: { items: true } },
           },
@@ -432,6 +458,14 @@ export async function completeReturnRequest(input) {
     if (!rr.order.payment?.invoice) {
       return { success: false, message: "Aucune facture n'est associée à cette commande — impossible d'émettre une note de crédit." };
     }
+
+    const originalMethod = getOrderPaymentMethod(rr.order.payment);
+    const manualConfirmationError = validateManualRefundConfirmation({
+      method: originalMethod,
+      confirmed: manualRefundConfirmed,
+      reference: manualRefundReference,
+    });
+    if (manualConfirmationError) return { success: false, message: manualConfirmationError };
 
     const refundAmount = rr.items.reduce((sum, i) => sum + Number(i.orderItem.unitPrice) * i.quantity, 0);
 
@@ -453,6 +487,7 @@ export async function completeReturnRequest(input) {
     const totalRefund = refundAmount + shippingRefund;
     const REFUND_EPSILON = 0.01;
 
+    const manualRefund = isManualOrderRefund(rr.order.payment);
     const { creditNote, alreadyRefunded, paidAmount } = await prisma.$transaction(async (tx) => {
       // Atomically claim this return: the WHERE clause only matches while
       // status is still APPROVED, so if two requests race here only one
@@ -507,6 +542,53 @@ export async function completeReturnRequest(input) {
 
       await tx.returnRequest.update({ where: { id: rr.id }, data: { creditNoteId: creditNote.id } });
 
+      if (manualRefund) {
+        const newTotalRefunded = alreadyRefunded + totalRefund;
+        const fullyRefunded = newTotalRefunded + REFUND_EPSILON >= paidAmount;
+        await tx.transaction.create({
+          data: {
+            paymentId: rr.order.payment.id,
+            amount: totalRefund,
+            method: originalMethod,
+            transactionType: "REFUND",
+            paidAt: new Date(),
+            manualReference: originalMethod === "CARD" ? manualRefundReference.trim() : null,
+          },
+        });
+        await tx.payment.update({
+          where: { id: rr.order.payment.id },
+          data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+        });
+      } else {
+        // Persist this before contacting Stripe: a process crash or timeout
+        // after the external call remains visible to the retry/reconciliation
+        // jobs instead of silently looking paid forever.
+        await tx.payment.update({
+          where: { id: rr.order.payment.id },
+          data: { status: "REFUND_PENDING", refundAttemptedAt: new Date() },
+        });
+      }
+
+      if (manualRefund) {
+        await tx.auditLog.create({
+          data: {
+            actorId: guard.session.user.id,
+            actorRole: guard.session.user.role,
+            action: "order.return_refund_completed",
+            entityType: "ReturnRequest",
+            entityId: rr.id,
+            metadata: {
+              orderId: rr.order.id,
+              orderNumber: rr.order.orderNumber,
+              amount: totalRefund,
+              method: originalMethod,
+              manualReference: originalMethod === "CARD" ? manualRefundReference.trim() : null,
+              automatedByStripe: false,
+            },
+          },
+        });
+      }
+
       return { creditNote, alreadyRefunded, paidAmount };
     });
 
@@ -520,16 +602,26 @@ export async function completeReturnRequest(input) {
     if (rr.order.payment.transactionReference) {
       try {
         const session = await stripe.checkout.sessions.retrieve(rr.order.payment.transactionReference);
-        if (session.payment_intent) {
-          await stripe.refunds.create({ payment_intent: session.payment_intent, amount: Math.round(totalRefund * 100) });
-        }
+        const stripePaymentIntentId =
+          typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+        if (!stripePaymentIntentId) throw new Error("STRIPE_PAYMENT_INTENT_MISSING");
+        await stripe.refunds.create({ payment_intent: stripePaymentIntentId, amount: Math.round(totalRefund * 100) });
       } catch (err) {
         console.error("[completeReturnRequest] REFUND FAILED for return", rr.id, err);
         refundFailed = true;
+        await prisma.payment.update({
+          where: { id: rr.order.payment.id },
+          data: {
+            status: "REFUND_FAILED",
+            refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+            refundAttemptedAt: new Date(),
+            refundRetryCount: { increment: 1 },
+          },
+        });
       }
     }
 
-    if (!refundFailed) {
+    if (!refundFailed && !manualRefund) {
       const newTotalRefunded = alreadyRefunded + totalRefund;
       const fullyRefunded = newTotalRefunded + REFUND_EPSILON >= paidAmount;
       await prisma.$transaction([
@@ -537,7 +629,7 @@ export async function completeReturnRequest(input) {
           data: {
             paymentId: rr.order.payment.id,
             amount: totalRefund,
-            method: rr.order.payment.transactionReference ? "ONLINE" : "CASH",
+            method: "ONLINE",
             transactionType: "REFUND",
             paidAt: new Date(),
           },
@@ -545,6 +637,22 @@ export async function completeReturnRequest(input) {
         prisma.payment.update({
           where: { id: rr.order.payment.id },
           data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+        }),
+        prisma.auditLog.create({
+          data: {
+            actorId: guard.session.user.id,
+            actorRole: guard.session.user.role,
+            action: "order.return_refund_completed",
+            entityType: "ReturnRequest",
+            entityId: rr.id,
+            metadata: {
+              orderId: rr.order.id,
+              orderNumber: rr.order.orderNumber,
+              amount: totalRefund,
+              method: "ONLINE",
+              automatedByStripe: true,
+            },
+          },
         }),
       ]);
     }
@@ -561,6 +669,7 @@ export async function completeReturnRequest(input) {
         orderNumber: rr.order.orderNumber,
         refundAmount: totalRefund,
         refundFailed,
+        manualRefund,
       }),
       ...(creditNotePdf ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] } : {}),
     }).catch((err) => console.error("[completeReturnRequest] email failed:", err));

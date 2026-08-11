@@ -166,6 +166,7 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
       )}
 
       <ReturnDetailDialog
+        key={active?.id ?? "empty"}
         returnRequest={active}
         onClose={() => setActive(null)}
         onCompleted={handleReload}
@@ -177,13 +178,20 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
 function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
   const [isPending, startTransition] = useTransition();
   const [staffNote, setStaffNote] = useState("");
+  const [manualRefundConfirmed, setManualRefundConfirmed] = useState(false);
+  const [manualRefundReference, setManualRefundReference] = useState("");
 
   if (!returnRequest) return null;
   const rr = returnRequest;
 
   function run(action) {
     startTransition(async () => {
-      const result = await action({ returnRequestId: rr.id, staffNote: staffNote || undefined });
+      const result = await action({
+        returnRequestId: rr.id,
+        staffNote: staffNote || undefined,
+        manualRefundConfirmed,
+        manualRefundReference: manualRefundReference || undefined,
+      });
       if (result.success) {
         toast.success(result.message);
         onClose();
@@ -233,6 +241,37 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
           {rr.reason}
         </div>
 
+        {rr.status === "APPROVED" && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p><span className="font-semibold">Paiement d'origine : </span>{rr.order?.paymentMethodLabel ?? "Non renseigné"}</p>
+            {rr.order?.requiresManualRefund ? (
+              <>
+                <p className="mt-1">{rr.order?.refundInstruction}</p>
+                <label className="mt-3 flex items-start gap-2 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={manualRefundConfirmed}
+                    onChange={(event) => setManualRefundConfirmed(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-amber-400"
+                  />
+                  Je confirme que le remboursement a déjà été effectué au client.
+                </label>
+                {rr.order?.paymentMethod === "CARD" && (
+                  <input
+                    value={manualRefundReference}
+                    onChange={(event) => setManualRefundReference(event.target.value)}
+                    maxLength={100}
+                    placeholder="Référence du ticket terminal (obligatoire)"
+                    className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#2f3a2e]"
+                  />
+                )}
+              </>
+            ) : (
+              <p className="mt-1">Le remboursement sera envoyé automatiquement via Stripe après confirmation de réception.</p>
+            )}
+          </div>
+        )}
+
         {["REQUESTED", "APPROVED"].includes(rr.status) && (
           <div className="mb-4">
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -278,7 +317,10 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
               >
                 Refuser
               </button>
-              <Button onClick={() => run(completeReturnRequest)} disabled={isPending}>
+              <Button
+                onClick={() => run(completeReturnRequest)}
+                disabled={isPending || (rr.order?.requiresManualRefund && (!manualRefundConfirmed || (rr.order?.paymentMethod === "CARD" && !manualRefundReference.trim())))}
+              >
                 {isPending && <Loader2 size={14} className="animate-spin" />}
                 Confirmer réception &amp; rembourser
               </Button>

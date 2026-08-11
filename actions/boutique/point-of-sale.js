@@ -5,7 +5,7 @@ import bcrypt from "bcrypt";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice } from "@/lib/invoicing";
 import { renderInvoicePdf } from "@/lib/pdf/render";
@@ -13,8 +13,12 @@ import { formatUserAddress } from "@/lib/format-address";
 import { sendEmail } from "@/lib/email";
 import { captureError } from "@/lib/monitoring";
 import { BELGIUM_VAT_RATE, calculateVatTotals } from "@/lib/tax-policy";
+import { stripe } from "@/lib/stripe";
+import { getAppBaseUrl } from "@/lib/site-url";
+import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
 
 const BCRYPT_SALT_ROUNDS = 12;
+const POS_CHECKOUT_SECONDS = 31 * 60;
 
 async function requirePointOfSaleAccess() {
   const session = await auth();
@@ -32,6 +36,52 @@ function serializeCustomer(customer) {
     email: customer.email,
     phone: customer.phone,
   };
+}
+
+async function createOrRecoverPointOfSaleCheckout(order) {
+  if (order.stripeCheckoutSessionId) {
+    const existing = await stripe.checkout.sessions.retrieve(order.stripeCheckoutSessionId);
+    if (existing.payment_status === "paid") {
+      await fulfillOrderPayment(existing);
+      return { session: existing, paid: true };
+    }
+    if (existing.status === "open") return { session: existing, paid: false };
+  }
+
+  const metadata = { kind: "order", orderId: order.id, source: "pos" };
+  const expiresAt = Math.floor(order.expiresAt.getTime() / 1000);
+  if (expiresAt < Math.floor(Date.now() / 1000) + 30 * 60) {
+    throw new Error("POS_CHECKOUT_RETRY_WINDOW_EXPIRED");
+  }
+  const session = await stripe.checkout.sessions.create(
+    {
+      payment_method_types: ["card"],
+      line_items: order.items.map((item) => ({
+        price_data: {
+          currency: "eur",
+          product_data: { name: `${item.productName} — ${item.variantName}` },
+          unit_amount: Math.round(Number(item.unitPrice) * 100),
+        },
+        quantity: item.quantity,
+      })),
+      mode: "payment",
+      success_url: `${getAppBaseUrl()}/boutique/order/success?session_id={CHECKOUT_SESSION_ID}&source=pos`,
+      cancel_url: `${getAppBaseUrl()}/boutique/order/success?pos_canceled=1`,
+      customer_email: order.user.email,
+      metadata,
+      payment_intent_data: { metadata },
+      expires_at: expiresAt,
+    },
+    { idempotencyKey: `pos-qr-${order.posAttemptKey}` }
+  );
+
+  await prisma.order.update({
+    where: { id: order.id },
+    data: {
+      stripeCheckoutSessionId: session.id,
+    },
+  });
+  return { session, paid: false };
 }
 
 /** Limited customer lookup for a counter sale. Never exposes financial data. */
@@ -121,7 +171,11 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, items, method } = parsed.data;
+  const { customer: requestedCustomer, items, method, attemptKey } = parsed.data;
+  if (!attemptKey) {
+    return { success: false, message: "Identifiant de tentative de caisse manquant. Rechargez la page." };
+  }
+  const isQrPayment = method === "CARD_QR";
   const groupedItems = new Map();
   for (const item of items) {
     groupedItems.set(item.variantId, (groupedItems.get(item.variantId) ?? 0) + item.quantity);
@@ -129,6 +183,33 @@ export async function completePointOfSaleSale(input) {
   const placeholderPassword = await bcrypt.hash(randomBytes(18).toString("base64url"), BCRYPT_SALT_ROUNDS);
 
   try {
+    const priorOrder = await prisma.order.findUnique({
+      where: { posAttemptKey: attemptKey },
+      include: { items: true, user: { select: { email: true } } },
+    });
+    if (priorOrder) {
+      if (priorOrder.source !== "POS" || priorOrder.createdByStaffId !== guard.session.user.id) {
+        return { success: false, message: "Cette tentative de caisse n'est pas valide." };
+      }
+      if (priorOrder.status === "COMPLETED") {
+        return { success: true, data: { orderId: priorOrder.id, orderNumber: priorOrder.orderNumber, completed: true, alreadyProcessed: true } };
+      }
+      if (isQrPayment && priorOrder.status === "PENDING_PAYMENT") {
+        const checkout = await createOrRecoverPointOfSaleCheckout(priorOrder);
+        return {
+          success: true,
+          data: {
+            orderId: priorOrder.id,
+            orderNumber: priorOrder.orderNumber,
+            checkoutUrl: checkout.session.url,
+            sessionId: checkout.session.id,
+            completed: checkout.paid,
+          },
+        };
+      }
+      return { success: false, message: "Cette tentative de caisse a déjà été traitée." };
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       let customer = requestedCustomer.id
         ? await tx.user.findFirst({ where: { id: requestedCustomer.id, role: "CUSTOMER", isDeleted: false } })
@@ -174,8 +255,11 @@ export async function completePointOfSaleSale(input) {
       const order = await tx.order.create({
         data: {
           userId: customer.id,
-          fulfilmentMode: "PICKUP_ON_SITE",
-          status: "COMPLETED",
+          fulfilmentMode: isQrPayment ? "PICKUP_PREPAID" : "PICKUP_ON_SITE",
+          status: isQrPayment ? "PENDING_PAYMENT" : "COMPLETED",
+          source: "POS",
+          createdByStaffId: guard.session.user.id,
+          posAttemptKey: attemptKey,
           subtotal,
           shippingCost: 0,
           totalAmount: subtotal,
@@ -185,9 +269,10 @@ export async function completePointOfSaleSale(input) {
           totalExclVat: taxTotals.totalExclVat,
           totalVat: taxTotals.vatAmount,
           customerVatNumber: customer.vatNumber ?? null,
-          pickedUpAt: new Date(),
-          pickedUpByStaffId: guard.session.user.id,
-          notes: "Vente directe en magasin",
+          pickedUpAt: isQrPayment ? null : new Date(),
+          pickedUpByStaffId: isQrPayment ? null : guard.session.user.id,
+          expiresAt: isQrPayment ? new Date(Date.now() + (POS_CHECKOUT_SECONDS + 4 * 60) * 1000) : null,
+          notes: isQrPayment ? "Vente en magasin — paiement Stripe QR" : "Vente directe en magasin",
           items: {
             create: saleItems.map((item) => ({
               variantId: item.id,
@@ -202,6 +287,27 @@ export async function completePointOfSaleSale(input) {
         include: { items: true },
       });
 
+      if (isQrPayment) {
+        for (const item of saleItems) {
+          await tx.productVariant.update({
+            where: { id: item.id },
+            data: { reservedQuantity: { increment: item.quantity } },
+          });
+        }
+        await tx.auditLog.create({
+          data: {
+            actorId: guard.session.user.id,
+            actorRole: guard.session.user.role,
+            action: "order.point_of_sale_checkout_created",
+            entityType: "Order",
+            entityId: order.id,
+            after: { status: "PENDING_PAYMENT", totalAmount: subtotal, paymentMethod: "CARD_QR" },
+            metadata: { orderNumber: order.orderNumber, customerId: customer.id, attemptKey },
+          },
+        });
+        return { order, customer, invoice: null, qrPayment: true };
+      }
+
       const payment = await tx.payment.create({
         data: {
           orderId: order.id,
@@ -214,7 +320,13 @@ export async function completePointOfSaleSale(input) {
         },
       });
       await tx.transaction.create({
-        data: { paymentId: payment.id, amount: subtotal, method, transactionType: "FINAL_PAYMENT", paidAt: new Date() },
+        data: {
+          paymentId: payment.id,
+          amount: subtotal,
+          method: method === "CASH" ? "CASH" : "CARD",
+          transactionType: "FINAL_PAYMENT",
+          paidAt: new Date(),
+        },
       });
 
       const invoice = await issueInvoice(tx, {
@@ -264,6 +376,25 @@ export async function completePointOfSaleSale(input) {
       return { order, invoice, customer };
     });
 
+    if (result.qrPayment) {
+      const order = await prisma.order.findUnique({
+        where: { id: result.order.id },
+        include: { items: true, user: { select: { email: true } } },
+      });
+      const checkout = await createOrRecoverPointOfSaleCheckout(order);
+      revalidatePath("/dashboard/boutique/orders");
+      return {
+        success: true,
+        data: {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          checkoutUrl: checkout.session.url,
+          sessionId: checkout.session.id,
+          completed: checkout.paid,
+        },
+      };
+    }
+
     const invoicePdf = await renderInvoicePdf(result.invoice).catch((error) => {
       captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "invoice-pdf" });
       return null;
@@ -298,13 +429,160 @@ export async function completePointOfSaleSale(input) {
       },
     };
   } catch (error) {
+    if (error.message === "POS_CHECKOUT_RETRY_WINDOW_EXPIRED") {
+      return { success: false, message: "Cette tentative QR est trop ancienne. Annulez-la puis recommencez." };
+    }
     if (error.message === "POS_PRODUCT_UNAVAILABLE") return { success: false, message: "Un produit du panier n'est plus disponible." };
     if (typeof error.message === "string" && error.message.startsWith("POS_STOCK_UNAVAILABLE:")) {
       return { success: false, message: `Stock insuffisant pour ${error.message.slice("POS_STOCK_UNAVAILABLE:".length)}.` };
+    }
+    if (error.code === "P2002" && error.meta?.target?.includes?.("posAttemptKey")) {
+      const order = await prisma.order.findUnique({
+        where: { posAttemptKey: attemptKey },
+        include: { items: true, user: { select: { email: true } } },
+      });
+      if (order?.createdByStaffId === guard.session.user.id) {
+        if (order.status === "COMPLETED") {
+          return { success: true, data: { orderId: order.id, orderNumber: order.orderNumber, completed: true, alreadyProcessed: true } };
+        }
+        if (isQrPayment && order.status === "PENDING_PAYMENT") {
+          const checkout = await createOrRecoverPointOfSaleCheckout(order);
+          return {
+            success: true,
+            data: {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              checkoutUrl: checkout.session.url,
+              sessionId: checkout.session.id,
+              completed: checkout.paid,
+            },
+          };
+        }
+      }
     }
     if (error.code === "P2002") return { success: false, message: "Ce client vient d'être créé. Recherchez-le puis réessayez." };
     console.error("[completePointOfSaleSale]", error);
     captureError(error, { area: "point-of-sale" });
     return { success: false, message: "Impossible d'enregistrer la vente." };
   }
+}
+
+function canAccessPosOrder(order, session) {
+  return isAdminRole(session.user.role) || order.createdByStaffId === session.user.id;
+}
+
+/** Cheap authenticated status probe used only while the staff QR modal is open. */
+export async function getPointOfSaleOrderStatus(orderId) {
+  const guard = await requirePointOfSaleAccess();
+  if (guard.error) return { success: false, message: guard.error };
+  if (!orderId || typeof orderId !== "string") return { success: false, message: "Commande invalide." };
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { id: true, source: true, status: true, createdByStaffId: true },
+  });
+  if (!order || order.source !== "POS" || !canAccessPosOrder(order, guard.session)) {
+    return { success: false, message: "Commande introuvable." };
+  }
+  return { success: true, status: order.status };
+}
+
+/** Reopens an in-progress QR after refresh without creating another order. */
+export async function recoverPointOfSaleCheckout(attemptKey) {
+  const guard = await requirePointOfSaleAccess();
+  if (guard.error) return { success: false, message: guard.error };
+  if (!attemptKey || typeof attemptKey !== "string") return { success: false, message: "Tentative invalide." };
+
+  const order = await prisma.order.findUnique({
+    where: { posAttemptKey: attemptKey },
+    include: { items: true, user: { select: { email: true } } },
+  });
+  if (!order || order.source !== "POS" || !canAccessPosOrder(order, guard.session)) {
+    return { success: false, notFound: true };
+  }
+  if (order.status === "COMPLETED") {
+    return { success: true, data: { orderId: order.id, orderNumber: order.orderNumber, completed: true } };
+  }
+  if (order.status !== "PENDING_PAYMENT") {
+    return { success: false, terminal: true, status: order.status };
+  }
+
+  let checkout;
+  try {
+    checkout = await createOrRecoverPointOfSaleCheckout(order);
+  } catch (error) {
+    if (error.message === "POS_CHECKOUT_RETRY_WINDOW_EXPIRED") {
+      return { success: false, terminal: true, status: "EXPIRED" };
+    }
+    console.error("[recoverPointOfSaleCheckout]", error);
+    return { success: false, message: "Impossible de récupérer le paiement QR." };
+  }
+  return {
+    success: true,
+    data: {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      checkoutUrl: checkout.session.url,
+      sessionId: checkout.session.id,
+      totalAmount: Number(order.totalAmount),
+      completed: checkout.paid,
+    },
+  };
+}
+
+/** Cancels an unpaid POS QR and makes both the Stripe URL and stock hold inert. */
+export async function cancelPointOfSaleCheckout(orderId) {
+  const guard = await requirePointOfSaleAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: true },
+  });
+  if (!order || order.source !== "POS" || !canAccessPosOrder(order, guard.session)) {
+    return { success: false, message: "Commande introuvable." };
+  }
+  if (order.status === "COMPLETED") return { success: false, paid: true, message: "Le paiement est déjà confirmé." };
+  if (order.status !== "PENDING_PAYMENT") return { success: true, message: "Cette tentative est déjà clôturée." };
+
+  if (order.stripeCheckoutSessionId) {
+    const session = await stripe.checkout.sessions.retrieve(order.stripeCheckoutSessionId);
+    if (session.payment_status === "paid") {
+      await fulfillOrderPayment(session);
+      return { success: false, paid: true, message: "Le paiement vient d'être confirmé." };
+    }
+    if (session.status === "open") await stripe.checkout.sessions.expire(session.id);
+  }
+
+  const cancelled = await prisma.$transaction(async (tx) => {
+    const claim = await tx.order.updateMany({
+      where: { id: order.id, source: "POS", status: "PENDING_PAYMENT" },
+      data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: "Paiement QR annulé à la caisse" },
+    });
+    if (claim.count === 0) return false;
+    for (const item of order.items) {
+      await tx.productVariant.update({
+        where: { id: item.variantId },
+        data: { reservedQuantity: { decrement: item.quantity } },
+      });
+    }
+    await tx.auditLog.create({
+      data: {
+        actorId: guard.session.user.id,
+        actorRole: guard.session.user.role,
+        action: "order.point_of_sale_checkout_cancelled",
+        entityType: "Order",
+        entityId: order.id,
+        before: { status: "PENDING_PAYMENT" },
+        after: { status: "CANCELLED" },
+      },
+    });
+    return true;
+  });
+
+  revalidatePath("/dashboard/boutique/orders");
+  revalidatePath("/dashboard/boutique/stock");
+  return cancelled
+    ? { success: true, message: "Paiement QR annulé." }
+    : { success: false, message: "La commande a changé d'état. Actualisez la page." };
 }

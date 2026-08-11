@@ -12,6 +12,7 @@ import { AlertTriangle } from "lucide-react";
  * @param {string} [props.cancelLabel]
  * @param {boolean} [props.danger]
  * @param {boolean} [props.loading]
+ * @param {boolean} [props.confirmDisabled]
  * @param {() => void} props.onConfirm
  * @param {() => void} props.onCancel
  */
@@ -23,6 +24,7 @@ export function ConfirmDialog({
   cancelLabel = "Annuler",
   danger = false,
   loading = false,
+  confirmDisabled = false,
   children,
   onConfirm,
   onCancel,
@@ -84,7 +86,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || confirmDisabled}
             className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
               danger
                 ? "bg-red-600 hover:bg-red-700"

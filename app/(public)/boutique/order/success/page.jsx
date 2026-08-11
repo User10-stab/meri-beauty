@@ -16,7 +16,16 @@ export const metadata = {
  * only displays the outcome. Mirrors app/(public)/reservation/success.
  */
 export default async function OrderSuccessPage({ searchParams }) {
-  const { session_id: sessionId, onsite, free, number, code } = await searchParams;
+  const { session_id: sessionId, onsite, free, number, code, pos_canceled: posCanceled } = await searchParams;
+
+  if (posCanceled === "1") {
+    return (
+      <Outcome
+        title="Paiement non terminé"
+        message="Aucun paiement n'a été confirmé. Vous pouvez revenir auprès de notre équipe en caisse."
+      />
+    );
+  }
 
   if (onsite === "1") {
     const qr = code ? await pickupQrDataUrl(code) : null;
@@ -71,9 +80,9 @@ export default async function OrderSuccessPage({ searchParams }) {
         if (orderId) {
           const order = await prisma.order.findUnique({
             where: { id: orderId },
-            select: { pickupCode: true, fulfilmentMode: true },
+            select: { pickupCode: true, fulfilmentMode: true, source: true },
           });
-          if (order?.pickupCode && order.fulfilmentMode !== "SHIPPING_PREPAID") {
+          if (order?.source !== "POS" && order?.pickupCode && order.fulfilmentMode !== "SHIPPING_PREPAID") {
             pickup = { code: order.pickupCode, qr: await pickupQrDataUrl(order.pickupCode) };
           }
         }

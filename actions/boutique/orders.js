@@ -22,6 +22,13 @@ import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { captureError, captureWarning } from "@/lib/monitoring";
 import { calculateVatTotals, repriceBelgianGross, resolveGoodsVatPolicy } from "@/lib/tax-policy";
+import {
+  getOrderPaymentMethod,
+  isManualOrderRefund,
+  manualRefundInstruction,
+  refundMethodLabel,
+  validateManualRefundConfirmation,
+} from "@/lib/payments/refund-method";
 
 /**
  * Checkout + order fulfilment.
@@ -133,6 +140,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
 }
 
 function serializeOrder(order) {
+  const paymentMethod = getOrderPaymentMethod(order.payment);
   return {
     id: order.id,
     orderNumber: order.orderNumber,
@@ -165,6 +173,15 @@ function serializeOrder(order) {
       ? { id: order.user.id, fullName: order.user.fullName, email: order.user.email, phone: order.user.phone }
       : null,
     hasPayment: Boolean(order.payment),
+    payment: order.payment
+      ? {
+          status: order.payment.status,
+          paymentMethod,
+          paymentMethodLabel: refundMethodLabel(paymentMethod),
+          requiresManualRefund: isManualOrderRefund(order.payment),
+          refundInstruction: manualRefundInstruction(paymentMethod),
+        }
+      : null,
     invoice: order.payment?.invoice
       ? { id: order.payment.invoice.id, number: order.payment.invoice.number, issuedAt: order.payment.invoice.issuedAt }
       : null,
@@ -726,7 +743,7 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
         take: pageSize,
         include: {
           user: { select: { id: true, fullName: true, email: true, phone: true } },
-          payment: { select: { id: true } },
+          payment: { select: { id: true, transactionReference: true, status: true, transactions: { select: { method: true, transactionType: true } } } },
           items: true,
         },
       }),
@@ -749,7 +766,7 @@ export async function getOrderById(orderId) {
       where: { id: orderId },
       include: {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
-        payment: { include: { invoice: { include: { creditNotes: true } } } },
+        payment: { include: { invoice: { include: { creditNotes: true } }, transactions: true } },
         items: true,
         returnRequests: { include: { items: true }, orderBy: { requestedAt: "desc" } },
       },
@@ -1034,9 +1051,13 @@ export async function markOrderCompleted(orderId) {
  * cancelMyOrder — every authorization/ownership/status decision happens in
  * the caller, this just performs the cancellation once that's settled.
  */
-const CANCELLABLE_ORDER_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP", "SHIPPED"];
+// Once a parcel is shipped, do not restock or refund it through a generic
+// cancellation: the goods are no longer physically in the salon. It must go
+// through the return workflow once received (or a separately audited loss /
+// carrier-claim process).
+const CANCELLABLE_ORDER_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP"];
 
-async function performOrderCancellation(order, reason) {
+async function performOrderCancellation(order, reason, manualRefund = {}) {
   const orderId = order.id;
   try {
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
@@ -1058,6 +1079,26 @@ async function performOrderCancellation(order, reason) {
       });
       const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
       remaining = Number(order.payment.paidAmount) - alreadyRefunded;
+    }
+
+    const originalMethod = getOrderPaymentMethod(order.payment);
+    const needsManualRefund = wasSold && isManualOrderRefund(order.payment) && remaining > REFUND_EPSILON;
+    if (needsManualRefund) {
+      const confirmationError = validateManualRefundConfirmation({
+        method: originalMethod,
+        confirmed: manualRefund.confirmed,
+        reference: manualRefund.reference,
+      });
+      if (confirmationError) {
+        return {
+          success: false,
+          message: confirmationError,
+          requiresManualRefundConfirmation: true,
+          paymentMethod: originalMethod,
+          paymentMethodLabel: refundMethodLabel(originalMethod),
+          refundInstruction: manualRefundInstruction(originalMethod),
+        };
+      }
     }
 
     const { claimed, creditNote } = await prisma.$transaction(async (tx) => {
@@ -1108,6 +1149,42 @@ async function performOrderCancellation(order, reason) {
         });
       }
 
+      if (needsManualRefund) {
+        const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
+        await tx.transaction.create({
+          data: {
+            paymentId: order.payment.id,
+            amount: remaining,
+            method: originalMethod,
+            transactionType: "REFUND",
+            paidAt: new Date(),
+            manualReference: originalMethod === "CARD" ? manualRefund.reference.trim() : null,
+          },
+        });
+        await tx.payment.update({
+          where: { id: order.payment.id },
+          data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          actorId: manualRefund.actorId ?? null,
+          actorRole: manualRefund.actorRole ?? null,
+          action: "order.cancelled",
+          entityType: "Order",
+          entityId: orderId,
+          metadata: {
+            orderNumber: order.orderNumber,
+            reason: reason ?? null,
+            refundAmount: remaining,
+            refundMethod: needsManualRefund ? originalMethod : order.payment?.transactionReference ? "ONLINE" : null,
+            manualReference: needsManualRefund && originalMethod === "CARD" ? manualRefund.reference.trim() : null,
+            manualRefundConfirmed: needsManualRefund,
+          },
+        },
+      });
+
       return { claimed: true, creditNote };
     });
 
@@ -1153,7 +1230,19 @@ async function performOrderCancellation(order, reason) {
                 where: { id: order.payment.id },
                 data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
               }),
+              prisma.auditLog.create({
+                data: {
+                  actorId: manualRefund.actorId ?? null,
+                  actorRole: manualRefund.actorRole ?? null,
+                  action: "order.cancellation_refund_completed",
+                  entityType: "Order",
+                  entityId: orderId,
+                  metadata: { orderNumber: order.orderNumber, amount: remaining, method: "ONLINE", automatedByStripe: true },
+                },
+              }),
             ]);
+          } else {
+            throw new Error("STRIPE_PAYMENT_INTENT_MISSING");
           }
         } catch (err) {
           // The order is already cancelled and stock restored — that's correct
@@ -1187,6 +1276,8 @@ async function performOrderCancellation(order, reason) {
     const refundNote = wasSold
       ? refundFailed
         ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
+        : needsManualRefund
+          ? " Le remboursement a été effectué directement en boutique."
         : " Le remboursement apparaîtra sur votre compte sous quelques jours."
       : "";
 
@@ -1245,7 +1336,7 @@ export async function cancelOrder(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return { success: false, message: errors.orderId?.[0] ?? "Données invalides." };
   }
-  const { orderId, reason } = parsed.data;
+  const { orderId, reason, manualRefundConfirmed, manualRefundReference } = parsed.data;
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -1259,6 +1350,9 @@ export async function cancelOrder(input) {
   if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
     return { success: false, message: "Cette commande ne peut plus être annulée." };
   }
+  if (order.status === "SHIPPED") {
+    return { success: false, message: "Cette commande est déjà expédiée. Attendez le retour physique des articles avant de procéder au remboursement." };
+  }
 
   // Cancelling an unpaid order is routine order management — but cancelling
   // a paid one triggers restock + a real Stripe refund, which per policy
@@ -1270,7 +1364,12 @@ export async function cancelOrder(input) {
     };
   }
 
-  return performOrderCancellation(order, reason);
+  return performOrderCancellation(order, reason, {
+    confirmed: manualRefundConfirmed,
+    reference: manualRefundReference,
+    actorId: guard.session.user.id,
+    actorRole: guard.session.user.role,
+  });
 }
 
 /**
@@ -1304,5 +1403,5 @@ export async function cancelMyOrder(orderId) {
     return { success: false, message: "Cette commande ne peut plus être annulée en ligne — contactez-nous." };
   }
 
-  return performOrderCancellation(order, "Annulée par le client");
+  return performOrderCancellation(order, "Annulée par le client", { actorId: session.user.id, actorRole: session.user.role });
 }

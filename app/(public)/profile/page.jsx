@@ -20,12 +20,22 @@ export default async function ProfilePage() {
   const settingsResult = await getMySettings();
   const newsletterSubscribed = settingsResult.success ? settingsResult.data.newsletterSubscribed : false;
   const vatNumber = settingsResult.success ? settingsResult.data.vatNumber : null;
+  const initialAddress = settingsResult.success
+    ? {
+        addressLine1: settingsResult.data.addressLine1,
+        addressLine2: settingsResult.data.addressLine2,
+        addressCity: settingsResult.data.addressCity,
+        addressPostalCode: settingsResult.data.addressPostalCode,
+        addressCountry: settingsResult.data.addressCountry,
+      }
+    : null;
 
   return (
     <ProfilePageClient
       user={profileResult.data}
       initialNewsletterSubscribed={newsletterSubscribed}
       initialVatNumber={vatNumber}
+      initialAddress={initialAddress}
     />
   );
 }

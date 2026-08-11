@@ -30,7 +30,7 @@ export default async function AuditLogsPage() {
           <tbody className="divide-y divide-stroke dark:divide-dark-3">
             {logs.map((log) => (
               <tr key={log.id} className="align-top">
-                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{new Date(log.createdAt).toLocaleString("fr-BE")}</td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-500">{new Date(log.createdAt).toLocaleString("fr-BE", { timeZone: "Europe/Brussels" })}</td>
                 <td className="px-4 py-3">{log.actor?.fullName ?? "Système"}<br /><span className="text-xs text-gray-400">{log.actorRole ?? "—"}</span></td>
                 <td className="px-4 py-3 font-medium">{log.action}</td>
                 <td className="px-4 py-3 font-mono text-xs">{log.entityType} / {log.entityId}</td>

@@ -38,6 +38,19 @@ function isDateInPast(date) {
   return date < today;
 }
 
+// Matches the "HH:mm" format the server's generated windows use (see
+// formatMinutesAsTime in lib/slot-availability.js) — timezone pinned to
+// Brussels explicitly, since this runs in the visitor's browser and can't
+// rely on the server's pinned process TZ (see instrumentation.js).
+function currentTimeHHmm(appointment) {
+  return new Date(appointment.startTime).toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "Europe/Brussels",
+  });
+}
+
 export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
@@ -55,10 +68,10 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
   }, []);
 
   useEffect(() => {
-    getMonthAvailability(appointment.staffServiceId, currentMonth).then((r) => {
+    getMonthAvailability(appointment.staffServiceId, currentMonth, appointment.id).then((r) => {
       if (r.success) setDisabledDates(new Set(r.data.unavailableDates || []));
     });
-  }, [appointment.staffServiceId, currentMonth]);
+  }, [appointment.staffServiceId, appointment.id, currentMonth]);
 
   useEffect(() => {
     if (!selectedDate) {
@@ -66,7 +79,7 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
       return;
     }
     setLoadingSlots(true);
-    getAvailableSlots(appointment.staffServiceId, selectedDate).then((result) => {
+    getAvailableSlots(appointment.staffServiceId, selectedDate, appointment.id).then((result) => {
       if (result.success) {
         setWindows(result.data.reservationWindows || []);
       } else {
@@ -75,7 +88,7 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
       }
       setLoadingSlots(false);
     });
-  }, [selectedDate, appointment.staffServiceId]);
+  }, [selectedDate, appointment.staffServiceId, appointment.id]);
 
   const days = getDaysInMonth(currentMonth);
   const isDisabled = (date) => {
@@ -83,6 +96,13 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
     if (isDateInPast(date)) return true;
     return disabledDates.has(getDateKey(date));
   };
+
+  // Rescheduling to the exact time it's already at is a no-op the server
+  // now rejects — don't even offer it as a pickable option when browsing
+  // the appointment's current day.
+  const displayWindows = isSameDay(selectedDate, new Date(appointment.startTime))
+    ? windows.filter((w) => w.startTime !== currentTimeHHmm(appointment))
+    : windows;
 
   async function handleConfirm() {
     if (!selectedDate || !selectedTime) return;
@@ -181,11 +201,11 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
               <div className="flex justify-center py-6">
                 <Loader2 className="h-5 w-5 animate-spin text-gold" />
               </div>
-            ) : windows.length === 0 ? (
+            ) : displayWindows.length === 0 ? (
               <p className="py-6 text-center text-xs text-ink/35">Aucun créneau disponible ce jour.</p>
             ) : (
               <div className="grid grid-cols-4 gap-2">
-                {windows.map((w) => (
+                {displayWindows.map((w) => (
                   <button
                     key={w.startTime}
                     type="button"

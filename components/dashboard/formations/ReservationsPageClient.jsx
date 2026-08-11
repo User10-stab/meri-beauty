@@ -58,7 +58,6 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         onClose={() => setToCancel(null)}
         onConfirm={handleConfirmCancel}
         loading={isCancelling}
-        formationMode
       />
     </div>
   );

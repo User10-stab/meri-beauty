@@ -481,7 +481,7 @@ export async function createCheckoutSession(reservationData) {
                     paymentDecision.paymentIntent === "FULL_ONLINE"
                       ? staffService.service.name
                       : `Acompte - ${staffService.service.name}`,
-                  description: `${staff.user?.fullName || "Expert"} • ${appointmentDate.toLocaleDateString("fr-FR")} • ${time}`,
+                  description: `${staff.user?.fullName || "Expert"} • ${appointmentDate.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} • ${time}`,
                   // Images omitted: Stripe rejects non-HTTPS URLs (localhost in dev).
                 },
                 unit_amount: Math.round(amountToPay * 100),

@@ -12,6 +12,7 @@ import {
 } from "@/lib/api-response";
 import { auth } from "@/auth";
 import { requireCustomer, hasPermission, DASHBOARD_PERMISSIONS, AUTH_ERRORS } from "@/lib/authorization";
+import { getAppBaseUrl } from "@/lib/site-url";
 import { sendEmail } from "@/lib/email";
 import {
   createNotificationsBulk,

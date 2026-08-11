@@ -45,7 +45,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
     const q = search.trim().toLowerCase();
     return initialProducts.filter((p) => {
       if (q) {
-        const hay = `${p.name} ${p.brand?.name ?? ""} ${p.variants.map((v) => v.sku).join(" ")}`.toLowerCase();
+        const hay = `${p.name} ${p.brand?.name ?? ""} ${p.variants.map((v) => `${v.sku} ${v.barcode ?? ""}`).join(" ")}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (brandFilter && p.brand?.id !== brandFilter) return false;

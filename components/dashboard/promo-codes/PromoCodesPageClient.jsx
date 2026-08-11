@@ -10,6 +10,15 @@ import { RowActions } from "@/components/dashboard/Tables/RowActions";
 import { deletePromoCode } from "@/actions/promo-codes";
 import { PromoCodeModal } from "./PromoCodeModal";
 
+function formatExpiry(expiresAt) {
+  // Explicit timeZone — without it this renders in Brussels time on the
+  // server but the viewer's own local time on the client (hydration
+  // mismatch + a wrong expiry shown to anyone outside Belgium).
+  return expiresAt
+    ? new Date(expiresAt).toLocaleString("fr-BE", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Brussels" })
+    : "Jamais";
+}
+
 function formatValue(promo) {
   return promo.type === "PERCENTAGE" ? `${promo.value}%` : `${promo.value.toFixed(2)} €`;
 }
@@ -71,6 +80,8 @@ export function PromoCodesPageClient({ initialPromoCodes }) {
               <TableHead className="pl-6">Code</TableHead>
               <TableHead>Réduction</TableHead>
               <TableHead>Minimum de commande</TableHead>
+              <TableHead>Expiration</TableHead>
+              <TableHead>Utilisations</TableHead>
               <TableHead>Statut</TableHead>
               <TableHead className="pr-6 text-right">Actions</TableHead>
             </TableRow>
@@ -83,6 +94,8 @@ export function PromoCodesPageClient({ initialPromoCodes }) {
                 </TableCell>
                 <TableCell>{formatValue(promo)}</TableCell>
                 <TableCell>{promo.minOrderAmount != null ? `${promo.minOrderAmount.toFixed(2)} €` : "—"}</TableCell>
+                <TableCell>{formatExpiry(promo.expiresAt)}</TableCell>
+                <TableCell>{promo.maxUses != null ? `${promo.usedCount} / ${promo.maxUses}` : `${promo.usedCount} / ∞`}</TableCell>
                 <TableCell>
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${

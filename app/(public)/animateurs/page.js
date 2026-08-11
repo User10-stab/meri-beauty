@@ -12,6 +12,7 @@ function formatDate(dateStr) {
     day: "numeric",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams, usePathname } from "next/navigation";
+import { useSearchParams, usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ArrowLeft, Calendar, CheckCircle, Bell, AlertTriangle, BadgeCheck, BadgeX, ShieldQuestion } from "lucide-react";
 import { useSession } from "next-auth/react";
@@ -24,6 +24,7 @@ function formatDate(dateStr) {
     day: "numeric",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -31,6 +32,7 @@ function formatTime(dateStr) {
   return new Date(dateStr).toLocaleTimeString("fr-FR", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -45,6 +47,7 @@ export default function ReservationFormationPage() {
 function ReservationFormationContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
+  const router = useRouter();
   const { data: session } = useSession();
   const isAuthed = !!session?.user;
   const callbackUrl = `${pathname}?${searchParams.toString()}`;
@@ -261,6 +264,13 @@ function ReservationFormationContent() {
       }
 
       window.location.href = result.url;
+    } else if (result.success && result.freeReservation) {
+      // A 100%-off promo code covered the whole reservation — already
+      // confirmed server-side, nothing to pay on Stripe's side.
+      if (waitingListId) {
+        await convertFormationWaitingListEntry(waitingListId, result.reservationId);
+      }
+      router.push(`/reservation-formation/succes?reservation_id=${result.reservationId}`);
     } else if (result.success && result.requiresEmailVerification) {
       setPendingVerificationEmail(result.email);
       setSubmitting(false);
@@ -476,7 +486,7 @@ function ReservationFormationContent() {
                             setVatCheck(null);
                           }}
                           className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                          placeholder="BE0123456789"
+                          placeholder="BE0123456789 ou FRXX123456789"
                         />
                         <button
                           type="button"
@@ -572,7 +582,7 @@ function ReservationFormationContent() {
                             setVatCheck(null);
                           }}
                           className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                          placeholder="BE0123456789"
+                          placeholder="BE0123456789 ou FRXX123456789"
                         />
                         <button
                           type="button"

@@ -7,7 +7,7 @@ import { getCustomerDetail } from "@/actions/customers/get-customer-detail";
 
 function formatDate(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+  return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" });
 }
 
 function SectionTitle({ children }) {

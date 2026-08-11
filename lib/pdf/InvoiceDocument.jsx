@@ -35,6 +35,7 @@ const styles = StyleSheet.create({
   },
   grandTotalLabel: { fontWeight: 700 },
   grandTotalValue: { fontWeight: 700 },
+  taxNote: { marginTop: 18, padding: 8, backgroundColor: "#f5f5f5", color: "#444", fontSize: 9 },
   footer: { position: "absolute", bottom: 32, left: 40, right: 40, fontSize: 8, color: "#999", textAlign: "center" },
   creditNoteBanner: {
     marginBottom: 16,
@@ -50,7 +51,7 @@ function money(n) {
 }
 
 function formatDate(d) {
-  return new Date(d).toLocaleDateString("fr-BE", { day: "2-digit", month: "long", year: "numeric" });
+  return new Date(d).toLocaleDateString("fr-BE", { day: "2-digit", month: "long", year: "numeric", timeZone: "Europe/Brussels" });
 }
 
 export function InvoiceDocument({ invoice }) {
@@ -112,6 +113,8 @@ export function InvoiceDocument({ invoice }) {
           </View>
         </View>
 
+        {invoice.taxNote && <Text style={styles.taxNote}>{invoice.taxNote}</Text>}
+
         <Text style={styles.footer}>
           {invoice.sellerName}
           {invoice.sellerVatNumber ? ` — TVA ${invoice.sellerVatNumber}` : ""} — Facture n° {invoice.number}
@@ -157,6 +160,8 @@ export function CreditNoteDocument({ creditNote, invoice }) {
             <Text style={styles.grandTotalValue}>{money(creditNote.totalInclVat)}</Text>
           </View>
         </View>
+
+        {invoice.taxNote && <Text style={styles.taxNote}>{invoice.taxNote}</Text>}
 
         <Text style={styles.footer}>
           {invoice.sellerName}

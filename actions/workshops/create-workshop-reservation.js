@@ -11,6 +11,7 @@ import { resolvePromoCode } from "@/lib/promo-codes";
 import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
+import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-workshop-reservation-payment";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -57,6 +58,22 @@ export async function createWorkshopReservationCheckoutSession(reservationId) {
     const chargeAmount = isFullPayment ? Number(reservation.totalPrice) : Number(reservation.depositAmount);
     const workshopAction = isFullPayment ? "full_payment" : "deposit";
 
+    // A 100%-off promo code can bring the amount due today to exactly 0 —
+    // Stripe rejects a 0-value Checkout Session, so there's nothing to
+    // actually charge. Confirm directly through the same fulfilment path a
+    // real payment webhook uses (a synthetic "session" shaped just enough
+    // for it to read), instead of forking a second, parallel implementation.
+    if (chargeAmount <= 0) {
+      const syntheticSession = {
+        id: `free_workshop_${reservation.id}`,
+        metadata: { kind: "workshop", workshopAction, reservationId: reservation.id },
+        amount_total: 0,
+        payment_intent: null,
+      };
+      await confirmWorkshopReservationPayment(syntheticSession);
+      return { success: true, url: null, freeReservation: true, reservationId: reservation.id };
+    }
+
     const stripeSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
       line_items: [
@@ -65,7 +82,7 @@ export async function createWorkshopReservationCheckoutSession(reservationId) {
             currency: "eur",
             product_data: {
               name: `${isFullPayment ? "Paiement total" : "Acompte"} - ${activity.title}`,
-              description: `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR")}`,
+              description: `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`,
             },
             unit_amount: Math.round(chargeAmount * 100),
           },
@@ -227,7 +244,7 @@ export async function createWorkshopReservation(data) {
       if (!isValidVatFormat(vatNumber)) {
         return {
           success: false,
-          message: "Numéro de TVA invalide (format attendu : BE0123456789).",
+          message: "Numéro de TVA UE invalide. Ajoutez le préfixe pays (BE, FR, DE, NL…).",
           field: "vatNumber",
         };
       }
@@ -291,11 +308,13 @@ export async function createWorkshopReservation(data) {
     // trust a client-computed discount amount.
     let promoCodeId = null;
     let discountAmount = 0;
+    let promoMaxUses = null;
     if (promoCode) {
       const promoResult = await resolvePromoCode(promoCode, totalPrice);
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
+      promoMaxUses = promoResult.maxUses;
     }
     const discountedTotal = Math.max(0, totalPrice - discountAmount);
 
@@ -361,6 +380,20 @@ export async function createWorkshopReservation(data) {
             throw new Error(`SOLD_OUT:${available}`);
           }
 
+          // Atomic conditional claim — only succeeds while usedCount is
+          // still under the cap captured moments ago at resolvePromoCode
+          // time. Two concurrent bookings racing the last use of a capped
+          // code can't both win: the loser's WHERE clause matches zero rows.
+          if (promoCodeId && promoMaxUses != null) {
+            const claim = await tx.promoCode.updateMany({
+              where: { id: promoCodeId, usedCount: { lt: promoMaxUses } },
+              data: { usedCount: { increment: 1 } },
+            });
+            if (claim.count === 0) throw new Error("PROMO_EXHAUSTED");
+          } else if (promoCodeId) {
+            await tx.promoCode.update({ where: { id: promoCodeId }, data: { usedCount: { increment: 1 } } });
+          }
+
           return tx.workshopReservation.create({
             data: {
               sessionId,
@@ -395,6 +428,10 @@ export async function createWorkshopReservation(data) {
             success: false,
             message: `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
           };
+        }
+        if (err.message === "PROMO_EXHAUSTED") {
+          captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
+          return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
         }
         throw err;
       }

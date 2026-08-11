@@ -146,9 +146,9 @@ export async function resumeReservationPayment(paymentId) {
     const staffName        = staff.user?.fullName || "Expert";
     const serviceName      = payment.appointment.staffService.service.name;
     const appointmentDate  = new Date(payment.appointment.date)
-      .toLocaleDateString("fr-FR");
+      .toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" });
     const appointmentTime  = new Date(payment.appointment.startTime)
-      .toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      .toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
 
     const metadata = {
       appointmentId,

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { pickupQrDataUrl } from "@/lib/qrcode";
+import { CartClearedNotifier } from "@/components/boutique/CartClearedNotifier";
 
 export const metadata = {
   // Deliberately neutral — this page also renders the "payment pending" and
@@ -15,7 +16,7 @@ export const metadata = {
  * only displays the outcome. Mirrors app/(public)/reservation/success.
  */
 export default async function OrderSuccessPage({ searchParams }) {
-  const { session_id: sessionId, onsite, number, code } = await searchParams;
+  const { session_id: sessionId, onsite, free, number, code } = await searchParams;
 
   if (onsite === "1") {
     const qr = code ? await pickupQrDataUrl(code) : null;
@@ -26,6 +27,25 @@ export default async function OrderSuccessPage({ searchParams }) {
           <>
             Merci ! Votre commande n°{number} est confirmée.
             {code && " Présentez ce code (ou son QR) en boutique pour la retirer et régler le paiement sur place :"}
+          </>
+        }
+        pickup={code ? { code, qr } : null}
+      />
+    );
+  }
+
+  // A 100%-off promo code covered the entire order — already confirmed
+  // server-side (createOrderCheckoutSession), nothing was ever charged, so
+  // there's no Stripe session to verify here.
+  if (free === "1") {
+    const qr = code ? await pickupQrDataUrl(code) : null;
+    return (
+      <Outcome
+        title="Commande confirmée"
+        message={
+          <>
+            Merci ! Votre commande n°{number} est confirmée — le code promo appliqué couvre l&apos;intégralité du montant, aucun paiement n&apos;était nécessaire.
+            {code && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
           </>
         }
         pickup={code ? { code, qr } : null}
@@ -68,23 +88,26 @@ export default async function OrderSuccessPage({ searchParams }) {
 
   if (state === "paid") {
     return (
-      <Outcome
-        title="Paiement confirmé"
-        message={
-          <>
-            Merci ! Votre paiement de <span className="font-semibold text-[#C8A46A]">€{details.amount}</span> a bien été reçu
-            {details?.email && (
-              <>
-                {" "}
-                — une confirmation a été envoyée à <span className="font-medium text-[#2F3A2E]">{details.email}</span>
-              </>
-            )}
-            .
-            {pickup && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
-          </>
-        }
-        pickup={pickup}
-      />
+      <>
+        <CartClearedNotifier />
+        <Outcome
+          title="Paiement confirmé"
+          message={
+            <>
+              Merci ! Votre paiement de <span className="font-semibold text-[#C8A46A]">€{details.amount}</span> a bien été reçu
+              {details?.email && (
+                <>
+                  {" "}
+                  — une confirmation a été envoyée à <span className="font-medium text-[#2F3A2E]">{details.email}</span>
+                </>
+              )}
+              .
+              {pickup && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
+            </>
+          }
+          pickup={pickup}
+        />
+      </>
     );
   }
 

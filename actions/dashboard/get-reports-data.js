@@ -17,7 +17,7 @@ function monthKey(date) {
 
 function monthLabel(key) {
   const [year, month] = key.split("-").map(Number);
-  return new Intl.DateTimeFormat("fr-FR", { month: "short", year: "2-digit" }).format(new Date(year, month - 1, 1));
+  return new Intl.DateTimeFormat("fr-FR", { month: "short", year: "2-digit", timeZone: "Europe/Brussels" }).format(new Date(year, month - 1, 1));
 }
 
 /**

@@ -50,6 +50,7 @@ function FormationCard({ formation }) {
         day: "numeric",
         month: "long",
         year: "numeric",
+        timeZone: "Europe/Brussels",
       })
     : null;
 

@@ -12,7 +12,11 @@ import Button from "@/components/ui/Button";
  *
  * @param {{ reservation: object|null, onClose: () => void, onConfirm: (args: { reason: string, refundDeposit: boolean }) => void, loading: boolean }} props
  */
-export function CancelReservationDialog({ reservation, onClose, onConfirm, loading, formationMode = false }) {
+function formatPrice(value) {
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
+}
+
+export function CancelReservationDialog({ reservation, onClose, onConfirm, loading }) {
   const [refundDeposit, setRefundDeposit] = useState(false);
   const [reason, setReason] = useState("");
 
@@ -20,6 +24,14 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
 
   const reasonRequired = refundDeposit;
   const canConfirm = !reasonRequired || reason.trim().length > 0;
+
+  // The checkbox always refunds whatever was actually paid, not just a
+  // deposit — for a full-payment booking (balanceDue === 0) that's the
+  // entire amount. Label it accordingly so an admin doesn't think they're
+  // only refunding a partial deposit when it's actually the full sum.
+  const isFullPayment = Number(reservation.balanceDue) === 0;
+  const paidAmount = Number(reservation.payment?.paidAmount ?? reservation.depositAmount ?? 0);
+  const paidLabel = isFullPayment ? "le paiement total" : "l'acompte";
 
   function handleClose() {
     setRefundDeposit(false);
@@ -60,10 +72,12 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
           />
           <span>
             <span className="font-medium text-gray-800 dark:text-white">
-              {formationMode ? "Rembourser le montant payé à titre exceptionnel" : "Rembourser l'acompte à titre exceptionnel"}
+              Rembourser {paidLabel} ({formatPrice(paidAmount)}) à titre exceptionnel
             </span>
             <span className="mt-0.5 block text-xs text-gray-400">
-              Réservé aux cas exceptionnels validés par un administrateur. Par défaut, le paiement n'est jamais remboursé.
+              {isFullPayment
+                ? "Ce client a payé l'intégralité — la case ci-dessus rembourse la totalité, pas un simple acompte."
+                : "Réservé aux cas exceptionnels validés par un administrateur. Par défaut, le paiement n'est jamais remboursé."}
             </span>
           </span>
         </label>
@@ -83,8 +97,8 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
 
         <p className="mt-3 text-xs text-gray-400">
           {refundDeposit
-            ? `${formationMode ? "Le montant payé" : "L'acompte versé"} sera remboursé via Stripe.`
-            : `${formationMode ? "Le montant payé" : "L'acompte versé"} ne sera pas remboursé.`}
+            ? `${formatPrice(paidAmount)} (${paidLabel}) sera remboursé via Stripe.`
+            : `${formatPrice(paidAmount)} (${paidLabel}) ne sera pas remboursé.`}
         </p>
 
         <div className="mt-5 flex justify-end gap-2">

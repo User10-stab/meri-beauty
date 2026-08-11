@@ -29,15 +29,15 @@ const STATUS_STYLE = {
 const UPCOMING_STATUSES = new Set(["PENDING", "CONFIRMED"]);
 
 function formatWeekday(date) {
-  return new Date(date).toLocaleDateString("fr-FR", { weekday: "long" });
+  return new Date(date).toLocaleDateString("fr-FR", { weekday: "long", timeZone: "Europe/Brussels" });
 }
 
 function formatDay(date) {
-  return new Date(date).toLocaleDateString("fr-FR", { day: "2-digit" });
+  return new Date(date).toLocaleDateString("fr-FR", { day: "2-digit", timeZone: "Europe/Brussels" });
 }
 
 function formatMonth(date) {
-  return new Date(date).toLocaleDateString("fr-FR", { month: "short" }).replace(".", "");
+  return new Date(date).toLocaleDateString("fr-FR", { month: "short", timeZone: "Europe/Brussels" }).replace(".", "");
 }
 
 function formatFullDate(date) {
@@ -46,11 +46,12 @@ function formatFullDate(date) {
     day: "2-digit",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
 function formatTime(date) {
-  return new Date(date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return new Date(date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
 }
 
 function StatusBadge({ status }) {

@@ -19,7 +19,7 @@ function formatPrice(n) {
 }
 
 function formatDate(d) {
-  return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+  return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" });
 }
 
 export function InvoicesPageClient({ initialInvoices }) {

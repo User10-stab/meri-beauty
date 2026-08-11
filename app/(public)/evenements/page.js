@@ -16,6 +16,7 @@ async function ActivityCard({ activity }) {
       day: "numeric",
       month: "long",
       year: "numeric",
+      timeZone: "Europe/Brussels",
     })
     : null;
 

@@ -19,12 +19,17 @@ const STATUS_LABELS = {
 };
 
 function formatSessionDate(date) {
+  // Explicit timeZone, not just the server's pinned TZ (instrumentation.js) —
+  // without it this renders in Brussels time on the server but the visiting
+  // browser's own local time on the client, causing a hydration mismatch
+  // (and silently the wrong appointment time for anyone outside Belgium).
   return new Date(date).toLocaleDateString("fr-FR", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 

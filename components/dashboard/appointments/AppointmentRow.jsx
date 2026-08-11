@@ -47,6 +47,7 @@ function formatDate(iso) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -55,6 +56,7 @@ function formatTime(iso) {
   return new Date(iso).toLocaleTimeString("fr-FR", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 

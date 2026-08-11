@@ -22,6 +22,7 @@ function formatSessionDate(date) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -296,7 +297,7 @@ export async function changeReservationSession(reservationId, newSessionId) {
             currency: "eur",
             product_data: {
               name: `Frais de modification - ${reservation.session.workshop.title}`,
-              description: `Changement de séance (${new Date(newSession.startDate).toLocaleDateString("fr-FR")})`,
+              description: `Changement de séance (${new Date(newSession.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })})`,
             },
             unit_amount: Math.round(changeFeeAmount * 100),
           },

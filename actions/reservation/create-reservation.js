@@ -16,7 +16,6 @@ import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { isAdminRole } from "@/lib/authorization";
-import { buildAppointmentWindow, findConflictingAppointment } from "@/lib/appointment-scheduling";
 import {
   createNotification,
   createNotificationsBulk,
@@ -365,10 +364,11 @@ export async function createReservation(data) {
     }
 
     // CASH_ONLY override: no online payment flows apply.
-    // Appointment status depends ONLY on reservationConfirmationMode.
+    // Appointment status depends ONLY on reservationConfirmationMode (the
+    // same server-derived isManuallyConfirmed computed above — never a
+    // second, independently-computed copy of the same thing).
     if (staffService.staff?.allowedPaymentMethods === "CASH_ONLY") {
-      const mode = String(staffService.staff?.reservationConfirmationMode ?? "MANUAL").toUpperCase();
-      const effectiveIsManualMode = Boolean(isManualMode || mode === "MANUAL");
+      const effectiveIsManualMode = isManuallyConfirmed;
 
       const appointmentStatus = effectiveIsManualMode ? "PENDING" : "CONFIRMED";
 
@@ -489,7 +489,7 @@ export async function createReservation(data) {
           },
           isNewUser,
           newUserCredentials: isNewUser ? { email: user.email, password: temporaryPassword } : null,
-          autologinToken: generateAutologinToken(user.email),
+          autologinToken: isNewUser ? generateAutologinToken(user.email) : null,
         },
       };
     }

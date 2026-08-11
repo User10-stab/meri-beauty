@@ -115,7 +115,7 @@ export async function globalDashboardSearch(query) {
       ...appointments.map((a) => ({
         type: "Rendez-vous",
         label: `${a.user.fullName} — ${a.staffService?.service?.name ?? "Service"}`,
-        sublabel: new Date(a.date).toLocaleDateString("fr-FR"),
+        sublabel: new Date(a.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" }),
         href: "/dashboard/allAppointments",
       }))
     );

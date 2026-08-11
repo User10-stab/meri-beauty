@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, CameraOff, Loader2 } from "lucide-react";
+import { X, CameraOff, Loader2, ScanLine } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { getProductByBarcode } from "@/actions/boutique/products";
 
@@ -20,6 +20,25 @@ export function ProductScanDialog({ open, onClose, onFound, onNotFound }) {
   const busyRef = useRef(false);
   const [error, setError] = useState(null);
   const [looking, setLooking] = useState(false);
+  const [usbCode, setUsbCode] = useState("");
+
+  async function handleUsbScan(event) {
+    event.preventDefault();
+    const code = usbCode.trim();
+    if (!code || looking) return;
+
+    setLooking(true);
+    setError(null);
+    const lookup = await getProductByBarcode(code);
+    setLooking(false);
+    if (!lookup.success) {
+      setError(lookup.message);
+      return;
+    }
+    setUsbCode("");
+    if (lookup.found) onFound(lookup.productId);
+    else onNotFound(code);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -86,6 +105,23 @@ export function ProductScanDialog({ open, onClose, onFound, onNotFound }) {
           </button>
         </div>
 
+        <form onSubmit={handleUsbScan} className="mb-4 flex gap-2">
+          <div className="relative flex-1">
+            <ScanLine size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#c8a46a]" />
+            <input
+              value={usbCode}
+              onChange={(event) => setUsbCode(event.target.value)}
+              placeholder="Lecteur USB : QR ou code-barres"
+              autoComplete="off"
+              autoFocus
+              className="h-10 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-[#2f3a2e]"
+            />
+          </div>
+          <button type="submit" disabled={looking} className="rounded-lg bg-[#2f3a2e] px-3 text-xs font-semibold text-white disabled:opacity-50">
+            Lire
+          </button>
+        </form>
+
         {error ? (
           <div className="flex flex-col items-center gap-3 rounded-lg bg-gray-50 px-4 py-10 text-center">
             <CameraOff size={22} className="text-gray-300" />
@@ -103,7 +139,7 @@ export function ProductScanDialog({ open, onClose, onFound, onNotFound }) {
         )}
 
         <p className="mt-4 text-center text-xs text-gray-400">
-          Code connu → fiche produit. Code inconnu → nouveau produit pré-rempli.
+          USB ou caméra · code connu → fiche produit · code inconnu → nouveau produit pré-rempli.
         </p>
       </div>
     </div>

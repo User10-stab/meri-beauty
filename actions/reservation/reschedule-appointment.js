@@ -77,6 +77,10 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
       return { success: false, message: "Veuillez choisir un créneau dans le futur." };
     }
 
+    if (startTime.getTime() === new Date(appointment.startTime).getTime()) {
+      return { success: false, message: "Ce rendez-vous est déjà prévu à cet horaire. Choisissez une date ou une heure différente." };
+    }
+
     const conflict = await findConflictingAppointment(
       appointment.staffServiceId,
       appointmentDate,
@@ -107,7 +111,11 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
     await prisma.$transaction(async (tx) => {
       await tx.appointment.update({
         where: { id: appointmentId },
-        data: { date: appointmentDate, startTime, endTime },
+        // Reset reminder markers — the old ones were set relative to the
+        // previous startTime, so left alone they'd permanently suppress
+        // reminders for the new slot (both windows may already be "passed"
+        // relative to the old time, or the DB thinks they were already sent).
+        data: { date: appointmentDate, startTime, endTime, reminder24hSentAt: null, reminder2hSentAt: null },
       });
     });
 
@@ -122,7 +130,7 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
             appointmentId: appointment.id,
             type: "GENERAL",
             title: "Rendez-vous déplacé",
-            message: `Rendez-vous${serviceName ? ` (${serviceName})` : ""} déplacé du ${previousDate.toLocaleDateString("fr-FR")} vers le ${appointmentDate.toLocaleDateString("fr-FR")} à ${time}${customerName ? ` — ${customerName}` : ""}.`,
+            message: `Rendez-vous${serviceName ? ` (${serviceName})` : ""} déplacé du ${previousDate.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} vers le ${appointmentDate.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} à ${time}${customerName ? ` — ${customerName}` : ""}.`,
             actionUrl: "/dashboard/appointments",
             status: "PENDING",
           }))
@@ -140,6 +148,7 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
       day: "2-digit",
       month: "long",
       year: "numeric",
+      timeZone: "Europe/Brussels",
     });
 
     sendEmail({

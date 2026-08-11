@@ -4,18 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import {
   paymentConfirmationEmail,
-  workshopReservationConfirmationEmail,
   workshopSessionChangeEmail,
   workshopSeatsChangeEmail,
-  formationReservationConfirmationEmail,
   staffPaymentFailedEmail,
 } from "@/lib/email-templates";
 import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
-import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
-import { renderInvoicePdf } from "@/lib/pdf/render";
-import { sendLowSeatsBroadcast } from "@/actions/workshops/notify-low-seats";
-import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
-import { sendFormationLowSeatsBroadcast } from "@/actions/formations/notify-low-seats";
+import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-workshop-reservation-payment";
+import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
+import { issueCreditNote } from "@/lib/invoicing";
 import {
   createNotificationsBulk,
   buildAppointmentConfirmedNotification,
@@ -23,9 +19,7 @@ import {
   getAppointmentNotificationRecipients,
   getAppointmentEmailRecipients,
 } from "@/lib/notifications";
-import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
-import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
 import { Prisma } from "@prisma/client";
 import { reconcileStripeProductOrderRefund } from "@/lib/orders/reconcile-stripe-refund";
 import {
@@ -33,6 +27,7 @@ import {
   RESERVATION_REFUND_AUTHORIZATION,
 } from "@/lib/payments/reconcile-reservation-refund";
 import { captureCriticalError } from "@/lib/monitoring";
+import { refundSession } from "@/lib/stripe-refund-session";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -182,9 +177,21 @@ export async function POST(req) {
     if (session.metadata?.kind === "order") {
       result = await fulfillOrderPayment(session);
     } else if (session.metadata?.kind === "workshop") {
-      result = await processWorkshopCheckoutSession(session);
+      // Session/seat-change fees are charged against an EXISTING confirmed
+      // reservation that already has its one Payment row — handled
+      // separately since there's no new Payment to create, just a
+      // Transaction against the existing one. Anything else is the initial
+      // deposit/full-payment booking confirmation.
+      const workshopAction = session.metadata?.workshopAction;
+      if (workshopAction === "session_change_fee") {
+        result = await applyWorkshopSessionChangeFee(session, session.metadata);
+      } else if (workshopAction === "seats_change_fee") {
+        result = await applyWorkshopSeatsChangeFee(session, session.metadata);
+      } else {
+        result = await confirmWorkshopReservationPayment(session);
+      }
     } else if (session.metadata?.kind === "formation") {
-      result = await processFormationCheckoutSession(session);
+      result = await confirmFormationReservationPayment(session);
     } else {
       result = await processAppointmentCheckoutSession(session);
     }
@@ -406,7 +413,7 @@ async function handleChargeDisputeCreated(dispute) {
 
   const amount = round2((dispute.amount ?? 0) / 100);
   const deadline = dispute.evidence_details?.due_by
-    ? new Date(dispute.evidence_details.due_by * 1000).toLocaleDateString("fr-FR")
+    ? new Date(dispute.evidence_details.due_by * 1000).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })
     : "non communiquée";
 
   await sendEmail({
@@ -841,355 +848,13 @@ async function handlePaymentIntentFailed(paymentIntent) {
   });
 }
 
-// ─── checkout.session.completed (workshops/events) ───────────────────────────
-
-async function processWorkshopCheckoutSession(session) {
-  const meta = session.metadata ?? {};
-  const { reservationId, workshopAction } = meta;
-
-  if (!reservationId) {
-    console.error("[stripe-webhook] Workshop session missing reservationId:", session.id, meta);
-    return { received: true, warning: "missing metadata" };
-  }
-
-  // Session-change fees are charged against an EXISTING confirmed
-  // reservation that already has its one Payment row (Payment.
-  // workshopReservationId is 1:1) — handled separately since there's no
-  // new Payment to create, just a Transaction against the existing one.
-  if (workshopAction === "session_change_fee") {
-    return applyWorkshopSessionChangeFee(session, meta);
-  }
-  if (workshopAction === "seats_change_fee") {
-    return applyWorkshopSeatsChangeFee(session, meta);
-  }
-
-  // ── Idempotency — was this session already processed? ────────────────────
-  const existing = await prisma.payment.findFirst({
-    where: { transactionReference: session.id },
-    select: { id: true },
-  });
-  if (existing) {
-    return { received: true, alreadyProcessed: true };
-  }
-
-  const reservation = await prisma.workshopReservation.findUnique({
-    where: { id: reservationId },
-    include: { session: { include: { workshop: true } }, customer: true },
-  });
-
-  if (!reservation) {
-    console.error("[stripe-webhook] WorkshopReservation gone, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "reservation deleted" };
-  }
-
-  // The salon can't honor a sale it already voided (e.g. an admin cancelled
-  // this reservation while the payment was in flight) — this is the one
-  // exception to "no refunds": a failed sale, not a voluntary cancellation
-  // of an honored booking.
-  if (reservation.status === "CANCELLED") {
-    console.warn("[stripe-webhook] Reservation cancelled before payment cleared, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "reservation cancelled" };
-  }
-
-  if (reservation.status === "CONFIRMED") {
-    // Already confirmed by a previous delivery of this same webhook event.
-    return { received: true, alreadyProcessed: true };
-  }
-
-  const isFullPayment = workshopAction === "full_payment";
-  const totalAmount = Number(reservation.totalPrice);
-  const paidAmount = (session.amount_total ?? 0) / 100;
-
-  const expectedAmount = isFullPayment ? totalAmount : Number(reservation.depositAmount);
-  if (paidAmount + UNDERPAYMENT_EPSILON < expectedAmount) {
-    console.error(`[stripe-webhook] UNDERPAYMENT: paid ${paidAmount} expected ${expectedAmount} for session ${session.id}`);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "underpayment" };
-  }
-
-  let invoice;
-  try {
-  ({ invoice } = await prisma.$transaction(async (tx) => {
-    await tx.workshopReservation.update({
-      where: { id: reservation.id },
-      data: { status: "CONFIRMED", holdExpiresAt: null },
-    });
-
-    const payment = await tx.payment.create({
-      data: {
-        workshopReservationId: reservation.id,
-        depositAmount: isFullPayment ? 0 : paidAmount,
-        totalAmount,
-        paidAmount,
-        remainingAmount: Math.max(totalAmount - paidAmount, 0),
-        paymentType: isFullPayment ? "ONLINE" : "DEPOSIT",
-        status: isFullPayment ? "PAID" : "PARTIALLY_PAID",
-        promoCodeId: reservation.promoCodeId,
-        discountAmount: reservation.discountAmount,
-        paidAt: new Date(),
-        transactionReference: session.id, // idempotency key
-      },
-    });
-
-    await tx.transaction.create({
-      data: {
-        paymentId: payment.id,
-        amount: paidAmount,
-        method: "ONLINE",
-        transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
-        paidAt: new Date(),
-        stripeCheckoutSessionId: session.id,
-        stripePaymentIntentId:
-          typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null,
-      },
-    });
-
-    // Only fully-settled payments are invoiced — a deposit leaves a balance
-    // due in-salon, invoiced once that's collected (same rule as appointments).
-    let invoice = null;
-    if (isFullPayment) {
-      invoice = await issueInvoice(tx, {
-        paymentId: payment.id,
-        source: "WORKSHOP",
-        totalInclVat: paidAmount,
-        customer: {
-          fullName: reservation.customer.fullName,
-          email: reservation.customer.email,
-          vatNumber: reservation.customer.vatNumber,
-        },
-        // quantity: 1 with unitPrice = the actual total collected, not
-        // seatsCount at a divided-back unit price — dividing then
-        // re-multiplying independently-rounded numbers can leave the line
-        // a cent off the invoice total (e.g. 100/3 -> 33.33 x 3 = 99.99).
-        // Seat count is still visible in the description.
-        lines: [
-          {
-            description: `${reservation.session.workshop.title} (${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""})`,
-            quantity: 1,
-            unitPrice: totalAmount,
-          },
-        ],
-      });
-    }
-
-    return { invoice };
-  }));
-  } catch (err) {
-    if (err.code === "P2002") {
-      return { received: true, alreadyProcessed: true };
-    }
-    throw err;
-  }
-
-  const sessionDate = new Date(reservation.session.startDate).toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  const invoicePdf = invoice
-    ? await renderInvoicePdf(invoice).catch((err) => {
-        console.error("[stripe-webhook] workshop invoice PDF render failed:", err);
-        return null;
-      })
-    : null;
-
-  sendEmail({
-    to: reservation.customer.email,
-    ...workshopReservationConfirmationEmail({
-      customerName: reservation.customer.fullName,
-      activityTitle: reservation.session.workshop.title,
-      sessionDate,
-      seatsCount: reservation.seatsCount,
-      paidAmount,
-      totalAmount,
-      balanceDue: Number(reservation.balanceDue),
-      isFullPayment,
-    }),
-    ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
-  }).catch((err) => console.error("[stripe-webhook] workshop confirmation email failed:", err));
-
-  // Fire-and-forget: the one place seat counts actually change from a real
-  // payment event, so this is where the low-seats threshold gets checked.
-  sendLowSeatsBroadcast(reservation.sessionId).catch((err) =>
-    console.error("[stripe-webhook] low-seats broadcast failed:", err)
-  );
-
-  return { received: true, processed: true };
-}
-
-// ─── checkout.session.completed (formations) ─────────────────────────────────
-
-async function processFormationCheckoutSession(session) {
-  const meta = session.metadata ?? {};
-  const { reservationId, formationAction } = meta;
-
-  if (!reservationId) {
-    console.error("[stripe-webhook] Formation session missing reservationId:", session.id, meta);
-    return { received: true, warning: "missing metadata" };
-  }
-
-  // ── Idempotency — was this session already processed? ────────────────────
-  const existing = await prisma.payment.findFirst({
-    where: { transactionReference: session.id },
-    select: { id: true },
-  });
-  if (existing) {
-    return { received: true, alreadyProcessed: true };
-  }
-
-  const reservation = await prisma.formationReservation.findUnique({
-    where: { id: reservationId },
-    include: { session: { include: { formation: true } }, customer: true },
-  });
-
-  if (!reservation) {
-    console.error("[stripe-webhook] FormationReservation gone, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "reservation deleted" };
-  }
-
-  // Same failed-sale safety net as the workshops flow — never a customer
-  // refund feature, since formations have no refund policy at all otherwise.
-  if (reservation.status === "CANCELLED") {
-    console.warn("[stripe-webhook] Formation reservation cancelled before payment cleared, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "reservation cancelled" };
-  }
-
-  if (reservation.status === "CONFIRMED") {
-    // Already confirmed by a previous delivery of this same webhook event.
-    return { received: true, alreadyProcessed: true };
-  }
-
-  const isFullPayment = formationAction === "full_payment";
-  const totalAmount = Number(reservation.totalPrice);
-  const paidAmount = (session.amount_total ?? 0) / 100;
-
-  const expectedAmount = isFullPayment ? totalAmount : Number(reservation.depositAmount);
-  if (paidAmount + UNDERPAYMENT_EPSILON < expectedAmount) {
-    console.error(`[stripe-webhook] UNDERPAYMENT: paid ${paidAmount} expected ${expectedAmount} for session ${session.id}`);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "underpayment" };
-  }
-
-  let invoice;
-  try {
-  ({ invoice } = await prisma.$transaction(async (tx) => {
-    await tx.formationReservation.update({
-      where: { id: reservation.id },
-      data: { status: "CONFIRMED", holdExpiresAt: null },
-    });
-
-    const payment = await tx.payment.create({
-      data: {
-        formationReservationId: reservation.id,
-        depositAmount: isFullPayment ? 0 : paidAmount,
-        totalAmount,
-        paidAmount,
-        remainingAmount: Math.max(totalAmount - paidAmount, 0),
-        paymentType: isFullPayment ? "ONLINE" : "DEPOSIT",
-        status: isFullPayment ? "PAID" : "PARTIALLY_PAID",
-        paidAt: new Date(),
-        transactionReference: session.id, // idempotency key
-        promoCodeId: reservation.promoCodeId,
-        discountAmount: reservation.discountAmount,
-      },
-    });
-
-    await tx.transaction.create({
-      data: {
-        paymentId: payment.id,
-        amount: paidAmount,
-        method: "ONLINE",
-        transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
-        paidAt: new Date(),
-        stripeCheckoutSessionId: session.id,
-        stripePaymentIntentId:
-          typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null,
-      },
-    });
-
-    // Only fully-settled payments are invoiced — a deposit leaves a balance
-    // due in-salon, invoiced once that's collected (same rule as workshops).
-    let invoice = null;
-    if (isFullPayment) {
-      invoice = await issueInvoice(tx, {
-        paymentId: payment.id,
-        source: "FORMATION",
-        totalInclVat: paidAmount,
-        customer: {
-          fullName: reservation.customer.fullName,
-          email: reservation.customer.email,
-          vatNumber: reservation.customer.vatNumber,
-        },
-        // See the matching workshop invoice comment above: quantity 1 at the
-        // actual total avoids a divide-then-round line/total mismatch.
-        lines: [
-          {
-            description: `${reservation.session.formation.title} (${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""})`,
-            quantity: 1,
-            unitPrice: totalAmount,
-          },
-        ],
-      });
-    }
-
-    return { invoice };
-  }));
-  } catch (err) {
-    if (err.code === "P2002") {
-      return { received: true, alreadyProcessed: true };
-    }
-    throw err;
-  }
-
-  const sessionDate = new Date(reservation.session.startDate).toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  const invoicePdf = invoice
-    ? await renderInvoicePdf(invoice).catch((err) => {
-        console.error("[stripe-webhook] formation invoice PDF render failed:", err);
-        return null;
-      })
-    : null;
-
-  const salon = await prisma.salon.findFirst({ select: { phone: true, email: true } });
-
-  sendEmail({
-    to: reservation.customer.email,
-    ...formationReservationConfirmationEmail({
-      customerName: reservation.customer.fullName,
-      formationTitle: reservation.session.formation.title,
-      sessionDate,
-      seatsCount: reservation.seatsCount,
-      paidAmount,
-      totalAmount,
-      balanceDue: Number(reservation.balanceDue),
-      isFullPayment,
-      salonPhone: salon?.phone,
-      salonEmail: salon?.email,
-    }),
-    ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
-  }).catch((err) => console.error("[stripe-webhook] formation confirmation email failed:", err));
-
-  sendFormationLowSeatsBroadcast(reservation.sessionId).catch((err) =>
-    console.error("[stripe-webhook] formation low-seats broadcast failed:", err)
-  );
-
-  return { received: true, processed: true };
-}
+// ─── checkout.session.completed (workshops/events, formations) ───────────────
+// The actual confirm-the-reservation logic lives in
+// lib/workshops/fulfill-workshop-reservation-payment.js and
+// lib/formations/fulfill-formation-reservation-payment.js — shared with the
+// zero-total (100%-promo) direct-fulfilment path in
+// createWorkshopReservationCheckoutSession / createFormationReservationCheckoutSession,
+// so there's exactly one implementation instead of two that can drift apart.
 
 /** Applies an admin-mediated session change once its 10% fee has cleared. */
 async function applyWorkshopSessionChangeFee(session, meta) {
@@ -1285,6 +950,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   };
 
   sendEmail({
@@ -1398,14 +1064,3 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
   return { received: true, processed: true };
 }
 
-/** Refunds the payment behind a checkout session. */
-async function refundSession(session) {
-  if (!session.payment_intent) return;
-  try {
-    await stripe.refunds.create({ payment_intent: session.payment_intent });
-  } catch (err) {
-    // The money question must never be silently swallowed.
-    captureCriticalError(err, { area: "refund-reconciliation", sessionId: session.id, kind: session.metadata?.kind });
-    throw err; // 500 → Stripe retries → refund retried
-  }
-}

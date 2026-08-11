@@ -38,7 +38,7 @@ const CONTRACT_STATUS_STYLES = {
 function formatDate(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("fr-FR", {
-    day: "2-digit", month: "long", year: "numeric",
+    day: "2-digit", month: "long", year: "numeric", timeZone: "Europe/Brussels",
   });
 }
 

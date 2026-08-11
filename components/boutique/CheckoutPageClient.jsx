@@ -183,13 +183,32 @@ export function CheckoutPageClient({ cart, customerSession }) {
       }
 
       if (!result.data.requiresPayment) {
+        // createOrderFromCart already converted the cart server-side for an
+        // on-site order, but router.push is a client-side transition — the
+        // header badge (mounted once, higher up the tree) won't remount to
+        // pick that up on its own, so it'd keep showing the old count.
+        window.dispatchEvent(new CustomEvent("boutique:cart-updated", { detail: { itemCount: 0 } }));
         router.push(`/boutique/order/success?onsite=1&number=${result.data.orderNumber}&code=${result.data.pickupCode}`);
         return;
       }
 
       const sessionResult = await createOrderCheckoutSession(result.data.orderId);
-      if (!sessionResult.success || !sessionResult.url) {
+      if (!sessionResult.success) {
         toast.error(sessionResult.message || "Impossible de démarrer le paiement.");
+        setSubmitting(false);
+        return;
+      }
+
+      if (sessionResult.freeOrder) {
+        // A 100%-off promo code covered the whole order — already confirmed
+        // server-side, nothing to pay on Stripe's side.
+        window.dispatchEvent(new CustomEvent("boutique:cart-updated", { detail: { itemCount: 0 } }));
+        router.push(`/boutique/order/success?free=1&number=${sessionResult.orderNumber}${sessionResult.pickupCode ? `&code=${sessionResult.pickupCode}` : ""}`);
+        return;
+      }
+
+      if (!sessionResult.url) {
+        toast.error("Impossible de démarrer le paiement.");
         setSubmitting(false);
         return;
       }

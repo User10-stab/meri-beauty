@@ -12,7 +12,7 @@ import { GraduationCap, PartyPopper } from "lucide-react";
  */
 export function ActivityPill({ event }) {
   const Icon = event.kind === "formation" ? GraduationCap : PartyPopper;
-  const time = new Date(event.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const time = new Date(event.start).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
 
   return (
     <div

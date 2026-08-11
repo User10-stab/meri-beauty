@@ -232,7 +232,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
                   </TableCell>
                   <TableCell className="pr-6">
                     <span className="text-gray-500 dark:text-dark-6">
-                      {new Date(o.createdAt).toLocaleDateString("fr-FR")}
+                      {new Date(o.createdAt).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}
                     </span>
                   </TableCell>
                 </TableRow>

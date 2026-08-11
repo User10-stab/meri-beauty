@@ -21,9 +21,29 @@ import {
   Phone,
   Lock,
   KeyRound,
+  Building2,
+  MapPin,
 } from "lucide-react";
 import { registerClientSchema } from "@/lib/validations/register-client";
 import { registerUser } from "@/actions/auth/register";
+import countriesData from "@/data/countries.json";
+
+const VAT_EXAMPLES = {
+  AT: "ATU12345678",
+  BE: "BE0123456789",
+  DE: "DE123456789",
+  ES: "ESX1234567X",
+  FR: "FRXX123456789",
+  GR: "EL123456789",
+  IT: "IT12345678901",
+  LU: "LU12345678",
+  NL: "NL123456789B01",
+};
+
+const countryOptions = countriesData
+  .filter((country) => /^[A-Z]{2}$/.test(country.code))
+  .map(({ code, name }) => ({ code, name }))
+  .sort((left, right) => left.name.localeCompare(right.name, "fr"));
 
 const fields = [
   {
@@ -92,6 +112,8 @@ export default function RegisterForm() {
     register,
     handleSubmit,
     setError,
+    setValue,
+    watch,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(registerClientSchema),
@@ -102,9 +124,20 @@ export default function RegisterForm() {
       phone: "",
       password: "",
       confirmPassword: "",
+      isCompany: false,
+      vatNumber: "",
+      addressLine1: "",
+      addressLine2: "",
+      addressCity: "",
+      addressPostalCode: "",
+      addressCountry: "BE",
+      termsAccepted: false,
       newsletterSubscribed: false,
     },
   });
+
+  const isCompany = watch("isCompany");
+  const addressCountry = watch("addressCountry");
 
   const togglePasswordVisibility = (fieldName) => {
     setShowPassword((prev) => ({ ...prev, [fieldName]: !prev[fieldName] }));
@@ -241,6 +274,170 @@ export default function RegisterForm() {
             Password must be at least 8 characters.
           </p>
 
+          {/* Account type — asked directly at signup, not inferred later */}
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+              Type de compte
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={isLoading}
+                onClick={() => setValue("isCompany", false, { shouldValidate: true })}
+                className={`flex items-center justify-center gap-2 py-3 px-4 rounded-2xl border text-sm font-medium transition-all duration-200 disabled:opacity-60 ${
+                  !isCompany
+                    ? "border-[#2F3A2E] bg-[#2F3A2E]/5 text-[#2F3A2E] dark:border-[#a8c4a2] dark:bg-[#a8c4a2]/10 dark:text-[#a8c4a2]"
+                    : "border-zinc-200/80 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
+                }`}
+              >
+                <User className="h-4 w-4" />
+                Particulier
+              </button>
+              <button
+                type="button"
+                disabled={isLoading}
+                onClick={() => setValue("isCompany", true, { shouldValidate: true })}
+                className={`flex items-center justify-center gap-2 py-3 px-4 rounded-2xl border text-sm font-medium transition-all duration-200 disabled:opacity-60 ${
+                  isCompany
+                    ? "border-[#2F3A2E] bg-[#2F3A2E]/5 text-[#2F3A2E] dark:border-[#a8c4a2] dark:bg-[#a8c4a2]/10 dark:text-[#a8c4a2]"
+                    : "border-zinc-200/80 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400"
+                }`}
+              >
+                <Building2 className="h-4 w-4" />
+                Entreprise
+              </button>
+            </div>
+          </div>
+
+          {isCompany ? (
+            <div className="space-y-1">
+              <label htmlFor="vatNumber" className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                Numéro de TVA UE <span className="text-red-500">*</span>
+              </label>
+              <div className="relative rounded-2xl shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <Building2 className="h-5 w-5 text-zinc-400 dark:text-zinc-500" />
+                </div>
+                <input
+                  id="vatNumber"
+                  type="text"
+                  autoComplete="off"
+                  disabled={isLoading}
+                  required={isCompany}
+                  {...register("vatNumber")}
+                  placeholder={VAT_EXAMPLES[addressCountry] ?? `${addressCountry || "EU"}…`}
+                  className={`block w-full pl-11 pr-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
+                    errors.vatNumber
+                      ? "border-red-400 focus:ring-red-400/40 focus:border-red-500"
+                      : "border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2]"
+                  } focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60`}
+                />
+              </div>
+              {errors.vatNumber && (
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium pl-1 animate-in fade-in duration-150">
+                  {errors.vatNumber.message}
+                </p>
+              )}
+              <p className="pl-1 text-xs text-zinc-400">
+                Incluez le préfixe du pays. Le numéro sera contrôlé dans le registre européen VIES lors de l’inscription.
+              </p>
+            </div>
+          ) : null}
+
+          {/* Billing address — mandatory for every account, needed on every invoice */}
+          <div className="space-y-4">
+            <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+              Adresse de facturation
+            </label>
+
+            <div className="space-y-1">
+              <div className="relative rounded-2xl shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <MapPin className="h-5 w-5 text-zinc-400 dark:text-zinc-500" />
+                </div>
+                <input
+                  id="addressLine1"
+                  type="text"
+                  autoComplete="address-line1"
+                  disabled={isLoading}
+                  {...register("addressLine1")}
+                  placeholder="Rue et numéro"
+                  className={`block w-full pl-11 pr-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
+                    errors.addressLine1
+                      ? "border-red-400 focus:ring-red-400/40 focus:border-red-500"
+                      : "border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2]"
+                  } focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60`}
+                />
+              </div>
+              {errors.addressLine1 && (
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium pl-1 animate-in fade-in duration-150">
+                  {errors.addressLine1.message}
+                </p>
+              )}
+            </div>
+
+            <input
+              type="text"
+              autoComplete="address-line2"
+              disabled={isLoading}
+              {...register("addressLine2")}
+              placeholder="Boîte, étage, complément (optionnel)"
+              className="block w-full px-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2] focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60"
+            />
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <input
+                  type="text"
+                  autoComplete="postal-code"
+                  disabled={isLoading}
+                  {...register("addressPostalCode")}
+                  placeholder="Code postal"
+                  className={`block w-full px-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
+                    errors.addressPostalCode
+                      ? "border-red-400 focus:ring-red-400/40 focus:border-red-500"
+                      : "border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2]"
+                  } focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60`}
+                />
+                {errors.addressPostalCode && (
+                  <p className="text-xs text-red-600 dark:text-red-400 font-medium pl-1 animate-in fade-in duration-150">
+                    {errors.addressPostalCode.message}
+                  </p>
+                )}
+              </div>
+              <div className="sm:col-span-2 space-y-1">
+                <input
+                  type="text"
+                  autoComplete="address-level2"
+                  disabled={isLoading}
+                  {...register("addressCity")}
+                  placeholder="Ville"
+                  className={`block w-full px-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
+                    errors.addressCity
+                      ? "border-red-400 focus:ring-red-400/40 focus:border-red-500"
+                      : "border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2]"
+                  } focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60`}
+                />
+                {errors.addressCity && (
+                  <p className="text-xs text-red-600 dark:text-red-400 font-medium pl-1 animate-in fade-in duration-150">
+                    {errors.addressCity.message}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <select
+              autoComplete="country"
+              disabled={isLoading}
+              {...register("addressCountry")}
+              className="block w-full px-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 rounded-2xl border border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2] focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60"
+            >
+              {countryOptions.map((country) => (
+                <option key={country.code} value={country.code}>{country.name}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Newsletter opt-in */}
           <label className="flex items-start gap-3 cursor-pointer select-none group">
             <input
@@ -254,6 +451,35 @@ export default function RegisterForm() {
               Je souhaite recevoir des offres exclusives et des actualités par email.
             </span>
           </label>
+
+          {/* Terms acceptance — mandatory, blocks submission when unchecked */}
+          <div className="space-y-1">
+            <label className="flex items-start gap-3 cursor-pointer select-none group">
+              <input
+                type="checkbox"
+                id="termsAccepted"
+                disabled={isLoading}
+                {...register("termsAccepted")}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 dark:border-zinc-600 text-[#2F3A2E] focus:ring-[#2F3A2E]/40 dark:focus:ring-[#a8c4a2]/30 transition-colors disabled:opacity-60 cursor-pointer"
+              />
+              <span className="text-sm text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-300 transition-colors leading-snug">
+                J&apos;ai lu et j&apos;accepte les{" "}
+                <Link href="/cgv" target="_blank" rel="noopener noreferrer" className="underline text-[#2F3A2E] dark:text-[#a8c4a2] hover:text-[#3d4d3c]">
+                  Conditions générales de vente
+                </Link>{" "}
+                et la{" "}
+                <Link href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline text-[#2F3A2E] dark:text-[#a8c4a2] hover:text-[#3d4d3c]">
+                  Politique de confidentialité
+                </Link>
+                .
+              </span>
+            </label>
+            {errors.termsAccepted && (
+              <p className="text-xs text-red-600 dark:text-red-400 font-medium pl-7 animate-in fade-in duration-150">
+                {errors.termsAccepted.message}
+              </p>
+            )}
+          </div>
 
           {/* Submit */}
           <button

@@ -179,7 +179,21 @@ export async function verifyEmail(rawToken) {
         resumeId: matchedToken.resumeId,
       });
       resumeSuccess = resumeResult.success;
-      resumeUrl = resumeResult.success ? resumeResult.url : null;
+      if (resumeResult.success) {
+        // A full promo can settle a checkout without Stripe. Those paths
+        // intentionally return no Checkout URL because there is nothing to
+        // redirect to, so build the local success destination explicitly.
+        // Without this, a guest's reservation/order was confirmed but their
+        // verification page looked like a dead end.
+        if (resumeResult.url) {
+          resumeUrl = resumeResult.url;
+        } else if (resumeResult.freeOrder) {
+          resumeUrl = `/boutique/order/success?free=1&number=${encodeURIComponent(resumeResult.orderNumber)}${resumeResult.pickupCode ? `&code=${encodeURIComponent(resumeResult.pickupCode)}` : ""}`;
+        } else if (resumeResult.freeReservation) {
+          const successPath = matchedToken.resumeType === "WORKSHOP" ? "/reservation-atelier/succes" : "/reservation-formation/succes";
+          resumeUrl = `${successPath}?reservation_id=${encodeURIComponent(resumeResult.reservationId)}`;
+        }
+      }
       resumeMessage = resumeResult.message ?? null;
     }
 

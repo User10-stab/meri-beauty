@@ -89,6 +89,7 @@ const ALL_NAV_DATA = [
         title: "Boutique",
         icon: Icons.ShoppingBagIcon,
         items: [
+          { title: "Caisse", url: "/dashboard/boutique/point-of-sale", roles: DASHBOARD_PERMISSIONS.ORDERS },
           // Staff: read-only catalogue browsing (no cost/margin data) + stock adjustments.
           { title: "Produits", url: "/dashboard/boutique/products", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK },
           { title: "Catégories", url: "/dashboard/boutique/categories", roles: DASHBOARD_PERMISSIONS.BOUTIQUE }, // Admin only — structural CRUD

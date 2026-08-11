@@ -183,6 +183,13 @@ enum FulfilmentMode {
   SHIPPING_PREPAID // pay online, bpost delivery
 }
 
+enum VatTreatment {
+  DOMESTIC
+  EU_DISTANCE_SALE
+  EU_REVERSE_CHARGE
+  EXPORT
+}
+
 enum OrderStatus {
   PENDING_PAYMENT // prepaid modes — Stripe checkout started, not yet settled
   PENDING_PICKUP // pickup+pay-on-site — confirmed, stock reserved, awaiting the customer
@@ -557,33 +564,61 @@ model SalonClosure {
 
 // USER
 model User {
-  id                   String    @id @default(cuid())
-  fullName             String
-  nickName             String?
-  email                String    @unique
-  password             String
-  phone                String    @unique
-  role                 UserRole
-  avatar               String?
-  emailVerified        Boolean   @default(false)
-  isActive             Boolean   @default(true)
-  lastLogin            DateTime?
-  sessionVersion       Int       @default(0)
-  newsletterSubscribed Boolean   @default(false)
+  id                       String    @id @default(cuid())
+  fullName                 String
+  nickName                 String?
+  email                    String    @unique
+  password                 String
+  // A counter sale needs a receipt email, but a phone number is optional.
+  // Online checkout and booking forms still require it at their own
+  // validation boundary.
+  phone                    String?   @unique
+  role                     UserRole
+  avatar                   String?
+  emailVerified            Boolean   @default(false)
+  isActive                 Boolean   @default(true)
+  lastLogin                DateTime?
+  // Bumped whenever this user's password changes (reset or self-service) so
+  // the JWT session callback can detect and invalidate stale sessions issued
+  // before the change — see auth.js#jwt.
+  sessionVersion           Int       @default(0)
+  newsletterSubscribed     Boolean   @default(false)
   // Demonstrable, timestamped marketing consent — GDPR/ePrivacy requires
   // being able to show when/how/under-what-policy-version someone opted
   // in, not just the current boolean. Only ever set together (see
   // lib/newsletter-consent.js#buildNewsletterConsentUpdate) whenever
   // newsletterSubscribed transitions to true; left untouched on
   // unsubscribe so the original consent record stays intact as history.
-  newsletterConsentedAt   DateTime?
-  newsletterConsentSource String? // e.g. "registration", "boutique_checkout", "appointment_booking", "account_settings"
+  newsletterConsentedAt    DateTime?
+  newsletterConsentSource  String? // e.g. "registration", "boutique_checkout", "appointment_booking", "account_settings"
   newsletterConsentVersion String? // which marketing-consent copy version was shown at opt-in time
-  vatNumber            String? // Client TVA number for B2B invoices
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  isCompany                Boolean   @default(false) // account type chosen at registration — "particulier" vs "entreprise"
+  vatNumber                String? // Client TVA number for B2B invoices — required at registration when isCompany is true, VIES-verified (see lib/vat-validation.js)
+  vatValidatedAt           DateTime?
+  vatValidationName        String?
+  vatValidationAddress     String?
+  // Billing address — mandatory at registration (both particulier and
+  // entreprise: a proper invoice needs the customer's address regardless of
+  // account type, not just a VAT number for companies). Nullable at the DB
+  // level only because accounts created before this field existed have no
+  // value here — see lib/format-address.js#formatUserAddress and the
+  // self-service edit in actions/customer/settings.js#updateMyAddress for
+  // how existing accounts backfill it.
+  addressLine1             String?
+  addressLine2             String?
+  addressCity              String?
+  addressPostalCode        String?
+  addressCountry           String?   @default("BE")
+  // Same demonstrable-consent shape as the newsletter fields above — a
+  // required checkbox at signup isn't enough on its own; GDPR/e-commerce
+  // rules expect a record of WHEN a specific person agreed to WHICH version
+  // of the CGV/CGU, not just a boolean. See lib/terms-consent.js.
+  termsAcceptedAt          DateTime?
+  termsAcceptedVersion     String?
+  isDeleted                Boolean   @default(false)
+  deletedAt                DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   staff                          Staff?
   appointments                   Appointment[]
@@ -604,10 +639,10 @@ model User {
   orders                         Order[]                @relation("OrderBuyer")
   pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
+  auditLogs                      AuditLog[]             @relation("AuditActor")
 
   @@index([role])
   @@index([isActive, isDeleted])
-  auditLogs                      AuditLog[]             @relation("AuditActor")
 }
 
 // Immutable operational trail. Target records are intentionally represented
@@ -617,7 +652,7 @@ model AuditLog {
   id String @id @default(cuid())
 
   actorId   String?
-  actor     User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actor     User?     @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   actorRole UserRole?
 
   action     String
@@ -927,9 +962,16 @@ model Order {
   // get silently cancelled by a retry click, swallowing the payment.
   stripeCheckoutSessionId String? @unique
 
-  subtotal     Decimal @db.Decimal(10, 2)
-  shippingCost Decimal @default(0) @db.Decimal(10, 2)
-  totalAmount  Decimal @db.Decimal(10, 2)
+  subtotal          Decimal      @db.Decimal(10, 2)
+  shippingCost      Decimal      @default(0) @db.Decimal(10, 2)
+  totalAmount       Decimal      @db.Decimal(10, 2)
+  taxCountryCode    String       @default("BE")
+  vatTreatment      VatTreatment @default(DOMESTIC)
+  vatRate           Decimal      @default(21) @db.Decimal(4, 2)
+  totalExclVat      Decimal?     @db.Decimal(10, 2)
+  totalVat          Decimal?     @db.Decimal(10, 2)
+  customerVatNumber String?
+  taxNote           String?
 
   // `totalAmount` above is already the post-discount figure; these two are
   // kept only so the eventual Payment row (created later, once Stripe
@@ -1093,7 +1135,7 @@ model Staff {
   yearsOfExperience Int
   isDeleted         Boolean   @default(false)
   deletedAt         DateTime?
-  vatNumber         String   @unique
+  vatNumber         String?   @unique
 
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
@@ -1170,6 +1212,11 @@ model Appointment {
   staffServiceId String
   staffService   StaffService @relation(fields: [staffServiceId], references: [id])
 
+  // Denormalized copy of staffService.staffId, set at creation time. Exists
+  // so the DB-level no-overlap exclusion constraint can key on the actual
+  // staff member instead of staffServiceId — a staff member offering
+  // multiple services would otherwise not be protected by the constraint
+  // against being double-booked across two different services at once.
   staffId String
   staff   Staff  @relation(fields: [staffId], references: [id])
 
@@ -1187,12 +1234,24 @@ model Appointment {
   review        Review?
   notifications Notification[]
 
+  // Dedup markers for the reminder cron (mirrors reservations'
+  // reminderSentAt), one per window since appointments send both a 24h and
+  // a 2h reminder. Without these the reminder window query keeps matching
+  // the same appointment on every cron tick until it starts.
+  reminder24hSentAt DateTime?
+  reminder2hSentAt  DateTime?
+
   @@index([staffServiceId, startTime]) // conflict checks + calendar
   @@index([staffId, startTime]) // cross-service overlap checks
   @@index([userId, startTime]) // "my appointments"
   @@index([isDeleted, status, startTime]) // dashboard filters
 }
 
+// PAYMENT
+// Polymorphic: exactly one of appointmentId / orderId / workshopReservationId
+// / formationReservationId is set, enforced by a raw-SQL CHECK constraint
+// added after the migration (see prisma/migrations/*/migration.sql for
+// "Payment_exactly_one_source") — Prisma has no schema-level XOR.
 model Payment {
   id                     String                @id @default(cuid())
   appointmentId          String?               @unique
@@ -1212,6 +1271,12 @@ model Payment {
   paidAt                 DateTime?
   isDeleted              Boolean               @default(false)
   deletedAt              DateTime?
+  // @unique is safe on a nullable column in Postgres — NULLs are never
+  // considered duplicates of each other, so ON_SITE/cash payments (which
+  // never set this) are unaffected. This turns the webhook's idempotency
+  // check from a race-prone findFirst-then-create into a real DB guarantee:
+  // a second concurrent insert with the same session id throws P2002 instead
+  // of silently succeeding and double-fulfilling.
   transactionReference   String?               @unique
 
   // Durable refund-retry bookkeeping — see PaymentStatus.REFUND_PENDING/
@@ -1241,10 +1306,13 @@ model Payment {
 }
 
 // PROMO CODE
-// Reusable across customers (not single-use) and never auto-expires — only
-// a manual `isActive` toggle retires one, per the client's explicit call.
-// `code` is stored uppercase so lookups are case-insensitive without a DB
-// collation dependency.
+// Reusable across customers (not single-use). Originally built to never
+// auto-expire — only a manual `isActive` toggle retires one — per the
+// client's explicit call; expiresAt/maxUses were added later (still the
+// client's call) as an OPTIONAL cap, not a requirement: left null, a code
+// behaves exactly as before (never expires, unlimited uses). `code` is
+// stored uppercase so lookups are case-insensitive without a DB collation
+// dependency.
 model PromoCode {
   id             String        @id @default(cuid())
   code           String        @unique
@@ -1252,6 +1320,9 @@ model PromoCode {
   value          Decimal       @db.Decimal(10, 2) // percentage points (0-100) or a flat EUR amount, per `type`
   minOrderAmount Decimal?      @db.Decimal(10, 2) // null = no minimum
   isActive       Boolean       @default(true)
+  expiresAt      DateTime? // null = never expires
+  maxUses        Int? // null = unlimited
+  usedCount      Int           @default(0) // incremented atomically at booking time, see resolvePromoCode callers
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -1302,10 +1373,13 @@ model Invoice {
   customerVatNumber String? // Client TVA number (copied from User.vatNumber at invoice time)
   customerAddress   String?
 
-  subtotalExclVat Decimal @db.Decimal(10, 2)
-  vatRate         Decimal @default(21) @db.Decimal(4, 2)
-  vatAmount       Decimal @db.Decimal(10, 2)
-  totalInclVat    Decimal @db.Decimal(10, 2)
+  subtotalExclVat Decimal      @db.Decimal(10, 2)
+  vatRate         Decimal      @default(21) @db.Decimal(4, 2)
+  vatAmount       Decimal      @db.Decimal(10, 2)
+  totalInclVat    Decimal      @db.Decimal(10, 2)
+  taxCountryCode  String       @default("BE")
+  vatTreatment    VatTreatment @default(DOMESTIC)
+  taxNote         String?
 
   lines       InvoiceLine[]
   creditNotes CreditNote[]
@@ -1443,7 +1517,7 @@ model Notification {
   message String
 
   status    NotificationStatus
-  isRead    Boolean @default(false)
+  isRead    Boolean            @default(false)
   actionUrl String?
   sentAt    DateTime?
   createdAt DateTime           @default(now())
@@ -1512,7 +1586,7 @@ model RentalRequest {
   status         RentalRequestStatus
   message        String?
   ownerResponse  String?
-  specialty      String
+  specialty      String?
   isDeleted      Boolean             @default(false)
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())

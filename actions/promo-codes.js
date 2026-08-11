@@ -28,6 +28,9 @@ function serializePromoCode(p) {
     value: Number(p.value),
     minOrderAmount: p.minOrderAmount != null ? Number(p.minOrderAmount) : null,
     isActive: p.isActive,
+    expiresAt: p.expiresAt,
+    maxUses: p.maxUses,
+    usedCount: p.usedCount,
     createdAt: p.createdAt,
   };
 }
@@ -71,7 +74,7 @@ export async function createPromoCode(input) {
     };
   }
 
-  const { code, type, value, minOrderAmount, isActive } = parsed.data;
+  const { code, type, value, minOrderAmount, expiresAt, maxUses, isActive } = parsed.data;
 
   try {
     const duplicate = await prisma.promoCode.findUnique({ where: { code }, select: { id: true } });
@@ -80,7 +83,7 @@ export async function createPromoCode(input) {
     }
 
     const promo = await prisma.promoCode.create({
-      data: { code, type, value, minOrderAmount: minOrderAmount ?? null, isActive },
+      data: { code, type, value, minOrderAmount: minOrderAmount ?? null, expiresAt, maxUses, isActive },
     });
 
     revalidatePath("/dashboard/promo-codes");
@@ -105,11 +108,18 @@ export async function updatePromoCode(input) {
     };
   }
 
-  const { id, code, type, value, minOrderAmount, isActive } = parsed.data;
+  const { id, code, type, value, minOrderAmount, expiresAt, maxUses, isActive } = parsed.data;
 
   try {
-    const existing = await prisma.promoCode.findUnique({ where: { id }, select: { id: true } });
+    const existing = await prisma.promoCode.findUnique({ where: { id }, select: { id: true, usedCount: true } });
     if (!existing) return { success: false, message: "Code promo introuvable." };
+    if (maxUses != null && maxUses < existing.usedCount) {
+      return {
+        success: false,
+        message: "La limite ne peut pas être inférieure au nombre d'utilisations déjà enregistrées.",
+        errors: { maxUses: ["Cette limite est déjà dépassée."] },
+      };
+    }
 
     const duplicate = await prisma.promoCode.findFirst({ where: { code, id: { not: id } }, select: { id: true } });
     if (duplicate) {
@@ -118,7 +128,7 @@ export async function updatePromoCode(input) {
 
     const promo = await prisma.promoCode.update({
       where: { id },
-      data: { code, type, value, minOrderAmount: minOrderAmount ?? null, isActive },
+      data: { code, type, value, minOrderAmount: minOrderAmount ?? null, expiresAt, maxUses, isActive },
     });
 
     revalidatePath("/dashboard/promo-codes");

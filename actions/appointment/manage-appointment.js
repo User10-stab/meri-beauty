@@ -9,6 +9,7 @@ import { sendEmail } from "@/lib/email";
 import { reservationConfirmedWithPaymentLinkEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice } from "@/lib/invoicing";
 import { renderInvoicePdf } from "@/lib/pdf/render";
+import { formatUserAddress } from "@/lib/format-address";
 import {
   createNotificationsBulk,
   buildAppointmentConfirmedNotification,
@@ -183,6 +184,7 @@ export async function confirmAppointment(appointmentId) {
         time: appointment.startTime.toLocaleTimeString("fr-FR", {
           hour: "2-digit",
           minute: "2-digit",
+          timeZone: "Europe/Brussels",
         }),
         totalAmount,
         paymentUrl,
@@ -392,12 +394,12 @@ export async function rejectAppointment(appointmentId, reason = null) {
       subject: "Rendez-vous annulé – Meri Beauty",
       text:
         `Bonjour ${appointment.user.fullName},\n\n` +
-        `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé.${refundNote}` +
+        `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a été annulé.${refundNote}` +
         (reason ? ` Raison : ${reason}` : "") +
         `\n\nL'équipe Meri Beauty`,
       html:
         `<p>Bonjour ${appointment.user.fullName},</p>` +
-        `<p>Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé.${refundNote}` +
+        `<p>Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a été annulé.${refundNote}` +
         (reason ? ` Raison : ${reason}` : "") +
         `</p><p>L'équipe Meri Beauty</p>`,
     }).catch((err) => console.error("[rejectAppointment] cancellation email failed:", err));
@@ -408,8 +410,8 @@ export async function rejectAppointment(appointmentId, reason = null) {
         sendEmail({
           to: salon.email,
           subject: `⚠️ Remboursement Stripe échoué – Rendez-vous ${appointment.user.fullName}`,
-          text: `Le remboursement Stripe pour le rendez-vous de ${appointment.user.fullName} (${appointment.user.email}) du ${appointment.date.toLocaleDateString("fr-FR")} a échoué. Traitement manuel requis dans le dashboard Stripe.`,
-          html: `<p>Le remboursement Stripe pour le rendez-vous de ${appointment.user.fullName} (${appointment.user.email}) du ${appointment.date.toLocaleDateString("fr-FR")} a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
+          text: `Le remboursement Stripe pour le rendez-vous de ${appointment.user.fullName} (${appointment.user.email}) du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a échoué. Traitement manuel requis dans le dashboard Stripe.`,
+          html: `<p>Le remboursement Stripe pour le rendez-vous de ${appointment.user.fullName} (${appointment.user.email}) du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
         }).catch((err) => console.error("[rejectAppointment] refund-failure alert email failed:", err));
       }
     }
@@ -457,7 +459,18 @@ export async function completeAppointment(appointmentId, { method } = {}) {
     const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId, isDeleted: false },
       include: {
-        user: { select: { fullName: true, email: true, vatNumber: true } },
+        user: {
+          select: {
+            fullName: true,
+            email: true,
+            vatNumber: true,
+            addressLine1: true,
+            addressLine2: true,
+            addressCity: true,
+            addressPostalCode: true,
+            addressCountry: true,
+          },
+        },
         staffService: { include: { service: true } },
         payment: true,
       },
@@ -511,6 +524,7 @@ export async function completeAppointment(appointmentId, { method } = {}) {
             fullName: appointment.user.fullName,
             email: appointment.user.email,
             vatNumber: appointment.user.vatNumber,
+            address: formatUserAddress(appointment.user),
           },
           lines: [
             {
@@ -541,11 +555,11 @@ export async function completeAppointment(appointmentId, { method } = {}) {
         subject: "Facture — solde réglé – Meri Beauty",
         text:
           `Bonjour ${appointment.user.fullName},\n\n` +
-          `Le solde de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a bien été encaissé. ` +
+          `Le solde de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
           `Vous trouverez votre facture en pièce jointe.\n\nL'équipe Meri Beauty`,
         html:
           `<p>Bonjour ${appointment.user.fullName},</p>` +
-          `<p>Le solde de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a bien été encaissé. ` +
+          `<p>Le solde de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
           `Vous trouverez votre facture en pièce jointe.</p><p>L'équipe Meri Beauty</p>`,
         ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
       }).catch((err) => console.error("[completeAppointment] receipt email failed:", err));

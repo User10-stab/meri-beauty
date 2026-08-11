@@ -11,6 +11,7 @@ import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
+import { formatUserAddress } from "@/lib/format-address";
 import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
@@ -20,6 +21,7 @@ import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-ord
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { captureError, captureWarning } from "@/lib/monitoring";
+import { calculateVatTotals, repriceBelgianGross, resolveGoodsVatPolicy } from "@/lib/tax-policy";
 
 /**
  * Checkout + order fulfilment.
@@ -139,6 +141,11 @@ function serializeOrder(order) {
     subtotal: Number(order.subtotal),
     shippingCost: Number(order.shippingCost),
     totalAmount: Number(order.totalAmount),
+    taxCountryCode: order.taxCountryCode,
+    vatTreatment: order.vatTreatment,
+    vatRate: Number(order.vatRate),
+    totalExclVat: order.totalExclVat == null ? null : Number(order.totalExclVat),
+    totalVat: order.totalVat == null ? null : Number(order.totalVat),
     shippingCarrier: order.shippingCarrier,
     pickupPointId: order.pickupPointId,
     pickupPointName: order.pickupPointName,
@@ -311,10 +318,17 @@ export async function createOrderFromCart(input) {
       return { success: false, message: "Trop de tentatives. Veuillez réessayer dans quelques minutes." };
     }
 
-    const subtotal = fullCart.items.reduce(
-      (sum, item) => sum + Number(item.variant.price) * item.quantity,
-      0
-    );
+    const destinationCountry = fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint?.countryCode ?? "BE" : "BE";
+    const taxPolicy = resolveGoodsVatPolicy({
+      fulfilmentMode,
+      destinationCountry,
+      customer: user,
+    });
+    const pricedItems = fullCart.items.map((item) => ({
+      ...item,
+      taxUnitPrice: repriceBelgianGross(item.variant.price, taxPolicy.vatRate),
+    }));
+    const subtotal = pricedItems.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
 
     // Calculate shipping based on total weight (Marie's requirement)
     let shippingCost = 0;
@@ -329,6 +343,7 @@ export async function createOrderFromCart(input) {
           message: "Votre commande dépasse 30 kg. Merci de nous contacter pour un devis de livraison personnalisé."
         };
       }
+      shippingCost = repriceBelgianGross(shippingCost, taxPolicy.vatRate);
     }
 
     // Re-validated here regardless of the client's live preview — a code
@@ -336,14 +351,17 @@ export async function createOrderFromCart(input) {
     // discount amount is never trusted from the client.
     let promoCodeId = null;
     let discountAmount = 0;
+    let promoMaxUses = null;
     if (promoCode) {
       const promoResult = await resolvePromoCode(promoCode, subtotal);
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
+      promoMaxUses = promoResult.maxUses;
     }
 
     const totalAmount = Math.max(0, subtotal + shippingCost - discountAmount);
+    const taxTotals = calculateVatTotals(totalAmount, taxPolicy.vatRate);
 
     const isOnSite = fulfilmentMode === "PICKUP_ON_SITE";
     const pickupCode = fulfilmentMode !== "SHIPPING_PREPAID" ? await uniquePickupCode() : null;
@@ -414,6 +432,13 @@ export async function createOrderFromCart(input) {
           subtotal,
           shippingCost,
           totalAmount,
+          taxCountryCode: taxPolicy.taxCountryCode,
+          vatTreatment: taxPolicy.vatTreatment,
+          vatRate: taxPolicy.vatRate,
+          totalExclVat: taxTotals.totalExclVat,
+          totalVat: taxTotals.vatAmount,
+          customerVatNumber: taxPolicy.customerVatNumber,
+          taxNote: taxPolicy.taxNote,
           promoCodeId,
           discountAmount,
           pickupPointId: pickupPoint?.id ?? null,
@@ -421,21 +446,36 @@ export async function createOrderFromCart(input) {
           pickupPointAddress: pickupPoint?.address ?? null,
           pickupPointPostalCode: pickupPoint?.postalCode ?? null,
           pickupPointCity: pickupPoint?.city ?? null,
+          shippingCountry: destinationCountry,
           pickupCode,
           expiresAt,
           notes: notes || null,
           items: {
-            create: fullCart.items.map((item) => ({
+            create: pricedItems.map((item) => ({
               variantId: item.variantId,
               productName: item.variant.product.name,
               variantName: item.variant.name,
               sku: item.variant.sku,
-              unitPrice: item.variant.price,
+              unitPrice: item.taxUnitPrice,
               quantity: item.quantity,
             })),
           },
         },
       });
+
+      // Atomic conditional claim — only succeeds while usedCount is still
+      // under the cap captured moments ago at resolvePromoCode time. Two
+      // concurrent checkouts racing the last use of a capped code can't
+      // both win: the loser's WHERE clause matches zero rows.
+      if (promoCodeId && promoMaxUses != null) {
+        const claim = await tx.promoCode.updateMany({
+          where: { id: promoCodeId, usedCount: { lt: promoMaxUses } },
+          data: { usedCount: { increment: 1 } },
+        });
+        if (claim.count === 0) throw new Error("PROMO_EXHAUSTED");
+      } else if (promoCodeId) {
+        await tx.promoCode.update({ where: { id: promoCodeId }, data: { usedCount: { increment: 1 } } });
+      }
 
       // PICKUP_ON_SITE has no payment step — the order is confirmed right here, so the
       // cart empties immediately, same as any normal checkout. The two prepaid modes
@@ -491,6 +531,16 @@ export async function createOrderFromCart(input) {
       captureWarning("Stock race lost during checkout", { area: "stock-capacity" });
       return { success: false, message: "Le stock a changé entre-temps — vérifiez votre panier et réessayez." };
     }
+    if (error.message === "PROMO_EXHAUSTED") {
+      captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
+      return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
+    }
+    if (error.message === "EXPORT_REQUIRES_MANUAL_REVIEW") {
+      return { success: false, message: "Cette destination hors UE nécessite une vérification fiscale et douanière manuelle avant paiement." };
+    }
+    if (error.message === "VAT_RATE_NOT_CONFIGURED") {
+      return { success: false, message: "Le taux de TVA de cette destination n’est pas configuré. Contactez Meri Beauty." };
+    }
     captureError(error, { area: "stock-capacity", context: "createOrderFromCart" });
     return { success: false, message: "Impossible de créer la commande." };
   }
@@ -509,13 +559,13 @@ function sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAm
       `Bonjour ${user.fullName},\n\n` +
       `Votre commande n°${order.orderNumber} (${totalAmount.toFixed(2)} €) est confirmée. ` +
       `Présentez ce code en boutique pour la récupérer et régler le paiement sur place : ${pickupCode}\n\n` +
-      `Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR")} — passé ce délai, la commande sera annulée.\n\n` +
+      `Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} — passé ce délai, la commande sera annulée.\n\n` +
       `L'équipe Meri Beauty`,
     html:
       `<p>Bonjour ${user.fullName},</p>` +
       `<p>Votre commande n°${order.orderNumber} (<strong>${totalAmount.toFixed(2)} €</strong>) est confirmée.</p>` +
       `<p>Présentez ce code en boutique pour la récupérer et régler le paiement sur place : <strong>${pickupCode}</strong></p>` +
-      `<p>Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR")} — passé ce délai, la commande sera annulée.</p>` +
+      `<p>Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} — passé ce délai, la commande sera annulée.</p>` +
       `<p>L'équipe Meri Beauty</p>`,
   }).catch((err) => console.error("[sendPickupConfirmationEmail] failed:", err));
 }
@@ -575,6 +625,23 @@ export async function createOrderCheckoutSession(orderId) {
       return { success: false, message: "Le délai de paiement pour cette commande a expiré." };
     }
 
+    // A 100%-off promo code can bring the total to exactly 0 — Stripe
+    // Checkout Sessions in "payment" mode reject a 0-value line item, so
+    // there's nothing to actually charge. Confirm the order directly
+    // through the same fulfilment path a real Stripe payment uses (a
+    // synthetic "session" shaped just enough for fulfillOrderPayment to
+    // read), instead of forking a second, parallel implementation.
+    if (Number(order.totalAmount) <= 0) {
+      const syntheticSession = {
+        id: `free_order_${order.id}`,
+        metadata: { kind: "order", orderId: order.id },
+        amount_total: 0,
+        payment_intent: null,
+      };
+      await fulfillOrderPayment(syntheticSession);
+      return { success: true, url: null, freeOrder: true, orderNumber: order.orderNumber, pickupCode: order.pickupCode };
+    }
+
     const lineItems = order.items.map((item) => ({
       price_data: {
         currency: "eur",
@@ -621,195 +688,6 @@ export async function createOrderCheckoutSession(orderId) {
     console.error("[createOrderCheckoutSession]", error);
     return { success: false, message: "Erreur lors de la création de la session de paiement." };
   }
-}
-
-/**
- * Called by the Stripe webhook (app/api/webhooks/stripe/route.js) when
- * session.metadata.kind === "order". Idempotent via
- * Payment.transactionReference, same pattern as the appointment path.
- */
-export async function fulfillOrderPayment(session) {
-  const orderId = session.metadata?.orderId;
-  if (!orderId) return { received: true, warning: "missing orderId metadata" };
-
-  const existing = await prisma.payment.findFirst({
-    where: { transactionReference: session.id },
-    select: { id: true },
-  });
-  if (existing) return { received: true, alreadyProcessed: true };
-
-  const order = await prisma.order.findUnique({
-    where: { id: orderId },
-    include: { items: true, cart: { select: { id: true, status: true } }, user: { select: { id: true, fullName: true, email: true, vatNumber: true } } },
-  });
-
-  if (!order || order.status === "CANCELLED" || order.status === "EXPIRED") {
-    console.warn("[fulfillOrderPayment] order gone/cancelled after payment, refunding:", session.id);
-    if (session.payment_intent) {
-      await stripe.refunds.create({ payment_intent: session.payment_intent }).catch((err) => {
-        console.error("[fulfillOrderPayment] REFUND FAILED for", session.id, err);
-        throw err;
-      });
-    }
-    return { received: true, refunded: true, reason: "order unavailable" };
-  }
-
-  if (order.status !== "PENDING_PAYMENT") {
-    return { received: true, alreadyProcessed: true };
-  }
-
-  const paidAmount = (session.amount_total ?? 0) / 100;
-  const nextStatus = order.fulfilmentMode === "SHIPPING_PREPAID" ? "PROCESSING" : "PAID";
-
-  // Paranoid check: line items are built server-side, but the webhook is the
-  // last line of defense on money.
-  const expectedAmount = Number(order.totalAmount);
-  if (paidAmount + 0.01 < expectedAmount) {
-    console.error(`[fulfillOrderPayment] UNDERPAYMENT: paid ${paidAmount} expected ${expectedAmount} for session ${session.id}`);
-    if (session.payment_intent) {
-      await stripe.refunds.create({ payment_intent: session.payment_intent }).catch((err) => {
-        console.error("[fulfillOrderPayment] underpayment REFUND FAILED for", session.id, err);
-        throw err;
-      });
-    }
-    return { received: true, refunded: true, reason: "underpayment" };
-  }
-
-  let invoice;
-  try {
-  ({ invoice } = await prisma.$transaction(async (tx) => {
-    // Atomic claim, gated on the order still being PENDING_PAYMENT — the read
-    // above is only a fast-path check. Without this, a customer cancellation
-    // (cancelMyOrder, gated on the same statuses) landing at the same instant
-    // as this webhook delivery could have its CANCELLED write silently
-    // overwritten back to PAID by the order.update further below committing
-    // after it. Claiming it now, up front, means everything else in this
-    // transaction (payment, stock, invoice) only happens for the winner.
-    const claim = await tx.order.updateMany({
-      where: { id: order.id, status: "PENDING_PAYMENT" },
-      data: { status: nextStatus, expiresAt: null },
-    });
-    if (claim.count === 0) throw new Error("ORDER_NO_LONGER_PENDING");
-
-    const payment = await tx.payment.create({
-      data: {
-        orderId: order.id,
-        totalAmount: order.totalAmount,
-        paidAmount,
-        remainingAmount: 0,
-        paymentType: "ONLINE",
-        status: "PAID",
-        paidAt: new Date(),
-        transactionReference: session.id,
-        promoCodeId: order.promoCodeId,
-        discountAmount: order.discountAmount,
-      },
-    });
-
-    await tx.transaction.create({
-      data: {
-        paymentId: payment.id,
-        amount: paidAmount,
-        method: "ONLINE",
-        transactionType: "FINAL_PAYMENT",
-        paidAt: new Date(),
-      },
-    });
-
-    const invoice = await issueInvoice(tx, {
-      paymentId: payment.id,
-      source: "ORDER",
-      totalInclVat: paidAmount,
-      customer: { fullName: order.user.fullName, email: order.user.email, vatNumber: order.user.vatNumber },
-      lines: orderInvoiceLines(order),
-    });
-
-    for (const item of order.items) {
-      // Atomic {decrement} on both columns — a plain read-then-write of a
-      // JS-computed literal would let two orders paying for the same
-      // variant at once silently lose one side's decrement.
-      const updated = await tx.productVariant.update({
-        where: { id: item.variantId },
-        data: {
-          stockQuantity: { decrement: item.quantity },
-          reservedQuantity: { decrement: item.quantity },
-        },
-      });
-      const newStock = updated.stockQuantity;
-
-      await tx.inventoryMovement.create({
-        data: {
-          variantId: item.variantId,
-          type: "SALE",
-          quantity: -item.quantity,
-          previousStock: newStock + item.quantity,
-          newStock,
-          reason: `Commande n°${order.orderNumber}`,
-        },
-      });
-    }
-
-    // Only now — payment confirmed — does the source cart actually empty. It was
-    // deliberately left ACTIVE at checkout time so an abandoned Stripe session
-    // wouldn't wipe the customer's cart (see createOrderFromCart).
-    if (order.cart && order.cart.status === "ACTIVE") {
-      await tx.cart.update({ where: { id: order.cart.id }, data: { status: "CONVERTED" } });
-    }
-
-
-    return { invoice };
-  }));
-  } catch (err) {
-    // The Payment.transactionReference unique constraint is the real
-    // idempotency guarantee — the findFirst check above is just a fast path
-    // that two near-simultaneous webhook deliveries can both pass before
-    // either commits. A P2002 here means the other delivery won the race;
-    // this one is done, not failed.
-    if (err.code === "P2002") {
-      return { received: true, alreadyProcessed: true };
-    }
-    // A concurrent cancellation (cancelMyOrder/cancelOrder) won the race and
-    // moved the order out of PENDING_PAYMENT between this function's initial
-    // read and this transaction — the salon can't honor a sale it already
-    // voided, so refund rather than resurrect the cancelled order.
-    if (err.message === "ORDER_NO_LONGER_PENDING") {
-      console.warn("[fulfillOrderPayment] order cancelled during payment, refunding:", session.id);
-      if (session.payment_intent) {
-        await stripe.refunds.create({ payment_intent: session.payment_intent }).catch((refundErr) => {
-          console.error("[fulfillOrderPayment] race REFUND FAILED for", session.id, refundErr);
-          throw refundErr;
-        });
-      }
-      return { received: true, refunded: true, reason: "order cancelled during payment" };
-    }
-    throw err;
-  }
-
-  const pickupNote =
-    order.fulfilmentMode === "PICKUP_PREPAID"
-      ? `Nous vous préviendrons dès qu'elle sera prête à être retirée. Code de retrait : ${order.pickupCode}.`
-      : "Elle sera expédiée sous peu vers votre point relais Mondial Relay — vous recevrez le numéro de suivi par e-mail.";
-
-  const invoicePdf = await renderInvoicePdf(invoice).catch((err) => {
-    console.error("[fulfillOrderPayment] invoice PDF render failed:", err);
-    return null;
-  });
-
-  sendEmail({
-    to: order.user.email,
-    subject: `Paiement confirmé – Commande n°${order.orderNumber} – Meri Beauty`,
-    text:
-      `Bonjour ${order.user.fullName},\n\n` +
-      `Votre paiement de €${paidAmount.toFixed(2)} pour la commande n°${order.orderNumber} a bien été reçu. ${pickupNote}\n\n` +
-      `L'équipe Meri Beauty`,
-    ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
-    html:
-      `<p>Bonjour ${order.user.fullName},</p>` +
-      `<p>Votre paiement de <strong>€${paidAmount.toFixed(2)}</strong> pour la commande n°${order.orderNumber} a bien été reçu. ${pickupNote}</p>` +
-      `<p>L'équipe Meri Beauty</p>`,
-  }).catch((err) => console.error("[fulfillOrderPayment] confirmation email failed:", err));
-
-  return { received: true, processed: true };
 }
 
 // ─── Dashboard: read ────────────────────────────────────────────────────────────
@@ -930,7 +808,22 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
   try {
     const order = await prisma.order.findFirst({
       where: orderId ? { id: orderId } : { pickupCode },
-      include: { items: true, payment: true, user: { select: { fullName: true, email: true, vatNumber: true } } },
+      include: {
+        items: true,
+        payment: true,
+        user: {
+          select: {
+            fullName: true,
+            email: true,
+            vatNumber: true,
+            addressLine1: true,
+            addressLine2: true,
+            addressCity: true,
+            addressPostalCode: true,
+            addressCountry: true,
+          },
+        },
+      },
     });
     if (!order) return { success: false, message: "Commande introuvable — vérifiez le code." };
     if (order.fulfilmentMode === "SHIPPING_PREPAID") {
@@ -978,8 +871,17 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
           paymentId: payment.id,
           source: "ORDER",
           totalInclVat: Number(order.totalAmount),
-          customer: { fullName: order.user.fullName, email: order.user.email, vatNumber: order.user.vatNumber },
+          customer: {
+            fullName: order.user.fullName,
+            email: order.user.email,
+            vatNumber: order.customerVatNumber ?? order.user.vatNumber,
+            address: formatUserAddress(order.user),
+          },
           lines: orderInvoiceLines(order),
+          vatRate: Number(order.vatRate),
+          vatTreatment: order.vatTreatment,
+          taxCountryCode: order.taxCountryCode,
+          taxNote: order.taxNote,
         });
 
         for (const item of order.items) {
@@ -1404,4 +1306,3 @@ export async function cancelMyOrder(orderId) {
 
   return performOrderCancellation(order, "Annulée par le client");
 }
-

@@ -18,6 +18,7 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
     ? new Date(appointment.startTime).toLocaleTimeString("fr-FR", {
         hour: "2-digit",
         minute: "2-digit",
+        timeZone: "Europe/Brussels",
       })
     : "";
 

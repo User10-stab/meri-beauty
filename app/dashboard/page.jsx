@@ -8,11 +8,11 @@ function formatEuro(value) {
 }
 
 function formatDateTime(iso) {
-  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" }).format(new Date(iso));
 }
 
 function formatDate(iso) {
-  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
+  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" }).format(new Date(iso));
 }
 
 const ORDER_STATUS_LABEL = {
@@ -93,7 +93,7 @@ export default async function Home() {
                     />
                   </div>
                   <span className="text-xs text-gray-400">
-                    {new Intl.DateTimeFormat("fr-FR", { weekday: "short" }).format(new Date(day.date))}
+                    {new Intl.DateTimeFormat("fr-FR", { weekday: "short", timeZone: "Europe/Brussels" }).format(new Date(day.date))}
                   </span>
                 </div>
               );

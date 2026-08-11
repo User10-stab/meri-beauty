@@ -573,13 +573,14 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             className={inputClass}
           />
         </Field>
-        <Field label="Poids (g)" hint="Optionnel — utilisé pour calculer les frais de port">
+        <Field label="Poids (g)" required hint="Utilisé pour calculer les frais de port Mondial Relay">
           <input
             type="number"
-            min="0"
+            min="1"
             value={variant.weightGrams ?? ""}
             onChange={(e) => onChange({ weightGrams: e.target.value === "" ? "" : Number(e.target.value) })}
             placeholder="ex. 250"
+            required
             className={inputClass}
           />
         </Field>

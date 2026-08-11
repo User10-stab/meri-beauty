@@ -7,6 +7,14 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
 describe("payment and webhook security contracts", () => {
   const webhook = source("app/api/webhooks/stripe/route.js");
+  // Workshop/formation payment confirmation (incl. underpayment handling)
+  // was extracted out of the webhook route so the zero-total (100%-promo)
+  // direct-fulfilment path can share the exact same logic instead of
+  // duplicating it — see lib/workshops/fulfill-workshop-reservation-payment.js
+  // and lib/formations/fulfill-formation-reservation-payment.js.
+  const workshopFulfil = source("lib/workshops/fulfill-workshop-reservation-payment.js");
+  const formationFulfil = source("lib/formations/fulfill-formation-reservation-payment.js");
+  const refundSessionLib = source("lib/stripe-refund-session.js");
 
   test("Stripe webhook verifies signatures and persists idempotency keys", () => {
     expect(webhook).toContain("stripe.webhooks.constructEvent");
@@ -16,10 +24,11 @@ describe("payment and webhook security contracts", () => {
   });
 
   test("underpayments and invalid late payments are refunded", () => {
-    expect(webhook).toContain("UNDERPAYMENT_EPSILON");
-    expect(webhook.match(/reason:\s*["']underpayment["']/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(webhook).toContain("await refundSession(session)");
-    expect(webhook).toContain("stripe.refunds.create");
+    const allSources = webhook + workshopFulfil + formationFulfil;
+    expect(allSources).toContain("UNDERPAYMENT_EPSILON");
+    expect(allSources.match(/reason:\s*["']underpayment["']/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(allSources).toContain("await refundSession(session)");
+    expect(refundSessionLib).toContain("stripe.refunds.create");
   });
 });
 
@@ -88,10 +97,14 @@ describe("returns and reminders contracts", () => {
     expect(returns).toContain("issueCreditNote");
   });
 
-  test("appointment reminders have per-window deduplication markers", () => {
-    expect(appointmentReminders).toContain('type: "APPOINTMENT_REMINDER"');
-    expect(appointmentReminders).toMatch(/notifications:\s*\{\s*none:/);
-    expect(appointmentReminders).toContain("prisma.notification.create");
+  test("appointment reminders are email-only and window-bounded (no per-customer Notification row)", () => {
+    // Customer reminders are deliberately EMAIL-ONLY — see the file's own
+    // docstring. Dedup relies on the (gt: now, lte: cutoff) window plus
+    // scheduler cadence rather than a Notification-row marker, so this
+    // guards against a customer-facing Notification row creeping back in.
+    expect(appointmentReminders).not.toContain("prisma.notification.create");
+    expect(appointmentReminders).toMatch(/startTime:\s*\{\s*gt:\s*now,\s*lte:\s*cutoff\s*\}/);
+    expect(appointmentReminders).toContain("appointmentReminderEmail");
   });
 
   test.each([

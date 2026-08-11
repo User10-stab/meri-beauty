@@ -8,6 +8,7 @@ function formatSessionDate(date) {
     weekday: "long",
     day: "numeric",
     month: "long",
+    timeZone: "Europe/Brussels",
   });
 }
 

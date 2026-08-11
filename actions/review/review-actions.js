@@ -13,7 +13,7 @@ import {
   buildReviewSubmittedNotification,
   getReviewNotificationRecipients,
 } from "@/lib/notifications";
-import { isAdminRole } from "@/lib/authorization";
+import { isAdminRole, canAccessDashboard } from "@/lib/authorization";
 
 function serializeReview(review) {
   return {
@@ -162,6 +162,12 @@ export async function getReviewDashboardData() {
   const session = await auth();
   if (!session?.user) {
     return { success: false, message: "Non authentifié.", data: null };
+  }
+  // Dashboard-only: every review here includes the reviewing customer's full
+  // name and email, so a plain CUSTOMER session must never reach the query
+  // below (the STAFF-scoping filter beneath this doesn't apply to that role).
+  if (!canAccessDashboard(session.user.role)) {
+    return { success: false, message: "Permissions insuffisantes.", data: null };
   }
 
   const where = session.user.role === "STAFF"

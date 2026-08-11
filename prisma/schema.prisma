@@ -42,6 +42,16 @@ enum PaymentStatus {
   PARTIALLY_PAID
   PARTIALLY_REFUNDED
   FAILED
+  // A refund was decided (cancellation/return approved) but the Stripe call
+  // hasn't been confirmed successful yet — set right before attempting it,
+  // so a crash/timeout mid-call still leaves a durably queryable row for
+  // the retry job to pick up, not just whatever the synchronous try/catch
+  // managed to report. See lib/payments/retry-failed-refunds.js.
+  REFUND_PENDING
+  // The Stripe refund call itself errored (network, card issuer, etc.) —
+  // previously only surfaced via a best-effort staff email that could be
+  // missed; now durably retryable via the same job.
+  REFUND_FAILED
 }
 
 enum PaymentType {
@@ -427,7 +437,7 @@ model Formation {
   animator              Animator?       @relation(fields: [animatorId], references: [id])
   status                FormationStatus @default(DRAFT)
   allowMultipleSessions Boolean         @default(false)
-  depositPercentage     Int             @default(30)
+  depositPercentage     Int             @default(50)
   createdById           String?
   createdBy             User?           @relation("FormationCreatedBy", fields: [createdById], references: [id])
   createdAt             DateTime        @default(now())
@@ -560,6 +570,15 @@ model User {
   lastLogin            DateTime?
   sessionVersion       Int       @default(0)
   newsletterSubscribed Boolean   @default(false)
+  // Demonstrable, timestamped marketing consent — GDPR/ePrivacy requires
+  // being able to show when/how/under-what-policy-version someone opted
+  // in, not just the current boolean. Only ever set together (see
+  // lib/newsletter-consent.js#buildNewsletterConsentUpdate) whenever
+  // newsletterSubscribed transitions to true; left untouched on
+  // unsubscribe so the original consent record stays intact as history.
+  newsletterConsentedAt   DateTime?
+  newsletterConsentSource String? // e.g. "registration", "boutique_checkout", "appointment_booking", "account_settings"
+  newsletterConsentVersion String? // which marketing-consent copy version was shown at opt-in time
   vatNumber            String? // Client TVA number for B2B invoices
   isDeleted            Boolean   @default(false)
   deletedAt            DateTime?
@@ -588,6 +607,31 @@ model User {
 
   @@index([role])
   @@index([isActive, isDeleted])
+  auditLogs                      AuditLog[]             @relation("AuditActor")
+}
+
+// Immutable operational trail. Target records are intentionally represented
+// by type + id rather than foreign keys so an audit entry survives soft or
+// hard deletion of its target.
+model AuditLog {
+  id String @id @default(cuid())
+
+  actorId   String?
+  actor     User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorRole UserRole?
+
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  metadata   Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
 }
 
 // CATEGORY — services only. Retail products use ProductCategory.
@@ -875,6 +919,14 @@ model Order {
   fulfilmentMode FulfilmentMode
   status         OrderStatus    @default(PENDING_PAYMENT)
 
+  // Set the moment a Checkout Session is created for this order (before
+  // Stripe confirms anything) — lets createOrderFromCart check with Stripe
+  // directly whether an existing PENDING_PAYMENT order on the same cart was
+  // actually already paid before assuming it's abandoned and cancelling it.
+  // Without this, a webhook-delivery race could see a genuinely-paid order
+  // get silently cancelled by a retry click, swallowing the payment.
+  stripeCheckoutSessionId String? @unique
+
   subtotal     Decimal @db.Decimal(10, 2)
   shippingCost Decimal @default(0) @db.Decimal(10, 2)
   totalAmount  Decimal @db.Decimal(10, 2)
@@ -1078,6 +1130,7 @@ model Staff {
   timeOffs      TimeOff[]
   contracts     Contract[]
   appointments  Appointment[]
+  newsletters   Newsletter[]
 }
 
 // StaffService
@@ -1160,6 +1213,23 @@ model Payment {
   isDeleted              Boolean               @default(false)
   deletedAt              DateTime?
   transactionReference   String?               @unique
+
+  // Durable refund-retry bookkeeping — see PaymentStatus.REFUND_PENDING/
+  // REFUND_FAILED above and lib/payments/retry-failed-refunds.js. Cleared
+  // implicitly by moving on to REFUNDED/PARTIALLY_REFUNDED; not reset to
+  // null on success since a resolved failure history is still worth
+  // keeping for reporting.
+  refundFailureReason String?
+  refundAttemptedAt   DateTime?
+  refundRetryCount    Int       @default(0)
+
+  // Recorded here rather than on each of the 4 source models (Order,
+  // WorkshopReservation, FormationReservation, Appointment) — Payment is
+  // the one row every flow already creates, and Appointment in particular
+  // has no price field of its own to sit a discount next to (it's derived
+  // from StaffService.price at booking time). `totalAmount` above is
+  // already the post-discount figure; this is purely for reporting which
+  // code was used and how much it took off.
   promoCodeId    String?
   promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
   discountAmount Decimal    @default(0) @db.Decimal(10, 2)
@@ -1399,7 +1469,19 @@ model Newsletter {
   salonId String
   salon   Salon  @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
+  // Attribution only, not an audience filter (client decision, 10 Aug 2026):
+  // any STAFF member can author and send a newsletter, and it still goes to
+  // every newsletter-subscribed customer of the salon, same audience as an
+  // OWNER/ADMIN-authored one. Null = created by OWNER/ADMIN; non-null =
+  // that staff member authored it. See actions/newsletter/*.js — a STAFF
+  // author may only edit/delete/send their OWN still-DRAFT newsletters,
+  // OWNER/ADMIN may act on any.
+  createdByStaffId String?
+  createdByStaff   Staff?  @relation(fields: [createdByStaffId], references: [id])
+
   recipients NewsletterRecipient[]
+
+  @@index([createdByStaffId])
 }
 
 // NEWSLETTER RECIPIENT

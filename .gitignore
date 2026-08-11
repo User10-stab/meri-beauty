@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/test-results
 
 # next.js
 /.next/
@@ -51,7 +52,16 @@ REVIEW_REQUIREMENTS.md
 SECURITY_AND_LOGIC_REVIEW.md
 google-form-generator.gs
 google-form-generator-round2.gs
+google-form-generator-round3.gs
 
 # one-off Wix data exports, not app code
 catalog_products_from_wix.csv
 inventory_from_wix.csv
+
+# Google Forms response exports (client survey answers, not app code)
+Merri Beauty — Points de suivi*.csv
+Merri Beauty — Derniers points*.csv
+Mondial Relay — Informations*.csv
+
+# local dev tool binary, not app code
+mailpit.exe

@@ -7,8 +7,9 @@ import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
 import { workshopCancellationEmail } from "@/lib/email-templates";
 import { isAdminRole } from "@/lib/authorization";
-import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
+import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-workshop-reservation";
+import { issueCreditNote } from "@/lib/invoicing";
 
 const CANCELLATION_CUTOFF_HOURS = 48;
 const SESSION_CHANGE_FEE_RATE = 0.1; // 10% of the reservation's total price
@@ -51,7 +52,11 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
 
     const reservation = await prisma.workshopReservation.findUnique({
       where: { id: reservationId },
-      include: { session: { include: { workshop: true } }, customer: true, payment: true },
+      include: {
+        session: { include: { workshop: true } },
+        customer: true,
+        payment: { include: { invoice: true } },
+      },
     });
     if (!reservation) {
       return { success: false, message: "Réservation introuvable." };
@@ -77,8 +82,11 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       ? `Annulation : ${reason}`
       : null;
 
-    await prisma.workshopReservation.update({
-      where: { id: reservationId },
+    // Atomic claim gated on the reservation not already being cancelled —
+    // without this, two concurrent cancels (double-click, or two admins)
+    // both pass the plain read-then-check above and both refund.
+    const claim = await prisma.workshopReservation.updateMany({
+      where: { id: reservationId, status: { not: "CANCELLED" } },
       data: {
         status: "CANCELLED",
         cancelledAt: new Date(),
@@ -86,23 +94,108 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
         notes: noteLine ? `${reservation.notes ? `${reservation.notes}\n` : ""}${noteLine}` : reservation.notes,
       },
     });
+    if (claim.count === 0) {
+      return { success: false, message: "Cette réservation est déjà annulée." };
+    }
 
     // Deposits are non-refundable by default — never stripe.refunds.create()
-    // here unless the admin explicitly granted an exception above.
+    // here unless the admin explicitly granted an exception above. The
+    // credit note is issued as soon as that exception is granted (same
+    // decoupled-from-Stripe-success pattern as orders.js/manage-appointment.js
+    // — it's a record of the business decision to credit the customer, not
+    // of the money having actually moved yet), so a failed/retried Stripe
+    // call never leaves it missing.
     let refundFailed = false;
+    const REFUND_EPSILON = 0.01;
     if (refundDeposit && reservation.payment?.transactionReference) {
-      try {
-        const checkoutSession = await stripe.checkout.sessions.retrieve(reservation.payment.transactionReference);
-        if (checkoutSession.payment_intent) {
-          await stripe.refunds.create({ payment_intent: checkoutSession.payment_intent });
+      const payment = reservation.payment;
+
+      // Cap against what's actually still outstanding — a prior partial
+      // refund (e.g. issued manually from the Stripe Dashboard, reconciled
+      // via the charge.refunded webhook) can already have refunded part of
+      // this payment. Mirrors rejectAppointment's exact pattern — without
+      // it, this over-counts in the ledger (and could double-refund on
+      // Stripe's side if the payment_intent still had a partial balance).
+      const priorRefunds = await prisma.transaction.aggregate({
+        where: { paymentId: payment.id, transactionType: "REFUND" },
+        _sum: { amount: true },
+      });
+      const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
+      const remaining = Number(payment.paidAmount) - alreadyRefunded;
+
+      if (remaining <= REFUND_EPSILON) {
+        await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
+      } else {
+        await prisma.$transaction(async (tx) => {
+          await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
+          if (payment.invoice) {
+            await issueCreditNote(tx, {
+              invoiceId: payment.invoice.id,
+              reason: reason || "Annulation atelier — remboursement exceptionnel",
+              totalInclVat: remaining,
+            });
+          }
+        });
+
+        try {
+          const checkoutSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
+          if (checkoutSession.payment_intent) {
+            const stripePaymentIntentId =
+              typeof checkoutSession.payment_intent === "string"
+                ? checkoutSession.payment_intent
+                : checkoutSession.payment_intent.id;
+            await stripe.refunds.create({
+              payment_intent: stripePaymentIntentId,
+              amount: Math.round(remaining * 100),
+              metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
+            });
+
+            const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
+            await prisma.$transaction([
+              prisma.payment.update({
+                where: { id: payment.id },
+                data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+              }),
+              prisma.transaction.updateMany({
+                where: {
+                  paymentId: payment.id,
+                  transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
+                  stripePaymentIntentId: null,
+                },
+                data: { stripePaymentIntentId },
+              }),
+              prisma.transaction.create({
+                data: {
+                  paymentId: payment.id,
+                  amount: remaining,
+                  method: "ONLINE",
+                  transactionType: "REFUND",
+                  paidAt: new Date(),
+                  stripeCheckoutSessionId: payment.transactionReference,
+                  stripePaymentIntentId,
+                },
+              }),
+            ]);
+          }
+        } catch (err) {
+          // The reservation is already cancelled and the credit note already
+          // issued — that stays. But don't let the customer email below claim
+          // a refund that didn't happen; surface this to staff instead, AND
+          // persist it durably so the cron retry job
+          // (lib/payments/retry-failed-refunds.js) can pick it up even if
+          // this email is missed.
+          console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
+          refundFailed = true;
+          await prisma.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: "REFUND_FAILED",
+              refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+              refundAttemptedAt: new Date(),
+              refundRetryCount: { increment: 1 },
+            },
+          });
         }
-      } catch (err) {
-        // The reservation is already cancelled — that stays. But don't let
-        // the customer email below claim a refund that didn't happen;
-        // surface this to staff instead (same pattern as
-        // actions/boutique/orders.js#performOrderCancellation).
-        console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
-        refundFailed = true;
       }
     }
 
@@ -196,7 +289,7 @@ export async function changeReservationSession(reservationId, newSessionId) {
     const changeFeeAmount = Number(reservation.totalPrice) * SESSION_CHANGE_FEE_RATE;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
       line_items: [
         {
           price_data: {
@@ -318,7 +411,7 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     const amountToCharge = changeFeeAmount + priceDelta;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
       line_items: [
         {
           price_data: {

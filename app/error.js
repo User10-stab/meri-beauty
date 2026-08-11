@@ -2,11 +2,13 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import * as Sentry from "@sentry/nextjs";
 
 export default function GlobalError({ error, reset }) {
   useEffect(() => {
     // Server-side logging only — never show error internals to the visitor.
     console.error("[unhandled error boundary]", error);
+    Sentry.captureException(error);
   }, [error]);
 
   return (

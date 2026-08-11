@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { ArrowIcon, StarIcon, ClockIcon, MapPinIcon } from "./icons";
+import { ArrowIcon, ClockIcon, MapPinIcon } from "./icons";
 import { getSalon } from "@/actions/salon/get-salon";
 import { groupWorkingDays } from "@/lib/groupWorkingDays";
 import WorkshopBanner from "./WorkshopBanner";
@@ -12,15 +12,6 @@ const SERVICES = [
   "Maquillage",
   "Rituels corps",
 ];
-
-// Placeholder working hours — swap with a DB/API fetch later
-const WORKING_HOURS = [
-  { days: "Monday",            hours: "12:00 pm – 19:00 pm" },
-  { days: "Tuesday to Friday", hours: "8:00 am – 19:00 pm"  },
-  { days: "Saturday",          hours: "8:00 am to 3:30 pm"  },
-];
-
-const ADDRESS = "66 Broklyn Golden Street\nNew York, USA";
 
 export default async function Hero() {
    const salon = await getSalon();
@@ -76,7 +67,7 @@ export default async function Hero() {
 
           {/* Sub-copy */}
           <p className="mt-8 max-w-xl text-[17px] leading-relaxed text-white/70 sm:text-[18px] lg:text-[19px]">
-            Chez Mery Beauty, chaque rituel est pensé sur-mesure — des mains
+            Chez Meri Beauty, chaque rituel est pensé sur-mesure — des mains
             expertes, des produits nobles et un cadre conçu pour ralentir le temps.
           </p>
 
@@ -97,19 +88,6 @@ export default async function Hero() {
             </a>
           </div>
 
-          {/* Trust row */}
-          <div className="mt-14 flex items-center gap-5">
-            <div>
-              <div className="flex items-center gap-1 text-gold">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <StarIcon key={i} className="h-4 w-4" />
-                ))}
-              </div>
-              <p className="mt-1 text-[13px] text-white/55">
-                4.9 / 5 — plus de 2 000 clientes conquises
-              </p>
-            </div>
-          </div>
         </div>
 
         {/* ── Marquee strip — last child, sits on the hero background ── */}

@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useMemo } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import { updateCartItemQuantity, removeFromCart } from "@/actions/boutique/cart";
@@ -88,9 +89,9 @@ export function CartPageClient({ initialCart }) {
             const itemPricing = calculateItemPricing(item);
             return (
             <li key={item.id} className="flex gap-4 py-6">
-              <Link href={`/boutique/${item.variant.product.slug}`} className="h-24 w-24 flex-shrink-0 overflow-hidden bg-neutral-50">
+              <Link href={`/boutique/${item.variant.product.slug}`} className="relative h-24 w-24 flex-shrink-0 overflow-hidden bg-neutral-50">
                 {item.variant.product.image ? (
-                  <img src={item.variant.product.image} alt="" className="h-full w-full object-cover" />
+                  <Image src={item.variant.product.image} alt="" fill sizes="96px" className="object-cover" />
                 ) : null}
               </Link>
 

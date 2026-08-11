@@ -1,7 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { verifyEmail } from "@/actions/auth/verify-email";
-import { resumeCheckoutAfterVerification } from "@/actions/shared/resume-checkout-after-verification";
 import VerifyEmailForm from "./verify-email-form";
 
 export const metadata = {
@@ -27,22 +26,18 @@ export default async function VerifyEmailPage({ searchParams }) {
     return <VerifyEmailForm success={result.success} message={result.message} />;
   }
 
-  // Checkout-issued token: verification succeeded, now try to actually
-  // start payment. If that fails (e.g. a Stripe hiccup), the person is
-  // still verified — show a manual retry instead of a dead end.
-  const resumeResult = await resumeCheckoutAfterVerification({
-    userId: result.userId,
-    resumeType: result.resumeType,
-    resumeId: result.resumeId,
-  });
-
+  // Checkout-issued token: verifyEmail() already tried to start payment
+  // (credentials generated + resume attempted inline, using the userId it
+  // resolved from the validated token — never a client-supplied one). If
+  // that failed (e.g. a Stripe hiccup), the person is still verified — show
+  // a manual retry instead of a dead end.
   return (
     <VerifyEmailForm
       success={true}
       message={result.message}
-      redirectUrl={resumeResult.success ? resumeResult.url : null}
-      paymentFailed={!resumeResult.success}
-      paymentFailedMessage={resumeResult.message}
+      redirectUrl={result.resumeSuccess ? result.resumeUrl : null}
+      paymentFailed={!result.resumeSuccess}
+      paymentFailedMessage={result.resumeMessage}
       resumeType={result.resumeType}
       resumeId={result.resumeId}
     />

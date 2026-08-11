@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { requireAdmin } from "@/lib/route-protection";
+import { requireRole, getCurrentStaffId } from "@/lib/route-protection";
+import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getNewsletters } from "@/actions/newsletter/get-newsletters";
 import { NewsletterPageClient } from "@/components/dashboard/newsletter/NewsletterPageClient";
 
@@ -11,7 +12,8 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function NewsletterPage() {
-  await requireAdmin();
+  const { user } = await requireRole(DASHBOARD_PERMISSIONS.NEWSLETTER);
+  const currentStaffId = await getCurrentStaffId();
 
   const result = await getNewsletters();
   const newsletters = result.data ?? [];
@@ -62,7 +64,11 @@ export default async function NewsletterPage() {
 
       {/* ── Client shell ───────────────────────────────────────────────── */}
       <Suspense fallback={<NewsletterTableSkeleton />}>
-        <NewsletterPageClient initialData={newsletters} />
+        <NewsletterPageClient
+          initialData={newsletters}
+          currentRole={user.role}
+          currentStaffId={currentStaffId}
+        />
       </Suspense>
     </div>
   );

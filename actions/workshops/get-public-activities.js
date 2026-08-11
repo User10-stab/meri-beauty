@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
+import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 
 export async function getPublicActivities() {
   try {

@@ -8,6 +8,7 @@ import { Providers } from "@/components/providers";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
 import NextTopLoader from "nextjs-toploader";
 import { AppToaster } from "@/components/AppToaster";
+import { getMetadataBase } from "@/lib/site-url";
 
 const cormorant = Cormorant_Garamond({
   subsets: ["latin"],
@@ -16,12 +17,11 @@ const cormorant = Cormorant_Garamond({
   display: "swap",
 });
 
-const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
 const SITE_DESCRIPTION =
   "Salon de beauté & bien-être à Jette, Bruxelles — coiffure, soins visage, manucure, massage et rituels corps sur mesure.";
 
 export const metadata = {
-  metadataBase: new URL(SITE_URL),
+  metadataBase: getMetadataBase(),
   title: {
     default: "Meri Beauty — Salon de beauté à Jette, Bruxelles",
     template: "%s | Meri Beauty",

@@ -10,7 +10,7 @@ import {
   returnApprovedEmail,
   returnCompletedEmail,
 } from "@/lib/email-templates";
-import { DASHBOARD_PERMISSIONS, hasPermission } from "@/lib/authorization";
+import { DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
 import { lookupOrderForReturnSchema, requestReturnSchema, returnActionSchema } from "@/lib/validations/commerce";
 import { issueCreditNote } from "@/lib/invoicing";
 import { renderCreditNotePdf } from "@/lib/pdf/render";
@@ -401,6 +401,12 @@ export async function rejectReturnRequest(input) {
 export async function completeReturnRequest(input) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
+  // Completing a return always issues a refund — per policy, only
+  // OWNER/ADMIN may do that. approveReturnRequest/rejectReturnRequest stay
+  // STAFF-accessible since neither moves money.
+  if (!isAdminRole(guard.session.user.role)) {
+    return { success: false, message: "Seul un administrateur peut finaliser un retour (remboursement requis). Contactez un administrateur." };
+  }
 
   const parsed = returnActionSchema.safeParse(input);
   if (!parsed.success) return { success: false, message: "Données invalides." };

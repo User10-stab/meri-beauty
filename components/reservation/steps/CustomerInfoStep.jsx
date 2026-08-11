@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 import { initCustomerVerification } from "@/actions/reservation/init-customer-verification";
+import { isDisposableEmail } from "@/lib/validations/customer-identity";
 
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 
@@ -92,6 +93,10 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
     }
     if (!formData.email.trim() || !formData.email.includes("@")) {
       toast.error("Veuillez entrer une adresse email valide");
+      return;
+    }
+    if (isDisposableEmail(formData.email)) {
+      toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
       return;
     }
     if (!formData.phone.trim()) {

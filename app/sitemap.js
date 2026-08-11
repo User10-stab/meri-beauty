@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { getAppBaseUrl } from "@/lib/site-url";
 
-const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+const SITE_URL = getAppBaseUrl();
 
 // Regenerate at most once an hour — cheap enough for how often new
 // products/activities/formations actually get published, and avoids
@@ -16,6 +17,9 @@ export default async function sitemap() {
     { path: "/formations", changeFrequency: "weekly", priority: 0.7 },
     { path: "/animateurs", changeFrequency: "monthly", priority: 0.5 },
     { path: "/contact", changeFrequency: "yearly", priority: 0.4 },
+    { path: "/cgv", changeFrequency: "yearly", priority: 0.2 },
+    { path: "/mentions-legales", changeFrequency: "yearly", priority: 0.2 },
+    { path: "/politique-de-confidentialite", changeFrequency: "yearly", priority: 0.2 },
   ].map((r) => ({
     url: `${SITE_URL}${r.path}`,
     lastModified: new Date(),

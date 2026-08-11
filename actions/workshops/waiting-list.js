@@ -4,7 +4,12 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
-import { welcomeWithCredentialsEmail, waitingListNotificationEmail, waitingListJoinConfirmationEmail } from "@/lib/email-templates";
+import { welcomeWithCredentialsEmail, waitingListJoinConfirmationEmail } from "@/lib/email-templates";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
+
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 3;
 
 function formatSessionDate(date) {
   return new Date(date).toLocaleDateString("fr-FR", {
@@ -27,11 +32,25 @@ function generateTemporaryPassword() {
  * Join the waiting list for a workshop session.
  * Creates the user account if needed (same logic as reservation).
  */
-export async function joinWaitingList({ sessionId, customerInfo }) {
+export async function joinWaitingList({ sessionId, customerInfo: submittedCustomerInfo }) {
   try {
+    let customerInfo = submittedCustomerInfo;
     if (!sessionId || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
     }
+
+    const customerValidation = validateCustomerIdentity(customerInfo);
+    if (!customerValidation.success) {
+      return { success: false, field: customerValidation.field, message: customerValidation.message };
+    }
+    customerInfo = { ...customerInfo, ...customerValidation.data };
+
+    const rateLimitIp = await getClientIp();
+    const rateLimitKey = `${customerInfo.email.trim().toLowerCase()}:${rateLimitIp}`;
+    if (isRateLimited("join-waiting-list", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+      return { success: false, message: "Trop de tentatives. Veuillez patienter avant de réessayer." };
+    }
+    recordRateLimitHit("join-waiting-list", rateLimitKey);
 
     // Load session + workshop
     const session = await prisma.workshopSession.findUnique({
@@ -157,77 +176,6 @@ export async function joinWaitingList({ sessionId, customerInfo }) {
 }
 
 /**
- * Notify everyone on the waiting list that a spot is available.
- * Called when a reservation is cancelled or a seat frees up.
- * The spot goes to the first person who finalizes their reservation.
- * The link stays valid as long as the session remains bookable (no 2h window).
- */
-export async function notifyAllInWaitingList(sessionId) {
-  try {
-    // Find all WAITING entries
-    const waitingEntries = await prisma.waitingListEntry.findMany({
-      where: {
-        sessionId,
-        status: "WAITING",
-      },
-      orderBy: { position: "asc" },
-      include: {
-        customer: true,
-        session: {
-          include: { workshop: true },
-        },
-      },
-    });
-
-    if (waitingEntries.length === 0) {
-      return { success: true, notified: 0, message: "Personne en liste d'attente." };
-    }
-
-    await prisma.waitingListEntry.updateMany({
-      where: {
-        sessionId,
-        status: "WAITING",
-      },
-      data: {
-        status: "NOTIFIED",
-        notifiedAt: new Date(),
-      },
-    });
-
-    // Send notification email to everyone
-    const session = waitingEntries[0].session;
-    const sessionDate = new Date(session.startDate).toLocaleDateString("fr-FR", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-
-    for (const entry of waitingEntries) {
-      const reservationUrl = `${process.env.NEXT_PUBLIC_APP_URL}/reservation-atelier?activity=${session.workshopId}&session=${sessionId}&priority=true&wl=${entry.id}`;
-      const emailTemplate = waitingListNotificationEmail({
-        customerName: entry.customer.fullName,
-        activityTitle: session.workshop.title,
-        sessionDate,
-        reservationUrl,
-      });
-
-      sendEmail({ to: entry.customer.email, ...emailTemplate }).catch(() => {});
-    }
-
-    return {
-      success: true,
-      notified: waitingEntries.length,
-    };
-  } catch (error) {
-    console.error("[notifyAllInWaitingList]", error?.message || error);
-    return { success: false, message: "Erreur lors de la notification." };
-  }
-}
-
-/**
  * Check if a user is already on the waiting list for a session.
  */
 export async function checkWaitingListStatus(sessionId, customerEmail) {
@@ -278,7 +226,7 @@ export async function validateWaitingListPriority(waitingListEntryId) {
     if (!entry) return { valid: false, message: "Entrée introuvable." };
     if (entry.status !== "NOTIFIED") return { valid: false, message: "Cette entrée n'est plus valide." };
 
-    return { valid: true, entry };
+    return { valid: true };
   } catch (error) {
     console.error("[validateWaitingListPriority]", error);
     return { valid: false, message: "Erreur de validation." };
@@ -287,17 +235,41 @@ export async function validateWaitingListPriority(waitingListEntryId) {
 
 /**
  * Mark a waiting list entry as converted after successful reservation.
+ *
+ * Both ids are client-supplied (called right after createWorkshopReservation
+ * returns its new id), so we verify the reservation actually belongs to the
+ * same customer + session as the waiting-list entry before writing anything
+ * — otherwise any caller who knows/guesses a waiting-list entry id could
+ * attach an unrelated reservationId to it.
  */
 export async function convertWaitingListEntry(waitingListEntryId, reservationId) {
   try {
-    await prisma.waitingListEntry.update({
+    const entry = await prisma.waitingListEntry.findUnique({
       where: { id: waitingListEntryId },
+      select: { sessionId: true, customerId: true },
+    });
+    if (!entry) return { success: false };
+
+    const reservation = await prisma.workshopReservation.findUnique({
+      where: { id: reservationId },
+      select: { sessionId: true, customerId: true },
+    });
+    if (
+      !reservation ||
+      reservation.sessionId !== entry.sessionId ||
+      reservation.customerId !== entry.customerId
+    ) {
+      return { success: false };
+    }
+
+    const converted = await prisma.waitingListEntry.updateMany({
+      where: { id: waitingListEntryId, status: "NOTIFIED" },
       data: {
         status: "CONVERTED",
         convertedToReservationId: reservationId,
       },
     });
-    return { success: true };
+    return { success: converted.count === 1 };
   } catch (error) {
     console.error("[convertWaitingListEntry]", error);
     return { success: false };

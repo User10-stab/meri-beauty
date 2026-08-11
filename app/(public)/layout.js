@@ -1,9 +1,11 @@
 import SiteHeader from "@/components/website/SiteHeader";
 import Footer from "@/components/website/Footer";
+import SiteTermsNotice from "@/components/website/SiteTermsNotice";
 import { getSalon } from "@/actions/salon/get-salon";
 import { getPublicServices } from "@/actions/services/get-services";
+import { getAppBaseUrl } from "@/lib/site-url";
 
-const SITE_URL = process.env.NEXT_PUBLIC_APP_URL || "https://meribeautystudio.com";
+const SITE_URL = getAppBaseUrl();
 
 const SCHEMA_DAY = {
   MONDAY: "Monday",
@@ -94,6 +96,8 @@ export default async function PublicLayout({ children }) {
       </main>
 
       <Footer salon={salon} services={services} />
+
+      <SiteTermsNotice />
     </>
   );
 }

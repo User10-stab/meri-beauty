@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Loader2, ArrowLeft, Calendar, CheckCircle, Bell, AlertTriangle } from "lucide-react";
+import { Loader2, ArrowLeft, Calendar, CheckCircle, Bell, AlertTriangle, BadgeCheck, BadgeX, ShieldQuestion } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { checkFormationSessionAvailability, createFormationReservation } from "@/actions/formations/create-formation-reservation";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
@@ -13,8 +13,10 @@ import {
   convertFormationWaitingListEntry,
 } from "@/actions/formations/waiting-list";
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
+import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
+import { isDisposableEmail } from "@/lib/validations/customer-identity";
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
@@ -64,6 +66,8 @@ function ReservationFormationContent() {
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
+  const [vatCheck, setVatCheck] = useState(null); // { loading } | { valid, message } | { error, message }
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   // null = not checked yet | "exists" = verified account found | "dismissed" = user chose to continue as guest
   const [emailStatus, setEmailStatus] = useState(null);
@@ -82,6 +86,27 @@ function ReservationFormationContent() {
     } finally {
       setCheckingEmail(false);
     }
+  }
+
+  async function handleVerifyVat() {
+    if (!form.vatNumber.trim()) {
+      setFieldErrors((p) => ({ ...p, vatNumber: "Renseignez d'abord un numéro de TVA." }));
+      return;
+    }
+    setVatCheck({ loading: true });
+    const result = await verifyVatNumber(form.vatNumber);
+    if (!result.success) {
+      setVatCheck({ error: true, message: result.message });
+      return;
+    }
+    setVatCheck({
+      valid: result.valid,
+      message: result.valid
+        ? result.name
+          ? `Actif — enregistré au nom de « ${result.name} ».`
+          : "Actif dans le registre VIES."
+        : "Ce numéro n'est pas reconnu par le registre européen VIES.",
+    });
   }
 
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
@@ -147,6 +172,7 @@ function ReservationFormationContent() {
   useEffect(() => {
     if (session?.user) {
       setForm((prev) => ({
+        ...prev,
         fullName: session.user.name || prev.fullName,
         email: session.user.email || prev.email,
         phone: "",
@@ -157,7 +183,7 @@ function ReservationFormationContent() {
   const isFull = available <= 0 && !priorityValid;
   const showWaitingListForm = (isFull || wantsWaitingList) && !priorityValid;
 
-  const depositPct = formation?.depositPercentage ?? 30;
+  const depositPct = formation?.depositPercentage ?? 50;
   const unitPrice = Number(formation?.price || 0);
   const totalPrice = unitPrice * seats;
   const discountAmount = appliedPromo?.discountAmount ?? 0;
@@ -178,6 +204,16 @@ function ReservationFormationContent() {
 
     if (!isAuthed && emailStatus === "exists") {
       setError("Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même ».");
+      return;
+    }
+
+    if (!isAuthed && isDisposableEmail(form.email)) {
+      setFieldErrors({ email: "Les adresses e-mail temporaires ne sont pas acceptées." });
+      return;
+    }
+
+    if (!acceptedTerms) {
+      setError("Veuillez accepter les CGV et la politique de confidentialité.");
       return;
     }
 
@@ -430,13 +466,45 @@ function ReservationFormationContent() {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA (optionnel)</label>
-                      <input
-                        type="text"
-                        value={form.vatNumber}
-                        onChange={(e) => setForm((p) => ({ ...p, vatNumber: e.target.value }))}
-                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
-                        placeholder="BE0123456789"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={form.vatNumber}
+                          onChange={(e) => {
+                            setForm((p) => ({ ...p, vatNumber: e.target.value }));
+                            setFieldErrors((p) => ({ ...p, vatNumber: undefined }));
+                            setVatCheck(null);
+                          }}
+                          className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                          placeholder="BE0123456789"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleVerifyVat}
+                          disabled={vatCheck?.loading}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink/15 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
+                        >
+                          {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
+                          Vérifier
+                        </button>
+                      </div>
+                      {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
+                      {vatCheck && !vatCheck.loading && (
+                        <p
+                          className={`mt-1 flex items-center gap-1.5 text-xs font-medium ${
+                            vatCheck.error ? "text-amber-600" : vatCheck.valid ? "text-emerald-600" : "text-red-600"
+                          }`}
+                        >
+                          {vatCheck.error ? (
+                            <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />
+                          ) : vatCheck.valid ? (
+                            <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+                          ) : (
+                            <BadgeX className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          {vatCheck.message}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -494,13 +562,45 @@ function ReservationFormationContent() {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA (optionnel)</label>
-                      <input
-                        type="text"
-                        value={form.vatNumber}
-                        onChange={(e) => setForm((p) => ({ ...p, vatNumber: e.target.value }))}
-                        className="h-10 w-full rounded-lg border border-ink/15 px-3 text-sm text-ink outline-none focus:border-gold/50 focus:ring-2 focus:ring-gold/10"
-                        placeholder="BE0123456789"
-                      />
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={form.vatNumber}
+                          onChange={(e) => {
+                            setForm((p) => ({ ...p, vatNumber: e.target.value }));
+                            setFieldErrors((p) => ({ ...p, vatNumber: undefined }));
+                            setVatCheck(null);
+                          }}
+                          className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                          placeholder="BE0123456789"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleVerifyVat}
+                          disabled={vatCheck?.loading}
+                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink/15 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
+                        >
+                          {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
+                          Vérifier
+                        </button>
+                      </div>
+                      {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
+                      {vatCheck && !vatCheck.loading && (
+                        <p
+                          className={`mt-1 flex items-center gap-1.5 text-xs font-medium ${
+                            vatCheck.error ? "text-amber-600" : vatCheck.valid ? "text-emerald-600" : "text-red-600"
+                          }`}
+                        >
+                          {vatCheck.error ? (
+                            <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />
+                          ) : vatCheck.valid ? (
+                            <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+                          ) : (
+                            <BadgeX className="h-3.5 w-3.5 shrink-0" />
+                          )}
+                          {vatCheck.message}
+                        </p>
+                      )}
                     </div>
                     <p className="text-xs text-ink/40">Un compte sera créé automatiquement avec votre email.</p>
                   </div>
@@ -511,10 +611,31 @@ function ReservationFormationContent() {
                 <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
               )}
 
+              {/* Terms acceptance */}
+              <label className="flex items-start gap-2.5 text-xs text-ink/60">
+                <input
+                  type="checkbox"
+                  checked={acceptedTerms}
+                  onChange={(e) => setAcceptedTerms(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  J&apos;ai lu et j&apos;accepte les{" "}
+                  <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-gold">
+                    Conditions générales de vente
+                  </a>{" "}
+                  et la{" "}
+                  <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-gold">
+                    Politique de confidentialité
+                  </a>
+                  .
+                </span>
+              </label>
+
               {showWaitingListForm ? (
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || !acceptedTerms}
                   className="w-full rounded-full bg-amber-600 py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-amber-600/20 transition-all duration-200 hover:bg-amber-700 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? (
@@ -529,7 +650,7 @@ function ReservationFormationContent() {
               ) : (
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || !acceptedTerms}
                   className="w-full rounded-full bg-gold py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {submitting ? (

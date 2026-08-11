@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
-import { ROLES, DASHBOARD_PERMISSIONS, hasPermission } from "@/lib/authorization";
+import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
@@ -15,20 +15,11 @@ import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
-import { resolvePromoCode } from "@/actions/promo-codes";
-
-/** Order items (+ shipping, if any) as invoice line snapshots. */
-function orderInvoiceLines(order) {
-  const lines = order.items.map((item) => ({
-    description: `${item.productName} — ${item.variantName}`,
-    quantity: item.quantity,
-    unitPrice: Number(item.unitPrice),
-  }));
-  if (Number(order.shippingCost) > 0) {
-    lines.push({ description: "Livraison", quantity: 1, unitPrice: Number(order.shippingCost) });
-  }
-  return lines;
-}
+import { resolvePromoCode } from "@/lib/promo-codes";
+import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-order-payment";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
+import { captureError, captureWarning } from "@/lib/monitoring";
 
 /**
  * Checkout + order fulfilment.
@@ -132,7 +123,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
       password: placeholderHash,
       role: "CUSTOMER",
       isActive: true,
-      newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
+      ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "boutique_checkout"),
     },
   });
 
@@ -252,6 +243,41 @@ export async function createOrderFromCart(input) {
         include: { items: true },
       });
       if (supersededOrder) {
+        // Our local PENDING_PAYMENT status can be stale: the customer may
+        // have already paid on Stripe's hosted page moments ago, and the
+        // webhook just hasn't landed yet (real-world delay, or the customer
+        // clicked back/retry before the redirect finished). Blindly
+        // cancelling here would silently swallow that payment — the money
+        // is charged, but no Payment row, no stock decrement, no
+        // confirmation ever gets created, because the webhook later finds
+        // the order no longer PENDING_PAYMENT and no-ops. This happened for
+        // real in testing (order #79: paid on Stripe, cancelled here 13
+        // minutes later by a retry, payment never fulfilled). Check with
+        // Stripe directly before assuming abandonment.
+        let alreadyPaidSession = null;
+        if (supersededOrder.stripeCheckoutSessionId) {
+          try {
+            const priorSession = await stripe.checkout.sessions.retrieve(supersededOrder.stripeCheckoutSessionId);
+            if (priorSession.payment_status === "paid") {
+              alreadyPaidSession = priorSession;
+            }
+          } catch (err) {
+            console.error("[createOrderFromCart] Stripe session check failed, proceeding with supersede:", err);
+          }
+        }
+
+        if (alreadyPaidSession) {
+          // Fulfil it now instead of waiting on a webhook that may already
+          // be in flight — fulfillOrderPayment is idempotent (claims via
+          // Payment.transactionReference), so this is safe even if the real
+          // webhook delivery lands moments later too.
+          await fulfillOrderPayment(alreadyPaidSession);
+          return {
+            success: false,
+            message: "Un paiement pour ce panier a déjà été confirmé. Consultez vos commandes — la confirmation arrive sous peu.",
+          };
+        }
+
         await prisma.$transaction(async (tx) => {
           for (const item of supersededOrder.items) {
             await tx.productVariant.update({
@@ -462,9 +488,10 @@ export async function createOrderFromCart(input) {
     };
   } catch (error) {
     if (error.message === "STOCK_RACE") {
+      captureWarning("Stock race lost during checkout", { area: "stock-capacity" });
       return { success: false, message: "Le stock a changé entre-temps — vérifiez votre panier et réessayez." };
     }
-    console.error("[createOrderFromCart]", error);
+    captureError(error, { area: "stock-capacity", context: "createOrderFromCart" });
     return { success: false, message: "Impossible de créer la commande." };
   }
 }
@@ -571,7 +598,7 @@ export async function createOrderCheckoutSession(orderId) {
     const metadata = { kind: "order", orderId: order.id };
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
       line_items: lineItems,
       mode: "payment",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/boutique/order/success?session_id={CHECKOUT_SESSION_ID}`,
@@ -579,6 +606,14 @@ export async function createOrderCheckoutSession(orderId) {
       customer_email: order.user.email,
       metadata,
       payment_intent_data: { metadata },
+    });
+
+    // Recorded so a later checkout attempt on the same cart can check with
+    // Stripe directly whether *this* order was actually already paid before
+    // assuming it's abandoned (see the supersede logic in createOrderFromCart).
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { stripeCheckoutSessionId: session.id },
     });
 
     return { success: true, url: session.url };
@@ -862,11 +897,18 @@ export async function markOrderReadyForPickup(orderId) {
     if (order.fulfilmentMode === "SHIPPING_PREPAID") {
       return { success: false, message: "Cette commande est à expédier, pas à retirer." };
     }
-    if (!["PAID", "PENDING_PICKUP"].includes(order.status)) {
+
+    // Atomic claim, gated on the prior status — without this, two concurrent
+    // clicks (double-click, or two staff members racing) both pass a plain
+    // read-then-check and both fire the transition.
+    const claim = await prisma.order.updateMany({
+      where: { id: orderId, status: { in: ["PAID", "PENDING_PICKUP"] } },
+      data: { status: "READY_FOR_PICKUP" },
+    });
+    if (claim.count === 0) {
       return { success: false, message: "Cette commande ne peut pas être marquée prête pour le moment." };
     }
 
-    await prisma.order.update({ where: { id: orderId }, data: { status: "READY_FOR_PICKUP" } });
     revalidatePath("/dashboard/boutique/orders");
     return { success: true, message: "Commande marquée comme prête pour le retrait." };
   } catch (error) {
@@ -1022,25 +1064,31 @@ export async function markOrderShipped(input) {
     if (order.fulfilmentMode !== "SHIPPING_PREPAID") {
       return { success: false, message: "Cette commande n'est pas à expédier." };
     }
-    if (order.status !== "PROCESSING") {
-      return { success: false, message: "Cette commande n'est pas prête à être expédiée." };
-    }
 
-    await prisma.order.update({
-      where: { id: orderId },
+    // Atomic claim, gated on the prior status — prevents a double-click (or
+    // two staff members racing) from double-sending the shipped-notification
+    // email for the same order.
+    const claim = await prisma.order.updateMany({
+      where: { id: orderId, status: "PROCESSING" },
       data: { status: "SHIPPED", trackingCode, shippedAt: new Date() },
     });
+    if (claim.count === 0) {
+      return { success: false, message: "Cette commande n'est pas prête à être expédiée." };
+    }
 
     sendEmail({
       to: order.user.email,
       subject: `Commande expédiée – n°${order.orderNumber} – Meri Beauty`,
       text:
         `Bonjour ${order.user.fullName},\n\n` +
-        `Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : ${trackingCode}\n\n` +
+        `Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : ${trackingCode}\n` +
+        `Suivez votre colis : ${MONDIAL_RELAY_TRACKING_URL}\n\n` +
         `L'équipe Meri Beauty`,
       html:
         `<p>Bonjour ${order.user.fullName},</p>` +
-        `<p>Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : <strong>${trackingCode}</strong></p>` +
+        `<p>Votre commande n°${order.orderNumber} a été expédiée via Mondial Relay. Numéro de suivi : <strong>${trackingCode}</strong>.</p>` +
+        `<p><a href="${MONDIAL_RELAY_TRACKING_URL}" style="display:inline-block;padding:12px 18px;background:#2F3A2E;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;">Suivre mon colis</a></p>` +
+        `<p>Sur la page Mondial Relay, saisissez le numéro de suivi : <strong>${trackingCode}</strong>.</p>` +
         `<p>L'équipe Meri Beauty</p>`,
     }).catch((err) => console.error("[markOrderShipped] email failed:", err));
 
@@ -1059,11 +1107,17 @@ export async function markOrderCompleted(orderId) {
   try {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) return { success: false, message: "Commande introuvable." };
-    if (order.status !== "SHIPPED") {
+
+    // Atomic claim, gated on the prior status — same double-click/race guard
+    // as markOrderShipped/markOrderReadyForPickup above.
+    const claim = await prisma.order.updateMany({
+      where: { id: orderId, status: "SHIPPED" },
+      data: { status: "COMPLETED" },
+    });
+    if (claim.count === 0) {
       return { success: false, message: "Seule une commande expédiée peut être clôturée." };
     }
 
-    await prisma.order.update({ where: { id: orderId }, data: { status: "COMPLETED" } });
     revalidatePath("/dashboard/boutique/orders");
     return { success: true, message: "Commande clôturée." };
   } catch (error) {
@@ -1084,6 +1138,25 @@ async function performOrderCancellation(order, reason) {
   const orderId = order.id;
   try {
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
+
+    // Cap against what's actually still outstanding — a prior partial return
+    // can already have refunded part of this payment, so summing (not just
+    // checking existence of) prior REFUND transactions is what stops this
+    // from either re-refunding the full original amount or, worse, silently
+    // skipping the remaining balance once any refund exists at all. Mirrors
+    // completeReturnRequest's exact pattern. Computed once up front so the
+    // credit note (below) and the Stripe refund (further down) agree on the
+    // same capped amount.
+    const REFUND_EPSILON = 0.01;
+    let remaining = 0;
+    if (wasSold) {
+      const priorRefunds = await prisma.transaction.aggregate({
+        where: { paymentId: order.payment.id, transactionType: "REFUND" },
+        _sum: { amount: true },
+      });
+      const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
+      remaining = Number(order.payment.paidAmount) - alreadyRefunded;
+    }
 
     const { claimed, creditNote } = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the order still being in a cancellable status —
@@ -1125,11 +1198,11 @@ async function performOrderCancellation(order, reason) {
       }
 
       let creditNote = null;
-      if (wasSold && order.payment.invoice) {
+      if (wasSold && order.payment.invoice && remaining > REFUND_EPSILON) {
         creditNote = await issueCreditNote(tx, {
           invoiceId: order.payment.invoice.id,
           reason: reason ?? "Commande annulée",
-          totalInclVat: Number(order.payment.paidAmount),
+          totalInclVat: remaining,
         });
       }
 
@@ -1142,38 +1215,61 @@ async function performOrderCancellation(order, reason) {
 
     let refundFailed = false;
     if (wasSold && order.payment.transactionReference) {
-      // Idempotency guard: if a REFUND transaction already exists for this
-      // payment (e.g. a retry after a prior partial failure, or the DB claim
-      // above was somehow bypassed), don't ask Stripe to refund twice.
-      const alreadyRefunded = await prisma.transaction.findFirst({
-        where: { paymentId: order.payment.id, transactionType: "REFUND" },
-        select: { id: true },
-      });
-
-      if (!alreadyRefunded) {
+      if (remaining > REFUND_EPSILON) {
+        // Recorded before the Stripe call, not just in the catch block below —
+        // a crash/timeout mid-call would otherwise leave nothing durable to
+        // retry against; see lib/payments/retry-failed-refunds.js.
+        await prisma.payment.update({ where: { id: order.payment.id }, data: { status: "REFUND_PENDING" } });
         try {
           const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
           if (session.payment_intent) {
-            await stripe.refunds.create({ payment_intent: session.payment_intent });
+            const stripePaymentIntentId =
+              typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent.id;
+            await stripe.refunds.create({ payment_intent: stripePaymentIntentId, amount: Math.round(remaining * 100) });
+            const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
             await prisma.$transaction([
+              prisma.transaction.updateMany({
+                where: {
+                  paymentId: order.payment.id,
+                  transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
+                  stripePaymentIntentId: null,
+                },
+                data: { stripePaymentIntentId },
+              }),
               prisma.transaction.create({
                 data: {
                   paymentId: order.payment.id,
-                  amount: order.payment.paidAmount,
+                  amount: remaining,
                   method: "ONLINE",
                   transactionType: "REFUND",
                   paidAt: new Date(),
+                  stripeCheckoutSessionId: order.payment.transactionReference,
+                  stripePaymentIntentId,
                 },
               }),
-              prisma.payment.update({ where: { id: order.payment.id }, data: { status: "REFUNDED" } }),
+              prisma.payment.update({
+                where: { id: order.payment.id },
+                data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+              }),
             ]);
           }
         } catch (err) {
           // The order is already cancelled and stock restored — that's correct
           // and stays. But don't let the customer email below claim a refund
-          // that didn't happen; surface this to staff instead.
+          // that didn't happen; surface this to staff instead, AND persist it
+          // durably so the cron retry job (lib/payments/retry-failed-refunds.js)
+          // can pick it up even if this email is missed.
           console.error("[performOrderCancellation] REFUND FAILED for order", orderId, err);
           refundFailed = true;
+          await prisma.payment.update({
+            where: { id: order.payment.id },
+            data: {
+              status: "REFUND_FAILED",
+              refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+              refundAttemptedAt: new Date(),
+              refundRetryCount: { increment: 1 },
+            },
+          });
         }
       }
     }
@@ -1262,6 +1358,16 @@ export async function cancelOrder(input) {
     return { success: false, message: "Cette commande ne peut plus être annulée." };
   }
 
+  // Cancelling an unpaid order is routine order management — but cancelling
+  // a paid one triggers restock + a real Stripe refund, which per policy
+  // only OWNER/ADMIN may issue. STAFF can still cancel unpaid/pending orders.
+  if (order.payment && !isAdminRole(guard.session.user.role)) {
+    return {
+      success: false,
+      message: "Seul un administrateur peut annuler une commande déjà payée (remboursement requis). Contactez un administrateur.",
+    };
+  }
+
   return performOrderCancellation(order, reason);
 }
 
@@ -1299,86 +1405,3 @@ export async function cancelMyOrder(orderId) {
   return performOrderCancellation(order, "Annulée par le client");
 }
 
-// ─── Cron-ready ─────────────────────────────────────────────────────────────────
-
-/**
- * For the future /api/cron job runner, not called from the UI: releases
- * abandoned PENDING_PAYMENT checkouts (short window) and un-collected
- * PICKUP_ON_SITE orders (7-day window per the locked policy — prepaid
- * pickups never auto-expire, the customer already paid).
- */
-export async function expireStaleOrders() {
-  const now = new Date();
-  const stale = await prisma.order.findMany({
-    where: {
-      expiresAt: { lt: now },
-      OR: [
-        { status: "PENDING_PAYMENT" },
-        { fulfilmentMode: "PICKUP_ON_SITE", status: { in: ["PENDING_PICKUP", "READY_FOR_PICKUP"] } },
-      ],
-    },
-    include: { items: true, user: { select: { fullName: true, email: true } } },
-  });
-
-  let expiredCount = 0;
-
-  for (const order of stale) {
-    try {
-      // Atomic claim gated on the status read above: if a customer paid,
-      // cancelled, or picked up between the findMany and here — or an
-      // overlapping cron run already claimed this same order — the WHERE
-      // clause no longer matches and this update affects zero rows. Only
-      // the run that actually flips the row goes on to decrement stock and
-      // email the customer.
-      const claimed = await prisma.$transaction(async (tx) => {
-        // cancelledAt is set for BOTH branches now — it previously stayed
-        // null for on-site pickup expirations, which broke any "cancelled
-        // orders" query filtering on that column even though the order was
-        // just as dead as a payment-timeout cancellation.
-        const claim = await tx.order.updateMany({
-          where: { id: order.id, status: order.status },
-          data: {
-            status: order.status === "PENDING_PAYMENT" ? "CANCELLED" : "EXPIRED",
-            cancelledAt: new Date(),
-            cancelReason:
-              order.status === "PENDING_PAYMENT"
-                ? "Paiement non complété"
-                : "Retrait non effectué dans le délai imparti",
-          },
-        });
-        if (claim.count === 0) return false;
-
-        for (const item of order.items) {
-          await tx.productVariant.update({
-            where: { id: item.variantId },
-            data: { reservedQuantity: { decrement: item.quantity } },
-          });
-        }
-        return true;
-      });
-
-      if (!claimed) continue;
-
-      sendEmail({
-        to: order.user.email,
-        subject: `Commande expirée – n°${order.orderNumber} – Meri Beauty`,
-        text:
-          `Bonjour ${order.user.fullName},\n\n` +
-          `Votre commande n°${order.orderNumber} a expiré et a été annulée. ` +
-          `Les articles ont été remis en stock — vous pouvez repasser commande à tout moment.\n\n` +
-          `L'équipe Meri Beauty`,
-        html:
-          `<p>Bonjour ${order.user.fullName},</p>` +
-          `<p>Votre commande n°${order.orderNumber} a expiré et a été annulée. ` +
-          `Les articles ont été remis en stock — vous pouvez repasser commande à tout moment.</p>` +
-          `<p>L'équipe Meri Beauty</p>`,
-      }).catch((err) => console.error("[expireStaleOrders] email failed:", err));
-
-      expiredCount += 1;
-    } catch (error) {
-      console.error("[expireStaleOrders] failed for order", order.id, error);
-    }
-  }
-
-  return { success: true, expiredCount };
-}

@@ -30,7 +30,7 @@ const formationSchema = z.object({
   animatorId: z.string().optional().nullable(),
   status: z.enum(["DRAFT", "PUBLISHED", "CANCELLED", "ARCHIVED"]).optional().default("DRAFT"),
   allowMultipleSessions: z.boolean().optional().default(false),
-  depositPercentage: z.coerce.number().int().min(0).max(100).optional().default(30),
+  depositPercentage: z.coerce.number().int().min(0).max(100).optional().default(50),
   startDate: z.string().optional().nullable(),
   endDate: z.string().optional().nullable(),
   sessions: z.array(sessionSchema).optional().default([]),

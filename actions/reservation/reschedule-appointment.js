@@ -88,6 +88,16 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
       return { success: false, message: "Ce créneau vient d'être réservé. Veuillez en choisir un autre." };
     }
 
+    // findConflictingAppointment only rules out collision with another
+    // appointment — it says nothing about closures, staff time off, working
+    // hours. Re-validate against the same rules the booking calendar itself
+    // uses to offer slots, exactly like createReservation does, so a
+    // reschedule can't land on a closed day or outside working hours.
+    const slotCheck = await validateAppointmentSlot(appointment.staffServiceId, appointmentDate, startTime, time, appointmentId);
+    if (!slotCheck.valid) {
+      return { success: false, message: slotCheck.message };
+    }
+
     const previousDate = appointment.date;
     const serviceName = appointment.staffService.service?.name ?? "votre service";
     const staffName = appointment.staffService.staff?.user?.fullName ?? "votre experte";

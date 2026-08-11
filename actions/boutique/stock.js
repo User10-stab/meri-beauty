@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isAdminRole, ROLES } from "@/lib/authorization";
+import { DASHBOARD_PERMISSIONS, hasPermission, isAdminRole, ROLES } from "@/lib/authorization";
 import { stockAdjustmentSchema, stockCountSchema } from "@/lib/validations/boutique";
+import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 
 /**
  * Stock movements.
@@ -26,6 +27,15 @@ async function requireStaff() {
   // RESTOCK/LOSS/ADJUSTMENT beyond that stay admin-only via the UI layer.
   const allowed = [ROLES.OWNER, ROLES.ADMIN, ROLES.STAFF];
   if (!allowed.includes(session.user.role)) return { error: "Accès non autorisé." };
+  return { session };
+}
+
+async function requireStockAccess() {
+  const session = await auth();
+  if (!session?.user) return { error: "Non authentifie." };
+  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK)) {
+    return { error: "Acces non autorise." };
+  }
   return { session };
 }
 
@@ -99,6 +109,16 @@ export async function recordStockMovement(input) {
           reason: reason ?? null,
           createdById: guard.session.user.id,
         },
+      });
+
+      await writeAuditLog(tx, {
+        action: AUDIT_ACTIONS.STOCK_MOVED,
+        entityType: "ProductVariant",
+        entityId: variantId,
+        before: { stockQuantity: previousStock },
+        after: { stockQuantity: newStock },
+        metadata: { movementId: movement.id, type, quantity: signedQuantity, reason: reason ?? null },
+        actor: guard.session.user,
       });
 
       return { updated, movement };
@@ -179,6 +199,16 @@ export async function recordStockCount(input) {
         },
       });
 
+      await writeAuditLog(tx, {
+        action: AUDIT_ACTIONS.STOCK_MOVED,
+        entityType: "ProductVariant",
+        entityId: variantId,
+        before: { stockQuantity: variant.stockQuantity },
+        after: { stockQuantity: countedQuantity },
+        metadata: { movementId: movement.id, type: "ADJUSTMENT", quantity: delta, reason: reason ?? "Comptage physique" },
+        actor: guard.session.user,
+      });
+
       return { updated, movement };
     });
 
@@ -208,6 +238,9 @@ export async function recordStockCount(input) {
 
 /** Flat, variant-centric inventory listing — the Stock page's main table. */
 export async function getAllVariants({ search, lowStockOnly = false } = {}) {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
+
   try {
     const variants = await prisma.productVariant.findMany({
       where: {
@@ -259,6 +292,9 @@ export async function getAllVariants({ search, lowStockOnly = false } = {}) {
 
 /** Variants at or below their low-stock threshold, for the dashboard alert. */
 export async function getLowStockVariants() {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
+
   try {
     const variants = await prisma.$queryRaw`
       SELECT v.id, v.name, v.sku, v."stockQuantity", v."reservedQuantity", v."lowStockThreshold",
@@ -288,6 +324,8 @@ export async function getLowStockVariants() {
 
 /** Movement history for one variant, most recent first. */
 export async function getStockMovements(variantId, { take = 50 } = {}) {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
   if (!variantId) return { success: false, message: "Identifiant manquant.", data: [] };
 
   try {

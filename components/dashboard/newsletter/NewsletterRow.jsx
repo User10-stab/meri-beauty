@@ -35,8 +35,10 @@ function StatusBadge({ status }) {
 /**
  * Newsletter row component for the DataTable.
  */
-export function NewsletterRow({ row, onView, onEdit, onDelete, onApprove }) {
+export function NewsletterRow({ row, onView, onEdit, onDelete, onApprove, currentRole, currentStaffId }) {
   const isDraft = row.status === "DRAFT";
+  // OWNER/ADMIN act on any newsletter; a STAFF author only acts on their own.
+  const canMutate = currentRole !== "STAFF" || row.createdByStaffId === currentStaffId;
 
   function formatDate(iso) {
     if (!iso) return "—";
@@ -59,6 +61,11 @@ export function NewsletterRow({ row, onView, onEdit, onDelete, onApprove }) {
         <span className="max-w-[200px] truncate text-sm text-gray-600">
           {row.subject}
         </span>
+      </td>
+
+      {/* Created by */}
+      <td className="px-4 py-4 align-middle">
+        <span className="text-sm text-gray-600">{row.createdByName ?? "Salon"}</span>
       </td>
 
       {/* Created date */}
@@ -100,8 +107,8 @@ export function NewsletterRow({ row, onView, onEdit, onDelete, onApprove }) {
             <Eye size={16} />
           </button>
 
-          {/* Edit (drafts only) */}
-          {isDraft && (
+          {/* Edit (own drafts only) */}
+          {isDraft && canMutate && (
             <button
               type="button"
               onClick={() => onEdit?.(row)}
@@ -112,8 +119,8 @@ export function NewsletterRow({ row, onView, onEdit, onDelete, onApprove }) {
             </button>
           )}
 
-          {/* Send (drafts only) */}
-          {isDraft && (
+          {/* Send (own drafts only) */}
+          {isDraft && canMutate && (
             <button
               type="button"
               onClick={() => onApprove?.(row)}
@@ -124,8 +131,8 @@ export function NewsletterRow({ row, onView, onEdit, onDelete, onApprove }) {
             </button>
           )}
 
-          {/* Delete (drafts only) */}
-          {isDraft && (
+          {/* Delete (own drafts only) */}
+          {isDraft && canMutate && (
             <button
               type="button"
               onClick={() => onDelete?.(row)}

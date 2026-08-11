@@ -134,7 +134,7 @@ const EMPTY_FORM = {
   startDate: "",
   endDate: "",
   allowMultipleSessions: false,
-  depositPercentage: 30,
+  depositPercentage: 50,
 };
 
 export function CreateFormationModal({ open, onClose, onCreated, formation, animators = [] }) {
@@ -176,7 +176,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
         startDate: firstSession?.startDate ? new Date(firstSession.startDate).toISOString().slice(0, 16) : "",
         endDate: firstSession?.endDate ? new Date(firstSession.endDate).toISOString().slice(0, 16) : "",
         allowMultipleSessions: formation.allowMultipleSessions ?? false,
-        depositPercentage: formation.depositPercentage ?? 30,
+        depositPercentage: formation.depositPercentage ?? 50,
       });
       if (formation.allowMultipleSessions && formation.sessions?.length > 0) {
         setSessions(

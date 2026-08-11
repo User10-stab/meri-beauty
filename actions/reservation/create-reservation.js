@@ -14,7 +14,7 @@ import {
 } from "@/lib/email-templates";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
-import { resolvePromoCode } from "@/actions/promo-codes";
+import { resolvePromoCode } from "@/lib/promo-codes";
 import { isAdminRole } from "@/lib/authorization";
 import { buildAppointmentWindow, findConflictingAppointment } from "@/lib/appointment-scheduling";
 import {
@@ -25,6 +25,8 @@ import {
   getAppointmentNotificationRecipients,
   getAppointmentEmailRecipients,
 } from "@/lib/notifications";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -123,7 +125,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         role: "CUSTOMER",
         emailVerified: false,
         isActive: true,
-        newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
+        ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
       },
     });
 
@@ -162,7 +164,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
             isActive: true,
             isDeleted: false,
             deletedAt: null,
-            newsletterSubscribed: customerInfo.newsletterSubscribed ?? false,
+            ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
           },
         });
 
@@ -253,13 +255,15 @@ export async function checkEmailExists(email) {
  *   },
  *   paymentMethod: string | null,
  *   notes?: string,
- *   isManualMode?: boolean,
- * }} data
+ * }} data `isManualMode` is intentionally not accepted here — the real
+ *   confirmation mode is always derived server-side from the staff
+ *   member's own `reservationConfirmationMode` (see below). Trusting a
+ *   client-supplied value would let a caller bypass a required deposit.
  */
 export async function createReservation(data) {
   try {
     const authSession = await auth();
-    const { staffServiceId, date, time, customerInfo, paymentMethod, notes, isManualMode = false, promoCode } = data;
+    const { staffServiceId, date, time, customerInfo, paymentMethod, notes, promoCode } = data;
 
     // ── 1. Validate required fields ──────────────────────────────────────────
     if (!staffServiceId || !date || !time || !customerInfo) {
@@ -311,6 +315,15 @@ export async function createReservation(data) {
       };
     }
 
+    // findConflictingAppointment only rules out collision with another
+    // appointment — it says nothing about closures, staff time off, working
+    // hours, or a past date/time. Re-validate against the same rules the
+    // booking calendar itself uses to offer slots in the first place.
+    const slotCheck = await validateAppointmentSlot(staffServiceId, appointmentDate, startTime, time);
+    if (!slotCheck.valid) {
+      return { success: false, message: slotCheck.message };
+    }
+
     // ── 5. Resolve or create the customer user ───────────────────────────────
     let user, isNewUser, temporaryPassword;
     try {
@@ -331,9 +344,20 @@ export async function createReservation(data) {
     // never trusted from the client — only meaningful for the automatic
     // pay-now path (a Payment row is only created when shouldCreatePaymentRecord).
     const rawTotalAmount = Number(staffService.price);
+
+    // The real confirmation mode always comes from the staff member's own
+    // setting — never from client input. `data.isManualMode` used to be
+    // trusted here directly, which let any caller force MANUAL mode on an
+    // AUTOMATIC-confirmation service: that skips the required online
+    // payment/deposit entirely (MANUAL never requires online payment) and
+    // still reserves the slot, so a client could fill a staff member's
+    // calendar with unpaid PENDING appointments at will.
+    const confirmationMode = staffService.staff?.reservationConfirmationMode ?? "MANUAL";
+    const isManuallyConfirmed = confirmationMode === "MANUAL";
+
     let promoCodeId = null;
     let discountAmount = 0;
-    if (!isManualMode && paymentMethod && promoCode) {
+    if (!isManuallyConfirmed && paymentMethod && promoCode) {
       const promoResult = await resolvePromoCode(promoCode, rawTotalAmount);
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
@@ -472,7 +496,7 @@ export async function createReservation(data) {
 
     const paymentDecision = getReservationPaymentDecision({
       appointmentCount: 1,
-      confirmationMode: isManualMode ? "MANUAL" : staffService.staff?.reservationConfirmationMode ?? "MANUAL",
+      confirmationMode,
       depositEnabled: Boolean(staffService.staff?.depositEnabled),
       depositPercentage: Number(staffService.staff?.depositPercentage ?? 0),
       totalAmount: rawTotalAmount,
@@ -482,7 +506,8 @@ export async function createReservation(data) {
     const totalAmount = paymentDecision.totalAmount; // already net of discountAmount
     const depositAmount = paymentDecision.depositAmount;
     const paymentType = paymentDecision.paymentType;
-    const effectiveIsManualMode = Boolean(isManualMode || paymentDecision.isManualMode);
+    // Server-derived only — see the comment above `confirmationMode`.
+    const effectiveIsManualMode = paymentDecision.isManualMode;
     const appointmentStatus = paymentDecision.appointmentStatusBeforePayment;
 
     // ── 7. Create appointment + payment atomically ───────────────────────────
@@ -620,9 +645,14 @@ export async function createReservation(data) {
           email: user.email,
         },
         isNewUser,
-        // Only returned for new accounts so PaymentStep can call signIn()
+        // Only returned for new accounts so PaymentStep can call signIn() —
+        // and the autologin token below must be gated the same way. If
+        // resolveOrCreateCustomer matched an EXISTING account (guest
+        // checkout looks up by email/phone with no password check), issuing
+        // a token here would let anyone who knows a customer's email sign
+        // themselves into that customer's real account.
         newUserCredentials: isNewUser ? { email: user.email, password: temporaryPassword } : null,
-        autologinToken: generateAutologinToken(user.email),
+        autologinToken: isNewUser ? generateAutologinToken(user.email) : null,
       },
     };
   } catch (error) {
@@ -799,7 +829,6 @@ export async function confirmPayment(paymentId, transactionReference = null) {
  *   },
  *   paymentMethod: string | null,
  *   notes?: string,
- *   isManualMode?: boolean,
  * }} data
  */
 export async function createMultipleReservations(data) {
@@ -860,6 +889,20 @@ export async function createMultipleReservations(data) {
         success: false,
         message: `Le créneau du rendez-vous ${conflictIndex + 1} vient d'être réservé. Veuillez choisir un autre horaire.`,
       };
+    }
+
+    // Same gap as createReservation: findConflictingAppointment alone says
+    // nothing about closures, staff time off, working hours, or a past
+    // date/time for each leg of this multi-appointment booking.
+    const slotChecks = await Promise.all(
+      appointments.map(({ staffServiceId, time }, i) => {
+        const { appointmentDate, startTime } = timeWindows[i];
+        return validateAppointmentSlot(staffServiceId, appointmentDate, startTime, time);
+      })
+    );
+    const invalidIndex = slotChecks.findIndex((c) => !c.valid);
+    if (invalidIndex !== -1) {
+      return { success: false, message: slotChecks[invalidIndex].message };
     }
 
     // ── 5. Resolve or create the customer user (once) ─────────────────────
@@ -993,8 +1036,10 @@ export async function createMultipleReservations(data) {
           email: user.email,
         },
         isNewUser,
+        // See createReservation's return above — gated the same way and for
+        // the same reason (guest lookup can match an existing account).
         newUserCredentials: isNewUser ? { email: user.email, password: temporaryPassword } : null,
-        autologinToken: generateAutologinToken(user.email),
+        autologinToken: isNewUser ? generateAutologinToken(user.email) : null,
       },
     };
   } catch (error) {

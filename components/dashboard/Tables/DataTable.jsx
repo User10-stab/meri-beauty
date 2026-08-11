@@ -180,12 +180,15 @@ export function DataTable({
     else setCurrentPage(value);
   }
 
-  // ── Action stubs (wire up real handlers as needed) ─────────────────────
-  const handleView = useCallback((row) => onView?.(row), [onView]);
-  const handleEdit = useCallback((row) => onEdit?.(row), [onEdit]);
-  const handleDelete = useCallback((row) => onDelete?.(row), [onDelete]);
-  const handleApprove = useCallback((row) => onApprove?.(row), [onApprove]);
-  const handleReject = useCallback((row) => onReject?.(row), [onReject]);
+  // Passed through as-is (not always-truthy wrappers) — RowActions decides
+  // which menu items to render based on whether each handler is defined at
+  // all, so an absent handler (e.g. a non-admin viewer with no onEdit) must
+  // stay undefined here rather than become a callable no-op.
+  const handleView = onView ? (row) => onView(row) : undefined;
+  const handleEdit = onEdit ? (row) => onEdit(row) : undefined;
+  const handleDelete = onDelete ? (row) => onDelete(row) : undefined;
+  const handleApprove = onApprove ? (row) => onApprove(row) : undefined;
+  const handleReject = onReject ? (row) => onReject(row) : undefined;
 
   const EmptyStateComponent = CustomEmptyState || EmptyState;
 

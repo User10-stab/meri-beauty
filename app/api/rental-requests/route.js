@@ -231,11 +231,15 @@ export async function POST(request) {
 
 // ─── OPTIONS /api/rental-requests ────────────────────────────────────────────
 /**
- * Handle CORS preflight requests for public form submissions.
+ * CORS preflight — this endpoint is only ever called from this same site's
+ * own rental-request form, never cross-origin, so the allowed origin is
+ * scoped to our own domain rather than "*". POST is auth-gated regardless
+ * (a wildcard origin can't carry credentials anyway), but a wildcard here
+ * was still a misconfiguration worth closing.
  */
 export async function OPTIONS() {
   const response = new NextResponse(null, { status: 204 });
-  response.headers.set('Access-Control-Allow-Origin', '*');
+  response.headers.set('Access-Control-Allow-Origin', getAppBaseUrl());
   response.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
   response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
   return response;

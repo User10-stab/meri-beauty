@@ -3,8 +3,12 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { getCustomers } from "@/actions/customers/get-customers";
+import { deleteCustomer } from "@/actions/customers/delete-customer";
 import { DataTable } from "../Tables/DataTable";
 import { CustomerRow } from "./CustomerRow";
+import { CustomerDetailsDrawer } from "./CustomerDetailsDrawer";
+import { CustomerEditModal } from "./CustomerEditModal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const CUSTOMERS_COLUMNS = [
   { key: "fullName", label: "Nom complet" },
@@ -18,13 +22,18 @@ const CUSTOMERS_COLUMNS = [
 
 const PAGE_SIZE = 20;
 
-export function CustomersPageClient({ initialCustomers, initialTotalCount }) {
+export function CustomersPageClient({ initialCustomers, initialTotalCount, userRole }) {
+  const isAdmin = userRole === "OWNER" || userRole === "ADMIN";
   const [customers, setCustomers] = useState(initialCustomers);
   const [totalCount, setTotalCount] = useState(initialTotalCount);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [search, setSearch] = useState("");
   const [isLoading, startTransition] = useTransition();
+  const [viewingCustomerId, setViewingCustomerId] = useState(null);
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  const [deletingCustomer, setDeletingCustomer] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   function fetchPage({ nextPage = page, nextPageSize = pageSize, nextSearch = search } = {}) {
     startTransition(async () => {
@@ -54,38 +63,75 @@ export function CustomersPageClient({ initialCustomers, initialTotalCount }) {
   }
 
   function handleView(customer) {
-    // TODO: open customer detail modal or navigate
-    console.log("View", customer);
+    setViewingCustomerId(customer.id);
   }
 
   function handleEdit(customer) {
-    // TODO: open edit modal
-    console.log("Edit", customer);
+    setEditingCustomer(customer);
   }
 
   function handleDelete(customer) {
-    // TODO: soft-delete
-    console.log("Delete", customer);
+    setDeletingCustomer(customer);
+  }
+
+  function handleSaved() {
+    setEditingCustomer(null);
+    fetchPage();
+  }
+
+  async function confirmDelete() {
+    if (!deletingCustomer) return;
+    setIsDeleting(true);
+    const result = await deleteCustomer(deletingCustomer.id);
+    setIsDeleting(false);
+    setDeletingCustomer(null);
+    if (result.success) {
+      toast.success(result.message);
+      fetchPage();
+    } else {
+      toast.error(result.message);
+    }
   }
 
   return (
-    <DataTable
-      data={customers}
-      isLoading={isLoading}
-      columns={CUSTOMERS_COLUMNS}
-      renderRow={(props) => <CustomerRow {...props} />}
-      onView={handleView}
-      onEdit={handleEdit}
-      onDelete={handleDelete}
-      searchPlaceholder="Rechercher par nom, email ou téléphone..."
-      serverPagination={{
-        page,
-        pageSize,
-        totalCount,
-        onPageChange: handlePageChange,
-        onPerPageChange: handlePerPageChange,
-      }}
-      onSearchChange={handleSearchChange}
-    />
+    <>
+      <DataTable
+        data={customers}
+        isLoading={isLoading}
+        columns={CUSTOMERS_COLUMNS}
+        renderRow={(props) => <CustomerRow {...props} />}
+        onView={handleView}
+        onEdit={isAdmin ? handleEdit : undefined}
+        onDelete={isAdmin ? handleDelete : undefined}
+        searchPlaceholder="Rechercher par nom, email ou téléphone..."
+        serverPagination={{
+          page,
+          pageSize,
+          totalCount,
+          onPageChange: handlePageChange,
+          onPerPageChange: handlePerPageChange,
+        }}
+        onSearchChange={handleSearchChange}
+      />
+
+      <CustomerDetailsDrawer customerId={viewingCustomerId} onClose={() => setViewingCustomerId(null)} />
+
+      <CustomerEditModal
+        customer={editingCustomer}
+        onClose={() => setEditingCustomer(null)}
+        onSaved={handleSaved}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deletingCustomer)}
+        title="Supprimer ce client ?"
+        message={`${deletingCustomer?.fullName ?? ""} sera désactivé et ne pourra plus se connecter. Ses rendez-vous et commandes restent conservés.`}
+        confirmLabel="Supprimer"
+        danger
+        loading={isDeleting}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeletingCustomer(null)}
+      />
+    </>
   );
 }

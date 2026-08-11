@@ -1,13 +1,13 @@
 "use client";
 
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DataTable } from "../Tables/DataTable";
 import { ReservationRow } from "./ReservationRow";
 import { cancelFormationReservation } from "@/actions/formations/manage-reservation";
-import { useConfirm } from "@/components/ConfirmProvider";
 import { isAdminRole } from "@/lib/authorization";
+import { CancelReservationDialog } from "@/components/dashboard/workshops/CancelReservationDialog";
 
 const COLUMNS = [
   { key: "formation", label: "Formation & Séance" },
@@ -19,23 +19,19 @@ const COLUMNS = [
 
 export function ReservationsPageClient({ initialReservations = [], userRole }) {
   const router = useRouter();
-  const confirm = useConfirm();
   const isAdmin = isAdminRole(userRole);
-  const [, startCancel] = useTransition();
+  const [toCancel, setToCancel] = useState(null);
+  const [isCancelling, startCancel] = useTransition();
 
-  async function handleCancel(reservation) {
-    if (
-      !(await confirm(
-        `Annuler la réservation de « ${reservation.customer?.fullName} » pour « ${reservation.session?.formation?.title} » ? L'acompte versé ne sera pas remboursé.`,
-        { danger: true }
-      ))
-    )
-      return;
-
+  function handleConfirmCancel({ reason, refundDeposit }) {
     startCancel(async () => {
-      const result = await cancelFormationReservation(reservation.id);
+      const result = await cancelFormationReservation(toCancel.id, {
+        reason,
+        refundPayment: refundDeposit,
+      });
       if (result.success) {
         toast.success(result.message);
+        setToCancel(null);
         router.refresh();
       } else {
         toast.error(result.message);
@@ -49,13 +45,20 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         data={initialReservations}
         columns={COLUMNS}
         renderRow={ReservationRow}
-        onDelete={isAdmin ? handleCancel : undefined}
+        onDelete={isAdmin ? setToCancel : undefined}
         searchPlaceholder="Rechercher une réservation..."
         searchFilter={(row, query) =>
           row.session?.formation?.title?.toLowerCase().includes(query) ||
           row.customer?.fullName?.toLowerCase().includes(query) ||
           row.customer?.email?.toLowerCase().includes(query)
         }
+      />
+      <CancelReservationDialog
+        reservation={toCancel}
+        onClose={() => setToCancel(null)}
+        onConfirm={handleConfirmCancel}
+        loading={isCancelling}
+        formationMode
       />
     </div>
   );

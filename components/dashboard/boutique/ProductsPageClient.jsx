@@ -69,9 +69,9 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
   }
 
   return (
-    <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+    <div className="flex h-[75vh] flex-col rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
       {/* Toolbar — Wix-style: search + filters on the left, primary action on the right */}
-      <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-1 flex-wrap items-center gap-3">
           <div className="relative w-full max-w-xs">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -154,6 +154,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
       {filtered.length === 0 ? (
         <EmptyState hasProducts={initialProducts.length > 0} isAdmin={isAdmin} />
       ) : (
+        <div className="min-h-0 flex-1 overflow-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -224,6 +225,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
             ))}
           </TableBody>
         </Table>
+        </div>
       )}
 
       <ConfirmDialog
@@ -246,7 +248,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
 
 function EmptyState({ hasProducts, isAdmin }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
         <Package size={22} className="text-gray-300" />
       </div>

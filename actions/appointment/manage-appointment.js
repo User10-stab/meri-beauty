@@ -251,6 +251,38 @@ export async function rejectAppointment(appointmentId, reason = null) {
     const payment = appointment.payment;
     const wasPaid = Boolean(payment) && ["PAID", "PARTIALLY_PAID"].includes(payment.status);
 
+    // Cancelling an unpaid request is routine appointment management (STAFF
+    // may do it for their own appointments, per authorizeAppointmentAction
+    // above) — but cancelling a paid one triggers a real Stripe refund, which
+    // per policy only OWNER/ADMIN may issue.
+    if (wasPaid) {
+      const session = await auth();
+      if (!isAdminRole(session?.user?.role)) {
+        return {
+          success: false,
+          message: "Seul un administrateur peut annuler un rendez-vous déjà payé (remboursement requis). Contactez un administrateur.",
+        };
+      }
+    }
+
+    // Cap against what's actually still outstanding — a prior partial refund
+    // (e.g. issued manually from the Stripe Dashboard, reconciled here via
+    // the charge.refunded webhook) can already have refunded part of this
+    // payment. Summing (not just checking existence of) prior REFUND
+    // transactions is what stops this from either over-crediting past the
+    // invoice total or silently skipping the remaining balance once any
+    // refund exists at all — mirrors completeReturnRequest's exact pattern.
+    const REFUND_EPSILON = 0.01;
+    let remaining = 0;
+    if (wasPaid) {
+      const priorRefunds = await prisma.transaction.aggregate({
+        where: { paymentId: payment.id, transactionType: "REFUND" },
+        _sum: { amount: true },
+      });
+      const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
+      remaining = Number(payment.paidAmount) - alreadyRefunded;
+    }
+
     const claimed = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the appointment not already being cancelled —
       // without this, two concurrent rejects (double-click, or staff and a
@@ -261,11 +293,11 @@ export async function rejectAppointment(appointmentId, reason = null) {
       });
       if (claim.count === 0) return false;
 
-      if (wasPaid && payment.invoice) {
+      if (wasPaid && payment.invoice && remaining > REFUND_EPSILON) {
         await issueCreditNote(tx, {
           invoiceId: payment.invoice.id,
           reason: reason ?? "Rendez-vous annulé",
-          totalInclVat: Number(payment.paidAmount),
+          totalInclVat: remaining,
         });
       }
 
@@ -301,37 +333,51 @@ export async function rejectAppointment(appointmentId, reason = null) {
     // actually confirms the refund — writing them unconditionally beforehand
     // would tell the customer "refunded" even if the Stripe call below fails.
     let refundFailed = false;
-    if (wasPaid && payment.transactionReference) {
-      const alreadyRefunded = await prisma.transaction.findFirst({
-        where: { paymentId: payment.id, transactionType: "REFUND" },
-        select: { id: true },
-      });
-
-      if (!alreadyRefunded) {
-        try {
-          const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
-          if (stripeSession.payment_intent) {
-            await stripe.refunds.create({ payment_intent: stripeSession.payment_intent });
-            await prisma.$transaction([
-              prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } }),
-              prisma.transaction.create({
-                data: {
-                  paymentId: payment.id,
-                  amount: payment.paidAmount,
-                  method: "ONLINE",
-                  transactionType: "REFUND",
-                  paidAt: new Date(),
-                },
-              }),
-            ]);
-          }
-        } catch (err) {
-          // The appointment cancellation and credit note are already
-          // committed and stay — surface the refund failure loudly so it can
-          // be retried/handled manually, rather than silently swallowing it.
-          console.error("[rejectAppointment] REFUND FAILED for appointment", appointmentId, err);
-          refundFailed = true;
+    if (wasPaid && payment.transactionReference && remaining > REFUND_EPSILON) {
+      // Recorded before the Stripe call, not just in the catch block below —
+      // a crash/timeout mid-call would otherwise leave nothing durable to
+      // retry against; see lib/payments/retry-failed-refunds.js.
+      await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
+      try {
+        const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
+        if (stripeSession.payment_intent) {
+          await stripe.refunds.create({ payment_intent: stripeSession.payment_intent, amount: Math.round(remaining * 100) });
+          const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
+          await prisma.$transaction([
+            prisma.payment.update({
+              where: { id: payment.id },
+              data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+            }),
+            prisma.transaction.create({
+              data: {
+                paymentId: payment.id,
+                amount: remaining,
+                method: "ONLINE",
+                transactionType: "REFUND",
+                paidAt: new Date(),
+                stripePaymentIntentId: stripeSession.payment_intent,
+              },
+            }),
+          ]);
         }
+      } catch (err) {
+        // The appointment cancellation and credit note are already
+        // committed and stay — surface the refund failure loudly so it can
+        // be retried/handled manually, rather than silently swallowing it.
+        // Also persisted durably so the cron retry job
+        // (lib/payments/retry-failed-refunds.js) can pick it up even if
+        // this email is missed.
+        console.error("[rejectAppointment] REFUND FAILED for appointment", appointmentId, err);
+        refundFailed = true;
+        await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: "REFUND_FAILED",
+            refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+            refundAttemptedAt: new Date(),
+            refundRetryCount: { increment: 1 },
+          },
+        });
       }
     }
 
@@ -570,7 +616,12 @@ export async function getAppointmentById(appointmentId) {
     }
 
     const isOwner = appointment.userId === session.user.id;
-    if (!isOwner && !isAdminRole(session.user.role) && session.user.role !== ROLES.STAFF) {
+    let isAssignedStaff = false;
+    if (!isOwner && session.user.role === ROLES.STAFF) {
+      const staffId = await getCurrentStaffId();
+      isAssignedStaff = !!staffId && appointment.staffService.staffId === staffId;
+    }
+    if (!isOwner && !isAdminRole(session.user.role) && !isAssignedStaff) {
       // Same message as "not found" — don't confirm an id belongs to someone else.
       return { success: false, message: "Rendez-vous introuvable" };
     }

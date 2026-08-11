@@ -13,6 +13,9 @@ import {
   buildAppointmentCreatedNotification,
   getAppointmentNotificationRecipients,
 } from "@/lib/notifications";
+import { resolvePromoCode } from "@/lib/promo-codes";
+import { validateAppointmentSlot } from "@/lib/appointment-scheduling";
+import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -43,7 +46,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
     });
 
     if (existingUser) {
-      return existingUser;
+      return { user: existingUser, isNewUser: false };
     }
   }
 
@@ -61,26 +64,51 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   });
 
   if (user) {
-    return user;
+    return { user, isNewUser: false };
   }
 
   const temporaryPassword = randomBytes(9).toString("base64url");
   const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
 
-  user = await prisma.user.create({
-    data: {
-      fullName: customerInfo.fullName?.trim() || "Client",
-      email: normalizedEmail || `${Date.now()}@guest.local`,
-      phone: normalizedPhone || `${Date.now()}`,
-      password: hashedPassword,
-      role: "CUSTOMER",
-      emailVerified: false,
-      isActive: true,
-      newsletterSubscribed: Boolean(customerInfo.newsletterSubscribed ?? false),
-    },
-  });
+  try {
+    user = await prisma.user.create({
+      data: {
+        fullName: customerInfo.fullName?.trim() || "Client",
+        email: normalizedEmail || `${Date.now()}@guest.local`,
+        phone: normalizedPhone || `${Date.now()}`,
+        password: hashedPassword,
+        role: "CUSTOMER",
+        emailVerified: false,
+        isActive: true,
+        ...buildNewsletterConsentUpdate(Boolean(customerInfo.newsletterSubscribed ?? false), "appointment_booking"),
+      },
+    });
+  } catch (createError) {
+    // P2002 = unique constraint violation — another concurrent request
+    // already created this user between our findFirst and this create.
+    // Fall back to fetching the already-existing record instead of crashing.
+    if (createError?.code === "P2002") {
+      user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            ...(normalizedEmail ? [{ email: normalizedEmail }] : []),
+            ...(normalizedPhone ? [{ phone: normalizedPhone }] : []),
+          ],
+        },
+      });
 
-  return user;
+      if (!user) {
+        // Truly unexpected — propagate so the outer catch handles it
+        throw createError;
+      }
+
+      return { user, isNewUser: false };
+    }
+
+    throw createError;
+  }
+
+  return { user, isNewUser: true };
 }
 
 /**
@@ -110,7 +138,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
 export async function createCheckoutSession(reservationData) {
   try {
     const authSession = await auth();
-    const { staffServiceId, date, time, customerInfo, paymentMethod, notes } = reservationData;
+    const { staffServiceId, date, time, customerInfo, paymentMethod, notes, promoCode } = reservationData;
 
     // ── 1. Validate required fields ──────────────────────────────────────────
     if (!staffServiceId || !date || !time || !customerInfo) {
@@ -219,10 +247,19 @@ export async function createCheckoutSession(reservationData) {
     });
 
     if (conflict) {
-      return { 
-        success: false, 
-        message: "Ce créneau n'est plus disponible. Veuillez en sélectionner un autre." 
+      return {
+        success: false,
+        message: "Ce créneau n'est plus disponible. Veuillez en sélectionner un autre."
       };
+    }
+
+    // The check above only rules out collision with another appointment —
+    // it says nothing about salon closures, staff time off, working hours,
+    // or a past date/time. Re-validate against the same rules the booking
+    // calendar itself uses to offer slots in the first place.
+    const slotCheck = await validateAppointmentSlot(staffServiceId, appointmentDate, startTime, time);
+    if (!slotCheck.valid) {
+      return { success: false, message: slotCheck.message };
     }
 
     // ── 5. Resolve the payment decision from the shared engine ─────────────
@@ -238,7 +275,6 @@ export async function createCheckoutSession(reservationData) {
         message: "Méthode de paiement invalide.",
       };
     }
-    const totalAmount = Number(staffService.price);
     // Enforce staff payment-method settings server-side
     const acceptsOnlinePayments =
       staff.allowedPaymentMethods === "BOTH" ||
@@ -267,6 +303,18 @@ export async function createCheckoutSession(reservationData) {
         message: "Ce professionnel n'accepte pas le paiement au salon.",
       };
     }
+    const rawTotalAmount = Number(staffService.price);
+
+    // Re-validated here regardless of any client-side preview — never trust
+    // a client-computed discount amount. Mirrors create-reservation.js.
+    let promoCodeId = null;
+    let discountAmount = 0;
+    if (promoCode) {
+      const promoResult = await resolvePromoCode(promoCode, rawTotalAmount);
+      if (!promoResult.success) return { success: false, message: promoResult.message };
+      promoCodeId = promoResult.promoCodeId;
+      discountAmount = promoResult.discountAmount;
+    }
 
     const paymentDecision = getReservationPaymentDecision({
       appointmentCount: 1,
@@ -274,9 +322,11 @@ export async function createCheckoutSession(reservationData) {
       // A deposit is only meaningful if online payments are accepted.
       depositEnabled: acceptsOnlinePayments ? Boolean(staff.depositEnabled) : false,
       depositPercentage: acceptsOnlinePayments ? Number(staff.depositPercentage ?? 0) : 0,
-      totalAmount,
+      totalAmount: rawTotalAmount,
       paymentMethod: normalizedPaymentMethod,
+      discountAmount,
     });
+    const totalAmount = paymentDecision.totalAmount; // already net of discountAmount
 
     if (!paymentDecision.requiresOnlinePaymentNow) {
       return {
@@ -289,11 +339,14 @@ export async function createCheckoutSession(reservationData) {
       ? paymentDecision.totalAmount
       : paymentDecision.depositAmount;
 
-    const customerUser = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
-    // Generate an autologin token for the customer. PaymentStep uses this to
-    // sign the customer in before navigating to Stripe, so that if the payment
-    // is interrupted they can return to /mes-reservations while authenticated.
-    const autologinToken = generateAutologinToken(customerUser.email);
+    const { user: customerUser, isNewUser } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    // Generate an autologin token for the customer — but only when this
+    // request just created the account. If `resolveOrCreateCustomer` matched
+    // an existing account (by email or phone, with no password check), a
+    // token here would sign the *caller's* browser into a stranger's real
+    // account — anyone who knows a customer's email could take it over.
+    // Existing accounts must go through normal login instead.
+    const autologinToken = isNewUser ? generateAutologinToken(customerUser.email) : null;
 
     const lockId = buildReservationLockKey({
       staffServiceId,
@@ -358,6 +411,8 @@ export async function createCheckoutSession(reservationData) {
           remainingAmount: totalAmount,
           paymentType: paymentDecision.paymentType,
           status: "PENDING",
+          promoCodeId,
+          discountAmount,
         },
       });
 
@@ -423,10 +478,10 @@ export async function createCheckoutSession(reservationData) {
                 currency: "eur",
                 product_data: {
                   name:
-                    paymentMethod === "ONLINE"
+                    paymentDecision.paymentIntent === "FULL_ONLINE"
                       ? staffService.service.name
                       : `Acompte - ${staffService.service.name}`,
-                  description: `${staff.user?.fullName || "Expert"} • ${new Date(date).toLocaleDateString("fr-FR")} • ${time}`,
+                  description: `${staff.user?.fullName || "Expert"} • ${appointmentDate.toLocaleDateString("fr-FR")} • ${time}`,
                   // Images omitted: Stripe rejects non-HTTPS URLs (localhost in dev).
                 },
                 unit_amount: Math.round(amountToPay * 100),

@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import {
   getVatCountryCode,
   isValidVatFormat,
   normalizeVatNumber,
   parseViesResponse,
+  verifyVatWithVies,
   viesPrefixForCountry,
 } from "@/lib/vat-validation";
 import { registerSchema } from "@/lib/validations/register";
@@ -24,6 +27,10 @@ const registration = {
   termsAccepted: true,
   newsletterSubscribed: false,
 };
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("EU VAT validation", () => {
   it("accepts supported non-Belgian VIES formats and normalizes separators", () => {
@@ -56,6 +63,28 @@ describe("EU VAT validation", () => {
       address: "10 rue de Paris\n75001 Paris",
     });
   });
+
+  it("retries a temporary country fault before accepting a valid response", async () => {
+    const temporaryFault = `
+      <soap:Envelope><soap:Body><soap:Fault>
+        <faultstring>MS_UNAVAILABLE</faultstring>
+      </soap:Fault></soap:Body></soap:Envelope>`;
+    const validResponse = `
+      <soap:Envelope><soap:Body><checkVatResponse>
+        <valid>true</valid><name>Société Exemple</name><address>Bruxelles</address>
+      </checkVatResponse></soap:Body></soap:Envelope>`;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => temporaryFault })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => validResponse });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyVatWithVies("BE0751854027")).resolves.toMatchObject({
+      success: true,
+      valid: true,
+      name: "Société Exemple",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("company registration VAT rules", () => {
@@ -73,5 +102,16 @@ describe("company registration VAT rules", () => {
     const result = registerSchema.safeParse({ ...registration, addressCountry: "DE" });
     expect(result.success).toBe(false);
     expect(result.error.flatten().fieldErrors.vatNumber?.[0]).toContain("DE");
+  });
+});
+
+describe("public VIES abuse protection", () => {
+  it("uses shared limits by IP and VAT number and caches successful checks", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "actions/vat/verify-vat.js"), "utf8");
+    expect(source).toContain('consumeSharedRateLimit("verify-vat-ip"');
+    expect(source).toContain('consumeSharedRateLimit("verify-vat-number"');
+    expect(source).toContain("RATE_LIMIT_MAX_PER_IP = 5");
+    expect(source).toContain("RATE_LIMIT_MAX_PER_VAT_NUMBER = 3");
+    expect(source).toContain("cachedResult(normalized)");
   });
 });

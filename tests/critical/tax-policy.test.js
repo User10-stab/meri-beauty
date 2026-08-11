@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateVatTotals,
+  EU_STANDARD_VAT_RATES,
   repriceBelgianGross,
   resolveGoodsVatPolicy,
   VAT_LEGAL_NOTES,
@@ -14,6 +15,12 @@ const frenchCompany = {
 };
 
 describe("physical goods VAT policy", () => {
+  it("uses the corrected country dataset as the source of EU standard rates", () => {
+    expect(EU_STANDARD_VAT_RATES.EE).toBe(24);
+    expect(EU_STANDARD_VAT_RATES.RO).toBe(21);
+    expect(EU_STANDARD_VAT_RATES.FR).toBe(20);
+  });
+
   it("always taxes POS and pickup transactions in Belgium", () => {
     const policy = resolveGoodsVatPolicy({
       fulfilmentMode: "PICKUP_ON_SITE",

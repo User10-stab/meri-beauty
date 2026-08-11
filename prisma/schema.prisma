@@ -669,6 +669,17 @@ model AuditLog {
   @@index([createdAt])
 }
 
+// Shared fixed-window counters for abuse-sensitive public operations. Unlike
+// the in-memory limiter, these counters apply across every production instance.
+model ApiRateLimitBucket {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+  updatedAt   DateTime @updatedAt
+
+  @@index([updatedAt])
+}
+
 // CATEGORY — services only. Retail products use ProductCategory.
 model Category {
   id          String  @id @default(cuid())

@@ -24,6 +24,22 @@ export default function VerifyEmailForm({
   const [retryingPayment, setRetryingPayment] = useState(false);
   const [retryError, setRetryError] = useState(null);
 
+  // If the user arrived here mid-rental-request flow, the return URL was
+  // stored in localStorage by BecomePartner before redirecting to auth.
+  // Thread it into the "Sign In" button so after login they land back on
+  // the form page (with the pending request still in localStorage).
+  const [loginHref, setLoginHref] = useState("/login");
+  useEffect(() => {
+    try {
+      const returnUrl = localStorage.getItem("pendingRentalReturnUrl");
+      if (returnUrl) {
+        setLoginHref(`/login?callbackUrl=${encodeURIComponent(returnUrl)}`);
+      }
+    } catch {
+      // localStorage unavailable (private browsing edge case) — /login is fine
+    }
+  }, []);
+
   // Checkout-issued token that verified successfully and already has a
   // Stripe/success URL ready — leave immediately rather than making the
   // person click anything.
@@ -158,7 +174,7 @@ export default function VerifyEmailForm({
           </p>
           <div className="pt-2">
             <Link
-              href="/login"
+              href={loginHref}
               className="w-full inline-flex justify-center items-center gap-2 py-3.5 px-4 text-sm font-semibold rounded-2xl text-white bg-[#2F3A2E] hover:bg-[#3d4d3c] transition-all shadow-md active:scale-[0.98]"
             >
               Sign In
@@ -243,7 +259,7 @@ export default function VerifyEmailForm({
 
           <div className="text-center mt-4">
             <Link
-              href="/login"
+              href={loginHref}
               className="inline-flex items-center gap-2 text-sm font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -342,7 +358,7 @@ export default function VerifyEmailForm({
 
         <div className="text-center mt-6">
           <Link
-            href="/login"
+            href={loginHref}
             className="inline-flex items-center gap-2 text-sm font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
@@ -78,6 +78,11 @@ const fields = [
 
 export default function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Preserve any callbackUrl so that after registration → email verification
+  // → sign in, the user lands back on the page they came from (e.g. the
+  // rental request form).
+  const callbackUrl = searchParams.get("callbackUrl") || "";
   const [showPassword, setShowPassword] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
@@ -128,12 +133,25 @@ export default function RegisterForm() {
         return;
       }
 
-      // Do not auto-login — user must verify email first
+      // Do not auto-login — user must verify email first.
+      // Redirect to login with the callbackUrl preserved so that after email
+      // verification → sign in, the user returns to where they started
+      // (e.g. the rental request form).
       toast.success(
         "Votre compte a été créé avec succès. Un e-mail de vérification vous a été envoyé. Veuillez consulter votre boîte de réception et vérifier votre adresse e-mail avant de vous connecter.",
         { duration: 8000 }
       );
       setServerSuccess(response.message);
+
+      // Build the login URL, carrying the callbackUrl and pre-filling the
+      // email so the user doesn't have to type it again.
+      const loginParams = new URLSearchParams();
+      if (data.email) loginParams.set("email", data.email);
+      if (callbackUrl) loginParams.set("callbackUrl", callbackUrl);
+      const loginHref = `/login${loginParams.toString() ? `?${loginParams.toString()}` : ""}`;
+
+      // Short delay so the toast is visible before navigating
+      setTimeout(() => router.push(loginHref), 2000);
     } catch (err) {
       console.error("[RegisterForm] submit error:", err);
       setServerError("An unexpected error occurred. Please try again.");
@@ -259,7 +277,7 @@ export default function RegisterForm() {
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Already have an account?{" "}
             <Link
-              href="/login"
+              href={callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/login"}
               className="font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
               Sign in

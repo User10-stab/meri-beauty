@@ -721,15 +721,6 @@ export async function fulfillOrderPayment(session) {
       await tx.cart.update({ where: { id: order.cart.id }, data: { status: "CONVERTED" } });
     }
 
-    await tx.notification.create({
-      data: {
-        userId: order.user.id,
-        type: "PAYMENT_RECEIVED",
-        title: "Paiement reçu",
-        message: `Paiement de €${paidAmount.toFixed(2)} reçu pour la commande n°${order.orderNumber}.`,
-        status: "PENDING",
-      },
-    });
 
     return { invoice };
   }));

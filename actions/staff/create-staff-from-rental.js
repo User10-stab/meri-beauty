@@ -47,6 +47,7 @@ export async function createStaffFromRental(input) {
         languages:         fe.languages?.[0]         ?? null,
         yearsOfExperience: fe.yearsOfExperience?.[0] ?? null,
         hireDate:          fe.hireDate?.[0]          ?? null,
+        vatNumber:         fe.vatNumber?.[0]         ?? null,
         serviceIds:        fe.serviceIds?.[0]        ?? null,
         contract:          fe["contract"]?.[0]       ?? null,
       },
@@ -62,6 +63,7 @@ export async function createStaffFromRental(input) {
     languages,
     yearsOfExperience,
     hireDate,
+    vatNumber,
     serviceIds,
     contract,
   } = parsed.data;
@@ -157,6 +159,7 @@ export async function createStaffFromRental(input) {
           yearsOfExperience: yearsOfExperience ?? null,
           isActive: true,
           hireDate: hireDate ? new Date(hireDate) : null,
+          vatNumber,
         },
       });
 
@@ -204,6 +207,14 @@ export async function createStaffFromRental(input) {
   } catch (error) {
     if (error.code === "P2002") {
       const fields = error.meta?.target ?? [];
+
+      if (fields.includes("vatNumber")) {
+        return {
+          success: false,
+          message: "Ce numéro de TVA est déjà utilisé.",
+          errors: { vatNumber: "Ce numéro de TVA est déjà utilisé." },
+        };
+      }
 
       if (fields.includes("phone")) {
         return {

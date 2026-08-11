@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { X, Loader2, Tag, Layers, FileText, Plus, Trash2, Check, Package } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { PhotoUpload } from "@/components/ui/PhotoUpload";
-import { createService, updateService, getCategories, getStaffOptions } from "@/actions/services/create-service";
+import { createService, updateService, getCategories, getStaffOptions, getCurrentStaffProfile } from "@/actions/services/create-service";
 import { assignServiceToMe } from "@/actions/services/assign-service-to-me";
 import { InlineCategoryCreate } from "@/components/dashboard/services/InlineCategoryCreate";
 
@@ -145,14 +145,16 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
   const [errors, setErrors] = useState({});
   const [assigningServiceId, setAssigningServiceId] = useState(null);
   const [assignedServiceIds, setAssignedServiceIds] = useState([]);
+  const [currentStaffId, setCurrentStaffId] = useState(null);
 
   useEffect(() => {
     if (!open) return;
     
     startLoading(async () => {
-      const [catsRes, staffRes] = await Promise.all([
+      const [catsRes, staffRes, staffProfileRes] = await Promise.all([
         getCategories(),
         getStaffOptions(),
+        getCurrentStaffProfile(),
       ]);
 
       if (catsRes.success) {
@@ -175,6 +177,10 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
           return [...staffRes.data, ...fromPrev];
         });
       }
+      // Get current staff ID for staff members
+      if (staffProfileRes.success && staffProfileRes.data) {
+        setCurrentStaffId(staffProfileRes.data.id);
+      }
     });
   }, [open]);
 
@@ -189,7 +195,12 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
         categoryId: "",
         description: "",
       });
-      setStaffAssignments([]);
+      // For staff: auto-add their own assignment so they can set price/duration
+      if (isStaff && currentStaffId) {
+        setStaffAssignments([{ staffId: currentStaffId, price: "", duration: "", margin: "", photo: "" }]);
+      } else {
+        setStaffAssignments([]);
+      }
       setErrors({});
       return;
     }
@@ -520,14 +531,13 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
               <FieldError message={errors.description} />
             </ModalField>
 
-            {/* Staff Assignments (admin/owner only — staff auto-assign to themselves) */}
-            {!isStaff && (
+            {/* Staff Assignments — shown for both admin/owner and staff */}
             <div className="border-t border-gray-100 pt-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-                  Professionnels associés
+                  {isStaff ? "Mes informations de service" : "Professionnels associés"}
                 </h3>
-                {staffNotSelected.length > 0 && (
+                {!isStaff && staffNotSelected.length > 0 && (
                   <div className="relative">
                     <select
                       value=""
@@ -549,7 +559,9 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
 
               {staffAssignments.length === 0 ? (
                 <p className="text-xs text-gray-400 italic py-3 text-center border border-dashed border-gray-200 rounded-lg">
-                  Aucun professionnel associé. Ajoutez-en un depuis le menu déroulant ci-dessus.
+                  {isStaff
+                    ? "Vos informations de service seront configurées après la création."
+                    : "Aucun professionnel associé. Ajoutez-en un depuis le menu déroulant ci-dessus."}
                 </p>
               ) : (
                 <div className="space-y-3">
@@ -564,7 +576,7 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
                         assignment={assignment}
                         onChange={handleAssignmentChange}
                         onRemove={handleRemoveStaff}
-                        canRemove={staffAssignments.length > 1}
+                        canRemove={!isStaff && staffAssignments.length > 1}
                         errors={errors.assignments?.[index]}
                       />
                     );
@@ -572,7 +584,6 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
                 </div>
               )}
             </div>
-            )}
           </div>
 
           {/* Footer */}

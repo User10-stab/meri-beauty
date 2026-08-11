@@ -16,6 +16,7 @@ import {
 } from "@/lib/api-response";
 import { auth } from "@/auth";
 import { hasPermission, DASHBOARD_PERMISSIONS, AUTH_ERRORS } from "@/lib/authorization";
+import { sendEmail } from "@/lib/email";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 // Approving/rejecting a rental request decides who becomes a colleague and on
@@ -170,7 +171,28 @@ export async function PATCH(request, { params }) {
         isDeleted: false,
       },
       data: updateData,
+      include: {
+        user: {
+          select: {
+            fullName: true,
+            email: true,
+          },
+        },
+      },
     });
+
+    // Send email to applicant when status changes to APPROVED or REJECTED
+    if (status && (status === "APPROVED" || status === "REJECTED") && rentalRequest.user?.email) {
+      const statusText = status === "APPROVED" ? "approuvée" : "rejetée";
+      const subject = `Votre demande de location a été ${statusText} – Meri Beauty`;
+      
+      await sendEmail({
+        to: rentalRequest.user.email,
+        subject,
+        text: `Bonjour ${rentalRequest.user.fullName},\n\nVotre demande de location a été ${statusText}.\n\nType: ${rentalRequest.rentalType}\nDate de début: ${new Date(rentalRequest.startDate).toLocaleDateString("fr-FR")}\n${rentalRequest.endDate ? `Date de fin: ${new Date(rentalRequest.endDate).toLocaleDateString("fr-FR")}\n` : ""}${ownerResponse ? `Réponse du propriétaire: ${ownerResponse}\n` : ""}\nL'équipe Meri Beauty`,
+        html: `<p>Bonjour ${rentalRequest.user.fullName},</p><p>Votre demande de location a été ${statusText}.</p><p><strong>Type:</strong> ${rentalRequest.rentalType}<br><strong>Date de début:</strong> ${new Date(rentalRequest.startDate).toLocaleDateString("fr-FR")}${rentalRequest.endDate ? `<br><strong>Date de fin:</strong> ${new Date(rentalRequest.endDate).toLocaleDateString("fr-FR")}` : ""}</p>${ownerResponse ? `<p><strong>Réponse du propriétaire:</strong> ${ownerResponse}</p>` : ""}<p>L'équipe Meri Beauty</p>`,
+      }).catch((err) => console.error(`[PATCH /api/rental-requests/${id}] email failed:`, err));
+    }
 
     return ok(rentalRequest, "Demande de location mise à jour avec succès.");
   } catch (error) {

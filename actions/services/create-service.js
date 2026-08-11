@@ -137,17 +137,71 @@ export async function createService(input) {
       return { success: false, message: "Non authentifié" };
     }
 
-    // Check if a service with the same name already exists (case-insensitive)
+    // Check if a service with the same name already exists in this category (case-insensitive)
     const existingService = await prisma.service.findFirst({
-      where: { 
+      where: {
+        categoryId,
         name: {
           equals: name,
-          mode: 'insensitive',
+          mode: "insensitive",
         },
       },
-      select: { id: true, name: true },
+      select: { id: true, name: true, categoryId: true },
     });
 
+    // STAFF: do not create duplicate global Service records.
+    // If the service exists, just create (or re-activate) the StaffService link.
+    if (existingService && session.user.role === ROLES.STAFF) {
+      const staffRecord = await prisma.staff.findUnique({
+        where: { userId: session.user.id, isDeleted: false },
+        select: { id: true },
+      });
+
+      if (!staffRecord) {
+        return { success: false, message: "Profil staff introuvable." };
+      }
+
+      const incoming = (staffAssignments || []).find((a) => a.staffId === staffRecord.id);
+      if (!incoming) {
+        return {
+          success: false,
+          message: "Veuillez renseigner le prix et la durée.",
+          errors: { assignments: [{ price: "Le prix est obligatoire.", duration: "La durée est obligatoire." }] },
+        };
+      }
+
+      await prisma.staffService.upsert({
+        where: { staffId_serviceId: { staffId: staffRecord.id, serviceId: existingService.id } },
+        update: {
+          price: incoming.price,
+          duration: incoming.duration,
+          margin: incoming.margin ?? null,
+          photo: incoming.photo ?? "",
+          isActive: true,
+        },
+        create: {
+          staffId: staffRecord.id,
+          serviceId: existingService.id,
+          createdById: session.user.id,
+          price: incoming.price,
+          duration: incoming.duration,
+          margin: incoming.margin ?? null,
+          photo: incoming.photo ?? "",
+          isActive: true,
+        },
+      });
+
+      revalidatePath("/dashboard/staff/auto-entrepreneur");
+      revalidatePath("/dashboard/services");
+
+      return {
+        success: true,
+        message: `Le service « ${existingService.name} » a été ajouté à votre profil.`,
+        service: { id: existingService.id, name: existingService.name },
+      };
+    }
+
+    // ADMIN/OWNER: keep existing behavior (no duplicates by name globally)
     if (existingService) {
       return {
         success: false,
@@ -178,16 +232,19 @@ export async function createService(input) {
       // Create staff-service assignments
       const assignmentsToCreate = [];
 
-      // If staff member created this, auto-assign to them
+      // If staff member created this, auto-assign to them with provided pricing
       if (staffIdToAssign) {
+        // Staff can provide their own pricing in staffAssignments
+        const staffAssignment = (staffAssignments || []).find(a => a.staffId === staffIdToAssign);
+        
         assignmentsToCreate.push({
           staffId: staffIdToAssign,
           serviceId: newService.id,
           createdById,
-          price: 0,
-          duration: 0,
-          margin: null,
-          photo: "",
+          price: staffAssignment?.price ?? 0,
+          duration: staffAssignment?.duration ?? 0,
+          margin: staffAssignment?.margin ?? null,
+          photo: staffAssignment?.photo ?? "",
           isActive: true,
         });
       }
@@ -209,8 +266,8 @@ export async function createService(input) {
                 staffId: staffExist.id,
                 serviceId: newService.id,
                 createdById,
-                price: assignment.price || 0,
-                duration: assignment.duration || 0,
+                price: assignment.price ?? 0,
+                duration: assignment.duration ?? 0,
                 margin: assignment.margin ?? null,
                 photo: assignment.photo ?? "",
                 isActive: true,
@@ -354,8 +411,8 @@ export async function updateService(input) {
             await tx.staffService.update({
               where: { id: existing.id },
               data: {
-                price: myAssignment.price || 0,
-                duration: myAssignment.duration || 0,
+                price: myAssignment.price ?? 0,
+                duration: myAssignment.duration ?? 0,
                 margin: myAssignment.margin ?? null,
                 photo: myAssignment.photo ?? "",
               },
@@ -465,6 +522,8 @@ export async function deleteService(id) {
   try {
     // Check if user is admin/owner or if staff member is assigned to this service
     let canDelete = false;
+    let isStaffDelete = false;
+    let staffId = null;
 
     if (isAdminRole(session.user.role)) {
       canDelete = true;
@@ -487,6 +546,8 @@ export async function deleteService(id) {
         
         if (assignment) {
           canDelete = true;
+          isStaffDelete = true;
+          staffId = staffRecord.id;
         }
       }
     }
@@ -496,16 +557,29 @@ export async function deleteService(id) {
     }
 
     await prisma.$transaction(async (tx) => {
-      // Delete all staff-service associations
-      await tx.staffService.deleteMany({ where: { serviceId: id } });
-      // Delete the service itself
-      await tx.service.delete({ where: { id } });
+      if (isStaffDelete) {
+        // Staff: only remove their own StaffService relationship
+        await tx.staffService.deleteMany({ 
+          where: { 
+            serviceId: id,
+            staffId: staffId
+          } 
+        });
+      } else {
+        // Admin/Owner: delete all staff-service associations and the service itself
+        await tx.staffService.deleteMany({ where: { serviceId: id } });
+        await tx.service.delete({ where: { id } });
+      }
     });
 
     revalidatePath("/dashboard/services");
     revalidatePath("/dashboard/staff/auto-entrepreneur");
 
-    return { success: true, message: "Le service a été supprimé." };
+    if (isStaffDelete) {
+      return { success: true, message: "Le service a été retiré de votre profil." };
+    } else {
+      return { success: true, message: "Le service a été supprimé." };
+    }
   } catch (error) {
     console.error("[deleteService]", error);
     return {
@@ -793,11 +867,28 @@ export async function deleteCategory(id) {
  */
 export async function getStaffOptions() {
   const session = await auth();
-  if (!session?.user || !isAdminRole(session.user.role)) {
-    return { success: false, data: [], message: "Permissions insuffisantes" };
+  if (!session?.user) {
+    return { success: false, data: [], message: "Non authentifié" };
   }
 
   try {
+    // For staff: return only their own profile
+    if (session.user.role === ROLES.STAFF) {
+      const staff = await prisma.staff.findUnique({
+        where: { userId: session.user.id, isDeleted: false },
+        select: {
+          id: true,
+          user: { select: { id: true, fullName: true, email: true } },
+        },
+      });
+      return { success: true, data: staff ? [staff] : [] };
+    }
+
+    // For admin/owner: return all active staff
+    if (!isAdminRole(session.user.role)) {
+      return { success: false, data: [], message: "Permissions insuffisantes" };
+    }
+
     const staff = await prisma.staff.findMany({
       where: { isDeleted: false, user: { isDeleted: false, isActive: true , role: "STAFF"  } },
       orderBy: { user: { fullName: "asc" } },
@@ -810,5 +901,31 @@ export async function getStaffOptions() {
   } catch (error) {
     console.error("[getStaffOptions]", error);
     return { success: false, data: [], message: "Impossible de charger les professionnels." };
+  }
+}
+
+/**
+ * Returns the current staff member's ID and profile for the logged-in user.
+ * Works for STAFF role users. Returns null for admin/owner.
+ */
+export async function getCurrentStaffProfile() {
+  const session = await auth();
+  if (!session?.user) {
+    return { success: false, data: null, message: "Non authentifié" };
+  }
+
+  try {
+    const staff = await prisma.staff.findUnique({
+      where: { userId: session.user.id, isDeleted: false },
+      select: {
+        id: true,
+        user: { select: { id: true, fullName: true, email: true } },
+      },
+    });
+
+    return { success: true, data: staff };
+  } catch (error) {
+    console.error("[getCurrentStaffProfile]", error);
+    return { success: false, data: null, message: "Impossible de charger votre profil." };
   }
 }

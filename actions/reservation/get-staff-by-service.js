@@ -53,6 +53,7 @@ export async function getStaffByService(serviceId) {
             reservationConfirmationMode: true,
             depositEnabled: true,
             depositPercentage: true,
+            allowedPaymentMethods: true,
             user: {
               select: {
                 id: true,

@@ -8,6 +8,8 @@ import { DataTable } from "../Tables/DataTable";
 import { CategoryRow } from "./CategoryRow";
 import { ServiceRow } from "./ServiceRow";
 import { CreateServiceModal } from "./CreateServiceModal";
+import { AdminServiceCreateForm } from "./forms/AdminServiceCreateForm";
+import { StaffServiceCreateForm } from "./forms/StaffServiceCreateForm";
 import { CreateCategoryModal } from "./CreateCategoryModal";
 import { ServiceDetailsDrawer } from "./ServiceDetailsDrawer";
 import { deleteService } from "@/actions/services/create-service";
@@ -43,6 +45,8 @@ export function ServicesPageClient({ initialCategories, initialServices, userRol
   const [editingCategory, setEditingCategory] = useState(null);
   const [showManageModal, setShowManageModal] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showAdminCreateModal, setShowAdminCreateModal] = useState(false);
+  const [showStaffCreateModal, setShowStaffCreateModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [detailsService, setDetailsService] = useState(null);
   const [isDeleting, startDelete] = useTransition();
@@ -59,7 +63,12 @@ export function ServicesPageClient({ initialCategories, initialServices, userRol
   }
 
   async function handleDeleteService(service) {
-    if (!(await confirm(`Supprimer définitivement « ${service.name} » ? Cette action est irréversible.`, { danger: true }))) return;
+    const isStaffUser = userRole === "STAFF";
+    const confirmMessage = isStaffUser
+      ? `Retirer « ${service.name} » de votre profil ? Le service restera disponible pour les autres professionnels.`
+      : `Supprimer définitivement « ${service.name} » ? Cette action est irréversible.`;
+
+    if (!(await confirm(confirmMessage, { danger: true }))) return;
 
     startDelete(async () => {
       const result = await deleteService(service.id);
@@ -75,6 +84,14 @@ export function ServicesPageClient({ initialCategories, initialServices, userRol
   function handleServiceModalClose() {
     setShowCreateModal(false);
     setEditingService(null);
+  }
+
+  function handleAdminCreateClose() {
+    setShowAdminCreateModal(false);
+  }
+
+  function handleStaffCreateClose() {
+    setShowStaffCreateModal(false);
   }
 
   // ─── Category handlers ─────────────────────────────────────────────
@@ -130,7 +147,14 @@ export function ServicesPageClient({ initialCategories, initialServices, userRol
         )}
 
         {activeTab === "services" && (
-          <Button onClick={() => { setEditingService(null); setShowCreateModal(true); }} className="mb-2 bg-[#2f3a2e]">
+          <Button
+            onClick={() => {
+              setEditingService(null);
+              if (userRole === "STAFF") setShowStaffCreateModal(true);
+              else setShowAdminCreateModal(true);
+            }}
+            className="mb-2 bg-[#2f3a2e]"
+          >
             <Plus size={16} /> Nouveau service
           </Button>
         )}
@@ -176,12 +200,25 @@ export function ServicesPageClient({ initialCategories, initialServices, userRol
             }
           />
         
+          {/* Edit existing service (keeps current edit behavior) */}
           <CreateServiceModal
             open={showCreateModal}
             onClose={handleServiceModalClose}
             onCreated={() => router.refresh()}
             service={editingService}
             userRole={userRole}
+          />
+
+          {/* Create new service (role-specific flows) */}
+          <AdminServiceCreateForm
+            open={showAdminCreateModal}
+            onClose={handleAdminCreateClose}
+            onCreated={() => router.refresh()}
+          />
+          <StaffServiceCreateForm
+            open={showStaffCreateModal}
+            onClose={handleStaffCreateClose}
+            onCreated={() => router.refresh()}
           />
 
           <ServiceDetailsDrawer

@@ -10,6 +10,7 @@ import {
   welcomeWithCredentialsEmail,
 } from "@/lib/email-templates";
 
+
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
   ? `${process.env.NEXT_PUBLIC_APP_URL}/login`
@@ -191,25 +192,30 @@ export async function createAppointment(data) {
     }
 
     // ── 6. Create appointment with PENDING status ─────────────────────────────
-    const appointment = await prisma.appointment.create({
-      data: {
-        userId: user.id,
-        staffServiceId,
-        staffId: staffService.staffId,
-        date: appointmentDate,
-        startTime,
-        endTime,
-        status: "PENDING", // Waiting for salon confirmation
-        notes: notes || null,
-      },
-      include: {
-        staffService: {
-          include: {
-            service: true,
-            staff: { include: { user: { select: { fullName: true } } } },
+    const appointment = await prisma.$transaction(async (tx) => {
+      const createdAppt = await tx.appointment.create({
+        data: {
+          userId: user.id,
+          staffServiceId,
+          staffId: staffService.staffId,
+          date: appointmentDate,
+          startTime,
+          endTime,
+          status: "PENDING", // Waiting for salon confirmation
+          notes: notes || null,
+        },
+        include: {
+          staffService: {
+            include: {
+              service: true,
+              staff: { include: { user: { select: { fullName: true } } } },
+            },
           },
         },
-      },
+      });
+
+
+      return createdAppt;
     });
 
     // ── 7. Send emails (fire-and-forget — never block the reservation) ───────

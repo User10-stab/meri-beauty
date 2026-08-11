@@ -173,11 +173,11 @@ export function AccountSettingsClient({ initialData }) {
          <PersonalInfoSection data={data} onSuccess={(updated) => setData((prev) => ({ ...prev, ...updated }))} />
           <ProfileSection data={data} onSuccess={(updated) => setData((prev) => ({ ...prev, ...updated }))} />
       </div>
+      <PaymentSettingsSection data={data} onSuccess={(updated) => setData((prev) => ({ ...prev, ...updated }))} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <ContractSection data={data} />
         <ReservationSettingsSection data={data} onSuccess={(updated) => setData((prev) => ({ ...prev, ...updated }))} />
       </div>
-      <PaymentSettingsSection data={data} onSuccess={(updated) => setData((prev) => ({ ...prev, ...updated }))} />
       <WorkingHoursSection data={data} onSuccess={(wh) => setData((prev) => ({ ...prev, workingHours: wh }))} />
       <TimeOffSection data={data} onSuccess={(timeOffs) => setData((prev) => ({ ...prev, timeOffs }))} />
       <CalendarSyncSection />
@@ -740,6 +740,17 @@ function ReservationSettingsSection({ data, onSuccess }) {
     });
   }
 
+  const acceptsOnlinePayments =
+    data?.allowedPaymentMethods === "BOTH" ||
+    data?.allowedPaymentMethods === "ONLINE_ONLY";
+
+  // If staff switches to cash-only, force-disable deposit in UI state.
+  useEffect(() => {
+    if (!acceptsOnlinePayments && depositEnabled) {
+      setDepositEnabled(false);
+    }
+  }, [acceptsOnlinePayments]);
+
   return (
     <SectionCard
       icon={Settings2}
@@ -784,14 +795,26 @@ function ReservationSettingsSection({ data, onSuccess }) {
         </div>
 
         {/* Deposit Toggle */}
-        <div className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50/50 px-3.5 py-2.5 dark:border-gray-800 dark:bg-gray-800/50">
+        <div className={`flex items-center justify-between rounded-lg border px-3.5 py-2.5 dark:border-gray-800 ${
+          acceptsOnlinePayments
+            ? "border-gray-100 bg-gray-50/50 dark:bg-gray-800/50"
+            : "border-amber-200 bg-amber-50 dark:border-amber-900/40 dark:bg-amber-900/10"
+        }`}>
           <div>
             <p className="text-xs font-medium text-gray-900 dark:text-white">Acompte</p>
             <p className="text-[11px] text-gray-500 dark:text-gray-400">
-              Exiger un acompte à la réservation
+              {acceptsOnlinePayments
+                ? "Exiger un acompte à la réservation"
+                : "Indisponible : activez le paiement en ligne dans l'étape 1"}
             </p>
           </div>
-          <Toggle checked={depositEnabled} onChange={() => setDepositEnabled((prev) => !prev)} />
+          <Toggle
+            checked={depositEnabled}
+            onChange={() => {
+              if (!acceptsOnlinePayments) return;
+              setDepositEnabled((prev) => !prev);
+            }}
+          />
         </div>
 
         {/* Deposit Percentage */}

@@ -18,8 +18,8 @@ export async function checkEmailExists(email) {
 
   const user = await prisma.user.findUnique({
     where: { email: email.trim().toLowerCase() },
-    select: { id: true, isDeleted: true, emailVerified: true, isActive: true },
+    select: { id: true, isDeleted: true, emailVerified: true, isActive: true , phone: true },
   });
 
-  return { exists: Boolean(user && !user.isDeleted && user.emailVerified && user.isActive) };
+  return { exists: Boolean(user && !user.isDeleted && user.emailVerified && user.isActive) , phone: user?.phone || null };
 }

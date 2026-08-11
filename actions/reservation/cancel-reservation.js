@@ -5,6 +5,14 @@ import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { issueCreditNote } from "@/lib/invoicing";
 import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
+import { sendEmail } from "@/lib/email";
+import { staffReservationCancelledEmail } from "@/lib/email-templates";
+import {
+  createNotificationsBulk,
+  buildAppointmentCancelledNotification,
+  getAppointmentNotificationRecipients,
+  getAppointmentEmailRecipients,
+} from "@/lib/notifications";
 
 const CANCELLABLE_STATUSES = ["PENDING", "CONFIRMED"];
 
@@ -38,7 +46,16 @@ export async function cancelReservation(appointmentId) {
 
     const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId, isDeleted: false },
-      include: { payment: { include: { invoice: true } } },
+      include: {
+        payment: { include: { invoice: true } },
+        user: { select: { fullName: true } },
+        staffService: {
+          include: {
+            service: { select: { name: true } },
+            staff: { include: { user: { select: { fullName: true } } } },
+          },
+        },
+      },
     });
 
     if (!appointment) {
@@ -79,7 +96,7 @@ export async function cancelReservation(appointmentId) {
         where: { id: appointmentId, status: { in: CANCELLABLE_STATUSES } },
         data: { status: "CANCELLED" },
       });
-      if (claim.count === 0) return false;
+      if (claim.count === 0) return null;
 
       if (wasPaid && payment.invoice) {
         await issueCreditNote(tx, {
@@ -89,22 +106,57 @@ export async function cancelReservation(appointmentId) {
         });
       }
 
-      await tx.notification.create({
-        data: {
-          userId: session.user.id,
-          appointmentId: appointment.id,
-          type: "APPOINTMENT_CANCELLED",
-          title: "Réservation annulée",
-          message: `Votre réservation du ${new Date(appointment.date).toLocaleDateString("fr-FR")} a été annulée.`,
-          status: "PENDING",
-        },
-      });
-
       return true;
     });
 
     if (!claimed) {
       return { success: false, message: "Cette réservation est déjà annulée." };
+    }
+
+    // Notifications (outside transaction - business operation already committed)
+    const serviceName = appointment.staffService?.service?.name;
+    const customerName = appointment.user?.fullName;
+    const staffUser = appointment.staffService?.staff?.user;
+    const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId);
+
+    if (recipientUserIds.length > 0) {
+      try {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildAppointmentCancelledNotification({
+              userId: uid,
+              appointmentId: appointment.id,
+              date: appointment.date,
+              startTime: appointment.startTime,
+              serviceName,
+              reason: "Annulé par le client",
+              customerName,
+            })
+          )
+        );
+      } catch (err) {
+        if (err?.message === "VALIDATION_ERROR") {
+          console.error("[cancelReservation] notification validation error:", err.fieldErrors);
+        } else {
+          console.error("[cancelReservation] notifications failed:", err);
+        }
+      }
+    }
+
+    // Send email to assigned staff member and admin/owner users
+    const emailRecipients = await getAppointmentEmailRecipients(appointment.staffId);
+    for (const recipient of emailRecipients) {
+      await sendEmail({
+        to: recipient.email,
+        ...staffReservationCancelledEmail({
+          staffName: recipient.fullName,
+          customerName: customerName,
+          serviceName: serviceName,
+          date: appointment.date,
+          time: appointment.startTime ? appointment.startTime.toTimeString().slice(0, 5) : "",
+          reason: "Annulé par le client",
+        }),
+      }).catch((err) => console.error("[cancelReservation] dashboard email failed:", err));
     }
 
     // Payment.status / the REFUND ledger row are only written once Stripe

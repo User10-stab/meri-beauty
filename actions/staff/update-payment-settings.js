@@ -22,9 +22,15 @@ export async function updatePaymentSettings({ allowedPaymentMethods }) {
       return { success: false, message: "Accès réservé au personnel." };
     }
 
+    // If switching to CASH_ONLY, force-disable deposits server-side.
     await prisma.staff.update({
       where: { userId: session.user.id },
-      data: { allowedPaymentMethods },
+      data: {
+        allowedPaymentMethods,
+        ...(allowedPaymentMethods === "CASH_ONLY"
+          ? { depositEnabled: false, depositPercentage: 0 }
+          : {}),
+      },
     });
 
     return { success: true, message: "Paramètres de paiement mis à jour." };

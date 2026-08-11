@@ -12,6 +12,12 @@ import {
 } from "@/lib/api-response";
 import { auth } from "@/auth";
 import { requireCustomer, hasPermission, DASHBOARD_PERMISSIONS, AUTH_ERRORS } from "@/lib/authorization";
+import { sendEmail } from "@/lib/email";
+import {
+  createNotificationsBulk,
+  buildRentalRequestSubmittedNotification,
+  getRentalRequestNotificationRecipients,
+} from "@/lib/notifications";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 // Admin/owner only — see the matching note in [id]/route.js. Any STAFF
@@ -127,24 +133,94 @@ export async function POST(request) {
     return badRequest("Validation échouée.", errors);
   }
 
-  const { rentalType, startDate, endDate, commissionType, message } =
+  const { rentalType, startDate, endDate, commissionType, specialty, vatNumber, message } =
     validationResult.data;
 
   // ── Create rental request ────────────────────────────────────────────────
   try {
-    const rentalRequest = await prisma.rentalRequest.create({
-      data: {
-        userId: session.user.id,
-        rentalType,
-        startDate: new Date(startDate),
-        endDate: endDate ? new Date(endDate) : null,
-        commissionType,
-        status: "PENDING",
-        message,
-      },
+    const result = await prisma.$transaction(async (tx) => {
+      // Update user's VAT number if provided
+      if (vatNumber && session.user.id) {
+        await tx.user.update({
+          where: { id: session.user.id },
+          data: { vatNumber },
+        });
+      }
+
+      const rentalRequest = await tx.rentalRequest.create({
+        data: {
+          // Connect via the relation — userId is the FK, Prisma wants
+          // either `connect` or the scalar field name (`userId`).
+          // The model declares `user User? @relation(...)` so both work,
+          // but `connect` is the idiomatic form and avoids any ambiguity.
+          user: session.user.id
+            ? { connect: { id: session.user.id } }
+            : undefined,
+          rentalType,
+          startDate: new Date(startDate),
+          endDate: endDate ? new Date(endDate) : null,
+          commissionType,
+          specialty,
+          // vatNumber is NOT a field on RentalRequest — it only exists on
+          // User and is already persisted in the tx.user.update() call above.
+          status: "PENDING",
+          message,
+        },
+        include: {
+          user: {
+            select: {
+              fullName: true,
+              email: true,
+            },
+          },
+        },
+      });
+
+      return { rentalRequest };
     });
 
-    return created(rentalRequest, "Demande de location créée avec succès.");
+    // Notify dashboard users about the new rental request (outside transaction - business operation already committed)
+    const recipientUserIds = await getRentalRequestNotificationRecipients();
+
+    if (recipientUserIds.length > 0) {
+      try {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildRentalRequestSubmittedNotification({
+              userId: uid,
+              rentalRequestId: result.rentalRequest.id,
+              rentalType: result.rentalRequest.rentalType,
+              applicantName: result.rentalRequest.user?.fullName,
+            })
+          )
+        );
+      } catch (err) {
+        if (err?.message === "VALIDATION_ERROR") {
+          console.error("[POST /api/rental-requests] notification validation error:", err.fieldErrors);
+        } else {
+          console.error("[POST /api/rental-requests] notifications failed:", err);
+        }
+      }
+    }
+
+    // Send email to admin/owner about the new rental request
+    const admins = await prisma.user.findMany({
+      where: { role: { in: ["OWNER", "ADMIN"] } },
+      select: { email: true },
+    });
+
+    for (const admin of admins) {
+      if (admin.email) {
+        await sendEmail({
+          to: admin.email,
+          subject: "Nouvelle demande de location – Meri Beauty",
+          text: `Bonjour,\n\nUne nouvelle demande de location a été soumise.\n\nType: ${result.rentalRequest.rentalType}\nDate de début: ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}\n${result.rentalRequest.endDate ? `Date de fin: ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}\n` : ""}Type de commission: ${result.rentalRequest.commissionType}\n\nMessage: ${result.rentalRequest.message || "Aucun message"}\n\nVeuillez consulter le tableau de bord pour traiter cette demande.\n\nL'équipe Meri Beauty`,
+          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p><p><strong>Type:</strong> ${result.rentalRequest.rentalType}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${result.rentalRequest.endDate ? `<br><strong>Date de fin:</strong> ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}` : ""}<br><strong>Type de commission:</strong> ${result.rentalRequest.commissionType}</p><p><strong>Message:</strong> ${result.rentalRequest.message || "Aucun message"}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
+        }).catch((err) => console.error("[POST /api/rental-requests] admin email failed:", err));
+      }
+    }
+
+    return created(result.rentalRequest, "Demande de location créée avec succès.");
   } catch (error) {
     const mapped = prismaError(error);
     if (mapped) return mapped;

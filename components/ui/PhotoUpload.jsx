@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { X, Loader2, Camera } from "lucide-react";
 
@@ -18,6 +18,11 @@ export function PhotoUpload({ value, onChange, uploadFolder = "staff", error }) 
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(value ?? null);
+
+  // Keep preview in sync when parent value changes (e.g. modal re-open / reset)
+  useEffect(() => {
+    setPreview(value ?? null);
+  }, [value]);
 
   async function handleFile(file) {
     if (!file) return;

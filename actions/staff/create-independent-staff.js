@@ -2,22 +2,20 @@
 
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { generateSecurePassword } from "@/lib/generate-password";
 import { revalidatePath } from "next/cache";
+
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { sendEmail } from "@/lib/email";
 import { emailVerificationEmail } from "@/lib/email-templates";
+import { generateSecurePassword } from "@/lib/generate-password";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 
-  const BCRYPT_SALT_ROUNDS = 12;
-  const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
-  const VERIFICATION_TOKEN_EXPIRY_MINUTES = 15;
+const BCRYPT_SALT_ROUNDS = 12;
+const VERIFICATION_TOKEN_EXPIRY_MINUTES = 15;
+const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
 
-
-
-// ─── Email template ───────────────────────────────────────────────────────────
 function buildWelcomeEmail({ fullName, email, password, loginUrl }) {
   const text = [
     `Bonjour ${fullName},`,
@@ -67,8 +65,6 @@ function buildWelcomeEmail({ fullName, email, password, loginUrl }) {
   return { text, html };
 }
 
-// ─── Server action ────────────────────────────────────────────────────────────
-
 /**
  * Creates User (STAFF) + Staff (INDEPENDENT) + Contract (FIXED_RENT — mandatory)
  * + StaffService assignments — all inside a single Prisma transaction.
@@ -82,7 +78,6 @@ export async function createIndependentStaff(input) {
     return { success: false, message: "Permissions insuffisantes" };
   }
 
-  // ── 1. Validate ──────────────────────────────────────────────────────────
   const parsed = createIndependentStaffSchema.safeParse(input);
 
   if (!parsed.success) {
@@ -91,16 +86,17 @@ export async function createIndependentStaff(input) {
       success: false,
       message: "Veuillez corriger les erreurs dans le formulaire.",
       errors: {
-        fullName:          fe.fullName?.[0]          ?? null,
-        email:             fe.email?.[0]             ?? null,
-        phone:             fe.phone?.[0]             ?? null,
-        photo:             fe.photo?.[0]             ?? null,
-        bio:               fe.bio?.[0]               ?? null,
-        languages:         fe.languages?.[0]         ?? null,
+        fullName: fe.fullName?.[0] ?? null,
+        email: fe.email?.[0] ?? null,
+        phone: fe.phone?.[0] ?? null,
+        photo: fe.photo?.[0] ?? null,
+        bio: fe.bio?.[0] ?? null,
+        languages: fe.languages?.[0] ?? null,
         yearsOfExperience: fe.yearsOfExperience?.[0] ?? null,
-        hireDate:          fe.hireDate?.[0]          ?? null,
-        serviceIds:        fe.serviceIds?.[0]        ?? null,
-        contract:          fe["contract"]?.[0]       ?? null,
+        hireDate: fe.hireDate?.[0] ?? null,
+        vatNumber: fe.vatNumber?.[0] ?? null,
+        serviceIds: fe.serviceIds?.[0] ?? null,
+        contract: fe["contract"]?.[0] ?? null,
       },
     };
   }
@@ -114,11 +110,12 @@ export async function createIndependentStaff(input) {
     languages,
     yearsOfExperience,
     hireDate,
+    vatNumber,
     serviceIds,
     contract,
   } = parsed.data;
 
-  // ── 2. Validate referenced service IDs exist ─────────────────────────────
+  // Validate referenced service IDs exist
   const ids = serviceIds ?? [];
   if (ids.length > 0) {
     const found = await prisma.service.findMany({
@@ -134,67 +131,61 @@ export async function createIndependentStaff(input) {
     }
   }
 
-  // ── 3. Generate & hash password ──────────────────────────────────────────
   const plainPassword = generateSecurePassword();
-  
   const hashedPassword = await bcrypt.hash(plainPassword, BCRYPT_SALT_ROUNDS);
 
-  // ── 4. Transaction ───────────────────────────────────────────────────────
   try {
     const staff = await prisma.$transaction(async (tx) => {
-      // 4a. Create User
       const user = await tx.user.create({
         data: {
           fullName,
           email,
           phone,
           password: hashedPassword,
-          role:          "STAFF",
+          role: "STAFF",
           emailVerified: false,
-          isActive:      true,
+          isActive: true,
         },
       });
 
-      // 4b. Create Staff
       const newStaff = await tx.staff.create({
         data: {
-          userId:            user.id,
-          type:              "INDEPENDENT",
-          photo:             photo ?? null,
-          bio:               bio ?? null,
-          languages:         languages ?? [],
+          userId: user.id,
+          type: "INDEPENDENT",
+          photo: photo ?? null,
+          bio: bio ?? null,
+          languages: languages ?? [],
           yearsOfExperience: yearsOfExperience ?? null,
-          isActive:          true,
-          hireDate:          hireDate ? new Date(hireDate) : null,
+          isActive: true,
+          hireDate: hireDate ? new Date(hireDate) : null,
+          vatNumber,
         },
       });
 
-      // 4c. Create Contract (always FIXED_RENT — mandatory for all staff)
       await tx.contract.create({
         data: {
-          staffId:   newStaff.id,
-          type:      "FIXED_RENT",
+          staffId: newStaff.id,
+          type: "FIXED_RENT",
           fixedRent: contract.fixedRent,
           startDate: new Date(contract.startDate),
-          endDate:   contract.endDate ? new Date(contract.endDate) : null,
-          status:    "ACTIVE",
-          notes:     contract.notes ?? null,
+          endDate: contract.endDate ? new Date(contract.endDate) : null,
+          status: "ACTIVE",
+          notes: contract.notes ?? null,
         },
       });
 
-      // 4d. Assign services — StaffService requires createdById (the admin creating the record)
-      // We use the newly-created staff's userId as createdById.
-      // Price and duration are set to 0 — the admin can edit them later per service.
       if (ids.length > 0) {
         await tx.staffService.createMany({
           data: ids.map((serviceId) => ({
-            staffId:     newStaff.id,
+            staffId: newStaff.id,
             serviceId,
-            createdById: user.id,
-            price:       0,
-            duration:    0,
-            photo:       "",
-            isActive:    true,
+            // createdById should be the admin performing the action
+            createdById: session.user.id,
+            // Admin assigns services, staff can edit details later
+            price: 0,
+            duration: 0,
+            photo: "",
+            isActive: true,
           })),
           skipDuplicates: true,
         });
@@ -203,8 +194,9 @@ export async function createIndependentStaff(input) {
       return newStaff;
     });
 
-    // ── 5. Send welcome email ────────────────────────────────────────────
-    const loginUrl = `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/login`;
+    const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
+    const loginUrl = `${baseUrl}/login`;
+
     const { text, html } = buildWelcomeEmail({
       fullName,
       email,
@@ -219,10 +211,14 @@ export async function createIndependentStaff(input) {
       html,
     });
 
-    // ── 6. Send verification email ──────────────────────────────────────
     const verificationPlainToken = crypto.randomUUID();
-    const verificationTokenHash = await bcrypt.hash(verificationPlainToken, BCRYPT_SALT_ROUNDS);
-    const verificationExpiresAt = new Date(Date.now() + VERIFICATION_TOKEN_EXPIRY_MINUTES * 60 * 1000);
+    const verificationTokenHash = await bcrypt.hash(
+      verificationPlainToken,
+      BCRYPT_SALT_ROUNDS
+    );
+    const verificationExpiresAt = new Date(
+      Date.now() + VERIFICATION_TOKEN_EXPIRY_MINUTES * 60 * 1000
+    );
 
     await prisma.emailVerificationToken.create({
       data: {
@@ -232,9 +228,9 @@ export async function createIndependentStaff(input) {
       },
     });
 
-    const verificationUrl = `${
-      process.env.NEXTAUTH_URL || "http://localhost:3000"
-    }/verify-email?token=${encodeURIComponent(verificationPlainToken)}`;
+    const verificationUrl = `${baseUrl}/verify-email?token=${encodeURIComponent(
+      verificationPlainToken
+    )}`;
 
     const verificationTemplate = emailVerificationEmail({
       customerName: fullName,
@@ -257,7 +253,7 @@ export async function createIndependentStaff(input) {
       staffId: staff.id,
     };
   } catch (error) {
-    if (error.code === "P2002") {
+    if (error?.code === "P2002") {
       const fields = error.meta?.target ?? [];
 
       if (fields.includes("email")) {
@@ -267,6 +263,13 @@ export async function createIndependentStaff(input) {
           errors: { email: "Cette adresse e-mail est déjà utilisée." },
         };
       }
+      if (fields.includes("vatNumber")) {
+        return {
+          success: false,
+          message: "Ce numéro de TVA est déjà utilisé.",
+          errors: { vatNumber: "Ce numéro de TVA est déjà utilisé." },
+        };
+      }
       if (fields.includes("phone")) {
         return {
           success: false,
@@ -274,6 +277,7 @@ export async function createIndependentStaff(input) {
           errors: { phone: "Ce numéro de téléphone est déjà utilisé." },
         };
       }
+
       return {
         success: false,
         message: "Un compte avec ces informations existe déjà.",

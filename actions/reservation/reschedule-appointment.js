@@ -5,6 +5,13 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
 import { buildAppointmentWindow, findConflictingAppointment } from "@/lib/appointment-scheduling";
+import { staffReservationModifiedEmail } from "@/lib/email-templates";
+import {
+  createNotificationsBulk,
+  buildAppointmentCreatedNotification,
+  getAppointmentNotificationRecipients,
+  getAppointmentEmailRecipients,
+} from "@/lib/notifications";
 
 const RESCHEDULABLE_STATUSES = ["PENDING", "CONFIRMED"];
 
@@ -82,26 +89,42 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
     }
 
     const previousDate = appointment.date;
-
-    await prisma.$transaction([
-      prisma.appointment.update({
-        where: { id: appointmentId },
-        data: { date: appointmentDate, startTime, endTime },
-      }),
-      prisma.notification.create({
-        data: {
-          userId: appointment.userId,
-          appointmentId: appointment.id,
-          type: "GENERAL",
-          title: "Rendez-vous déplacé",
-          message: `Votre rendez-vous du ${previousDate.toLocaleDateString("fr-FR")} a été déplacé au ${appointmentDate.toLocaleDateString("fr-FR")} à ${time}.`,
-          status: "PENDING",
-        },
-      }),
-    ]);
-
     const serviceName = appointment.staffService.service?.name ?? "votre service";
     const staffName = appointment.staffService.staff?.user?.fullName ?? "votre experte";
+    const customerName = appointment.user?.fullName;
+    const staffUser = appointment.staffService.staff?.user;
+
+    await prisma.$transaction(async (tx) => {
+      await tx.appointment.update({
+        where: { id: appointmentId },
+        data: { date: appointmentDate, startTime, endTime },
+      });
+    });
+
+    // Notify dashboard users that an appointment was rescheduled (outside transaction - business operation already committed)
+    const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId);
+
+    if (recipientUserIds.length > 0) {
+      try {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) => ({
+            userId: uid,
+            appointmentId: appointment.id,
+            type: "GENERAL",
+            title: "Rendez-vous déplacé",
+            message: `Rendez-vous${serviceName ? ` (${serviceName})` : ""} déplacé du ${previousDate.toLocaleDateString("fr-FR")} vers le ${appointmentDate.toLocaleDateString("fr-FR")} à ${time}${customerName ? ` — ${customerName}` : ""}.`,
+            actionUrl: "/dashboard/appointments",
+            status: "PENDING",
+          }))
+        );
+      } catch (err) {
+        if (err?.message === "VALIDATION_ERROR") {
+          console.error("[rescheduleAppointment] notification validation error:", err.fieldErrors);
+        } else {
+          console.error("[rescheduleAppointment] notifications failed:", err);
+        }
+      }
+    }
     const formattedDate = appointmentDate.toLocaleDateString("fr-FR", {
       weekday: "long",
       day: "2-digit",
@@ -121,6 +144,22 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
         `<p>Votre rendez-vous « ${serviceName} » avec ${staffName} a bien été déplacé au ${formattedDate} à ${time}.</p>` +
         `<p>L'équipe Meri Beauty</p>`,
     }).catch((err) => console.error("[rescheduleAppointment] email failed:", err));
+
+    // Send email to assigned staff member and admin/owner users
+    const emailRecipients = await getAppointmentEmailRecipients(appointment.staffId);
+    for (const recipient of emailRecipients) {
+      await sendEmail({
+        to: recipient.email,
+        ...staffReservationModifiedEmail({
+          staffName: recipient.fullName,
+          customerName: appointment.user.fullName,
+          serviceName,
+          previousDate,
+          newDate: appointmentDate,
+          newTime: time,
+        }),
+      }).catch((err) => console.error("[rescheduleAppointment] dashboard email failed:", err));
+    }
 
     return { success: true, message: "Votre rendez-vous a été déplacé." };
   } catch (error) {

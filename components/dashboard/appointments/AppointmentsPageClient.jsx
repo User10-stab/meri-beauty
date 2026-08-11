@@ -17,11 +17,11 @@ const STATUS_LABEL = {
 };
 
 const STATUS_STYLE = {
-  PENDING: "bg-amber-50 text-amber-700 border-amber-100",
-  CONFIRMED: "bg-emerald-50 text-emerald-700 border-emerald-100",
-  COMPLETED: "bg-gray-100 text-gray-500 border-gray-200",
-  CANCELLED: "bg-red-50 text-red-600 border-red-100",
-  NO_SHOW: "bg-red-50 text-red-600 border-red-100",
+  PENDING: "bg-amber-50 text-amber-700 border-amber-200",
+  CONFIRMED: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  COMPLETED: "bg-gray-50 text-gray-600 border-gray-200",
+  CANCELLED: "bg-red-50 text-red-600 border-red-200",
+  NO_SHOW: "bg-red-50 text-red-600 border-red-200",
 };
 
 function formatDateTime(date, startTime) {
@@ -32,9 +32,13 @@ function formatDateTime(date, startTime) {
 
 function RatingStars({ rating }) {
   return (
-    <div className="flex items-center gap-1 text-amber-400">
+    <div className="flex items-center gap-0.5">
       {Array.from({ length: 5 }, (_, index) => (
-        <Star key={index} size={12} className={index < rating ? "fill-current" : "text-gray-300"} />
+        <Star
+          key={index}
+          size={14}
+          className={index < rating ? "fill-amber-400 text-amber-400" : "text-gray-300"}
+        />
       ))}
     </div>
   );
@@ -50,6 +54,19 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [isPending, startTransition] = useTransition();
   const [rowLoadingId, setRowLoadingId] = useState(null);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return appointments.filter((a) => {
+      if (q) {
+        const hay = `${a.customer?.fullName} ${a.customer?.email} ${a.serviceName}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (statusFilter && a.status !== statusFilter) return false;
+      if (staffFilter && a.staffId !== staffFilter) return false;
+      return true;
+    });
+  }, [appointments, search, statusFilter, staffFilter]);
 
   function refetch(next) {
     const params = {
@@ -174,7 +191,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         )}
       </div>
 
-      {appointments.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
             <CalendarX size={22} className="text-gray-300" />
@@ -197,7 +214,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               </TableRow>
             </TableHeader>
             <TableBody>
-              {appointments.map((a) => (
+              {filtered.map((a) => (
                 <TableRow key={a.id}>
                   <TableCell className="pl-6">
                     <div className="font-medium text-gray-800 dark:text-white">{a.customer?.fullName}</div>
@@ -245,7 +262,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                           type="button"
                           onClick={() => handleConfirm(a.id)}
                           disabled={rowLoadingId === a.id}
-                          className="rounded-lg border border-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:opacity-50"
+                          className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
                         >
                           {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Confirmer"}
                         </button>
@@ -267,9 +284,9 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                             : handleCompleteDirect(a.id)
                         }
                         disabled={rowLoadingId === a.id}
-                        className="rounded-lg border border-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:opacity-50"
+                        className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
                       >
-                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "le rendez-vous est terminé"}
+                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer"}
                       </button>
                     ) : (
                       <span className="text-gray-300">—</span>

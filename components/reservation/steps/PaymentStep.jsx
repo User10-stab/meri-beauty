@@ -77,6 +77,12 @@ export default function PaymentStep({ data, customerSession }) {
     depositPercentage,
   } = computePaymentDecision({ drafts, discountAmount });
 
+  const allowedPaymentMethods = draft?.staffService?.staff?.allowedPaymentMethods;
+  const acceptsOnlinePayments =
+    allowedPaymentMethods === "BOTH" || allowedPaymentMethods === "ONLINE_ONLY";
+  const acceptsCashPayments =
+    allowedPaymentMethods === "BOTH" || allowedPaymentMethods === "CASH_ONLY";
+
   // The amount the customer will pay online right now, per chosen method —
   // used only to display in UI labels, never sent to the server.
   //   "online" → full price (Stripe, charged immediately)
@@ -306,20 +312,34 @@ export default function PaymentStep({ data, customerSession }) {
           <PaymentOption
             icon={<CreditCard size={24} />}
             title="Payer en ligne par Stripe"
-            description="Paiement sécurisé — montant total débité immédiatement"
+            description={
+              acceptsOnlinePayments
+                ? "Paiement sécurisé — montant total débité immédiatement"
+                : "Indisponible : ce professionnel n'accepte pas le paiement en ligne"
+            }
             badge="Montant total"
             selected={paymentMethod === "online"}
-            disabled={processing}
-            onSelect={() => setPaymentMethod("online")}
+            disabled={processing || !acceptsOnlinePayments}
+            onSelect={() => {
+              if (!acceptsOnlinePayments) return;
+              setPaymentMethod("online");
+            }}
           />
 
           <PaymentOption
             icon={<Wallet size={24} />}
             title="Payer au salon"
-            description={salonDescription}
+            description={
+              acceptsCashPayments
+                ? salonDescription
+                : "Indisponible : ce professionnel n'accepte pas le paiement au salon"
+            }
             selected={paymentMethod === "cash"}
-            disabled={processing}
-            onSelect={() => setPaymentMethod("cash")}
+            disabled={processing || !acceptsCashPayments}
+            onSelect={() => {
+              if (!acceptsCashPayments) return;
+              setPaymentMethod("cash");
+            }}
           />
         </div>
 

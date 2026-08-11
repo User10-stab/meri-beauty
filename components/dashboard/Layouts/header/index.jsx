@@ -6,6 +6,7 @@ import { useSidebarContext } from "../sidebar/sidebar-context";
 import { MenuIcon } from "./icons";
 import { ThemeToggleSwitch } from "./theme-toggle";
 import { UserInfo } from "./user-info";
+import NotificationBell from "@/components/dashboard/notifications/NotificationBell";
 
 export function Header({ user }) {
   const { toggleSidebar, isMobile } = useSidebarContext();
@@ -47,6 +48,10 @@ export function Header({ user }) {
         </div>
 
         <ThemeToggleSwitch />
+
+        <div className="shrink-0">
+          <NotificationBell user={user} />
+        </div>
 
         <div className="shrink-0">
           <UserInfo user={user} />

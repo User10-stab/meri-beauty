@@ -33,12 +33,38 @@ export async function updateReservationSettings(input) {
 
     const { confirmationMode, depositEnabled, depositPercentage } = parsed.data;
 
+    // Enforce payment-method dependency server-side:
+    // if the staff member doesn't accept online payments, they cannot enable deposits.
+    const staff = await prisma.staff.findUnique({
+      where: { userId: session.user.id },
+      select: { allowedPaymentMethods: true },
+    });
+
+    const acceptsOnline =
+      staff?.allowedPaymentMethods === "BOTH" ||
+      staff?.allowedPaymentMethods === "ONLINE_ONLY";
+
+    if (depositEnabled && !acceptsOnline) {
+      return {
+        success: false,
+        message: "Vous devez activer le paiement en ligne pour pouvoir demander un acompte.",
+        errors: {
+          confirmationMode: null,
+          depositEnabled: "Acompte indisponible sans paiement en ligne.",
+          depositPercentage: null,
+        },
+      };
+    }
+
     await prisma.staff.update({
       where: { userId: session.user.id },
       data: {
         reservationConfirmationMode: confirmationMode,
-        depositEnabled,
-        depositPercentage: depositEnabled && depositPercentage != null ? depositPercentage : 0,
+        depositEnabled: acceptsOnline ? depositEnabled : false,
+        depositPercentage:
+          acceptsOnline && depositEnabled && depositPercentage != null
+            ? depositPercentage
+            : 0,
       },
     });
 

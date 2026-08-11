@@ -36,6 +36,13 @@ export default function LoginForm() {
     };
   };
 
+  // Thread callbackUrl into the register link so that if the user chooses
+  // to sign up instead, the pending rental request (or any other redirect
+  // intent) is preserved through the full register → verify → login flow.
+  const registerHref = callbackUrl
+    ? `/register?callbackUrl=${encodeURIComponent(callbackUrl)}`
+    : "/register";
+
   return (
     <AuthForm
       subtitle="Sign in to manage your premium salon space"
@@ -61,7 +68,7 @@ export default function LoginForm() {
       submitText="Sign In"
       loadingText="Signing in..."
       footerText="Don't have an account?"
-      footerLinkHref="/register"
+      footerLinkHref={registerHref}
       footerLinkText="Create an account"
       extraElements={({ register, isLoading }) => (
         <div className="flex items-center justify-between">

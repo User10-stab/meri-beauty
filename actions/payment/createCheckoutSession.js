@@ -8,6 +8,11 @@ import { prisma } from "@/lib/prisma";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
 import { parseLocalDateString } from "@/lib/slot-availability";
+import {
+  createNotificationsBulk,
+  buildAppointmentCreatedNotification,
+  getAppointmentNotificationRecipients,
+} from "@/lib/notifications";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -136,6 +141,7 @@ export async function createCheckoutSession(reservationData) {
             reservationConfirmationMode: true,
             depositEnabled: true,
             depositPercentage: true,
+            allowedPaymentMethods: true,
             user: { select: { fullName: true } },
           },
         },
@@ -233,11 +239,41 @@ export async function createCheckoutSession(reservationData) {
       };
     }
     const totalAmount = Number(staffService.price);
+    // Enforce staff payment-method settings server-side
+    const acceptsOnlinePayments =
+      staff.allowedPaymentMethods === "BOTH" ||
+      staff.allowedPaymentMethods === "ONLINE_ONLY";
+    const acceptsCashPayments =
+      staff.allowedPaymentMethods === "BOTH" ||
+      staff.allowedPaymentMethods === "CASH_ONLY";
+
+    if (staff.allowedPaymentMethods === "CASH_ONLY") {
+      return {
+        success: false,
+        message: "Ce professionnel accepte uniquement le paiement au salon.",
+      };
+    }
+
+    if (normalizedPaymentMethod === "online" && !acceptsOnlinePayments) {
+      return {
+        success: false,
+        message: "Ce professionnel n'accepte pas le paiement en ligne.",
+      };
+    }
+
+    if (normalizedPaymentMethod === "cash" && !acceptsCashPayments) {
+      return {
+        success: false,
+        message: "Ce professionnel n'accepte pas le paiement au salon.",
+      };
+    }
+
     const paymentDecision = getReservationPaymentDecision({
       appointmentCount: 1,
       confirmationMode: staff.reservationConfirmationMode ?? "MANUAL",
-      depositEnabled:   Boolean(staff.depositEnabled),
-      depositPercentage: Number(staff.depositPercentage ?? 0),
+      // A deposit is only meaningful if online payments are accepted.
+      depositEnabled: acceptsOnlinePayments ? Boolean(staff.depositEnabled) : false,
+      depositPercentage: acceptsOnlinePayments ? Number(staff.depositPercentage ?? 0) : 0,
       totalAmount,
       paymentMethod: normalizedPaymentMethod,
     });
@@ -324,6 +360,29 @@ export async function createCheckoutSession(reservationData) {
           status: "PENDING",
         },
       });
+
+      // Notify dashboard users (staff + owners/admins) of the new pending booking
+      const serviceName = staffService.service?.name;
+      const staffName = staff.user?.fullName;
+      const customerName = customerUser.fullName;
+      const recipientUserIds = await getAppointmentNotificationRecipients(staffService.staffId, { tx });
+
+      if (recipientUserIds.length > 0) {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildAppointmentCreatedNotification({
+              userId: uid,
+              appointmentId: appointment.id,
+              date: appointmentDate,
+              startTime,
+              serviceName,
+              staffName,
+              customerName,
+            })
+          ),
+          { tx }
+        );
+      }
 
       return { appointment, payment };
     });

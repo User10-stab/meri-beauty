@@ -9,6 +9,12 @@ import { sendEmail } from "@/lib/email";
 import { reservationConfirmedWithPaymentLinkEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice } from "@/lib/invoicing";
 import { renderInvoicePdf } from "@/lib/pdf/render";
+import {
+  createNotificationsBulk,
+  buildAppointmentConfirmedNotification,
+  buildAppointmentCancelledNotification,
+  getAppointmentNotificationRecipients,
+} from "@/lib/notifications";
 
 /**
  * Verify the authenticated user can manage the given appointment.
@@ -116,24 +122,50 @@ export async function confirmAppointment(appointmentId) {
       };
     }
 
-    // Update appointment status (no payment record created yet)
-    // Payment will be created by Stripe webhook after customer pays
-    await prisma.appointment.update({
-      where: { id: appointmentId },
-      data: { status: "CONFIRMED" },
+    // ── Update status + create notification atomically ──────────────────────
+    // The status transition claim (updateMany gated on PENDING) and the
+    // notification creation are wrapped together in a single transaction so
+    // that if either step fails, neither is committed — this prevents a
+    // "confirmed but no notification ever shown to dashboard staff" scenario
+    // when the notif write transiently fails.
+    const claimed = await prisma.$transaction(async (tx) => {
+      const claim = await tx.appointment.updateMany({
+        where: { id: appointmentId, status: "PENDING" },
+        data: { status: "CONFIRMED" },
+      });
+      if (claim.count === 0) return false;
+
+      const serviceName = appointment.staffService?.service?.name;
+      const staffName = appointment.staffService?.staff?.user?.fullName;
+      const customerName = appointment.user?.fullName;
+
+      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
+
+      if (recipientUserIds.length > 0) {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildAppointmentConfirmedNotification({
+              userId: uid,
+              appointmentId: appointment.id,
+              date: appointment.date,
+              startTime: appointment.startTime,
+              serviceName,
+              staffName,
+              customerName,
+            })
+          ),
+          { tx }
+        );
+      }
+      return true;
     });
 
-    // Create notification
-    await prisma.notification.create({
-      data: {
-        userId: appointment.user.id,
-        appointmentId: appointment.id,
-        type: "APPOINTMENT_CONFIRMED",
-        title: "Réservation confirmée",
-        message: `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été confirmé`,
-        status: "PENDING",
-      },
-    });
+    if (!claimed) {
+      return {
+        success: false,
+        message: "Ce rendez-vous n'est pas en attente de confirmation",
+      };
+    }
 
     // Generate payment URL
     const paymentUrl = `${process.env.NEXT_PUBLIC_APP_URL}/appointment/${appointmentId}/payment`;
@@ -202,6 +234,12 @@ export async function rejectAppointment(appointmentId, reason = null) {
             email: true,
           },
         },
+        staffService: {
+          include: {
+            service: { select: { name: true } },
+            staff: { include: { user: { select: { fullName: true } } } },
+          },
+        },
         payment: { include: { invoice: true } },
       },
     });
@@ -231,18 +269,26 @@ export async function rejectAppointment(appointmentId, reason = null) {
         });
       }
 
-      await tx.notification.create({
-        data: {
-          userId: appointment.user.id,
-          appointmentId: appointment.id,
-          type: "APPOINTMENT_CANCELLED",
-          title: "Réservation annulée",
-          message: reason
-            ? `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé. Raison: ${reason}`
-            : `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR")} a été annulé`,
-          status: "PENDING",
-        },
-      });
+      const serviceName = appointment.staffService?.service?.name;
+      const customerName = appointment.user?.fullName;
+      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
+
+      if (recipientUserIds.length > 0) {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildAppointmentCancelledNotification({
+              userId: uid,
+              appointmentId: appointment.id,
+              date: appointment.date,
+              startTime: appointment.startTime,
+              serviceName,
+              reason,
+              customerName,
+            })
+          ),
+          { tx }
+        );
+      }
 
       return true;
     });

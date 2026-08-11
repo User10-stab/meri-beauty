@@ -19,6 +19,7 @@ import {
   Camera,
   Briefcase,
   Layers,
+  Hash,
 } from "lucide-react";
 import { createIndependentStaff } from "@/actions/staff/create-independent-staff";
 import { createStaffFromRental } from "@/actions/staff/create-staff-from-rental";
@@ -225,6 +226,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       languages:         [],
       yearsOfExperience: "",
       hireDate:          "",
+      vatNumber:         "",
       serviceIds:        [],
       contract: {
         fixedRent: "",
@@ -450,6 +452,21 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                   />
                   <FieldError message={errors.hireDate?.message} />
                 </div>
+              </div>
+
+              {/* VAT Number */}
+              <div>
+                <Label htmlFor="vatNumber" icon={Hash} required>
+                  Numéro de TVA
+                </Label>
+                <TextInput
+                  id="vatNumber"
+                  type="text"
+                  placeholder="ex. BE0123456789"
+                  error={errors.vatNumber}
+                  {...register("vatNumber")}
+                />
+                <FieldError message={errors.vatNumber?.message} />
               </div>
             </div>
           </div>

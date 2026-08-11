@@ -135,6 +135,26 @@ export function PieChart(props) {
   );
 }
 
+export function StarIcon(props) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={24}
+      height={24}
+      viewBox="0 0 24 24"
+      fill="none"
+      {...props}
+    >
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M12 1.25a.75.75 0 01.67.41l2.678 5.074a.75.75 0 01.33.083l5.66.823a.75.75 0 01-.414 1.36l-5.066 2.49a.75.75 0 01-.693.037l-1.898-4.774-1.898 4.774a.75.75 0 01-.693-.037l-5.066-2.49a.75.75 0 01-.414-1.36l5.66-.823a.75.75 0 01.33-.083L11.33 1.66a.75.75 0 01.67-.41zM12 4.86l-1.71 3.253 3.884-.591a.75.75 0 01-.434.69l-.363 4.497 3.498-1.729a.75.75 0 01.664 0l3.884 1.729-.363-4.497a.75.75 0 01-.434-.69l3.884.591L13.71 4.86z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 export function FourCircle(props) {
   return (
     <svg width={24} height={24} viewBox="0 0 24 24" fill="none" {...props}>

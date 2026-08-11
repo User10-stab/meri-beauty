@@ -73,6 +73,8 @@ export default function BecomePartner() {
     startDate: "",
     endDate: "",
     commissionType: "percentage",
+    specialty: "",
+    vatNumber: "",
     message: "",
   });
 
@@ -80,16 +82,41 @@ export default function BecomePartner() {
   const [submitStatus, setSubmitStatus] = useState({ type: null, message: "" });
   const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
+  
+  // Fetch user's VAT number from their profile
+  useEffect(() => {
+    if (sessionStatus === "authenticated" && session?.user?.id) {
+      fetchUserVatNumber(session.user.id);
+    }
+  }, [sessionStatus, session?.user?.id]);
+  
+  async function fetchUserVatNumber(userId) {
+    try {
+      const response = await fetch(`/api/users/${userId}`);
+      if (response.ok) {
+        const userData = await response.json();
+        setFormData(prev => ({ ...prev, vatNumber: userData.vatNumber || "" }));
+      }
+    } catch (error) {
+      console.error("Error fetching user VAT number:", error);
+    }
+  }
 
   // ── Auto-submit pending rental request after authentication ──────────────
   useEffect(() => {
     if (sessionStatus !== "authenticated") return;
 
-    const pending = sessionStorage.getItem("pendingRentalRequest");
+    // Prefer sessionStorage (same-tab), fall back to localStorage (cross-tab,
+    // e.g. verification email opened in a new tab then user signs in there).
+    const pending =
+      sessionStorage.getItem("pendingRentalRequest") ||
+      localStorage.getItem("pendingRentalRequest");
     if (!pending) return;
 
-    // Clear immediately to prevent re-submission on re-renders
+    // Clear immediately from both stores to prevent re-submission on re-renders
     sessionStorage.removeItem("pendingRentalRequest");
+    localStorage.removeItem("pendingRentalRequest");
+    localStorage.removeItem("pendingRentalReturnUrl");
 
     let pendingData;
     try {
@@ -110,6 +137,8 @@ export default function BecomePartner() {
           rentalType,
           commissionType: "FIXED",
           startDate: pendingData.startDate,
+          specialty: pendingData.specialty || undefined,
+          vatNumber: pendingData.vatNumber || undefined,
           message: pendingData.message || undefined,
         };
 
@@ -165,10 +194,15 @@ export default function BecomePartner() {
 
     // If the user is not authenticated, save form data and redirect to auth
     if (sessionStatus !== "authenticated") {
-      sessionStorage.setItem(
-        "pendingRentalRequest",
-        JSON.stringify(formData)
-      );
+      // Save to both sessionStorage (same-tab fast path) and localStorage
+      // (cross-tab fallback for when the email verification link is opened
+      // in a different tab/window and the user is then redirected to login).
+      const serialized = JSON.stringify(formData);
+      sessionStorage.setItem("pendingRentalRequest", serialized);
+      localStorage.setItem("pendingRentalRequest", serialized);
+      // Store the return URL separately so verify-email-form can build the
+      // correct "Sign In" link even without knowing the full form payload.
+      localStorage.setItem("pendingRentalReturnUrl", window.location.href);
       signIn(undefined, { callbackUrl: window.location.href });
       return;
     }
@@ -195,6 +229,8 @@ export default function BecomePartner() {
         rentalType,
         commissionType: "FIXED",
         startDate: formData.startDate,
+        specialty: formData.specialty || undefined,
+        vatNumber: formData.vatNumber || undefined,
         message: formData.message || undefined,
       };
 
@@ -250,6 +286,10 @@ export default function BecomePartner() {
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSpecialtyChange = (e) => {
+    setFormData({ ...formData, specialty: e.target.value });
   };
 
   return (
@@ -419,34 +459,49 @@ export default function BecomePartner() {
                 </div>
               </div>
 
-              {/* Commission type */}
-              {/* <div>
-                <label
-                  htmlFor="commissionType"
-                  className="mb-1.5 block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
-                >
-                  Type de commission
-                </label>
-                <div className="relative">
-                  <select
-                    id="commissionType"
-                    name="commissionType"
-                    required
-                    value={formData.commissionType}
-                    onChange={handleChange}
-                    className="w-full appearance-none rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
+              <div className="grid grid-cols-2 gap-3">
+                 {/* Specialty */}
+                <div className="grid grid-rows-2 ">
+                  <label
+                    htmlFor="specialty"
+                    className="block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                   >
-                    <option value="percentage">Pourcentage</option>
-                    <option value="fixed">Loyer fixe mensuel</option>
-                    <option value="hybrid">Formule hybride</option>
-                  </select>
-                  <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-ink/30">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
-                      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
+                    Spécialité
+                  </label>
+                  <input
+                    type="text"
+                    id="specialty"
+                    name="specialty"
+                    required
+                    placeholder="ex. Coiffure, Esthétique, Onglerie..."
+                    value={formData.specialty}
+                    onChange={handleSpecialtyChange}
+                    className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
+                  />
                 </div>
-              </div> */}
+
+                {/* VAT Number */}
+                <div className="grid grid-rows-2 ">
+                  <label
+                    htmlFor="vatNumber"
+                    className="block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
+                  >
+                    Numéro de TVA <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="vatNumber"
+                    name="vatNumber"
+                    required
+                    placeholder="ex. BE0123456789"
+                    value={formData.vatNumber}
+                    onChange={handleChange}
+                    className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
+                  />
+                </div>
+              </div>
+
+             
 
               {/* Message */}
               <div>

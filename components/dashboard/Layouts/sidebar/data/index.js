@@ -137,6 +137,13 @@ const ALL_NAV_DATA = [
         roles: DASHBOARD_PERMISSIONS.RENTAL_REQUESTS, // Admin only
       },
       {
+        title: "Avis clients",
+        url: "/dashboard/reviews",
+        icon: Icons.StarIcon,
+        items: [],
+        roles: DASHBOARD_PERMISSIONS.REVIEWS, // Admin only
+      },
+      {
         title: "Rapports",
         url: "/dashboard/reports",
         icon: Icons.PieChart,

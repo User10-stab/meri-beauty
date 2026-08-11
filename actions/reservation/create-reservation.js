@@ -10,12 +10,21 @@ import {
   paymentConfirmationEmail,
   welcomeWithCredentialsEmail,
   multiReservationConfirmationEmail,
+  staffReservationCreatedEmail,
 } from "@/lib/email-templates";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
 import { resolvePromoCode } from "@/actions/promo-codes";
 import { isAdminRole } from "@/lib/authorization";
 import { buildAppointmentWindow, findConflictingAppointment } from "@/lib/appointment-scheduling";
+import {
+  createNotification,
+  createNotificationsBulk,
+  buildAppointmentCreatedNotification,
+  buildAppointmentConfirmedNotification,
+  getAppointmentNotificationRecipients,
+  getAppointmentEmailRecipients,
+} from "@/lib/notifications";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -267,9 +276,11 @@ export async function createReservation(data) {
         service: true,
         staff: {
           select: {
+            id: true,
             reservationConfirmationMode: true,
             depositEnabled: true,
             depositPercentage: true,
+            allowedPaymentMethods: true,
             user: { select: { fullName: true } },
           },
         },
@@ -329,6 +340,136 @@ export async function createReservation(data) {
       discountAmount = promoResult.discountAmount;
     }
 
+    // CASH_ONLY override: no online payment flows apply.
+    // Appointment status depends ONLY on reservationConfirmationMode.
+    if (staffService.staff?.allowedPaymentMethods === "CASH_ONLY") {
+      const mode = String(staffService.staff?.reservationConfirmationMode ?? "MANUAL").toUpperCase();
+      const effectiveIsManualMode = Boolean(isManualMode || mode === "MANUAL");
+
+      const appointmentStatus = effectiveIsManualMode ? "PENDING" : "CONFIRMED";
+
+      const { appointment } = await prisma.$transaction(async (tx) => {
+        const appointment = await tx.appointment.create({
+          data: {
+            userId: user.id,
+            staffServiceId,
+            staffId: staffService.staffId,
+            date: appointmentDate,
+            startTime,
+            endTime,
+            status: appointmentStatus,
+            notes: notes || null,
+          },
+        });
+
+        return { appointment };
+      });
+
+      // Notifications (outside transaction - business operation already committed)
+      const staffName = staffService.staff?.user?.fullName ?? "votre experte";
+      const serviceName = staffService.service?.name ?? "votre service";
+      const customerName = user.fullName;
+      const recipientUserIds = await getAppointmentNotificationRecipients(staffService.staff?.id);
+
+      const buildFn = appointmentStatus === "CONFIRMED"
+        ? buildAppointmentConfirmedNotification
+        : buildAppointmentCreatedNotification;
+
+      if (recipientUserIds.length > 0) {
+        const inputs = recipientUserIds.map((uid) =>
+          buildFn({
+            userId: uid,
+            appointmentId: appointment.id,
+            date: appointmentDate,
+            startTime,
+            serviceName,
+            staffName,
+            customerName,
+          })
+        );
+
+        try {
+          await createNotificationsBulk(inputs);
+        } catch (err) {
+          // Notification failure must never block reservation creation.
+          if (err?.message === "VALIDATION_ERROR") {
+            console.error("[createReservation] notification validation error:", err.fieldErrors);
+          } else {
+            console.error("[createReservation] notifications failed:", err);
+          }
+        }
+      }
+
+      // Email logic below expects these variables
+      const payment = null;
+      const totalAmount = rawTotalAmount;
+
+      // 8. Send emails: manual-mode → reservationReceivedEmail; automatic → paymentConfirmationEmail (ON_SITE)
+      // We reuse the existing code below by continuing with effectiveIsManualMode.
+      // (We keep the rest of the function unchanged, aside from using these locals.)
+
+      // Send email to assigned staff member and admin/owner users
+      const emailRecipients = await getAppointmentEmailRecipients(staffService.staff?.id);
+      for (const recipient of emailRecipients) {
+        await sendEmail({
+          to: recipient.email,
+          ...staffReservationCreatedEmail({
+            staffName: recipient.fullName,
+            customerName: user.fullName,
+            serviceName,
+            date: appointmentDate,
+            time,
+          }),
+        }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+      }
+
+      if (effectiveIsManualMode) {
+        await sendEmail({
+          to: user.email,
+          ...reservationReceivedEmail({
+            customerName: user.fullName,
+            serviceName,
+            staffName,
+            date: appointmentDate,
+            time,
+          }),
+        }).catch((err) => console.error("[createReservation] reservation received email failed:", err));
+      } else {
+        await sendEmail({
+          to: user.email,
+          ...paymentConfirmationEmail({
+            customerName: user.fullName,
+            serviceName,
+            staffName,
+            date: appointmentDate,
+            time,
+            paidAmount: 0,
+            totalAmount,
+            paymentMethod: "ON_SITE",
+          }),
+        }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
+      }
+
+      await sendWelcomeEmailIfNew({ user, isNewUser, temporaryPassword }, "[createReservation]");
+
+      return {
+        success: true,
+        message: effectiveIsManualMode ? "Demande de réservation envoyée" : "Réservation créée avec succès",
+        data: {
+          appointment,
+          payment,
+          user: {
+            id: user.id,
+            fullName: user.fullName,
+            email: user.email,
+          },
+          isNewUser,
+          newUserCredentials: isNewUser ? { email: user.email, password: temporaryPassword } : null,
+          autologinToken: generateAutologinToken(user.email),
+        },
+      };
+    }
+
     const paymentDecision = getReservationPaymentDecision({
       appointmentCount: 1,
       confirmationMode: isManualMode ? "MANUAL" : staffService.staff?.reservationConfirmationMode ?? "MANUAL",
@@ -379,10 +520,43 @@ export async function createReservation(data) {
       return { appointment, payment };
     });
 
-    // ── 8. Send emails (fire-and-forget — never block the reservation) ───────
+    // ── 7b. Appointment notification (outside transaction - business operation already committed) ──
+    // Notifications are not allowed to break reservation creation.
     const staffName = staffService.staff?.user?.fullName ?? "votre experte";
     const serviceName = staffService.service?.name ?? "votre service";
+    const customerName = user.fullName;
 
+    const recipientUserIds = await getAppointmentNotificationRecipients(staffService.staff?.id);
+
+    const buildFn = appointmentStatus === "CONFIRMED"
+      ? buildAppointmentConfirmedNotification
+      : buildAppointmentCreatedNotification;
+
+    if (recipientUserIds.length > 0) {
+      try {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildFn({
+              userId: uid,
+              appointmentId: appointment.id,
+              date: appointmentDate,
+              startTime,
+              serviceName,
+              staffName,
+              customerName,
+            })
+          )
+        );
+      } catch (err) {
+        if (err?.message === "VALIDATION_ERROR") {
+          console.error("[createReservation] notification validation error:", err.fieldErrors);
+        } else {
+          console.error("[createReservation] notifications failed:", err);
+        }
+      }
+    }
+
+    // ── 8. Send emails (fire-and-forget — never block the reservation) ───────
     // 8a. Reservation confirmation — sent to all customers
     if (effectiveIsManualMode) {
       // Manual mode: "reservation received, pending staff review" email
@@ -415,7 +589,22 @@ export async function createReservation(data) {
       }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
     }
 
-    // 8b. Welcome email with credentials — only for brand-new accounts
+    // 8b. Send email to assigned staff member and admin/owner users
+    const emailRecipients = await getAppointmentEmailRecipients(staffService.staffId);
+    for (const recipient of emailRecipients) {
+      await sendEmail({
+        to: recipient.email,
+        ...staffReservationCreatedEmail({
+          staffName: recipient.fullName,
+          customerName: user.fullName,
+          serviceName,
+          date: appointmentDate,
+          time,
+        }),
+      }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+    }
+
+    // 8c. Welcome email with credentials — only for brand-new accounts
     await sendWelcomeEmailIfNew({ user, isNewUser, temporaryPassword }, "[createReservation]");
 
     // ── 9. Return result ─────────────────────────────────────────────────────
@@ -473,7 +662,19 @@ export async function confirmPayment(paymentId, transactionReference = null) {
 
     const payment = await prisma.payment.findUnique({
       where: { id: paymentId },
-      include: { appointment: true },
+      include: {
+        appointment: {
+          include: {
+            staffService: {
+              include: {
+                service: { select: { name: true } },
+                staff: { include: { user: { select: { fullName: true } } } },
+              },
+            },
+            user: { select: { fullName: true } },
+          },
+        },
+      },
     });
 
     if (!payment || !payment.appointment) {
@@ -531,16 +732,30 @@ export async function confirmPayment(paymentId, transactionReference = null) {
         data: { status: "CONFIRMED" },
       });
 
-      await tx.notification.create({
-        data: {
-          userId: payment.appointment.userId,
-          appointmentId: payment.appointmentId,
-          type: "APPOINTMENT_CONFIRMED",
-          title: "Réservation confirmée",
-          message: "Votre réservation a été confirmée avec succès",
-          status: "PENDING",
-        },
-      });
+      // Payment + appointment status just transitioned to CONFIRMED/PAID —
+      // emit APPOINTMENT_CONFIRMED alongside the business records so all three
+      // commit or roll back together.
+      const serviceName = payment.appointment.staffService?.service?.name;
+      const staffName = payment.appointment.staffService?.staff?.user?.fullName;
+      const customerName = payment.appointment.user?.fullName;
+      const recipientUserIds = await getAppointmentNotificationRecipients(payment.appointment.staffId, { tx });
+
+      if (recipientUserIds.length > 0) {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildAppointmentConfirmedNotification({
+              userId: uid,
+              appointmentId: payment.appointmentId,
+              date: payment.appointment.date,
+              startTime: payment.appointment.startTime,
+              serviceName,
+              staffName,
+              customerName,
+            })
+          ),
+          { tx }
+        );
+      }
     });
 
     // NOTE: `paymentConfirmationEmail` is imported but was never sent anywhere
@@ -609,7 +824,8 @@ export async function createMultipleReservations(data) {
             service: true,
             staff: {
               select: {
-                user: { select: { fullName: true } },
+                id: true,
+                user: { select: { fullName: true, email: true } },
               },
             },
           },
@@ -661,10 +877,13 @@ export async function createMultipleReservations(data) {
     }
 
     // ── 6. Create all appointments atomically ─────────────────────────────
-    const createdAppointments = await prisma.$transaction(
-      appointments.map(({ staffServiceId }, i) => {
+    const createdAppointments = await prisma.$transaction(async (tx) => {
+      /** @type {any[]} */
+      const created = [];
+      for (let i = 0; i < appointments.length; i++) {
+        const { staffServiceId } = appointments[i];
         const { appointmentDate, startTime, endTime } = timeWindows[i];
-        return prisma.appointment.create({
+        const appt = await tx.appointment.create({
           data: {
             userId: user.id,
             staffServiceId,
@@ -676,8 +895,47 @@ export async function createMultipleReservations(data) {
             notes: notes || null,
           },
         });
-      })
-    );
+        created.push(appt);
+      }
+      return created;
+    });
+
+    // ── 6b. Send notifications for all appointments (outside transaction - business operation already committed) ──
+    for (let i = 0; i < createdAppointments.length; i++) {
+      const appt = createdAppointments[i];
+      const { appointmentDate, startTime, endTime } = timeWindows[i];
+      const serviceName = staffServices[i].service?.name;
+      const staffName = staffServices[i].staff?.user?.fullName;
+      const customerName = user.fullName;
+      const time = appointments[i].time;
+      const staffId = staffServices[i].staff?.id;
+
+      const recipientUserIds = await getAppointmentNotificationRecipients(staffId);
+
+      if (recipientUserIds.length > 0) {
+        try {
+          await createNotificationsBulk(
+            recipientUserIds.map((uid) =>
+              buildAppointmentCreatedNotification({
+                userId: uid,
+                appointmentId: appt.id,
+                date: appointmentDate,
+                startTime: time,
+                serviceName,
+                staffName,
+                customerName,
+              })
+            )
+          );
+        } catch (err) {
+          if (err?.message === "VALIDATION_ERROR") {
+            console.error("[createReservation] notification validation error:", err.fieldErrors);
+          } else {
+            console.error("[createReservation] notifications failed:", err);
+          }
+        }
+      }
+    }
 
     // ── 7. Send multi-reservation confirmation email (fire-and-forget) ────
     const totalAmount = staffServices.reduce((sum, ss) => sum + Number(ss.price ?? 0), 0);
@@ -697,7 +955,30 @@ export async function createMultipleReservations(data) {
       }),
     }).catch((err) => console.error("[createMultipleReservations] confirmation email failed:", err));
 
-    // 7b. Welcome email for brand-new accounts
+    // 7b. Send email to staff members and admin/owner users for each appointment
+    for (let i = 0; i < createdAppointments.length; i++) {
+      const appt = createdAppointments[i];
+      const staffId = staffServices[i].staff?.id;
+      const serviceName = staffServices[i].service?.name ?? "—";
+      const time = appointments[i].time;
+      const appointmentDate = timeWindows[i].appointmentDate;
+
+      const emailRecipients = await getAppointmentEmailRecipients(staffId);
+      for (const recipient of emailRecipients) {
+        await sendEmail({
+          to: recipient.email,
+          ...staffReservationCreatedEmail({
+            staffName: recipient.fullName,
+            customerName: user.fullName,
+            serviceName,
+            date: appointmentDate,
+            time,
+          }),
+        }).catch((err) => console.error("[createMultipleReservations] dashboard email failed:", err));
+      }
+    }
+
+    // 7c. Welcome email for brand-new accounts
     await sendWelcomeEmailIfNew({ user, isNewUser, temporaryPassword }, "[createMultipleReservations]");
 
     // ── 8. Return result ──────────────────────────────────────────────────

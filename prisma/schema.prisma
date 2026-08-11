@@ -558,9 +558,6 @@ model User {
   emailVerified        Boolean   @default(false)
   isActive             Boolean   @default(true)
   lastLogin            DateTime?
-  // Bumped whenever this user's password changes (reset or self-service) so
-  // the JWT session callback can detect and invalidate stale sessions issued
-  // before the change — see auth.js#jwt.
   sessionVersion       Int       @default(0)
   newsletterSubscribed Boolean   @default(false)
   vatNumber            String? // Client TVA number for B2B invoices
@@ -588,6 +585,9 @@ model User {
   orders                         Order[]                @relation("OrderBuyer")
   pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
+
+  @@index([role])
+  @@index([isActive, isDeleted])
 }
 
 // CATEGORY — services only. Retail products use ProductCategory.
@@ -1041,7 +1041,7 @@ model Staff {
   yearsOfExperience Int
   isDeleted         Boolean   @default(false)
   deletedAt         DateTime?
-  vatNumber         String?   @unique
+  vatNumber         String   @unique
 
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
@@ -1117,11 +1117,6 @@ model Appointment {
   staffServiceId String
   staffService   StaffService @relation(fields: [staffServiceId], references: [id])
 
-  // Denormalized copy of staffService.staffId, set at creation time. Exists
-  // so the DB-level no-overlap exclusion constraint can key on the actual
-  // staff member instead of staffServiceId — a staff member offering
-  // multiple services would otherwise not be protected by the constraint
-  // against being double-booked across two different services at once.
   staffId String
   staff   Staff  @relation(fields: [staffId], references: [id])
 
@@ -1145,11 +1140,6 @@ model Appointment {
   @@index([isDeleted, status, startTime]) // dashboard filters
 }
 
-// PAYMENT
-// Polymorphic: exactly one of appointmentId / orderId / workshopReservationId
-// / formationReservationId is set, enforced by a raw-SQL CHECK constraint
-// added after the migration (see prisma/migrations/*/migration.sql for
-// "Payment_exactly_one_source") — Prisma has no schema-level XOR.
 model Payment {
   id                     String                @id @default(cuid())
   appointmentId          String?               @unique
@@ -1169,21 +1159,7 @@ model Payment {
   paidAt                 DateTime?
   isDeleted              Boolean               @default(false)
   deletedAt              DateTime?
-  // @unique is safe on a nullable column in Postgres — NULLs are never
-  // considered duplicates of each other, so ON_SITE/cash payments (which
-  // never set this) are unaffected. This turns the webhook's idempotency
-  // check from a race-prone findFirst-then-create into a real DB guarantee:
-  // a second concurrent insert with the same session id throws P2002 instead
-  // of silently succeeding and double-fulfilling.
   transactionReference   String?               @unique
-
-  // Recorded here rather than on each of the 4 source models (Order,
-  // WorkshopReservation, FormationReservation, Appointment) — Payment is
-  // the one row every flow already creates, and Appointment in particular
-  // has no price field of its own to sit a discount next to (it's derived
-  // from StaffService.price at booking time). `totalAmount` above is
-  // already the post-discount figure; this is purely for reporting which
-  // code was used and how much it took off.
   promoCodeId    String?
   promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
   discountAmount Decimal    @default(0) @db.Decimal(10, 2)
@@ -1316,6 +1292,8 @@ model Transaction {
   createdAt               DateTime          @default(now())
   isDeleted               Boolean           @default(false)
   deletedAt               DateTime?
+
+  @@index([paymentId])
 }
 
 // CONTRACT
@@ -1376,6 +1354,8 @@ model Review {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 // NOTIFICATION
@@ -1393,8 +1373,14 @@ model Notification {
   message String
 
   status    NotificationStatus
+  isRead    Boolean @default(false)
+  actionUrl String?
   sentAt    DateTime?
   createdAt DateTime           @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([userId, isRead])
 }
 
 // NEWSLETTER
@@ -1444,7 +1430,7 @@ model RentalRequest {
   status         RentalRequestStatus
   message        String?
   ownerResponse  String?
-  specialty      String?
+  specialty      String
   isDeleted      Boolean             @default(false)
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())

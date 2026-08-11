@@ -8,6 +8,7 @@ import {
   workshopSessionChangeEmail,
   workshopSeatsChangeEmail,
   formationReservationConfirmationEmail,
+  staffPaymentFailedEmail,
 } from "@/lib/email-templates";
 import { fulfillOrderPayment } from "@/actions/boutique/orders";
 import { issueInvoice } from "@/lib/invoicing";
@@ -15,6 +16,13 @@ import { renderInvoicePdf } from "@/lib/pdf/render";
 import { sendLowSeatsBroadcast } from "@/actions/workshops/notify-low-seats";
 import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
 import { sendFormationLowSeatsBroadcast } from "@/actions/formations/notify-low-seats";
+import {
+  createNotificationsBulk,
+  buildAppointmentConfirmedNotification,
+  buildAppointmentCancelledNotification,
+  getAppointmentNotificationRecipients,
+  getAppointmentEmailRecipients,
+} from "@/lib/notifications";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -289,8 +297,19 @@ async function processAppointmentCheckoutSession(session) {
     const existingPayment = await tx.payment.findUnique({
       where: { id: paymentId },
       include: {
-        appointment: { include: { staffService: { include: { staff: true } } } },
+        appointment: {
+          include: {
+            user: { select: { fullName: true } },
+            staffService: {
+              include: {
+                service: { select: { name: true } },
+                staff: { include: { user: { select: { fullName: true } } },
+              },
+            },
+          },
+        },
       },
+    }
     });
 
     if (!existingPayment || !existingPayment.appointment) {
@@ -348,6 +367,34 @@ async function processAppointmentCheckoutSession(session) {
       },
     });
 
+    // ── Notification for dashboard users ───────────────────────────────────
+    // AUTOMATIC: appointment just became CONFIRMED → emit APPOINTMENT_CONFIRMED.
+    // MANUAL: appointment stays PENDING (paid but waiting on salon OK) → no
+    // new notif; the "APPOINTMENT_CREATED" one already exists for this event.
+    if (nextAppointmentStatus === "CONFIRMED") {
+      const serviceName = appointment.staffService?.service?.name;
+      const staffName = appointment.staffService?.staff?.user?.fullName;
+      const customerName = appointment.user?.fullName;
+      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
+
+      if (recipientUserIds.length > 0) {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildAppointmentConfirmedNotification({
+              userId: uid,
+              appointmentId: appointment.id,
+              date: appointment.date,
+              startTime: appointment.startTime,
+              serviceName,
+              staffName,
+              customerName,
+            })
+          ),
+          { tx }
+        );
+      }
+    }
+
     return {
       processed: true,
       appointment,
@@ -403,7 +450,27 @@ async function handlePaymentIntentFailed(paymentIntent) {
 
   const transaction = await prisma.transaction.findFirst({
     where: { stripePaymentIntentId: paymentIntentId },
-    include: { payment: { include: { appointment: true } } },
+    include: {
+      payment: {
+        include: {
+          appointment: {
+            include: {
+              user: { select: { fullName: true } },
+              staffService: {
+                include: {
+                  service: { select: { name: true } },
+                  staff: {
+                    include: {
+                      user: { select: { fullName: true, email: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   });
 
   if (!transaction?.payment?.appointment) {
@@ -412,9 +479,57 @@ async function handlePaymentIntentFailed(paymentIntent) {
   }
 
   const payment = transaction.payment;
+  const appointment = payment.appointment;
 
-  await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
-  await prisma.appointment.update({ where: { id: payment.appointmentId }, data: { status: "CANCELLED" } });
+  // Atomic: payment FAILED + appointment CANCELLED commit together
+  await prisma.$transaction(async (tx) => {
+    await tx.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    await tx.appointment.update({ where: { id: payment.appointmentId }, data: { status: "CANCELLED" } });
+  });
+
+  // Dashboard notifications (outside transaction - business operation already committed)
+  const serviceName = appointment.staffService?.service?.name;
+  const customerName = appointment.user?.fullName;
+  const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId);
+
+  if (recipientUserIds.length > 0) {
+    try {
+      await createNotificationsBulk(
+        recipientUserIds.map((uid) =>
+          buildAppointmentCancelledNotification({
+            userId: uid,
+            appointmentId: appointment.id,
+            date: appointment.date,
+            startTime: appointment.startTime,
+            serviceName,
+            reason: "Paiement échoué",
+            customerName,
+          })
+        )
+      );
+    } catch (err) {
+      if (err?.message === "VALIDATION_ERROR") {
+        console.error("[stripe-webhook] notification validation error:", err.fieldErrors);
+      } else {
+        console.error("[stripe-webhook] notifications failed:", err);
+      }
+    }
+  }
+
+  // Send email to assigned staff member and admin/owner users about payment failure
+  const emailRecipients = await getAppointmentEmailRecipients(appointment.staffId);
+  for (const recipient of emailRecipients) {
+    await sendEmail({
+      to: recipient.email,
+      ...staffPaymentFailedEmail({
+        staffName: recipient.fullName,
+        customerName: appointment.user?.fullName,
+        serviceName: appointment.staffService?.service?.name,
+        date: appointment.date,
+        time: appointment.startTime ? appointment.startTime.toTimeString().slice(0, 5) : "",
+      }),
+    }).catch((err) => console.error("[stripe-webhook] dashboard payment failed email error:", err));
+  }
 
   console.info(`[stripe-webhook] Payment failed for payment intent ${paymentIntentId}`, {
     paymentId: payment.id,

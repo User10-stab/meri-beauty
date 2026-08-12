@@ -218,6 +218,9 @@ function ReservationAtelierContent() {
       const result = await joinWaitingList({
         sessionId,
         customerInfo: { ...form, seatsRequested: seats },
+        // Re-checked and recorded server-side — the guard above is only a
+        // courtesy message, the action is a public endpoint.
+        termsAccepted: acceptedTerms,
       });
 
       if (result.success) {
@@ -227,7 +230,13 @@ function ReservationAtelierContent() {
             password: result.temporaryPassword,
           }));
         }
-        setWlSuccess({ position: result.position });
+        setWlSuccess({
+          position: result.position,
+          seatsRequested: result.seatsRequested ?? seats,
+          // Submitting twice must not read as a second, separate signup.
+          alreadyOnList: Boolean(result.alreadyOnList),
+          email: result.email,
+        });
       } else {
         if (result.field) {
           setFieldErrors({ [result.field]: result.message });
@@ -351,21 +360,74 @@ function ReservationAtelierContent() {
 
         {/* Waiting list success state */}
         {wlSuccess ? (
-          <div className="rounded-2xl border border-emerald-200 bg-white p-8 text-center shadow-sm space-y-4">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-              <Bell size={28} />
+          <div className="rounded-2xl border border-emerald-200 bg-white p-8 shadow-sm space-y-5">
+            <div className="text-center space-y-3">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                <Bell size={28} />
+              </div>
+              <h2 className="text-xl font-bold text-ink">
+                {wlSuccess.alreadyOnList
+                  ? "Vous étiez déjà sur la liste d'attente"
+                  : "Vous êtes inscrit(e) sur la liste d'attente !"}
+              </h2>
+              <p className="text-sm text-ink/70 max-w-md mx-auto">
+                {wlSuccess.alreadyOnList
+                  ? "Votre inscription précédente est toujours active — rien n'a été ajouté en double."
+                  : "Nous vous avons envoyé un email de confirmation."}
+              </p>
             </div>
-            <h2 className="text-xl font-bold text-ink">Vous êtes inscrit(e) sur la liste d&apos;attente !</h2>
-            <p className="text-sm text-ink/70 max-w-md mx-auto">
-              Vous êtes en <strong className="text-gold font-bold">position #{wlSuccess.position}</strong> sur la liste d&apos;attente.
-              Dès qu&apos;une place se libère, un email sera envoyé à toutes les personnes inscrites. La place sera attribuée à la première personne qui finalise sa réservation — soyez rapide !
-            </p>
-            <div className="pt-4 flex justify-center gap-4">
+
+            <div className="mx-auto max-w-md rounded-xl border border-ink/8 bg-cream/40 p-4 text-sm">
+              <div className="flex items-center justify-between border-b border-ink/8 pb-2.5">
+                <span className="text-ink/60">Votre position</span>
+                <strong className="text-lg font-bold text-gold">#{wlSuccess.position}</strong>
+              </div>
+              <div className="flex items-center justify-between pt-2.5">
+                <span className="text-ink/60">Places demandées</span>
+                <strong className="text-ink">{wlSuccess.seatsRequested}</strong>
+              </div>
+            </div>
+
+            {/* The mechanism is deliberately spelled out: a place is not
+                reserved, and the notification email goes to everyone at once.
+                Someone expecting "I'm #2 so I get the second free place" would
+                otherwise feel cheated when a #5 books faster. */}
+            <div className="mx-auto max-w-md space-y-2.5 text-sm text-ink/70">
+              <p className="font-semibold text-ink">Ce qui se passe maintenant</p>
+              <ul className="space-y-2">
+                <li className="flex gap-2.5">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+                  <span>Aucun paiement ne vous est demandé pour l&apos;instant, et aucune place n&apos;est bloquée à votre nom.</span>
+                </li>
+                <li className="flex gap-2.5">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+                  <span>Dès qu&apos;une place se libère, un email part <strong className="font-semibold text-ink">en même temps</strong> à toutes les personnes inscrites.</span>
+                </li>
+                <li className="flex gap-2.5">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+                  <span>La place revient à la première personne qui finalise sa réservation et règle l&apos;acompte — votre position n&apos;est pas une priorité garantie.</span>
+                </li>
+                <li className="flex gap-2.5">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-gold" />
+                  <span>Pour vous désinscrire, écrivez-nous à{" "}
+                    <a href="mailto:contact@meribeautystudio.com" className="underline hover:text-gold">contact@meribeautystudio.com</a>.
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="pt-2 flex flex-wrap justify-center gap-3">
               <Link
                 href="/evenements"
                 className="rounded-full bg-gold px-6 py-2.5 text-sm font-semibold text-white shadow hover:bg-gold/90"
               >
                 Découvrir d&apos;autres activités
+              </Link>
+              <Link
+                href="/mon-compte"
+                className="rounded-full border border-ink/15 px-6 py-2.5 text-sm font-semibold text-ink transition-colors hover:border-gold/40 hover:text-gold"
+              >
+                Mon compte
               </Link>
             </div>
           </div>
@@ -373,6 +435,28 @@ function ReservationAtelierContent() {
           <div className="grid grid-cols-1 gap-8 lg:grid-cols-5">
             {/* Form */}
             <form onSubmit={handleSubmit} className="lg:col-span-3 space-y-6">
+              {/* Waiting-list explainer. Nothing on this page previously said
+                  what joining actually does, so someone filling in the same
+                  fields as a real booking could reasonably think they were
+                  booking a place — and be charged nothing, then hear nothing. */}
+              {showWaitingListForm && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-5">
+                  <div className="flex items-start gap-3">
+                    <Bell size={18} className="mt-0.5 shrink-0 text-amber-600" />
+                    <div className="space-y-2 text-sm text-amber-900/80">
+                      <p className="font-semibold text-amber-900">
+                        Cette session est complète — vous rejoignez la liste d&apos;attente
+                      </p>
+                      <p>
+                        Vous ne payez rien maintenant et aucune place n&apos;est bloquée à votre nom.
+                        Si une place se libère, un email part en même temps à toutes les personnes
+                        inscrites : elle revient à la première qui finalise sa réservation.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Seats selection */}
               <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
                 <h2 className="mb-4 text-sm font-semibold text-ink">Nombre de places</h2>

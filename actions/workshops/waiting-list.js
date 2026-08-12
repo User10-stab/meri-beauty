@@ -7,6 +7,11 @@ import { sendEmail } from "@/lib/email";
 import { welcomeWithCredentialsEmail, waitingListJoinConfirmationEmail } from "@/lib/email-templates";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
+import {
+  TERMS_CONSENT_REQUIRED_MESSAGE,
+  buildTermsAcceptanceUpdate,
+  recordTermsAcceptance,
+} from "@/lib/terms-consent";
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
@@ -33,11 +38,19 @@ function generateTemporaryPassword() {
  * Join the waiting list for a workshop session.
  * Creates the user account if needed (same logic as reservation).
  */
-export async function joinWaitingList({ sessionId, customerInfo: submittedCustomerInfo }) {
+export async function joinWaitingList({ sessionId, customerInfo: submittedCustomerInfo, termsAccepted }) {
   try {
     let customerInfo = submittedCustomerInfo;
     if (!sessionId || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
+    }
+
+    // The form's CGV checkbox was client-side only. Joining creates a real
+    // account and a real place in the queue, so the consent has to be
+    // re-established here — this is a public POST endpoint like every
+    // "use server" export.
+    if (termsAccepted !== true) {
+      return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
     }
 
     const customerValidation = validateCustomerIdentity(customerInfo);
@@ -93,6 +106,7 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
           password: hashedPassword,
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
+          ...buildTermsAcceptanceUpdate(),
         },
       });
 
@@ -109,42 +123,66 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
       sendEmail({ to: email, ...emailTemplate }).catch(() => {});
     }
 
-    // Check if already on waiting list for this session
-    const existing = await prisma.waitingListEntry.findFirst({
-      where: {
-        sessionId,
-        customerId: user.id,
-        status: { in: ["WAITING", "NOTIFIED"] },
-      },
+    // Returning customer, or an account predating consent tracking.
+    await recordTermsAcceptance(prisma, user.id);
+
+    const seatsRequested = customerInfo.seatsRequested ?? 1;
+
+    // Serialised per session. The "already on the list?" check and the
+    // position calculation below are read-then-write: two submissions racing
+    // each other (a double-click, or the same person on two devices) both read
+    // no existing entry and both read the same highest position, producing two
+    // rows for one customer and two people shown the same "position #3".
+    // There is no unique constraint on the table to fall back on — the entry
+    // is deliberately soft-statused rather than deleted — so the lock is the
+    // guard. Transaction-scoped, so it always releases even if this crashes.
+    const { entry, position, alreadyOnList } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`meri-waiting-list-${sessionId}`}))`;
+
+      const existing = await tx.waitingListEntry.findFirst({
+        where: {
+          sessionId,
+          customerId: user.id,
+          status: { in: ["WAITING", "NOTIFIED"] },
+        },
+      });
+
+      if (existing) {
+        return { entry: existing, position: existing.position, alreadyOnList: true };
+      }
+
+      const lastEntry = await tx.waitingListEntry.findFirst({
+        where: { sessionId },
+        orderBy: { position: "desc" },
+      });
+      const nextPosition = (lastEntry?.position ?? 0) + 1;
+
+      const created = await tx.waitingListEntry.create({
+        data: {
+          sessionId,
+          customerId: user.id,
+          seatsRequested,
+          position: nextPosition,
+          status: "WAITING",
+        },
+      });
+
+      return { entry: created, position: nextPosition, alreadyOnList: false };
     });
 
-    if (existing) {
+    // Nothing new happened — don't send a second confirmation email for a
+    // place they already hold.
+    if (alreadyOnList) {
       return {
         success: true,
-        position: existing.position,
-        entryId: existing.id,
+        alreadyOnList: true,
+        position,
+        entryId: entry.id,
+        seatsRequested: entry.seatsRequested,
+        email,
         message: "Vous êtes déjà inscrit(e) sur la liste d'attente pour cette session.",
       };
     }
-
-    // Calculate next position
-    const lastEntry = await prisma.waitingListEntry.findFirst({
-      where: { sessionId },
-      orderBy: { position: "desc" },
-    });
-    const nextPosition = (lastEntry?.position ?? 0) + 1;
-
-    // Create waiting list entry
-    const seatsRequested = customerInfo.seatsRequested ?? 1;
-    const entry = await prisma.waitingListEntry.create({
-      data: {
-        sessionId,
-        customerId: user.id,
-        seatsRequested,
-        position: nextPosition,
-        status: "WAITING",
-      },
-    });
 
     sendEmail({
       to: email,
@@ -152,15 +190,17 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
         customerName: customerInfo.fullName,
         activityTitle: session.workshop.title,
         sessionDate: formatSessionDate(session.startDate),
-        position: nextPosition,
+        position,
         seatsRequested,
       }),
     }).catch((err) => console.error("[joinWaitingList] confirmation email failed:", err));
 
     return {
       success: true,
-      position: nextPosition,
+      alreadyOnList: false,
+      position,
       entryId: entry.id,
+      seatsRequested,
       isNewUser,
       temporaryPassword,
       email,
@@ -176,43 +216,12 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
   }
 }
 
-/**
- * Check if a user is already on the waiting list for a session.
- */
-export async function checkWaitingListStatus(sessionId, customerEmail) {
-  try {
-    if (!sessionId || !customerEmail) return { success: true, data: null };
-
-    const user = await prisma.user.findUnique({
-      where: { email: customerEmail.trim().toLowerCase() },
-    });
-
-    if (!user) return { success: true, data: null };
-
-    const entry = await prisma.waitingListEntry.findFirst({
-      where: {
-        sessionId,
-        customerId: user.id,
-        status: { in: ["WAITING", "NOTIFIED"] },
-      },
-    });
-
-    if (!entry) return { success: true, data: null };
-
-    return {
-      success: true,
-      data: {
-        id: entry.id,
-        position: entry.position,
-        status: entry.status,
-        expiresAt: entry.expiresAt,
-      },
-    };
-  } catch (error) {
-    console.error("[checkWaitingListStatus]", error?.message || error);
-    return { success: false, data: null };
-  }
-}
+// checkWaitingListStatus(sessionId, email) used to live here. Nothing called
+// it, and as a "use server" export it was a public unauthenticated endpoint
+// that answered "is this email on the waiting list for this session?" about
+// any address a caller cared to try. joinWaitingList already reports an
+// existing entry back to the person who owns it (alreadyOnList), which is the
+// only place that answer was ever needed.
 
 /**
  * Validate a priority waiting list entry for reservation.

@@ -11,6 +11,7 @@ import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import {
   TERMS_CONSENT_REQUIRED_MESSAGE,
   buildTermsAcceptanceUpdate,
@@ -54,6 +55,13 @@ export async function createFormationReservationCheckoutSession(reservationId) {
     }
     if (reservation.holdExpiresAt && reservation.holdExpiresAt < new Date()) {
       return { success: false, message: "Le délai de réservation a expiré. Veuillez recommencer." };
+    }
+
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
+      };
     }
 
     const { session } = reservation;

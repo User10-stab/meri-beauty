@@ -3,7 +3,7 @@
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { resetPasswordSchema } from "@/lib/validations/reset-password";
-import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -20,14 +20,13 @@ export async function validateResetToken(rawToken) {
   // Rate-limit the bcrypt table-scan below (it compares against every
   // pending token) — without this, a caller could hammer this action to
   // burn CPU proportional to however many tokens are currently pending.
-  const ip = await getClientIp();
-  if (isRateLimited("validate-reset-token", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+  const ip = hashRateLimitValue(await getClientIp());
+  if (await consumeSharedRateLimit("validate-reset-token", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
       message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("validate-reset-token", ip);
 
   try {
     const allTokens = await prisma.passwordResetToken.findMany({
@@ -78,14 +77,13 @@ export async function resetPassword(input) {
     };
   }
 
-  const ip = await getClientIp();
-  if (isRateLimited("reset-password-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+  const ip = hashRateLimitValue(await getClientIp());
+  if (await consumeSharedRateLimit("reset-password-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
       message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("reset-password-submit", ip);
 
   try {
     const allTokens = await prisma.passwordResetToken.findMany({

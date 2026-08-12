@@ -716,6 +716,9 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
       message: hasBalanceDue ? "Rendez-vous terminé — solde encaissé et facturé." : "Rendez-vous marqué comme terminé.",
     };
   } catch (error) {
+    if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {
+      return { success: false, message: "Identité légale du salon incomplète — complétez Réglages > Salon avant d'émettre des factures." };
+    }
     console.error("[completeAppointment]", error);
     return { success: false, message: "Erreur lors de la finalisation du rendez-vous." };
   }

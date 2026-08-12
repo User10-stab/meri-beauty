@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { emailVerificationEmail } from "@/lib/email-templates";
 import { registerSchema } from "@/lib/validations/register";
-import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate } from "@/lib/terms-consent";
 import { verifyVatWithVies } from "@/lib/vat-validation";
@@ -82,14 +82,13 @@ export async function registerUser(input) {
   } = parsed.data;
 
   const ip = await getClientIp();
-  const rateLimitKey = `${email}:${ip}`;
-  if (isRateLimited("register", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+  const rateLimitKey = hashRateLimitValue(`${email}:${ip}`);
+  if (await consumeSharedRateLimit("register", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
       message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("register", rateLimitKey);
 
   // Invalid VAT still blocks signup. If VIES itself is unavailable, the
   // account can be created with the VAT number pending verification; tax

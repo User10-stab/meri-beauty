@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { emailVerificationEmail, welcomeWithCredentialsEmail } from "@/lib/email-templates";
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
-import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-verification";
 
 const BCRYPT_SALT_ROUNDS = 12;
@@ -81,14 +81,13 @@ export async function verifyEmail(rawToken) {
   // pending token) — without this, a caller could hammer this action to
   // burn CPU proportional to however many tokens are currently pending,
   // independent of whether their own token is even real.
-  const ip = await getClientIp();
-  if (isRateLimited("verify-email-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+  const ip = hashRateLimitValue(await getClientIp());
+  if (await consumeSharedRateLimit("verify-email-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
       message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("verify-email-submit", ip);
 
   try {
     const allTokens = await prisma.emailVerificationToken.findMany({
@@ -235,14 +234,13 @@ export async function resendVerificationEmail(input) {
   const { email } = parsed.data;
   const ip = await getClientIp();
 
-  const rateLimitKey = `${email}:${ip}`;
-  if (isRateLimited("verify-email", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+  const rateLimitKey = hashRateLimitValue(`${email}:${ip}`);
+  if (await consumeSharedRateLimit("verify-email", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
       message: "Trop de demandes. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("verify-email", rateLimitKey);
 
   try {
     const user = await prisma.user.findUnique({

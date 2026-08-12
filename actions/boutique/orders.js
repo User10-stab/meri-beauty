@@ -10,7 +10,7 @@ import { sendEmail } from "@/lib/email";
 import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema, closeShippedOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
-import { issueInvoice, issueCreditNote, buildInvoiceCustomer } from "@/lib/invoicing";
+import { issueInvoice, issueCreditNote, buildInvoiceCustomer, isSellerLegalDataComplete } from "@/lib/invoicing";
 import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
@@ -649,6 +649,13 @@ export async function createOrderCheckoutSession(orderId) {
     }
     if (order.expiresAt && order.expiresAt < new Date()) {
       return { success: false, message: "Le délai de paiement pour cette commande a expiré." };
+    }
+
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
+      };
     }
 
     // A 100%-off promo code can bring the total to exactly 0 — Stripe

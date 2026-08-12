@@ -60,8 +60,8 @@ export default function CGVPage() {
       <H3>Ateliers et formations</H3>
       <P>
         Vous réservez votre place en réglant un acompte de 50 % du prix total en ligne. Le solde
-        (50 % restants) est à régler avant la date de la session, selon les modalités indiquées
-        au moment de la réservation.
+        (50 % restants) est à régler sur place, le jour de la session, selon les modalités
+        indiquées au moment de la réservation.
       </P>
 
       <H2>5. Paiement</H2>

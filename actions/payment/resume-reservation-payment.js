@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
 
 /**
  * Creates a fresh Stripe Checkout Session for an existing pending payment.
@@ -112,6 +113,13 @@ export async function resumeReservationPayment(paymentId) {
       return {
         success: false,
         message: "Le compte Stripe de ce membre du staff n'est pas encore en mesure d'effectuer des virements. Veuillez réessayer ultérieurement.",
+      };
+    }
+
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
       };
     }
 

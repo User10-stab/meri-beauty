@@ -549,6 +549,9 @@ export async function completePointOfSaleSale(input) {
       },
     };
   } catch (error) {
+    if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {
+      return { success: false, message: "Identité légale du salon incomplète — complétez Réglages > Salon avant d'émettre des factures." };
+    }
     if (error.message === "POS_CHECKOUT_RETRY_WINDOW_EXPIRED") {
       return { success: false, message: "Cette tentative QR est trop ancienne. Annulez-la puis recommencez." };
     }

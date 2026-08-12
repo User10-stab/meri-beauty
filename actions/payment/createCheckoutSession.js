@@ -6,6 +6,7 @@ import bcrypt from "bcrypt";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { generateAutologinToken } from "@/lib/autologin";
 import { parseLocalDateString } from "@/lib/slot-availability";
 import {
@@ -218,6 +219,13 @@ export async function createCheckoutSession(reservationData) {
       return {
         success: false,
         message: "Le compte Stripe de ce membre du staff n'est pas encore en mesure d'effectuer des virements. Veuillez réessayer ultérieurement.",
+      };
+    }
+
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
       };
     }
 

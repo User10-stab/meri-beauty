@@ -6,7 +6,7 @@ import { AuthError } from "next-auth";
 import { DASHBOARD_ROLES } from "@/lib/authorization";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 
 // Deliberately looser than the email-verification/password-reset limiters —
 // those gate on a rare user action, this gates on every normal login. Wide
@@ -39,14 +39,13 @@ export async function loginUser(input) {
   const { email, password } = parsed.data;
 
   const ip = await getClientIp();
-  const rateLimitKey = `${email}:${ip}`;
-  if (isRateLimited("login", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_ATTEMPTS })) {
+  const rateLimitKey = hashRateLimitValue(`${email}:${ip}`);
+  if (await consumeSharedRateLimit("login", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_ATTEMPTS })) {
     return {
       success: false,
       message: "Trop de tentatives de connexion. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("login", rateLimitKey);
 
   try {
       const user = await prisma.user.findUnique({

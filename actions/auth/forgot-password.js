@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { passwordResetEmail } from "@/lib/email-templates";
 import { forgotPasswordSchema } from "@/lib/validations/forgot-password";
-import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
@@ -38,14 +38,13 @@ export async function forgotPassword(input) {
   const { email } = parsed.data;
   const ip = await getClientIp();
 
-  const rateLimitKey = `${email}:${ip}`;
-  if (isRateLimited("forgot-password", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+  const rateLimitKey = hashRateLimitValue(`${email}:${ip}`);
+  if (await consumeSharedRateLimit("forgot-password", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
       message: "Trop de demandes. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("forgot-password", rateLimitKey);
 
   try {
     const user = await prisma.user.findUnique({

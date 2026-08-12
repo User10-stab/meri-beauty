@@ -1,4 +1,4 @@
-import LegalPageLayout, { H2, P, Ul, Note } from "@/components/website/LegalPageLayout";
+import LegalPageLayout, { H2, P, Ul } from "@/components/website/LegalPageLayout";
 
 export const metadata = {
   title: "Mentions légales | Meri Beauty",
@@ -8,13 +8,7 @@ export const metadata = {
 
 export default function MentionsLegalesPage() {
   return (
-    <LegalPageLayout eyebrow="Informations légales" title="Mentions légales" updated="7 août 2026">
-      <Note>
-        Ce document est un projet rédigé à partir des informations transmises par l'exploitante
-        et des éléments techniques du site. Il doit être relu et validé — au besoin avec un
-        conseil juridique — avant publication définitive.
-      </Note>
-
+    <LegalPageLayout eyebrow="Informations légales" title="Mentions légales" updated="12 août 2026">
       <H2>1. Éditeur du site</H2>
       <P>
         Le site accessible à l'adresse meribeautystudio.com (le « Site ») est exploité par :
@@ -46,8 +40,8 @@ export default function MentionsLegalesPage() {
 
       <H2>3. Hébergement</H2>
       <P>
-        Le Site est hébergé par OVH SAS, 2 rue Kellermann, 59100 Roubaix, France. La base de
-        données est hébergée par Neon, Inc. Les
+        Le Site et sa base de données sont hébergés par OVH SAS, 2 rue Kellermann, 59100
+        Roubaix, France, sur des serveurs situés dans l'Union européenne. Les
         paiements en ligne sont traités par Stripe Payments Europe, Ltd. (voir la{" "}
         <a className="text-gold underline" href="/politique-de-confidentialite">Politique de confidentialité</a>{" "}
         pour le détail des sous-traitants).

@@ -9,7 +9,7 @@ export const metadata = {
 
 export default function CGVPage() {
   return (
-    <LegalPageLayout eyebrow="Avant de commander" title="Conditions générales de vente" updated="11 août 2026">
+    <LegalPageLayout eyebrow="Avant de commander" title="Conditions générales de vente" updated="12 août 2026">
       <H2>1. Champ d'application et identification du vendeur</H2>
       <P>
         Les présentes conditions générales de vente (« CGV ») régissent toute commande de
@@ -66,9 +66,10 @@ export default function CGVPage() {
 
       <H2>5. Paiement</H2>
       <P>
-        Les paiements en ligne sont traités de façon sécurisée par Stripe (carte bancaire,
-        Bancontact). Meri Beauty n'a à aucun moment accès à vos coordonnées bancaires complètes.
-        Certaines prestations peuvent être réglées directement au salon (espèces, carte).
+        Les paiements en ligne sont traités de façon sécurisée par Stripe et acceptés par carte
+        bancaire (Visa, Mastercard). Meri Beauty n'a à aucun moment accès à vos coordonnées
+        bancaires complètes. Au salon, les règlements sont acceptés en espèces ou par carte via
+        notre terminal de paiement.
       </P>
 
       <H2>6. Livraison et retrait (boutique)</H2>
@@ -103,9 +104,12 @@ export default function CGVPage() {
 
       <H2>8. Annulation et report des rendez-vous</H2>
       <P>
-        Toute demande d'annulation ou de report d'un rendez-vous se fait directement auprès du
-        salon, par téléphone ou email. Si Meri Beauty est à l'origine de l'annulation, toute
-        somme déjà versée (acompte ou solde) vous est intégralement remboursée.
+        Toute demande d'annulation ou de report d'un rendez-vous se fait depuis votre espace
+        client, rubrique{" "}
+        <Link className="text-gold underline" href="/mes-reservations">Mes réservations</Link>, ou
+        directement auprès du salon par téléphone ou email. Si Meri Beauty est à l'origine de
+        l'annulation, toute somme déjà versée (acompte ou solde) vous est intégralement
+        remboursée.
       </P>
 
       <H2>9. Ateliers et formations — conditions particulières</H2>
@@ -122,9 +126,13 @@ export default function CGVPage() {
       <P>
         À titre exceptionnel, et à sa seule discrétion, Meri Beauty peut accorder un
         remboursement en cas de force majeure dûment justifié (maladie grave, décès, etc.).
-        Cette exception n'est jamais automatique : contactez-nous directement par téléphone ou
-        email en exposant votre situation ; nous l'examinerons au cas par cas. Seul un membre
-        autorisé de l'équipe Meri Beauty peut valider et traiter ce remboursement.
+        Cette exception n'est jamais automatique : introduisez une demande motivée depuis votre
+        espace client, rubrique{" "}
+        <Link className="text-gold underline" href="/mon-compte">Mon compte</Link>, ou
+        contactez-nous par téléphone ou email en exposant votre situation. Nous l'examinerons au
+        cas par cas. Le dépôt d'une demande ne vaut ni annulation ni remboursement : seul un
+        membre autorisé de l'équipe Meri Beauty peut l'accepter et déclencher le remboursement,
+        et vous êtes informé(e) de la décision par email.
       </P>
       <P>
         Lorsqu'un remboursement est accordé, Meri Beauty émet, lorsque la réglementation l'exige,
@@ -176,7 +184,23 @@ export default function CGVPage() {
         dispositions impératives protectrices du consommateur.
       </P>
 
-      <H2>15. Modification des CGV</H2>
+      <H2>15. Avis clients publiés sur le Site</H2>
+      <P>
+        Les avis affichés sur le Site proviennent exclusivement de personnes ayant réservé et
+        effectivement bénéficié d'une prestation au salon : seul un rendez-vous marqué comme
+        terminé permet techniquement de déposer un avis, depuis l'espace client de la personne
+        concernée. Meri Beauty ne rédige, ne commande ni n'achète aucun avis, et n'en publie
+        aucun qui ne serait pas issu de ce processus.
+      </P>
+      <P>
+        Les avis sont affichés du plus récent au plus ancien, sans sélection ni tri fondés sur la
+        note attribuée. Seuls le prénom et l'initiale du nom de famille sont affichés. Meri
+        Beauty se réserve le droit de retirer un avis dont le contenu est illicite, injurieux,
+        diffamatoire, hors sujet ou attentatoire à la vie privée d'un tiers — jamais au seul
+        motif qu'il serait défavorable.
+      </P>
+
+      <H2>16. Modification des CGV</H2>
       <P>
         Meri Beauty se réserve le droit de modifier les présentes CGV à tout moment. Les CGV
         applicables sont celles en vigueur au moment de votre commande ou réservation.

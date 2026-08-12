@@ -1,65 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import { StarIcon } from "./icons";
 
-const REVIEWS = [
-  {
-    id: 1,
-    name: "Camille Renard",
-    service: "Coloration & Soin",
-    review:
-      "Une expérience inégalée ! Le soin est au-dessus et le personnel est très à l'écoute de tous les détails de la beauté.",
-    image: "/Images/clients/client-1.webp",
-    rating: 5,
-  },
-  {
-    id: 2,
-    name: "Emma S.",
-    service: "Bon Voyage",
-    review:
-      "Le meilleur salon que j'ai trouvé. Au-dessus et les professionnels talentueuses à vous mettre..",
-    image: "/Images/clients/client-2.webp",
-    rating: 5,
-  },
-  {
-    id: 3,
-    name: "Mejrem A.",
-    service: "Coiffure & Brushing",
-    review:
-      "La raison de revenir à 100% ! Accueil chaleureux et prestations de très haute qualité. Je recommande vraiment.",
-    image: "/Images/clients/client-3.webp",
-    rating: 5,
-  },
-  {
-    id: 4,
-    name: "Sophie Laurent",
-    service: "Soin du Visage",
-    review:
-      "Un havre de paix en plein centre-ville. Le soin du visage m'a laissée rayonnante pendant des jours entiers.",
-    image: "/Images/clients/client-4.webp",
-    rating: 5,
-  },
-  {
-    id: 5,
-    name: "Isabelle Moreau",
-    service: "Massage Bien-être",
-    review:
-      "Ambiance feutrée et personnel aux petits soins. Je repars à chaque fois ressourcée et détendue. Un vrai luxe.",
-    image: "/Images/clients/client-5.webp",
-    rating: 5,
-  },
-  {
-    id: 6,
-    name: "Nadia Osman",
-    service: "Manucure Premium",
-    review:
-      "Résultat parfait et tenu impeccable. Chaque détail est soigné avec soin — on se sent vraiment choyée.",
-    image: "/Images/clients/client-6.webp",
-    rating: 5,
-  },
-];
+/**
+ * Testimonials come from lib/reviews/get-public-reviews.js — real Review rows
+ * written by customers after a COMPLETED appointment. They used to be a
+ * hardcoded array of six invented 5-star quotes with stock portraits, which is
+ * a misleading commercial practice under Book VI of the Belgian Code de droit
+ * économique. Nothing renders until real reviews exist.
+ */
 
 function useInView(options = {}) {
   const ref = useRef(null);
@@ -95,24 +45,30 @@ function QuoteIcon({ className = "w-8 h-8" }) {
   );
 }
 
-export default function ClientReviews() {
+export default function ClientReviews({ reviews = [] }) {
   const [headerRef, headerInView] = useInView();
   const [carouselRef, carouselInView] = useInView();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const totalSlides = Math.ceil(REVIEWS.length / 3);
+  const totalSlides = Math.max(1, Math.ceil(reviews.length / 3));
   const intervalRef = useRef(null);
 
   const goTo = (index) => {
     setCurrentIndex(index);
   };
 
-  // Auto-slide
+  // Auto-slide. Pointless with a single slide, and the modulo would just keep
+  // resetting state on a timer for nothing.
   useEffect(() => {
+    if (totalSlides <= 1) return;
     intervalRef.current = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % totalSlides);
     }, 4500);
     return () => clearInterval(intervalRef.current);
   }, [totalSlides]);
+
+  // Hooks above run unconditionally; the guard sits below them. An empty
+  // section beats an invented one — on opening day there are no reviews yet.
+  if (reviews.length === 0) return null;
 
   return (
     <section className="relative w-full overflow-hidden bg-cream">
@@ -146,6 +102,14 @@ export default function ClientReviews() {
             Elles nous font{" "}
             <em className="font-light text-gold/80 not-italic">confiance.</em>
           </h2>
+
+          {/* Art. VI.99/2 CDE requires stating how reviews are verified as
+              genuine whenever a trader displays them. */}
+          <p className="mx-auto max-w-2xl text-[13px] leading-relaxed text-ink/50">
+            Tous les avis ci-dessous ont été rédigés depuis leur espace client par des
+            personnes ayant réellement effectué un rendez-vous au salon. Ils sont affichés
+            du plus récent au plus ancien, sans sélection sur la note.
+          </p>
         </div>
 
         {/* Carousel */}
@@ -166,7 +130,7 @@ export default function ClientReviews() {
                   key={slideIndex}
                   className="grid min-w-full grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3"
                 >
-                  {REVIEWS.slice(slideIndex * 3, slideIndex * 3 + 3).map(
+                  {reviews.slice(slideIndex * 3, slideIndex * 3 + 3).map(
                     (review) => (
                       <ReviewCard key={review.id} review={review} />
                     )
@@ -176,8 +140,8 @@ export default function ClientReviews() {
             </div>
           </div>
 
-          {/* Dots */}
-          <div className="mt-10 flex justify-center gap-2.5">
+          {/* Dots — nothing to navigate between with a single slide */}
+          <div className={`mt-10 flex justify-center gap-2.5 ${totalSlides <= 1 ? "hidden" : ""}`}>
             {Array.from({ length: totalSlides }).map((_, i) => (
               <button
                 key={i}
@@ -210,29 +174,30 @@ function ReviewCard({ review }) {
         "{review.review}"
       </p>
 
-      {/* Stars */}
-      <div className="flex gap-1">
-        {Array.from({ length: review.rating }).map((_, i) => (
-          <StarIcon key={i} className="h-3.5 w-3.5 text-gold" />
+      {/* Stars — always out of 5, so a 3-star review can't read as a 3-star max */}
+      <div className="flex gap-1" aria-label={`${review.rating} sur 5`}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <StarIcon
+            key={i}
+            aria-hidden="true"
+            className={`h-3.5 w-3.5 ${i < review.rating ? "text-gold" : "text-gold/20"}`}
+          />
         ))}
       </div>
 
-      {/* Author */}
+      {/* Author. Initials rather than a photo — the previous stock portraits
+          depicted people who were never customers here. */}
       <div className="flex items-center gap-3 border-t border-black/5 pt-4">
-        {/* Avatar */}
-        <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-full bg-cream">
-          <Image
-            src={review.image}
-            alt={review.name}
-            fill
-            className="object-cover object-top"
-          />
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-cream text-[13px] font-semibold text-gold">
+          {review.name.charAt(0).toUpperCase()}
         </div>
         <div>
           <p className="text-[14px] font-semibold text-ink">{review.name}</p>
-          <p className="text-[11px] font-medium uppercase tracking-[0.10em] text-gold">
-            {review.service}
-          </p>
+          {review.service ? (
+            <p className="text-[11px] font-medium uppercase tracking-[0.10em] text-gold">
+              {review.service}
+            </p>
+          ) : null}
         </div>
       </div>
 

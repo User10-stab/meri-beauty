@@ -1,4 +1,4 @@
-import LegalPageLayout, { H2, H3, P, Ul, Note } from "@/components/website/LegalPageLayout";
+import LegalPageLayout, { H2, H3, P, Ul } from "@/components/website/LegalPageLayout";
 
 export const metadata = {
   title: "Politique de confidentialité | Meri Beauty",
@@ -8,17 +8,11 @@ export const metadata = {
 
 export default function PolitiqueConfidentialitePage() {
   return (
-    <LegalPageLayout eyebrow="Vos données" title="Politique de confidentialité" updated="7 août 2026">
-      <Note>
-        Ce document est un projet à faire valider avant publication. Les sous-traitants listés
-        (Stripe, Resend, Neon, Mondial Relay) reflètent les outils réellement utilisés par le
-        site à ce jour — à réviser si un prestataire change.
-      </Note>
-
+    <LegalPageLayout eyebrow="Vos données" title="Politique de confidentialité" updated="12 août 2026">
       <H2>1. Responsable du traitement</H2>
       <P>
         Le responsable du traitement des données collectées via meribeautystudio.com (le
-        « Site ») est [Nom et prénom complets de la responsable — à compléter], exploitant Meri
+        « Site ») est Marie Mercier, exploitant Meri
         Beauty à titre personnel (BCE BE 0751.854.027), Rue Bonaventure 113, 1090 Jette,
         Belgique. Pour toute question relative à vos données, contactez :{" "}
         <a className="text-gold underline" href="mailto:contact@meribeautystudio.com">
@@ -36,6 +30,7 @@ export default function PolitiqueConfidentialitePage() {
         <li><strong>Paiement :</strong> les coordonnées bancaires ou de carte ne transitent jamais par nos serveurs — elles sont saisies directement sur la page sécurisée de Stripe, notre prestataire de paiement.</li>
         <li><strong>Newsletter :</strong> votre email, uniquement si vous cochez la case d'inscription.</li>
         <li><strong>Formulaire de contact :</strong> nom, email, message.</li>
+        <li><strong>Avis clients :</strong> la note et le commentaire que vous rédigez après un rendez-vous terminé (voir section 9).</li>
       </Ul>
 
       <H2>3. Pourquoi nous utilisons ces données</H2>
@@ -57,7 +52,7 @@ export default function PolitiqueConfidentialitePage() {
       <Ul>
         <li><strong>Stripe</strong> (Stripe Payments Europe, Ltd.) — traitement des paiements en ligne.</li>
         <li><strong>Resend</strong> — envoi des emails transactionnels (confirmations, factures, rappels).</li>
-        <li><strong>Neon</strong> — hébergement de la base de données.</li>
+        <li><strong>OVH</strong> (OVH SAS, France) — hébergement du site et de la base de données, sur des serveurs situés dans l'Union européenne.</li>
         <li><strong>Mondial Relay</strong> — livraison des commandes en point relais (dès activation de ce mode de livraison).</li>
       </Ul>
       <P>
@@ -71,6 +66,7 @@ export default function PolitiqueConfidentialitePage() {
         <li>Données de compte : conservées tant que votre compte est actif, puis supprimées ou anonymisées sur demande.</li>
         <li>Factures et notes de crédit : conservées 7 ans, conformément à l'obligation légale belge de conservation des documents comptables.</li>
         <li>Email de prospection (newsletter) : conservé jusqu'à votre désinscription.</li>
+        <li>Avis clients : conservés et affichés jusqu'à votre demande de retrait (voir section 9).</li>
         <li>Cookies techniques : voir durée indiquée à la section 7.</li>
       </Ul>
 
@@ -131,7 +127,23 @@ export default function PolitiqueConfidentialitePage() {
         justification requise de votre part.
       </P>
 
-      <H2>9. Sécurité</H2>
+      <H2>9. Avis publiés sur le Site</H2>
+      <P>
+        Lorsque vous déposez un avis depuis votre espace client après un rendez-vous terminé,
+        votre note, votre commentaire, la prestation concernée ainsi que votre prénom suivi de
+        l'initiale de votre nom de famille (par exemple « Camille R. ») peuvent être affichés
+        publiquement sur la page d'accueil du Site. Votre nom complet, votre email et vos
+        coordonnées ne sont jamais publiés — ils restent visibles uniquement de l'équipe Meri
+        Beauty dans son outil de gestion interne.
+      </P>
+      <P>
+        La publication repose sur notre intérêt légitime à présenter des retours authentiques.
+        Vous pouvez à tout moment demander le retrait de votre avis, sans justification, en
+        écrivant à{" "}
+        <a className="text-gold underline" href="mailto:contact@meribeautystudio.com">contact@meribeautystudio.com</a>.
+      </P>
+
+      <H2>10. Sécurité</H2>
       <P>
         Vos mots de passe sont stockés de manière chiffrée (jamais en clair). Les échanges avec
         le Site sont sécurisés par chiffrement TLS (HTTPS). L'accès aux outils de gestion interne
@@ -139,13 +151,13 @@ export default function PolitiqueConfidentialitePage() {
         PCI-DSS, le plus haut niveau de sécurité pour le traitement de données bancaires.
       </P>
 
-      <H2>10. Mineurs</H2>
+      <H2>11. Mineurs</H2>
       <P>
         Le Site s'adresse à un public majeur. Si vous êtes mineur(e), l'utilisation du Site et
         la réservation de prestations doivent se faire avec l'accord d'un parent ou tuteur légal.
       </P>
 
-      <H2>11. Modifications</H2>
+      <H2>12. Modifications</H2>
       <P>
         Cette politique peut être mise à jour pour refléter une évolution du Site ou de la
         réglementation. La date de dernière mise à jour figure en haut de cette page.

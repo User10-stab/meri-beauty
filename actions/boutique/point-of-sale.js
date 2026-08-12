@@ -7,9 +7,9 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, DASHBOARD_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
-import { issueInvoice } from "@/lib/invoicing";
-import { renderInvoicePdf } from "@/lib/pdf/render";
-import { formatUserAddress } from "@/lib/format-address";
+import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
+import { renderInvoicePdf, renderTicketPdf } from "@/lib/pdf/render";
+import { formatSalonAddress } from "@/lib/format-address";
 import { sendEmail } from "@/lib/email";
 import { captureError } from "@/lib/monitoring";
 import { BELGIUM_VAT_RATE, calculateVatTotals } from "@/lib/tax-policy";
@@ -35,6 +35,11 @@ function serializeCustomer(customer) {
     fullName: customer.fullName,
     email: customer.email,
     phone: customer.phone,
+    addressLine1: customer.addressLine1,
+    addressLine2: customer.addressLine2,
+    addressCity: customer.addressCity,
+    addressPostalCode: customer.addressPostalCode,
+    addressCountry: customer.addressCountry,
   };
 }
 
@@ -59,7 +64,7 @@ async function createOrRecoverPointOfSaleCheckout(order) {
       line_items: order.items.map((item) => ({
         price_data: {
           currency: "eur",
-          product_data: { name: `${item.productName} — ${item.variantName}` },
+          product_data: { name: item.variantName ? `${item.productName} — ${item.variantName}` : item.productName },
           unit_amount: Math.round(Number(item.unitPrice) * 100),
         },
         quantity: item.quantity,
@@ -105,7 +110,11 @@ export async function searchPointOfSaleCustomers(query) {
       },
       orderBy: { fullName: "asc" },
       take: 8,
-      select: { id: true, fullName: true, email: true, phone: true },
+      select: {
+        id: true, fullName: true, email: true, phone: true,
+        addressLine1: true, addressLine2: true, addressCity: true,
+        addressPostalCode: true, addressCountry: true,
+      },
     });
     return { success: true, data: customers.map(serializeCustomer) };
   } catch (error) {
@@ -176,10 +185,16 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: "Identifiant de tentative de caisse manquant. Rechargez la page." };
   }
   const isQrPayment = method === "CARD_QR";
+  // No account, no invoice — a simplified ticket is issued instead. The
+  // schema's refine already blocks this combined with CARD_QR (Stripe
+  // checkout needs a real customer_email), so isQrPayment is never true here.
+  const isWalkIn = requestedCustomer === null;
   const groupedItems = new Map();
   for (const item of items) {
+    if (item.type !== "PRODUCT") continue;
     groupedItems.set(item.variantId, (groupedItems.get(item.variantId) ?? 0) + item.quantity);
   }
+  const serviceLines = items.filter((item) => item.type === "SERVICE");
   const placeholderPassword = await bcrypt.hash(randomBytes(18).toString("base64url"), BCRYPT_SALT_ROUNDS);
 
   try {
@@ -211,25 +226,57 @@ export async function completePointOfSaleSale(input) {
     }
 
     const result = await prisma.$transaction(async (tx) => {
-      let customer = requestedCustomer.id
-        ? await tx.user.findFirst({ where: { id: requestedCustomer.id, role: "CUSTOMER", isDeleted: false } })
-        : await tx.user.findFirst({ where: { email: requestedCustomer.email, role: "CUSTOMER", isDeleted: false } });
+      const billingProfileInclude = {
+        billingProfile: {
+          select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+        },
+      };
+      let customer = null;
+      if (!isWalkIn) {
+        customer = requestedCustomer.id
+          ? await tx.user.findFirst({ where: { id: requestedCustomer.id, role: "CUSTOMER", isDeleted: false }, include: billingProfileInclude })
+          : await tx.user.findFirst({ where: { email: requestedCustomer.email, role: "CUSTOMER", isDeleted: false }, include: billingProfileInclude });
 
-      if (!customer) {
-        customer = await tx.user.create({
-          data: {
-            fullName: requestedCustomer.fullName,
-            email: requestedCustomer.email,
-            phone: requestedCustomer.phone || null,
-            password: placeholderPassword,
-            role: "CUSTOMER",
-            // A receipt is transactional, not marketing consent. The client
-            // can verify/create login credentials later through the normal
-            // account flow.
-            emailVerified: false,
-            newsletterSubscribed: false,
-          },
-        });
+        // Only require the address when the resolved customer doesn't already
+        // have one on file — a returning customer shouldn't have to re-enter
+        // their billing address on every counter sale. New/incomplete
+        // customers do need it: invoices are mandatory-address for every
+        // named-customer account (see lib/format-address.js) — a walk-in
+        // sale skips this entirely since it never creates an account.
+        const needsAddress = !customer?.addressLine1;
+        if (needsAddress && (!requestedCustomer.addressLine1 || !requestedCustomer.addressCity || !requestedCustomer.addressPostalCode)) {
+          throw new Error("POS_ADDRESS_REQUIRED");
+        }
+
+        const addressData = needsAddress
+          ? {
+              addressLine1: requestedCustomer.addressLine1,
+              addressLine2: requestedCustomer.addressLine2 || null,
+              addressCity: requestedCustomer.addressCity,
+              addressPostalCode: requestedCustomer.addressPostalCode,
+              addressCountry: requestedCustomer.addressCountry || "BE",
+            }
+          : {};
+
+        if (!customer) {
+          customer = await tx.user.create({
+            data: {
+              fullName: requestedCustomer.fullName,
+              email: requestedCustomer.email,
+              phone: requestedCustomer.phone || null,
+              password: placeholderPassword,
+              role: "CUSTOMER",
+              // A receipt is transactional, not marketing consent. The client
+              // can verify/create login credentials later through the normal
+              // account flow.
+              emailVerified: false,
+              newsletterSubscribed: false,
+              ...addressData,
+            },
+          });
+        } else if (needsAddress) {
+          customer = await tx.user.update({ where: { id: customer.id }, data: addressData });
+        }
       }
 
       const saleItems = [];
@@ -250,7 +297,9 @@ export async function completePointOfSaleSale(input) {
         saleItems.push({ ...variant, quantity, available });
       }
 
-      const subtotal = saleItems.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+      const productSubtotal = saleItems.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
+      const serviceSubtotal = serviceLines.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+      const subtotal = productSubtotal + serviceSubtotal;
       if (method === "CASH" && cashReceived < subtotal) {
         throw new Error("POS_CASH_INSUFFICIENT");
       }
@@ -258,7 +307,7 @@ export async function completePointOfSaleSale(input) {
       const taxTotals = calculateVatTotals(subtotal, BELGIUM_VAT_RATE);
       const order = await tx.order.create({
         data: {
-          userId: customer.id,
+          userId: customer?.id ?? null,
           fulfilmentMode: isQrPayment ? "PICKUP_PREPAID" : "PICKUP_ON_SITE",
           status: isQrPayment ? "PENDING_PAYMENT" : "COMPLETED",
           source: "POS",
@@ -272,20 +321,31 @@ export async function completePointOfSaleSale(input) {
           vatRate: BELGIUM_VAT_RATE,
           totalExclVat: taxTotals.totalExclVat,
           totalVat: taxTotals.vatAmount,
-          customerVatNumber: customer.vatNumber ?? null,
+          customerVatNumber: customer?.vatNumber ?? null,
           pickedUpAt: isQrPayment ? null : new Date(),
           pickedUpByStaffId: isQrPayment ? null : guard.session.user.id,
           expiresAt: isQrPayment ? new Date(Date.now() + (POS_CHECKOUT_SECONDS + 4 * 60) * 1000) : null,
-          notes: isQrPayment ? "Vente en magasin — paiement Stripe QR" : "Vente directe en magasin",
+          notes: isQrPayment
+            ? "Vente en magasin — paiement Stripe QR"
+            : isWalkIn
+            ? "Vente directe en magasin — client de passage"
+            : "Vente directe en magasin",
           items: {
-            create: saleItems.map((item) => ({
-              variantId: item.id,
-              productName: item.product.name,
-              variantName: item.name,
-              sku: item.sku,
-              unitPrice: item.price,
-              quantity: item.quantity,
-            })),
+            create: [
+              ...saleItems.map((item) => ({
+                variantId: item.id,
+                productName: item.product.name,
+                variantName: item.name,
+                sku: item.sku,
+                unitPrice: item.price,
+                quantity: item.quantity,
+              })),
+              ...serviceLines.map((item) => ({
+                productName: item.description,
+                unitPrice: item.unitPrice,
+                quantity: item.quantity,
+              })),
+            ],
           },
         },
         include: { items: true },
@@ -323,6 +383,11 @@ export async function completePointOfSaleSale(input) {
           paidAt: new Date(),
         },
       });
+      // Attached to whichever till session is currently open, if any — never
+      // blocks the sale if none is (see actions/dashboard/cash-sessions.js),
+      // just leaves it unassigned for manual reconciliation.
+      const openCashSession =
+        method === "CASH" ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } }) : null;
       await tx.transaction.create({
         data: {
           paymentId: payment.id,
@@ -335,21 +400,26 @@ export async function completePointOfSaleSale(input) {
           manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
           cashReceived: method === "CASH" ? cashReceived : null,
           changeGiven: method === "CASH" ? changeGiven : null,
+          cashSessionId: openCashSession?.id ?? null,
         },
       });
 
-      const invoice = await issueInvoice(tx, {
-        paymentId: payment.id,
-        source: "ORDER",
-        totalInclVat: subtotal,
-        customer: {
-          fullName: customer.fullName,
-          email: customer.email,
-          vatNumber: customer.vatNumber,
-          address: formatUserAddress(customer),
-        },
-        lines: saleItems.map((item) => ({ description: `${item.product.name} — ${item.name}`, quantity: item.quantity, unitPrice: Number(item.price) })),
-      });
+      // A walk-in sale has no customer identity for an Invoice's non-null
+      // customerName/customerEmail — a simplified ticket is rendered after
+      // the transaction instead (see renderTicketPdf below), from the order
+      // rows just created.
+      const invoice = isWalkIn
+        ? null
+        : await issueInvoice(tx, {
+            paymentId: payment.id,
+            source: "ORDER",
+            totalInclVat: subtotal,
+            customer: buildInvoiceCustomer(customer),
+            lines: [
+              ...saleItems.map((item) => ({ description: `${item.product.name} — ${item.name}`, quantity: item.quantity, unitPrice: Number(item.price) })),
+              ...serviceLines.map((item) => ({ description: item.description, quantity: item.quantity, unitPrice: item.unitPrice })),
+            ],
+          });
 
       for (const item of saleItems) {
         const updated = await tx.productVariant.update({
@@ -380,7 +450,7 @@ export async function completePointOfSaleSale(input) {
           after: { status: "COMPLETED", totalAmount: subtotal, paymentMethod: method },
           metadata: {
             orderNumber: order.orderNumber,
-            customerId: customer.id,
+            customerId: customer?.id ?? null,
             itemCount: saleItems.length,
             ...(method === "EXTERNAL_TERMINAL" ? { terminalReference: terminalReference.trim() } : {}),
           },
@@ -405,6 +475,42 @@ export async function completePointOfSaleSale(input) {
           checkoutUrl: checkout.session.url,
           sessionId: checkout.session.id,
           completed: checkout.paid,
+        },
+      };
+    }
+
+    if (isWalkIn) {
+      // No email to send it to — the ticket is handed back to the cashier
+      // to print/download instead of being attached to a receipt e-mail.
+      const salon = await prisma.salon.findUnique({
+        where: { id: "main-salon" },
+        select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
+      });
+      const ticketPdf = await renderTicketPdf({
+        orderNumber: result.order.orderNumber,
+        issuedAt: result.order.createdAt,
+        sellerName: salon?.legalName || "Meri Beauty",
+        sellerAddress: formatSalonAddress(salon),
+        sellerVatNumber: salon?.vatNumber ?? null,
+        subtotalExclVat: result.order.totalExclVat,
+        vatRate: result.order.vatRate,
+        vatAmount: result.order.totalVat,
+        totalInclVat: result.order.totalAmount,
+        lines: result.order.items.map((item) => ({ description: item.productName, quantity: item.quantity, unitPrice: Number(item.unitPrice) })),
+      }).catch((error) => {
+        captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "ticket-pdf" });
+        return null;
+      });
+
+      revalidatePath("/dashboard/boutique/orders");
+      revalidatePath("/dashboard/boutique/stock");
+      return {
+        success: true,
+        data: {
+          orderId: result.order.id,
+          orderNumber: result.order.orderNumber,
+          walkIn: true,
+          ticketPdfBase64: ticketPdf ? ticketPdf.toString("base64") : null,
         },
       };
     }
@@ -452,6 +558,13 @@ export async function completePointOfSaleSale(input) {
     }
     if (error.message === "POS_CASH_INSUFFICIENT") {
       return { success: false, message: "Le montant reçu est inférieur au total de la vente." };
+    }
+    if (error.message === "POS_ADDRESS_REQUIRED") {
+      return {
+        success: false,
+        message: "L'adresse de facturation est obligatoire pour ce client.",
+        errors: { addressLine1: "Obligatoire", addressCity: "Obligatoire", addressPostalCode: "Obligatoire" },
+      };
     }
     if (error.code === "P2002" && error.meta?.target?.includes?.("posAttemptKey")) {
       const order = await prisma.order.findUnique({

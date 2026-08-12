@@ -10,6 +10,7 @@ import { isAdminRole } from "@/lib/authorization";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-workshop-reservation";
 import { issueCreditNote } from "@/lib/invoicing";
+import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 
 const CANCELLATION_CUTOFF_HOURS = 48;
 const SESSION_CHANGE_FEE_RATE = 0.1; // 10% of the reservation's total price
@@ -127,8 +128,12 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       if (remaining <= REFUND_EPSILON) {
         await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
       } else {
+        // Pinned in the same transaction as the credit note — see
+        // lib/payments/pin-pending-refund.js's doc comment for why this has
+        // to happen before the Stripe call below, not just in its catch.
+        const refundIdempotencyKey = buildRefundIdempotencyKey("workshop-cancel", payment.id);
         await prisma.$transaction(async (tx) => {
-          await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
+          await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey);
           if (payment.invoice) {
             await issueCreditNote(tx, {
               invoiceId: payment.invoice.id,
@@ -145,18 +150,18 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
               typeof checkoutSession.payment_intent === "string"
                 ? checkoutSession.payment_intent
                 : checkoutSession.payment_intent.id;
-            await stripe.refunds.create({
-              payment_intent: stripePaymentIntentId,
-              amount: Math.round(remaining * 100),
-              metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
-            });
+            await stripe.refunds.create(
+              {
+                payment_intent: stripePaymentIntentId,
+                amount: Math.round(remaining * 100),
+                metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
+              },
+              { idempotencyKey: refundIdempotencyKey }
+            );
 
             const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
             await prisma.$transaction([
-              prisma.payment.update({
-                where: { id: payment.id },
-                data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
-              }),
+              clearPendingRefund(prisma, payment.id, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED"),
               prisma.transaction.updateMany({
                 where: {
                   paymentId: payment.id,
@@ -181,21 +186,13 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
         } catch (err) {
           // The reservation is already cancelled and the credit note already
           // issued — that stays. But don't let the customer email below claim
-          // a refund that didn't happen; surface this to staff instead, AND
-          // persist it durably so the cron retry job
-          // (lib/payments/retry-failed-refunds.js) can pick it up even if
-          // this email is missed.
+          // a refund that didn't happen; surface this to staff instead.
+          // pendingRefundAmount/idempotencyKey are left set (not cleared) so
+          // the cron retry job (lib/payments/retry-failed-refunds.js) can
+          // pick it up even if this email is missed.
           console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
           refundFailed = true;
-          await prisma.payment.update({
-            where: { id: payment.id },
-            data: {
-              status: "REFUND_FAILED",
-              refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
-              refundAttemptedAt: new Date(),
-              refundRetryCount: { increment: 1 },
-            },
-          });
+          await markRefundFailed(prisma, payment.id, err);
         }
       }
     }

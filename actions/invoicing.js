@@ -21,6 +21,7 @@ function serializeInvoice(invoice) {
     issuedAt: invoice.issuedAt,
     customerName: invoice.customerName,
     customerEmail: invoice.customerEmail,
+    customerType: invoice.customerType,
     totalInclVat: Number(invoice.totalInclVat),
     creditNotes: (invoice.creditNotes ?? []).map((cn) => ({
       id: cn.id,

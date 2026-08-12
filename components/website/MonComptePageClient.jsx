@@ -140,7 +140,7 @@ function OrderCard({ order }) {
       <ul className="mt-4 space-y-1 border-t border-ink/8 pt-3 text-[13px] text-ink/65">
         {order.items.map((item, i) => (
           <li key={i} className="flex justify-between gap-3">
-            <span className="min-w-0 truncate">{item.productName} — {item.variantName} × {item.quantity}</span>
+            <span className="min-w-0 truncate">{item.productName}{item.variantName ? ` — ${item.variantName}` : ""} × {item.quantity}</span>
             <span className="shrink-0 font-medium text-ink">{formatPrice(item.unitPrice * item.quantity)}</span>
           </li>
         ))}

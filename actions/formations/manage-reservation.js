@@ -9,6 +9,7 @@ import { isAdminRole } from "@/lib/authorization";
 import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting-list";
 import { stripe } from "@/lib/stripe";
 import { issueCreditNote } from "@/lib/invoicing";
+import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 
 function formatSessionDate(date) {
   return new Date(date).toLocaleDateString("fr-FR", {
@@ -92,8 +93,12 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       const remainingRefund = Math.max(0, Number(payment.paidAmount) - alreadyRefunded);
 
       if (remainingRefund > 0.01) {
+        // Pinned in the same transaction as the credit note — see
+        // lib/payments/pin-pending-refund.js's doc comment for why this has
+        // to happen before the Stripe call below, not just in its catch.
+        const refundIdempotencyKey = buildRefundIdempotencyKey("formation-cancel", payment.id);
         await prisma.$transaction(async (tx) => {
-          await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
+          await pinPendingRefund(tx, payment.id, remainingRefund, refundIdempotencyKey);
           if (payment.invoice) {
             await issueCreditNote(tx, {
               invoiceId: payment.invoice.id,
@@ -110,13 +115,16 @@ export async function cancelFormationReservation(reservationId, { reason, refund
             typeof checkoutSession.payment_intent === "string"
               ? checkoutSession.payment_intent
               : checkoutSession.payment_intent.id;
-          await stripe.refunds.create({
-            payment_intent: stripePaymentIntentId,
-            amount: Math.round(remainingRefund * 100),
-            metadata: { kind: "formation_admin_exception", reservationId, adminUserId: session.user.id },
-          });
+          await stripe.refunds.create(
+            {
+              payment_intent: stripePaymentIntentId,
+              amount: Math.round(remainingRefund * 100),
+              metadata: { kind: "formation_admin_exception", reservationId, adminUserId: session.user.id },
+            },
+            { idempotencyKey: refundIdempotencyKey }
+          );
           await prisma.$transaction([
-            prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } }),
+            clearPendingRefund(prisma, payment.id, "REFUNDED"),
             prisma.transaction.updateMany({
               where: {
                 paymentId: payment.id,
@@ -138,16 +146,11 @@ export async function cancelFormationReservation(reservationId, { reason, refund
             }),
           ]);
         } catch (error) {
+          // pendingRefundAmount/idempotencyKey are left set (not cleared) so
+          // the cron retry job (lib/payments/retry-failed-refunds.js) can
+          // pick this up.
           refundFailed = true;
-          await prisma.payment.update({
-            where: { id: payment.id },
-            data: {
-              status: "REFUND_FAILED",
-              refundFailureReason: error?.message?.slice(0, 500) ?? "Erreur inconnue",
-              refundAttemptedAt: new Date(),
-              refundRetryCount: { increment: 1 },
-            },
-          });
+          await markRefundFailed(prisma, payment.id, error);
         }
       }
     }

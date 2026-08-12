@@ -15,9 +15,10 @@ import {
   FileText,
   CheckCircle,
   XCircle,
+  UserX,
   Loader2,
 } from "lucide-react";
-import { confirmAppointment, rejectAppointment, completeAppointment } from "@/actions/appointment/manage-appointment";
+import { confirmAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
 import { getStaffColor } from "./staffColors";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -208,6 +209,24 @@ export function AppointmentDrawer({
       const result = await rejectAppointment(appointment.id, reason);
       if (result.success) {
         setFeedback({ type: "success", message: "Rendez-vous annulé." });
+        onAppointmentUpdated();
+      } else {
+        setFeedback({ type: "error", message: result.message ?? "Erreur." });
+      }
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function handleNoShow() {
+    if (!appointment?.id || isPending) return;
+    if (!window.confirm("Marquer ce rendez-vous comme absence ? Aucun remboursement ne sera émis.")) return;
+    setIsPending(true);
+    setFeedback(null);
+    try {
+      const result = await markAppointmentNoShow(appointment.id);
+      if (result.success) {
+        setFeedback({ type: "success", message: result.message ?? "Rendez-vous marqué absent." });
         onAppointmentUpdated();
       } else {
         setFeedback({ type: "error", message: result.message ?? "Erreur." });
@@ -480,6 +499,15 @@ export function AppointmentDrawer({
                 >
                   {isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle size={15} />}
                   Terminer
+                </button>
+                <button
+                  onClick={handleNoShow}
+                  disabled={isPending}
+                  title="Aucun remboursement ne sera émis"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-400"
+                >
+                  <UserX size={15} />
+                  Marquer absente
                 </button>
                 <button
                   onClick={handleCancel}

@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { billingProfileSchema } from "@/lib/validations/billing-profile";
 
 export async function getMySettings() {
   const session = await auth();
@@ -22,11 +23,71 @@ export async function getMySettings() {
       addressCity: true,
       addressPostalCode: true,
       addressCountry: true,
+      isCompany: true,
+      billingProfile: {
+        select: {
+          companyLegalName: true,
+          companyRegistrationNo: true,
+          companyLegalForm: true,
+          billingContactName: true,
+          purchaseOrderReference: true,
+        },
+      },
     },
   });
   if (!user) return { success: false, message: "Utilisateur introuvable." };
 
   return { success: true, data: user };
+}
+
+/**
+ * Lets a company customer (isCompany) set/update their B2B legal identity —
+ * companyLegalName presence is what makes issueInvoice() emit a B2B invoice
+ * instead of B2C (see lib/invoicing.js). No password confirmation, same
+ * reasoning as updateMyVatNumber()/updateMyAddress().
+ */
+export async function updateMyBillingProfile(input) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return { success: false, message: "Vous devez être connecté(e)." };
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { isCompany: true } });
+  if (!user?.isCompany) {
+    return { success: false, message: "Cette section est réservée aux comptes entreprise." };
+  }
+
+  const parsed = billingProfileSchema.safeParse(input);
+  if (!parsed.success) {
+    const fe = parsed.error.flatten().fieldErrors;
+    return {
+      success: false,
+      message: "Veuillez corriger les erreurs.",
+      errors: Object.fromEntries(Object.entries(fe).map(([k, v]) => [k, v?.[0] ?? null])),
+    };
+  }
+
+  const data = {
+    companyLegalName: parsed.data.companyLegalName,
+    companyRegistrationNo: parsed.data.companyRegistrationNo || null,
+    companyLegalForm: parsed.data.companyLegalForm || null,
+    billingContactName: parsed.data.billingContactName || null,
+    purchaseOrderReference: parsed.data.purchaseOrderReference || null,
+  };
+
+  try {
+    await prisma.billingProfile.upsert({
+      where: { userId: session.user.id },
+      update: data,
+      create: { userId: session.user.id, ...data },
+    });
+
+    revalidatePath("/profile");
+    return { success: true, message: "Identité de facturation enregistrée." };
+  } catch (error) {
+    console.error("[updateMyBillingProfile]", error);
+    return { success: false, message: "Une erreur est survenue." };
+  }
 }
 
 /**

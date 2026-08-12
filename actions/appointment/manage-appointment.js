@@ -7,13 +7,15 @@ import { ROLES, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
 import { reservationConfirmedWithPaymentLinkEmail } from "@/lib/email-templates";
-import { issueCreditNote, issueInvoice } from "@/lib/invoicing";
+import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
+import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
+import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { renderInvoicePdf } from "@/lib/pdf/render";
-import { formatUserAddress } from "@/lib/format-address";
 import {
   createNotificationsBulk,
   buildAppointmentConfirmedNotification,
   buildAppointmentCancelledNotification,
+  buildAppointmentNoShowNotification,
   getAppointmentNotificationRecipients,
 } from "@/lib/notifications";
 
@@ -272,6 +274,20 @@ export async function rejectAppointment(appointmentId, reason = null) {
       }
     }
 
+    // Without an auto-close job (see lib/appointments/notify-unsettled-appointments.js
+    // for why one doesn't exist), a CONFIRMED appointment can otherwise stay
+    // cancellable-with-full-refund indefinitely — even months after the
+    // fact. Past this point a no-show should go through markAppointmentNoShow
+    // (no refund) or a manual reconciliation, not an automatic Stripe refund
+    // for a rendez-vous nobody remembers the outcome of.
+    const STALE_CANCELLATION_GUARD_DAYS = 7;
+    if (wasPaid && appointment.endTime && Date.now() - appointment.endTime.getTime() > STALE_CANCELLATION_GUARD_DAYS * 24 * 60 * 60 * 1000) {
+      return {
+        success: false,
+        message: `Ce rendez-vous date de plus de ${STALE_CANCELLATION_GUARD_DAYS} jours — utilisez « Marquer absente » ou une régularisation manuelle plutôt qu'une annulation avec remboursement automatique.`,
+      };
+    }
+
     // Cap against what's actually still outstanding — a prior partial refund
     // (e.g. issued manually from the Stripe Dashboard, reconciled here via
     // the charge.refunded webhook) can already have refunded part of this
@@ -290,6 +306,30 @@ export async function rejectAppointment(appointmentId, reason = null) {
       remaining = Number(payment.paidAmount) - alreadyRefunded;
     }
 
+    // A late cancellation (inside the 48h window a customer can no longer
+    // self-cancel through, so it's processed here instead, e.g. by phone)
+    // withholds a configurable share of a deposit-type payment. Default
+    // depositForfeitPercentage is 0 — today's exact "always fully refunded"
+    // behaviour — so this is a no-op until a staff member's percentage is
+    // explicitly set above zero. Only applies to deposit payments, not a
+    // full/balance payment, and never to a no-show (see markAppointmentNoShow,
+    // which withholds everything by design and doesn't go through here).
+    let forfeitAmount = 0;
+    if (wasPaid && payment.paymentType === "DEPOSIT" && isWithinCancellationWindow(appointment.startTime)) {
+      const forfeitPercentage = Number(appointment.staffService?.staff?.depositForfeitPercentage ?? 0);
+      if (forfeitPercentage > 0) {
+        forfeitAmount = Math.round(remaining * (forfeitPercentage / 100) * 100) / 100;
+        remaining = Math.round((remaining - forfeitAmount) * 100) / 100;
+      }
+    }
+
+    const needsRefund = wasPaid && payment.transactionReference && remaining > REFUND_EPSILON;
+    const refundIdempotencyKey = needsRefund ? buildRefundIdempotencyKey("appt-reject", payment.id) : null;
+    const cancellationReasonWithForfeit =
+      forfeitAmount > REFUND_EPSILON
+        ? `${cancellationReason} (acompte retenu : ${forfeitAmount.toFixed(2)} €)`
+        : cancellationReason;
+
     const claimed = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the appointment not already being cancelled —
       // without this, two concurrent rejects (double-click, or staff and a
@@ -300,7 +340,7 @@ export async function rejectAppointment(appointmentId, reason = null) {
           status: "CANCELLED",
           cancelledAt: new Date(),
           cancelledByUserId: authCheck.userId,
-          cancellationReason,
+          cancellationReason: cancellationReasonWithForfeit,
           cancellationSource: isAdminRole(authCheck.userRole) ? "ADMIN" : "STAFF",
         },
       });
@@ -309,9 +349,16 @@ export async function rejectAppointment(appointmentId, reason = null) {
       if (wasPaid && payment.invoice && remaining > REFUND_EPSILON) {
         await issueCreditNote(tx, {
           invoiceId: payment.invoice.id,
-          reason: cancellationReason,
+          reason: cancellationReasonWithForfeit,
           totalInclVat: remaining,
         });
+      }
+
+      // Pinned in the same transaction that commits the cancellation itself
+      // — see lib/payments/pin-pending-refund.js's doc comment for why this
+      // has to happen before the Stripe call below, not just in its catch.
+      if (needsRefund) {
+        await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey);
       }
 
       const serviceName = appointment.staffService?.service?.name;
@@ -345,22 +392,20 @@ export async function rejectAppointment(appointmentId, reason = null) {
     // Payment.status / the REFUND ledger row are only written once Stripe
     // actually confirms the refund — writing them unconditionally beforehand
     // would tell the customer "refunded" even if the Stripe call below fails.
+    // pendingRefundAmount/idempotencyKey were already pinned inside the
+    // cancellation transaction above.
     let refundFailed = false;
-    if (wasPaid && payment.transactionReference && remaining > REFUND_EPSILON) {
-      // Recorded before the Stripe call, not just in the catch block below —
-      // a crash/timeout mid-call would otherwise leave nothing durable to
-      // retry against; see lib/payments/retry-failed-refunds.js.
-      await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
+    if (needsRefund) {
       try {
         const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
         if (stripeSession.payment_intent) {
-          await stripe.refunds.create({ payment_intent: stripeSession.payment_intent, amount: Math.round(remaining * 100) });
+          await stripe.refunds.create(
+            { payment_intent: stripeSession.payment_intent, amount: Math.round(remaining * 100) },
+            { idempotencyKey: refundIdempotencyKey }
+          );
           const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
           await prisma.$transaction([
-            prisma.payment.update({
-              where: { id: payment.id },
-              data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
-            }),
+            clearPendingRefund(prisma, payment.id, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED"),
             prisma.transaction.create({
               data: {
                 paymentId: payment.id,
@@ -377,20 +422,12 @@ export async function rejectAppointment(appointmentId, reason = null) {
         // The appointment cancellation and credit note are already
         // committed and stay — surface the refund failure loudly so it can
         // be retried/handled manually, rather than silently swallowing it.
-        // Also persisted durably so the cron retry job
-        // (lib/payments/retry-failed-refunds.js) can pick it up even if
-        // this email is missed.
+        // pendingRefundAmount/idempotencyKey are left set (not cleared) so
+        // the cron retry job (lib/payments/retry-failed-refunds.js) can pick
+        // it up even if this email is missed.
         console.error("[rejectAppointment] REFUND FAILED for appointment", appointmentId, err);
         refundFailed = true;
-        await prisma.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: "REFUND_FAILED",
-            refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
-            refundAttemptedAt: new Date(),
-            refundRetryCount: { increment: 1 },
-          },
-        });
+        await markRefundFailed(prisma, payment.id, err);
       }
     }
 
@@ -446,6 +483,89 @@ export async function rejectAppointment(appointmentId, reason = null) {
 }
 
 /**
+ * Marks a CONFIRMED appointment as a no-show. Unlike rejectAppointment, this
+ * never touches Payment or calls Stripe — whatever was captured (deposit or
+ * full payment) stays exactly as captured, no automatic refund in either
+ * direction. Before this existed, the only way to close out a missed
+ * appointment was "Annuler", which always issues a full refund and treats a
+ * no-show identically to a business-initiated cancellation — rewarding the
+ * absence instead of recording it.
+ *
+ * @param {string} appointmentId
+ * @returns {Promise<{ success: boolean, message?: string }>}
+ */
+export async function markAppointmentNoShow(appointmentId) {
+  try {
+    if (!appointmentId) {
+      return { success: false, message: "ID de rendez-vous manquant" };
+    }
+
+    const authCheck = await authorizeAppointmentAction(appointmentId);
+    if (!authCheck.authorized) {
+      return { success: false, message: authCheck.message };
+    }
+
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: appointmentId, isDeleted: false },
+      include: {
+        user: { select: { id: true, fullName: true } },
+        staffService: { include: { service: { select: { name: true } } } },
+      },
+    });
+    if (!appointment) {
+      return { success: false, message: "Rendez-vous introuvable" };
+    }
+
+    const markedNote = `Marqué absent le ${new Date().toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`;
+
+    const claimed = await prisma.$transaction(async (tx) => {
+      // Atomic claim, gated on CONFIRMED — a no-show only makes sense for an
+      // appointment the client was actually expected to attend, and only
+      // once (a double-click or two staff acting at once can't both fire
+      // the notification below).
+      const claim = await tx.appointment.updateMany({
+        where: { id: appointmentId, status: "CONFIRMED" },
+        data: {
+          status: "NO_SHOW",
+          notes: appointment.notes ? `${appointment.notes}\n${markedNote}` : markedNote,
+        },
+      });
+      if (claim.count === 0) return false;
+
+      const serviceName = appointment.staffService?.service?.name;
+      const customerName = appointment.user?.fullName;
+      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
+      if (recipientUserIds.length > 0) {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildAppointmentNoShowNotification({
+              userId: uid,
+              appointmentId: appointment.id,
+              date: appointment.date,
+              startTime: appointment.startTime,
+              serviceName,
+              customerName,
+            })
+          ),
+          { tx }
+        );
+      }
+
+      return true;
+    });
+
+    if (!claimed) {
+      return { success: false, message: "Ce rendez-vous ne peut plus être marqué absent (statut déjà modifié)." };
+    }
+
+    return { success: true, message: "Rendez-vous marqué comme absence. Aucun remboursement n'a été émis." };
+  } catch (error) {
+    console.error("[markAppointmentNoShow]", error);
+    return { success: false, message: "Erreur lors du marquage de l'absence" };
+  }
+}
+
+/**
  * Marks a CONFIRMED appointment as COMPLETED. For a deposit booking
  * (Payment.status === "PARTIALLY_PAID"), this is also where the on-site
  * balance gets collected and invoiced — previously there was no mechanism
@@ -480,6 +600,10 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
             addressCity: true,
             addressPostalCode: true,
             addressCountry: true,
+            isCompany: true,
+            billingProfile: {
+              select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+            },
           },
         },
         staffService: { include: { service: true } },
@@ -539,19 +663,12 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
           paymentId: updatedPayment.id,
           source: "APPOINTMENT",
           totalInclVat: Number(updatedPayment.totalAmount),
-          customer: {
-            fullName: appointment.user.fullName,
-            email: appointment.user.email,
-            vatNumber: appointment.user.vatNumber,
-            address: formatUserAddress(appointment.user),
-          },
-          lines: [
-            {
-              description: appointment.staffService.service?.name ?? "Prestation",
-              quantity: 1,
-              unitPrice: Number(updatedPayment.totalAmount),
-            },
-          ],
+          customer: buildInvoiceCustomer(appointment.user),
+          lines: buildServiceInvoiceLines({
+            description: appointment.staffService.service?.name ?? "Prestation",
+            totalAmount: Number(updatedPayment.totalAmount),
+            discountAmount: Number(updatedPayment.discountAmount),
+          }),
         });
       }
 

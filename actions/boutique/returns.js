@@ -224,6 +224,9 @@ export async function getReturnableOrder(input) {
 
     const claimed = claimedQuantities(order);
     const items = order.items
+      // POS ad-hoc service lines (variantId null) have no stock to return
+      // to — they're a counter sale, not something to ship back.
+      .filter((item) => item.variantId !== null)
       .map((item) => ({
         id: item.id,
         productName: item.productName,

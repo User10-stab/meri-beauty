@@ -102,6 +102,60 @@ describe("point-of-sale security contracts", () => {
     expect(ui).toContain("Monnaie à rendre");
   });
 
+  test("billing address is required only when the resolved customer doesn't already have one on file", () => {
+    expect(pos).toContain('throw new Error("POS_ADDRESS_REQUIRED")');
+    expect(pos).toContain("needsAddress = !customer?.addressLine1");
+    expect(pos).toContain('error.message === "POS_ADDRESS_REQUIRED"');
+
+    const validation = source("lib/validations/point-of-sale.js");
+    expect(validation).toContain("addressLine1");
+    // Optional at the schema level — completePointOfSaleSale enforces the
+    // real requirement server-side once it knows the customer's DB state.
+    expect(validation).toContain('.optional().or(z.literal(""))');
+
+    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    expect(ui).toContain("needsAddress = !addressOnFile");
+    expect(ui).toContain("updateCustomerAddress");
+  });
+
+  test("the counter can sell an ad-hoc service line alongside products, with no stock/variant lookup for it", () => {
+    expect(pos).toContain('item.type !== "PRODUCT"');
+    expect(pos).toContain("serviceLines = items.filter");
+    expect(pos).toContain("serviceSubtotal");
+    expect(pos).toContain("...serviceLines.map((item) => ({");
+
+    const validation = source("lib/validations/point-of-sale.js");
+    expect(validation).toContain('type: z.literal("PRODUCT")');
+    expect(validation).toContain('type: z.literal("SERVICE")');
+    expect(validation).toContain("discriminatedUnion");
+
+    const schema = source("prisma/schema.prisma");
+    expect(schema).toContain("variantId String?");
+
+    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    expect(ui).toContain("addServiceLine");
+    expect(ui).toContain('type: "SERVICE"');
+  });
+
+  test("a walk-in client de passage sale creates no account and issues a ticket instead of an invoice", () => {
+    expect(pos).toContain("const isWalkIn = requestedCustomer === null");
+    expect(pos).toContain("userId: customer?.id ?? null");
+    expect(pos).toContain("const invoice = isWalkIn");
+    expect(pos).toContain("renderTicketPdf(");
+
+    const validation = source("lib/validations/point-of-sale.js");
+    expect(validation).toContain("customer: customerSchema.nullable()");
+    expect(validation).toContain('data.customer !== null || data.method !== "CARD_QR"');
+
+    const schema = source("prisma/schema.prisma");
+    expect(schema).toMatch(/userId String\?\s*\n\s*user\s+User\?/);
+
+    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    expect(ui).toContain("isWalkIn");
+    expect(ui).toContain("toggleWalkIn");
+    expect(ui).toContain('customer: isWalkIn ? null : customer');
+  });
+
   test("shared Stripe fulfillment completes POS orders and attributes stock to the cashier", () => {
     const fulfillment = source("lib/orders/fulfill-order-payment.js");
     expect(fulfillment).toContain('order.source === "POS"');

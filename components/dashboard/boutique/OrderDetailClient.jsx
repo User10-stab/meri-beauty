@@ -181,7 +181,9 @@ export function OrderDetailClient({ order }) {
                   <div>
                     <p className="font-medium text-gray-800 dark:text-white">{item.productName}</p>
                     <p className="text-xs text-gray-400">
-                      {item.variantName} · {item.sku} · × {item.quantity}
+                      {item.variantName ? `${item.variantName} · ` : ""}
+                      {item.sku ? `${item.sku} · ` : ""}
+                      × {item.quantity}
                     </p>
                   </div>
                   <span className="font-medium text-gray-700 dark:text-dark-6">

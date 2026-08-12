@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { issueCreditNote } from "@/lib/invoicing";
+import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
 import { sendEmail } from "@/lib/email";
 import { staffReservationCancelledEmail } from "@/lib/email-templates";
@@ -103,6 +104,9 @@ export async function cancelReservation(appointmentId) {
       remaining = Number(payment.paidAmount) - alreadyRefunded;
     }
 
+    const needsRefund = wasPaid && payment.transactionReference && remaining > REFUND_EPSILON;
+    const refundIdempotencyKey = needsRefund ? buildRefundIdempotencyKey("appt-customer-cancel", payment.id) : null;
+
     const claimed = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the appointment still being cancellable —
       // without this, a double-click or a race with the Stripe webhook
@@ -127,6 +131,16 @@ export async function cancelReservation(appointmentId) {
           reason: "Réservation annulée par le client",
           totalInclVat: remaining,
         });
+      }
+
+      // Pinned in the same transaction that commits the cancellation itself
+      // — see lib/payments/pin-pending-refund.js's doc comment for why this
+      // has to happen before the Stripe call below, not just in its catch.
+      // Previously this path recorded nothing at all on failure (no status
+      // change, no pending amount) — invisible to both the retry cron and
+      // the reconciliation dashboard.
+      if (needsRefund) {
+        await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey);
       }
 
       return true;
@@ -185,18 +199,20 @@ export async function cancelReservation(appointmentId) {
     // Payment.status / the REFUND ledger row are only written once Stripe
     // actually confirms the refund — writing them unconditionally beforehand
     // would tell the customer "refunded" even if the Stripe call below fails.
+    // pendingRefundAmount/idempotencyKey were already pinned inside the
+    // cancellation transaction above.
     let refundFailed = false;
-    if (wasPaid && payment.transactionReference && remaining > REFUND_EPSILON) {
+    if (needsRefund) {
       try {
         const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
         if (stripeSession.payment_intent) {
-          await stripe.refunds.create({ payment_intent: stripeSession.payment_intent, amount: Math.round(remaining * 100) });
+          await stripe.refunds.create(
+            { payment_intent: stripeSession.payment_intent, amount: Math.round(remaining * 100) },
+            { idempotencyKey: refundIdempotencyKey }
+          );
           const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
           await prisma.$transaction([
-            prisma.payment.update({
-              where: { id: payment.id },
-              data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
-            }),
+            clearPendingRefund(prisma, payment.id, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED"),
             prisma.transaction.create({
               data: {
                 paymentId: payment.id,
@@ -212,8 +228,12 @@ export async function cancelReservation(appointmentId) {
         // The cancellation and credit note are already committed and stay
         // — surface the refund failure loudly so it can be retried/handled
         // manually, rather than silently telling the customer it's done.
+        // pendingRefundAmount/idempotencyKey are left set (not cleared) so
+        // the cron retry job (lib/payments/retry-failed-refunds.js) can pick
+        // it up even if this email/UI message is missed.
         console.error("[cancelReservation] REFUND FAILED for appointment", appointmentId, err);
         refundFailed = true;
+        await markRefundFailed(prisma, payment.id, err);
       }
     }
 

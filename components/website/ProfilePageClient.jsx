@@ -2,9 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Lock, Star, Mail, Receipt, BadgeCheck, BadgeX, ShieldQuestion, MapPin } from "lucide-react";
+import { Loader2, Lock, Star, Mail, Receipt, BadgeCheck, BadgeX, ShieldQuestion, MapPin, Building2 } from "lucide-react";
 import { updateMyProfile } from "@/actions/customer/profile";
-import { updateNewsletterPreference, updateMyVatNumber, updateMyAddress } from "@/actions/customer/settings";
+import { updateNewsletterPreference, updateMyVatNumber, updateMyAddress, updateMyBillingProfile } from "@/actions/customer/settings";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { createAppointmentReview } from "@/actions/review/review-actions";
 import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/review-eligibility";
@@ -487,7 +487,110 @@ function VatNumberCard({ initialVatNumber }) {
   );
 }
 
-export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVatNumber, initialAddress }) {
+function BillingProfileCard({ initialBillingProfile }) {
+  const empty = { companyLegalName: "", companyRegistrationNo: "", companyLegalForm: "", billingContactName: "", purchaseOrderReference: "" };
+  const initial = { ...empty, ...(initialBillingProfile ?? {}) };
+  const [profile, setProfile] = useState(initial);
+  const [saved, setSaved] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const hasChanges = JSON.stringify(profile) !== JSON.stringify(saved);
+  const isComplete = Boolean(saved.companyLegalName);
+
+  function update(field, value) {
+    setProfile((prev) => ({ ...prev, [field]: value }));
+    setErrors((prev) => ({ ...prev, [field]: null }));
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    const result = await updateMyBillingProfile(profile);
+    setSaving(false);
+    if (result.success) {
+      toast.success(result.message);
+      setSaved(profile);
+      setErrors({});
+    } else {
+      toast.error(result.message);
+      if (result.errors) setErrors(result.errors);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
+      <div className="flex items-start gap-3">
+        <Building2 className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.75} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold text-ink">Identité de facturation entreprise</p>
+          <p className="mt-0.5 text-xs text-ink/50">
+            {isComplete
+              ? "Utilisée sur vos factures B2B."
+              : "Renseignez votre raison sociale pour recevoir des factures B2B."}
+          </p>
+
+          <div className="mt-3 space-y-2">
+            <input
+              type="text"
+              value={profile.companyLegalName}
+              onChange={(e) => update("companyLegalName", e.target.value)}
+              placeholder="Raison sociale (ex. Doe Consulting SRL)"
+              className="h-10 w-full border border-neutral-200 px-4 text-sm focus:border-gold focus:outline-none"
+            />
+            {errors.companyLegalName && <p className="text-xs text-red-600">{errors.companyLegalName}</p>}
+
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="text"
+                value={profile.companyRegistrationNo ?? ""}
+                onChange={(e) => update("companyRegistrationNo", e.target.value)}
+                placeholder="N° BCE (optionnel)"
+                className="h-10 min-w-40 flex-1 border border-neutral-200 px-4 text-sm focus:border-gold focus:outline-none"
+              />
+              <input
+                type="text"
+                value={profile.companyLegalForm ?? ""}
+                onChange={(e) => update("companyLegalForm", e.target.value)}
+                placeholder="Forme juridique (SRL, SA…)"
+                className="h-10 min-w-40 flex-1 border border-neutral-200 px-4 text-sm focus:border-gold focus:outline-none"
+              />
+            </div>
+
+            <input
+              type="text"
+              value={profile.billingContactName ?? ""}
+              onChange={(e) => update("billingContactName", e.target.value)}
+              placeholder="Contact facturation (optionnel)"
+              className="h-10 w-full border border-neutral-200 px-4 text-sm focus:border-gold focus:outline-none"
+            />
+
+            <input
+              type="text"
+              value={profile.purchaseOrderReference ?? ""}
+              onChange={(e) => update("purchaseOrderReference", e.target.value)}
+              placeholder="Référence bon de commande (optionnel)"
+              className="h-10 w-full border border-neutral-200 px-4 text-sm focus:border-gold focus:outline-none"
+            />
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !hasChanges}
+                className="inline-flex items-center gap-1.5 bg-gold px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-gold/90 disabled:cursor-not-allowed disabled:bg-gray-300"
+              >
+                {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVatNumber, initialAddress, initialBillingProfile }) {
   const [fullName, setFullName] = useState(user.fullName ?? "");
   const [email, setEmail] = useState(user.email ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
@@ -682,6 +785,8 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
           <AddressCard initialAddress={initialAddress} />
 
           <VatNumberCard initialVatNumber={initialVatNumber} />
+
+          {user.isCompany && <BillingProfileCard initialBillingProfile={initialBillingProfile} />}
 
           <section className="space-y-5">
             <div>

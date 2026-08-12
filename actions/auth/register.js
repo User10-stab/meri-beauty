@@ -51,6 +51,7 @@ export async function registerUser(input) {
         phone: errors.phone?.[0] ?? null,
         password: errors.password?.[0] ?? null,
         vatNumber: errors.vatNumber?.[0] ?? null,
+        companyLegalName: errors.companyLegalName?.[0] ?? null,
         termsAccepted: errors.termsAccepted?.[0] ?? null,
         addressLine1: errors.addressLine1?.[0] ?? null,
         addressCity: errors.addressCity?.[0] ?? null,
@@ -68,6 +69,10 @@ export async function registerUser(input) {
     password,
     isCompany,
     vatNumber,
+    companyLegalName,
+    companyRegistrationNo,
+    companyLegalForm,
+    billingContactName,
     addressLine1,
     addressLine2,
     addressCity,
@@ -156,6 +161,18 @@ export async function registerUser(input) {
           expiresAt,
         },
       });
+
+      if (isCompany && companyLegalName) {
+        await tx.billingProfile.create({
+          data: {
+            userId: newUser.id,
+            companyLegalName,
+            companyRegistrationNo: companyRegistrationNo || null,
+            companyLegalForm: companyLegalForm || null,
+            billingContactName: billingContactName || null,
+          },
+        });
+      }
 
       return newUser;
     });

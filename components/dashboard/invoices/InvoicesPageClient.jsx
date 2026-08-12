@@ -91,6 +91,14 @@ export function InvoicesPageClient({ initialInvoices }) {
                 <TableCell className="pl-6">
                   <span className="font-medium text-gray-800 dark:text-white">{inv.number}</span>
                   {inv.orderNumber && <span className="block text-xs text-gray-400">Commande n°{inv.orderNumber}</span>}
+                  {inv.customerType === "B2B" && (
+                    <span
+                      className="mt-1 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700"
+                      title="Pas d'envoi Peppol automatique — à saisir manuellement dans le logiciel comptable."
+                    >
+                      B2B — à facturer manuellement
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <span className="text-gray-700 dark:text-dark-6">{inv.customerName}</span>

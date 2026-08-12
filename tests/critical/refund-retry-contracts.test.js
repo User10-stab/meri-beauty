@@ -61,3 +61,52 @@ describe("refund retry never exceeds the exact pending amount", () => {
     expect(orders).toContain('["REFUND_PENDING", "REFUND_FAILED"].includes(order.payment.status)');
   });
 });
+
+// P0: the 4 reservation-side cancellation paths (staff appointment reject,
+// customer appointment cancel, workshop cancel, formation cancel) used to
+// skip this pinning entirely — 3 of them set REFUND_PENDING with no amount
+// (unretryable), and the customer-initiated path wrote nothing at all on
+// failure (invisible to both the retry cron and the reconciliation
+// dashboard). All 4 now share lib/payments/pin-pending-refund.js instead of
+// reimplementing the boutique pattern a 4th and 5th time.
+describe("reservation cancellations pin refunds the same way boutique orders/returns do", () => {
+  const helper = source("lib/payments/pin-pending-refund.js");
+  const rejectAppointment = source("actions/appointment/manage-appointment.js");
+  const cancelReservation = source("actions/reservation/cancel-reservation.js");
+  const cancelWorkshop = source("actions/workshops/manage-reservation.js");
+  const cancelFormation = source("actions/formations/manage-reservation.js");
+
+  test("the shared helper pins before Stripe and leaves the pin intact on failure", () => {
+    expect(helper).toContain('status: "REFUND_PENDING"');
+    expect(helper).toContain("pendingRefundAmount: amount");
+    expect(helper).toContain("pendingRefundIdempotencyKey: idempotencyKey");
+    expect(helper).toContain('status: "REFUND_FAILED"');
+    expect(helper).toContain("refundRetryCount: { increment: 1 }");
+    // markRefundFailed must NOT null out the pending fields — the whole
+    // point is the retry job can still find them afterward.
+    const failedFn = helper.slice(
+      helper.indexOf("export function markRefundFailed"),
+      helper.indexOf("export function clearPendingRefund")
+    );
+    expect(failedFn).not.toContain("pendingRefundAmount: null");
+  });
+
+  for (const [name, mod] of [
+    ["rejectAppointment (staff/admin)", rejectAppointment],
+    ["cancelReservation (customer)", cancelReservation],
+    ["cancelWorkshopReservation", cancelWorkshop],
+    ["cancelFormationReservation", cancelFormation],
+  ]) {
+    test(`${name} pins the refund and passes an idempotency key to Stripe`, () => {
+      expect(mod).toContain("pinPendingRefund(tx");
+      expect(mod).toContain("buildRefundIdempotencyKey");
+      expect(mod).toContain("idempotencyKey: refundIdempotencyKey");
+      expect(mod).toContain("markRefundFailed(prisma");
+    });
+  }
+
+  test("cancelReservation (customer path) no longer silently drops a failed refund", () => {
+    // The old bug: a bare console.error with no durable Payment write at all.
+    expect(cancelReservation).toContain("await markRefundFailed(prisma, payment.id, err)");
+  });
+});

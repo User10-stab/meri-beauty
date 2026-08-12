@@ -74,19 +74,30 @@ export function InvoiceDocument({ invoice }) {
         <View style={styles.partiesRow}>
           <View>
             <Text style={styles.partyLabel}>Facturé à</Text>
-            <Text>{invoice.customerName}</Text>
+            <Text>{invoice.customerType === "B2B" && invoice.customerLegalName ? invoice.customerLegalName : invoice.customerName}</Text>
+            {invoice.customerType === "B2B" && invoice.customerLegalName && invoice.customerContactName && (
+              <Text style={styles.muted}>À l'attention de {invoice.customerContactName}</Text>
+            )}
             <Text style={styles.muted}>{invoice.customerEmail}</Text>
             {invoice.customerVatNumber && <Text style={styles.muted}>TVA : {invoice.customerVatNumber}</Text>}
+            {invoice.customerRegistrationNo && <Text style={styles.muted}>N° BCE : {invoice.customerRegistrationNo}</Text>}
             {invoice.customerAddress && <Text style={styles.muted}>{invoice.customerAddress}</Text>}
+            {invoice.purchaseOrderReference && <Text style={styles.muted}>Réf. bon de commande : {invoice.purchaseOrderReference}</Text>}
           </View>
         </View>
+
+        {invoice.customerType === "B2B" && (
+          <Text style={styles.taxNote}>
+            Facture B2B — à saisir manuellement dans le logiciel comptable compatible Peppol (envoi réseau non encore actif).
+          </Text>
+        )}
 
         <View style={styles.table}>
           <View style={styles.tableHeaderRow}>
             <Text style={styles.colDescription}>Description</Text>
             <Text style={styles.colQty}>Qté</Text>
-            <Text style={styles.colUnitPrice}>Prix unitaire</Text>
-            <Text style={styles.colTotal}>Total</Text>
+            <Text style={styles.colUnitPrice}>Prix unitaire TTC</Text>
+            <Text style={styles.colTotal}>Total TTC</Text>
           </View>
           {invoice.lines.map((line) => (
             <View style={styles.tableRow} key={line.id}>
@@ -149,12 +160,26 @@ export function CreditNoteDocument({ creditNote, invoice }) {
         <View style={styles.partiesRow}>
           <View>
             <Text style={styles.partyLabel}>Émis à l'attention de</Text>
-            <Text>{invoice.customerName}</Text>
+            <Text>{invoice.customerType === "B2B" && invoice.customerLegalName ? invoice.customerLegalName : invoice.customerName}</Text>
+            {invoice.customerType === "B2B" && invoice.customerLegalName && invoice.customerContactName && (
+              <Text style={styles.muted}>À l'attention de {invoice.customerContactName}</Text>
+            )}
             <Text style={styles.muted}>{invoice.customerEmail}</Text>
+            {invoice.customerVatNumber && <Text style={styles.muted}>TVA : {invoice.customerVatNumber}</Text>}
+            {invoice.customerRegistrationNo && <Text style={styles.muted}>N° BCE : {invoice.customerRegistrationNo}</Text>}
+            {invoice.customerAddress && <Text style={styles.muted}>{invoice.customerAddress}</Text>}
           </View>
         </View>
 
         <View style={styles.totals}>
+          <View style={styles.totalsRow}>
+            <Text style={styles.totalsLabel}>Sous-total (hors TVA)</Text>
+            <Text>{money(creditNote.subtotalExclVat)}</Text>
+          </View>
+          <View style={styles.totalsRow}>
+            <Text style={styles.totalsLabel}>TVA ({Number(creditNote.vatRate)}%)</Text>
+            <Text>{money(creditNote.vatAmount)}</Text>
+          </View>
           <View style={styles.grandTotalRow}>
             <Text style={styles.grandTotalLabel}>Montant crédité (TTC)</Text>
             <Text style={styles.grandTotalValue}>{money(creditNote.totalInclVat)}</Text>

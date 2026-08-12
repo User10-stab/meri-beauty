@@ -141,6 +141,7 @@ enum NotificationType {
   APPOINTMENT_CREATED
   APPOINTMENT_CONFIRMED
   APPOINTMENT_CANCELLED
+  APPOINTMENT_NO_SHOW
   APPOINTMENT_REMINDER
   PAYMENT_RECEIVED
   PAYMENT_PENDING
@@ -231,6 +232,11 @@ enum VatTreatment {
   EU_DISTANCE_SALE
   EU_REVERSE_CHARGE
   EXPORT
+}
+
+enum InvoiceCustomerType {
+  B2C
+  B2B
 }
 
 enum OrderStatus {
@@ -571,12 +577,30 @@ model Salon {
 
   phone     String
   email     String
-  address   String?
+  address   String? // freeform, shown on the public site (footer/contact) — not used for invoices
   vatNumber String? // legal TVA/BCE number — printed on every issued invoice
+
+  // Structured legal identity, required before any invoice can be issued
+  // (see lib/invoicing.js#issueInvoice's seller-data gate) — kept separate
+  // from the freeform `address` above since Peppol/UBL export (Phase B)
+  // needs machine-parseable fields, not a single display string.
+  legalName             String?
+  companyRegistrationNo String? // BCE/KBO number — same digits as the VAT number for BE since 2017
+  addressLine1          String?
+  addressLine2          String?
+  postalCode            String?
+  city                  String?
+  countryCode           String? @default("BE")
 
   instagram String?
   facebook  String?
   tiktok    String?
+
+  // Dedup marker for notifyUnsettledAppointments (lib/appointments/) — an
+  // atomic claim against this keeps the digest genuinely daily regardless
+  // of how often the job runner ticks (every 5min in-process, plus whatever
+  // external HTTP cron cadence is configured).
+  unsettledAppointmentsDigestSentAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -694,9 +718,33 @@ model User {
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
   auditLogs                      AuditLog[]             @relation("AuditActor")
   assignedDisputes               StripeDispute[]        @relation("DisputeAssignee")
+  billingProfile                 BillingProfile?
+  openedCashSessions             CashSession[]          @relation("CashSessionOpenedBy")
+  closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
 
   @@index([role])
   @@index([isActive, isDeleted])
+}
+
+// Company legal identity for B2B invoicing — separate from the billing
+// address on User (addressLine1 etc. above), which every account already
+// has regardless of isCompany. Only meaningful when User.isCompany is true;
+// its presence (companyLegalName set) is what makes an invoice B2B instead
+// of B2C — see lib/invoicing.js#issueInvoice.
+model BillingProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyLegalName       String
+  companyRegistrationNo  String? // BCE/KBO or equivalent, if distinct from the VAT number
+  companyLegalForm       String? // e.g. "SRL", "SA", "indépendant"
+  billingContactName     String?
+  purchaseOrderReference String? // the PO/order reference this customer wants printed on every invoice
+  peppolParticipantId    String? // reserved for Phase B — not used until live Peppol delivery exists
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Immutable operational trail. Target records are intentionally represented
@@ -1005,8 +1053,11 @@ model Order {
   id          String @id @default(cuid())
   orderNumber Int    @unique @default(autoincrement())
 
-  userId String
-  user   User   @relation("OrderBuyer", fields: [userId], references: [id])
+  // Null for an anonymous POS "client de passage" sale — no account is
+  // created for a walk-in counter sale, see completePointOfSaleSale's
+  // isWalkIn branch. Every other order source always sets this.
+  userId String?
+  user   User?   @relation("OrderBuyer", fields: [userId], references: [id])
 
   // The cart this order was checked out from — null for older orders created
   // before this field existed. Prepaid orders keep their source cart ACTIVE
@@ -1123,12 +1174,15 @@ model OrderItem {
   orderId String
   order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  variantId String
-  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  // Null for a POS ad-hoc service line — no ProductVariant backs it (see
+  // completePointOfSaleSale's SERVICE branch). productName carries the
+  // free-text description in that case.
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
 
   productName String
-  variantName String
-  sku         String
+  variantName String?
+  sku         String?
 
   unitPrice Decimal @db.Decimal(10, 2)
   quantity  Int
@@ -1232,6 +1286,11 @@ model Staff {
   depositEnabled              Boolean                     @default(false)
   depositPercentage           Decimal                     @default(10.0) @db.Decimal(5, 2)
   allowedPaymentMethods       AllowedPaymentMethods       @default(BOTH)
+  // % of the deposit withheld when rejectAppointment processes a late
+  // cancellation (inside the 48h window) on a deposit-type payment. Default
+  // 0 — today's exact "always fully refunded" behaviour — so this is inert
+  // until a staff member's percentage is explicitly set above zero.
+  depositForfeitPercentage    Decimal                     @default(0) @db.Decimal(5, 2)
 
   // Account Setup
   setupCompleted Boolean @default(false)
@@ -1529,6 +1588,16 @@ model Invoice {
   customerVatNumber String? // Client TVA number (copied from User.vatNumber at invoice time)
   customerAddress   String?
 
+  // B2B snapshot — populated when the buyer is a company (see
+  // BillingProfile). Peppol network delivery is Phase B (not built); until
+  // then a B2B invoice is flagged for manual accountant-software entry —
+  // see customerType on the dashboard invoices list.
+  customerType           InvoiceCustomerType @default(B2C)
+  customerLegalName      String?
+  customerContactName    String?
+  customerRegistrationNo String?
+  purchaseOrderReference String?
+
   subtotalExclVat Decimal      @db.Decimal(10, 2)
   vatRate         Decimal      @default(21) @db.Decimal(4, 2)
   vatAmount       Decimal      @db.Decimal(10, 2)
@@ -1569,11 +1638,46 @@ model CreditNote {
 
   reason       String?
   issuedAt     DateTime @default(now())
-  totalInclVat Decimal  @db.Decimal(10, 2)
+  // HT/TVA/TTC breakdown of the credited amount, at the original invoice's
+  // rate — a partial credit needs its own visible split, not just a TTC
+  // figure (spec: "préciser motif, ... HT, TVA, TTC et taux").
+  subtotalExclVat Decimal @db.Decimal(10, 2)
+  vatRate         Decimal @db.Decimal(4, 2)
+  vatAmount       Decimal @db.Decimal(10, 2)
+  totalInclVat    Decimal @db.Decimal(10, 2)
 
   returnRequest ReturnRequest?
 
   @@index([invoiceId])
+}
+
+// CASH SESSION
+// A daily till open/close boundary — before this, every CASH POS sale was
+// tracked individually (Transaction.cashReceived/changeGiven) but nothing
+// gave a running expected total or a counted-vs-expected reconciliation at
+// end of day, so a shortfall was only ever findable by recounting every
+// sale one by one.
+model CashSession {
+  id String @id @default(cuid())
+
+  openedAt     DateTime @default(now())
+  openedById   String
+  openedBy     User     @relation("CashSessionOpenedBy", fields: [openedById], references: [id])
+  openingFloat Decimal  @db.Decimal(10, 2)
+
+  closedAt     DateTime?
+  closedById   String?
+  closedBy     User?     @relation("CashSessionClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  // expected = openingFloat + sum(CASH transactions during the session).
+  // Both null while the session is open — filled in atomically at close.
+  expectedCash Decimal?  @db.Decimal(10, 2)
+  countedCash  Decimal?  @db.Decimal(10, 2)
+  variance     Decimal?  @db.Decimal(10, 2)
+  note         String?
+
+  transactions Transaction[]
+
+  @@index([closedAt])
 }
 
 // TRANSACTION
@@ -1582,6 +1686,12 @@ model Transaction {
 
   paymentId String
   payment   Payment @relation(fields: [paymentId], references: [id])
+
+  // Set at sale time when a CashSession is open (POS CASH sales only) — a
+  // sale never blocks on this being unset, it's just left unassigned and
+  // reconciled manually if no session was open.
+  cashSessionId String?
+  cashSession   CashSession? @relation(fields: [cashSessionId], references: [id])
 
   amount                  Decimal
   method                  TransactionMethod

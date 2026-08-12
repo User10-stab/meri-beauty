@@ -6,7 +6,7 @@ import { Search, Loader2, CalendarX, Star } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
-import { confirmAppointment, rejectAppointment, completeAppointment } from "@/actions/appointment/manage-appointment";
+import { confirmAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
 
 const STATUS_LABEL = {
   PENDING: "En attente",
@@ -107,6 +107,19 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   async function handleCompleteDirect(appointmentId) {
     setRowLoadingId(appointmentId);
     const result = await completeAppointment(appointmentId);
+    setRowLoadingId(null);
+    if (result.success) {
+      toast.success(result.message);
+      refetch({});
+    } else {
+      toast.error(result.message);
+    }
+  }
+
+  async function handleNoShow(appointmentId) {
+    if (!window.confirm("Marquer ce rendez-vous comme absence ? Aucun remboursement ne sera émis.")) return;
+    setRowLoadingId(appointmentId);
+    const result = await markAppointmentNoShow(appointmentId);
     setRowLoadingId(null);
     if (result.success) {
       toast.success(result.message);
@@ -288,21 +301,43 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         </button>
                       </div>
                     ) : a.status === "CONFIRMED" ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (a.payment?.status === "PARTIALLY_PAID") {
-                            setPaymentConfirmed(false);
-                            setToComplete(a);
-                          } else {
-                            handleCompleteDirect(a.id);
-                          }
-                        }}
-                        disabled={rowLoadingId === a.id}
-                        className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
-                      >
-                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer"}
-                      </button>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (a.payment?.status === "PARTIALLY_PAID") {
+                              setPaymentConfirmed(false);
+                              setToComplete(a);
+                            } else {
+                              handleCompleteDirect(a.id);
+                            }
+                          }}
+                          disabled={rowLoadingId === a.id}
+                          className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
+                        >
+                          {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleNoShow(a.id)}
+                          disabled={rowLoadingId === a.id}
+                          title="Aucun remboursement ne sera émis"
+                          className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
+                        >
+                          Absente
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRejectionReason("");
+                            setToReject(a);
+                          }}
+                          disabled={rowLoadingId === a.id}
+                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+                        >
+                          Annuler
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-gray-300">—</span>
                     )}

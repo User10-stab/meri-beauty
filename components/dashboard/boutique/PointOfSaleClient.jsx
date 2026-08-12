@@ -17,13 +17,39 @@ import {
   searchPointOfSaleCustomers,
 } from "@/actions/boutique/point-of-sale";
 
-const emptyCustomer = { id: null, fullName: "", email: "", phone: "" };
+const emptyAddress = {
+  addressLine1: "",
+  addressLine2: "",
+  addressCity: "",
+  addressPostalCode: "",
+  addressCountry: "BE",
+};
+
+const emptyCustomer = {
+  id: null,
+  fullName: "",
+  email: "",
+  phone: "",
+  ...emptyAddress,
+};
 
 export function PointOfSaleClient() {
   const router = useRouter();
   const [barcode, setBarcode] = useState("");
   const [cart, setCart] = useState([]);
+  const [serviceDescription, setServiceDescription] = useState("");
+  const [servicePrice, setServicePrice] = useState("");
+  // No account, no invoice — a simplified ticket is issued instead. Blocked
+  // together with CARD_QR (Stripe checkout needs a real customer_email) —
+  // enforced again server-side, this is just the matching UI gate.
+  const [isWalkIn, setIsWalkIn] = useState(false);
   const [customer, setCustomer] = useState(emptyCustomer);
+  // Whether the *resolved* customer already has a billing address stored.
+  // Tracked separately from the form fields on purpose: deriving it from
+  // customer.addressLine1 made the address form unmount on the first
+  // keystroke typed into it, so city/postal code could never be filled and
+  // the server rejected every new-customer sale with POS_ADDRESS_REQUIRED.
+  const [addressOnFile, setAddressOnFile] = useState(false);
   const [matches, setMatches] = useState([]);
   const [method, setMethod] = useState("CARD_QR");
   const [attemptKey, setAttemptKey] = useState(null);
@@ -138,7 +164,7 @@ export function PointOfSaleClient() {
     }
     setCart((current) => {
       const present = current.find((entry) => entry.variantId === item.variantId);
-      if (!present) return [...current, { ...item, quantity: 1 }];
+      if (!present) return [...current, { ...item, key: item.variantId, type: "PRODUCT", quantity: 1 }];
       if (present.quantity >= item.availableQuantity) {
         toast.error("La quantité demandée dépasse le stock disponible.");
         return current;
@@ -147,6 +173,28 @@ export function PointOfSaleClient() {
     });
     setBarcode("");
   }, [barcode]);
+
+  function addServiceLine() {
+    const description = serviceDescription.trim();
+    const price = Number(servicePrice);
+    if (!description) return toast.error("Indiquez la description de la prestation.");
+    if (!Number.isFinite(price) || price <= 0) return toast.error("Indiquez un prix valide.");
+    setCart((current) => [
+      ...current,
+      {
+        key: crypto.randomUUID(),
+        type: "SERVICE",
+        variantId: null,
+        productName: description,
+        variantName: "Prestation",
+        unitPrice: Math.round(price * 100) / 100,
+        availableQuantity: Infinity,
+        quantity: 1,
+      },
+    ]);
+    setServiceDescription("");
+    setServicePrice("");
+  }
 
   useEffect(() => {
     if (!scannerOpen) return undefined;
@@ -183,24 +231,61 @@ export function PointOfSaleClient() {
     };
   }, [scannerOpen, addBarcode]);
 
-  function changeQuantity(variantId, delta) {
+  function changeQuantity(key, delta) {
     setCart((current) =>
       current
-        .map((item) => item.variantId === variantId ? { ...item, quantity: item.quantity + delta } : item)
+        .map((item) => item.key === key ? { ...item, quantity: item.quantity + delta } : item)
         .filter((item) => item.quantity > 0)
     );
   }
 
   function selectCustomer(match) {
-    setCustomer({ id: match.id, fullName: match.fullName, email: match.email, phone: match.phone ?? "" });
+    setCustomer({
+      id: match.id,
+      fullName: match.fullName,
+      email: match.email,
+      phone: match.phone ?? "",
+      addressLine1: match.addressLine1 ?? "",
+      addressLine2: match.addressLine2 ?? "",
+      addressCity: match.addressCity ?? "",
+      addressPostalCode: match.addressPostalCode ?? "",
+      addressCountry: match.addressCountry ?? "BE",
+    });
+    setAddressOnFile(Boolean(match.addressLine1));
     setMatches([]);
   }
 
   function updateCustomer(field, value) {
-    setCustomer((current) => ({ ...current, id: null, [field]: value }));
+    // Editing an identity field detaches from the matched customer. Their
+    // stored address belongs to them, not to whoever is being typed now, so
+    // drop it and ask again — otherwise person B gets invoiced at person A's
+    // address, and the form never reappears because it still looks filled.
+    const wasMatched = Boolean(customer.id);
+    if (wasMatched) setAddressOnFile(false);
+    setCustomer((current) => ({
+      ...current,
+      ...(wasMatched ? emptyAddress : null),
+      id: null,
+      [field]: value,
+    }));
   }
 
+  // Address edits don't detach from an already-matched customer — filling in
+  // a missing address for someone already selected is a continuation of that
+  // match, not a new person.
+  function updateCustomerAddress(field, value) {
+    setCustomer((current) => ({ ...current, [field]: value }));
+  }
+
+  // A returning customer with an address already on file shouldn't have to
+  // re-enter it at every counter sale — only ask when it's genuinely
+  // missing (new customer, or an existing one with none saved yet). Mirrors
+  // the server's own rule, which also tests the stored record rather than
+  // the submitted payload.
+  const needsAddress = !addressOnFile;
+
   function selectMethod(next) {
+    if (next === "CARD_QR" && isWalkIn) return; // blocked while client de passage is active
     setMethod(next);
     if (next !== "EXTERNAL_TERMINAL") {
       setTerminalApproved(false);
@@ -209,8 +294,13 @@ export function PointOfSaleClient() {
     if (next !== "CASH") setCashReceived("");
   }
 
+  function toggleWalkIn(next) {
+    setIsWalkIn(next);
+    if (next && method === "CARD_QR") setMethod("CASH");
+  }
+
   function submitSale() {
-    if (!cart.length) return toast.error("Scannez au moins un produit.");
+    if (!cart.length) return toast.error("Ajoutez au moins un produit ou une prestation.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
     if (method === "EXTERNAL_TERMINAL" && !terminalConfirmOpen) {
       setTerminalConfirmOpen(true);
@@ -221,8 +311,12 @@ export function PointOfSaleClient() {
     }
     startTransition(async () => {
       const result = await completePointOfSaleSale({
-        customer,
-        items: cart.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
+        customer: isWalkIn ? null : customer,
+        items: cart.map((item) =>
+          item.type === "SERVICE"
+            ? { type: "SERVICE", description: item.productName, unitPrice: item.unitPrice, quantity: item.quantity }
+            : { type: "PRODUCT", variantId: item.variantId, quantity: item.quantity }
+        ),
         method,
         attemptKey,
         ...(method === "EXTERNAL_TERMINAL" ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
@@ -246,6 +340,18 @@ export function PointOfSaleClient() {
       localStorage.removeItem("meri-pos-attempt-key");
       if (result.data.alreadyProcessed) {
         toast.success(`La vente n°${result.data.orderNumber} était déjà enregistrée.`);
+        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+        return;
+      }
+      if (result.data.walkIn) {
+        if (result.data.ticketPdfBase64) {
+          const bytes = Uint8Array.from(atob(result.data.ticketPdfBase64), (c) => c.charCodeAt(0));
+          const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+          window.open(url, "_blank");
+          toast.success(`Vente n°${result.data.orderNumber} enregistrée. Ticket prêt à imprimer.`);
+        } else {
+          toast.error(`Vente n°${result.data.orderNumber} enregistrée, mais le ticket n'a pas pu être généré.`);
+        }
         router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
         return;
       }
@@ -319,23 +425,48 @@ export function PointOfSaleClient() {
           </button>
         </form>
 
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            addServiceLine();
+          }}
+          className="flex gap-2"
+        >
+          <input
+            value={serviceDescription}
+            onChange={(event) => setServiceDescription(event.target.value)}
+            placeholder="Prestation (ex. Coupe cheveux)"
+            autoComplete="off"
+            className="h-11 flex-1 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+          />
+          <input
+            value={servicePrice}
+            onChange={(event) => setServicePrice(event.target.value)}
+            placeholder="Prix €"
+            inputMode="decimal"
+            autoComplete="off"
+            className="h-11 w-28 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+          />
+          <Button type="submit">Ajouter</Button>
+        </form>
+
         {cart.length === 0 ? (
           <div className="rounded-lg border border-dashed border-gray-200 px-5 py-12 text-center text-sm text-gray-500">Le panier est vide.</div>
         ) : (
           <div className="divide-y divide-gray-100 rounded-lg border border-gray-100 dark:divide-dark-3 dark:border-dark-3">
             {cart.map((item) => (
-              <div key={item.variantId} className="flex items-center gap-3 p-3">
+              <div key={item.key} className="flex items-center gap-3 p-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{item.productName}</p>
                   <p className="text-xs text-gray-500">{item.variantName} · {item.unitPrice.toFixed(2)} €</p>
                 </div>
                 <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-1 dark:border-dark-3">
-                  <button type="button" onClick={() => changeQuantity(item.variantId, -1)} className="rounded p-1 hover:bg-gray-100 dark:hover:bg-dark-2"><Minus size={14} /></button>
+                  <button type="button" onClick={() => changeQuantity(item.key, -1)} className="rounded p-1 hover:bg-gray-100 dark:hover:bg-dark-2"><Minus size={14} /></button>
                   <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
-                  <button type="button" onClick={() => changeQuantity(item.variantId, 1)} disabled={item.quantity >= item.availableQuantity} className="rounded p-1 hover:bg-gray-100 disabled:opacity-30 dark:hover:bg-dark-2"><Plus size={14} /></button>
+                  <button type="button" onClick={() => changeQuantity(item.key, 1)} disabled={item.quantity >= item.availableQuantity} className="rounded p-1 hover:bg-gray-100 disabled:opacity-30 dark:hover:bg-dark-2"><Plus size={14} /></button>
                 </div>
                 <p className="w-20 text-right text-sm font-semibold text-gray-900 dark:text-white">{(item.unitPrice * item.quantity).toFixed(2)} €</p>
-                <button type="button" onClick={() => changeQuantity(item.variantId, -item.quantity)} className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
+                <button type="button" onClick={() => changeQuantity(item.key, -item.quantity)} className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
               </div>
             ))}
           </div>
@@ -344,25 +475,83 @@ export function PointOfSaleClient() {
 
       <aside className="space-y-5 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <div className="flex items-center gap-2"><UserRound size={18} className="text-[#2f3a2e]" /><h2 className="font-semibold text-gray-900 dark:text-white">Client et reçu</h2></div>
-        <div className="relative space-y-3">
-          <input value={customer.fullName} onChange={(event) => updateCustomer("fullName", event.target.value)} placeholder="Nom complet" className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
-          <input value={customer.email} onChange={(event) => updateCustomer("email", event.target.value)} placeholder="E-mail pour le reçu" type="email" className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
-          <input value={customer.phone} onChange={(event) => updateCustomer("phone", event.target.value)} placeholder="Téléphone (facultatif)" className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
-          {matches.length > 0 && (
-            <div className="absolute z-10 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-3 dark:bg-dark-2">
-              {matches.map((match) => (
-                <button key={match.id} type="button" onClick={() => selectCustomer(match)} className="block w-full border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-gray-50 dark:border-dark-3 dark:hover:bg-dark-3">
-                  <span className="block text-sm font-medium">{match.fullName}</span><span className="block text-xs text-gray-500">{match.email}</span>
-                </button>
-              ))}
+
+        <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-dark-6">
+          <input
+            type="checkbox"
+            checked={isWalkIn}
+            onChange={(event) => toggleWalkIn(event.target.checked)}
+            className="h-4 w-4 rounded border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e]"
+          />
+          Client de passage — pas de compte, ticket simplifié sans nom ni e-mail
+        </label>
+
+        {isWalkIn ? (
+          <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500 dark:border-dark-3 dark:bg-dark-2">
+            Aucune identité n&apos;est enregistrée. Un ticket sera généré à la place d&apos;une facture — le paiement par QR n&apos;est pas disponible dans ce mode.
+          </p>
+        ) : (
+          <div className="relative space-y-3">
+            <input value={customer.fullName} onChange={(event) => updateCustomer("fullName", event.target.value)} placeholder="Nom complet" className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
+            <input value={customer.email} onChange={(event) => updateCustomer("email", event.target.value)} placeholder="E-mail pour le reçu" type="email" className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
+            <input value={customer.phone} onChange={(event) => updateCustomer("phone", event.target.value)} placeholder="Téléphone (facultatif)" className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
+            {matches.length > 0 && (
+              <div className="absolute z-10 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg dark:border-dark-3 dark:bg-dark-2">
+                {matches.map((match) => (
+                  <button key={match.id} type="button" onClick={() => selectCustomer(match)} className="block w-full border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-gray-50 dark:border-dark-3 dark:hover:bg-dark-3">
+                    <span className="block text-sm font-medium">{match.fullName}</span><span className="block text-xs text-gray-500">{match.email}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isWalkIn && needsAddress && (
+          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-900/10">
+            <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+              Adresse de facturation obligatoire pour ce client (nouveau ou sans adresse enregistrée).
+            </p>
+            <input
+              value={customer.addressLine1}
+              onChange={(event) => updateCustomerAddress("addressLine1", event.target.value)}
+              placeholder="Rue et numéro"
+              className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+            <input
+              value={customer.addressLine2}
+              onChange={(event) => updateCustomerAddress("addressLine2", event.target.value)}
+              placeholder="Boîte, étage (facultatif)"
+              className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+            <div className="flex gap-2">
+              <input
+                value={customer.addressPostalCode}
+                onChange={(event) => updateCustomerAddress("addressPostalCode", event.target.value)}
+                placeholder="Code postal"
+                className="h-10 w-24 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              />
+              <input
+                value={customer.addressCity}
+                onChange={(event) => updateCustomerAddress("addressCity", event.target.value)}
+                placeholder="Ville"
+                className="h-10 flex-1 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              />
+              <input
+                value={customer.addressCountry}
+                onChange={(event) => updateCustomerAddress("addressCountry", event.target.value.toUpperCase())}
+                placeholder="BE"
+                maxLength={2}
+                className="h-10 w-16 rounded-lg border border-gray-200 px-3 text-center text-sm uppercase outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              />
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className="space-y-2 border-t border-gray-100 pt-5 dark:border-dark-3">
           <p className="text-sm font-medium text-gray-700 dark:text-dark-6">Paiement encaissé</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <button type="button" onClick={() => selectMethod("CARD_QR")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CARD_QR" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte QR</button>
+            <button type="button" onClick={() => selectMethod("CARD_QR")} disabled={isWalkIn} title={isWalkIn ? "Indisponible en mode client de passage" : undefined} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${method === "CARD_QR" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte QR</button>
             <button type="button" onClick={() => selectMethod("CASH")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CASH" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><Banknote size={16} />Espèces</button>
             <button type="button" onClick={() => selectMethod("EXTERNAL_TERMINAL")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "EXTERNAL_TERMINAL" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Terminal externe</button>
           </div>
@@ -393,9 +582,21 @@ export function PointOfSaleClient() {
         <Button
           className="w-full"
           onClick={submitSale}
-          disabled={isPending || !attemptKey || cart.length === 0 || (method === "CASH" && (cashReceived === "" || changeDue < 0))}
+          disabled={
+            isPending ||
+            !attemptKey ||
+            cart.length === 0 ||
+            (method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
+            (!isWalkIn && needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim()))
+          }
         >
-          {isPending ? "Enregistrement…" : method === "CARD_QR" ? "Générer le QR de paiement" : "Encaisser et envoyer le reçu"}
+          {isPending
+            ? "Enregistrement…"
+            : method === "CARD_QR"
+            ? "Générer le QR de paiement"
+            : isWalkIn
+            ? "Encaisser et générer le ticket"
+            : "Encaisser et envoyer le reçu"}
         </Button>
       </aside>
 

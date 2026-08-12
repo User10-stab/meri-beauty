@@ -126,6 +126,10 @@ export default function RegisterForm() {
       confirmPassword: "",
       isCompany: false,
       vatNumber: "",
+      companyLegalName: "",
+      companyRegistrationNo: "",
+      companyLegalForm: "",
+      billingContactName: "",
       addressLine1: "",
       addressLine2: "",
       addressCity: "",
@@ -308,6 +312,38 @@ export default function RegisterForm() {
               </button>
             </div>
           </div>
+
+          {isCompany ? (
+            <div className="space-y-1">
+              <label htmlFor="companyLegalName" className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                Raison sociale <span className="text-red-500">*</span>
+              </label>
+              <div className="relative rounded-2xl shadow-sm">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <Building2 className="h-5 w-5 text-zinc-400 dark:text-zinc-500" />
+                </div>
+                <input
+                  id="companyLegalName"
+                  type="text"
+                  autoComplete="organization"
+                  disabled={isLoading}
+                  required={isCompany}
+                  {...register("companyLegalName")}
+                  placeholder="Doe Consulting SRL"
+                  className={`block w-full pl-11 pr-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
+                    errors.companyLegalName
+                      ? "border-red-400 focus:ring-red-400/40 focus:border-red-500"
+                      : "border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2]"
+                  } focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60`}
+                />
+              </div>
+              {errors.companyLegalName && (
+                <p className="text-xs text-red-600 dark:text-red-400 font-medium pl-1 animate-in fade-in duration-150">
+                  {errors.companyLegalName.message}
+                </p>
+              )}
+            </div>
+          ) : null}
 
           {isCompany ? (
             <div className="space-y-1">

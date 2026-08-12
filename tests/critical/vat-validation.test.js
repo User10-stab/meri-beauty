@@ -18,6 +18,7 @@ const registration = {
   phone: "+33 1 23 45 67 89",
   password: "mot-de-passe-solide",
   isCompany: true,
+  companyLegalName: "Société Exemple SARL",
   vatNumber: "FR40303265045",
   addressLine1: "10 rue de Paris",
   addressLine2: "",
@@ -92,6 +93,12 @@ describe("company registration VAT rules", () => {
     const result = registerSchema.safeParse({ ...registration, vatNumber: "" });
     expect(result.success).toBe(false);
     expect(result.error.flatten().fieldErrors.vatNumber?.[0]).toContain("obligatoire");
+  });
+
+  it("requires a company legal name for a company (B2B invoicing needs it, see BillingProfile)", () => {
+    const result = registerSchema.safeParse({ ...registration, companyLegalName: "" });
+    expect(result.success).toBe(false);
+    expect(result.error.flatten().fieldErrors.companyLegalName?.[0]).toContain("obligatoire");
   });
 
   it("accepts a French company with a French VAT number", () => {

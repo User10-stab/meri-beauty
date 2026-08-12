@@ -155,11 +155,22 @@ function BusinessInfoSection({ salon, onSuccess }) {
       email: salon?.email ?? "",
       address: salon?.address ?? "",
       vatNumber: salon?.vatNumber ?? "",
+      legalName: salon?.legalName ?? "",
+      companyRegistrationNo: salon?.companyRegistrationNo ?? "",
+      addressLine1: salon?.addressLine1 ?? "",
+      addressLine2: salon?.addressLine2 ?? "",
+      postalCode: salon?.postalCode ?? "",
+      city: salon?.city ?? "",
+      countryCode: salon?.countryCode ?? "BE",
       instagram: salon?.instagram ?? "",
       facebook: salon?.facebook ?? "",
       tiktok: salon?.tiktok ?? "",
     },
   });
+
+  const legalDataComplete = Boolean(
+    salon?.legalName && salon?.vatNumber && salon?.addressLine1 && salon?.postalCode && salon?.city && salon?.countryCode
+  );
 
   async function handleVerifyVat() {
     const value = watch("vatNumber");
@@ -310,6 +321,58 @@ function BusinessInfoSection({ salon, onSuccess }) {
                 {...register("tiktok")}
               />
               <FieldError message={errors.tiktok?.message} />
+            </div>
+          </div>
+        </div>
+
+        {/* Legal identity — required for invoice issuance */}
+        <div className="mt-8 border-t border-stroke pt-6 dark:border-dark-3">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-dark-5">
+            Identité légale (facturation)
+          </h3>
+          <p className="mb-4 text-xs text-gray-500 dark:text-dark-6">
+            Ces informations sont imprimées sur chaque facture. Tant qu'elles ne sont pas toutes renseignées, aucune facture ne peut être émise.
+          </p>
+          {!legalDataComplete && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-medium text-amber-700 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-400">
+              Identité légale incomplète — les ventes ne peuvent pas être finalisées tant que ces champs ne sont pas remplis.
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-x-8 gap-y-5 lg:grid-cols-2">
+            <div>
+              <Label icon={Building2} required>Dénomination légale</Label>
+              <TextInput placeholder="Meri Beauty SRL" error={errors.legalName} {...register("legalName")} />
+              <FieldError message={errors.legalName?.message} />
+            </div>
+            <div>
+              <Label icon={Receipt}>Numéro BCE</Label>
+              <TextInput placeholder="0751.854.027" error={errors.companyRegistrationNo} {...register("companyRegistrationNo")} />
+              <FieldError message={errors.companyRegistrationNo?.message} />
+            </div>
+            <div>
+              <Label icon={MapPin} required>Adresse (ligne 1)</Label>
+              <TextInput placeholder="Rue Bonaventure 113" error={errors.addressLine1} {...register("addressLine1")} />
+              <FieldError message={errors.addressLine1?.message} />
+            </div>
+            <div>
+              <Label icon={MapPin}>Adresse (ligne 2)</Label>
+              <TextInput placeholder="Boîte 2" error={errors.addressLine2} {...register("addressLine2")} />
+              <FieldError message={errors.addressLine2?.message} />
+            </div>
+            <div>
+              <Label icon={MapPin} required>Code postal</Label>
+              <TextInput placeholder="1090" error={errors.postalCode} {...register("postalCode")} />
+              <FieldError message={errors.postalCode?.message} />
+            </div>
+            <div>
+              <Label icon={MapPin} required>Ville</Label>
+              <TextInput placeholder="Jette" error={errors.city} {...register("city")} />
+              <FieldError message={errors.city?.message} />
+            </div>
+            <div>
+              <Label icon={MapPin} required>Pays (code ISO)</Label>
+              <TextInput placeholder="BE" maxLength={2} error={errors.countryCode} {...register("countryCode")} />
+              <FieldError message={errors.countryCode?.message} />
             </div>
           </div>
         </div>

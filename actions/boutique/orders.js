@@ -10,8 +10,7 @@ import { sendEmail } from "@/lib/email";
 import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema, closeShippedOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
-import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
-import { formatUserAddress } from "@/lib/format-address";
+import { issueInvoice, issueCreditNote, buildInvoiceCustomer } from "@/lib/invoicing";
 import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
@@ -839,6 +838,10 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
             addressCity: true,
             addressPostalCode: true,
             addressCountry: true,
+            isCompany: true,
+            billingProfile: {
+              select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+            },
           },
         },
       },
@@ -889,12 +892,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
           paymentId: payment.id,
           source: "ORDER",
           totalInclVat: Number(order.totalAmount),
-          customer: {
-            fullName: order.user.fullName,
-            email: order.user.email,
-            vatNumber: order.customerVatNumber ?? order.user.vatNumber,
-            address: formatUserAddress(order.user),
-          },
+          customer: buildInvoiceCustomer(order.user, { vatNumberOverride: order.customerVatNumber ?? order.user.vatNumber }),
           lines: orderInvoiceLines(order),
           vatRate: Number(order.vatRate),
           vatTreatment: order.vatTreatment,
@@ -1336,23 +1334,28 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
         : " Le remboursement apparaîtra sur votre compte sous quelques jours."
       : "";
 
-    sendEmail({
-      to: order.user.email,
-      subject: `Commande annulée – n°${order.orderNumber} – Meri Beauty`,
-      text:
-        `Bonjour ${order.user.fullName},\n\n` +
-        `Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
-        (reason ? ` Raison : ${reason}` : "") +
-        `\n\nL'équipe Meri Beauty`,
-      html:
-        `<p>Bonjour ${order.user.fullName},</p>` +
-        `<p>Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
-        (reason ? ` Raison : ${reason}` : "") +
-        `</p><p>L'équipe Meri Beauty</p>`,
-      ...(creditNotePdf
-        ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] }
-        : {}),
-    }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
+    // A walk-in POS "client de passage" order has no user/email to notify —
+    // nothing to send here, the cashier already has whatever ticket/refund
+    // record was handed over in person.
+    if (order.user) {
+      sendEmail({
+        to: order.user.email,
+        subject: `Commande annulée – n°${order.orderNumber} – Meri Beauty`,
+        text:
+          `Bonjour ${order.user.fullName},\n\n` +
+          `Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
+          (reason ? ` Raison : ${reason}` : "") +
+          `\n\nL'équipe Meri Beauty`,
+        html:
+          `<p>Bonjour ${order.user.fullName},</p>` +
+          `<p>Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
+          (reason ? ` Raison : ${reason}` : "") +
+          `</p><p>L'équipe Meri Beauty</p>`,
+        ...(creditNotePdf
+          ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] }
+          : {}),
+      }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
+    }
 
     if (refundFailed) {
       const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
@@ -1360,8 +1363,8 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
         sendEmail({
           to: salon.email,
           subject: `⚠️ Remboursement Stripe échoué – Commande n°${order.orderNumber}`,
-          text: `Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
-          html: `<p>Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
+          text: `Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user?.email ?? "client de passage"}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
+          html: `<p>Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user?.email ?? "client de passage"}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
         }).catch((err) => console.error("[performOrderCancellation] refund-failure alert email failed:", err));
       }
     }

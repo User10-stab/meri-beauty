@@ -10,6 +10,7 @@ import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting
 import { stripe } from "@/lib/stripe";
 import { issueCreditNote } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
+import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
 
 function formatSessionDate(date) {
   return new Date(date).toLocaleDateString("fr-FR", {
@@ -189,4 +190,42 @@ export async function cancelFormationReservation(reservationId, { reason, refund
     console.error("[cancelFormationReservation]", error);
     return { success: false, message: "Erreur lors de l'annulation." };
   }
+}
+
+/**
+ * Admin-only: closes out a formation reservation, collecting the 50% on-site
+ * balance and issuing the final invoice. Before this existed there was no
+ * way to record that money at all — see lib/reservations/settle-reservation.js.
+ */
+export async function completeFormationReservation(reservationId, { method, paymentConfirmed } = {}) {
+  const session = await auth();
+  if (!session?.user) return { success: false, message: "Non authentifié." };
+  if (!isAdminRole(session.user.role)) return { success: false, message: "Non autorisé." };
+
+  const result = await settleReservation({
+    kind: "FORMATION",
+    reservationId,
+    method,
+    paymentConfirmed,
+    actorId: session.user.id,
+  });
+
+  if (result.success) revalidatePath(RESERVATION_KINDS.FORMATION.revalidatePath);
+  return result;
+}
+
+/** Admin-only: records a no-show. Never refunds — the deposit is kept by design. */
+export async function markFormationReservationNoShow(reservationId) {
+  const session = await auth();
+  if (!session?.user) return { success: false, message: "Non authentifié." };
+  if (!isAdminRole(session.user.role)) return { success: false, message: "Non autorisé." };
+
+  const result = await markReservationNoShow({
+    kind: "FORMATION",
+    reservationId,
+    actorId: session.user.id,
+  });
+
+  if (result.success) revalidatePath(RESERVATION_KINDS.FORMATION.revalidatePath);
+  return result;
 }

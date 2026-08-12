@@ -11,6 +11,7 @@ import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-workshop-reservation";
 import { issueCreditNote } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
+import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
 
 const CANCELLATION_CUTOFF_HOURS = 48;
 const SESSION_CHANGE_FEE_RATE = 0.1; // 10% of the reservation's total price
@@ -457,4 +458,42 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     console.error("[changeReservationSeats]", error);
     return { success: false, message: "Erreur lors de la modification du nombre de places." };
   }
+}
+
+/**
+ * Admin-only: closes out an atelier reservation, collecting the 50% on-site
+ * balance and issuing the final invoice. Before this existed there was no
+ * way to record that money at all — see lib/reservations/settle-reservation.js.
+ */
+export async function completeWorkshopReservation(reservationId, { method, paymentConfirmed } = {}) {
+  const session = await auth();
+  if (!session?.user) return { success: false, message: "Non authentifié." };
+  if (!isAdminRole(session.user.role)) return { success: false, message: "Non autorisé." };
+
+  const result = await settleReservation({
+    kind: "WORKSHOP",
+    reservationId,
+    method,
+    paymentConfirmed,
+    actorId: session.user.id,
+  });
+
+  if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
+  return result;
+}
+
+/** Admin-only: records a no-show. Never refunds — the deposit is kept by design. */
+export async function markWorkshopReservationNoShow(reservationId) {
+  const session = await auth();
+  if (!session?.user) return { success: false, message: "Non authentifié." };
+  if (!isAdminRole(session.user.role)) return { success: false, message: "Non autorisé." };
+
+  const result = await markReservationNoShow({
+    kind: "WORKSHOP",
+    reservationId,
+    actorId: session.user.id,
+  });
+
+  if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
+  return result;
 }

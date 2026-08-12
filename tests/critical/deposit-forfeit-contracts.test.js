@@ -5,18 +5,22 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
-// Deposit forfeiture on a late cancellation was entirely absent — every
-// cancellation path always refunded 100%, regardless of policy. This wires
-// in a configurable withholding, defaulted to 0% (today's exact behaviour)
-// so nothing changes for anyone until a staff member's percentage is set
-// above zero — see actions/appointment/manage-appointment.js's rejectAppointment.
-describe("deposit forfeiture is inert at its 0% default", () => {
+// Deposit forfeiture on a late cancellation defaults to 100% — the deposit
+// is kept in full on a late cancellation, matching what customers are told
+// (MyAppointmentsPageClient.jsx / MyReservationsClient.jsx: "L'acompte reste
+// acquis... sauf annulation exceptionnelle approuvée par l'administration")
+// and the same non-refundable-by-default policy already applied to
+// ateliers/formations deposits. The only way back to a full refund is an
+// admin approving a cancellation-exception request, which passes
+// waiveDepositForfeit: true — see
+// actions/appointment/manage-appointment.js's rejectAppointment.
+describe("deposit forfeiture defaults to withholding the deposit in full", () => {
   const schema = source("prisma/schema.prisma");
   const actions = source("actions/appointment/manage-appointment.js");
 
-  test("Staff.depositForfeitPercentage defaults to 0", () => {
+  test("Staff.depositForfeitPercentage defaults to 100", () => {
     expect(schema).toContain("depositForfeitPercentage");
-    expect(schema).toMatch(/depositForfeitPercentage\s+Decimal\s+@default\(0\)/);
+    expect(schema).toMatch(/depositForfeitPercentage\s+Decimal\s+@default\(100\)/);
   });
 
   test("only applies to a deposit-type payment inside the cancellation window, never a full/balance payment", () => {

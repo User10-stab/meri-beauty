@@ -1318,9 +1318,15 @@ model Staff {
   allowedPaymentMethods       AllowedPaymentMethods       @default(BOTH)
   // % of the deposit withheld when rejectAppointment processes a late
   // cancellation (inside the 48h window) on a deposit-type payment. Default
-  // 0 — today's exact "always fully refunded" behaviour — so this is inert
-  // until a staff member's percentage is explicitly set above zero.
-  depositForfeitPercentage    Decimal                     @default(0) @db.Decimal(5, 2)
+  // 100 — the deposit is kept in full, matching what customers are told
+  // (MyAppointmentsPageClient.jsx / MyReservationsClient.jsx: "L'acompte
+  // reste acquis... sauf annulation exceptionnelle approuvée par
+  // l'administration") — the only way back to a full refund is an admin
+  // approving a cancellation-exception request, which passes
+  // waiveDepositForfeit: true and skips this withholding entirely. Mirrors
+  // the ateliers/formations policy (deposit non-refundable by default,
+  // refundable only via the same admin-exception path).
+  depositForfeitPercentage    Decimal                     @default(100) @db.Decimal(5, 2)
 
   // Account Setup
   setupCompleted Boolean @default(false)

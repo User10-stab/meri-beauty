@@ -107,9 +107,27 @@ export default function CGVPage() {
         Toute demande d'annulation ou de report d'un rendez-vous se fait depuis votre espace
         client, rubrique{" "}
         <Link className="text-gold underline" href="/mes-reservations">Mes réservations</Link>, ou
-        directement auprès du salon par téléphone ou email. Si Meri Beauty est à l'origine de
-        l'annulation, toute somme déjà versée (acompte ou solde) vous est intégralement
-        remboursée.
+        directement auprès du salon par téléphone ou email, jusqu'à 48 heures avant l'heure du
+        rendez-vous. Si Meri Beauty est à l'origine de l'annulation, toute somme déjà versée
+        (acompte ou solde) vous est intégralement remboursée.
+      </P>
+      <Note>
+        Passé ce délai de 48 heures, le rendez-vous ne peut plus être annulé ni reporté depuis
+        votre espace client, et l'acompte déjà versé reste acquis à Meri Beauty. Il en va de même
+        en cas d'absence au rendez-vous sans annulation préalable (« no-show ») : les sommes
+        déjà versées, acompte ou solde, ne sont pas remboursées.
+      </Note>
+      <P>
+        À titre exceptionnel, et à sa seule discrétion, Meri Beauty peut accorder un
+        remboursement intégral de l'acompte pour une annulation tardive justifiée par un motif
+        grave (maladie, hospitalisation, décès, ou autre cas de force majeure dûment justifié).
+        Cette exception n'est jamais automatique : introduisez une demande motivée depuis votre
+        espace client, rubrique{" "}
+        <Link className="text-gold underline" href="/mes-reservations">Mes réservations</Link>. Le
+        dépôt d'une demande ne vaut ni annulation ni remboursement — votre rendez-vous et votre
+        acompte restent inchangés tant qu'elle n'a pas été examinée. Seul un membre autorisé de
+        l'équipe Meri Beauty peut l'accepter et déclencher le remboursement, et vous êtes
+        informé(e) de la décision par email.
       </P>
 
       <H2>9. Ateliers et formations — conditions particulières</H2>

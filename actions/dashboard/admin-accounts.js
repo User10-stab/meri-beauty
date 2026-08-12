@@ -67,18 +67,141 @@ function buildWelcomeEmail({ fullName, email, password, loginUrl }) {
   return { text, html };
 }
 
-/** Existing administrator accounts — so an admin can see who already has access before adding another. */
+/**
+ * Existing administrator accounts — so an admin can see who already has
+ * access before adding another. Deliberately includes soft-deleted rows
+ * (unlike most list actions in this codebase) so a deletion can be undone
+ * from the same screen — without this, "Supprimer" would be a one-way door
+ * back to needing CLI/server access, defeating the point of this feature.
+ */
 export async function listAdminAccounts() {
   const guard = await requireAdminAccountAccess();
   if (guard.error) return { success: false, message: guard.error, data: [] };
 
   const admins = await prisma.user.findMany({
-    where: { role: { in: ["ADMIN", "OWNER"] }, isDeleted: false },
+    where: { role: { in: ["ADMIN", "OWNER"] } },
     orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-    select: { id: true, fullName: true, email: true, role: true, isActive: true, createdAt: true },
+    select: { id: true, fullName: true, email: true, role: true, isActive: true, isDeleted: true, createdAt: true },
   });
 
   return { success: true, data: admins };
+}
+
+/**
+ * Shared guards for every action that changes another admin's access
+ * (deactivate/delete/reactivate). Two rules, both hard-blocks:
+ *
+ *  1. Nobody can act on their own account through this UI — prevents an
+ *     accidental self-lockout with no one else to undo it.
+ *  2. A plain ADMIN can never mutate an OWNER's account status, in either
+ *     direction — mirrors createAdminAccount's "ADMIN can't grant OWNER"
+ *     rule symmetrically. Only an OWNER can act on another OWNER.
+ *
+ * Returns the target user row (so callers don't re-fetch) or an error.
+ */
+async function loadMutationTarget(session, targetId) {
+  if (targetId === session.user.id) {
+    return { error: "Vous ne pouvez pas modifier votre propre statut depuis cet écran." };
+  }
+
+  const target = await prisma.user.findUnique({
+    where: { id: targetId },
+    select: { id: true, fullName: true, role: true, isActive: true, isDeleted: true },
+  });
+  if (!target || !["ADMIN", "OWNER"].includes(target.role)) {
+    return { error: "Compte administrateur introuvable." };
+  }
+  if (target.role === "OWNER" && session.user.role !== "OWNER") {
+    return { error: "Seul un propriétaire peut modifier le statut d'un autre propriétaire." };
+  }
+
+  return { target };
+}
+
+/**
+ * Blocks an action that would leave zero active admins — the hard safety
+ * net behind the self-guard above. Counts every OTHER active, non-deleted
+ * ADMIN/OWNER; the guard fires if that count is already zero (i.e. the
+ * target being acted on is the last one standing).
+ */
+async function assertAnotherActiveAdminRemains(targetId) {
+  const remaining = await prisma.user.count({
+    where: { role: { in: ["ADMIN", "OWNER"] }, isActive: true, isDeleted: false, id: { not: targetId } },
+  });
+  if (remaining === 0) {
+    return { error: "Impossible : il ne resterait plus aucun compte administrateur actif. Créez ou réactivez-en un autre d'abord." };
+  }
+  return {};
+}
+
+/** Reversible: blocks login, keeps the account visible (marked "Inactif") and instantly restorable. */
+export async function deactivateAdminAccount(targetId) {
+  const guard = await requireAdminAccountAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const targetCheck = await loadMutationTarget(guard.session, targetId);
+  if (targetCheck.error) return { success: false, message: targetCheck.error };
+  if (!targetCheck.target.isActive) {
+    return { success: false, message: "Ce compte est déjà inactif." };
+  }
+
+  const remainingCheck = await assertAnotherActiveAdminRemains(targetId);
+  if (remainingCheck.error) return { success: false, message: remainingCheck.error };
+
+  await prisma.user.update({ where: { id: targetId }, data: { isActive: false } });
+  revalidatePath(REVALIDATE_PATH);
+  return { success: true, message: `Le compte de ${targetCheck.target.fullName} a été désactivé.` };
+}
+
+/**
+ * Soft-delete, matching the pattern used everywhere else in this codebase
+ * (see deleteIndependentStaff) — never a hard SQL DELETE. History that
+ * references this User (AuditLog.actorId, past Transactions, etc.) stays
+ * intact; the row simply drops out of the active-admin count and is shown
+ * as "Supprimé" instead of "Actif"/"Inactif", with a one-click restore.
+ */
+export async function deleteAdminAccount(targetId) {
+  const guard = await requireAdminAccountAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const targetCheck = await loadMutationTarget(guard.session, targetId);
+  if (targetCheck.error) return { success: false, message: targetCheck.error };
+  if (targetCheck.target.isDeleted) {
+    return { success: false, message: "Ce compte est déjà supprimé." };
+  }
+
+  const remainingCheck = await assertAnotherActiveAdminRemains(targetId);
+  if (remainingCheck.error) return { success: false, message: remainingCheck.error };
+
+  await prisma.user.update({
+    where: { id: targetId },
+    data: { isActive: false, isDeleted: true, deletedAt: new Date() },
+  });
+  revalidatePath(REVALIDATE_PATH);
+  return { success: true, message: `Le compte de ${targetCheck.target.fullName} a été supprimé. Il peut être restauré à tout moment.` };
+}
+
+/**
+ * Undoes either a deactivation or a deletion — always results in a fully
+ * active account. No "last admin" guard needed here: this only ever adds
+ * access back, it can't be the action that drops the count to zero.
+ */
+export async function reactivateAdminAccount(targetId) {
+  const guard = await requireAdminAccountAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const targetCheck = await loadMutationTarget(guard.session, targetId);
+  if (targetCheck.error) return { success: false, message: targetCheck.error };
+  if (targetCheck.target.isActive && !targetCheck.target.isDeleted) {
+    return { success: false, message: "Ce compte est déjà actif." };
+  }
+
+  await prisma.user.update({
+    where: { id: targetId },
+    data: { isActive: true, isDeleted: false, deletedAt: null },
+  });
+  revalidatePath(REVALIDATE_PATH);
+  return { success: true, message: `Le compte de ${targetCheck.target.fullName} a été réactivé.` };
 }
 
 /**

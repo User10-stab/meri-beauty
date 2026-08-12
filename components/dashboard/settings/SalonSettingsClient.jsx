@@ -28,16 +28,24 @@ import {
   UserPlus,
   Copy,
   AlertTriangle,
+  Ban,
+  RotateCcw,
 } from "lucide-react";
 import { updateSalon } from "@/actions/salon/update-salon";
 import { updateWorkingDays } from "@/actions/salon/update-working-days";
 import { createClosure } from "@/actions/salon/create-closure";
 import { deleteClosure } from "@/actions/salon/delete-closure";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
-import { createAdminAccount } from "@/actions/dashboard/admin-accounts";
+import {
+  createAdminAccount,
+  deactivateAdminAccount,
+  deleteAdminAccount,
+  reactivateAdminAccount,
+} from "@/actions/dashboard/admin-accounts";
 import { updateSalonSchema } from "@/lib/validations/salon";
 import { createAdminAccountSchema } from "@/lib/validations/admin-account";
 import Button from "@/components/ui/Button";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const DAY_LABELS = {
   MONDAY:    "Lundi",
@@ -129,7 +137,7 @@ function formatDate(dateStr) {
 
 /* ─── Main Export ─── */
 
-export function SalonSettingsClient({ initialData }) {
+export function SalonSettingsClient({ initialData, initialAdmins, currentUserId }) {
   const [salonData, setSalonData] = useState(initialData);
 
   return (
@@ -137,6 +145,7 @@ export function SalonSettingsClient({ initialData }) {
       <BusinessInfoSection salon={salonData} onSuccess={setSalonData} />
       <WorkingDaysSection salon={salonData} setSalonData={setSalonData} />
       <ClosuresSection salon={salonData} setSalonData={setSalonData} />
+      <AdminAccountsSection initialAdmins={initialAdmins ?? []} currentUserId={currentUserId} />
     </div>
   );
 }
@@ -811,6 +820,316 @@ function ClosuresSection({ salon, setSalonData }) {
             </Button>
           </div>
         </div>
+      )}
+    </SectionCard>
+  );
+}
+
+/* ─── Section 4: Admin accounts ───
+ * Lets an existing ADMIN/OWNER create, deactivate, delete, or restore
+ * another admin account from the dashboard, with zero server access needed
+ * — closes the gap where the only way to mint an admin was the CLI seed
+ * script. Deactivate/delete both go through actions/dashboard/admin-accounts.js's
+ * shared guards: nobody can act on their own row, a plain ADMIN can't touch
+ * an OWNER's status, and neither action is allowed if it would leave zero
+ * active admins — so this screen can never be used to lock everyone out.
+ */
+
+const ROLE_BADGE = {
+  OWNER: "bg-[#2f3a2e] text-white",
+  ADMIN: "bg-[#2f3a2e]/10 text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white",
+};
+
+function adminStatus(admin) {
+  if (admin.isDeleted) return "deleted";
+  if (!admin.isActive) return "inactive";
+  return "active";
+}
+
+function AdminAccountsSection({ initialAdmins, currentUserId }) {
+  const [admins, setAdmins] = useState(initialAdmins);
+  const [showForm, setShowForm] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [revealedPassword, setRevealedPassword] = useState(null); // { email, password } — only set when the welcome e-mail failed to send
+  const [pendingAction, setPendingAction] = useState(null); // { id, fullName, type: "deactivate" | "delete" }
+  const [isMutating, startMutation] = useTransition();
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm({
+    resolver: zodResolver(createAdminAccountSchema),
+    defaultValues: { fullName: "", email: "" },
+  });
+
+  function onSubmit(data) {
+    startTransition(async () => {
+      const res = await createAdminAccount(data);
+      if (!res.success) {
+        if (res.errors) {
+          const first = Object.values(res.errors).find(Boolean);
+          if (first) toast.error(first);
+          else toast.error(res.message);
+        } else {
+          toast.error(res.message);
+        }
+        return;
+      }
+      toast.success(res.message);
+      setAdmins((prev) => [...prev, res.data]);
+      setRevealedPassword(
+        res.emailSent ? null : { email: res.data.email, password: res.temporaryPassword }
+      );
+      reset();
+      setShowForm(false);
+    });
+  }
+
+  function applyUpdate(id, patch) {
+    setAdmins((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  }
+
+  function handleReactivate(admin) {
+    startMutation(async () => {
+      const res = await reactivateAdminAccount(admin.id);
+      if (!res.success) return toast.error(res.message);
+      toast.success(res.message);
+      applyUpdate(admin.id, { isActive: true, isDeleted: false });
+    });
+  }
+
+  function confirmPendingAction() {
+    if (!pendingAction) return;
+    const { id, type } = pendingAction;
+    startMutation(async () => {
+      const res = await (type === "delete" ? deleteAdminAccount(id) : deactivateAdminAccount(id));
+      if (!res.success) {
+        toast.error(res.message);
+        setPendingAction(null);
+        return;
+      }
+      toast.success(res.message);
+      applyUpdate(id, type === "delete" ? { isActive: false, isDeleted: true } : { isActive: false });
+      setPendingAction(null);
+    });
+  }
+
+  function formatShortDate(dateStr) {
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Brussels" });
+  }
+
+  function copyPassword() {
+    if (!revealedPassword) return;
+    navigator.clipboard?.writeText(revealedPassword.password);
+    toast.success("Mot de passe copié.");
+  }
+
+  return (
+    <SectionCard
+      icon={ShieldCheck}
+      title="Comptes administrateurs"
+      description="Les personnes ayant un accès complet au tableau de bord."
+    >
+      {revealedPassword && (
+        <div className="mb-6 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-900/20 dark:text-amber-400">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium">L'e-mail de bienvenue n'a pas pu être envoyé à {revealedPassword.email}.</p>
+            <p className="mt-1">Transmettez ce mot de passe temporaire vous-même, par un autre moyen :</p>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="rounded-lg bg-white/70 px-3 py-1.5 font-mono text-xs dark:bg-black/20">{revealedPassword.password}</code>
+              <button
+                type="button"
+                onClick={copyPassword}
+                className="flex items-center gap-1 rounded-lg border border-amber-300 px-2.5 py-1.5 text-xs font-medium hover:bg-amber-100 dark:border-amber-800 dark:hover:bg-amber-900/40"
+              >
+                <Copy size={12} /> Copier
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4 flex justify-end">
+        {!showForm && (
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-stroke bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6 dark:hover:bg-dark-3"
+          >
+            <UserPlus size={14} /> Ajouter un administrateur
+          </button>
+        )}
+      </div>
+
+      {admins.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-stroke dark:border-dark-3">
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-6">Nom</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-6">E-mail</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-6">Rôle</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-6">Depuis</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-dark-6">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {admins.map((admin) => {
+                const status = adminStatus(admin);
+                const isSelf = admin.id === currentUserId;
+                return (
+                  <tr key={admin.id} className={`border-b border-stroke dark:border-dark-3 ${status === "deleted" ? "opacity-50" : ""}`}>
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-medium text-dark dark:text-white">{admin.fullName}</span>
+                      {isSelf && <span className="ml-2 text-xs text-gray-400 dark:text-dark-5">(vous)</span>}
+                      {status === "inactive" && (
+                        <span className="ml-2 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-600 dark:bg-red-900/20 dark:text-red-400">Inactif</span>
+                      )}
+                      {status === "deleted" && (
+                        <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-500 dark:bg-dark-3 dark:text-dark-6">Supprimé</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-6">{admin.email}</td>
+                    <td className="px-4 py-3">
+                      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${ROLE_BADGE[admin.role] ?? ROLE_BADGE.ADMIN}`}>
+                        {admin.role === "OWNER" ? "Propriétaire" : "Administrateur"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-dark-6">{formatShortDate(admin.createdAt)}</td>
+                    <td className="px-4 py-3">
+                      {isSelf ? (
+                        <span className="block text-right text-xs text-gray-400 dark:text-dark-5">—</span>
+                      ) : (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {status === "active" && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isMutating}
+                                onClick={() => setPendingAction({ id: admin.id, fullName: admin.fullName, type: "deactivate" })}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-all hover:bg-amber-50 hover:text-amber-600 disabled:opacity-40 dark:hover:bg-amber-900/20"
+                                title="Désactiver"
+                              >
+                                <Ban size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isMutating}
+                                onClick={() => setPendingAction({ id: admin.id, fullName: admin.fullName, type: "delete" })}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-all hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:hover:bg-red-900/20"
+                                title="Supprimer"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          )}
+                          {status === "inactive" && (
+                            <>
+                              <button
+                                type="button"
+                                disabled={isMutating}
+                                onClick={() => handleReactivate(admin)}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-all hover:bg-emerald-50 hover:text-emerald-600 disabled:opacity-40 dark:hover:bg-emerald-900/20"
+                                title="Réactiver"
+                              >
+                                <RotateCcw size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isMutating}
+                                onClick={() => setPendingAction({ id: admin.id, fullName: admin.fullName, type: "delete" })}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-all hover:bg-red-50 hover:text-red-500 disabled:opacity-40 dark:hover:bg-red-900/20"
+                                title="Supprimer"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </>
+                          )}
+                          {status === "deleted" && (
+                            <button
+                              type="button"
+                              disabled={isMutating}
+                              onClick={() => handleReactivate(admin)}
+                              className="flex items-center gap-1 rounded-lg border border-stroke px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-all hover:bg-gray-50 disabled:opacity-40 dark:border-dark-3 dark:text-dark-6 dark:hover:bg-dark-3"
+                            >
+                              <RotateCcw size={12} /> Restaurer
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-stroke bg-gray-50/50 px-6 py-12 dark:border-dark-3 dark:bg-dark-2/50">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gray-100 dark:bg-dark-3">
+            <ShieldCheck size={24} className="text-gray-400 dark:text-dark-5" />
+          </div>
+          <h3 className="mt-4 text-sm font-semibold text-dark dark:text-white">Aucun compte administrateur trouvé</h3>
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={Boolean(pendingAction)}
+        title={pendingAction?.type === "delete" ? "Supprimer ce compte administrateur ?" : "Désactiver ce compte administrateur ?"}
+        message={
+          pendingAction?.type === "delete"
+            ? `${pendingAction?.fullName} ne pourra plus se connecter. Le compte reste restaurable à tout moment depuis cette page.`
+            : `${pendingAction?.fullName} ne pourra plus se connecter tant que le compte n'est pas réactivé.`
+        }
+        confirmLabel={pendingAction?.type === "delete" ? "Supprimer" : "Désactiver"}
+        danger={pendingAction?.type === "delete"}
+        loading={isMutating}
+        onConfirm={confirmPendingAction}
+        onCancel={() => setPendingAction(null)}
+      />
+
+      {showForm && (
+        <form
+          onSubmit={handleSubmit(onSubmit)}
+          noValidate
+          className="mt-6 rounded-2xl border border-stroke bg-gray-50/80 p-6 dark:border-dark-3 dark:bg-dark-2/80"
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <Label required>Nom complet</Label>
+              <TextInput placeholder="ex. Sophie Dupont" error={errors.fullName} {...register("fullName")} />
+              <FieldError message={errors.fullName?.message} />
+            </div>
+            <div>
+              <Label icon={Mail} required>E-mail</Label>
+              <TextInput type="email" placeholder="sophie@meribeauty.com" error={errors.email} {...register("email")} />
+              <FieldError message={errors.email?.message} />
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-gray-500 dark:text-dark-6">
+            Un mot de passe temporaire sera généré automatiquement et envoyé par e-mail à cette adresse.
+          </p>
+          <div className="mt-6 flex items-center justify-end gap-3 border-t border-stroke pt-5 dark:border-dark-3">
+            <button
+              type="button"
+              onClick={() => { reset(); setShowForm(false); }}
+              className="rounded-xl border border-stroke bg-white px-5 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition-all hover:bg-gray-50 dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6 dark:hover:bg-dark-3"
+            >
+              Annuler
+            </button>
+            <Button type="submit" disabled={isPending}>
+              {isPending ? (
+                <><Loader2 size={16} className="animate-spin" /> Création…</>
+              ) : (
+                <><UserPlus size={16} /> Créer le compte</>
+              )}
+            </Button>
+          </div>
+        </form>
       )}
     </SectionCard>
   );

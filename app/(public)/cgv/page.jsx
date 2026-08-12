@@ -157,6 +157,15 @@ export default function CGVPage() {
         une note de crédit liée à la facture initiale. Un remboursement ou une annulation accordé(e)
         par exception libère la place concernée afin qu'elle puisse être proposée à une autre personne.
       </P>
+      <P>
+        <strong>Changement de séance ou de nombre de places (ateliers).</strong> Pour une place déjà
+        réservée sur un atelier, vous pouvez demander à changer de date de session ou à modifier le
+        nombre de places réservées, sous réserve de disponibilité, en contactant le salon. Ce
+        changement donne lieu à des frais de modification équivalant à 10 % du prix total de votre
+        réservation, quel que soit le sens du changement. Le montant exact vous est indiqué avant
+        tout règlement, sur la page de paiement sécurisée dédiée à cette modification ; le
+        changement n'est effectif qu'une fois ces frais réglés.
+      </P>
 
       <H2>10. Garantie légale de conformité</H2>
       <P>

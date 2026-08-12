@@ -13,7 +13,6 @@ import { issueCreditNote } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
 
-const CANCELLATION_CUTOFF_HOURS = 48;
 const SESSION_CHANGE_FEE_RATE = 0.1; // 10% of the reservation's total price
 
 function formatSessionDate(date) {
@@ -30,13 +29,19 @@ function formatSessionDate(date) {
 
 /**
  * Admin-only: cancels a reservation on a customer's behalf. Deposits are
- * non-refundable by default (see req: "no refund once paid the deposit"),
- * and a booking can't be cancelled within 48h of its session — both
+ * non-refundable by default (see req: "no refund once paid the deposit") —
  * enforced here since there's no customer self-service cancel flow in this
  * app. The client confirmed exceptions should exist for medical reasons,
  * death, or genuine force majeure — `refundDeposit` is the admin's manual
  * case-by-case call, never automatic, so `reason` is required whenever it's
  * used (it's what justifies the exception in the reservation's own record).
+ *
+ * No time cutoff before the session: unlike a customer self-service window,
+ * this is a trusted admin acting on a case she's already reviewed — the
+ * most urgent exceptions (a customer hospitalized the day of the session)
+ * are also the ones closest to the session date, so a cutoff here would
+ * block the admin from honoring exactly the force-majeure promise made in
+ * the CGV.
  */
 export async function cancelWorkshopReservation(reservationId, { reason, refundDeposit = false } = {}) {
   try {
@@ -66,17 +71,6 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
     }
     if (reservation.status === "CANCELLED") {
       return { success: false, message: "Cette réservation est déjà annulée." };
-    }
-
-    // Cutoff runs the opposite direction from a withdrawal window: it blocks
-    // once too LITTLE time remains before a FUTURE session, not once too
-    // much time has passed since a past one.
-    const cutoff = new Date(reservation.session.startDate.getTime() - CANCELLATION_CUTOFF_HOURS * 3600 * 1000);
-    if (new Date() > cutoff) {
-      return {
-        success: false,
-        message: "Impossible d'annuler une réservation moins de 48h avant l'événement.",
-      };
     }
 
     const noteLine = refundDeposit

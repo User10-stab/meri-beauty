@@ -29,10 +29,11 @@ function formatSessionDate(date) {
  * is "no client-side cancellation or modification at all" — this exists
  * purely as an internal admin tool (duplicate bookings, data-entry mistakes,
  * a customer who called to cancel and must be handled manually), not a
- * feature exposed to customers. No refund path — formation deposits are
- * non-refundable with no self-service exception (unlike ateliers, where she
- * explicitly asked for one); she still handles true force-majeure cases by
- * being contacted directly rather than through the dashboard.
+ * feature exposed to customers. Deposits are non-refundable by default;
+ * `refundPayment` is the same admin-discretion exception path as ateliers
+ * (grave/force-majeure cases), never automatic — `reason` is required
+ * whenever it's used, since it's what justifies the exception in the
+ * reservation's own record.
  *
  * A freed seat is what actually gives the formation waiting list something
  * to do — availability is computed live from non-cancelled reservations, so

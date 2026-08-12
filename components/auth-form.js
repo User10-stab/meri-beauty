@@ -16,13 +16,13 @@ import { Loader2, Sparkles, AlertCircle, Check, ArrowLeft, Eye, EyeOff } from "l
  * @param {Array<{name: string, label: string, type: string, placeholder: string, icon?: React.ComponentType}>} props.fields - Inputs to generate.
  * @param {import("zod").ZodTypeAny} props.schema - Zod schema for client-side validations.
  * @param {function} props.onSubmit - Submission callback (must return `{ success: boolean, message: string }`).
- * @param {string} [props.submitText="Submit"] - Label of the submit button.
- * @param {string} [props.loadingText="Submitting..."] - Loading text of the submit button.
+ * @param {string} [props.submitText="Envoyer"] - Label of the submit button.
+ * @param {string} [props.loadingText="Envoi en cours…"] - Loading text of the submit button.
  * @param {string} [props.footerText] - Bottom description string (e.g. "Don't have an account?").
  * @param {string} [props.footerLinkHref] - Bottom link target.
  * @param {string} [props.footerLinkText] - Bottom link label.
  * @param {function} [props.extraElements] - Render prop returning custom sub-fields (receives `{ register, isLoading }`).
- * @param {boolean} [props.backToSignIn=false] - If true, adds a "Back to Sign In" backlink.
+ * @param {boolean} [props.backToSignIn=false] - If true, adds a "Retour à la connexion" backlink.
  * @param {object} [props.defaultValues] - Pre-fills form fields (e.g. email carried over from a checkout redirect).
  */
 export default function AuthForm({
@@ -31,8 +31,8 @@ export default function AuthForm({
   fields = [],
   schema,
   onSubmit,
-  submitText = "Submit",
-  loadingText = "Submitting...",
+  submitText = "Envoyer",
+  loadingText = "Envoi en cours…",
   footerText,
   footerLinkHref,
   footerLinkText,
@@ -79,7 +79,7 @@ export default function AuthForm({
       setIsLoading(false);
     } catch (error) {
       console.error("[AuthForm] submit error:", error);
-      setServerError("An unexpected error occurred. Please try again.");
+      setServerError("Une erreur inattendue est survenue. Veuillez réessayer.");
       setIsLoading(false);
     }
   };
@@ -214,7 +214,7 @@ export default function AuthForm({
               className="inline-flex items-center gap-2 text-sm font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              Back to Sign In
+              Retour à la connexion
             </Link>
           </div>
         )}

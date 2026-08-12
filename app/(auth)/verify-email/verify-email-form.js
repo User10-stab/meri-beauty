@@ -104,7 +104,7 @@ export default function VerifyEmailForm({
       setIsLoading(false);
     } catch (error) {
       console.error("[resendVerificationEmail] submit error:", error);
-      setServerError("An unexpected error occurred. Please try again.");
+      setServerError("Une erreur inattendue est survenue. Veuillez réessayer.");
       setIsLoading(false);
     }
   };
@@ -172,7 +172,7 @@ export default function VerifyEmailForm({
             <Check className="h-6 w-6" />
           </div>
           <h2 className="text-2xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
-            Email Verified
+            Adresse e-mail confirmée
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
             {message}
@@ -182,7 +182,7 @@ export default function VerifyEmailForm({
               href={loginHref}
               className="w-full inline-flex justify-center items-center gap-2 py-3.5 px-4 text-sm font-semibold rounded-2xl text-white bg-[#2F3A2E] hover:bg-[#3d4d3c] transition-all shadow-md active:scale-[0.98]"
             >
-              Sign In
+              Se connecter
             </Link>
           </div>
         </div>
@@ -199,7 +199,7 @@ export default function VerifyEmailForm({
               <AlertCircle className="h-6 w-6" />
             </div>
             <h2 className="text-2xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
-              Verification Failed
+              Échec de la vérification
             </h2>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
               {message}
@@ -227,7 +227,7 @@ export default function VerifyEmailForm({
                   htmlFor="email"
                   className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider"
                 >
-                  Email Address
+                  Adresse e-mail
                 </label>
                 <div className="relative rounded-2xl shadow-sm">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -264,12 +264,12 @@ export default function VerifyEmailForm({
                 {isLoading ? (
                   <span className="flex items-center gap-2">
                     <Loader2 className="h-5 w-5 animate-spin" />
-                    Sending...
+                    Envoi en cours…
                   </span>
                 ) : (
                   <span className="flex items-center gap-2">
                     <RefreshCcw className="h-4 w-4" />
-                    Resend Verification Email
+                    Renvoyer le lien de vérification
                   </span>
                 )}
               </button>
@@ -282,7 +282,7 @@ export default function VerifyEmailForm({
               className="inline-flex items-center gap-2 text-sm font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
               <ArrowLeft className="h-4 w-4" />
-              Back to Sign In
+              Retour à la connexion
             </Link>
           </div>
         </div>
@@ -298,10 +298,10 @@ export default function VerifyEmailForm({
             <Sparkles className="h-6 w-6" />
           </div>
           <h2 className="text-3xl font-extrabold tracking-tight text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
-            Verify Your Email
+            Confirmez votre adresse e-mail
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Enter your email to resend the verification link
+            Saisissez votre adresse e-mail pour recevoir un nouveau lien de vérification
           </p>
         </div>
 
@@ -326,7 +326,7 @@ export default function VerifyEmailForm({
                 htmlFor="email"
                 className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider"
               >
-                Email Address
+                Adresse e-mail
               </label>
               <div className="relative rounded-2xl shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -363,12 +363,12 @@ export default function VerifyEmailForm({
               {isLoading ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  Sending...
+                  Envoi en cours…
                 </span>
               ) : (
                 <span className="flex items-center gap-2">
                   <RefreshCcw className="h-4 w-4" />
-                  Resend Verification Email
+                  Renvoyer le lien de vérification
                 </span>
               )}
             </button>
@@ -381,7 +381,7 @@ export default function VerifyEmailForm({
             className="inline-flex items-center gap-2 text-sm font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Sign In
+            Retour à la connexion
           </Link>
         </div>
       </div>

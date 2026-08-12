@@ -42,7 +42,7 @@ export default function ForgotPasswordForm() {
       setIsLoading(false);
     } catch (error) {
       console.error("[forgotPasswordForm] submit error:", error);
-      setServerError("An unexpected error occurred. Please try again.");
+      setServerError("Une erreur inattendue est survenue. Veuillez réessayer.");
       setIsLoading(false);
     }
   };
@@ -57,10 +57,10 @@ export default function ForgotPasswordForm() {
             <Sparkles className="h-6 w-6" />
           </div>
           <h2 className="text-3xl font-extrabold tracking-tight text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
-            Forgot Password
+            Mot de passe oublié
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Enter your email address to receive a secure password reset link
+            Saisissez votre adresse e-mail pour recevoir un lien de réinitialisation sécurisé
           </p>
         </div>
 
@@ -89,7 +89,7 @@ export default function ForgotPasswordForm() {
                 htmlFor="email"
                 className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider"
               >
-                Email Address
+                Adresse e-mail
               </label>
               <div className="relative rounded-2xl shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -128,10 +128,10 @@ export default function ForgotPasswordForm() {
               {isLoading ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  Requesting link...
+                  Envoi du lien…
                 </span>
               ) : (
-                "Send Reset Link"
+                "Envoyer le lien"
               )}
             </button>
           </div>
@@ -144,7 +144,7 @@ export default function ForgotPasswordForm() {
             className="inline-flex items-center gap-2 text-sm font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Sign In
+            Retour à la connexion
           </Link>
         </div>
       </div>

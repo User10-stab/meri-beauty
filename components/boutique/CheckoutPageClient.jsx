@@ -167,6 +167,9 @@ export function CheckoutPageClient({ cart, customerSession }) {
         pickupPoint: fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint : null,
         notes: notes || null,
         promoCode: appliedPromo?.code ?? null,
+        // Re-checked and recorded server-side — the guard above is only a
+        // courtesy message, the action is a public endpoint.
+        termsAccepted: acceptedTerms,
       };
 
       const result = await createOrderFromCart(payload);

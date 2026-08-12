@@ -4,8 +4,8 @@ import { redirect } from "next/navigation";
 import LoginForm from "./login-form";
 
 export const metadata = {
-  title: "Sign In | Meri Beauty",
-  description: "Access your dashboard to manage appointments, staff, and customer bookings.",
+  title: "Connexion | Meri Beauty",
+  description: "Connectez-vous à votre espace Meri Beauty pour gérer vos rendez-vous et vos réservations.",
 };
 
 export default async function LoginPage() {

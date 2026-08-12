@@ -256,6 +256,9 @@ function ReservationFormationContent() {
       isPriority: priorityValid,
       waitingListEntryId: waitingListId,
       promoCode: appliedPromo?.code ?? null,
+      // Re-checked and recorded server-side — the guard above is only a
+      // courtesy message, the action is a public endpoint.
+      termsAccepted: acceptedTerms,
     });
 
     if (result.success && result.url) {

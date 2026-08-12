@@ -28,7 +28,7 @@ export async function forgotPassword(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: "Please enter a valid email address.",
+      message: "Veuillez saisir une adresse e-mail valide.",
       errors: {
         email: errors.email?.[0] ?? null,
       },
@@ -42,7 +42,7 @@ export async function forgotPassword(input) {
   if (isRateLimited("forgot-password", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
-      message: "Too many requests. Please wait a few minutes before trying again.",
+      message: "Trop de demandes. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
   recordRateLimitHit("forgot-password", rateLimitKey);
@@ -57,7 +57,7 @@ export async function forgotPassword(input) {
       await new Promise((resolve) => setTimeout(resolve, Math.random() * 200 + 100));
       return {
         success: true,
-        message: "If an account exists with that email, a password reset link has been sent.",
+        message: "Si un compte existe avec cette adresse e-mail, un lien de réinitialisation vient d'être envoyé.",
       };
     }
 
@@ -103,7 +103,7 @@ export async function forgotPassword(input) {
     console.error("[forgotPassword]", error);
     return {
       success: false,
-      message: "Something went wrong. Please try again later.",
+      message: "Une erreur est survenue. Veuillez réessayer plus tard.",
     };
   }
 }

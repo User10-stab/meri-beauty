@@ -28,7 +28,7 @@ export async function loginUser(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: "Please correct the errors in the form.",
+      message: "Veuillez corriger les erreurs du formulaire.",
       errors: {
         email: errors.email?.[0] ?? null,
         password: errors.password?.[0] ?? null,
@@ -43,7 +43,7 @@ export async function loginUser(input) {
   if (isRateLimited("login", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_ATTEMPTS })) {
     return {
       success: false,
-      message: "Too many login attempts. Please wait a few minutes before trying again.",
+      message: "Trop de tentatives de connexion. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
   recordRateLimitHit("login", rateLimitKey);
@@ -60,7 +60,7 @@ export async function loginUser(input) {
       if (!user) {
         return {
           success: false,
-          message: "Invalid email or password.",
+          message: "Adresse e-mail ou mot de passe incorrect.",
         };
       }
 
@@ -68,7 +68,7 @@ export async function loginUser(input) {
         if (!user.emailVerified) {
           return {
             success: false,
-            message: "Please verify your email before logging in. Check your inbox for the verification link.",
+            message: "Veuillez confirmer votre adresse e-mail avant de vous connecter. Le lien de vérification se trouve dans votre boîte de réception.",
           };
         }
       }
@@ -83,7 +83,7 @@ export async function loginUser(input) {
         if (result?.error) {
           return {
             success: false,
-            message: "Invalid email or password.",
+            message: "Adresse e-mail ou mot de passe incorrect.",
           };
         }
       // Redirect based on the role we already have
@@ -93,7 +93,7 @@ export async function loginUser(input) {
 
         return {
           success: true,
-          message: "Logged in successfully.",
+          message: "Connexion réussie.",
           redirectTo,
         };
  
@@ -103,19 +103,19 @@ export async function loginUser(input) {
         case "CredentialsSignin":
           return {
             success: false,
-            message: "Invalid email or password.",
+            message: "Adresse e-mail ou mot de passe incorrect.",
           };
         default:
           return {
             success: false,
-            message: "Something went wrong. Please try again.",
+            message: "Une erreur est survenue. Veuillez réessayer.",
           };
       }
     }
     console.error("[loginUser] error:", error);
     return {
       success: false,
-      message: "An unexpected error occurred. Please try again.",
+      message: "Une erreur inattendue est survenue. Veuillez réessayer.",
     };
   }
 }

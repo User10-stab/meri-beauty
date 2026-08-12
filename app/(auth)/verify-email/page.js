@@ -4,8 +4,8 @@ import { verifyEmail } from "@/actions/auth/verify-email";
 import VerifyEmailForm from "./verify-email-form";
 
 export const metadata = {
-  title: "Verify Email | Meri Beauty",
-  description: "Verify your email address to activate your Meri Beauty account.",
+  title: "Confirmer votre e-mail | Meri Beauty",
+  description: "Confirmez votre adresse e-mail pour activer votre compte Meri Beauty.",
 };
 
 export default async function VerifyEmailPage({ searchParams }) {
@@ -27,7 +27,7 @@ export default async function VerifyEmailPage({ searchParams }) {
           success: false,
           message: "Votre compte a bien été créé, mais l’e-mail de vérification n’a pas pu être envoyé. Vérifiez le service d’e-mail puis demandez un nouveau lien ci-dessous.",
         }
-      : { success: false, message: "No verification token provided." };
+      : { success: false, message: "Aucun lien de vérification fourni." };
 
   // Plain registration tokens have no resumeType — nothing further to do,
   // the form below shows its usual "verified, go sign in" card.

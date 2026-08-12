@@ -55,7 +55,7 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
       }, 2000);
     } catch (error) {
       console.error("[resetPasswordForm] submit error:", error);
-      setServerError("An unexpected error occurred. Please try again.");
+      setServerError("Une erreur inattendue est survenue. Veuillez réessayer.");
       setIsLoading(false);
     }
   };
@@ -69,18 +69,18 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
             <AlertCircle className="h-6 w-6" />
           </div>
           <h2 className="text-2xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
-            Invalid Reset Link
+            Lien invalide
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
             {tokenError ||
-              "This password reset link is invalid, expired, or has already been used. Please request a new link."}
+              "Ce lien de réinitialisation est invalide, a expiré ou a déjà été utilisé. Veuillez en demander un nouveau."}
           </p>
           <div className="pt-2">
             <Link
               href="/forgot-password"
               className="w-full inline-flex justify-center items-center gap-2 py-3.5 px-4 text-sm font-semibold rounded-2xl text-white bg-[#2F3A2E] hover:bg-[#3d4d3c] transition-all shadow-md active:scale-[0.98]"
             >
-              Request New Link
+              Demander un nouveau lien
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
@@ -89,7 +89,7 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
               href="/login"
               className="text-xs font-semibold text-zinc-500 hover:text-[#2F3A2E] dark:text-zinc-400 dark:hover:text-[#a8c4a2] transition-colors"
             >
-              Back to Sign In
+              Retour à la connexion
             </Link>
           </div>
         </div>
@@ -108,10 +108,10 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
             <Sparkles className="h-6 w-6" />
           </div>
           <h2 className="text-3xl font-extrabold tracking-tight text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
-            Reset Password
+            Réinitialiser le mot de passe
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Choose a secure, strong password for your account
+            Choisissez un mot de passe sûr pour votre compte
           </p>
         </div>
 
@@ -140,7 +140,7 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
                 htmlFor="password"
                 className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider"
               >
-                New Password
+                Nouveau mot de passe
               </label>
               <div className="relative rounded-2xl shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -161,7 +161,7 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-zinc-400 hover:text-[#2F3A2E] dark:text-zinc-500 dark:hover:text-[#a8c4a2] transition-colors"
                 >
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
@@ -180,7 +180,7 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
                 htmlFor="confirmPassword"
                 className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider"
               >
-                Confirm New Password
+                Confirmez le nouveau mot de passe
               </label>
               <div className="relative rounded-2xl shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -201,7 +201,7 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  aria-label={showConfirmPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
                   className="absolute inset-y-0 right-0 pr-4 flex items-center text-zinc-400 hover:text-[#2F3A2E] dark:text-zinc-500 dark:hover:text-[#a8c4a2] transition-colors"
                 >
                   {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
@@ -226,10 +226,10 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
               {isLoading ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  Updating password...
+                  Enregistrement…
                 </span>
               ) : (
-                "Save Password"
+                "Enregistrer le mot de passe"
               )}
             </button>
           </div>

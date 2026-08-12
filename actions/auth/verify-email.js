@@ -73,7 +73,7 @@ export async function verifyEmail(rawToken) {
   if (!rawToken || typeof rawToken !== "string" || rawToken.trim().length === 0) {
     return {
       success: false,
-      message: "Invalid or expired verification link. Please request a new one.",
+      message: "Ce lien de vérification est invalide ou a expiré. Veuillez en demander un nouveau.",
     };
   }
 
@@ -85,7 +85,7 @@ export async function verifyEmail(rawToken) {
   if (isRateLimited("verify-email-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
-      message: "Too many attempts. Please wait a few minutes before trying again.",
+      message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
   recordRateLimitHit("verify-email-submit", ip);
@@ -107,7 +107,7 @@ export async function verifyEmail(rawToken) {
     if (!matchedToken) {
       return {
         success: false,
-        message: "Invalid or expired verification link. Please request a new one.",
+        message: "Ce lien de vérification est invalide ou a expiré. Veuillez en demander un nouveau.",
       };
     }
 
@@ -119,7 +119,7 @@ export async function verifyEmail(rawToken) {
     if (!user) {
       return {
         success: false,
-        message: "Invalid or expired verification link. Please request a new one.",
+        message: "Ce lien de vérification est invalide ou a expiré. Veuillez en demander un nouveau.",
       };
     }
 
@@ -199,7 +199,7 @@ export async function verifyEmail(rawToken) {
 
     return {
       success: true,
-      message: "Your email has been verified successfully. You can now log in.",
+      message: "Votre adresse e-mail a bien été confirmée. Vous pouvez maintenant vous connecter.",
       userId: user.id,
       // Set only for tokens issued mid-checkout — null for plain
       // registration tokens.
@@ -213,7 +213,7 @@ export async function verifyEmail(rawToken) {
     console.error("[verifyEmail]", error);
     return {
       success: false,
-      message: "Something went wrong. Please try again later.",
+      message: "Une erreur est survenue. Veuillez réessayer plus tard.",
     };
   }
 }
@@ -225,7 +225,7 @@ export async function resendVerificationEmail(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: "Please enter a valid email address.",
+      message: "Veuillez saisir une adresse e-mail valide.",
       errors: {
         email: errors.email?.[0] ?? null,
       },
@@ -239,7 +239,7 @@ export async function resendVerificationEmail(input) {
   if (isRateLimited("verify-email", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
-      message: "Too many requests. Please wait a few minutes before trying again.",
+      message: "Trop de demandes. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
   recordRateLimitHit("verify-email", rateLimitKey);
@@ -253,9 +253,24 @@ export async function resendVerificationEmail(input) {
     if (!user || user.emailVerified) {
       return {
         success: true,
-        message: "If an unverified account exists with that email, a verification link has been sent.",
+        message: "Si un compte non confirmé existe avec cette adresse e-mail, un lien de vérification vient d'être envoyé.",
       };
     }
+
+    // Carry the checkout context onto the replacement token.
+    //
+    // resumeType/resumeId live only on the token row. A resend used to mint a
+    // bare token, so a guest whose first link expired — the exact reason
+    // anyone clicks "renvoyer" — would verify their address and then hit a
+    // dead end: account confirmed, but the order or reservation they had
+    // already created was never resumed, never paid, and quietly expired along
+    // with its stock or seat hold. Read before the deleteMany below, which
+    // would otherwise remove the very expired row this needs.
+    const pendingCheckout = await prisma.emailVerificationToken.findFirst({
+      where: { email: user.email, used: false, resumeType: { not: null } },
+      orderBy: { createdAt: "desc" },
+      select: { resumeType: true, resumeId: true },
+    });
 
     const plainToken = crypto.randomUUID();
     const tokenHash = await hashToken(plainToken);
@@ -273,6 +288,8 @@ export async function resendVerificationEmail(input) {
         email: user.email,
         tokenHash,
         expiresAt,
+        resumeType: pendingCheckout?.resumeType ?? null,
+        resumeId: pendingCheckout?.resumeId ?? null,
       },
     });
 
@@ -309,7 +326,7 @@ export async function resendVerificationEmail(input) {
     console.error("[resendVerificationEmail]", error);
     return {
       success: false,
-      message: "Something went wrong. Please try again later.",
+      message: "Une erreur est survenue. Veuillez réessayer plus tard.",
     };
   }
 }

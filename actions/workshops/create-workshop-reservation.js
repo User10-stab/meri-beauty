@@ -12,6 +12,11 @@ import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
 import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-workshop-reservation-payment";
+import {
+  TERMS_CONSENT_REQUIRED_MESSAGE,
+  buildTermsAcceptanceUpdate,
+  recordTermsAcceptance,
+} from "@/lib/terms-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -180,6 +185,13 @@ export async function createWorkshopReservation(data) {
       return { success: false, message: "Données manquantes." };
     }
 
+    // The booking form's CGV checkbox was client-side only. This action is a
+    // public POST endpoint, so the consent has to be re-established here —
+    // it is also what gets persisted onto the customer below.
+    if (data?.termsAccepted !== true) {
+      return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
+    }
+
     // This action can be called without the browser form and creates both a
     // customer account and a seat hold, so validate the payload here too.
     const customerValidation = validateCustomerIdentity(customerInfo);
@@ -291,6 +303,7 @@ export async function createWorkshopReservation(data) {
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
           vatNumber: vatNumberToSave,
+          ...buildTermsAcceptanceUpdate(),
         },
       });
     } else if (vatNumberToSave && user.vatNumber !== vatNumberToSave) {
@@ -298,6 +311,9 @@ export async function createWorkshopReservation(data) {
       // never clear it just because a later booking leaves the field blank.
       user = await prisma.user.update({ where: { id: user.id }, data: { vatNumber: vatNumberToSave } });
     }
+
+    // Returning customer, or an account predating consent tracking.
+    await recordTermsAcceptance(prisma, user.id);
 
     // Calculate pricing
     const depositPct = activity.depositPercentage ?? 50;

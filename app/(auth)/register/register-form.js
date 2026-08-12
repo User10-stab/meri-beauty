@@ -56,23 +56,23 @@ const companyCountryOptions = countryOptions.filter((country) => VIES_COUNTRY_CO
 const fields = [
   {
     name: "fullName",
-    label: "Full Name",
+    label: "Nom complet",
     type: "text",
-    placeholder: "Jane Doe",
+    placeholder: "Marie Dupont",
     icon: User,
     autoComplete: "name",
   },
   {
     name: "nickName",
-    label: "Nickname",
+    label: "Surnom",
     type: "text",
-    placeholder: "Jane (optional)",
+    placeholder: "Marie (facultatif)",
     icon: AtSign,
     autoComplete: "nickname",
   },
   {
     name: "email",
-    label: "Email Address",
+    label: "Adresse e-mail",
     type: "email",
     placeholder: "you@example.com",
     icon: Mail,
@@ -80,15 +80,15 @@ const fields = [
   },
   {
     name: "phone",
-    label: "Phone Number",
+    label: "Numéro de téléphone",
     type: "tel",
-    placeholder: "+1 234 567 8900",
+    placeholder: "+32 470 12 34 56",
     icon: Phone,
     autoComplete: "tel",
   },
   {
     name: "password",
-    label: "Password",
+    label: "Mot de passe",
     type: "password",
     placeholder: "••••••••",
     icon: Lock,
@@ -96,7 +96,7 @@ const fields = [
   },
   {
     name: "confirmPassword",
-    label: "Confirm Password",
+    label: "Confirmez le mot de passe",
     type: "password",
     placeholder: "••••••••",
     icon: KeyRound,
@@ -233,7 +233,7 @@ export default function RegisterForm() {
       setTimeout(() => router.push(nextHref), 2000);
     } catch (err) {
       console.error("[RegisterForm] submit error:", err);
-      setServerError("An unexpected error occurred. Please try again.");
+      setServerError("Une erreur inattendue est survenue. Veuillez réessayer.");
     } finally {
       setIsLoading(false);
     }
@@ -264,7 +264,7 @@ export default function RegisterForm() {
             Meri Beauty
           </h2> */}
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Create your account to get started
+            Créez votre compte pour commencer
           </p>
         </div>
 
@@ -317,7 +317,7 @@ export default function RegisterForm() {
 
           {/* Password strength hint */}
           <p className="text-xs text-zinc-400 dark:text-zinc-500 -mt-2 pl-1">
-            Password must be at least 8 characters.
+            Le mot de passe doit contenir au moins 8 caractères.
           </p>
 
           {/* Account type — asked directly at signup, not inferred later */}
@@ -569,10 +569,10 @@ export default function RegisterForm() {
             {isLoading ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="h-5 w-5 animate-spin" />
-                Creating account...
+                Création du compte…
               </span>
             ) : (
-              "Create Account"
+              "Créer mon compte"
             )}
           </button>
         </form>
@@ -580,12 +580,12 @@ export default function RegisterForm() {
         {/* Footer */}
         <div className="text-center mt-6">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Already have an account?{" "}
+            Vous avez déjà un compte ?{" "}
             <Link
               href={callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/login"}
               className="font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
-              Sign in
+              Se connecter
             </Link>
           </p>
         </div>
@@ -639,7 +639,7 @@ function FieldInput({ field, register, errors, isLoading, showPassword, onToggle
           <button
             type="button"
             onClick={() => onTogglePassword(field.name)}
-            aria-label={isVisible ? "Hide password" : "Show password"}
+            aria-label={isVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}
             className="absolute inset-y-0 right-0 pr-4 flex items-center text-zinc-400 hover:text-[#2F3A2E] dark:text-zinc-500 dark:hover:text-[#a8c4a2] transition-colors"
           >
             {isVisible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}

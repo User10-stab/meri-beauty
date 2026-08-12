@@ -4,7 +4,7 @@ import { validateResetToken } from "@/actions/auth/reset-password";
 import ResetPasswordForm from "./reset-password-form";
 
 export const metadata = {
-  title: "Reset Password | Meri Beauty",
+  title: "Réinitialiser le mot de passe | Meri Beauty",
   description: "Choose a new password for your Meri Beauty account.",
 };
 

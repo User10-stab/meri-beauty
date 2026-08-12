@@ -44,7 +44,7 @@ export async function registerUser(input) {
 
     return {
       success: false,
-      message: "Please fix the errors below.",
+      message: "Veuillez corriger les erreurs ci-dessous.",
       errors: {
         fullName: errors.fullName?.[0] ?? null,
         email: errors.email?.[0] ?? null,
@@ -86,7 +86,7 @@ export async function registerUser(input) {
   if (isRateLimited("register", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
-      message: "Too many attempts. Please wait a few minutes before trying again.",
+      message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
   recordRateLimitHit("register", rateLimitKey);
@@ -203,10 +203,10 @@ export async function registerUser(input) {
     return {
       success: true,
       message: emailDeliveryFailed
-        ? "Account created successfully, but the verification email could not be delivered. Please request a new verification link."
+        ? "Votre compte a bien été créé, mais l'e-mail de vérification n'a pas pu être envoyé. Vous pouvez demander un nouveau lien."
         : vatVerificationPending
-          ? "Account created successfully. Your VAT number was saved pending VIES verification. Please check your email to verify your account before logging in."
-          : "Account created successfully. Please check your email to verify your account before logging in.",
+          ? "Votre compte a bien été créé. Votre numéro de TVA est enregistré, en attente de vérification VIES. Confirmez votre adresse e-mail avant de vous connecter."
+          : "Votre compte a bien été créé. Consultez votre boîte de réception pour confirmer votre adresse e-mail avant de vous connecter.",
       vatVerificationPending,
       emailDeliveryFailed,
       user,
@@ -216,7 +216,7 @@ export async function registerUser(input) {
       console.error("[registerUser] database unreachable", error);
       return {
         success: false,
-        message: "Impossible de contacter la base de données pour le moment. Vérifiez la connexion Neon/DATABASE_URL puis réessayez.",
+        message: "Le service est temporairement indisponible. Veuillez réessayer dans quelques instants.",
       };
     }
 
@@ -226,22 +226,22 @@ export async function registerUser(input) {
       if (fields.includes("email")) {
         return {
           success: false,
-          message: "This email is already registered.",
-          errors: { email: "This email is already registered." },
+          message: "Cette adresse e-mail est déjà utilisée.",
+          errors: { email: "Cette adresse e-mail est déjà utilisée." },
         };
       }
 
       if (fields.includes("phone")) {
         return {
           success: false,
-          message: "This phone number is already registered.",
-          errors: { phone: "This phone number is already registered." },
+          message: "Ce numéro de téléphone est déjà utilisé.",
+          errors: { phone: "Ce numéro de téléphone est déjà utilisé." },
         };
       }
 
       return {
         success: false,
-        message: "An account with this information already exists.",
+        message: "Un compte existe déjà avec ces informations.",
       };
     }
 
@@ -249,7 +249,7 @@ export async function registerUser(input) {
 
     return {
       success: false,
-      message: "Something went wrong. Please try again later.",
+      message: "Une erreur est survenue. Veuillez réessayer plus tard.",
     };
   }
 }

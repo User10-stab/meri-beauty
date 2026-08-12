@@ -13,7 +13,7 @@ export async function validateResetToken(rawToken) {
   if (!rawToken || typeof rawToken !== "string" || rawToken.trim().length === 0) {
     return {
       success: false,
-      message: "Invalid or expired reset link. Please request a new one.",
+      message: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.",
     };
   }
 
@@ -24,7 +24,7 @@ export async function validateResetToken(rawToken) {
   if (isRateLimited("validate-reset-token", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
-      message: "Too many attempts. Please wait a few minutes before trying again.",
+      message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
   recordRateLimitHit("validate-reset-token", ip);
@@ -37,19 +37,19 @@ export async function validateResetToken(rawToken) {
     for (const tokenRecord of allTokens) {
       const isValid = await bcrypt.compare(rawToken.trim(), tokenRecord.tokenHash);
       if (isValid) {
-        return { success: true, message: "Token is valid." };
+        return { success: true, message: "Lien valide." };
       }
     }
 
     return {
       success: false,
-      message: "Invalid or expired reset link. Please request a new one.",
+      message: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.",
     };
   } catch (error) {
     console.error("[validateResetToken]", error);
     return {
       success: false,
-      message: "Something went wrong. Please try again later.",
+      message: "Une erreur est survenue. Veuillez réessayer plus tard.",
     };
   }
 }
@@ -61,7 +61,7 @@ export async function resetPassword(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: "Please check your input and try again.",
+      message: "Veuillez vérifier les informations saisies et réessayer.",
       errors: {
         password: errors.password?.[0] ?? null,
         confirmPassword: errors.confirmPassword?.[0] ?? null,
@@ -74,7 +74,7 @@ export async function resetPassword(input) {
   if (!token || typeof token !== "string" || token.trim().length === 0) {
     return {
       success: false,
-      message: "Invalid or expired reset link. Please request a new one.",
+      message: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.",
     };
   }
 
@@ -82,7 +82,7 @@ export async function resetPassword(input) {
   if (isRateLimited("reset-password-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
-      message: "Too many attempts. Please wait a few minutes before trying again.",
+      message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
   recordRateLimitHit("reset-password-submit", ip);
@@ -104,7 +104,7 @@ export async function resetPassword(input) {
     if (!matchedToken) {
       return {
         success: false,
-        message: "Invalid or expired reset link. Please request a new one.",
+        message: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.",
       };
     }
 
@@ -131,13 +131,13 @@ export async function resetPassword(input) {
 
     return {
       success: true,
-      message: "Your password has been reset successfully. You can now sign in.",
+      message: "Votre mot de passe a bien été réinitialisé. Vous pouvez maintenant vous connecter.",
     };
   } catch (error) {
     console.error("[resetPassword]", error);
     return {
       success: false,
-      message: "Something went wrong. Please try again later.",
+      message: "Une erreur est survenue. Veuillez réessayer plus tard.",
     };
   }
 }

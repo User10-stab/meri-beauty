@@ -357,6 +357,9 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
           paymentMethod: null,
           notes: data.notes,
           isManualMode: false,
+          // Re-checked and recorded server-side — the guard above is only a
+          // courtesy message, the action is a public endpoint.
+          termsAccepted: acceptedTerms,
         });
         toast.dismiss(loadingToastId);
         if (!result.success) {
@@ -392,6 +395,7 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
           paymentMethod: null,
           notes:         data.notes,
           isManualMode:  isManualMode,
+          termsAccepted: acceptedTerms,
         });
         toast.dismiss(loadingToastId);
         if (!result.success) {

@@ -18,6 +18,7 @@ import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-order-payment";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { captureError, captureWarning } from "@/lib/monitoring";
 import { calculateVatTotals, repriceBelgianGross, resolveGoodsVatPolicy } from "@/lib/tax-policy";
@@ -132,6 +133,10 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
       role: "CUSTOMER",
       isActive: true,
       ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "boutique_checkout"),
+      // Guest checkout creates the account, so this is the moment consent is
+      // given — it used to be recorded at signup only, which meant a guest who
+      // never registered left no record at all.
+      ...buildTermsAcceptanceUpdate(),
     },
   });
 
@@ -225,6 +230,7 @@ export async function createOrderFromCart(input) {
     return {
       success: false,
       message:
+        errors.termsAccepted?.[0] ??
         errors.fulfilmentMode?.[0] ??
         errors.pickupPoint?.[0] ??
         errors.customerInfo?.[0] ??
@@ -250,6 +256,9 @@ export async function createOrderFromCart(input) {
     }
 
     const { user } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    // Returning customer, or an account created before consent was tracked:
+    // record that they accepted the current CGV at this order.
+    await recordTermsAcceptance(prisma, user.id);
 
     // A customer who abandoned a prepaid checkout and comes back to retry
     // (closed the Stripe tab, card declined, etc.) hits this same cart again

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import ForgotPasswordForm from "./forgot-password-form";
 
 export const metadata = {
-  title: "Forgot Password | Meri Beauty",
+  title: "Mot de passe oublié | Meri Beauty",
   description: "Request a password reset link for your Meri Beauty account.",
 };
 

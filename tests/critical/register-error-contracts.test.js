@@ -10,7 +10,11 @@ describe("registration error messages", () => {
     const action = source("actions/auth/register.js");
 
     expect(action).toContain('error.code === "P1001"');
-    expect(action).toContain("Impossible de contacter la base de données");
+    // Still its own branch with its own wording, distinct from the catch-all
+    // below — the message no longer names the database host, which was an
+    // internal detail shown to whoever was trying to sign up.
+    expect(action).toContain("Le service est temporairement indisponible");
+    expect(action).not.toContain("Neon/DATABASE_URL");
     expect(action.indexOf('error.code === "P1001"')).toBeLessThan(action.indexOf('error.code === "P2002"'));
   });
 

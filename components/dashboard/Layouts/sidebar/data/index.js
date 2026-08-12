@@ -64,6 +64,11 @@ const ALL_NAV_DATA = [
           { title: "Animateurs", url: "/dashboard/workshops/animators", roles: DASHBOARD_PERMISSIONS.WORKSHOPS },
           { title: "Réservations", url: "/dashboard/workshops/reservations", roles: DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS },
           { title: "Liste d'attente", url: "/dashboard/workshops/waiting-list", roles: DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS },
+          // Shared queue for atelier AND formation cancellation requests —
+          // one review screen, since the decision and its consequences are
+          // identical for both. Same admin-only gate as the appointment
+          // exceptions page.
+          { title: "Demandes d'annulation", url: "/dashboard/reservations/exceptions", roles: DASHBOARD_PERMISSIONS.APPOINTMENT_CANCELLATION_EXCEPTIONS },
         ],
         roles: DASHBOARD_PERMISSIONS.WORKSHOPS,
       },

@@ -53,6 +53,17 @@ enum AppointmentCancellationRequestStatus {
   REJECTED
 }
 
+// Ateliers and formations are admin-cancel-only by policy (the deposit is
+// non-refundable, exceptions are case-by-case). Kept as its own enum + table
+// rather than widening AppointmentCancellationRequest: the appointment
+// version is already live, and a polymorphic rewrite of a table holding real
+// requests is not a migration worth risking for shared naming.
+enum ReservationCancellationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum PaymentStatus {
   PENDING
   PAID
@@ -152,6 +163,7 @@ enum NotificationType {
   APPOINTMENT_CANCELLED
   APPOINTMENT_NO_SHOW
   APPOINTMENT_CANCELLATION_REQUEST
+  RESERVATION_CANCELLATION_REQUEST
   APPOINTMENT_REMINDER
   PAYMENT_RECEIVED
   PAYMENT_PENDING
@@ -425,6 +437,8 @@ model WorkshopReservation {
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
 
+  cancellationRequest ReservationCancellationRequest?
+
   @@index([sessionId])
   @@index([customerId])
   @@map("workshop_reservations")
@@ -568,6 +582,8 @@ model FormationReservation {
   reminderSentAt    DateTime?
   createdAt         DateTime                   @default(now())
   updatedAt         DateTime                   @updatedAt
+
+  cancellationRequest ReservationCancellationRequest?
 
   @@index([sessionId])
   @@index([customerId])
@@ -733,6 +749,8 @@ model User {
   closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
   submittedCancellationRequests  AppointmentCancellationRequest[] @relation("CancellationRequestSubmittedBy")
   reviewedCancellationRequests   AppointmentCancellationRequest[] @relation("CancellationRequestReviewedBy")
+  submittedReservationCancellationRequests ReservationCancellationRequest[] @relation("ReservationCancellationRequestedBy")
+  reviewedReservationCancellationRequests  ReservationCancellationRequest[] @relation("ReservationCancellationReviewedBy")
 
   @@index([role])
   @@index([isActive, isDeleted])
@@ -1432,6 +1450,44 @@ model AppointmentCancellationRequest {
   reviewedAt       DateTime?
   reviewedByUserId String?
   reviewedBy       User? @relation("CancellationRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  decisionNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([requestedByUserId])
+  @@index([reviewedByUserId])
+}
+
+// The atelier/formation counterpart of AppointmentCancellationRequest above.
+// Customers cannot self-cancel either flow (confirmed policy: the 50%
+// deposit is non-refundable, and exceptions — medical, bereavement, genuine
+// force majeure — are Marie's call case by case). Before this, the customer
+// simply saw no way to cancel and no way to ask: a dead end that pushed
+// every such case to an untracked phone call.
+//
+// Polymorphic on exactly one of workshopReservationId / formationReservationId,
+// enforced by a raw-SQL CHECK constraint in the migration
+// ("ReservationCancellationRequest_exactly_one_source") — same approach as
+// Payment, since Prisma has no schema-level XOR.
+model ReservationCancellationRequest {
+  id String @id @default(cuid())
+
+  workshopReservationId String?              @unique
+  workshopReservation   WorkshopReservation? @relation(fields: [workshopReservationId], references: [id], onDelete: Cascade)
+
+  formationReservationId String?               @unique
+  formationReservation   FormationReservation? @relation(fields: [formationReservationId], references: [id], onDelete: Cascade)
+
+  requestedByUserId String
+  requestedBy       User   @relation("ReservationCancellationRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  reason            String
+  status            ReservationCancellationRequestStatus @default(PENDING)
+
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  reviewedBy       User?     @relation("ReservationCancellationReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   decisionNote     String?
 
   createdAt DateTime @default(now())

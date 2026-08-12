@@ -36,6 +36,7 @@ afterEach(() => {
 describe("EU VAT validation", () => {
   it("accepts supported non-Belgian VIES formats and normalizes separators", () => {
     expect(isValidVatFormat("FR 40 303 265 045")).toBe(true);
+    expect(isValidVatFormat("FR16410313018")).toBe(true);
     expect(isValidVatFormat("DE136695976")).toBe(true);
     expect(normalizeVatNumber("nl 123.456.789-b01")).toBe("NL123456789B01");
     expect(getVatCountryCode("FR40303265045")).toBe("FR");
@@ -86,6 +87,31 @@ describe("EU VAT validation", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  it("falls back to the official REST endpoint when SOAP keeps returning a member-state fault", async () => {
+    const temporaryFault = `
+      <soap:Envelope><soap:Body><soap:Fault>
+        <faultstring>MS_UNAVAILABLE</faultstring>
+      </soap:Fault></soap:Body></soap:Envelope>`;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => temporaryFault })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => temporaryFault })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => temporaryFault })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ valid: true, name: "SociÃ©tÃ© Exemple", address: "Paris" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyVatWithVies("FR16410313018")).resolves.toMatchObject({
+      success: true,
+      valid: true,
+      name: "SociÃ©tÃ© Exemple",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls[3][0]).toContain("/rest-api/check-vat-number");
+  });
 });
 
 describe("company registration VAT rules", () => {
@@ -103,6 +129,7 @@ describe("company registration VAT rules", () => {
 
   it("accepts a French company with a French VAT number", () => {
     expect(registerSchema.safeParse(registration).success).toBe(true);
+    expect(registerSchema.safeParse({ ...registration, vatNumber: "FR16410313018" }).success).toBe(true);
   });
 
   it("rejects a VAT prefix that differs from the billing country", () => {
@@ -120,5 +147,15 @@ describe("public VIES abuse protection", () => {
     expect(source).toContain("RATE_LIMIT_MAX_PER_IP = 5");
     expect(source).toContain("RATE_LIMIT_MAX_PER_VAT_NUMBER = 3");
     expect(source).toContain("cachedResult(normalized)");
+  });
+});
+
+describe("registration when VIES is unavailable", () => {
+  it("keeps true invalid VAT blocking, but does not block account creation on VIES downtime", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "actions/auth/register.js"), "utf8");
+    expect(source).toContain("vatVerificationPending = true");
+    expect(source).toContain("vatNumberToSave = vatNumber");
+    expect(source).toContain("} else if (!viesResult.valid) {");
+    expect(source).toContain("vatVerificationPending,");
   });
 });

@@ -17,6 +17,7 @@ export default function VerifyEmailForm({
   paymentFailedMessage,
   resumeType,
   resumeId,
+  defaultEmail = "",
 }) {
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
@@ -67,9 +68,13 @@ export default function VerifyEmailForm({
   } = useForm({
     resolver: zodResolver(resendVerificationSchema),
     defaultValues: {
-      email: "",
+      email: defaultEmail,
     },
   });
+
+  useEffect(() => {
+    if (defaultEmail) reset({ email: defaultEmail });
+  }, [defaultEmail, reset]);
 
   // Defined before any early-return blocks below so it's always initialized
   // when referenced via handleSubmit(onSubmit) further down.
@@ -200,6 +205,20 @@ export default function VerifyEmailForm({
               {message}
             </p>
           </div>
+
+          {serverError && (
+            <div className="flex items-center gap-3 p-4 rounded-2xl bg-red-50 border border-red-200 text-red-800 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-300 text-sm">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              <p className="font-medium">{serverError}</p>
+            </div>
+          )}
+
+          {serverSuccess && (
+            <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-300 text-sm">
+              <Check className="h-5 w-5 shrink-0" />
+              <p className="font-medium">{serverSuccess}</p>
+            </div>
+          )}
 
           <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
             <div className="space-y-4">

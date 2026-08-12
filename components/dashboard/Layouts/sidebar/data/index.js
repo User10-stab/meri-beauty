@@ -28,6 +28,11 @@ const ALL_NAV_DATA = [
             title: "Tous les rendez-vous",
             url: "/dashboard/appointments",
           },
+          {
+            title: "Demandes exceptionnelles",
+            url: "/dashboard/appointments/exceptions",
+            roles: DASHBOARD_PERMISSIONS.APPOINTMENT_CANCELLATION_EXCEPTIONS,
+          },
         ],
       },
       {

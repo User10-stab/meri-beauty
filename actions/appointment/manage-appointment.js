@@ -216,7 +216,7 @@ export async function confirmAppointment(appointmentId) {
  * @param {string} reason - Optional reason for rejection
  * @returns {Promise<{ success: boolean, message?: string }>}
  */
-export async function rejectAppointment(appointmentId, reason = null) {
+export async function rejectAppointment(appointmentId, reason = null, { waiveDepositForfeit = false } = {}) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -259,6 +259,9 @@ export async function rejectAppointment(appointmentId, reason = null) {
 
     const payment = appointment.payment;
     const wasPaid = Boolean(payment) && ["PAID", "PARTIALLY_PAID"].includes(payment.status);
+    // authorizeAppointmentAction already guarantees STAFF only reach this
+    // point for appointments assigned to them.
+    const cancelledByAssignedStaff = authCheck.userRole === ROLES.STAFF;
 
     // Cancelling an unpaid request is routine appointment management (STAFF
     // may do it for their own appointments, per authorizeAppointmentAction
@@ -266,7 +269,7 @@ export async function rejectAppointment(appointmentId, reason = null) {
     // per policy only OWNER/ADMIN may issue.
     if (wasPaid) {
       const session = await auth();
-      if (!isAdminRole(session?.user?.role)) {
+      if (!isAdminRole(session?.user?.role) && !cancelledByAssignedStaff) {
         return {
           success: false,
           message: "Seul un administrateur peut annuler un rendez-vous déjà payé (remboursement requis). Contactez un administrateur.",
@@ -315,7 +318,14 @@ export async function rejectAppointment(appointmentId, reason = null) {
     // full/balance payment, and never to a no-show (see markAppointmentNoShow,
     // which withholds everything by design and doesn't go through here).
     let forfeitAmount = 0;
-    if (wasPaid && payment.paymentType === "DEPOSIT" && isWithinCancellationWindow(appointment.startTime)) {
+    if (
+      wasPaid &&
+      appointment.status !== "COMPLETED" &&
+      payment.paymentType === "DEPOSIT" &&
+      isWithinCancellationWindow(appointment.startTime) &&
+      !cancelledByAssignedStaff &&
+      !waiveDepositForfeit
+    ) {
       const forfeitPercentage = Number(appointment.staffService?.staff?.depositForfeitPercentage ?? 0);
       if (forfeitPercentage > 0) {
         forfeitAmount = Math.round(remaining * (forfeitPercentage / 100) * 100) / 100;

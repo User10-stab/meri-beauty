@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -44,6 +44,14 @@ const countryOptions = countriesData
   .filter((country) => /^[A-Z]{2}$/.test(country.code))
   .map(({ code, name }) => ({ code, name }))
   .sort((left, right) => left.name.localeCompare(right.name, "fr"));
+
+const VIES_COUNTRY_CODES = new Set([
+  "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR",
+  "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO",
+  "SE", "SI", "SK", "GB",
+]);
+
+const companyCountryOptions = countryOptions.filter((country) => VIES_COUNTRY_CODES.has(country.code));
 
 const fields = [
   {
@@ -142,6 +150,24 @@ export default function RegisterForm() {
 
   const isCompany = watch("isCompany");
   const addressCountry = watch("addressCountry");
+  const visibleCountryOptions = isCompany ? companyCountryOptions : countryOptions;
+  const vatField = register("vatNumber");
+  const countryField = register("addressCountry");
+
+  useEffect(() => {
+    if (isCompany && !VIES_COUNTRY_CODES.has(addressCountry)) {
+      setValue("addressCountry", "BE", { shouldValidate: true });
+    }
+  }, [addressCountry, isCompany, setValue]);
+
+  function handleVatNumberChange(event) {
+    vatField.onChange(event);
+    const prefix = event.target.value.replace(/[\s.\-]/g, "").slice(0, 2).toUpperCase();
+    const countryCode = prefix === "EL" ? "GR" : prefix === "XI" ? "GB" : prefix;
+    if (isCompany && VIES_COUNTRY_CODES.has(countryCode) && countryCode !== addressCountry) {
+      setValue("addressCountry", countryCode, { shouldValidate: true });
+    }
+  }
 
   const togglePasswordVisibility = (fieldName) => {
     setShowPassword((prev) => ({ ...prev, [fieldName]: !prev[fieldName] }));
@@ -174,10 +200,19 @@ export default function RegisterForm() {
       // Redirect to login with the callbackUrl preserved so that after email
       // verification → sign in, the user returns to where they started
       // (e.g. the rental request form).
-      toast.success(
-        "Votre compte a été créé avec succès. Un e-mail de vérification vous a été envoyé. Veuillez consulter votre boîte de réception et vérifier votre adresse e-mail avant de vous connecter.",
-        { duration: 8000 }
-      );
+      if (response.emailDeliveryFailed) {
+        toast.warning(
+          "Votre compte a bien été créé, mais l’e-mail de vérification n’a pas pu être envoyé. Vous pourrez demander un nouveau lien.",
+          { duration: 10000 }
+        );
+      } else {
+        toast.success(
+          response.vatVerificationPending
+            ? "Votre compte a été créé. Votre numéro de TVA est enregistré en attente de vérification VIES. Vérifiez votre adresse e-mail avant de vous connecter."
+            : "Votre compte a été créé avec succès. Un e-mail de vérification vous a été envoyé. Veuillez consulter votre boîte de réception et vérifier votre adresse e-mail avant de vous connecter.",
+          { duration: 8000 }
+        );
+      }
       setServerSuccess(response.message);
 
       // Build the login URL, carrying the callbackUrl and pre-filling the
@@ -186,9 +221,16 @@ export default function RegisterForm() {
       if (data.email) loginParams.set("email", data.email);
       if (callbackUrl) loginParams.set("callbackUrl", callbackUrl);
       const loginHref = `/login${loginParams.toString() ? `?${loginParams.toString()}` : ""}`;
+      const verificationParams = new URLSearchParams({
+        deliveryFailed: "1",
+        email: data.email,
+      });
+      const nextHref = response.emailDeliveryFailed
+        ? `/verify-email?${verificationParams.toString()}`
+        : loginHref;
 
       // Short delay so the toast is visible before navigating
-      setTimeout(() => router.push(loginHref), 2000);
+      setTimeout(() => router.push(nextHref), 2000);
     } catch (err) {
       console.error("[RegisterForm] submit error:", err);
       setServerError("An unexpected error occurred. Please try again.");
@@ -360,7 +402,8 @@ export default function RegisterForm() {
                   autoComplete="off"
                   disabled={isLoading}
                   required={isCompany}
-                  {...register("vatNumber")}
+                  {...vatField}
+                  onChange={handleVatNumberChange}
                   placeholder={VAT_EXAMPLES[addressCountry] ?? `${addressCountry || "EU"}…`}
                   className={`block w-full pl-11 pr-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
                     errors.vatNumber
@@ -465,10 +508,10 @@ export default function RegisterForm() {
             <select
               autoComplete="country"
               disabled={isLoading}
-              {...register("addressCountry")}
+              {...countryField}
               className="block w-full px-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 rounded-2xl border border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2] focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60"
             >
-              {countryOptions.map((country) => (
+              {visibleCountryOptions.map((country) => (
                 <option key={country.code} value={country.code}>{country.name}</option>
               ))}
             </select>

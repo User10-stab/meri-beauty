@@ -62,6 +62,18 @@ export async function getMyReservations() {
             },
           },
         },
+        cancellationRequests: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: {
+            id: true,
+            status: true,
+            reason: true,
+            decisionNote: true,
+            createdAt: true,
+            reviewedAt: true,
+          },
+        },
       },
     });
 
@@ -126,6 +138,17 @@ export async function getMyReservations() {
           (payment.paymentType === "ONLINE" || payment.paymentType === "DEPOSIT") &&
           appt.status !== "CANCELLED" &&
           appt.status !== "COMPLETED",
+
+        cancellationRequest: appt.cancellationRequests[0]
+          ? {
+              id:           appt.cancellationRequests[0].id,
+              status:       appt.cancellationRequests[0].status,
+              reason:       appt.cancellationRequests[0].reason,
+              decisionNote: appt.cancellationRequests[0].decisionNote,
+              createdAt:    appt.cancellationRequests[0].createdAt,
+              reviewedAt:   appt.cancellationRequests[0].reviewedAt,
+            }
+          : null,
       };
     });
 

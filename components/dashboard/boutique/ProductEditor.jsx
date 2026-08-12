@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { ArrowLeft, Plus, Trash2, Loader2, RefreshCw, Tag } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Loader2, RefreshCw, ScanLine, Tag } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ProductImages } from "@/components/dashboard/boutique/ProductImages";
 import { BarcodeLabelDialog } from "@/components/dashboard/boutique/BarcodeLabelDialog";
+import { BarcodeTextScannerDialog } from "@/components/dashboard/boutique/BarcodeTextScannerDialog";
 import { createProduct, updateProduct, deleteProduct, generateUniqueSku } from "@/actions/boutique/products";
 import { getProductCategories } from "@/actions/boutique/categories";
 
@@ -95,6 +96,7 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
   const [errors, setErrors] = useState({});
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [labelVariant, setLabelVariant] = useState(null);
+  const [scannerVariantKey, setScannerVariantKey] = useState(null);
   const [isPending, startTransition] = useTransition();
 
   // Categories are brand-scoped, so they're loaded per selection rather than
@@ -290,6 +292,7 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
                   onChange={(patch) => updateVariant(v._key, patch)}
                   onRemove={() => removeVariant(v._key)}
                   onShowLabel={() => setLabelVariant(v)}
+                  onScanBarcode={() => setScannerVariantKey(v._key)}
                 />
               ))}
             </div>
@@ -391,6 +394,16 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
       />
 
       <BarcodeLabelDialog variant={labelVariant} productName={name} onClose={() => setLabelVariant(null)} />
+      <BarcodeTextScannerDialog
+        open={!!scannerVariantKey}
+        title="Lire le code-barres fournisseur"
+        onClose={() => setScannerVariantKey(null)}
+        onDecoded={(code) => {
+          if (!scannerVariantKey) return;
+          updateVariant(scannerVariantKey, { barcode: code });
+          toast.success("Code-barres lu et ajouté à la déclinaison.");
+        }}
+      />
     </form>
   );
 }
@@ -410,7 +423,7 @@ function Section({ title, action, children }) {
 /** One variant's fields. Stock quantity is only editable for a brand-new
  * variant — an existing one can only change stock through a movement
  * (Stock page), so the ledger always reconciles. */
-function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
+function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onScanBarcode }) {
   const isExisting = !!variant.id;
   const price = Number(variant.price) || 0;
   const cost = Number(variant.costPrice) || 0;
@@ -489,6 +502,14 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
               onChange={(e) => onChange({ barcode: e.target.value })}
               className={`${inputClass} flex-1`}
             />
+            <button
+              type="button"
+              title="Scanner le code-barres fournisseur"
+              onClick={onScanBarcode}
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+            >
+              <ScanLine size={14} />
+            </button>
             <button
               type="button"
               title="Générer un code interne"

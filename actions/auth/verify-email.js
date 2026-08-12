@@ -286,12 +286,20 @@ export async function resendVerificationEmail(input) {
       expiresInMinutes: TOKEN_EXPIRY_MINUTES,
     });
 
-    await sendEmail({
+    const emailResult = await sendEmail({
       to: user.email,
       subject: emailTemplate.subject,
       text: emailTemplate.text,
       html: emailTemplate.html,
     });
+
+    if (!emailResult?.success) {
+      console.error("[resendVerificationEmail] provider did not deliver the verification email");
+      return {
+        success: false,
+        message: "Le service d’e-mail est temporairement indisponible. Veuillez réessayer dans quelques instants.",
+      };
+    }
 
     return {
       success: true,

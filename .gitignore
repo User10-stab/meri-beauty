@@ -65,3 +65,6 @@ Mondial Relay — Informations*.csv
 
 # local dev tool binary, not app code
 mailpit.exe
+
+# local AI/dev assistant state
+.claude/

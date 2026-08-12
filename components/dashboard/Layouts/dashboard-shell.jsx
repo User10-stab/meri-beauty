@@ -11,7 +11,7 @@ export function DashboardShell({ user, children }) {
     <SidebarProvider>
       <OnboardingGuard userRole={user?.role} />
       {user?.role === "STAFF" && <StripeReminderBanner />}
-      <div className="flex min-h-screen">
+      <div className="dashboard-scope flex min-h-screen">
         <Sidebar userRole={user?.role} />
 
         <div className="w-full bg-gray-2 dark:bg-[#020d1a]">

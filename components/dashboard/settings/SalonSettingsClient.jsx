@@ -24,13 +24,19 @@ import {
   BadgeCheck,
   BadgeX,
   ShieldQuestion,
+  ShieldCheck,
+  UserPlus,
+  Copy,
+  AlertTriangle,
 } from "lucide-react";
 import { updateSalon } from "@/actions/salon/update-salon";
 import { updateWorkingDays } from "@/actions/salon/update-working-days";
 import { createClosure } from "@/actions/salon/create-closure";
 import { deleteClosure } from "@/actions/salon/delete-closure";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
+import { createAdminAccount } from "@/actions/dashboard/admin-accounts";
 import { updateSalonSchema } from "@/lib/validations/salon";
+import { createAdminAccountSchema } from "@/lib/validations/admin-account";
 import Button from "@/components/ui/Button";
 
 const DAY_LABELS = {

@@ -44,6 +44,15 @@ enum AppointmentCancellationSource {
   SYSTEM
 }
 
+// A customer may ask the salon to make an exception to the normal
+// non-refundable deposit policy. This is deliberately a request, never a
+// cancellation: only an OWNER/ADMIN can approve it and trigger the refund.
+enum AppointmentCancellationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum PaymentStatus {
   PENDING
   PAID
@@ -142,6 +151,7 @@ enum NotificationType {
   APPOINTMENT_CONFIRMED
   APPOINTMENT_CANCELLED
   APPOINTMENT_NO_SHOW
+  APPOINTMENT_CANCELLATION_REQUEST
   APPOINTMENT_REMINDER
   PAYMENT_RECEIVED
   PAYMENT_PENDING
@@ -721,6 +731,8 @@ model User {
   billingProfile                 BillingProfile?
   openedCashSessions             CashSession[]          @relation("CashSessionOpenedBy")
   closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
+  submittedCancellationRequests  AppointmentCancellationRequest[] @relation("CancellationRequestSubmittedBy")
+  reviewedCancellationRequests   AppointmentCancellationRequest[] @relation("CancellationRequestReviewedBy")
 
   @@index([role])
   @@index([isActive, isDeleted])
@@ -1387,6 +1399,7 @@ model Appointment {
   payment       Payment?
   review        Review?
   notifications Notification[]
+  cancellationRequests AppointmentCancellationRequest[]
 
   // Dedup markers for the reminder cron (mirrors reservations'
   // reminderSentAt), one per window since appointments send both a 24h and
@@ -1400,6 +1413,33 @@ model Appointment {
   @@index([userId, startTime]) // "my appointments"
   @@index([isDeleted, status, startTime]) // dashboard filters
   @@index([cancelledByUserId])
+}
+
+// A late cancellation request does not change the appointment or payment by
+// itself. It gives the salon a durable review queue and an audit trail of the
+// customer's stated exceptional circumstances.
+model AppointmentCancellationRequest {
+  id String @id @default(cuid())
+
+  appointmentId String @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  requestedByUserId String
+  requestedBy       User @relation("CancellationRequestSubmittedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  reason            String
+  status            AppointmentCancellationRequestStatus @default(PENDING)
+
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  reviewedBy       User? @relation("CancellationRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  decisionNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([requestedByUserId])
+  @@index([reviewedByUserId])
 }
 
 // PAYMENT

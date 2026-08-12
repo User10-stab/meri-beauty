@@ -25,6 +25,12 @@ describe("deposit forfeiture is inert at its 0% default", () => {
     expect(actions).toContain("forfeitPercentage > 0");
   });
 
+  test("does not withhold a deposit when the assigned staff member cancels", () => {
+    expect(actions).toContain("const cancelledByAssignedStaff = authCheck.userRole === ROLES.STAFF");
+    expect(actions).toContain("!isAdminRole(session?.user?.role) && !cancelledByAssignedStaff");
+    expect(actions).toContain("!cancelledByAssignedStaff");
+  });
+
   test("forfeiture is computed before pinning the refund, so the pinned/refunded amount already excludes it", () => {
     const forfeitIdx = actions.indexOf("let forfeitAmount = 0");
     const needsRefundIdx = actions.indexOf("const needsRefund =");

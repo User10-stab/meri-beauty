@@ -91,36 +91,31 @@ export async function registerUser(input) {
   }
   recordRateLimitHit("register", rateLimitKey);
 
-  // Never persist a VAT number nobody has confirmed is real — it ends up
-  // printed on invoices as the customer's basis for a tax deduction. Same
-  // strict gate as every other VAT entry point in this app (e.g.
-  // createWorkshopReservation, updateMyVatNumber): VIES must actively
-  // confirm it; a network error/timeout blocks too, not just a
-  // confirmed-invalid number.
+  // Invalid VAT still blocks signup. If VIES itself is unavailable, the
+  // account can be created with the VAT number pending verification; tax
+  // policy later requires vatValidatedAt before granting reverse-charge.
   let vatNumberToSave = null;
   let vatValidation = null;
+  let vatVerificationPending = false;
   if (isCompany && vatNumber) {
     const viesResult = await verifyVatWithVies(vatNumber);
     if (!viesResult.success) {
-      return {
-        success: false,
-        message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
-        errors: { vatNumber: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez." },
-      };
-    }
-    if (!viesResult.valid) {
+      vatNumberToSave = vatNumber;
+      vatVerificationPending = true;
+    } else if (!viesResult.valid) {
       return {
         success: false,
         message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
         errors: { vatNumber: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES." },
       };
+    } else {
+      vatNumberToSave = vatNumber;
+      vatValidation = {
+        vatValidatedAt: new Date(),
+        vatValidationName: viesResult.name ?? null,
+        vatValidationAddress: viesResult.address ?? null,
+      };
     }
-    vatNumberToSave = vatNumber;
-    vatValidation = {
-      vatValidatedAt: new Date(),
-      vatValidationName: viesResult.name ?? null,
-      vatValidationAddress: viesResult.address ?? null,
-    };
   }
 
   try {
@@ -181,25 +176,50 @@ export async function registerUser(input) {
       process.env.NEXTAUTH_URL || "http://localhost:3000"
     }/verify-email?token=${encodeURIComponent(plainToken)}`;
 
-    const emailTemplate = emailVerificationEmail({
-      customerName: user.fullName,
-      verificationUrl,
-      expiresInMinutes: TOKEN_EXPIRY_MINUTES,
-    });
+    // The database transaction above has already committed. Email delivery is
+    // a follow-up operation, so a provider outage must not make the UI claim
+    // that registration failed (and then report the committed email as taken
+    // on the next attempt).
+    let emailDeliveryFailed = false;
+    try {
+      const emailTemplate = emailVerificationEmail({
+        customerName: user.fullName,
+        verificationUrl,
+        expiresInMinutes: TOKEN_EXPIRY_MINUTES,
+      });
 
-    await sendEmail({
-      to: user.email,
-      subject: emailTemplate.subject,
-      text: emailTemplate.text,
-      html: emailTemplate.html,
-    });
+      const emailResult = await sendEmail({
+        to: user.email,
+        subject: emailTemplate.subject,
+        text: emailTemplate.text,
+        html: emailTemplate.html,
+      });
+      emailDeliveryFailed = !emailResult?.success;
+    } catch (emailError) {
+      emailDeliveryFailed = true;
+      console.error("[registerUser] account created but verification email delivery failed", emailError);
+    }
 
     return {
       success: true,
-      message: "Account created successfully. Please check your email to verify your account before logging in.",
+      message: emailDeliveryFailed
+        ? "Account created successfully, but the verification email could not be delivered. Please request a new verification link."
+        : vatVerificationPending
+          ? "Account created successfully. Your VAT number was saved pending VIES verification. Please check your email to verify your account before logging in."
+          : "Account created successfully. Please check your email to verify your account before logging in.",
+      vatVerificationPending,
+      emailDeliveryFailed,
       user,
     };
   } catch (error) {
+    if (error.code === "P1001") {
+      console.error("[registerUser] database unreachable", error);
+      return {
+        success: false,
+        message: "Impossible de contacter la base de données pour le moment. Vérifiez la connexion Neon/DATABASE_URL puis réessayez.",
+      };
+    }
+
     if (error.code === "P2002") {
       const fields = error.meta?.target ?? [];
 

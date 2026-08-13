@@ -141,12 +141,39 @@ export async function POST(request) {
   // ── Create rental request ────────────────────────────────────────────────
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // Update user's VAT number if provided
+      // Update the account's VAT number, and drop the verification proof
+      // whenever the number actually changes.
+      //
+      // This used to write `vatNumber` on its own. User.vatNumber is paired
+      // with vatValidatedAt / vatValidationName / vatValidationAddress, set
+      // by the VIES lookup at signup — and lib/tax-policy.js#hasRecentVatValidation
+      // reads vatValidatedAt to decide whether a sale qualifies for
+      // reverse-charge. Replacing the number while leaving the old timestamp
+      // in place made a never-verified number look verified, on real invoices.
+      // No malice needed: correcting a typo here was enough to inherit the
+      // previous number's verification.
+      //
+      // Clearing rather than re-verifying is deliberate — this endpoint is a
+      // lead form, and a VIES outage must not cost Marie a rental enquiry.
+      // The number is format-checked by the schema; re-verification belongs
+      // where the contract is signed.
       if (vatNumber && session.user.id) {
-        await tx.user.update({
+        const current = await tx.user.findUnique({
           where: { id: session.user.id },
-          data: { vatNumber },
+          select: { vatNumber: true },
         });
+
+        if (current?.vatNumber !== vatNumber) {
+          await tx.user.update({
+            where: { id: session.user.id },
+            data: {
+              vatNumber,
+              vatValidatedAt: null,
+              vatValidationName: null,
+              vatValidationAddress: null,
+            },
+          });
+        }
       }
 
       const rentalRequest = await tx.rentalRequest.create({

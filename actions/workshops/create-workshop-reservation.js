@@ -277,6 +277,13 @@ export async function createWorkshopReservation(data) {
     // point beats the alternative (silently accepting an unconfirmed number
     // whenever VIES happens to be slow) — the customer can just retry.
     let vatNumberToSave = null;
+    // Captured alongside the number itself. lib/tax-policy.js decides
+    // reverse-charge from vatValidatedAt, so storing the number without its
+    // proof threw away the VIES call made two lines below and left a
+    // genuinely verified B2B customer taxed as if unverified — or, when the
+    // account already had an older validation, let the new number inherit the
+    // previous number's timestamp. Mirrors actions/auth/register.js.
+    let vatValidation = null;
     if (vatNumber) {
       if (!isValidVatFormat(vatNumber)) {
         return {
@@ -301,6 +308,11 @@ export async function createWorkshopReservation(data) {
         };
       }
       vatNumberToSave = vatNumber;
+      vatValidation = {
+        vatValidatedAt: new Date(),
+        vatValidationName: viesResult.name ?? null,
+        vatValidationAddress: viesResult.address ?? null,
+      };
     }
     let user = await prisma.user.findUnique({ where: { email } });
 
@@ -328,13 +340,18 @@ export async function createWorkshopReservation(data) {
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
           vatNumber: vatNumberToSave,
+          ...(vatValidation ?? {}),
           ...buildTermsAcceptanceUpdate(),
         },
       });
     } else if (vatNumberToSave && user.vatNumber !== vatNumberToSave) {
       // B2B customer supplying (or updating) their VAT number for invoicing —
       // never clear it just because a later booking leaves the field blank.
-      user = await prisma.user.update({ where: { id: user.id }, data: { vatNumber: vatNumberToSave } });
+      // The number and its VIES proof are always written together.
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { vatNumber: vatNumberToSave, ...(vatValidation ?? {}) },
+      });
     }
 
     // Returning customer, or an account predating consent tracking.

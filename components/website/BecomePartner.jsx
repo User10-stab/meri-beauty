@@ -5,6 +5,7 @@ import { useSession, signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
+import { isValidVatFormat } from "@/lib/vat-validation";
 
 
 function useInView(options = {}) {
@@ -207,9 +208,25 @@ export default function BecomePartner() {
       return;
     }
 
-    // Basic validation — only startDate is required
     if (!formData.startDate) {
       setSubmitStatus({ type: "error", message: "Veuillez renseigner la date de début." });
+      return;
+    }
+
+    // The field is marked with a red asterisk and carries `required`, but that
+    // is browser-only — and the schema behind the POST route used to accept it
+    // missing. Checked here too so a typo shows an explanation instead of a
+    // bare 422 from the API.
+    if (!formData.vatNumber?.trim()) {
+      setSubmitStatus({ type: "error", message: "Veuillez renseigner votre numéro de TVA." });
+      return;
+    }
+    if (!isValidVatFormat(formData.vatNumber)) {
+      setSubmitStatus({
+        type: "error",
+        message:
+          "Numéro de TVA invalide. Indiquez le préfixe du pays, par exemple BE0751854027.",
+      });
       return;
     }
 

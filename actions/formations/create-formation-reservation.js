@@ -272,6 +272,11 @@ export async function createFormationReservation(data) {
     // point beats the alternative (silently accepting an unconfirmed number
     // whenever VIES happens to be slow) — the customer can just retry.
     let vatNumberToSave = null;
+    // Captured alongside the number — see the identical fix in
+    // actions/workshops/create-workshop-reservation.js. Storing the number
+    // without its VIES proof discarded the check made just below, so
+    // lib/tax-policy.js treated a verified B2B customer as unverified.
+    let vatValidation = null;
     if (vatNumber) {
       if (!isValidVatFormat(vatNumber)) {
         return {
@@ -296,6 +301,11 @@ export async function createFormationReservation(data) {
         };
       }
       vatNumberToSave = vatNumber;
+      vatValidation = {
+        vatValidatedAt: new Date(),
+        vatValidationName: viesResult.name ?? null,
+        vatValidationAddress: viesResult.address ?? null,
+      };
     }
     let user = await prisma.user.findUnique({ where: { email } });
 
@@ -323,13 +333,18 @@ export async function createFormationReservation(data) {
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
           vatNumber: vatNumberToSave,
+          ...(vatValidation ?? {}),
           ...buildTermsAcceptanceUpdate(),
         },
       });
     } else if (vatNumberToSave && user.vatNumber !== vatNumberToSave) {
       // B2B customer supplying (or updating) their VAT number for invoicing —
       // never clear it just because a later booking leaves the field blank.
-      user = await prisma.user.update({ where: { id: user.id }, data: { vatNumber: vatNumberToSave } });
+      // The number and its VIES proof are always written together.
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { vatNumber: vatNumberToSave, ...(vatValidation ?? {}) },
+      });
     }
 
     // Returning customer, or an account predating consent tracking.

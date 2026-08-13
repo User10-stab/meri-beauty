@@ -1,9 +1,35 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { normalizeCallbackUrl } from "@/lib/safe-callback-url";
+import { contactVisitorAutoReplyEmail } from "@/lib/email-templates";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
+
+describe("auth redirect and email escaping contracts", () => {
+  test("auth callback URLs are reduced to same-site paths", () => {
+    expect(normalizeCallbackUrl("/reservation-atelier?step=2#checkout", "/fallback")).toBe("/reservation-atelier?step=2#checkout");
+    expect(normalizeCallbackUrl("https://meri.example/mes-reservations", "/fallback", "https://meri.example")).toBe("/mes-reservations");
+    expect(normalizeCallbackUrl("https://evil.example/phish", "/fallback", "https://meri.example")).toBe("/fallback");
+    expect(normalizeCallbackUrl("//evil.example/phish", "/fallback", "https://meri.example")).toBe("/fallback");
+    expect(normalizeCallbackUrl("javascript:alert(1)", "/fallback", "https://meri.example")).toBe("/fallback");
+  });
+
+  test("contact visitor auto-reply escapes submitted fields in HTML", () => {
+    const email = contactVisitorAutoReplyEmail({
+      name: "<img src=x onerror=alert(1)>",
+      subject: "<script>alert(1)</script>",
+      salonName: "Meri <Beauty>",
+      salonEmail: "hello@example.com",
+    });
+
+    expect(email.html).not.toContain("<img src=x onerror=alert(1)>");
+    expect(email.html).not.toContain("<script>alert(1)</script>");
+    expect(email.html).toContain("&lt;img src=x onerror=alert(1)&gt;");
+    expect(email.html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+  });
+});
 
 describe("payment and webhook security contracts", () => {
   const webhook = source("app/api/webhooks/stripe/route.js");

@@ -5,12 +5,17 @@ import Link from "next/link";
 import { Mail, Lock } from "lucide-react";
 import { loginSchema } from "@/lib/validations/login";
 import { loginUser } from "@/actions/auth/login";
+import { normalizeCallbackUrl } from "@/lib/safe-callback-url";
 import AuthForm from "@/components/auth-form";
 
 export default function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl");
+  const callbackUrl = normalizeCallbackUrl(
+    searchParams.get("callbackUrl"),
+    "",
+    typeof window !== "undefined" ? window.location.origin : null
+  );
   const prefillEmail = searchParams.get("email") || "";
 
   const onSubmit = async (data) => {
@@ -23,7 +28,7 @@ export default function LoginForm() {
     // A callbackUrl means the person was sent here mid-checkout/booking
     // (e.g. the "an account already exists" nudge) — send them back to
     // exactly where they were instead of the generic role-based default.
-    const redirectTo = callbackUrl ? decodeURIComponent(callbackUrl) : response.redirectTo || "/dashboard";
+    const redirectTo = callbackUrl || response.redirectTo || "/dashboard";
 
     window.location.href = redirectTo;
     router.replace(redirectTo);

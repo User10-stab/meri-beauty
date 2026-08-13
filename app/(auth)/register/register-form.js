@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { registerClientSchema } from "@/lib/validations/register-client";
 import { registerUser } from "@/actions/auth/register";
+import { normalizeCallbackUrl } from "@/lib/safe-callback-url";
 import countriesData from "@/data/countries.json";
 
 const VAT_EXAMPLES = {
@@ -110,7 +111,11 @@ export default function RegisterForm() {
   // Preserve any callbackUrl so that after registration → email verification
   // → sign in, the user lands back on the page they came from (e.g. the
   // rental request form).
-  const callbackUrl = searchParams.get("callbackUrl") || "";
+  const callbackUrl = normalizeCallbackUrl(
+    searchParams.get("callbackUrl"),
+    "",
+    typeof window !== "undefined" ? window.location.origin : null
+  );
   const [showPassword, setShowPassword] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);

@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { isAdminRole } from "@/lib/authorization";
 import { promoCodeSchema, updatePromoCodeSchema } from "@/lib/validations/promo-codes";
 import { resolvePromoCode } from "@/lib/promo-codes";
+import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 
 /**
  * Promo codes apply across all four purchase flows (boutique, ateliers,
@@ -19,6 +20,9 @@ async function requireAdmin() {
   if (!isAdminRole(session.user.role)) return { error: "Accès non autorisé." };
   return { session };
 }
+
+const PROMO_VALIDATE_WINDOW_MS = 60 * 1000;
+const PROMO_VALIDATE_MAX_ATTEMPTS = 20;
 
 function serializePromoCode(p) {
   return {
@@ -37,8 +41,16 @@ function serializePromoCode(p) {
 
 /** Public — called from the 4 checkout UIs for a live discount preview. */
 export async function validatePromoCode(rawCode, subtotal) {
+  const ip = await getClientIp();
+  const code = String(rawCode ?? "").trim().toUpperCase();
+  const rateLimitKey = hashRateLimitValue(ip);
+
+  if (await consumeSharedRateLimit("promo-validate", rateLimitKey, { windowMs: PROMO_VALIDATE_WINDOW_MS, max: PROMO_VALIDATE_MAX_ATTEMPTS })) {
+    return { success: false, message: "Trop de tentatives. Veuillez patienter avant de réessayer." };
+  }
+
   try {
-    const result = await resolvePromoCode(rawCode, Number(subtotal) || 0);
+    const result = await resolvePromoCode(code, Number(subtotal) || 0);
     if (!result.success) return result;
     return { success: true, discountAmount: result.discountAmount };
   } catch (error) {

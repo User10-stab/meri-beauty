@@ -7,6 +7,15 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
 describe("promo-code limits and free checkout contracts", () => {
+  test("public promo validation consumes the shared rate limiter", () => {
+    const action = source("actions/promo-codes.js");
+
+    expect(action).toContain('consumeSharedRateLimit("promo-validate"');
+    expect(action).toContain("hashRateLimitValue");
+    expect(action).toContain("getClientIp");
+    expect(action).not.toContain("`${code}:${ip}`");
+  });
+
   test("admin input accepts optional expiry/cap and rejects invalid caps", () => {
     const valid = promoCodeSchema.safeParse({
       code: "FREE100",

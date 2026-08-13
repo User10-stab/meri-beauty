@@ -8,6 +8,7 @@ import { Mail, Loader2, Sparkles, AlertCircle, Check, ArrowLeft, RefreshCcw } fr
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
 import { resendVerificationEmail } from "@/actions/auth/verify-email";
 import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-verification";
+import { normalizeCallbackUrl } from "@/lib/safe-callback-url";
 
 export default function VerifyEmailForm({
   success,
@@ -34,8 +35,9 @@ export default function VerifyEmailForm({
   useEffect(() => {
     try {
       const returnUrl = localStorage.getItem("pendingRentalReturnUrl");
-      if (returnUrl) {
-        setLoginHref(`/login?callbackUrl=${encodeURIComponent(returnUrl)}`);
+      const callbackUrl = normalizeCallbackUrl(returnUrl, "", window.location.origin);
+      if (callbackUrl) {
+        setLoginHref(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
       }
     } catch {
       // localStorage unavailable (private browsing edge case) — /login is fine

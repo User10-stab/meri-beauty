@@ -82,6 +82,13 @@ describe("CGV consent is enforced and recorded at every purchase, not just signu
     expect(matches).toHaveLength(2); // createReservation + createMultipleReservations
   });
 
+  test("the refusal message reaches the customer in French", () => {
+    // Zod 4 ignores `errorMap`; only `error` is honoured at runtime.
+    const lib = source("lib/terms-consent.js");
+    expect(lib).toContain("error: TERMS_CONSENT_REQUIRED_MESSAGE");
+    expect(lib).not.toContain("errorMap:");
+  });
+
   test("re-recording is gated so termsAcceptedAt is not reset on every order", () => {
     const lib = source("lib/terms-consent.js");
     expect(lib).toContain("{ termsAcceptedAt: null }");

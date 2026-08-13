@@ -83,10 +83,10 @@ export function BarcodeTextScannerDialog({
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm sm:p-4"
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
-      <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-dark">
+      <div className="max-h-[calc(100vh-24px)] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-4 shadow-xl dark:bg-gray-dark sm:p-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white">{title}</h2>
           <button type="button" onClick={onClose} aria-label="Fermer" className="text-gray-400 hover:text-gray-600">
@@ -94,8 +94,8 @@ export function BarcodeTextScannerDialog({
           </button>
         </div>
 
-        <form onSubmit={handleManualSubmit} className="mb-4 flex gap-2">
-          <div className="relative flex-1">
+        <form onSubmit={handleManualSubmit} className="mb-4 flex flex-col gap-2 sm:flex-row">
+          <div className="relative min-w-0 flex-1">
             <ScanLine size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#c8a46a]" />
             <input
               value={manualCode}
@@ -103,13 +103,13 @@ export function BarcodeTextScannerDialog({
               placeholder="Lecteur USB : scannez ici"
               autoComplete="off"
               autoFocus
-              className="h-10 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              className="h-11 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
             />
           </div>
           <button
             type="submit"
             disabled={decoding}
-            className="rounded-lg bg-[#2f3a2e] px-3 text-xs font-semibold text-white disabled:opacity-50"
+            className="h-11 rounded-lg bg-[#2f3a2e] px-4 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto"
           >
             Lire
           </button>
@@ -122,7 +122,7 @@ export function BarcodeTextScannerDialog({
           </div>
         ) : (
           <div className="relative overflow-hidden rounded-lg bg-black">
-            <video ref={videoRef} className="aspect-square w-full object-cover" muted playsInline />
+            <video ref={videoRef} className="aspect-[4/3] w-full object-cover sm:aspect-square" muted playsInline />
             {decoding && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/50">
                 <Loader2 size={22} className="animate-spin text-white" />

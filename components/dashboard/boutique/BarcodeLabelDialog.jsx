@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import { X, Printer } from "lucide-react";
 import QRCode from "qrcode";
 
@@ -71,7 +72,16 @@ export function BarcodeLabelDialog({ variant, productName, onClose }) {
         >
           <p className="w-full truncate px-[1mm] text-[2.6mm] font-medium leading-tight text-gray-700">{productName}</p>
           <p className="w-full truncate px-[1mm] text-[2.2mm] leading-tight text-gray-500">{variant.name}</p>
-          {qr && <img src={qr} alt="QR code produit" className="my-[0.5mm] h-[24mm] w-[24mm]" />}
+          {qr && (
+            <Image
+              src={qr}
+              alt="QR code produit"
+              width={200}
+              height={200}
+              unoptimized
+              className="my-[0.5mm] h-[24mm] w-[24mm]"
+            />
+          )}
           <p className="font-mono text-[2.2mm] leading-tight tracking-wide text-gray-800">{variant.barcode}</p>
         </div>
 

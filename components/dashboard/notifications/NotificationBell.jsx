@@ -171,10 +171,10 @@ export default function NotificationBell({ user }) {
         <div
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 z-50 mt-2 flex w-[380px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 dark:border-white/10 dark:bg-gray-900 dark:ring-white/5 sm:w-[400px]"
+          className="fixed left-3 right-3 top-[76px] z-50 flex max-h-[calc(100vh-92px)] flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 dark:border-white/10 dark:bg-gray-900 dark:ring-white/5 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:max-h-none sm:w-[400px] sm:max-w-[calc(100vw-2rem)]"
         >
-          <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3 dark:border-white/5">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 border-b border-gray-100 px-4 py-3 dark:border-white/5 min-[420px]:flex-row min-[420px]:items-center min-[420px]:justify-between">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white">
                 Notifications
               </h2>
@@ -188,14 +188,14 @@ export default function NotificationBell({ user }) {
               <button
                 type="button"
                 onClick={handleMarkAll}
-                className="text-[12px] font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300"
+                className="self-start text-[12px] font-medium text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300 min-[420px]:self-auto"
               >
                 Tout marquer lu
               </button>
             )}
           </div>
 
-          <div className="max-h-[60vh] min-h-[120px] overflow-y-auto">
+          <div className="min-h-[120px] flex-1 overflow-y-auto sm:max-h-[60vh]">
             {loading && items.length === 0 ? (
               <div className="flex items-center justify-center py-10">
                 <div className="flex items-center gap-2 text-[13px] text-gray-500 dark:text-gray-400">

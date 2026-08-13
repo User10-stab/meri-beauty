@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Banknote, Camera, CameraOff, CreditCard, Loader2, Minus, Plus, ScanLine, Trash2, UserRound, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
@@ -631,15 +632,14 @@ export function PointOfSaleClient() {
       </ConfirmDialog>
 
       {qrModal && (
-        <div role="dialog" aria-modal="true" aria-labelledby="pos-qr-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-xl dark:bg-gray-dark">
+        <div role="dialog" aria-modal="true" aria-labelledby="pos-qr-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm sm:p-4">
+          <div className="max-h-[calc(100vh-24px)] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-4 text-center shadow-xl dark:bg-gray-dark sm:p-6">
             <h2 id="pos-qr-title" className="text-xl font-bold text-gray-900 dark:text-white">Paiement par carte</h2>
             <p className="mt-1 text-sm text-gray-500">Scannez ce QR avec le téléphone du client.</p>
             <p className="mt-4 text-3xl font-bold text-[#2f3a2e]">{Number(qrModal.totalAmount ?? total).toFixed(2)} €</p>
-            <div className="mx-auto mt-5 flex h-80 w-80 max-w-full items-center justify-center rounded-xl border border-gray-200 bg-white p-3">
+            <div className="relative mx-auto mt-5 flex aspect-square w-full max-w-80 items-center justify-center rounded-xl border border-gray-200 bg-white p-3">
               {qrDataUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={qrDataUrl} alt="QR code Stripe Checkout" width={320} height={320} className="h-full w-full object-contain" />
+                <Image src={qrDataUrl} alt="QR code Stripe Checkout" fill sizes="320px" unoptimized className="object-contain p-3" />
               ) : <Loader2 size={28} className="animate-spin text-[#2f3a2e]" />}
             </div>
             <div className="mt-4 flex items-center justify-center gap-2 text-sm text-gray-500"><Loader2 size={15} className="animate-spin" />En attente de confirmation Stripe…</div>

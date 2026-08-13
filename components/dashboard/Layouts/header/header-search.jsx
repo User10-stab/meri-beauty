@@ -58,7 +58,7 @@ export function HeaderSearch() {
   }
 
   return (
-    <div ref={containerRef} className="relative w-full max-w-75">
+    <div ref={containerRef} className="relative hidden w-full max-w-75 sm:block">
       <input
         type="search"
         placeholder="Rechercher un client, une commande, un produit..."

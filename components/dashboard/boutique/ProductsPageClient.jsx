@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -69,25 +70,25 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
   }
 
   return (
-    <div className="flex h-[75vh] flex-col rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+    <div className="flex h-[75vh] min-w-0 flex-col rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
       {/* Toolbar — Wix-style: search + filters on the left, primary action on the right */}
-      <div className="flex shrink-0 flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-stroke px-3 py-4 dark:border-dark-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-1 flex-wrap items-center gap-3">
-          <div className="relative w-full max-w-xs">
+          <div className="relative w-full lg:max-w-xs">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Rechercher un produit, une référence…"
-              className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              className="h-10 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
             />
           </div>
 
           <select
             value={brandFilter}
             onChange={(e) => setBrandFilter(e.target.value)}
-            className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
           >
             <option value="">Toutes les marques</option>
             {brands.map((b) => (
@@ -98,7 +99,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
           >
             <option value="">Tous les statuts</option>
             <option value="ACTIVE">Actif</option>
@@ -108,11 +109,11 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
         </div>
 
         {isAdmin && (
-          <div className="flex items-center gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:flex lg:items-center">
             <button
               type="button"
               onClick={() => setScanOpen(true)}
-              className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
             >
               <ScanLine size={16} />
               Scanner
@@ -120,14 +121,14 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
             <Link href="/dashboard/boutique/products/import">
               <button
                 type="button"
-                className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
+                className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
               >
                 <Upload size={16} />
                 Importer depuis Wix
               </button>
             </Link>
             <Link href="/dashboard/boutique/products/new">
-              <Button>
+              <Button className="w-full justify-center">
                 <Plus size={16} />
                 Ajouter un produit
               </Button>
@@ -175,9 +176,9 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
               >
                 <TableCell className="pl-6">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
+                    <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
                       {p.thumbnail ? (
-                        <img src={p.thumbnail} alt="" className="h-full w-full object-cover" />
+                        <Image src={p.thumbnail} alt="" fill sizes="40px" unoptimized className="object-cover" />
                       ) : (
                         <Package size={16} className="text-gray-300" />
                       )}

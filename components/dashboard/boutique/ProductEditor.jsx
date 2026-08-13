@@ -50,9 +50,9 @@ function emptyVariant(barcode) {
   };
 }
 
-function Field({ label, required, children, hint }) {
+function Field({ label, required, children, hint, className = "" }) {
   return (
-    <div>
+    <div className={className}>
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
         {label}
         {required && <span className="ml-1 text-red-400">*</span>}
@@ -64,7 +64,7 @@ function Field({ label, required, children, hint }) {
 }
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white";
+  "h-10 w-full min-w-0 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white";
 
 /**
  * Dedicated product editor page (create + edit share this) — a full page
@@ -202,30 +202,30 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-6 pb-24">
       {/* Sticky header — Wix-style: back, title, Save always reachable */}
-      <div className="sticky top-0 z-10 -mx-4 flex items-center justify-between border-b border-stroke bg-white/95 px-4 py-3 backdrop-blur dark:border-dark-3 dark:bg-gray-dark/95 sm:-mx-6 sm:px-6">
-        <div className="flex items-center gap-3">
+      <div className="sticky top-0 z-10 -mx-3 flex flex-col gap-3 border-b border-stroke bg-white/95 px-3 py-3 backdrop-blur dark:border-dark-3 dark:bg-gray-dark/95 sm:-mx-4 sm:flex-row sm:items-center sm:justify-between sm:px-4 md:-mx-6 md:px-6">
+        <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/dashboard/boutique/products"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100"
           >
             <ArrowLeft size={16} />
           </Link>
-          <h1 className="text-lg font-semibold text-dark dark:text-white">
+          <h1 className="min-w-0 truncate text-base font-semibold text-dark dark:text-white sm:text-lg">
             {isEdit ? "Modifier le produit" : "Nouveau produit"}
           </h1>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           {isEdit && (
             <button
               type="button"
               onClick={() => setConfirmDelete(true)}
-              className="flex h-9 items-center gap-2 rounded-lg border border-red-200 px-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+              className="flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 px-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 sm:flex-none"
             >
               <Trash2 size={14} />
               Supprimer
             </button>
           )}
-          <Button type="submit" disabled={isPending}>
+          <Button type="submit" disabled={isPending} className="flex-1 sm:flex-none">
             {isPending && <Loader2 size={14} className="animate-spin" />}
             Enregistrer
           </Button>
@@ -410,8 +410,8 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
 
 function Section({ title, action, children }) {
   return (
-    <div className="rounded-[10px] border border-stroke bg-white p-5 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="rounded-[10px] border border-stroke bg-white p-4 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card sm:p-5">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-sm font-semibold text-gray-800 dark:text-white">{title}</h2>
         {action}
       </div>
@@ -443,16 +443,16 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="rounded-lg border border-gray-200 p-3 sm:p-4">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <input
           type="text"
           value={variant.name}
           onChange={(e) => onChange({ name: e.target.value })}
           placeholder="Nom de la déclinaison (250ml, Teinte 03…)"
-          className="w-64 border-0 border-b border-transparent bg-transparent p-0 text-sm font-medium text-gray-800 outline-none focus:border-gray-300"
+          className="w-full min-w-0 border-0 border-b border-transparent bg-transparent p-0 text-sm font-medium text-gray-800 outline-none focus:border-gray-300 sm:w-64"
         />
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3 sm:justify-end">
           <label className="flex items-center gap-1.5 text-xs text-gray-500">
             <input
               type="checkbox"
@@ -473,9 +473,9 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Field label="Référence (SKU)" required>
-          <div className="flex gap-1.5">
+          <div className="flex min-w-0 gap-1.5">
             <input
               type="text"
               value={variant.sku}
@@ -488,14 +488,14 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
               title="Générer une référence unique"
               onClick={handleGenerateSku}
               disabled={generatingSku}
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {generatingSku ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             </button>
           </div>
         </Field>
-        <Field label="Code-barres" hint="Code fournisseur (EAN/UPC) ou un code interne généré">
-          <div className="flex gap-1.5">
+        <Field label="Code-barres" hint="Code fournisseur (EAN/UPC) ou un code interne généré" className="sm:col-span-2 xl:col-span-1">
+          <div className="flex min-w-0 gap-1.5">
             <input
               type="text"
               value={variant.barcode ?? ""}
@@ -506,7 +506,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
               type="button"
               title="Scanner le code-barres fournisseur"
               onClick={onScanBarcode}
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
             >
               <ScanLine size={14} />
             </button>
@@ -517,7 +517,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
                 if (variant.barcode && !window.confirm("Remplacer le code-barres actuel par un nouveau code interne ?")) return;
                 onChange({ barcode: generateInternalBarcode() });
               }}
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+              className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
             >
               <RefreshCw size={14} />
             </button>
@@ -526,7 +526,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
                 type="button"
                 title="Étiquette à imprimer"
                 onClick={onShowLabel}
-                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
               >
                 <Tag size={14} />
               </button>
@@ -536,7 +536,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
 
         {isExisting ? (
           <Field label="Stock" hint="Ajustez depuis la page Stock">
-            <div className="flex h-9 items-center rounded-lg border border-gray-100 bg-gray-50 px-3 text-sm text-gray-500">
+            <div className="flex min-h-10 items-center rounded-lg border border-gray-100 bg-gray-50 px-3 text-sm text-gray-500">
               {variant.stockQuantity} en stock
               {variant.reservedQuantity > 0 && ` (${variant.reservedQuantity} réservé)`}
             </div>

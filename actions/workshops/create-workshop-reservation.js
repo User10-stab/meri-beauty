@@ -3,6 +3,8 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
+import { auth } from "@/auth";
+import { createResumeCheckoutToken, isCheckoutAuthorized } from "@/lib/resume-checkout-token";
 import bcrypt from "bcrypt";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
@@ -42,7 +44,7 @@ function generateTemporaryPassword() {
  *
  * @param {string} reservationId
  */
-export async function createWorkshopReservationCheckoutSession(reservationId) {
+export async function createWorkshopReservationCheckoutSession(reservationId, checkoutToken) {
   if (!reservationId) return { success: false, message: "Identifiant de réservation manquant." };
 
   try {
@@ -51,6 +53,21 @@ export async function createWorkshopReservationCheckoutSession(reservationId) {
       include: { session: { include: { workshop: true } }, customer: { select: { id: true, email: true } } },
     });
     if (!reservation) return { success: false, message: "Réservation introuvable." };
+
+    // Exported "use server" action — a bare reservationId proves nothing.
+    // Authorize via a signed checkout token (guest / post-verification resume)
+    // or by being signed in as the reservation's customer.
+    const authSession = await auth();
+    if (
+      !isCheckoutAuthorized(reservation, {
+        resumeType: "WORKSHOP",
+        resumeId: reservationId,
+        checkoutToken,
+        sessionUserId: authSession?.user?.id,
+      })
+    ) {
+      return { success: false, message: "Vous n'êtes pas autorisé(e) à démarrer le paiement de cette réservation." };
+    }
     if (reservation.status !== "PENDING_DEPOSIT") {
       return { success: false, message: "Cette réservation n'est plus en attente de paiement." };
     }
@@ -482,7 +499,10 @@ export async function createWorkshopReservation(data) {
       return { success: true, requiresEmailVerification: true, email };
     }
 
-    const checkoutResult = await createWorkshopReservationCheckoutSession(reservation.id);
+    const checkoutResult = await createWorkshopReservationCheckoutSession(
+      reservation.id,
+      createResumeCheckoutToken({ resumeType: "WORKSHOP", resumeId: reservation.id, email }),
+    );
     if (!checkoutResult.success) return checkoutResult;
 
     return {

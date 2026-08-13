@@ -8,6 +8,7 @@ import { emailVerificationEmail, welcomeWithCredentialsEmail } from "@/lib/email
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
 import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-verification";
+import { createResumeCheckoutToken } from "@/lib/resume-checkout-token";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
@@ -154,6 +155,7 @@ export async function verifyEmail(rawToken) {
     let resumeSuccess = null;
     let resumeUrl = null;
     let resumeMessage = null;
+    let resumeToken = null;
 
     if (matchedToken.resumeType) {
       const temporaryPassword = generateTemporaryPassword();
@@ -170,12 +172,25 @@ export async function verifyEmail(rawToken) {
         }),
       }).catch((err) => console.error("[verifyEmail] credentials email failed:", err));
 
+      // A resumeToken authorizes the manual "Réessayer le paiement" button to
+      // re-enter this checkout: retryCheckoutSession is a public "use server"
+      // action, so without a signed, ownership-bound capability any caller
+      // could resume — and harvest the pickup code of — an arbitrary
+      // order/reservation. Bound to the just-verified e-mail, valid 30 min;
+      // the inline resume below reuses the same token.
+      resumeToken = createResumeCheckoutToken({
+        resumeType: matchedToken.resumeType,
+        resumeId: matchedToken.resumeId,
+        email: matchedToken.email,
+      });
+
       // If this fails (e.g. a Stripe API hiccup), the token has already been
       // consumed and the account is verified either way — the caller shows a
       // manual retry-payment screen rather than leaving the person stuck.
       const resumeResult = await retryCheckoutSession({
         resumeType: matchedToken.resumeType,
         resumeId: matchedToken.resumeId,
+        resumeToken,
       });
       resumeSuccess = resumeResult.success;
       if (resumeResult.success) {
@@ -204,6 +219,7 @@ export async function verifyEmail(rawToken) {
       // registration tokens.
       resumeType: matchedToken.resumeType,
       resumeId: matchedToken.resumeId,
+      resumeToken,
       resumeSuccess,
       resumeUrl,
       resumeMessage,

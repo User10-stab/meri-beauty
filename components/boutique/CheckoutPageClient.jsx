@@ -195,7 +195,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
         return;
       }
 
-      const sessionResult = await createOrderCheckoutSession(result.data.orderId);
+      const sessionResult = await createOrderCheckoutSession(result.data.orderId, result.data.checkoutToken);
       if (!sessionResult.success) {
         toast.error(sessionResult.message || "Impossible de démarrer le paiement.");
         setSubmitting(false);

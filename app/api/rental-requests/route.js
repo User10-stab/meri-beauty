@@ -14,6 +14,7 @@ import { auth } from "@/auth";
 import { requireCustomer, hasPermission, DASHBOARD_PERMISSIONS, AUTH_ERRORS } from "@/lib/authorization";
 import { getAppBaseUrl } from "@/lib/site-url";
 import { sendEmail } from "@/lib/email";
+import { escapeHtml } from "@/lib/email-templates";
 import {
   createNotificationsBulk,
   buildRentalRequestSubmittedNotification,
@@ -216,7 +217,7 @@ export async function POST(request) {
           to: admin.email,
           subject: "Nouvelle demande de location – Meri Beauty",
           text: `Bonjour,\n\nUne nouvelle demande de location a été soumise.\n\nType: ${result.rentalRequest.rentalType}\nDate de début: ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}\n${result.rentalRequest.endDate ? `Date de fin: ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}\n` : ""}Type de commission: ${result.rentalRequest.commissionType}\n\nMessage: ${result.rentalRequest.message || "Aucun message"}\n\nVeuillez consulter le tableau de bord pour traiter cette demande.\n\nL'équipe Meri Beauty`,
-          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p><p><strong>Type:</strong> ${result.rentalRequest.rentalType}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${result.rentalRequest.endDate ? `<br><strong>Date de fin:</strong> ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}` : ""}<br><strong>Type de commission:</strong> ${result.rentalRequest.commissionType}</p><p><strong>Message:</strong> ${result.rentalRequest.message || "Aucun message"}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
+          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p><p><strong>Type:</strong> ${escapeHtml(result.rentalRequest.rentalType)}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${result.rentalRequest.endDate ? `<br><strong>Date de fin:</strong> ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}` : ""}<br><strong>Type de commission:</strong> ${escapeHtml(result.rentalRequest.commissionType)}</p><p><strong>Message:</strong> ${escapeHtml(result.rentalRequest.message || "Aucun message")}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
         }).catch((err) => console.error("[POST /api/rental-requests] admin email failed:", err));
       }
     }

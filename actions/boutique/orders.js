@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
+import { isCheckoutAuthorized, createResumeCheckoutToken } from "@/lib/resume-checkout-token";
 import { sendEmail } from "@/lib/email";
 import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema, closeShippedOrderSchema } from "@/lib/validations/commerce";
@@ -550,7 +551,16 @@ export async function createOrderFromCart(input) {
     return {
       success: true,
       message: "Commande créée, paiement requis.",
-      data: { orderId: order.id, orderNumber: order.orderNumber, requiresPayment: true },
+      data: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        requiresPayment: true,
+        // Authorizes the immediate createOrderCheckoutSession call the client
+        // makes next: that builder is a public "use server" action, so the
+        // orderId alone can't be the proof of ownership. Bound to this buyer,
+        // valid 30 min.
+        checkoutToken: createResumeCheckoutToken({ resumeType: "ORDER", resumeId: order.id, email: user.email }),
+      },
     };
   } catch (error) {
     if (error.message === "STOCK_RACE") {
@@ -606,7 +616,7 @@ function sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAm
  *
  * @param {string} orderId
  */
-export async function resumeOrderAfterVerification(orderId) {
+export async function resumeOrderAfterVerification(orderId, checkoutToken) {
   if (!orderId) return { success: false, message: "Identifiant de commande manquant." };
 
   const order = await prisma.order.findUnique({
@@ -614,6 +624,22 @@ export async function resumeOrderAfterVerification(orderId) {
     include: { user: { select: { fullName: true, email: true } } },
   });
   if (!order) return { success: false, message: "Commande introuvable." };
+
+  // Exported "use server" action — the orderId alone proves nothing. The
+  // pickup code below and the pickup-confirmation e-mail are gated behind
+  // this check. The resume path reaches here with a signed resumeToken from
+  // retryCheckoutSession; a logged-in owner is also authorized.
+  const authSession = await auth();
+  if (
+    !isCheckoutAuthorized(order, {
+      resumeType: "ORDER",
+      resumeId: orderId,
+      checkoutToken,
+      sessionUserId: authSession?.user?.id,
+    })
+  ) {
+    return { success: false, message: "Vous n'êtes pas autorisé(e) à reprendre cette commande." };
+  }
 
   if (order.fulfilmentMode === "PICKUP_ON_SITE") {
     if (order.status !== "PENDING_PICKUP") {
@@ -631,11 +657,11 @@ export async function resumeOrderAfterVerification(orderId) {
     };
   }
 
-  return createOrderCheckoutSession(orderId);
+  return createOrderCheckoutSession(orderId, checkoutToken);
 }
 
 /** Stripe Checkout Session for a PENDING_PAYMENT order (prepaid modes only). */
-export async function createOrderCheckoutSession(orderId) {
+export async function createOrderCheckoutSession(orderId, checkoutToken) {
   if (!orderId) return { success: false, message: "Identifiant de commande manquant." };
 
   try {
@@ -644,6 +670,22 @@ export async function createOrderCheckoutSession(orderId) {
       include: { items: true, user: { select: { email: true } } },
     });
     if (!order) return { success: false, message: "Commande introuvable." };
+
+    // This is an exported "use server" action reachable by anyone — a bare
+    // orderId proves nothing. Authorize via a signed checkout token (guest
+    // checkout / post-verification resume) or by being signed in as the
+    // order's owner, BEFORE any Stripe session or pickup code is handed out.
+    const authSession = await auth();
+    if (
+      !isCheckoutAuthorized(order, {
+        resumeType: "ORDER",
+        resumeId: orderId,
+        checkoutToken,
+        sessionUserId: authSession?.user?.id,
+      })
+    ) {
+      return { success: false, message: "Vous n'êtes pas autorisé(e) à démarrer le paiement de cette commande." };
+    }
     if (order.status !== "PENDING_PAYMENT") {
       return { success: false, message: "Cette commande n'est plus en attente de paiement." };
     }

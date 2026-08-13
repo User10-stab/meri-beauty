@@ -3,6 +3,8 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
+import { auth } from "@/auth";
+import { createResumeCheckoutToken, isCheckoutAuthorized } from "@/lib/resume-checkout-token";
 import bcrypt from "bcrypt";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
@@ -41,7 +43,7 @@ function generateTemporaryPassword() {
  *
  * @param {string} reservationId
  */
-export async function createFormationReservationCheckoutSession(reservationId) {
+export async function createFormationReservationCheckoutSession(reservationId, checkoutToken) {
   if (!reservationId) return { success: false, message: "Identifiant de réservation manquant." };
 
   try {
@@ -50,6 +52,21 @@ export async function createFormationReservationCheckoutSession(reservationId) {
       include: { session: { include: { formation: true } }, customer: { select: { id: true, email: true } } },
     });
     if (!reservation) return { success: false, message: "Réservation introuvable." };
+
+    // Exported "use server" action — a bare reservationId proves nothing.
+    // Authorize via a signed checkout token (guest / post-verification resume)
+    // or by being signed in as the reservation's customer.
+    const authSession = await auth();
+    if (
+      !isCheckoutAuthorized(reservation, {
+        resumeType: "FORMATION",
+        resumeId: reservationId,
+        checkoutToken,
+        sessionUserId: authSession?.user?.id,
+      })
+    ) {
+      return { success: false, message: "Vous n'êtes pas autorisé(e) à démarrer le paiement de cette réservation." };
+    }
     if (reservation.status !== "PENDING_DEPOSIT") {
       return { success: false, message: "Cette réservation n'est plus en attente de paiement." };
     }
@@ -469,7 +486,10 @@ export async function createFormationReservation(data) {
       return { success: true, requiresEmailVerification: true, email };
     }
 
-    const checkoutResult = await createFormationReservationCheckoutSession(reservation.id);
+    const checkoutResult = await createFormationReservationCheckoutSession(
+      reservation.id,
+      createResumeCheckoutToken({ resumeType: "FORMATION", resumeId: reservation.id, email }),
+    );
     if (!checkoutResult.success) return checkoutResult;
 
     return {

@@ -49,6 +49,7 @@ export default async function VerifyEmailPage({ searchParams }) {
       paymentFailedMessage={result.resumeMessage}
       resumeType={result.resumeType}
       resumeId={result.resumeId}
+      resumeToken={result.resumeToken}
     />
   );
 }

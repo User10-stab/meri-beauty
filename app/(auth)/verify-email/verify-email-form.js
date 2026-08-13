@@ -17,6 +17,7 @@ export default function VerifyEmailForm({
   paymentFailedMessage,
   resumeType,
   resumeId,
+  resumeToken,
   defaultEmail = "",
 }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -49,9 +50,13 @@ export default function VerifyEmailForm({
   }, [redirectUrl]);
 
   async function handleRetryPayment() {
+    if (!resumeToken) {
+      setRetryError("Ce lien de reprise a expiré. Veuillez vous connecter pour finaliser votre commande.");
+      return;
+    }
     setRetryingPayment(true);
     setRetryError(null);
-    const result = await retryCheckoutSession({ resumeType, resumeId });
+    const result = await retryCheckoutSession({ resumeType, resumeId, resumeToken });
     if (result.success && result.url) {
       window.location.href = result.url;
       return;

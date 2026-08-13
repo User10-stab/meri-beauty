@@ -35,7 +35,10 @@ const CSP = [
   // *.pusher.com: Pusher notifications client — wss://ws-<cluster>.pusher.com
   // for the live socket, plus https://sockjs-<cluster>.pusher.com and
   // stats.pusher.com that the same client falls back to/reports to.
-  "connect-src 'self' https://*.mondialrelay.com wss://*.pusher.com https://*.pusher.com",
+  // *.ingest.de.sentry.io: the Sentry SDK's client-side error/event beacon
+  // (instrumentation-client.js) — without this, every browser-side error
+  // report is itself silently blocked by this very CSP.
+  "connect-src 'self' https://*.mondialrelay.com wss://*.pusher.com https://*.pusher.com https://*.ingest.de.sentry.io",
   // Google Maps embed on the Contact page.
   "frame-src 'self' https://www.google.com",
   "object-src 'none'",

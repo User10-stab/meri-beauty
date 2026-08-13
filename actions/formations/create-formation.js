@@ -89,7 +89,7 @@ export async function createFormation(input) {
     const parsed = formationSchema.safeParse(input);
     if (!parsed.success) {
       const fieldErrors = {};
-      parsed.error.errors.forEach((err) => {
+      parsed.error.issues.forEach((err) => {
         fieldErrors[err.path[0]] = err.message;
       });
       return {
@@ -167,7 +167,7 @@ export async function updateFormation(input) {
     const parsed = updateFormationSchema.safeParse(input);
     if (!parsed.success) {
       const fieldErrors = {};
-      parsed.error.errors.forEach((err) => {
+      parsed.error.issues.forEach((err) => {
         fieldErrors[err.path[0]] = err.message;
       });
       return {

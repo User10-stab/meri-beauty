@@ -26,7 +26,7 @@ export async function updateCustomer(input) {
 
   const parsed = updateCustomerSchema.safeParse(input);
   if (!parsed.success) {
-    return { success: false, message: parsed.error.errors[0]?.message ?? "Données invalides." };
+    return { success: false, message: parsed.error.issues[0]?.message ?? "Données invalides." };
   }
   const { id, fullName, phone, isActive } = parsed.data;
 

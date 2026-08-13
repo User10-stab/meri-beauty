@@ -86,7 +86,7 @@ export async function createActivity(input) {
     const parsed = activitySchema.safeParse(input);
     if (!parsed.success) {
       const fieldErrors = {};
-      parsed.error.errors.forEach((err) => {
+      parsed.error.issues.forEach((err) => {
         fieldErrors[err.path[0]] = err.message;
       });
       return {
@@ -164,7 +164,7 @@ export async function updateActivity(input) {
     const parsed = updateActivitySchema.safeParse(input);
     if (!parsed.success) {
       const fieldErrors = {};
-      parsed.error.errors.forEach((err) => {
+      parsed.error.issues.forEach((err) => {
         fieldErrors[err.path[0]] = err.message;
       });
       return {

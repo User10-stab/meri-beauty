@@ -117,4 +117,12 @@ export default withSentryConfig(nextConfig, {
   project: process.env.SENTRY_PROJECT,
   authToken: process.env.SENTRY_AUTH_TOKEN,
   silent: true,
+  // Routes the browser SDK's error/event beacon through our own domain
+  // (/monitoring, proxied server-side to Sentry's real ingest URL) instead
+  // of calling *.ingest.de.sentry.io directly. Ad-blockers/privacy extensions
+  // (uBlock, Brave Shields, etc.) ship domain blocklists that target Sentry's
+  // ingest hosts by name — that's ERR_BLOCKED_BY_CLIENT in the console, not a
+  // CSP or app bug, and no connect-src change can fix it. A same-origin path
+  // isn't on those lists, so this is Sentry's own documented workaround.
+  tunnelRoute: "/monitoring",
 });

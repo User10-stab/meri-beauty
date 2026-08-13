@@ -154,6 +154,7 @@ export async function runWixImport({ products, slugMapping }) {
               {
                 name: "Standard",
                 sku,
+                barcode: p.barcode,
                 price: p.price,
                 costPrice: p.costPrice,
                 comparePrice: p.comparePrice,

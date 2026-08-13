@@ -2,25 +2,22 @@ import { requireRole } from "@/lib/route-protection";
 import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getStaffPerformance } from "@/actions/staff/get-staff-performance";
 import { StaffPerformanceClient } from "@/components/dashboard/staff/StaffPerformanceClient";
-
-export const metadata = {
-  title: "Performance du staff — Dashboard",
-  description: "Rendez-vous, chiffre d'affaires et commissions par membre du staff.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function StaffPerformancePage() {
   await requireRole(DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT); // OWNER/ADMIN only — getStaffPerformance() re-checks server-side
+  const t = await getTranslations("dashboard.staff.performance");
 
   const result = await getStaffPerformance();
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-dark dark:text-white">Performance du staff</h1>
+        <h1 className="text-2xl font-bold text-dark dark:text-white">{t("title")}</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Rendez-vous effectués, chiffre d'affaires généré et commissions dues, par membre du staff.
+          {t("subtitle")}
         </p>
       </div>
 

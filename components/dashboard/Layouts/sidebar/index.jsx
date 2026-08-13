@@ -9,14 +9,28 @@ import { getNavDataForRole } from "./data";
 import { ArrowLeftIcon, ChevronUp } from "./icons";
 import { MenuItem } from "./menu-item";
 import { useSidebarContext } from "./sidebar-context";
+import { useTranslations } from "next-intl";
 
 export function Sidebar({ userRole }) {
+  const t = useTranslations("dashboard");
   const pathname = usePathname();
   const { setIsOpen, isOpen, isMobile, toggleSidebar } = useSidebarContext();
   const [expandedItems, setExpandedItems] = useState([]);
 
   // Get navigation data filtered by user role
   const NAV_DATA = getNavDataForRole(userRole);
+  const titleKeys = {
+    "Tableau de bord": "dashboard", "Rendez-vous": "appointments", "Calendrier": "calendar",
+    "Tous les rendez-vous": "allAppointments", "Clients": "customers", "Services": "services",
+    "Paiements": "payments", "Compte Stripe": "stripe", "Réconciliation": "reconciliation",
+    "Workshops & Événements": "workshops", "Activités": "activities", "Animateurs": "animators",
+    "Réservations": "reservations", "Liste d'attente": "waitingList", "Formations": "courses", "Staff": "staff",
+    "Performance": "performance", "Auto-Entrepreneur": "independentStaff", "Boutique": "shop", "Produits": "products",
+    "Catégories": "categories", "Stock": "stock", "Commandes": "orders", "Retours": "returns", "Factures": "invoices",
+    "Codes promo": "promoCodes", "Newsletter": "newsletter", "Demandes de location": "rentalRequests",
+    "Avis clients": "reviews", "Rapports": "reports"
+  };
+  const label = (value) => titleKeys[value] ? t(`sidebar.${titleKeys[value]}`) : value;
 
   const toggleExpanded = (title) => {
     setExpandedItems((prev) => (prev.includes(title) ? [] : [title]));
@@ -96,7 +110,7 @@ export function Sidebar({ userRole }) {
             {NAV_DATA.map((section) => (
               <div key={section.label} className="mb-6">
                 <h2 className="mb-5 text-sm font-medium text-dark-4 dark:text-dark-6">
-                  {section.label}
+                  {section.label === "PRINCIPAL" ? t("main") : section.label}
                 </h2>
 
                 <nav role="navigation" aria-label={section.label}>
@@ -116,7 +130,7 @@ export function Sidebar({ userRole }) {
                                 aria-hidden="true"
                               />
 
-                              <span>{item.title}</span>
+                              <span>{label(item.title)}</span>
 
                               <ChevronUp
                                 className={cn(
@@ -140,7 +154,7 @@ export function Sidebar({ userRole }) {
                                       href={subItem.url}
                                       isActive={pathname === subItem.url}
                                     >
-                                      <span>{subItem.title}</span>
+                                      <span>{label(subItem.title)}</span>
                                     </MenuItem>
                                   </li>
                                 ))}
@@ -167,7 +181,7 @@ export function Sidebar({ userRole }) {
                                   aria-hidden="true"
                                 />
 
-                                <span>{item.title}</span>
+                                <span>{label(item.title)}</span>
                               </MenuItem>
                             );
                           })()

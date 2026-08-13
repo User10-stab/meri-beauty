@@ -3,17 +3,19 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useLocale, useTranslations } from "next-intl";
 import { resumeReservationPayment } from "@/actions/payment/resume-reservation-payment";
 import { cancelReservation } from "@/actions/reservation/cancel-reservation";
 import {
   isWithinCancellationWindow,
   CANCELLATION_WINDOW_HOURS,
 } from "@/lib/reservationRules";
+import { toIntlLocale } from "@/lib/intl-locale";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDate(date) {
-  return new Date(date).toLocaleDateString("fr-FR", {
+function formatDate(date, locale) {
+  return new Date(date).toLocaleDateString(toIntlLocale(locale), {
     weekday: "long",
     day: "2-digit",
     month: "long",
@@ -22,16 +24,16 @@ function formatDate(date) {
   });
 }
 
-function formatTime(date) {
-  return new Date(date).toLocaleTimeString("fr-FR", {
+function formatTime(date, locale) {
+  return new Date(date).toLocaleTimeString(toIntlLocale(locale), {
     hour: "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Brussels",
   });
 }
 
-function formatAmount(amount) {
-  return new Intl.NumberFormat("fr-FR", {
+function formatAmount(amount, locale) {
+  return new Intl.NumberFormat(toIntlLocale(locale), {
     style: "currency",
     currency: "EUR",
   }).format(amount);
@@ -40,18 +42,18 @@ function formatAmount(amount) {
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
 const APPOINTMENT_STATUS_CONFIG = {
-  PENDING: { label: "En attente", className: "bg-amber-100 text-amber-800" },
-  CONFIRMED: { label: "Confirmé", className: "bg-emerald-100 text-emerald-800" },
-  COMPLETED: { label: "Terminé", className: "bg-gray-100 text-gray-600" },
-  CANCELLED: { label: "Annulé", className: "bg-red-100 text-red-700" },
-  NO_SHOW: { label: "Absent", className: "bg-orange-100 text-orange-700" },
+  PENDING: { labelKey: "pending", className: "bg-amber-100 text-amber-800" },
+  CONFIRMED: { labelKey: "confirmed", className: "bg-emerald-100 text-emerald-800" },
+  COMPLETED: { labelKey: "completed", className: "bg-gray-100 text-gray-600" },
+  CANCELLED: { labelKey: "cancelled", className: "bg-red-100 text-red-700" },
+  NO_SHOW: { labelKey: "noShow", className: "bg-orange-100 text-orange-700" },
 };
 
 const PAYMENT_STATUS_CONFIG = {
-  PENDING: { label: "Paiement en attente", className: "bg-amber-100 text-amber-800" },
-  PARTIALLY_PAID: { label: "Acompte payé", className: "bg-blue-100 text-blue-800" },
-  PAID: { label: "Payé", className: "bg-emerald-100 text-emerald-800" },
-  REFUNDED: { label: "Remboursé", className: "bg-purple-100 text-purple-800" },
+  PENDING: { labelKey: "paymentStatusPending", className: "bg-amber-100 text-amber-800" },
+  PARTIALLY_PAID: { labelKey: "paymentStatusPartiallyPaid", className: "bg-blue-100 text-blue-800" },
+  PAID: { labelKey: "paymentStatusPaid", className: "bg-emerald-100 text-emerald-800" },
+  REFUNDED: { labelKey: "paymentStatusRefunded", className: "bg-purple-100 text-purple-800" },
 };
 
 function StatusBadge({ label, className }) {
@@ -67,6 +69,9 @@ function StatusBadge({ label, className }) {
 // ─── Single reservation card ──────────────────────────────────────────────────
 
 function ReservationCard({ reservation, onCancelled }) {
+  const t = useTranslations("myReservations");
+  const tApptStatus = useTranslations("appointmentStatus");
+  const locale = useLocale();
   const [loadingPayment, setLoadingPayment] = useState(false);
   const [loadingCancel, setLoadingCancel] = useState(false);
   // Track local cancelled state so the card updates instantly without a full reload
@@ -77,15 +82,21 @@ function ReservationCard({ reservation, onCancelled }) {
   const effectiveStatus = isCancelled ? "CANCELLED" : reservation.status;
   const apptStatusConfig =
     APPOINTMENT_STATUS_CONFIG[effectiveStatus] ?? {
-      label: effectiveStatus,
+      labelKey: "",
       className: "bg-gray-100 text-gray-600",
     };
+  const apptStatusLabel = apptStatusConfig.labelKey
+    ? tApptStatus(apptStatusConfig.labelKey)
+    : effectiveStatus;
   const paymentStatusConfig = reservation.payment
     ? (PAYMENT_STATUS_CONFIG[reservation.payment.status] ?? {
-        label: reservation.payment.status,
+        labelKey: "",
         className: "bg-gray-100 text-gray-600",
       })
     : null;
+  const paymentStatusLabel = paymentStatusConfig?.labelKey
+    ? t(paymentStatusConfig.labelKey)
+    : reservation.payment?.status;
 
   // ── 48-hour window check ─────────────────────────────────────────────────
   const blocked = isWithinCancellationWindow(reservation.startTime);
@@ -105,13 +116,13 @@ function ReservationCard({ reservation, onCancelled }) {
       if (!result.success || !result.url) {
         toast.error(
           result.message ??
-            "Impossible de créer la session de paiement. Veuillez réessayer.",
+            t("sessionFailedToast"),
         );
         return;
       }
       window.location.href = result.url;
     } catch {
-      toast.error("Une erreur est survenue. Veuillez réessayer.");
+      toast.error(t("genericErrorToast"));
       setLoadingPayment(false);
     }
   }
@@ -124,13 +135,13 @@ function ReservationCard({ reservation, onCancelled }) {
       const result = await cancelReservation(reservation.id);
       if (result.success) {
         setIsCancelled(true);
-        toast.success(result.message ?? "Réservation annulée.");
+        toast.success(result.message ?? t("cancelledToast"));
         onCancelled?.();
       } else {
-        toast.error(result.message ?? "Impossible d'annuler cette réservation.");
+        toast.error(result.message ?? t("cancelFailedToast"));
       }
     } catch {
-      toast.error("Une erreur est survenue. Veuillez réessayer.");
+      toast.error(t("genericErrorToast"));
     } finally {
       setLoadingCancel(false);
     }
@@ -154,10 +165,10 @@ function ReservationCard({ reservation, onCancelled }) {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
                 </svg>
               </div>
-              <span className="font-medium">avec {reservation.staff.fullName}</span>
+              <span className="font-medium">{t("withExpert", { name: reservation.staff.fullName })}</span>
             </div>
           </div>
-          <StatusBadge {...apptStatusConfig} />
+          <StatusBadge label={apptStatusLabel} className={apptStatusConfig.className} />
         </div>
       </div>
 
@@ -171,10 +182,10 @@ function ReservationCard({ reservation, onCancelled }) {
                 <svg className="h-3.5 w-3.5 text-[#2f3a2e]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 9v7.5" />
                 </svg>
-                <span>Date</span>
+                <span>{t("date")}</span>
               </div>
               <p className="text-sm font-bold text-gray-800 capitalize leading-tight">
-                {formatDate(reservation.date)}
+                {formatDate(reservation.date, locale)}
               </p>
             </div>
           </div>
@@ -185,12 +196,12 @@ function ReservationCard({ reservation, onCancelled }) {
                 <svg className="h-3.5 w-3.5 text-[#C8A46A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span>Heure</span>
+                <span>{t("time")}</span>
               </div>
               <p className="text-sm font-bold text-gray-800 leading-tight">
-                {formatTime(reservation.startTime)}
+                {formatTime(reservation.startTime, locale)}
               </p>
-              <p className="text-xs text-gray-600 mt-0.5">{reservation.duration} min</p>
+              <p className="text-xs text-gray-600 mt-0.5">{t("durationMinutes", { duration: reservation.duration })}</p>
             </div>
           </div>
         </div>
@@ -199,27 +210,27 @@ function ReservationCard({ reservation, onCancelled }) {
         {reservation.payment && (
           <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-gray-50 to-white p-5 border border-gray-200">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Paiement</span>
-              <StatusBadge {...paymentStatusConfig} />
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{t("payment")}</span>
+              <StatusBadge label={paymentStatusLabel} className={paymentStatusConfig.className} />
             </div>
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600">Total</span>
+                <span className="text-gray-600">{t("total")}</span>
                 <span className="font-bold text-[#2F3A2E]">
-                  {formatAmount(reservation.payment.totalAmount)}
+                  {formatAmount(reservation.payment.totalAmount, locale)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-600">Payé</span>
+                <span className="text-gray-600">{t("paid")}</span>
                 <span className="font-bold text-emerald-600">
-                  {formatAmount(reservation.payment.paidAmount)}
+                  {formatAmount(reservation.payment.paidAmount, locale)}
                 </span>
               </div>
               {reservation.payment.remainingAmount > 0 && (
                 <div className="flex items-center justify-between text-sm pt-2 border-t-2 border-gray-200">
-                  <span className="text-gray-700 font-semibold">Reste à payer</span>
+                  <span className="text-gray-700 font-semibold">{t("remainingToPay")}</span>
                   <span className="font-bold text-amber-600 text-base">
-                    {formatAmount(reservation.payment.remainingAmount)}
+                    {formatAmount(reservation.payment.remainingAmount, locale)}
                   </span>
                 </div>
               )}
@@ -237,24 +248,24 @@ function ReservationCard({ reservation, onCancelled }) {
             disabled={loadingPayment}
             className="group/btn relative w-full overflow-hidden rounded-xl bg-[#2f3a2e] px-4 py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:bg-[#3d4e3b] hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <span className="relative z-10 flex items-center justify-center gap-2">
-              {loadingPayment ? (
-                <>
-                  <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                  </svg>
-                  Redirection…
-                </>
-              ) : (
-                <>
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
-                  </svg>
-                  Finaliser le paiement
-                </>
-              )}
-            </span>
+<span className="relative z-10 flex items-center justify-center gap-2">
+                  {loadingPayment ? (
+                    <>
+                      <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      {t("redirecting")}
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+                      </svg>
+                      {t("finalizePayment")}
+                    </>
+                  )}
+                </span>
           </button>
         )}
 
@@ -268,9 +279,7 @@ function ReservationCard({ reservation, onCancelled }) {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                 </svg>
                 <p className="text-xs text-amber-800 leading-relaxed font-medium">
-                  Les modifications et annulations ne sont plus disponibles
-                  moins de {CANCELLATION_WINDOW_HOURS} heures avant le
-                  rendez-vous.
+                  {t("cancellationLocked", { hours: CANCELLATION_WINDOW_HOURS })}
                 </p>
               </div>
             ) : (
@@ -284,7 +293,7 @@ function ReservationCard({ reservation, onCancelled }) {
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
                   </svg>
-                  Modifier
+                  {t("modify")}
                 </Link>
 
                 {/* Cancel */}
@@ -299,14 +308,14 @@ function ReservationCard({ reservation, onCancelled }) {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                       </svg>
-                      Annulation…
+                      {t("cancelling")}
                     </>
                   ) : (
                     <>
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                       </svg>
-                      Annuler
+                      {t("cancel")}
                     </>
                   )}
                 </button>
@@ -319,7 +328,7 @@ function ReservationCard({ reservation, onCancelled }) {
         {isCancelled && (
           <div className="rounded-xl border-2 border-gray-200 bg-gray-100 px-4 py-3 text-center">
             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-              Cette réservation a été annulée.
+              {t("cancelledNotice")}
             </p>
           </div>
         )}
@@ -332,7 +341,7 @@ function ReservationCard({ reservation, onCancelled }) {
             <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
             </svg>
-            Paiement sécurisé par Stripe
+            {t("secureStripe")}
           </p>
         </div>
       )}
@@ -393,6 +402,7 @@ function XIcon() {
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
 function EmptyState() {
+  const t = useTranslations("myReservations");
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
@@ -410,16 +420,15 @@ function EmptyState() {
           />
         </svg>
       </div>
-      <h3 className="text-lg font-semibold text-[#2F3A2E]">Aucune réservation</h3>
+      <h3 className="text-lg font-semibold text-[#2F3A2E]">{t("emptyTitle")}</h3>
       <p className="mt-2 max-w-xs text-sm text-gray-500">
-        Vous n&apos;avez pas encore de rendez-vous. Prenez votre premier
-        rendez-vous en quelques secondes.
+        {t("emptyDescription")}
       </p>
       <Link
         href="/reservation"
         className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[#2F3A2E] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#3d4e3b]"
       >
-        Prendre un rendez-vous
+        {t("bookNow")}
       </Link>
     </div>
   );
@@ -438,6 +447,7 @@ function EmptyState() {
  * @param {{ reservations: Array<object> }} props
  */
 export default function MyReservationsClient({ reservations }) {
+  const t = useTranslations("myReservations");
   if (!reservations || reservations.length === 0) {
     return <EmptyState />;
   }
@@ -456,7 +466,7 @@ export default function MyReservationsClient({ reservations }) {
               <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
             </span>
             <h2 className="text-sm font-bold uppercase tracking-wider text-amber-700">
-              Paiement en attente
+              {t("pendingPayment")}
             </h2>
           </div>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
@@ -471,7 +481,7 @@ export default function MyReservationsClient({ reservations }) {
       {others.length > 0 && (
         <section>
           <h2 className="mb-6 text-sm font-bold uppercase tracking-wider text-gray-400">
-            Mes rendez-vous
+            {t("myAppointments")}
           </h2>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {others.map((r) => (

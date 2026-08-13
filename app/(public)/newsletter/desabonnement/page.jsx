@@ -1,20 +1,25 @@
 import Link from "next/link";
 import { CheckCircle2, XCircle } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { unsubscribeFromNewsletter } from "@/actions/newsletter/unsubscribe";
 
-export const metadata = {
-  title: "Désabonnement newsletter | Meri Beauty",
-  robots: { index: false, follow: false },
-};
+export async function generateMetadata() {
+  const t = await getTranslations("newsletter");
+  return {
+    title: t("metadataTitle"),
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function NewsletterUnsubscribePage({ searchParams }) {
   const params = await searchParams;
+  const t = await getTranslations("newsletter");
   const userId = params?.u || "";
   const token = params?.t || "";
 
   const result = userId && token
     ? await unsubscribeFromNewsletter(userId, token)
-    : { success: false, message: "Ce lien de désabonnement est invalide." };
+    : { success: false, message: t("invalidLink") };
 
   return (
     <div className="min-h-[60vh] flex items-center justify-center px-4 py-20">
@@ -27,14 +32,14 @@ export default async function NewsletterUnsubscribePage({ searchParams }) {
           {result.success ? <CheckCircle2 className="h-6 w-6" /> : <XCircle className="h-6 w-6" />}
         </div>
         <h1 className="text-xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
-          {result.success ? "Désabonnement confirmé" : "Lien invalide"}
+          {result.success ? t("confirmedTitle") : t("invalidTitle")}
         </h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">{result.message}</p>
         <Link
           href="/"
           className="inline-flex justify-center py-3 px-6 text-sm font-semibold rounded-2xl text-white bg-[#2F3A2E] hover:bg-[#3d4d3c] transition-all"
         >
-          Retour à l&apos;accueil
+          {t("backHome")}
         </Link>
       </div>
     </div>

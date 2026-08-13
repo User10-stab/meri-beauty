@@ -1,4 +1,5 @@
 import { withSentryConfig } from "@sentry/nextjs";
+import createNextIntlPlugin from "next-intl/plugin";
 
 const CSP = [
   "default-src 'self'",
@@ -110,7 +111,9 @@ const nextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
+const withNextIntl = createNextIntlPlugin("./i18n/request.js");
+
+export default withSentryConfig(withNextIntl(nextConfig), {
   // Only used for source-map upload — silent no-op locally/without a token,
   // so this is safe to leave configured even before SENTRY_AUTH_TOKEN exists.
   org: process.env.SENTRY_ORG,

@@ -1,12 +1,16 @@
 import { requireAdmin } from "@/lib/route-protection";
 import { getBrands } from "@/actions/boutique/brands";
 import { ProductEditor } from "@/components/dashboard/boutique/ProductEditor";
-
-export const metadata = {
-  title: "Nouveau produit — Boutique — Dashboard",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata() {
+  const t = await getTranslations("dashboardBoutique.productEditor");
+  return {
+    title: t("newMetadataTitle"),
+  };
+}
 
 export default async function NewProductPage({ searchParams }) {
   await requireAdmin();

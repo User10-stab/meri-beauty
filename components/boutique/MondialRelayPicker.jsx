@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Script from "next/script";
 import { MapPin, Search } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 const BRAND_ID = process.env.NEXT_PUBLIC_MONDIAL_RELAY_BRAND_ID || "";
 
@@ -26,8 +27,9 @@ const JQUERY_SRC = "https://code.jquery.com/jquery-3.7.1.min.js";
  * keeps working end-to-end without any Mondial Relay credentials at all.
  */
 export function MondialRelayPicker({ value, onChange }) {
+  const t = useTranslations("boutique.mondialRelay");
   if (!BRAND_ID) {
-    return <ManualPickupPointForm value={value} onChange={onChange} />;
+    return <ManualPickupPointForm value={value} onChange={onChange} t={t} />;
   }
   return <WidgetPickupPointPicker value={value} onChange={onChange} />;
 }
@@ -94,7 +96,7 @@ function WidgetPickupPointPicker({ value, onChange }) {
   );
 }
 
-function ManualPickupPointForm({ value, onChange }) {
+function ManualPickupPointForm({ value, onChange, t }) {
   const point = value ?? { name: "", address: "", postalCode: "", city: "" };
 
   function handleChange(e) {
@@ -107,15 +109,14 @@ function ManualPickupPointForm({ value, onChange }) {
       <div className="flex items-start gap-2 border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
         <Search size={14} className="mt-0.5 flex-shrink-0" />
         <p>
-          Recherche automatique des points relais bientôt disponible. En attendant, indiquez le point relais
-          Mondial Relay de votre choix (trouvable sur mondialrelay.fr).
+          {t("autoSearchComing")}
         </p>
       </div>
       <input
         name="name"
         value={point.name}
         onChange={handleChange}
-        placeholder="Nom du point relais"
+        placeholder={t("pointName")}
         className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
         required
       />
@@ -123,7 +124,7 @@ function ManualPickupPointForm({ value, onChange }) {
         name="address"
         value={point.address}
         onChange={handleChange}
-        placeholder="Adresse du point relais"
+        placeholder={t("pointAddress")}
         className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
         required
       />
@@ -132,7 +133,7 @@ function ManualPickupPointForm({ value, onChange }) {
           name="postalCode"
           value={point.postalCode}
           onChange={handleChange}
-          placeholder="Code postal"
+          placeholder={t("postalCode")}
           maxLength={4}
           className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
           required
@@ -141,12 +142,12 @@ function ManualPickupPointForm({ value, onChange }) {
           name="city"
           value={point.city}
           onChange={handleChange}
-          placeholder="Ville"
+          placeholder={t("city")}
           className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
           required
         />
       </div>
-      <p className="text-xs text-gray-400">Livraison en Belgique uniquement, via Mondial Relay.</p>
+      <p className="text-xs text-gray-400">{t("belgiumOnly")}</p>
     </div>
   );
 }

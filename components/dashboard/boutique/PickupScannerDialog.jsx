@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { X, CameraOff, ScanLine } from "lucide-react";
 import { BrowserQRCodeReader } from "@zxing/browser";
+import { useTranslations } from "next-intl";
 
 /**
  * Camera-driven alternative to typing a pickup code by hand. Decodes the QR
@@ -13,6 +14,7 @@ import { BrowserQRCodeReader } from "@zxing/browser";
  * @param {{ open: boolean, onClose: () => void, onDecoded: (code: string) => void }} props
  */
 export function PickupScannerDialog({ open, onClose, onDecoded }) {
+  const t = useTranslations("dashboardBoutique.pickupScannerDialog");
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
   const [error, setError] = useState(null);
@@ -39,7 +41,7 @@ export function PickupScannerDialog({ open, onClose, onDecoded }) {
       .catch((err) => {
         if (cancelled) return;
         console.error("[PickupScannerDialog] camera init failed:", err);
-        setError("Impossible d'accéder à la caméra — vérifiez les autorisations de votre navigateur.");
+        setError(t("cameraError"));
       });
 
     return () => {
@@ -60,7 +62,7 @@ export function PickupScannerDialog({ open, onClose, onDecoded }) {
     >
       <div className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">Scanner un code de retrait</h2>
+          <h2 className="text-base font-semibold text-gray-900">{t("title")}</h2>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={18} />
           </button>
@@ -102,7 +104,7 @@ export function PickupScannerDialog({ open, onClose, onDecoded }) {
         )}
 
         <p className="mt-4 text-center text-xs text-gray-400">
-          Visez le QR affiché sur le téléphone du client — la détection est automatique.
+          {t("hint")}
         </p>
       </div>
     </div>

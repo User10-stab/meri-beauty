@@ -2,22 +2,24 @@
 
 import { DataTable } from "../Tables/DataTable";
 import { WaitingListRow } from "./WaitingListRow";
-
-const COLUMNS = [
-  { key: "activity", label: "Activité & Séance" },
-  { key: "customer", label: "Client" },
-  { key: "position", label: "Position" },
-  { key: "seatsRequested", label: "Places demandées" },
-  { key: "status", label: "Statut" },
-];
+import { useTranslations } from "next-intl";
 
 export function WaitingListPageClient({ initialEntries = [] }) {
+  const t = useTranslations("dashboardWorkshops.waitingList");
+  const columns = [
+    { key: "activity", label: t("columns.activity") },
+    { key: "customer", label: t("columns.customer") },
+    { key: "position", label: t("columns.position") },
+    { key: "seatsRequested", label: t("columns.seatsRequested") },
+    { key: "status", label: t("columns.status") },
+  ];
+
   return (
     <DataTable
       data={initialEntries}
-      columns={COLUMNS}
+      columns={columns}
       renderRow={WaitingListRow}
-      searchPlaceholder="Rechercher dans la liste d'attente..."
+      searchPlaceholder={t("searchPlaceholder")}
       searchFilter={(row, query) =>
         row.session?.workshop?.title?.toLowerCase().includes(query) ||
         row.customer?.fullName?.toLowerCase().includes(query) ||

@@ -94,10 +94,13 @@ export async function deleteIndependentStaff(input) {
     const now = new Date();
 
     await prisma.$transaction([
-      // Soft-delete the User account — blocks login
+      // Soft-delete the User account — blocks login immediately.
+      // sessionVersion bump invalidates any live JWT on the staff member's
+      // very next authenticated request rather than waiting up to 5 minutes
+      // for the periodic revalidation window to expire.
       prisma.user.update({
         where: { id: existing.userId },
-        data:  { isActive: false, isDeleted: true, deletedAt: now },
+        data:  { isActive: false, isDeleted: true, deletedAt: now, sessionVersion: { increment: 1 } },
       }),
 
       // Soft-delete the Staff profile

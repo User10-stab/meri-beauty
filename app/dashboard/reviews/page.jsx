@@ -3,16 +3,13 @@ import { requireRole } from "@/lib/route-protection";
 import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getReviewDashboardData } from "@/actions/review/review-actions";
 import { ReviewsPageClient } from "@/components/dashboard/reviews/ReviewsPageClient";
-
-export const metadata = {
-  title: "Avis clients — Dashboard",
-  description: "Gérez les avis clients de votre salon.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReviewsPage() {
   await requireRole(DASHBOARD_PERMISSIONS.REVIEWS);
+  const t = await getTranslations("dashboard.reviews");
 
   const result = await getReviewDashboardData();
   const reviews = result.data?.reviews ?? [];
@@ -25,17 +22,17 @@ export default async function ReviewsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            Avis clients
+            {t("title")}
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Consultez et gérez l'ensemble des avis clients.
+            {t("subtitle")}
           </p>
         </div>
 
         {/* Stats strip */}
         <div className="flex items-center gap-3">
           <StatBadge
-            label="Total"
+            label={t("totalLabel")}
             value={totalReviews}
             color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
           />

@@ -6,8 +6,10 @@ import Image from "next/image";
 import { Minus, Plus, ShoppingBag, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { addToCart } from "@/actions/boutique/cart";
+import { useTranslations } from "next-intl";
 
 export function ProductDetailClient({ product, initialVariantId }) {
+  const t = useTranslations("boutique");
   const hasInitialVariant = product.variants.some((v) => v.id === initialVariantId);
   const [selectedVariantId, setSelectedVariantId] = useState(
     hasInitialVariant ? initialVariantId : product.variants[0]?.id ?? null
@@ -30,7 +32,7 @@ export function ProductDetailClient({ product, initialVariantId }) {
       toast.error(result.message);
       return;
     }
-    toast.success("Ajouté au panier.");
+    toast.success(t("addedToCart"));
     window.dispatchEvent(new Event("boutique:cart-updated")); // updates the header badge (client-fetched)
   }
 
@@ -40,7 +42,7 @@ export function ProductDetailClient({ product, initialVariantId }) {
         {/* Breadcrumb */}
         <nav className="mb-8 flex items-center gap-1.5 text-xs text-gray-400">
           <Link href="/boutique" className="hover:text-[#2F3A2E]">
-            Boutique
+            {t("title")}
           </Link>
           <ChevronRight size={12} />
           <span>{product.category.name}</span>
@@ -105,7 +107,7 @@ export function ProductDetailClient({ product, initialVariantId }) {
 
             {hasMultipleVariants && (
               <div className="mt-8">
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Déclinaison</h3>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("variant")}</h3>
                 <div className="flex flex-wrap gap-2">
                   {product.variants.map((v) => (
                     <button
@@ -130,11 +132,11 @@ export function ProductDetailClient({ product, initialVariantId }) {
               {inStock ? (
                 <span className="text-green-700">
                   {variant.availableQuantity <= 5
-                    ? `Il ne reste que ${variant.availableQuantity} en stock`
-                    : "En stock"}
+                    ? t("remainingInStock", { count: variant.availableQuantity })
+                    : t("stock")}
                 </span>
               ) : (
-                <span className="text-gray-400">Rupture de stock</span>
+                <span className="text-gray-400">{t("outOfStock")}</span>
               )}
             </div>
 
@@ -144,7 +146,7 @@ export function ProductDetailClient({ product, initialVariantId }) {
                   type="button"
                   onClick={() => setQuantity((q) => Math.max(1, q - 1))}
                   className="flex h-11 w-11 items-center justify-center text-[#2F3A2E] hover:bg-neutral-50"
-                  aria-label="Diminuer la quantité"
+                  aria-label={t("decreaseQuantity")}
                 >
                   <Minus size={14} />
                 </button>
@@ -153,7 +155,7 @@ export function ProductDetailClient({ product, initialVariantId }) {
                   type="button"
                   onClick={() => setQuantity((q) => Math.min(99, q + 1))}
                   className="flex h-11 w-11 items-center justify-center text-[#2F3A2E] hover:bg-neutral-50"
-                  aria-label="Augmenter la quantité"
+                  aria-label={t("increaseQuantity")}
                 >
                   <Plus size={14} />
                 </button>
@@ -166,7 +168,7 @@ export function ProductDetailClient({ product, initialVariantId }) {
                 className="flex flex-1 items-center justify-center gap-2 bg-[#C8A46A] px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-[#B8945A] disabled:cursor-not-allowed disabled:bg-gray-300"
               >
                 <ShoppingBag size={16} />
-                {adding ? "Ajout…" : "Ajouter au panier"}
+                {adding ? t("adding") : t("addToCart")}
               </button>
             </div>
           </div>

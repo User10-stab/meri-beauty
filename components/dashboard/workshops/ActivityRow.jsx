@@ -1,8 +1,10 @@
 "use client";
 
 import { RowActions } from "../Tables/RowActions";
+import { useTranslations } from "next-intl";
 
 export function ActivityRow({ row, onView, onEdit, onDelete }) {
+  const t = useTranslations("dashboardWorkshops.activities");
   // Format price
   const priceFormatted = new Intl.NumberFormat("fr-FR", {
     style: "currency",
@@ -18,10 +20,10 @@ export function ActivityRow({ row, onView, onEdit, onDelete }) {
   };
 
   const statusLabels = {
-    DRAFT: "Brouillon",
-    PUBLISHED: "Publié",
-    CANCELLED: "Annulé",
-    ARCHIVED: "Archivé",
+    DRAFT: t("statusLabels.DRAFT"),
+    PUBLISHED: t("statusLabels.PUBLISHED"),
+    CANCELLED: t("statusLabels.CANCELLED"),
+    ARCHIVED: t("statusLabels.ARCHIVED"),
   };
 
   return (
@@ -61,7 +63,7 @@ export function ActivityRow({ row, onView, onEdit, onDelete }) {
               : "bg-sky-50 text-sky-800 border-sky-200"
           }`}
         >
-          {row.type === "WORKSHOP" ? "Workshop" : "Événement"}
+          {row.type === "WORKSHOP" ? t("typeLabels.WORKSHOP") : t("typeLabels.EVENT")}
         </span>
       </td>
 
@@ -72,12 +74,12 @@ export function ActivityRow({ row, onView, onEdit, onDelete }) {
 
       {/* Duration */}
       <td className="px-4 py-4 align-middle text-gray-600">
-        {row.duration} min
+        {row.duration} {t("unitLabels.minutes")}
       </td>
 
       {/* Capacity */}
       <td className="px-4 py-4 align-middle text-gray-600">
-        {row.capacity} pers.
+        {row.capacity} {t("unitLabels.persons")}
       </td>
 
       {/* Animator */}
@@ -98,7 +100,7 @@ export function ActivityRow({ row, onView, onEdit, onDelete }) {
             <span className="text-sm font-medium text-gray-700">{row.animator.name}</span>
           </div>
         ) : (
-          <span className="text-xs text-gray-400 italic">Aucun animateur</span>
+          <span className="text-xs text-gray-400 italic">{t("unitLabels.noAnimator")}</span>
         )}
       </td>
 

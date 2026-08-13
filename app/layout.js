@@ -9,6 +9,8 @@ import { ConfirmProvider } from "@/components/ConfirmProvider";
 import NextTopLoader from "nextjs-toploader";
 import { AppToaster } from "@/components/AppToaster";
 import { getMetadataBase } from "@/lib/site-url";
+import { NextIntlClientProvider } from "next-intl";
+import { getLocale, getMessages } from "next-intl/server";
 
 const cormorant = Cormorant_Garamond({
   subsets: ["latin"],
@@ -43,19 +45,21 @@ export const metadata = {
   },
 };
 
-export default function RootLayout({ children }) {
+export default async function RootLayout({ children }) {
+  const locale = await getLocale();
+  const messages = await getMessages();
   return (
-    <html lang="fr-BE" suppressHydrationWarning className={cormorant.variable}>
+    <html lang={locale} suppressHydrationWarning className={cormorant.variable}>
       <body className="antialiased" suppressHydrationWarning>
-        <Providers>
-          <ConfirmProvider>
-            <NextTopLoader color="#5750F1" showSpinner={false} />
-
-            {children}
-
-            <AppToaster />
-          </ConfirmProvider>
-        </Providers>
+        <NextIntlClientProvider locale={locale} messages={messages}>
+          <Providers>
+            <ConfirmProvider>
+              <NextTopLoader color="#5750F1" showSpinner={false} />
+              {children}
+              <AppToaster />
+            </ConfirmProvider>
+          </Providers>
+        </NextIntlClientProvider>
       </body>
     </html>
   );

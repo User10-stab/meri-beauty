@@ -3,15 +3,7 @@
 import { useEffect, useState } from "react";
 import { X, Loader2 } from "lucide-react";
 import { getStockMovements } from "@/actions/boutique/stock";
-
-const TYPE_LABEL = {
-  SALE: "Vente",
-  RESTOCK: "Réapprovisionnement",
-  RETURN: "Retour client",
-  LOSS: "Perte / casse",
-  ADJUSTMENT: "Correction manuelle",
-  SALON_USAGE: "Utilisation en prestation",
-};
+import { useTranslations } from "next-intl";
 
 function formatDate(d) {
   return new Intl.DateTimeFormat("fr-BE", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" }).format(new Date(d));
@@ -19,8 +11,18 @@ function formatDate(d) {
 
 /** Slide-over showing a variant's full inventory ledger, most recent first. */
 export function StockHistoryDrawer({ variant, onClose }) {
+  const t = useTranslations("dashboardBoutique.stock.historyDrawer");
   const [movements, setMovements] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  const TYPE_LABEL = {
+    SALE: t("movementTypes.SALE"),
+    RESTOCK: t("movementTypes.RESTOCK"),
+    RETURN: t("movementTypes.RETURN"),
+    LOSS: t("movementTypes.LOSS"),
+    ADJUSTMENT: t("movementTypes.ADJUSTMENT"),
+    SALON_USAGE: t("movementTypes.SALON_USAGE"),
+  };
 
   useEffect(() => {
     if (!variant) return;
@@ -38,7 +40,7 @@ export function StockHistoryDrawer({ variant, onClose }) {
       <div className="flex h-full w-full max-w-md flex-col bg-white shadow-xl">
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <div>
-            <h2 className="text-base font-semibold text-gray-900">Historique du stock</h2>
+            <h2 className="text-base font-semibold text-gray-900">{t("title")}</h2>
             <p className="text-sm text-gray-500">{variant.product.name} — {variant.name}</p>
           </div>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -52,7 +54,7 @@ export function StockHistoryDrawer({ variant, onClose }) {
               <Loader2 size={20} className="animate-spin text-gray-400" />
             </div>
           ) : movements.length === 0 ? (
-            <p className="py-10 text-center text-sm text-gray-400">Aucun mouvement enregistré.</p>
+            <p className="py-10 text-center text-sm text-gray-400">{t("noMovements")}</p>
           ) : (
             <ul className="space-y-3">
               {movements.map((m) => (

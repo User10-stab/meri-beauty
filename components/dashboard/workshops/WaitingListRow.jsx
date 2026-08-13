@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslations } from "next-intl";
+
 const STATUS_STYLES = {
   WAITING: "bg-gray-100 text-gray-600 border-gray-200",
   NOTIFIED: "bg-amber-50 text-amber-700 border-amber-200",
@@ -28,6 +30,7 @@ function formatSessionDate(date) {
 }
 
 export function WaitingListRow({ row }) {
+  const t = useTranslations("dashboardWorkshops.waitingList");
   return (
     <tr className="border-b border-gray-100 transition-colors hover:bg-gray-50/70">
       <td className="px-4 py-4 pl-5 align-middle">

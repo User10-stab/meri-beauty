@@ -11,20 +11,22 @@ import { deleteFormation } from "@/actions/formations/create-formation";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { isAdminRole } from "@/lib/authorization";
 import Button from "@/components/ui/Button";
-
-const COLUMNS = [
-  { key: "title", label: "Titre & Description" },
-  { key: "type", label: "Type" },
-  { key: "price", label: "Tarif" },
-  { key: "duration", label: "Durée" },
-  { key: "capacity", label: "Capacité" },
-  { key: "animator", label: "Formateur" },
-  { key: "status", label: "Statut" },
-];
+import { useTranslations } from "next-intl";
 
 export function FormationsPageClient({ initialFormations = [], initialAnimators = [], userRole, currentUserId }) {
+  const t = useTranslations("dashboardFormations");
   const router = useRouter();
   const confirm = useConfirm();
+  
+  const COLUMNS = [
+    { key: "title", label: t("columns.title") },
+    { key: "type", label: t("columns.type") },
+    { key: "price", label: t("columns.price") },
+    { key: "duration", label: t("columns.duration") },
+    { key: "capacity", label: t("columns.capacity") },
+    { key: "animator", label: t("columns.animator") },
+    { key: "status", label: t("columns.status") },
+  ];
 
   const [editingFormation, setEditingFormation] = useState(null);
   const [showFormationModal, setShowFormationModal] = useState(false);
@@ -49,7 +51,7 @@ export function FormationsPageClient({ initialFormations = [], initialAnimators 
   }
 
   async function handleDelete(formation) {
-    if (!(await confirm(`Supprimer définitivement la formation « ${formation.title} » ? Cette action est irréversible.`, { danger: true }))) return;
+    if (!(await confirm(t("confirmDelete", { title: formation.title }), { danger: true }))) return;
 
     startDelete(async () => {
       const result = await deleteFormation(formation.id);
@@ -70,7 +72,7 @@ export function FormationsPageClient({ initialFormations = [], initialAnimators 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-lg font-semibold text-gray-800">Formations</h1>
+        <h1 className="text-lg font-semibold text-gray-800">{t("title")}</h1>
         <Button
           onClick={() => {
             setEditingFormation(null);
@@ -78,7 +80,7 @@ export function FormationsPageClient({ initialFormations = [], initialAnimators 
           }}
           className="bg-[#2f3a2e]"
         >
-          <Plus size={16} /> Nouvelle formation
+          <Plus size={16} /> {t("button")}
         </Button>
       </div>
 
@@ -90,31 +92,39 @@ export function FormationsPageClient({ initialFormations = [], initialAnimators 
           onChange={(e) => setFilterType(e.target.value)}
           className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
         >
-          <option value="">Tous les types</option>
-          <option value="PRIVATE">Privée</option>
-          <option value="PUBLIC">Groupe</option>
+          <option value="">{t("filters.allTypes")}</option>
+          <option value="PRIVATE">{t("filters.typePrivate")}</option>
+          <option value="PUBLIC">{t("filters.typePublic")}</option>
         </select>
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
           className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
         >
-          <option value="">Tous les statuts</option>
-          <option value="DRAFT">Brouillon</option>
-          <option value="PUBLISHED">Publié</option>
-          <option value="CANCELLED">Annulé</option>
-          <option value="ARCHIVED">Archivé</option>
+          <option value="">{t("filters.allStatuses")}</option>
+          <option value="DRAFT">{t("filters.statusDraft")}</option>
+          <option value="PUBLISHED">{t("filters.statusPublished")}</option>
+          <option value="CANCELLED">{t("filters.statusCancelled")}</option>
+          <option value="ARCHIVED">{t("filters.statusArchived")}</option>
         </select>
       </div>
 
       <DataTable
         data={filteredFormations}
-        columns={COLUMNS}
+        columns={[
+          { key: "title", label: t("columns.title") },
+          { key: "type", label: t("columns.type") },
+          { key: "price", label: t("columns.price") },
+          { key: "duration", label: t("columns.duration") },
+          { key: "capacity", label: t("columns.capacity") },
+          { key: "animator", label: t("columns.animator") },
+          { key: "status", label: t("columns.status") },
+        ]}
         renderRow={FormationRow}
         onView={handleEdit}
         onEdit={handleEdit}
         onDelete={handleDelete}
-        searchPlaceholder="Rechercher une formation..."
+        searchPlaceholder={t("searchPlaceholder")}
         searchFilter={(row, query) =>
           row.title?.toLowerCase().includes(query) ||
           row.description?.toLowerCase().includes(query) ||

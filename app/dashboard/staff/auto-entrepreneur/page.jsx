@@ -3,16 +3,21 @@ import { requireAdmin } from "@/lib/route-protection";
 import { getIndependentStaff } from "@/actions/staff/get-independent-staff";
 import { getServices } from "@/actions/services/get-services";
 import { StaffPageClient } from "@/components/dashboard/staff/StaffPageClient";
-
-export const metadata = {
-  title: "Auto-Entrepreneurs — Dashboard",
-  description: "Gérez les professionnels indépendants de votre salon.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
+export async function generateMetadata() {
+  const t = await getTranslations();
+  return {
+    title: `${t("dashboard.staff.autoEntrepreneur.title")} — Dashboard`,
+    description: t("dashboard.staff.autoEntrepreneur.subtitle"),
+  };
+}
+
 export default async function AutoEntrepreneurPage() {
   await requireAdmin();
+  const t = await getTranslations("dashboard.staff.autoEntrepreneur");
 
   const [staffResult, servicesResult] = await Promise.all([
     getIndependentStaff(),
@@ -28,32 +33,32 @@ export default async function AutoEntrepreneurPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            Auto-Entrepreneurs
+            {t("title")}
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Gérez les professionnels indépendants rattachés à votre salon.
+            {t("subtitle")}
           </p>
         </div>
 
         {/* Stats strip */}
         <div className="flex items-center gap-3">
           <StatBadge
-            label="Total"
+            label={t("totalLabel")}
             value={staffList.length}
             color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
           />
           <StatBadge
-            label="Actifs"
+            label={t("activeLabel")}
             value={staffList.filter((s) => s.isActive).length}
             color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
           />
           <StatBadge
-            label="Stripe non connecté"
+            label={t("stripeNotConnectedLabel")}
             value={staffList.filter((s) => !s.stripeChargesEnabled || !s.stripePayoutsEnabled).length}
             color="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
           />
           <StatBadge
-            label="Inactifs"
+            label={t("inactiveLabel")}
             value={staffList.filter((s) => !s.isActive).length}
             color="bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-dark-6"
           />
@@ -77,7 +82,18 @@ export default async function AutoEntrepreneurPage() {
           className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-400"
         >
           <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
-          {servicesResult.message} Les services ne seront pas disponibles dans le formulaire.
+          {servicesResult.message}
+        </div>
+      )}
+
+      {/* ── Services warning ─────────────────────────────────────────── */}
+      {!servicesResult.success && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-400"
+        >
+          <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
+          {t("servicesWarning")}
         </div>
       )}
 

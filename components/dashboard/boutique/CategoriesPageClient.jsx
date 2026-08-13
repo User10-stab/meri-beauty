@@ -12,6 +12,7 @@ import { deleteProduct } from "@/actions/boutique/products";
 import { BrandModal } from "@/components/dashboard/boutique/BrandModal";
 import { CategoryModal } from "@/components/dashboard/boutique/CategoryModal";
 import { SubcategoryModal } from "@/components/dashboard/boutique/SubcategoryModal";
+import { useTranslations } from "next-intl";
 
 /**
  * Brand → Category → Subcategory, three nested accordions (client decision,
@@ -20,6 +21,7 @@ import { SubcategoryModal } from "@/components/dashboard/boutique/SubcategoryMod
  */
 export function CategoriesPageClient({ initialBrands }) {
   const router = useRouter();
+  const t = useTranslations("dashboardBoutique.categories");
   const [expandedBrands, setExpandedBrands] = useState(() => new Set(initialBrands.map((b) => b.id)));
   const [expandedCategories, setExpandedCategories] = useState(() => new Set());
   const [expandedSubcategories, setExpandedSubcategories] = useState(() => new Set());
@@ -80,7 +82,7 @@ export function CategoriesPageClient({ initialBrands }) {
       <div className="flex justify-end">
         <Button onClick={() => setBrandModal("new")}>
           <Plus size={16} />
-          Ajouter une marque
+          {t("addBrand")}
         </Button>
       </div>
 
@@ -88,9 +90,9 @@ export function CategoriesPageClient({ initialBrands }) {
         <div className="flex flex-col items-center gap-3 rounded-[10px] border border-dashed border-stroke bg-white px-6 py-16 text-center dark:border-dark-3 dark:bg-gray-dark">
           <Tag size={22} className="text-gray-300" />
           <div>
-            <p className="font-medium text-gray-700">Aucune marque pour le moment</p>
+            <p className="font-medium text-gray-700">{t("noBrands")}</p>
             <p className="mt-1 text-sm text-gray-400">
-              Créez une marque, puis ses catégories et sous-catégories pour organiser le catalogue.
+              {t("noBrandsDesc")}
             </p>
           </div>
         </div>
@@ -106,10 +108,10 @@ export function CategoriesPageClient({ initialBrands }) {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className="font-semibold text-gray-900 dark:text-white">{brand.name}</span>
-                        {!brand.isActive && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Inactive</span>}
+                        {!brand.isActive && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{t("inactive")}</span>}
                       </div>
                       <span className="text-xs text-gray-400">
-                        {brand.categoryCount} catégorie{brand.categoryCount !== 1 ? "s" : ""} · {brand.productCount} produit{brand.productCount !== 1 ? "s" : ""}
+                        {brand.categoryCount} {brand.categoryCount !== 1 ? t("categoryCount_plural") : t("categoryCount")} · {brand.productCount} {brand.productCount !== 1 ? t("productCount_plural") : t("productCount")}
                       </span>
                     </div>
                   </button>
@@ -120,7 +122,7 @@ export function CategoriesPageClient({ initialBrands }) {
                     className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/10"
                   >
                     <Plus size={13} />
-                    Catégorie
+                    {t("addCategory")}
                   </button>
                   <button
                     type="button"
@@ -143,7 +145,7 @@ export function CategoriesPageClient({ initialBrands }) {
                     {brand.categories.length === 0 ? (
                       <div className="flex flex-col items-center gap-2 py-8 text-center">
                         <FolderOpen size={18} className="text-gray-300" />
-                        <p className="text-sm text-gray-400">Aucune catégorie pour {brand.name}.</p>
+                        <p className="text-sm text-gray-400">{t("noCategories", { brand: brand.name })}</p>
                       </div>
                     ) : (
                       brand.categories.map((cat) => {
@@ -156,10 +158,10 @@ export function CategoriesPageClient({ initialBrands }) {
                                 <div>
                                   <div className="flex items-center gap-2">
                                     <span className="text-sm font-medium text-gray-800 dark:text-white">{cat.name}</span>
-                                    {!cat.isActive && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Inactive</span>}
+                                    {!cat.isActive && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{t("inactive")}</span>}
                                   </div>
                                   <span className="text-xs text-gray-400">
-                                    {cat.subcategories.length} sous-catégorie{cat.subcategories.length !== 1 ? "s" : ""}
+                                    {cat.subcategories.length} {cat.subcategories.length !== 1 ? t("subcategoryCount_plural") : t("subcategoryCount")}
                                   </span>
                                 </div>
                               </button>
@@ -170,7 +172,7 @@ export function CategoriesPageClient({ initialBrands }) {
                                 className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/5"
                               >
                                 <Plus size={12} />
-                                Sous-catégorie
+                                {t("addSubcategory")}
                               </button>
                               <button
                                 type="button"
@@ -191,7 +193,7 @@ export function CategoriesPageClient({ initialBrands }) {
                             {catOpen && (
                               <div className="border-t border-gray-100 px-4 py-2">
                                 {cat.subcategories.length === 0 ? (
-                                  <p className="py-2 text-sm text-gray-400">Aucune sous-catégorie.</p>
+                                  <p className="py-2 text-sm text-gray-400">{t("noSubcategories", { category: cat.name })}</p>
                                 ) : (
                                   <ul className="divide-y divide-gray-100">
                                     {cat.subcategories.map((sub) => {
@@ -210,9 +212,9 @@ export function CategoriesPageClient({ initialBrands }) {
                                               <ChevronDown size={12} className={`flex-shrink-0 text-gray-400 transition-transform ${subOpen ? "" : "-rotate-90"}`} />
                                             )}
                                             <span className="text-sm text-gray-700 dark:text-dark-6">{sub.name}</span>
-                                            {!sub.isActive && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">Inactive</span>}
+                                            {!sub.isActive && <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">{t("inactive")}</span>}
                                             <span className="text-xs text-gray-400">
-                                              {sub.productCount} produit{sub.productCount !== 1 ? "s" : ""}
+                                              {sub.productCount} {sub.productCount !== 1 ? t("productCount_plural") : t("productCount")}
                                             </span>
                                           </button>
                                           <div className="flex items-center gap-1">
@@ -227,11 +229,7 @@ export function CategoriesPageClient({ initialBrands }) {
                                               type="button"
                                               onClick={() => setToDelete({ type: "subcategory", id: sub.id, name: sub.name })}
                                               disabled={sub.productCount > 0}
-                                              title={
-                                                sub.productCount > 0
-                                                  ? "Déjà utilisée par au moins un produit — ne peut plus être supprimée, même si ce produit a été supprimé depuis. Désactivez-la à la place."
-                                                  : undefined
-                                              }
+                                              title={sub.productCount > 0 ? t("cannotDeleteTooltip") : undefined}
                                               className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
                                             >
                                               <Trash2 size={13} />
@@ -266,18 +264,18 @@ export function CategoriesPageClient({ initialBrands }) {
                                                     <span className="truncate text-gray-700 dark:text-dark-6">{product.name}</span>
                                                     {product.status !== "ACTIVE" && (
                                                       <span className="flex-shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">
-                                                        {product.status === "DRAFT" ? "Brouillon" : "Archivé"}
+                                                        {product.status === "DRAFT" ? t("statusDraft") : t("statusArchived")}
                                                       </span>
                                                     )}
                                                     <span className="flex-shrink-0 text-xs text-gray-400">{priceLabel}</span>
-                                                    <span className="flex-shrink-0 text-xs text-gray-400">· stock {totalStock}</span>
+                                                    <span className="flex-shrink-0 text-xs text-gray-400">{t("stockLabel", { count: totalStock })}</span>
                                                   </div>
                                                   <div className="flex flex-shrink-0 items-center gap-1">
                                                     <button
                                                       type="button"
                                                       onClick={() => router.push(`/dashboard/boutique/products/${product.id}`)}
                                                       className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
-                                                      title="Modifier"
+                                                      title={t("edit")}
                                                     >
                                                       <Pencil size={12} />
                                                     </button>
@@ -285,7 +283,7 @@ export function CategoriesPageClient({ initialBrands }) {
                                                       type="button"
                                                       onClick={() => setToDelete({ type: "product", id: product.id, name: product.name })}
                                                       className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-500"
-                                                      title="Supprimer"
+                                                      title={t("deleteProduct")}
                                                     >
                                                       <Trash2 size={12} />
                                                     </button>
@@ -354,21 +352,25 @@ export function CategoriesPageClient({ initialBrands }) {
         open={!!toDelete}
         title={
           toDelete?.type === "brand"
-            ? "Supprimer cette marque ?"
+            ? t("deleteBrand")
             : toDelete?.type === "category"
-            ? "Supprimer cette catégorie ?"
+            ? t("deleteCategory")
             : toDelete?.type === "subcategory"
-            ? "Supprimer cette sous-catégorie ?"
-            : "Supprimer ce produit ?"
+            ? t("deleteSubcategory")
+            : t("deleteProduct")
         }
         message={
           toDelete
             ? toDelete.type === "product"
-              ? `"${toDelete.name}" sera retiré de la boutique. Les commandes passées le conservent dans leur historique.`
-              : `"${toDelete.name}" sera ${toDelete.type === "brand" ? "désactivée" : "définitivement supprimée"}.`
+              ? t("deleteProductMessage", { name: toDelete.name })
+              : toDelete.type === "brand"
+              ? t("deleteBrandMessage", { name: toDelete.name })
+              : toDelete.type === "category"
+              ? t("deleteCategoryMessage", { name: toDelete.name })
+              : t("deleteSubcategoryMessage", { name: toDelete.name })
             : ""
         }
-        confirmLabel="Supprimer"
+        confirmLabel={t("deleteConfirm")}
         danger
         loading={isPending}
         onConfirm={handleDelete}

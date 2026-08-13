@@ -6,7 +6,7 @@ import { stripe } from "@/lib/stripe";
 import { ROLES, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
-import { reservationConfirmedWithPaymentLinkEmail } from "@/lib/email-templates";
+import { reservationAcceptedWithPaymentLinkEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
@@ -178,7 +178,7 @@ export async function confirmAppointment(appointmentId) {
     
     sendEmail({
       to: appointment.user.email,
-      ...reservationConfirmedWithPaymentLinkEmail({
+      ...reservationAcceptedWithPaymentLinkEmail({
         customerName: appointment.user.fullName,
         serviceName: appointment.staffService.service.name,
         staffName: appointment.staffService.staff?.user?.fullName || "Expert",

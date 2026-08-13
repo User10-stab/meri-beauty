@@ -7,6 +7,7 @@ import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import { updateCartItemQuantity, removeFromCart } from "@/actions/boutique/cart";
 import { calculateCartPricing, calculateItemPricing, formatPrice } from "@/lib/pricing";
+import { useTranslations } from "next-intl";
 
 function notifyCartUpdated(itemCount) {
   // Passing the count lets the header badge update in the same tick as this
@@ -16,6 +17,7 @@ function notifyCartUpdated(itemCount) {
 }
 
 export function CartPageClient({ initialCart }) {
+  const t = useTranslations("boutique");
   const [cart, setCart] = useState(initialCart);
   const [isPending, startTransition] = useTransition();
 
@@ -65,15 +67,15 @@ export function CartPageClient({ initialCart }) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 py-24 text-center">
         <ShoppingBag size={40} className="text-gray-300" />
-        <h1 className="text-2xl text-[#2F3A2E]">Votre panier est vide</h1>
+        <h1 className="text-2xl text-[#2F3A2E]">{t("cartEmptyTitle")}</h1>
         <p className="max-w-sm text-sm text-gray-500">
-          Parcourez notre boutique et ajoutez vos produits préférés pour commencer.
+          {t("cartEmptySubtitle")}
         </p>
         <Link
           href="/boutique"
           className="mt-4 inline-block bg-[#C8A46A] px-8 py-3 text-sm font-medium uppercase tracking-wider text-white transition-colors hover:bg-[#B8945A]"
         >
-          Voir la boutique
+          {t("viewShop")}
         </Link>
       </div>
     );
@@ -81,7 +83,7 @@ export function CartPageClient({ initialCart }) {
 
   return (
     <div className="mx-auto max-w-[1000px] px-6 py-12 md:px-10">
-      <h1 className="mb-8 text-3xl text-[#2F3A2E]">Mon panier</h1>
+      <h1 className="mb-8 text-3xl text-[#2F3A2E]">{t("cartTitle")}</h1>
 
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_320px]">
         <ul className={`divide-y divide-neutral-100 ${isPending ? "opacity-60" : ""}`}>
@@ -108,7 +110,7 @@ export function CartPageClient({ initialCart }) {
                       {itemPricing.savings > 0 && (
                         <div className="text-gray-400">
                           <span className="line-through">{formatPrice(itemPricing.originalPrice / itemPricing.quantity)} / unit</span>
-                          <span className="text-green-600 ml-2">Économie: {formatPrice(itemPricing.savings)}</span>
+                          <span className="text-green-600 ml-2">{t("promoDiscount")}: {formatPrice(itemPricing.savings)}</span>
                         </div>
                       )}
                       <div className="text-gray-500">
@@ -120,7 +122,7 @@ export function CartPageClient({ initialCart }) {
                     type="button"
                     onClick={() => handleRemove(item)}
                     className="text-gray-300 transition-colors hover:text-red-500"
-                    aria-label="Retirer du panier"
+                    aria-label={t("removeFromCart")}
                   >
                     <Trash2 size={16} />
                   </button>
@@ -132,7 +134,7 @@ export function CartPageClient({ initialCart }) {
                       type="button"
                       onClick={() => updateQuantity(item, Math.max(0, item.quantity - 1))}
                       className="flex h-9 w-9 items-center justify-center text-[#2F3A2E] hover:bg-neutral-50"
-                      aria-label="Diminuer la quantité"
+                      aria-label={t("decreaseQuantity")}
                     >
                       <Minus size={13} />
                     </button>
@@ -141,7 +143,7 @@ export function CartPageClient({ initialCart }) {
                       type="button"
                       onClick={() => updateQuantity(item, item.quantity + 1)}
                       className="flex h-9 w-9 items-center justify-center text-[#2F3A2E] hover:bg-neutral-50"
-                      aria-label="Augmenter la quantité"
+                      aria-label={t("increaseQuantity")}
                     >
                       <Plus size={13} />
                     </button>
@@ -161,55 +163,55 @@ export function CartPageClient({ initialCart }) {
 
         {/* Summary */}
         <div className="h-fit border border-neutral-200 p-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Récapitulatif</h2>
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("summary")}</h2>
 
           {/* Before promotion (if applicable) */}
           {cartPricing.hasPromotions && (
             <div className="flex justify-between text-sm text-gray-500 mb-2">
-              <span>Avant promotion (TTC)</span>
+              <span>{t("beforePromo")}</span>
               <span className="line-through">{formatPrice(cartPricing.totalOriginalTTC)}</span>
             </div>
           )}
 
           {/* Before TVA */}
           <div className="flex justify-between text-sm text-gray-600">
-            <span>Sous-total (hors TVA)</span>
+            <span>{t("subtotalExclVat")}</span>
             <span className="font-medium text-[#2F3A2E]">{formatPrice(cartPricing.totalHT)}</span>
           </div>
 
           {/* TVA amount */}
           <div className="flex justify-between text-sm text-gray-600">
-            <span>TVA (21%)</span>
+            <span>{t("vat", { rate: 21 })}</span>
             <span className="font-medium text-[#2F3A2E]">{formatPrice(cartPricing.totalVAT)}</span>
           </div>
 
           {/* Savings (if applicable) */}
           {cartPricing.hasPromotions && (
             <div className="flex justify-between text-sm text-green-600">
-              <span>Économie promotion</span>
+              <span>{t("promoDiscount")}</span>
               <span className="font-medium">-{formatPrice(cartPricing.totalSavings)}</span>
             </div>
           )}
 
           {/* Total */}
           <div className="flex justify-between text-base font-semibold text-[#2F3A2E] mt-3 pt-3 border-t border-neutral-200">
-            <span>Total TTC</span>
+            <span>{t("totalInclVat")}</span>
             <span>{formatPrice(cartPricing.totalTTC)}</span>
           </div>
 
-          <p className="mt-3 text-xs text-gray-400">Frais de livraison calculés à l'étape suivante.</p>
+          <p className="mt-3 text-xs text-gray-400">{t("shippingNotice")}</p>
 
           <Link
             href="/boutique/checkout"
             className="mt-6 flex w-full items-center justify-center bg-[#C8A46A] px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-[#B8945A]"
           >
-            Passer la commande
+            {t("checkout")}
           </Link>
           <Link
             href="/boutique"
             className="mt-3 flex w-full items-center justify-center border border-neutral-200 px-6 py-3 text-sm font-medium text-[#2F3A2E] transition-colors hover:border-[#2F3A2E]"
           >
-            Continuer mes achats
+            {t("continueShopping")}
           </Link>
         </div>
       </div>

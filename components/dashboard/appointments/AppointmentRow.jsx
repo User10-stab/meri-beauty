@@ -17,6 +17,11 @@ const STATUS_CONFIG = {
     className: "bg-amber-50 text-amber-700 border border-amber-100",
     dot: "bg-amber-500",
   },
+  ACCEPTED: {
+    label: "Accepté",
+    className: "bg-blue-50 text-blue-700 border border-blue-100",
+    dot: "bg-blue-500",
+  },
   CONFIRMED: {
     label: "Confirmé",
     className: "bg-emerald-50 text-emerald-700 border border-emerald-100",
@@ -29,8 +34,8 @@ const STATUS_CONFIG = {
   },
   COMPLETED: {
     label: "Terminé",
-    className: "bg-blue-50 text-blue-700 border border-blue-100",
-    dot: "bg-blue-500",
+    className: "bg-gray-50 text-gray-600 border border-gray-100",
+    dot: "bg-gray-400",
   },
   NO_SHOW: {
     label: "Absent",

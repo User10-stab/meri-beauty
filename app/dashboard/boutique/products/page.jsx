@@ -4,17 +4,22 @@ import { DASHBOARD_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { getProducts } from "@/actions/boutique/products";
 import { getBrands } from "@/actions/boutique/brands";
 import { ProductsPageClient } from "@/components/dashboard/boutique/ProductsPageClient";
-
-export const metadata = {
-  title: "Produits — Boutique — Dashboard",
-  description: "Gérez le catalogue de produits de la boutique.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata() {
+  const t = await getTranslations();
+  return {
+    title: `${t("dashboardBoutique.products.title")} — ${t("dashboardBoutique.title")} — Dashboard`,
+    description: t("dashboardBoutique.products.subtitle"),
+  };
+}
 
 export default async function ProductsPage() {
   const { user } = await requireRole(DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK);
   const isAdmin = isAdminRole(user.role);
+  const t = await getTranslations("dashboardBoutique.products");
 
   const [productsResult, brandsResult] = await Promise.all([
     getProducts({ pageSize: 50 }),
@@ -24,9 +29,9 @@ export default async function ProductsPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-dark dark:text-white">Produits</h1>
+        <h1 className="text-2xl font-bold text-dark dark:text-white">{t("title")}</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Le catalogue de la boutique — chaque produit peut avoir plusieurs déclinaisons (taille, teinte…).
+          {t("subtitle")}
         </p>
       </div>
 

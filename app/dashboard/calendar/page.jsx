@@ -6,13 +6,17 @@ import { getSalon } from "@/actions/salon/get-salon";
 import { getCalendarEvents } from "@/actions/dashboard/get-calendar-events";
 import { CalendarPageClient } from "@/components/dashboard/calendar/CalendarPageClient";
 import { weekRange } from "@/components/dashboard/calendar/calendarUtils";
-
-export const metadata = {
-  title: "Calendrier — Dashboard",
-  description: "Vue jour/semaine/mois des rendez-vous, ateliers et formations.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata() {
+  const t = await getTranslations();
+  return {
+    title: `${t("dashboard.calendar")} — Dashboard`,
+    description: t("calendar.title"),
+  };
+}
 
 // ─── Working hours helpers ────────────────────────────────────────────────────
 
@@ -58,6 +62,7 @@ export default async function CalendarPage() {
   // ── Auth guard ─────────────────────────────────────────────────────────
   const { user } = await requireDashboard();
   const isAdmin = isAdminRole(user.role);
+  const t = await getTranslations();
 
   // ── Initial data: current week ─────────────────────────────────────────
   const range = weekRange(new Date());
@@ -83,12 +88,12 @@ export default async function CalendarPage() {
       {/* ── Page header ───────────────────────────────────────────────── */}
       <div>
         <h1 className="text-2xl font-bold text-dark dark:text-white">
-          Calendrier
+          {t("dashboard.calendar")}
         </h1>
         <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
           {isAdmin
-            ? "Rendez-vous de toute l'équipe, ateliers et formations."
-            : "Vos rendez-vous."}
+            ? t("calendar.adminDescription")
+            : t("calendar.staffDescription")}
         </p>
       </div>
 

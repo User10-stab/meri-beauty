@@ -5,11 +5,13 @@ import { toast } from "sonner";
 import { X, Loader2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { createProductCategory, updateProductCategory } from "@/actions/boutique/categories";
+import { useTranslations } from "next-intl";
 
 /**
  * @param {{ open: boolean, category: object|null, brands: object[], defaultBrandId: string|null, onClose: () => void, onSaved: () => void }} props
  */
 export function CategoryModal({ open, category, brands, defaultBrandId, onClose, onSaved }) {
+  const t = useTranslations("dashboardBoutique.modals.category");
   const isEditing = !!category;
   const [loading, startLoading] = useTransition();
   const [form, setForm] = useState({ name: "", brandId: "", description: "", isActive: true });
@@ -56,7 +58,7 @@ export function CategoryModal({ open, category, brands, defaultBrandId, onClose,
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
         <div className="mb-5 flex items-center justify-between">
           <h2 className="text-base font-semibold text-gray-900">
-            {isEditing ? "Modifier la catégorie" : "Nouvelle catégorie"}
+            {isEditing ? t("editTitle") : t("newTitle")}
           </h2>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={18} />
@@ -66,7 +68,7 @@ export function CategoryModal({ open, category, brands, defaultBrandId, onClose,
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-              Marque <span className="text-red-400">*</span>
+              {t("brand")} <span className="text-red-400">*</span>
             </label>
             <select
               value={form.brandId}
@@ -74,7 +76,7 @@ export function CategoryModal({ open, category, brands, defaultBrandId, onClose,
               required
               className="mt-1.5 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
             >
-              <option value="">Choisir…</option>
+              <option value="">{t("brandPlaceholder")}</option>
               {brands.map((b) => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
@@ -84,13 +86,13 @@ export function CategoryModal({ open, category, brands, defaultBrandId, onClose,
 
           <div>
             <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-              Nom <span className="text-red-400">*</span>
+              {t("name")} <span className="text-red-400">*</span>
             </label>
             <input
               type="text"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-              placeholder="Bases, Accessoires, Gels…"
+              placeholder={t("namePlaceholder")}
               required
               className="mt-1.5 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
             />
@@ -98,7 +100,7 @@ export function CategoryModal({ open, category, brands, defaultBrandId, onClose,
           </div>
 
           <div>
-            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Description</label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">{t("description")}</label>
             <textarea
               value={form.description}
               onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
@@ -113,7 +115,7 @@ export function CategoryModal({ open, category, brands, defaultBrandId, onClose,
               checked={form.isActive}
               onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
             />
-            Visible dans le catalogue
+            {t("isActive")}
           </label>
 
           <div className="flex justify-end gap-3 pt-2">
@@ -122,11 +124,11 @@ export function CategoryModal({ open, category, brands, defaultBrandId, onClose,
               onClick={onClose}
               className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              Annuler
+              {t("cancel")}
             </button>
             <Button type="submit" disabled={loading}>
               {loading && <Loader2 size={14} className="animate-spin" />}
-              {isEditing ? "Enregistrer" : "Créer"}
+              {isEditing ? t("save") : t("create")}
             </Button>
           </div>
         </form>

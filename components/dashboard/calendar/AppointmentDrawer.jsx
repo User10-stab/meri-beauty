@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   X,
   User,
@@ -61,10 +62,17 @@ function formatPrice(amount) {
 }
 
 const PAYMENT_STATUS_LABELS = {
-  PENDING: { label: "En attente", className: "bg-amber-50 text-amber-700 border-amber-100" },
-  PAID: { label: "Payé", className: "bg-emerald-50 text-emerald-700 border-emerald-100" },
-  PARTIALLY_PAID: { label: "Partiellement payé", className: "bg-blue-50 text-blue-700 border-blue-100" },
-  REFUNDED: { label: "Remboursé", className: "bg-gray-100 text-gray-600 border-gray-200" },
+  PENDING: { key: "paymentStatus.pending" },
+  PAID: { key: "paymentStatus.paid" },
+  PARTIALLY_PAID: { key: "paymentStatus.partiallyPaid" },
+  REFUNDED: { key: "paymentStatus.refunded" },
+};
+
+const PAYMENT_STATUS_STYLES = {
+  PENDING: "bg-amber-50 text-amber-700 border-amber-100",
+  PAID: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  PARTIALLY_PAID: "bg-blue-50 text-blue-700 border-blue-100",
+  REFUNDED: "bg-gray-100 text-gray-600 border-gray-200",
 };
 
 // ─── Row component ────────────────────────────────────────────────────────────
@@ -108,6 +116,7 @@ export function AppointmentDrawer({
   onAppointmentUpdated,
   isAdmin = false,
 }) {
+  const t = useTranslations();
   const drawerRef = useRef(null);
   const [isPending, setIsPending] = useState(false);
   const [feedback, setFeedback] = useState(null); // { type: "success"|"error", message }
@@ -150,10 +159,10 @@ export function AppointmentDrawer({
     try {
       const result = await confirmAppointment(appointment.id);
       if (result.success) {
-        setFeedback({ type: "success", message: result.message ?? "Rendez-vous confirmé." });
+        setFeedback({ type: "success", message: result.message ?? t("success.appointmentConfirmed") });
         onAppointmentUpdated();
       } else {
-        setFeedback({ type: "error", message: result.message ?? "Erreur." });
+        setFeedback({ type: "error", message: result.message ?? t("errors.generic") });
       }
     } finally {
       setIsPending(false);
@@ -171,10 +180,10 @@ export function AppointmentDrawer({
     try {
       const result = await completeAppointment(appointment.id);
       if (result.success) {
-        setFeedback({ type: "success", message: result.message ?? "Rendez-vous terminé." });
+        setFeedback({ type: "success", message: result.message ?? t("success.appointmentCompleted") });
         onAppointmentUpdated();
       } else {
-        setFeedback({ type: "error", message: result.message ?? "Erreur." });
+        setFeedback({ type: "error", message: result.message ?? t("errors.generic") });
       }
     } finally {
       setIsPending(false);
@@ -189,10 +198,10 @@ export function AppointmentDrawer({
       const result = await completeAppointment(appointment.id, { method: completeMethod, paymentConfirmed });
       setShowPaymentDialog(false);
       if (result.success) {
-        setFeedback({ type: "success", message: result.message ?? "Rendez-vous terminé." });
+        setFeedback({ type: "success", message: result.message ?? t("success.appointmentCompleted") });
         onAppointmentUpdated();
       } else {
-        setFeedback({ type: "error", message: result.message ?? "Erreur." });
+        setFeedback({ type: "error", message: result.message ?? t("errors.generic") });
       }
     } finally {
       setIsPending(false);
@@ -208,10 +217,10 @@ export function AppointmentDrawer({
     try {
       const result = await rejectAppointment(appointment.id, reason);
       if (result.success) {
-        setFeedback({ type: "success", message: "Rendez-vous annulé." });
+        setFeedback({ type: "success", message: t("success.appointmentCancelled") });
         onAppointmentUpdated();
       } else {
-        setFeedback({ type: "error", message: result.message ?? "Erreur." });
+        setFeedback({ type: "error", message: result.message ?? t("errors.generic") });
       }
     } finally {
       setIsPending(false);
@@ -239,7 +248,9 @@ export function AppointmentDrawer({
   if (!appointment) return null;
 
   const color = getStaffColor(appointment.staffId);
-  const paymentConfig = PAYMENT_STATUS_LABELS[appointment.paymentStatus] ?? null;
+  const paymentConfig = PAYMENT_STATUS_LABELS[appointment.paymentStatus];
+  const paymentLabel = paymentConfig ? t(paymentConfig.key) : null;
+  const paymentClassName = PAYMENT_STATUS_STYLES[appointment.paymentStatus] ?? null;
   const actionsDone = feedback?.type === "success";
   const balanceDue =
     appointment.totalAmount !== null && appointment.paidAmount !== null
@@ -284,7 +295,7 @@ export function AppointmentDrawer({
         >
           <div>
             <h2 className="text-base font-bold text-gray-800 dark:text-white">
-              Détails du rendez-vous
+              {t("appointmentDetails.title")}
             </h2>
             <p className="mt-0.5 text-xs text-gray-400">
               {formatDate(appointment.date)}
@@ -292,7 +303,7 @@ export function AppointmentDrawer({
           </div>
           <button
             onClick={onClose}
-            aria-label="Fermer"
+            aria-label={t("common.close")}
             className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700"
           >
             <X size={18} />
@@ -321,63 +332,63 @@ export function AppointmentDrawer({
           )}
 
           {/* ── Section: Client ────────────────────────────────────── */}
-          <Section title="Client">
-            <DrawerRow icon={User} label="Nom" value={appointment.customerName} />
-            <DrawerRow icon={Phone} label="Téléphone" value={appointment.customerPhone} />
-            <DrawerRow icon={Mail} label="Email" value={appointment.customerEmail} />
+          <Section title={t("appointmentDetails.client")}>
+            <DrawerRow icon={User} label={t("appointmentDetails.client")} value={appointment.customerName} />
+            <DrawerRow icon={Phone} label={t("common.phone")} value={appointment.customerPhone} />
+            <DrawerRow icon={Mail} label={t("common.email")} value={appointment.customerEmail} />
           </Section>
 
           {/* ── Section: Service ───────────────────────────────────── */}
-          <Section title="Prestation">
-            <DrawerRow icon={Scissors} label="Service" value={appointment.serviceName} />
-            <DrawerRow icon={Tag} label="Catégorie" value={appointment.categoryName} />
+          <Section title={t("appointmentDetails.service")}>
+            <DrawerRow icon={Scissors} label={t("appointmentDetails.service")} value={appointment.serviceName} />
+            <DrawerRow icon={Tag} label={t("appointmentDetails.category")} value={appointment.categoryName} />
             <DrawerRow
               icon={User}
-              label="Prestataire"
+              label={t("appointmentDetails.staff")}
               value={appointment.staffName}
             />
           </Section>
 
           {/* ── Section: Horaire ───────────────────────────────────── */}
-          <Section title="Horaire">
-            <DrawerRow icon={CalendarDays} label="Date" value={formatDate(appointment.date)} />
+          <Section title={t("appointmentDetails.date")}>
+            <DrawerRow icon={CalendarDays} label={t("appointmentDetails.date")} value={formatDate(appointment.date)} />
             <DrawerRow
               icon={Clock}
-              label="Heure"
+              label={t("appointmentDetails.time")}
               value={`${formatTime(appointment.startTime)} – ${formatTime(appointment.endTime)}`}
             />
             <DrawerRow
               icon={Timer}
-              label="Durée"
+              label={t("appointmentDetails.duration")}
               value={formatDuration(derivedDuration)}
             />
           </Section>
 
           {/* ── Section: Paiement ──────────────────────────────────── */}
-          <Section title="Paiement">
+          <Section title={t("appointmentPayment.collectBalance")}>
             <DrawerRow
               icon={CreditCard}
-              label="Montant total"
+              label={t("common.total")}
               value={formatPrice(appointment.totalAmount ?? appointment.price)}
             />
             {appointment.depositAmount !== null && (
               <DrawerRow
                 icon={CreditCard}
-                label="Acompte"
+                label={t("appointmentDetails.depositCollected")}
                 value={formatPrice(appointment.depositAmount)}
               />
             )}
             {appointment.paidAmount !== null && (
               <DrawerRow
                 icon={CreditCard}
-                label="Payé"
+                label={t("success.paid")}
                 value={formatPrice(appointment.paidAmount)}
               />
             )}
             {appointment.remainingAmount !== null && (
               <DrawerRow
                 icon={CreditCard}
-                label="Restant"
+                label={t("appointmentPayment.paymentDue")}
                 value={formatPrice(appointment.remainingAmount)}
               />
             )}
@@ -386,12 +397,12 @@ export function AppointmentDrawer({
                 <CreditCard size={14} className="text-gray-500 dark:text-gray-400" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-gray-400">Statut paiement</p>
-                {paymentConfig ? (
+                <p className="text-xs font-medium text-gray-400">{t("common.status")}</p>
+                {paymentLabel ? (
                   <span
-                    className={`mt-0.5 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${paymentConfig.className}`}
+                    className={`mt-0.5 inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${paymentClassName}`}
                   >
-                    {paymentConfig.label}
+                    {paymentLabel}
                   </span>
                 ) : (
                   <p className="mt-0.5 text-sm font-medium text-gray-500">—</p>
@@ -402,7 +413,7 @@ export function AppointmentDrawer({
 
           {/* ── Section: Notes ─────────────────────────────────────── */}
           {appointment.notes && (
-            <Section title="Notes">
+            <Section title={t("appointmentDetails.notes")}>
               <div className="flex items-start gap-3 py-2.5">
                 <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-700">
                   <FileText size={14} className="text-gray-500 dark:text-gray-400" />
@@ -417,15 +428,15 @@ export function AppointmentDrawer({
           {/* ── Encaisser le solde (partial payment) ───────────────── */}
           {showPaymentDialog && (
             <div className="mt-2 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-800/30">
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-white">Encaisser le solde restant</h3>
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-white">{t("appointmentPayment.collectBalance")}</h3>
               <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
-                Le client doit encore régler{" "}
+                {t("appointmentPayment.stillDue")}{" "}
                 <span className="font-semibold text-gray-700 dark:text-gray-200">
                   {formatPrice(balanceDue)}
                 </span>{" "}
                 sur place. Une facture sera émise pour le montant total dès l&apos;encaissement.
               </p>
-              <label className="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">Mode de paiement</label>
+              <label className="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("appointmentPayment.paymentMethod")}</label>
               <select
                 value={completeMethod}
                 onChange={(e) => setCompleteMethod(e.target.value)}
@@ -450,7 +461,7 @@ export function AppointmentDrawer({
                   disabled={isPending}
                   className="rounded-lg border border-gray-200 px-3.5 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"
                 >
-                  Annuler
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="button"
@@ -459,7 +470,7 @@ export function AppointmentDrawer({
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#3d4e3b] disabled:opacity-60"
                 >
                   {isPending && <Loader2 size={12} className="animate-spin" />}
-                  Confirmer l&apos;encaissement
+                  {t("appointmentActions.confirm")}
                 </button>
               </div>
             </div>
@@ -477,7 +488,7 @@ export function AppointmentDrawer({
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[#2f3a2e] px-4 py-2.5 text-sm font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle size={15} />}
-                  Confirmer
+                  {t("appointmentActions.confirm")}
                 </button>
                 <button
                   onClick={handleCancel}
@@ -485,7 +496,7 @@ export function AppointmentDrawer({
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
                 >
                   <XCircle size={15} />
-                  Refuser
+                  {t("appointmentActions.reject")}
                 </button>
               </>
             )}
@@ -498,7 +509,7 @@ export function AppointmentDrawer({
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[#2f3a2e] px-4 py-2.5 text-sm font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle size={15} />}
-                  Terminer
+                  {t("appointmentActions.complete")}
                 </button>
                 <button
                   onClick={handleNoShow}
@@ -515,13 +526,13 @@ export function AppointmentDrawer({
                   className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
                 >
                   <XCircle size={15} />
-                  Annuler le RDV
+                  {t("appointmentActions.cancel")}
                 </button>
               </>
             )}
 
             {(appointment.status === "COMPLETED" || appointment.status === "CANCELLED" || appointment.status === "NO_SHOW") && (
-              <p className="w-full text-center text-xs text-gray-400">Ce rendez-vous ne peut plus être modifié.</p>
+              <p className="w-full text-center text-xs text-gray-400">{t("appointmentDetails.cannotModify")}</p>
             )}
           </div>
         )}

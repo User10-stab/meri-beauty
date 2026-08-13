@@ -7,8 +7,11 @@ import { ThemeToggleSwitch } from "./theme-toggle";
 import { UserInfo } from "./user-info";
 import NotificationBell from "@/components/dashboard/notifications/NotificationBell";
 import { HeaderSearch } from "./header-search";
+import LocaleSwitcher from "@/components/LocaleSwitcher";
+import { useTranslations } from "next-intl";
 
 export function Header({ user }) {
+  const t = useTranslations("dashboard");
   const { toggleSidebar, isMobile } = useSidebarContext();
 
   return (
@@ -18,7 +21,7 @@ export function Header({ user }) {
         className="dark:border-stroke-dark rounded-lg border px-1.5 py-1 lg:hidden dark:bg-[#020D1A] hover:dark:bg-[#FFFFFF1A]"
       >
         <MenuIcon />
-        <span className="sr-only">Toggle Sidebar</span>
+        <span className="sr-only">{t("toggleSidebar")}</span>
       </button>
 
       {isMobile && (
@@ -31,13 +34,15 @@ export function Header({ user }) {
 
       <div className="max-xl:hidden">
         <h1 className="text-heading-5 text-dark mb-0.5 font-bold dark:text-white">
-          Dashboard
+          {t("title")}
         </h1>
-        <p className="font-medium">Meri Beauty Salon Management</p>
+        <p className="font-medium">{t("subtitle")}</p>
       </div>
 
       <div className="2xsm:gap-4 flex min-w-0 flex-1 items-center justify-end gap-2">
         <HeaderSearch />
+
+        <LocaleSwitcher />
 
         <ThemeToggleSwitch />
 

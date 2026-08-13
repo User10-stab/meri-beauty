@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertCircle, LogIn } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 /**
  * Nudges a guest whose typed email already matches a verified account
@@ -10,6 +11,7 @@ import { AlertCircle, LogIn } from "lucide-react";
  * them to where they left off.
  */
 export function ExistingAccountBanner({ email, callbackUrl, onDismiss }) {
+  const t = useTranslations("existingAccountBanner");
   const loginHref = `/login?callbackUrl=${encodeURIComponent(callbackUrl)}&email=${encodeURIComponent(email)}`;
 
   return (
@@ -18,12 +20,10 @@ export function ExistingAccountBanner({ email, callbackUrl, onDismiss }) {
         <AlertCircle size={20} className="mt-0.5 flex-shrink-0 text-amber-500" />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-semibold text-amber-900">
-            Un compte existe déjà pour cette adresse email.
+            {t("title")}
           </p>
           <p className="mt-1 text-sm text-amber-700">
-            Connectez-vous pour associer cette réservation à votre compte
-            existant, ou continuez en tant qu'invité si vous souhaitez créer un
-            nouveau compte.
+            {t("description")}
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             <a
@@ -31,7 +31,7 @@ export function ExistingAccountBanner({ email, callbackUrl, onDismiss }) {
               className="inline-flex items-center gap-2 rounded-lg bg-[#2F3A2E] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#3d4e3b]"
             >
               <LogIn size={15} />
-              Se connecter
+              {t("signIn")}
             </a>
           </div>
         </div>

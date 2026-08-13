@@ -1,15 +1,20 @@
 import { Suspense } from "react";
 import { getStaffSettings } from "@/actions/staff/get-staff-settings";
 import { AccountSettingsClient } from "@/components/dashboard/account-settings/AccountSettingsClient";
-
-export const metadata = {
-  title: "Mon compte — Dashboard",
-  description: "Gérez votre profil, contrat, paramètres de réservation et horaires.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
+export async function generateMetadata() {
+  const t = await getTranslations();
+  return {
+    title: `${t("dashboard.accountSettings.title")} — Dashboard`,
+    description: t("dashboard.accountSettings.subtitle"),
+  };
+}
+
 export default async function AccountSettingsPage() {
+  const t = await getTranslations("dashboard.accountSettings");
   const result = await getStaffSettings();
 
   const settings = result.success ? result.data : null;
@@ -18,10 +23,10 @@ export default async function AccountSettingsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-dark dark:text-white">
-          Mon compte
+          {t("title")}
         </h1>
         <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-          Gérez votre profil, votre contrat et vos préférences.
+          {t("subtitle")}
         </p>
       </div>
 

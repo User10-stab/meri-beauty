@@ -36,6 +36,92 @@ async function getStaffOnboardingState(userId) {
   return { isStaff: true, setupCompleted };
 }
 
+// ─── Contract expiry check ────────────────────────────────────────────────────
+//
+// Called from two places in this file:
+//   1. authorize()  — login-time gate, so an expired staff member can't sign
+//      in even before the periodic JWT revalidation has had a chance to run.
+//   2. jwt()        — periodic revalidation gate (every SESSION_REVALIDATE_
+//      INTERVAL_MS), so an already-logged-in staff member whose contract
+//      expires mid-session is kicked out on their next authenticated request.
+//
+// When expiry is detected this function:
+//   • Marks the contract EXPIRED
+//   • Sets Staff.isActive = false
+//   • Sets User.isActive  = false
+//   • Bumps User.sessionVersion  ← makes every other live JWT for this user
+//     invalid immediately (the jwt() callback compares token.sessionVersion
+//     with the DB value and returns null on mismatch)
+//
+// Returns true if the contract was found to be expired (and mutations were
+// applied), false if the staff is fine and should be allowed through.
+//
+// IMPORTANT: does NOT touch StaffService rows or appointments.
+
+async function checkAndExpireStaffContract(userId) {
+  const staff = await prisma.staff.findUnique({
+    where: { userId },
+    select: {
+      id: true,
+      contracts: {
+        where: { status: "ACTIVE" },
+        select: { id: true, startDate: true, endDate: true },
+        take: 1,
+      },
+    },
+  });
+
+  // No staff profile at all — nothing to expire; let the existing
+  // isActive/isDeleted guards handle it.
+  if (!staff) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const activeContract = staff.contracts[0] ?? null;
+
+  // A staff member with no ACTIVE contract is already blocked by
+  // isStaffAvailable() in the booking flow and by the onboarding guard in
+  // the authorized() callback above.  We don't expire what isn't active.
+  if (!activeContract) return false;
+
+  const contractStart = new Date(activeContract.startDate);
+  contractStart.setHours(0, 0, 0, 0);
+
+  // Contract hasn't started yet — not expired, just pending.
+  if (today < contractStart) return false;
+
+  // endDate null means open-ended — never expires.
+  if (!activeContract.endDate) return false;
+
+  const contractEnd = new Date(activeContract.endDate);
+  contractEnd.setHours(23, 59, 59, 999);
+
+  // Contract end date is in the future (or today) — still valid.
+  if (today <= contractEnd) return false;
+
+  // ── Contract is expired — apply all mutations in one transaction ──────────
+  // sessionVersion is incremented so every concurrent JWT for this user
+  // (other open tabs, mobile browsers, etc.) is also invalidated on their
+  // next authenticated request without any additional work.
+  await prisma.$transaction([
+    prisma.contract.update({
+      where: { id: activeContract.id },
+      data:  { status: "EXPIRED" },
+    }),
+    prisma.staff.update({
+      where: { id: staff.id },
+      data:  { isActive: false },
+    }),
+    prisma.user.update({
+      where: { id: userId },
+      data:  { isActive: false, sessionVersion: { increment: 1 } },
+    }),
+  ]);
+
+  return true;
+}
+
 // How often the jwt callback re-checks the DB for staleness (password
 // changed, account deactivated/deleted) instead of trusting the token as-is.
 // A tradeoff between "how fast a revocation takes effect" and "a DB round
@@ -106,6 +192,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           }
           const passwordMatch = await bcrypt.compare(password, user.password);
           if (!passwordMatch) {
+            return null;
+          }
+        }
+
+        // ── Login-time contract check for staff ─────────────────────────────
+        // The periodic jwt() revalidation only fires after the first request
+        // post-login, so without this check an expired staff member could
+        // complete the login and hold a valid JWT until the next revalidation
+        // window. Blocking here is the earliest possible gate.
+        if (user.role === "STAFF") {
+          const expired = await checkAndExpireStaffContract(user.id);
+          if (expired) {
             return null;
           }
         }
@@ -190,6 +288,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // since this token was issued — force sign-out by invalidating it.
       if (!dbUser || dbUser.isDeleted || !dbUser.isActive || dbUser.sessionVersion !== token.sessionVersion) {
         return null;
+      }
+
+      // ── Periodic contract check for staff ───────────────────────────────
+      // Runs inside the same revalidation window as the isActive/sessionVersion
+      // check above — no extra interval, no extra mechanism.  If the contract
+      // has expired, checkAndExpireStaffContract() mutates the DB (marks the
+      // contract EXPIRED, flips isActive flags, bumps sessionVersion) and
+      // returns true, so we immediately return null here to kill this token.
+      // The sessionVersion bump in the DB also ensures any other live JWTs
+      // for this user (other tabs, devices) fail their next sessionVersion
+      // comparison and are killed without any additional code.
+      if (dbUser.role === "STAFF") {
+        const expired = await checkAndExpireStaffContract(token.id);
+        if (expired) {
+          return null;
+        }
       }
 
       token.role = dbUser.role;

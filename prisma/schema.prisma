@@ -29,6 +29,7 @@ enum StaffType {
 
 enum AppointmentStatus {
   PENDING
+  ACCEPTED
   CONFIRMED
   COMPLETED
   CANCELLED

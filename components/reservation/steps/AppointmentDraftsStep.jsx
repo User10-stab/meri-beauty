@@ -1,6 +1,7 @@
 "use client";
 
 import { Clock, Euro, Tag, User, Plus, CalendarCheck, Trash2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 /**
  * AppointmentDraftsStep
@@ -22,6 +23,7 @@ export default function AppointmentDraftsStep({
   onContinue,
   onRemoveDraft,
 }) {
+  const t = useTranslations("reservationSteps");
   const drafts = data.appointmentDrafts ?? [];
 
   const totalDuration = drafts.reduce((sum, d) => sum + (d.duration ?? 0), 0);
@@ -32,12 +34,12 @@ export default function AppointmentDraftsStep({
       {/* ── Header ───────────────────────────────────────────────── */}
       <div className="mb-8 text-center">
         <h2 className="text-3xl font-bold text-[#2F3A2E]">
-          Vos rendez-vous
+          {t("drafts.title")}
         </h2>
         <p className="mt-2 text-gray-600">
           {drafts.length === 0
-            ? "Aucun rendez-vous ajouté pour l'instant."
-            : `${drafts.length} rendez-vous ajouté${drafts.length > 1 ? "s" : ""}`}
+            ? t("drafts.empty")
+            : t("drafts.count", { count: drafts.length })}
         </p>
       </div>
 
@@ -60,14 +62,14 @@ export default function AppointmentDraftsStep({
           {/* Totals */}
           <div className="rounded-2xl border border-[#C8A46A] bg-[#C8A46A]/7 p-5">
             <div className="flex items-center justify-between text-sm font-medium text-gray-600">
-              <span>Durée totale estimée</span>
+              <span>{t("drafts.totalDuration")}</span>
               <span className="flex items-center gap-1 font-semibold text-[#2F3A2E]">
                 <Clock size={15} />
-                {totalDuration} min
+                {t("minutes", { count: totalDuration })}
               </span>
             </div>
             <div className="mt-2 flex items-center justify-between text-sm font-medium text-gray-600">
-              <span>Prix total estimé</span>
+              <span>{t("drafts.totalPrice")}</span>
               <span className="flex items-center gap-1 font-bold text-[#C8A46A]">
                 <Euro size={15} />
                 {totalPrice.toFixed(2)}
@@ -80,7 +82,7 @@ export default function AppointmentDraftsStep({
       {/* ── Empty state ──────────────────────────────────────────── */}
       {drafts.length === 0 && (
         <div className="mb-6 flex min-h-[120px] items-center justify-center rounded-2xl border-2 border-dashed border-gray-200 text-gray-400">
-          <p className="text-sm">Ajoutez votre premier rendez-vous ci-dessous</p>
+          <p className="text-sm">{t("drafts.emptyAdd")}</p>
         </div>
       )}
 
@@ -92,7 +94,7 @@ export default function AppointmentDraftsStep({
           className="flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-[#2F3A2E] p-4 text-sm font-semibold text-[#2F3A2E] transition-all hover:bg-[#2F3A2E] hover:text-white"
         >
           <Plus size={18} />
-          Ajouter un autre rendez-vous
+          {t("drafts.addAnother")}
         </button>
 
         <button
@@ -105,7 +107,7 @@ export default function AppointmentDraftsStep({
           }`}
         >
           <CalendarCheck size={18} />
-          Continuer
+          {t("drafts.continue")}
         </button>
         </div>
       </div>
@@ -116,19 +118,20 @@ export default function AppointmentDraftsStep({
 // ─── DraftCard ────────────────────────────────────────────────────────────────
 
 function DraftCard({ draft, index, onRemove, removable }) {
+  const t = useTranslations("reservationSteps");
   return (
     <div className="rounded-2xl border border-gray-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
   {/* Header */}
   <div className="mb-5 flex items-center justify-between bg-gradient-to-r from-[#2F3A2E] to-[#3d4e3b] p-5 rounded-t-2xl">
     <h3 className=" text-lg font-semibold text-white">
-      Rendez-vous {index + 1}
+      {t("drafts.appointment", { index: index + 1 })}
     </h3>
 
     {removable && (
       <button
         onClick={onRemove}
         className="rounded-lg p-2 text-gray-400 transition-colors  hover:text-red-500"
-        aria-label="Supprimer ce rendez-vous"
+        aria-label={t("drafts.removeAria")}
       >
         <Trash2 size={18} />
       </button>
@@ -164,7 +167,7 @@ function DraftCard({ draft, index, onRemove, removable }) {
       </p>
 
       <p className="text-sm text-gray-500">
-        Experte
+        {t("expert")}
       </p>
     </div>
   </div>
@@ -174,7 +177,7 @@ function DraftCard({ draft, index, onRemove, removable }) {
       <div className="flex items-center gap-2 text-gray-500">
         <Clock size={16} />
         <span className="text-sm">
-          {draft.duration ?? "—"} min
+          {t("minutes", { count: draft.duration ?? "—" })}
         </span>
       </div>
 

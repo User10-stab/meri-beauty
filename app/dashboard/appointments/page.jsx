@@ -2,11 +2,15 @@ import { Suspense } from "react";
 import { requireDashboard } from "@/lib/route-protection";
 import { getAllAppointments } from "@/actions/appointment/get-all-appointments";
 import { AppointmentsPageClient } from "@/components/dashboard/appointments/AppointmentsPageClient";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Tous les rendez-vous — Dashboard",
-  description: "Consultez et gérez tous les rendez-vous.",
-};
+export async function generateMetadata() {
+  const t = await getTranslations();
+  return {
+    title: `${t("dashboard.appointments.title")} — Dashboard`,
+    description: t("dashboard.appointments.subtitle"),
+  };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +26,7 @@ export default async function AppointmentsPage() {
   // Auth guard — accessible to Admin, Owner and Staff
   await requireDashboard();
 
+  const t = await getTranslations();
   const result = await getAllAppointments();
   const appointments = result.data ?? [];
 
@@ -34,30 +39,30 @@ export default async function AppointmentsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            Tous les rendez-vous
+            {t("dashboard.appointments.title")}
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Consultez et gérez l&apos;ensemble des rendez-vous.
+            {t("dashboard.appointments.subtitle")}
           </p>
         </div>
 
         {/* Stats strip */}
         <div className="flex flex-wrap items-center gap-3">
           <StatBadge
-            label="Total"
+            label={t("common.total")}
             value={appointments.length}
             color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
           />
           {pendingCount > 0 && (
             <StatBadge
-              label="En attente"
+              label={t("appointmentStatus.pending")}
               value={pendingCount}
               color="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
             />
           )}
           {confirmedCount > 0 && (
             <StatBadge
-              label="Confirmés"
+              label={t("appointmentStatus.confirmed")}
               value={confirmedCount}
               color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
             />

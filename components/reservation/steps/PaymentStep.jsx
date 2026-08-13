@@ -8,6 +8,7 @@ import { computePaymentDecision } from "@/lib/reservation-payment";
 import { signIn } from "next-auth/react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 
 // ─── Payment option button ────────────────────────────────────────────────────
@@ -60,6 +61,7 @@ function PaymentOption({ icon, title, description, badge, selected, disabled, on
  *                       OR deposit charge now (if depositRequired=true)
  */
 export default function PaymentStep({ data, customerSession }) {
+  const t = useTranslations("reservationSteps");
   const [paymentMethod, setPaymentMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [appliedPromo, setAppliedPromo] = useState(null);
@@ -106,11 +108,11 @@ export default function PaymentStep({ data, customerSession }) {
 
   const handlePayment = async () => {
     if (!paymentMethod) {
-      toast.error("Veuillez sélectionner un mode de paiement");
+      toast.error(t("payment.selectPaymentMethod"));
       return;
     }
     if (!acceptedTerms) {
-      toast.error("Veuillez accepter les CGV et la politique de confidentialité");
+      toast.error(t("payment.acceptTermsRequired"));
       return;
     }
 
@@ -124,7 +126,7 @@ export default function PaymentStep({ data, customerSession }) {
     //   • "online"               → full amount
     //   • "cash" + depositRequired → deposit amount
     setProcessing(true);
-    const loadingToastId = toast.loading("Redirection vers le paiement sécurisé…");
+    const loadingToastId = toast.loading(t("payment.redirecting"));
     try {
       const customerInfo = customerSession
         ? {
@@ -155,7 +157,7 @@ export default function PaymentStep({ data, customerSession }) {
 
       if (!result.success || !result.url) {
         toast.error(
-          (result.message || "Impossible de créer la session de paiement. Veuillez réessayer.") +
+          (result.message || t("payment.sessionFailed")) +
             (result.error ? ` — ${result.error}` : "")
         );
         setProcessing(false);
@@ -190,7 +192,7 @@ export default function PaymentStep({ data, customerSession }) {
     } catch (err) {
       console.error("[PaymentStep] unexpected error:", err);
       toast.dismiss(loadingToastId);
-      toast.error("Une erreur est survenue. Veuillez réessayer dans quelques instants.");
+      toast.error(t("payment.genericError"));
       setProcessing(false);
     }
   };
@@ -198,7 +200,7 @@ export default function PaymentStep({ data, customerSession }) {
   // "Payer au salon", no deposit required → create appointment without Stripe
   const handleSalonNoDeposit = async () => {
     setProcessing(true);
-    const loadingToastId = toast.loading("Traitement de votre réservation…");
+    const loadingToastId = toast.loading(t("review.processing"));
     try {
       const customerInfo = customerSession
         ? {
@@ -226,7 +228,7 @@ export default function PaymentStep({ data, customerSession }) {
 
       if (!result.success) {
         toast.error(
-          result.message || "La réservation a échoué. Veuillez réessayer."
+          result.message || t("payment.reservationFailed")
         );
         setProcessing(false);
         return;
@@ -242,12 +244,12 @@ export default function PaymentStep({ data, customerSession }) {
         }
       }
 
-      toast.success("Réservation confirmée avec succès !");
+      toast.success(t("payment.reservationConfirmed"));
       setTimeout(() => router.push("/"), 2000);
     } catch (err) {
       console.error("[PaymentStep] handleSalonNoDeposit:", err);
       toast.dismiss(loadingToastId);
-      toast.error("Une erreur est survenue. Veuillez réessayer.");
+      toast.error(t("payment.genericError"));
       setProcessing(false);
     }
   };
@@ -256,25 +258,25 @@ export default function PaymentStep({ data, customerSession }) {
 
   // Contextual description for the "Payer au salon" option
   const salonDescription = depositRequired
-    ? `Acompte de ${depositPercentage}% requis en ligne · Solde au salon`
-    : "Aucun paiement en ligne requis · Règlement intégral au salon";
+    ? t("payment.salonDepositDesc", { percentage: depositPercentage })
+    : t("payment.salonNoDepositDesc");
 
   // Confirm button label
   const confirmLabel = (() => {
-    if (!paymentMethod) return "Confirmer et payer";
+    if (!paymentMethod) return t("payment.confirmPay");
     if (paymentMethod === "online")
-      return `Payer €${Number(totalAmount).toFixed(2)} en ligne`;
+      return t("payment.payOnline", { amount: Number(totalAmount).toFixed(2) });
     if (depositRequired)
-      return `Payer l'acompte €${Number(depositAmount).toFixed(2)}`;
-    return "Confirmer — paiement au salon";
+      return t("payment.payDeposit", { amount: Number(depositAmount).toFixed(2) });
+    return t("payment.confirmSalon");
   })();
 
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-8 text-center">
-        <h2 className="text-3xl font-bold text-[#2F3A2E]">Paiement</h2>
+        <h2 className="text-3xl font-bold text-[#2F3A2E]">{t("payment.title")}</h2>
         <p className="mt-2 text-gray-600">
-          Sélectionnez votre mode de paiement
+          {t("payment.subtitle")}
         </p>
       </div>
 
@@ -282,14 +284,14 @@ export default function PaymentStep({ data, customerSession }) {
         {/* ── Amount summary ─────────────────────────────────── */}
         <div className="rounded-2xl border-2 border-[#C8A46A] bg-gradient-to-br from-[#C8A46A]/5 to-white p-6 text-center">
           <p className="text-sm font-medium text-gray-600">
-            Prix total du service
+            {t("payment.totalServicePrice")}
           </p>
           {discountAmount > 0 ? (
             <>
               <p className="mt-1 text-lg text-gray-400 line-through">€{rawTotal.toFixed(2)}</p>
               <p className="text-4xl font-bold text-[#C8A46A]">€{Number(totalAmount).toFixed(2)}</p>
               <p className="mt-1 text-sm font-medium text-emerald-600">
-                Réduction ({appliedPromo.code}) : -€{discountAmount.toFixed(2)}
+                {t("payment.discount", { code: appliedPromo.code, amount: discountAmount.toFixed(2) })}
               </p>
             </>
           ) : (
@@ -299,11 +301,11 @@ export default function PaymentStep({ data, customerSession }) {
           )}
           {depositRequired && paymentMethod === "cash" && (
             <p className="mt-2 text-sm text-gray-500">
-              Acompte en ligne :{" "}
+              {t("payment.depositOnline")}{" "}
               <span className="font-semibold text-[#2F3A2E]">
                 €{Number(depositAmount).toFixed(2)}
               </span>{" "}
-              · Solde au salon :{" "}
+              · {t("payment.balanceInSalon")}{" "}
               <span className="font-semibold text-[#2F3A2E]">
                 €{Number(totalAmount - depositAmount).toFixed(2)}
               </span>
@@ -311,7 +313,7 @@ export default function PaymentStep({ data, customerSession }) {
           )}
           {paymentMethod === "online" && (
             <p className="mt-2 text-sm text-gray-500">
-              Montant total débité maintenant
+              {t("payment.fullAmountDebited")}
             </p>
           )}
         </div>
@@ -321,18 +323,18 @@ export default function PaymentStep({ data, customerSession }) {
         {/* ── Payment options ─────────────────────────────────── */}
         <div className="space-y-4">
           <h3 className="text-lg font-semibold text-[#2F3A2E]">
-            Mode de paiement
+            {t("payment.paymentMethod")}
           </h3>
 
           <PaymentOption
             icon={<CreditCard size={24} />}
-            title="Payer en ligne par Stripe"
+            title={t("payment.payOnlineTitle")}
             description={
               acceptsOnlinePayments
-                ? "Paiement sécurisé — montant total débité immédiatement"
-                : "Indisponible : ce professionnel n'accepte pas le paiement en ligne"
+                ? t("payment.payOnlineDesc")
+                : t("payment.payOnlineUnavailable")
             }
-            badge="Montant total"
+            badge={t("payment.badgeTotal")}
             selected={paymentMethod === "online"}
             disabled={processing || !acceptsOnlinePayments}
             onSelect={() => {
@@ -343,11 +345,11 @@ export default function PaymentStep({ data, customerSession }) {
 
           <PaymentOption
             icon={<Wallet size={24} />}
-            title="Payer au salon"
+            title={t("payment.payAtSalonTitle")}
             description={
               acceptsCashPayments
                 ? salonDescription
-                : "Indisponible : ce professionnel n'accepte pas le paiement au salon"
+                : t("payment.payAtSalonUnavailable")
             }
             selected={paymentMethod === "cash"}
             disabled={processing || !acceptsCashPayments}
@@ -361,38 +363,31 @@ export default function PaymentStep({ data, customerSession }) {
         {/* ── Contextual notice ───────────────────────────────── */}
         {paymentMethod === "online" && (
           <div className="rounded-lg bg-blue-50 p-4 text-sm text-blue-800">
-            <p className="font-medium">💳 Paiement sécurisé par Stripe</p>
+            <p className="font-medium">{t("payment.secureStripeNotice")}</p>
             <p className="mt-1">
-              Le montant total de{" "}
-              <strong>€{Number(totalAmount).toFixed(2)}</strong> sera débité
-              immédiatement de votre carte.
+              {t("payment.onlineNoticeDesc", { amount: `€${Number(totalAmount).toFixed(2)}` })}
             </p>
           </div>
         )}
 
         {paymentMethod === "cash" && depositRequired && (
           <div className="rounded-lg bg-amber-50 p-4 text-sm text-amber-800">
-            <p className="font-medium">⚠️ Acompte obligatoire</p>
+            <p className="font-medium">{t("payment.depositRequired")}</p>
             <p className="mt-1">
-              Un acompte de{" "}
-              <strong>
-                {depositPercentage}% (€{Number(depositAmount).toFixed(2)})
-              </strong>{" "}
-              doit être réglé en ligne maintenant. Le solde de{" "}
-              <strong>
-                €{Number(totalAmount - depositAmount).toFixed(2)}
-              </strong>{" "}
-              sera à régler au salon.
+              {t("payment.depositNoticeDesc", {
+                percentage: depositPercentage,
+                amount: `€${Number(depositAmount).toFixed(2)}`,
+                balance: `€${Number(totalAmount - depositAmount).toFixed(2)}`,
+              })}
             </p>
           </div>
         )}
 
         {paymentMethod === "cash" && !depositRequired && (
           <div className="rounded-lg bg-green-50 p-4 text-sm text-green-800">
-            <p className="font-medium">✓ Aucun paiement en ligne requis</p>
+            <p className="font-medium">{t("payment.noOnlinePayment")}</p>
             <p className="mt-1">
-              Votre réservation sera confirmée sans paiement en ligne. Vous
-              règlerez la totalité au salon.
+              {t("payment.noOnlinePaymentDesc")}
             </p>
           </div>
         )}
@@ -405,18 +400,21 @@ export default function PaymentStep({ data, customerSession }) {
             onChange={(e) => setAcceptedTerms(e.target.checked)}
             className="mt-0.5"
           />
-          <span>
-            J&apos;ai lu et j&apos;accepte les{" "}
-            <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-              Conditions générales de vente
-            </a>{" "}
-            et la{" "}
-            <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-              Politique de confidentialité
-            </a>
-            .
-          </span>
-        </label>
+<span>
+              {t("payment.acceptTerms", {
+                cgv: (
+                  <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                    {t("payment.cgv")}
+                  </a>
+                ),
+                privacy: (
+                  <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                    {t("payment.privacy")}
+                  </a>
+                ),
+              })}
+            </span>
+          </label>
 
         {/* ── Submit ──────────────────────────────────────────── */}
         <button
@@ -431,7 +429,7 @@ export default function PaymentStep({ data, customerSession }) {
           {processing ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 size={20} className="animate-spin" />
-              Traitement en cours…
+              {t("payment.processing")}
             </span>
           ) : (
             confirmLabel
@@ -439,7 +437,7 @@ export default function PaymentStep({ data, customerSession }) {
         </button>
 
         <p className="text-center text-xs text-gray-400">
-          🔒 Paiement sécurisé · Vos données sont protégées
+          {t("payment.secureFooter")}
         </p>
       </div>
     </div>

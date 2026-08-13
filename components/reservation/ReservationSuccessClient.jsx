@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useLocale, useTranslations } from "next-intl";
 import { getPaymentStatusBySession } from "@/actions/payment/get-payment-status-by-session";
+import { toIntlLocale } from "@/lib/intl-locale";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -11,8 +13,8 @@ const POLL_TIMEOUT_MS  = 30_000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDate(date) {
-  return new Date(date).toLocaleDateString("fr-FR", {
+function formatDate(date, locale) {
+  return new Date(date).toLocaleDateString(toIntlLocale(locale), {
     weekday: "long",
     day:     "2-digit",
     month:   "long",
@@ -21,16 +23,16 @@ function formatDate(date) {
   });
 }
 
-function formatTime(date) {
-  return new Date(date).toLocaleTimeString("fr-FR", {
+function formatTime(date, locale) {
+  return new Date(date).toLocaleTimeString(toIntlLocale(locale), {
     hour:   "2-digit",
     minute: "2-digit",
     timeZone: "Europe/Brussels",
   });
 }
 
-function formatAmount(amount) {
-  return new Intl.NumberFormat("fr-FR", {
+function formatAmount(amount, locale) {
+  return new Intl.NumberFormat(toIntlLocale(locale), {
     style:    "currency",
     currency: "EUR",
   }).format(amount);
@@ -66,6 +68,7 @@ function AmountRow({ label, value, highlight }) {
 
 /** Spinner shown while waiting for the webhook. */
 function Polling() {
+  const t = useTranslations("reservationSuccess");
   return (
     <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6 px-4 text-center">
       {/* Animated ring */}
@@ -75,10 +78,10 @@ function Polling() {
       </div>
       <div>
         <h2 className="text-xl font-semibold text-[#2F3A2E]">
-          Confirmation en cours…
+          {t("pollingTitle")}
         </h2>
         <p className="mt-2 text-sm text-gray-500">
-          Nous attendons la confirmation de votre paiement. Merci de patienter.
+          {t("pollingDescription")}
         </p>
       </div>
     </div>
@@ -87,6 +90,7 @@ function Polling() {
 
 /** Shown when polling times out without a confirmed payment. */
 function PollingTimeout({ sessionId }) {
+  const t = useTranslations("reservationSuccess");
   return (
     <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6 px-4 text-center">
       <div className="w-16 h-16 rounded-full bg-amber-50 flex items-center justify-center">
@@ -96,18 +100,17 @@ function PollingTimeout({ sessionId }) {
       </div>
       <div>
         <h2 className="text-xl font-semibold text-[#2F3A2E]">
-          Paiement en cours de traitement
+          {t("timeoutTitle")}
         </h2>
         <p className="mt-2 text-sm text-gray-500 max-w-sm">
-          Votre paiement a bien été reçu mais la confirmation prend un peu plus de temps que prévu.
-          Vous recevrez un email de confirmation dès que le traitement sera finalisé.
+          {t("timeoutDescription")}
         </p>
       </div>
       <Link
         href="/"
         className="inline-flex items-center gap-2 rounded-lg bg-[#2F3A2E] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#3d4e3b] transition-colors"
       >
-        Retour à l'accueil
+        {t("backHome")}
       </Link>
     </div>
   );
@@ -115,6 +118,7 @@ function PollingTimeout({ sessionId }) {
 
 /** Shown when session_id is missing or payment is not found at all. */
 function NotFound() {
+  const t = useTranslations("reservationSuccess");
   return (
     <div className="min-h-[60vh] flex flex-col items-center justify-center gap-6 px-4 text-center">
       <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center">
@@ -123,10 +127,9 @@ function NotFound() {
         </svg>
       </div>
       <div>
-        <h2 className="text-xl font-semibold text-[#2F3A2E]">Réservation introuvable</h2>
+        <h2 className="text-xl font-semibold text-[#2F3A2E]">{t("notFoundTitle")}</h2>
         <p className="mt-2 text-sm text-gray-500 max-w-sm">
-          Nous n'avons pas pu retrouver votre réservation. Si vous avez été débité,
-          contactez-nous en indiquant votre email de réservation.
+          {t("notFoundDescription")}
         </p>
       </div>
       <div className="flex gap-3 flex-wrap justify-center">
@@ -134,13 +137,13 @@ function NotFound() {
           href="/reservation"
           className="inline-flex items-center gap-2 rounded-lg bg-[#2F3A2E] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#3d4e3b] transition-colors"
         >
-          Nouvelle réservation
+          {t("newReservation")}
         </Link>
         <Link
           href="/"
           className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-5 py-2.5 text-sm font-semibold text-[#2F3A2E] hover:bg-gray-50 transition-colors"
         >
-          Retour à l'accueil
+          {t("backHome")}
         </Link>
       </div>
     </div>
@@ -149,6 +152,8 @@ function NotFound() {
 
 /** The main success card rendered once we have confirmed payment data. */
 function SuccessCard({ data }) {
+  const t = useTranslations("reservationSuccess");
+  const locale = useLocale();
   const { payment, appointment, staff, service, transactions = [] } = data;
 
   const isManual    = staff.reservationConfirmationMode === "MANUAL";
@@ -156,7 +161,7 @@ function SuccessCard({ data }) {
   const isFullPaid  = payment.remainingAmount === 0;
 
   // Time formatted from the startTime stored in the DB
-  const appointmentTime = formatTime(appointment.startTime);
+  const appointmentTime = formatTime(appointment.startTime, locale);
 
   return (
     <div className="w-full max-w-xl mx-auto px-4 py-12">
@@ -169,9 +174,9 @@ function SuccessCard({ data }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-[#2F3A2E]">Réservation confirmée</h1>
+          <h1 className="text-2xl font-bold text-[#2F3A2E]">{t("confirmedTitle")}</h1>
           <p className="text-sm text-gray-500">
-            Votre paiement a été reçu et votre rendez-vous est confirmé.
+            {t("confirmedDescription")}
           </p>
         </div>
       ) : (
@@ -181,10 +186,9 @@ function SuccessCard({ data }) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-[#2F3A2E]">Paiement reçu</h1>
+          <h1 className="text-2xl font-bold text-[#2F3A2E]">{t("receivedTitle")}</h1>
           <p className="text-sm text-gray-500 max-w-sm">
-            Votre paiement a bien été reçu. Votre réservation est en attente de
-            confirmation par notre équipe.
+            {t("receivedDescription")}
           </p>
         </div>
       )}
@@ -193,11 +197,10 @@ function SuccessCard({ data }) {
       {isManual && !isConfirmed && (
         <div className="mb-6 rounded-xl bg-amber-50 border border-amber-200 px-5 py-4">
           <p className="text-sm font-semibold text-amber-800 mb-1">
-            En attente d'approbation
+            {t("awaitingApproval")}
           </p>
           <p className="text-sm text-amber-700 leading-relaxed">
-            Notre équipe va examiner votre demande et vous enverra un email de
-            confirmation dès que votre rendez-vous sera approuvé.
+            {t("awaitingApprovalDescription")}
           </p>
         </div>
       )}
@@ -206,14 +209,14 @@ function SuccessCard({ data }) {
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden mb-4">
         <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
           <p className="text-xs font-semibold uppercase tracking-widest text-[#C8A46A]">
-            Détails du rendez-vous
+            {t("detailsSection")}
           </p>
         </div>
         <div className="px-5 py-1">
-          <InfoRow label="Service"  value={service.name} />
-          <InfoRow label="Experte"  value={staff.user.fullName} />
-          <InfoRow label="Date"     value={formatDate(appointment.date)} />
-          <InfoRow label="Heure"    value={appointmentTime} />
+          <InfoRow label={t("service")}  value={service.name} />
+          <InfoRow label={t("expert")}  value={staff.user.fullName} />
+          <InfoRow label={t("date")}     value={formatDate(appointment.date, locale)} />
+          <InfoRow label={t("time")}    value={appointmentTime} />
         </div>
       </div>
 
@@ -221,30 +224,30 @@ function SuccessCard({ data }) {
       <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden mb-6">
         <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
           <p className="text-xs font-semibold uppercase tracking-widest text-[#C8A46A]">
-            Résumé du paiement
+            {t("paymentSummary")}
           </p>
         </div>
         <div className="px-5 py-1">
           <AmountRow
-            label="Montant total"
-            value={formatAmount(payment.totalAmount)}
+            label={t("totalAmount")}
+            value={formatAmount(payment.totalAmount, locale)}
           />
           <AmountRow
-            label="Montant payé"
-            value={formatAmount(payment.paidAmount)}
+            label={t("paidAmount")}
+            value={formatAmount(payment.paidAmount, locale)}
             highlight="green"
           />
           {payment.remainingAmount > 0 && (
             <AmountRow
-              label="Reste à payer en salon"
-              value={formatAmount(payment.remainingAmount)}
+              label={t("remainingInSalon")}
+              value={formatAmount(payment.remainingAmount, locale)}
               highlight="amber"
             />
           )}
           {isFullPaid && (
             <AmountRow
-              label="Statut"
-              value="Payé intégralement"
+              label={t("status")}
+              value={t("paidInFull")}
               highlight="green"
             />
           )}
@@ -256,23 +259,23 @@ function SuccessCard({ data }) {
         <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden mb-6">
           <div className="px-5 py-4 border-b border-gray-100 bg-gray-50">
             <p className="text-xs font-semibold uppercase tracking-widest text-[#C8A46A]">
-              Transactions
+              {t("transactions")}
             </p>
           </div>
           <div className="px-5 py-3 space-y-3">
-            {transactions.map((t) => (
-              <div key={t.id} className="text-sm">
+            {transactions.map((trx) => (
+              <div key={trx.id} className="text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-gray-600">
-                    {t.transactionType === "DEPOSIT"       ? "Acompte"          :
-                     t.transactionType === "FINAL_PAYMENT" ? "Paiement complet"  :
-                     "Remboursement"}
+                    {trx.transactionType === "DEPOSIT"       ? t("deposit")          :
+                     trx.transactionType === "FINAL_PAYMENT" ? t("finalPayment")  :
+                     t("refund")}
                   </span>
                   <span className="font-semibold text-[#2F3A2E]">
-                    {formatAmount(t.amount)}
+                    {formatAmount(trx.amount, locale)}
                   </span>
                 </div>
-                
+
               </div>
             ))}
           </div>
@@ -283,10 +286,10 @@ function SuccessCard({ data }) {
       {payment.remainingAmount > 0 && (
         <div className="mb-6 rounded-xl bg-[#fdf8f0] border border-[#C8A46A]/30 px-5 py-4">
           <p className="text-sm font-semibold text-[#a07840] mb-1">
-            Solde restant : {formatAmount(payment.remainingAmount)}
+            {t("remainingBalance", { amount: formatAmount(payment.remainingAmount, locale) })}
           </p>
           <p className="text-sm text-[#a07840] leading-relaxed">
-            Le solde sera à régler directement au salon lors de votre visite.
+            {t("remainingBalanceDescription")}
           </p>
         </div>
       )}
@@ -297,13 +300,13 @@ function SuccessCard({ data }) {
           href="/reservation"
           className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg bg-[#2F3A2E] px-5 py-3 text-sm font-semibold text-white hover:bg-[#3d4e3b] transition-colors"
         >
-          Nouveau rendez-vous
+          {t("newAppointment")}
         </Link>
         <Link
           href="/"
           className="flex-1 inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 px-5 py-3 text-sm font-semibold text-[#2F3A2E] hover:bg-gray-50 transition-colors"
         >
-          Retour à l'accueil
+          {t("backHome")}
         </Link>
       </div>
     </div>

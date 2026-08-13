@@ -5,8 +5,10 @@ import { getStaffByService } from "@/actions/reservation/get-staff-by-service";
 import { Star, Clock, Euro } from "lucide-react";
 import { toast } from "sonner";
 import Image from "next/image";
+import { useTranslations } from "next-intl";
 
 export default function StaffStep({ data, updateData, nextStep }) {
+  const t = useTranslations("reservationSteps");
   const [staffList, setStaffList] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -22,7 +24,7 @@ export default function StaffStep({ data, updateData, nextStep }) {
     if (result.success) {
       setStaffList(result.data);
     } else {
-      toast.error(result.message || "Erreur lors du chargement");
+      toast.error(result.message || t("errorLoad"));
     }
     setLoading(false);
   };
@@ -52,7 +54,7 @@ export default function StaffStep({ data, updateData, nextStep }) {
     return (
       <div className="flex min-h-[500px] flex-col items-center justify-center">
         <p className="text-lg text-gray-600">
-          Aucune experte disponible pour ce service
+          {t("staff.noStaff")}
         </p>
       </div>
     );
@@ -62,10 +64,10 @@ export default function StaffStep({ data, updateData, nextStep }) {
     <div>
       <div className="mb-8 text-center">
         <h2 className="text-3xl font-bold text-[#2F3A2E]">
-          Choisissez votre experte
+          {t("staff.title")}
         </h2>
         <p className="mt-2 text-gray-600">
-          {data.service?.name} • {staffList.length} experte{staffList.length > 1 ? "s" : ""} disponible{staffList.length > 1 ? "s" : ""}
+          {t("staff.subtitle", { name: data.service?.name, count: staffList.length })}
         </p>
       </div>
 
@@ -113,7 +115,7 @@ export default function StaffStep({ data, updateData, nextStep }) {
                       {staffService.avgRating.toFixed(1)}
                     </span>
                     <span className="text-xs text-gray-500">
-                      ({staffService.reviewCount} avis)
+                      {t("staff.reviews", { count: staffService.reviewCount })}
                     </span>
                   </div>
                 )}

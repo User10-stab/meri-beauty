@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 
 const STORAGE_KEY = "meri-beauty:terms-accepted";
 
@@ -12,6 +13,7 @@ const STORAGE_KEY = "meri-beauty:terms-accepted";
  * doesn't use non-essential cookies, see the Politique de confidentialité).
  * Persisted in localStorage so it only ever shows once per browser. */
 export default function SiteTermsNotice() {
+  const t = useTranslations("siteTermsNotice");
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -39,22 +41,22 @@ export default function SiteTermsNotice() {
   return (
     <div
       role="region"
-      aria-label="Conditions d'utilisation du site"
+      aria-label={t("ariaLabel")}
       className="fixed inset-x-0 bottom-0 z-50 border-t border-gold-soft bg-primary px-4 py-4 shadow-[0_-4px_20px_rgba(0,0,0,0.15)] sm:px-6"
     >
       <div className="mx-auto flex max-w-[1400px] flex-col items-center gap-3 sm:flex-row sm:justify-between">
         <p className="text-center text-sm leading-relaxed text-cream/85 sm:text-left">
-          En poursuivant votre navigation sur ce site, vous acceptez nos{" "}
+          {t("intro")}{" "}
           <Link href="/cgv" className="underline text-gold hover:text-gold/80">
-            Conditions Générales de Vente
+            {t("terms")}
           </Link>
-          , nos{" "}
+          {", "}{t("andOur")}{" "}
           <Link href="/mentions-legales" className="underline text-gold hover:text-gold/80">
-            Mentions légales
+            {t("legalNotice")}
           </Link>{" "}
-          et notre{" "}
+          {" "}{t("andOur")}{" "}
           <Link href="/politique-de-confidentialite" className="underline text-gold hover:text-gold/80">
-            Politique de confidentialité
+            {t("privacyPolicy")}
           </Link>
           .
         </p>
@@ -63,7 +65,7 @@ export default function SiteTermsNotice() {
           onClick={handleAccept}
           className="shrink-0 rounded-full bg-gold px-6 py-2.5 text-sm font-semibold text-primary transition hover:bg-gold/90"
         >
-          J&apos;accepte
+          {t("accept")}
         </button>
       </div>
     </div>

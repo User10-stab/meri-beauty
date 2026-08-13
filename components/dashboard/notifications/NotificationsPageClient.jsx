@@ -10,14 +10,9 @@ import {
   markAllAsRead,
   deleteNotificationAction,
 } from "@/actions/notifications/notifications";
+import { useTranslations } from "next-intl";
 
-const FILTERS = [
-  { key: "all", label: "Toutes", filterIsRead: null },
-  { key: "unread", label: "Non lues", filterIsRead: false },
-  { key: "read", label: "Lues", filterIsRead: true },
-];
-
-function formatGroupHeader(dateIso) {
+function formatGroupHeader(dateIso, t) {
   const d = new Date(dateIso);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -25,8 +20,8 @@ function formatGroupHeader(dateIso) {
   yesterday.setDate(today.getDate() - 1);
   const diffDays = Math.floor((today - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 86400000);
 
-  if (diffDays === 0) return "Aujourd'hui";
-  if (diffDays === 1) return "Hier";
+  if (diffDays === 0) return t("groupHeaders.today");
+  if (diffDays === 1) return t("groupHeaders.yesterday");
   if (diffDays < 7) {
     return d.toLocaleDateString("fr-FR", { weekday: "long" }).replace(/^./, (c) => c.toUpperCase());
   }
@@ -57,6 +52,7 @@ function groupByDay(items) {
 }
 
 export default function NotificationsPageClient({ userId, initialItems, initialPageInfo }) {
+  const t = useTranslations("notifications");
   const [activeFilter, setActiveFilter] = useState("all");
   const [items, setItems] = useState([]);
   const [hasNext, setHasNext] = useState(false);
@@ -64,9 +60,18 @@ export default function NotificationsPageClient({ userId, initialItems, initialP
   const [initialLoading, setInitialLoading] = useState(true);
   const [pageLoading, setPageLoading] = useState(false);
 
+  const FILTERS = useMemo(
+    () => [
+      { key: "all", label: t("filters.all"), filterIsRead: null },
+      { key: "unread", label: t("filters.unread"), filterIsRead: false },
+      { key: "read", label: t("filters.read"), filterIsRead: true },
+    ],
+    [t]
+  );
+
   const activeConfig = useMemo(
     () => FILTERS.find((f) => f.key === activeFilter) ?? FILTERS[0],
-    [activeFilter]
+    [activeFilter, FILTERS]
   );
 
   const loadPage = useCallback(
@@ -127,6 +132,11 @@ export default function NotificationsPageClient({ userId, initialItems, initialP
 
   const groups = useMemo(() => groupByDay(items), [items]);
 
+  const formatGroupHeaderWithLocale = useCallback(
+    (dateIso) => formatGroupHeader(dateIso, t),
+    [t]
+  );
+
   const realtimeHandlers = useMemo(
     () => ({
       onCreated: ({ notification }) => {
@@ -168,7 +178,7 @@ export default function NotificationsPageClient({ userId, initialItems, initialP
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-gray-900 dark:text-white">
             <Bell className="h-6 w-6 text-gray-500 dark:text-gray-400" />
-            Notifications
+            {t("title")}
           </h1>
           <p className="mt-1 text-[13.5px] text-gray-500 dark:text-gray-400">
             Suivez l'activité du salon : nouveaux rendez-vous, confirmations et annulations.
@@ -181,7 +191,7 @@ export default function NotificationsPageClient({ userId, initialItems, initialP
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900 dark:border-white/10 dark:bg-white/5 dark:text-gray-200 dark:hover:bg-white/10"
           >
             <CheckSquare2 className="h-4 w-4" />
-            Tout marquer comme lu
+            {t("markAllRead")}
           </button>
         )}
       </header>
@@ -212,7 +222,7 @@ export default function NotificationsPageClient({ userId, initialItems, initialP
           <div className="flex items-center justify-center py-24">
             <div className="flex items-center gap-2 text-[13.5px] text-gray-500 dark:text-gray-400">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Chargement des notifications…
+              {t("loading")}
             </div>
           </div>
         ) : items.length === 0 ? (
@@ -222,7 +232,7 @@ export default function NotificationsPageClient({ userId, initialItems, initialP
             {groups.map((group) => (
               <div key={group.key} className="border-b border-gray-100 last:border-b-0 dark:border-white/5">
                 <div className="sticky top-0 z-10 border-b border-gray-100 bg-gray-50/80 px-5 py-2 text-[11.5px] font-semibold uppercase tracking-wider text-gray-500 backdrop-blur dark:border-white/5 dark:bg-gray-900/80 dark:text-gray-400">
-                  {formatGroupHeader(group.key)}
+                  {formatGroupHeaderWithLocale(group.key)}
                 </div>
                 <div className="py-1.5">
                   {group.items.map((n) => (
@@ -248,15 +258,15 @@ export default function NotificationsPageClient({ userId, initialItems, initialP
                   {pageLoading ? (
                     <>
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Chargement…
+                      {t("loading")}
                     </>
                   ) : (
-                    "Charger plus"
+                    t("loadMore")
                   )}
                 </button>
               ) : (
                 <p className="py-1 text-center text-[12.5px] text-gray-400 dark:text-gray-500">
-                  Vous avez atteint la fin de l'historique.
+                  {t("endOfHistory")}
                 </p>
               )}
             </div>
@@ -268,13 +278,14 @@ export default function NotificationsPageClient({ userId, initialItems, initialP
 }
 
 function EmptyState({ filter }) {
+  const t = useTranslations("notifications");
   return (
     <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
       <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 dark:bg-white/5">
         <Inbox className="h-8 w-8 text-gray-400 dark:text-gray-500" strokeWidth={1.6} />
       </div>
       <h3 className="text-[16px] font-semibold text-gray-800 dark:text-gray-200">
-        Aucune notification {filter.toLowerCase() !== "toutes" ? filter.toLowerCase() : ""}
+        {t("empty")}
       </h3>
       <p className="mt-1.5 max-w-md text-[13.5px] text-gray-500 dark:text-gray-400">
         Lorsque de nouveaux événements liés aux rendez-vous surviendront (création, confirmation, annulation), ils apparaîtront ici.

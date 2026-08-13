@@ -3,17 +3,14 @@ import { requireRole, getCurrentStaffId } from "@/lib/route-protection";
 import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getNewsletters } from "@/actions/newsletter/get-newsletters";
 import { NewsletterPageClient } from "@/components/dashboard/newsletter/NewsletterPageClient";
-
-export const metadata = {
-  title: "Newsletter — Dashboard",
-  description: "Créez et gérez les newsletters pour vos clients.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewsletterPage() {
   const { user } = await requireRole(DASHBOARD_PERMISSIONS.NEWSLETTER);
   const currentStaffId = await getCurrentStaffId();
+  const t = await getTranslations("dashboard.newsletter");
 
   const result = await getNewsletters();
   const newsletters = result.data ?? [];
@@ -24,27 +21,27 @@ export default async function NewsletterPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            Newsletter
+            {t("title")}
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Créez et gérez les newsletters pour communiquer avec vos clients.
+            {t("subtitle")}
           </p>
         </div>
 
         {/* Stats strip */}
         <div className="flex items-center gap-3">
           <StatBadge
-            label="Newsletters"
+            label={t("statsLabel")}
             value={newsletters.length}
             color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
           />
           <StatBadge
-            label="Envoyées"
+            label={t("sentLabel")}
             value={newsletters.filter((n) => n.status === "SENT").length}
             color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
           />
           <StatBadge
-            label="Brouillons"
+            label={t("draftsLabel")}
             value={newsletters.filter((n) => n.status === "DRAFT").length}
             color="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
           />

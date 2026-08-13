@@ -1,6 +1,7 @@
 "use client";
 
 import { Search } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 /**
  * @param {object} props
@@ -11,16 +12,19 @@ import { Search } from "lucide-react";
 export function SearchBar({
   value,
   onChange,
-  placeholder = "Rechercher...",
+  placeholder,
 }) {
+  const t = useTranslations("dashboard.components.search");
+  const placeholderText = placeholder || t("placeholder");
+
   return (
     <div className="relative">
       <input
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        aria-label="Rechercher"
+        placeholder={placeholderText}
+        aria-label={t("ariaLabel")}
         className="
           h-9 w-64 rounded-md border border-gray-200 bg-white
           pl-3 pr-10 text-sm text-gray-700 outline-none
@@ -31,7 +35,7 @@ export function SearchBar({
       />
       <button
         type="button"
-        aria-label="Lancer la recherche"
+        aria-label={t("ariaLabelButton")}
         className="
           absolute right-0 top-0 flex h-9 w-9 items-center justify-center
           rounded-r-md text-white transition-colors

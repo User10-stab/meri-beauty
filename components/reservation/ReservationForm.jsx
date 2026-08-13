@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronRight, ChevronLeft, Check } from "lucide-react";
 import CategoryStep from "./steps/CategoryStep";
@@ -88,20 +89,21 @@ function isStepValid(stepId, reservationData) {
 }
 
 const ALL_STEPS = [
-  { id: 1, name: "Catégorie",      component: CategoryStep },
-  { id: 2, name: "Service",        component: ServiceStep },
-  { id: 3, name: "Experte",        component: StaffStep },
-  { id: 4, name: "Rendez-vous",    component: AppointmentDraftsStep, draftStep: true },
-  { id: 5, name: "Date & Heure",   component: DateTimeStep },
-  { id: 6, name: "Informations",   component: CustomerInfoStep, guestOnly: true },
-  { id: 7, name: "Récapitulatif",  component: ReviewStep },
-  { id: 8, name: "Paiement",       component: PaymentStep, paymentStep: true },
+  { id: 1, name: "reservationForm.step1", component: CategoryStep },
+  { id: 2, name: "reservationForm.step2", component: ServiceStep },
+  { id: 3, name: "reservationForm.step3", component: StaffStep },
+  { id: 4, name: "reservationForm.step4", component: AppointmentDraftsStep, draftStep: true },
+  { id: 5, name: "reservationForm.step5", component: DateTimeStep },
+  { id: 6, name: "reservationForm.step6", component: CustomerInfoStep, guestOnly: true },
+  { id: 7, name: "reservationForm.step7", component: ReviewStep },
+  { id: 8, name: "reservationForm.step8", component: PaymentStep, paymentStep: true },
 ];
 
 /**
  * @param {{ customerSession: { id: string, email: string, fullName?: string, phone?: string } | null }} props
  */
 export default function ReservationForm({ customerSession = null }) {
+  const t = useTranslations();
   const isAuthenticated = Boolean(customerSession);
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -286,7 +288,7 @@ export default function ReservationForm({ customerSession = null }) {
                     index + 1 <= currentStep ? "text-[#2F3A2E]" : "text-gray-400"
                   }`}
                 >
-                  {step.name}
+                  {t(step.name)}
                 </span>
               </div>
               {index < STEPS.length - 1 && (
@@ -348,11 +350,11 @@ export default function ReservationForm({ customerSession = null }) {
             }`}
           >
             <ChevronLeft size={18} />
-            Précédent
+            {t("reservationForm.buttons.previous")}
           </button>
 
           <div className="text-sm text-gray-500">
-            Étape {currentStep} sur {STEPS.length}
+            {t("reservationForm.stepOf", { current: currentStep, total: STEPS.length })}
           </div>
 
           <button
@@ -364,7 +366,7 @@ export default function ReservationForm({ customerSession = null }) {
                 : "bg-[#C8A46A] text-white hover:bg-[#B8945A]"
             }`}
           >
-            Suivant
+            {t("reservationForm.buttons.next")}
             <ChevronRight size={18} />
           </button>
         </div>

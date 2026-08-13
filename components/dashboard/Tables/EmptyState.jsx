@@ -1,4 +1,5 @@
 import { Users } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 /**
  * @param {object} props
@@ -6,9 +7,13 @@ import { Users } from "lucide-react";
  * @param {string} [props.description]
  */
 export function EmptyState({
-  title = "No users found",
-  description = "Try adjusting your search or filters.",
+  title,
+  description,
 }) {
+  const t = useTranslations("dashboard.components.emptyState");
+  const titleText = title || t("title");
+  const descriptionText = description || t("description");
+
   return (
     <tr>
       <td colSpan={7}>
@@ -17,8 +22,8 @@ export function EmptyState({
             <Users size={24} className="text-gray-400" />
           </div>
           <div>
-            <p className="font-semibold text-gray-700">{title}</p>
-            <p className="mt-1 text-sm text-gray-400">{description}</p>
+            <p className="font-semibold text-gray-700">{titleText}</p>
+            <p className="mt-1 text-sm text-gray-400">{descriptionText}</p>
           </div>
         </div>
       </td>

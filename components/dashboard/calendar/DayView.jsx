@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   buildTimeSlots,
   parseTime,
@@ -43,6 +44,7 @@ export function DayView({
   workingDays = [],
   onAppointmentClick,
 }) {
+  const t = useTranslations();
   const dayAppts = appointmentsForDay(appointments, currentDate);
   const dayActivities = activityEventsForDay(activityEvents, currentDate);
   const slots = buildTimeSlots(openingTime, closingTime);
@@ -109,7 +111,7 @@ export function DayView({
             {isClosed
               ? "Salon fermé ce jour"
               : dayAppts.length === 0
-              ? "Aucune réservation confirmée"
+              ? t("calendarView.noReservations")
               : `${dayAppts.length} réservation${dayAppts.length > 1 ? "s" : ""} confirmée${dayAppts.length > 1 ? "s" : ""}`}
           </p>
         </div>
@@ -154,7 +156,7 @@ export function DayView({
                 <Calendar className="h-7 w-7 text-gray-400" strokeWidth={1.5} />
               </div>
               <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                Aucune réservation confirmée pour cette journée.
+                {t("calendarView.noReservations")}
               </p>
             </div>
           ) : (

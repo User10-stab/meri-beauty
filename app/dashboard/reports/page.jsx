@@ -2,25 +2,22 @@ import { requireRole } from "@/lib/route-protection";
 import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getReportsData } from "@/actions/dashboard/get-reports-data";
 import { ReportsPageClient } from "@/components/dashboard/reports/ReportsPageClient";
-
-export const metadata = {
-  title: "Rapports — Dashboard",
-  description: "Chiffre d'affaires, meilleures ventes et croissance client sur les 6 derniers mois.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReportsPage() {
   await requireRole(DASHBOARD_PERMISSIONS.REPORTS); // OWNER/ADMIN only — getReportsData() re-checks server-side
+  const t = await getTranslations("dashboard.reports");
 
   const result = await getReportsData();
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-dark dark:text-white">Rapports</h1>
+        <h1 className="text-2xl font-bold text-dark dark:text-white">{t("title")}</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Vue d'ensemble de l'activité sur les 6 derniers mois — chiffre d'affaires, ventes, clients.
+          {t("subtitle")}
         </p>
       </div>
 

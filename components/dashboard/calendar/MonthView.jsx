@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   getMonthGrid,
   appointmentsForDay,
@@ -8,7 +9,6 @@ import {
 } from "./calendarUtils";
 import { getStaffColor } from "./staffColors";
 
-const FR_DAY_NAMES = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 const MAX_VISIBLE = 3;
 
 /**
@@ -28,19 +28,29 @@ export function MonthView({
   onDayClick,
   onAppointmentClick,
 }) {
+  const t = useTranslations();
   const grid = getMonthGrid(currentDate);
   const currentMonth = currentDate.getMonth();
+
+  // Map JS day index (0-6, where 0 is Sunday) to Monday-first display (1-7)
+  // For header row, we want: Mon, Tue, Wed, Thu, Fri, Sat, Sun
+  // Indices 1-6 are Mon-Sat, index 0 (Sun) goes to 7 in our display array
+  const dayIndexToKey = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  function getDayName(dayIndex) {
+    const key = dayIndexToKey[dayIndex];
+    return t(`monthView.${key}`).substring(0, 3); // First 3 letters for compact display
+  }
 
   return (
     <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-dark">
       {/* ── Day-of-week headers ──────────────────────────────────────────── */}
       <div className="grid grid-cols-7 border-b border-gray-200 dark:border-gray-700">
-        {FR_DAY_NAMES.map((name) => (
+        {[1, 2, 3, 4, 5, 6, 0].map((dayIndex) => (
           <div
-            key={name}
+            key={dayIndex}
             className="py-3 text-center text-xs font-semibold uppercase tracking-wider text-gray-400"
           >
-            {name}
+            {getDayName(dayIndex)}
           </div>
         ))}
       </div>

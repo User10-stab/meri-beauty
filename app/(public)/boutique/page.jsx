@@ -1,11 +1,15 @@
 import { getStorefrontProducts, getStorefrontFilters } from "@/actions/boutique/storefront";
 import { BoutiquePageClient } from "@/components/boutique/BoutiquePageClient";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Boutique – Meri Beauty",
-  description: "Découvrez notre sélection de produits de beauté.",
-  alternates: { canonical: "/boutique" },
-};
+export async function generateMetadata() {
+  const t = await getTranslations("boutique.metadata");
+  return {
+    title: t("boutiquePage"),
+    description: t("boutiqueDescription"),
+    alternates: { canonical: "/boutique" },
+  };
+}
 
 export default async function BoutiquePage() {
   const [productsResult, filtersResult] = await Promise.all([

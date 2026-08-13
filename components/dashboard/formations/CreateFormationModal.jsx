@@ -2,9 +2,10 @@
 
 import { useEffect, useState, useRef, useTransition } from "react";
 import { toast } from "sonner";
-import { X, Loader2, Euro, Clock, Users, Globe2, BookOpen, Camera } from "lucide-react";
+import { X, Loader2, Calendar, Euro, Clock, Users, Globe2, BookOpen, Camera } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { createFormation, updateFormation } from "@/actions/formations/create-formation";
+import { useTranslations } from "next-intl";
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -23,7 +24,7 @@ function ModalField({ label, children, required = false }) {
   );
 }
 
-function CoverUpload({ value, onChange, error }) {
+function CoverUpload({ value, onChange, error, t }) {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(value ?? null);
@@ -37,11 +38,11 @@ function CoverUpload({ value, onChange, error }) {
 
     const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
     if (!ALLOWED.includes(file.type)) {
-      toast.error("Format non accepté. Utilisez JPEG, PNG, WebP ou GIF.");
+      toast.error(t("errorFormat"));
       return;
     }
     if (file.size > 20 * 1024 * 1024) {
-      toast.error("Le fichier ne doit pas dépasser 20 Mo.");
+      toast.error(t("errorFileSize"));
       return;
     }
 
@@ -58,12 +59,12 @@ function CoverUpload({ value, onChange, error }) {
       if (data.success) {
         onChange(data.url);
       } else {
-        toast.error(data.message ?? "Erreur lors du téléversement.");
+        toast.error(data.message ?? t("errorUpload"));
         setPreview(null);
         onChange(null);
       }
     } catch {
-      toast.error("Erreur réseau.");
+      toast.error(t("errorNetwork"));
       setPreview(null);
       onChange(null);
     } finally {
@@ -101,8 +102,8 @@ function CoverUpload({ value, onChange, error }) {
             ) : (
               <>
                 <Camera size={24} className="text-gray-400" />
-                <span className="text-sm font-medium">Image de couverture</span>
-                <span className="text-xs text-gray-400">JPEG, PNG, WebP (max. 20Mo)</span>
+                <span className="text-sm font-medium">{t("coverLabel")}</span>
+                <span className="text-xs text-gray-400">{t("coverHint")}</span>
               </>
             )}
           </div>
@@ -138,6 +139,7 @@ const EMPTY_FORM = {
 };
 
 export function CreateFormationModal({ open, onClose, onCreated, formation, animators = [] }) {
+  const t = useTranslations("dashboardFormations.modal");
   const isEditing = !!formation;
   const [loading, startLoading] = useTransition();
   const [form, setForm] = useState(EMPTY_FORM);
@@ -248,7 +250,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
         onClose();
       } else {
         setErrors(result.errors ?? {});
-        toast.error(result.message || "Une erreur est survenue.");
+        toast.error(result.message || t("errorGeneric"));
       }
     });
   }
@@ -263,10 +265,10 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
           <div>
             <h2 className="text-base font-semibold text-gray-900">
-              {isEditing ? "Modifier la formation" : "Nouvelle formation"}
+              {isEditing ? t("editTitle") : t("newTitle")}
             </h2>
             <p className="text-xs text-gray-500">
-              {isEditing ? "Modifier les détails de la formation" : "Créer une nouvelle formation"}
+              {isEditing ? t("editSubtitle") : t("newSubtitle")}
             </p>
           </div>
           <button
@@ -285,10 +287,11 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
             value={form.cover}
             onChange={(url) => setForm((prev) => ({ ...prev, cover: url }))}
             error={errors.cover}
+            t={t}
           />
 
           {/* Type Selector */}
-          <ModalField label="Type de formation" required>
+          <ModalField label={t("typeLabel")} required>
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
@@ -299,7 +302,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                     : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
                 }`}
               >
-                Privée (1 personne)
+                {t("typePrivate")}
               </button>
               <button
                 type="button"
@@ -310,14 +313,14 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                     : "bg-white border-gray-200 text-gray-700 hover:bg-gray-50"
                 }`}
               >
-                Groupe (+1 personne)
+                {t("typePublic")}
               </button>
             </div>
             <FieldError message={errors.type} />
           </ModalField>
 
           {/* Title */}
-          <ModalField label="Titre de la formation" required>
+          <ModalField label={t("titleLabel")} required>
             <div className="relative">
               <BookOpen size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -326,26 +329,26 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                 value={form.title}
                 onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
                 className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                placeholder="ex. Formation Extension de Cils"
+                placeholder={t("titlePlaceholder")}
               />
             </div>
             <FieldError message={errors.title} />
           </ModalField>
 
           {/* Description */}
-          <ModalField label="Description">
+          <ModalField label={t("descriptionLabel")}>
             <textarea
               value={form.description}
               onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100 min-h-[80px] resize-none"
-              placeholder="Détails de la formation..."
+              placeholder={t("descriptionPlaceholder")}
             />
             <FieldError message={errors.description} />
           </ModalField>
 
           {/* Pricing, Duration & Capacity */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <ModalField label="Tarif (€)" required>
+            <ModalField label={t("priceLabel")} required>
               <div className="relative">
                 <Euro size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -361,7 +364,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
               <FieldError message={errors.price} />
             </ModalField>
 
-            <ModalField label="Durée (min)" required>
+            <ModalField label={t("durationLabel")} required>
               <div className="relative">
                 <Clock size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -376,7 +379,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
               <FieldError message={errors.duration} />
             </ModalField>
 
-            <ModalField label="Capacité (pers.)" required>
+            <ModalField label={t("capacityLabel")} required>
               <div className="relative">
                 <Users size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -391,7 +394,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                 />
               </div>
               <p className="mt-1 text-xs text-gray-400">
-                {isPrivate ? "Toujours 1 personne pour une formation privée." : "Aucune limite maximale pour une formation groupe."}
+                {isPrivate ? t("capacityPrivateHint") : t("capacityPublicHint")}
               </p>
               <FieldError message={errors.capacity} />
             </ModalField>
@@ -399,7 +402,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
 
           {/* Deposit Percentage & Language / Animator */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <ModalField label="Acompte (%)">
+            <ModalField label={t("depositLabel")}>
               <div className="relative">
                 <input
                   type="number"
@@ -411,11 +414,11 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                   placeholder="30"
                 />
               </div>
-              <p className="mt-1 text-xs text-gray-400">Pourcentage du prix total demandé à la réservation.</p>
+              <p className="mt-1 text-xs text-gray-400">{t("depositHint")}</p>
               <FieldError message={errors.depositPercentage} />
             </ModalField>
 
-            <ModalField label="Langue">
+            <ModalField label={t("languageLabel")}>
               <div className="relative">
                 <Globe2 size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -423,19 +426,19 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                   value={form.language}
                   onChange={(e) => setForm((prev) => ({ ...prev, language: e.target.value }))}
                   className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                  placeholder="ex. Français, Anglais"
+                  placeholder={t("languagePlaceholder")}
                 />
               </div>
               <FieldError message={errors.language} />
             </ModalField>
 
-            <ModalField label="Formateur">
+            <ModalField label={t("animatorLabel")}>
               <select
                 value={form.animatorId}
                 onChange={(e) => setForm((prev) => ({ ...prev, animatorId: e.target.value }))}
                 className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
               >
-                <option value="">-- Sélectionner un formateur --</option>
+                <option value="">{t("animatorPlaceholder")}</option>
                 {animators.map((animator) => (
                   <option key={animator.id} value={animator.id}>
                     {animator.name}
@@ -448,16 +451,16 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
 
           {/* Status & Options */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 pt-2 border-t border-gray-100">
-            <ModalField label="Statut" required>
+            <ModalField label={t("statusLabel")} required>
               <select
                 value={form.status}
                 onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value }))}
                 className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
               >
-                <option value="DRAFT">Brouillon</option>
-                <option value="PUBLISHED">Publié</option>
-                <option value="CANCELLED">Annulé</option>
-                <option value="ARCHIVED">Archivé</option>
+                <option value="DRAFT">{t("statusDraft")}</option>
+                <option value="PUBLISHED">{t("statusPublished")}</option>
+                <option value="CANCELLED">{t("statusCancelled")}</option>
+                <option value="ARCHIVED">{t("statusArchived")}</option>
               </select>
               <FieldError message={errors.status} />
             </ModalField>
@@ -470,7 +473,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                   onChange={(e) => setForm((prev) => ({ ...prev, allowMultipleSessions: e.target.checked }))}
                   className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                 />
-                <span className="text-sm font-medium text-gray-700">Autoriser plusieurs sessions</span>
+                <span className="text-sm font-medium text-gray-700">{t("allowMultipleSessions")}</span>
               </label>
             </div>
           </div>
@@ -479,7 +482,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
           <div className="pt-2 border-t border-gray-100 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-gray-700">
-                {form.allowMultipleSessions ? `Sessions (${sessions.length})` : "Date de la formation"}
+                {form.allowMultipleSessions ? t("sessionsLabel", { count: sessions.length }) : t("dateLabel")}
               </h3>
               {form.allowMultipleSessions && (
                 <button
@@ -487,7 +490,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                   onClick={() => addSession()}
                   className="text-xs font-medium text-indigo-600 hover:text-indigo-800 transition-colors"
                 >
-                  + Ajouter une session
+                  {t("addSession")}
                 </button>
               )}
             </div>
@@ -496,7 +499,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
               <>
                 {sessions.length === 0 && (
                   <p className="text-xs text-gray-400 italic">
-                    Aucune session définie. Cliquez sur &quot;+ Ajouter une session&quot; pour ajouter des créneaux.
+                    {t("noSessions")}
                   </p>
                 )}
 
@@ -504,7 +507,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                   <div key={index} className="rounded-lg border border-gray-200 p-3 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                        Session #{index + 1}
+                        {t("sessionNumber", { number: index + 1 })}
                       </span>
                       <button
                         type="button"
@@ -516,7 +519,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <ModalField label="Date de début" required>
+                      <ModalField label={t("startDateLabel")} required>
                         <input
                           type="datetime-local"
                           required
@@ -525,7 +528,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                           className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
                         />
                       </ModalField>
-                      <ModalField label="Date de fin">
+                      <ModalField label={t("endDateLabel")}>
                         <input
                           type="datetime-local"
                           value={session.endDate}
@@ -536,18 +539,18 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                     </div>
 
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <ModalField label="Capacité">
+                      <ModalField label={t("sessionCapacityLabel")}>
                         <input
                           type="number"
                           min={1}
                           disabled={isPrivate}
                           value={isPrivate ? 1 : session.capacity}
                           onChange={(e) => updateSession(index, "capacity", e.target.value)}
-                          placeholder={`${form.capacity || "1"} (défaut)`}
+                          placeholder={t("sessionCapacityPlaceholder", { default: form.capacity || "1" })}
                           className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100 disabled:bg-gray-100 disabled:text-gray-500"
                         />
                       </ModalField>
-                      <ModalField label="Date limite inscription">
+                      <ModalField label={t("deadlineLabel")}>
                         <input
                           type="datetime-local"
                           value={session.registrationDeadline}
@@ -557,13 +560,13 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                       </ModalField>
                     </div>
 
-                    <ModalField label="Formateur (spécifique à cette session)">
+                    <ModalField label={t("sessionAnimatorLabel")}>
                       <select
                         value={session.animatorId}
                         onChange={(e) => updateSession(index, "animatorId", e.target.value)}
                         className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
                       >
-                        <option value="">-- Formateur par défaut --</option>
+                        <option value="">{t("sessionAnimatorPlaceholder")}</option>
                         {animators.map((animator) => (
                           <option key={animator.id} value={animator.id}>
                             {animator.name}
@@ -576,7 +579,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
               </>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <ModalField label="Date de début" required>
+                <ModalField label={t("startDateLabel")} required>
                   <input
                     type="datetime-local"
                     required
@@ -585,7 +588,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                     className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
                   />
                 </ModalField>
-                <ModalField label="Date de fin">
+                <ModalField label={t("endDateLabel")}>
                   <input
                     type="datetime-local"
                     value={form.endDate}
@@ -604,11 +607,11 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
               onClick={onClose}
               className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              Annuler
+              {t("cancel")}
             </button>
             <Button type="submit" disabled={loading} className="bg-[#2f3a2e]">
               {loading ? <Loader2 size={15} className="animate-spin mr-1.5" /> : null}
-              {isEditing ? "Mettre à jour" : "Créer la formation"}
+              {isEditing ? t("update") : t("create")}
             </Button>
           </div>
         </form>

@@ -4,6 +4,8 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
+import { toIntlLocale } from "@/lib/intl-locale";
 
 export default function ReservationFormationSuccesPage() {
   return (
@@ -14,6 +16,8 @@ export default function ReservationFormationSuccesPage() {
 }
 
 function ReservationFormationSuccesContent() {
+  const t = useTranslations("activityReservation");
+  const locale = useLocale();
   const searchParams = useSearchParams();
   const reservationId = searchParams.get("reservation_id");
   const [status, setStatus] = useState("loading");
@@ -68,9 +72,9 @@ function ReservationFormationSuccesContent() {
   const r = reservation;
   const isConfirmed = r?.status === "CONFIRMED" || r?.status === "COMPLETED";
   const isStillPending = r?.status === "PENDING_DEPOSIT";
-  const depositFormatted = r && new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(r.depositAmount));
-  const totalFormatted = r && new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(r.totalPrice));
-  const balanceFormatted = r && new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(r.balanceDue));
+  const depositFormatted = r && new Intl.NumberFormat(toIntlLocale(locale), { style: "currency", currency: "EUR" }).format(Number(r.depositAmount));
+  const totalFormatted = r && new Intl.NumberFormat(toIntlLocale(locale), { style: "currency", currency: "EUR" }).format(Number(r.totalPrice));
+  const balanceFormatted = r && new Intl.NumberFormat(toIntlLocale(locale), { style: "currency", currency: "EUR" }).format(Number(r.balanceDue));
 
   return (
     <div className="min-h-screen bg-cream">
@@ -90,45 +94,45 @@ function ReservationFormationSuccesContent() {
         </div>
 
         <h1 className="text-2xl font-bold text-ink sm:text-3xl">
-          {isStillPending ? "Confirmation en cours..." : isConfirmed ? "Réservation confirmée !" : "Réservation introuvable"}
+          {isStillPending ? t("pendingTitle") : isConfirmed ? t("confirmedTitle") : t("notFoundTitle")}
         </h1>
         <p className="mt-3 text-ink/60">
-          {isStillPending && "Nous attendons la confirmation de votre paiement. Cela peut prendre quelques instants — vous recevrez un email dès que ce sera confirmé."}
+          {isStillPending && t("pendingDesc")}
           {isConfirmed && (
             <>
-              Votre réservation a bien été prise en compte.
-              <span className="font-medium"> Un email de confirmation vous a été envoyé.</span>
+              {t("confirmedDesc")}
+              <span className="font-medium"> {t("confirmedDescEmail")}</span>
             </>
           )}
-          {!r && "Nous n'avons pas pu retrouver votre réservation. Si le paiement a été débité, contactez-nous."}
+          {!r && t("notFoundDesc")}
         </p>
 
         {r && (
           <div className="mx-auto mt-8 max-w-sm rounded-xl border border-ink/8 bg-white p-6 text-left shadow-sm">
-            <h2 className="mb-3 text-sm font-semibold text-ink">Récapitulatif</h2>
+            <h2 className="mb-3 text-sm font-semibold text-ink">{t("summary")}</h2>
             <div className="space-y-2 text-sm">
-              <p className="text-ink/80 font-medium">{r.session?.formation?.title || "Formation"}</p>
+              <p className="text-ink/80 font-medium">{r.session?.formation?.title || t("typeWorkshop")}</p>
               <p className="text-xs text-ink/50">
-                {new Date(r.session?.startDate).toLocaleDateString("fr-FR", {
+                {new Date(r.session?.startDate).toLocaleDateString(toIntlLocale(locale), {
                   weekday: "long", day: "numeric", month: "long", year: "numeric",
                   hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels",
                 })}
               </p>
               <hr className="border-ink/8" />
               <div className="flex justify-between">
-                <span className="text-ink/60">Places</span>
+                <span className="text-ink/60">{t("seats")}</span>
                 <span className="font-medium">{r.seatsCount}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-ink/60">Total</span>
+                <span className="text-ink/60">{t("total")}</span>
                 <span className="font-medium">{totalFormatted}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-ink/60">Payé aujourd&apos;hui</span>
+                <span className="text-ink/60">{t("paidToday")}</span>
                 <span className="font-semibold text-gold">{depositFormatted}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-ink/60">Solde restant</span>
+                <span className="text-ink/60">{t("balanceRemaining")}</span>
                 <span>{balanceFormatted}</span>
               </div>
             </div>
@@ -140,10 +144,10 @@ function ReservationFormationSuccesContent() {
             href="/formations"
             className="inline-flex items-center gap-2 rounded-full bg-gold px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-gold/20 transition-all hover:bg-gold/90"
           >
-            Voir d&apos;autres formations
+            {t("seeOtherFormations")}
           </Link>
           <Link href="/" className="text-sm text-ink/50 transition-colors hover:text-gold">
-            Retour à l&apos;accueil
+            {t("backHome")}
           </Link>
         </div>
       </div>

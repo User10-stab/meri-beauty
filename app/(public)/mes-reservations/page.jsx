@@ -4,6 +4,8 @@ import { auth } from "@/auth";
 import { getMyReservations } from "@/actions/reservation/get-my-reservations";
 import MyReservationsClient from "@/components/customer/MyReservationsClient";
 
+import { getTranslations } from "next-intl/server";
+
 export const metadata = {
   title: "Mes réservations – Meri Beauty",
   description: "Consultez et gérez vos rendez-vous Meri Beauty.",
@@ -25,6 +27,7 @@ export const metadata = {
  *   which calls resumeReservationPayment() and redirects to Stripe.
  */
 export default async function MesReservationsPage() {
+  const t = await getTranslations();
   const session = await auth();
 
   // Not logged in → go to login, come back after
@@ -46,9 +49,9 @@ export default async function MesReservationsPage() {
         <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <h1 className="text-2xl font-bold text-[#2F3A2E]">Mes réservations</h1>
+              <h1 className="text-2xl font-bold text-[#2F3A2E]">{t("myAccount.myReservations")}</h1>
               <p className="mt-1 text-sm text-gray-500">
-                Retrouvez tous vos rendez-vous et finalisez vos paiements en attente.
+                {t("myAccount.findAllReservations")}
               </p>
             </div>
             <Link
@@ -58,7 +61,7 @@ export default async function MesReservationsPage() {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              Nouveau rendez-vous
+              {t("myAccount.newReservation")}
             </Link>
           </div>
         </div>
@@ -70,10 +73,10 @@ export default async function MesReservationsPage() {
           // Server error — show a non-crashing fallback
           <div className="rounded-2xl border border-red-100 bg-red-50 px-6 py-8 text-center">
             <p className="text-sm font-semibold text-red-700">
-              Impossible de charger vos réservations.
+              {t("myAccount.failedLoadReservations")}
             </p>
             <p className="mt-1 text-sm text-red-600">
-              {result.message ?? "Veuillez rafraîchir la page ou réessayer plus tard."}
+              {result.message ?? t("myAccount.refreshPageOrRetry")}
             </p>
           </div>
         ) : (

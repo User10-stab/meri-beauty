@@ -1,25 +1,30 @@
 import { requireAdmin } from "@/lib/route-protection";
 import { getCatalogueTree } from "@/actions/boutique/categories";
 import { CategoriesPageClient } from "@/components/dashboard/boutique/CategoriesPageClient";
-
-export const metadata = {
-  title: "Catégories — Boutique — Dashboard",
-  description: "Organisez le catalogue par marque, catégorie et sous-catégorie.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
+export async function generateMetadata() {
+  const t = await getTranslations();
+  return {
+    title: `${t("dashboardBoutique.categories.title")} — ${t("dashboardBoutique.title")} — Dashboard`,
+    description: t("dashboardBoutique.categories.subtitle"),
+  };
+}
+
 export default async function ProductCategoriesPage() {
   await requireAdmin();
+  const t = await getTranslations("dashboardBoutique.categories");
 
   const result = await getCatalogueTree({ includeInactive: true, includeProducts: true });
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-dark dark:text-white">Catégories</h1>
+        <h1 className="text-2xl font-bold text-dark dark:text-white">{t("title")}</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Chaque produit appartient à une sous-catégorie, elle-même rattachée à une catégorie, elle-même rattachée à une marque.
+          {t("subtitle")}
         </p>
       </div>
 

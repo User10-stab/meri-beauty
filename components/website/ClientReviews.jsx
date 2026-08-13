@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useTranslations } from "next-intl";
 import { StarIcon } from "./icons";
 
 const REVIEWS = [
@@ -96,10 +97,13 @@ function QuoteIcon({ className = "w-8 h-8" }) {
 }
 
 export default function ClientReviews() {
+  const t = useTranslations("home");
+  const reviewCopy = t.raw("reviewsItems");
+  const reviews = REVIEWS.map((review, index) => ({ ...review, ...reviewCopy[index] }));
   const [headerRef, headerInView] = useInView();
   const [carouselRef, carouselInView] = useInView();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const totalSlides = Math.ceil(REVIEWS.length / 3);
+  const totalSlides = Math.ceil(reviews.length / 3);
   const intervalRef = useRef(null);
 
   const goTo = (index) => {
@@ -137,14 +141,15 @@ export default function ClientReviews() {
           <div className="mb-5 inline-flex items-center gap-3">
             <span className="h-px w-8 bg-gold" />
             <span className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-gold">
-              Avis Clients
+              {t("reviewsEyebrow")}
             </span>
             <span className="h-px w-8 bg-gold" />
           </div>
 
           <h2 className="mb-6 text-[2rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[2.4rem] lg:text-[2.6rem]">
-            Elles nous font{" "}
-            <em className="font-light text-gold/80 not-italic">confiance.</em>
+            {t.rich("reviewsTitle", {
+              accent: (chunks) => <em className="font-light text-gold/80 not-italic">{chunks}</em>,
+            })}
           </h2>
         </div>
 
@@ -166,7 +171,7 @@ export default function ClientReviews() {
                   key={slideIndex}
                   className="grid min-w-full grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3"
                 >
-                  {REVIEWS.slice(slideIndex * 3, slideIndex * 3 + 3).map(
+                  {reviews.slice(slideIndex * 3, slideIndex * 3 + 3).map(
                     (review) => (
                       <ReviewCard key={review.id} review={review} />
                     )
@@ -182,7 +187,7 @@ export default function ClientReviews() {
               <button
                 key={i}
                 onClick={() => goTo(i)}
-                aria-label={`Aller au slide ${i + 1}`}
+                aria-label={`${t("reviewsSlide")} ${i + 1}`}
                 className={`h-2 rounded-full transition-all duration-300 ${
                   i === currentIndex
                     ? "w-8 bg-gold"

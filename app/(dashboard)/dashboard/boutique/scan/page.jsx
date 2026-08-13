@@ -2,10 +2,14 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { validateDashboardAccess, hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { ProductScanClient } from "@/components/boutique/ProductScanClient";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Scanner un produit – Meri Beauty",
-};
+export async function generateMetadata() {
+  const t = await getTranslations("dashboardBoutique.scan");
+  return {
+    title: t("metadata"),
+  };
+}
 
 /**
  * In-store barcode/QR scanning for staff to add items to orders.

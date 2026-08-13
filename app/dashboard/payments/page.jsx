@@ -1,49 +1,15 @@
 import { Suspense } from "react";
 import { getStripeStatus } from "@/actions/stripe/get-stripe-status";
 import { PaymentsSettingsClient } from "@/components/dashboard/payments/PaymentsSettingsClient";
-
-export const metadata = {
-  title: "Paiements — Dashboard",
-  description: "Gérez votre connexion Stripe et vos paramètres de paiement.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
-
-/**
- * Maps the OAuth callback error keys (see /api/stripe/oauth/callback) to
- * user-facing French messages.
- */
-const OAUTH_ERROR_MESSAGES = {
-  declined:
-    "Vous avez annulé la connexion de votre compte Stripe existant.",
-  invalid_state:
-    "La demande de connexion est invalide ou a expiré. Veuillez réessayer.",
-  session_mismatch:
-    "Vous devez rester connecté avec le même compte pendant toute la connexion Stripe. Reconnectez-vous et réessayez.",
-  no_code:
-    "Stripe n'a pas renvoyé de code d'autorisation. Veuillez réessayer.",
-  staff_not_found:
-    "Votre profil staff est introuvable. Veuillez contacter le support.",
-  staff_inactive:
-    "Votre compte n'est pas actif. Veuillez contacter le support.",
-  already_connected:
-    "Vous disposez déjà d'un compte Stripe connecté. Pour en connecter un autre, déconnectez d'abord le compte actuel.",
-  duplicate_account:
-    "Ce compte Stripe est déjà associé à un autre membre du staff et ne peut pas être connecté.",
-  foreign_express:
-    "Ce compte Stripe Express a été créé par une autre plateforme et ne peut pas être connecté à Meri Beauty. Créez un nouveau compte Stripe ou connectez un compte Standard.",
-  unsupported_type:
-    "Ce type de compte Stripe n'est pas pris en charge par la plateforme.",
-  exchange_failed:
-    "Impossible de confirmer l'autorisation Stripe. Veuillez réessayer.",
-  unexpected:
-    "Une erreur inattendue s'est produite lors de la connexion Stripe. Veuillez réessayer.",
-};
 
 export default async function PaymentsPage({ searchParams }) {
   const params = await searchParams;
   const oauthError = params?.stripeOAuthError;
   const oauthSuccess = params?.success === "true";
+  const t = await getTranslations("dashboard.payments");
 
   const result = await getStripeStatus();
 
@@ -53,10 +19,10 @@ export default async function PaymentsPage({ searchParams }) {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-dark dark:text-white">
-          Paiements
+          {t("title")}
         </h1>
         <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-          Gérez votre connexion Stripe pour recevoir des paiements en ligne.
+          {t("subtitle")}
         </p>
       </div>
 
@@ -76,7 +42,7 @@ export default async function PaymentsPage({ searchParams }) {
           className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
         >
           <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
-          {OAUTH_ERROR_MESSAGES[oauthError] ?? OAUTH_ERROR_MESSAGES.unexpected}
+          {t(`oauthErrors.${oauthError}`) ?? t("oauthErrors.unexpected")}
         </div>
       )}
 
@@ -86,7 +52,7 @@ export default async function PaymentsPage({ searchParams }) {
           className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/10 dark:text-green-400"
         >
           <span className="mt-0.5 flex-shrink-0 text-lg leading-none">✓</span>
-          Votre compte Stripe a été connecté avec succès.
+          {t("stripeConnected")}
         </div>
       )}
 

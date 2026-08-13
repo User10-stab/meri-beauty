@@ -8,6 +8,8 @@ import { computePaymentDecision } from "@/lib/reservation-payment";
 import { toast } from "sonner";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
+import { toIntlLocale } from "@/lib/intl-locale";
 
 // ─── Shared primitives ────────────────────────────────────────────────────────
 
@@ -46,9 +48,9 @@ function StaffAvatar({ staff }) {
   );
 }
 
-function formatDate(date) {
+function formatDate(date, locale) {
   if (!date) return "—";
-  return new Date(date).toLocaleDateString("fr-FR", {
+  return new Date(date).toLocaleDateString(toIntlLocale(locale), {
     weekday: "long",
     year: "numeric",
     month: "long",
@@ -59,17 +61,19 @@ function formatDate(date) {
 // ─── Single-appointment service details card ──────────────────────────────────
 
 function SingleServiceCard({ data }) {
+  const t = useTranslations("reservationSteps");
+  const locale = useLocale();
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-gray-200">
-      <SectionHeader title="Détails du service" />
+      <SectionHeader title={t("review.serviceDetails")} />
       <div className="space-y-4 p-6">
-        <InfoRow icon={<Tag size={20} />} label="Catégorie">
+        <InfoRow icon={<Tag size={20} />} label={t("review.category")}>
           {data.appointmentDrafts[0]?.category?.name ?? data.category?.name ?? "—"}
         </InfoRow>
-        <InfoRow icon={<Tag size={20} />} label="Service">
+        <InfoRow icon={<Tag size={20} />} label={t("review.service")}>
           {data.appointmentDrafts[0]?.service?.name ?? data.service?.name ?? "—"}
         </InfoRow>
-        <InfoRow icon={<User size={20} />} label="Experte">
+        <InfoRow icon={<User size={20} />} label={t("review.expert")}>
           <div className="mt-1 flex items-center gap-3">
             <span>
               {data.appointmentDrafts[0]?.staff?.user?.fullName ??
@@ -78,17 +82,12 @@ function SingleServiceCard({ data }) {
             </span>
           </div>
         </InfoRow>
-        <InfoRow icon={<Calendar size={20} />} label="Date">
-          {formatDate(data.date)}
+        <InfoRow icon={<Calendar size={20} />} label={t("review.date")}>
+          {formatDate(data.date, locale)}
         </InfoRow>
-        <InfoRow icon={<Clock size={20} />} label="Heure">
-          {data.time} (
-          {data.appointmentDrafts[0]?.duration ??
-            data.staffService?.duration ??
-            "—"}{" "}
-          minutes)
-        </InfoRow>
-      </div>
+        <InfoRow icon={<Clock size={20} />} label={t("review.time")}>
+          {data.time} ({t("review.minutes", { count: data.appointmentDrafts[0]?.duration ?? data.staffService?.duration ?? "—" })})
+        </InfoRow>      </div>
     </div>
   );
 }
@@ -96,20 +95,21 @@ function SingleServiceCard({ data }) {
 // ─── Multi-appointment summary card ──────────────────────────────────────────
 
 function MultiServiceCard({ drafts }) {
+  const t = useTranslations("reservationSteps");
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-gray-200">
-      <SectionHeader title={`${drafts.length} rendez-vous`} />
+      <SectionHeader title={t("review.appointmentsCount", { count: drafts.length })} />
       <div className="divide-y divide-gray-100">
         {drafts.map((draft, i) => (
           <div key={i} className="p-5">
             <p className="mb-3 text-xs font-bold uppercase tracking-wide text-[#C8A46A]">
-              Rendez-vous {i + 1}
+              {t("review.appointment", { index: i + 1 })}
             </p>
             <div className="space-y-3">
-              <InfoRow icon={<Tag size={16} />} label="Service">
+              <InfoRow icon={<Tag size={16} />} label={t("review.service")}>
                 {draft.service?.name ?? "—"}
               </InfoRow>
-              <InfoRow icon={<User size={16} />} label="Experte">
+              <InfoRow icon={<User size={16} />} label={t("review.expert")}>
                 <div className="mt-1 flex items-center gap-2">
                  
                   <span>{draft.staff?.user?.fullName ?? "—"}</span>
@@ -118,7 +118,7 @@ function MultiServiceCard({ drafts }) {
               <div className="flex items-center gap-6 pt-1 text-sm text-gray-500">
                 <span className="flex items-center gap-1">
                   <Clock size={14} />
-                  {draft.duration ?? "—"} min
+                  {t("minutes", { count: draft.duration ?? "—" })}
                 </span>
                 <span className="flex items-center gap-1 font-semibold text-[#C8A46A]">
                   <Euro size={14} />
@@ -136,6 +136,7 @@ function MultiServiceCard({ drafts }) {
 // ─── Customer info card ───────────────────────────────────────────────────────
 
 function CustomerCard({ data, customerSession }) {
+  const t = useTranslations("reservationSteps");
   const info = customerSession
     ? {
         fullName: customerSession.fullName,
@@ -146,19 +147,19 @@ function CustomerCard({ data, customerSession }) {
 
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-gray-200">
-      <SectionHeader title="Vos informations" />
+      <SectionHeader title={t("review.yourInfo")} />
       <div className="space-y-4 p-6">
-        <InfoRow icon={<User size={20} />} label="Nom">
+        <InfoRow icon={<User size={20} />} label={t("review.name")}>
           {info?.fullName ?? "—"}
         </InfoRow>
-        <InfoRow icon={<Mail size={20} />} label="Email">
+        <InfoRow icon={<Mail size={20} />} label={t("review.email")}>
           {info?.email ?? "—"}
         </InfoRow>
-        <InfoRow icon={<Phone size={20} />} label="Téléphone">
+        <InfoRow icon={<Phone size={20} />} label={t("review.phone")}>
           {info?.phone ?? "—"}
         </InfoRow>
         {data.notes && (
-          <InfoRow icon={<FileText size={20} />} label="Notes">
+          <InfoRow icon={<FileText size={20} />} label={t("review.notes")}>
             <span className="font-normal">{data.notes}</span>
           </InfoRow>
         )}
@@ -170,19 +171,20 @@ function CustomerCard({ data, customerSession }) {
 // ─── Payment preview cards ────────────────────────────────────────────────────
 
 function AutomaticPaymentPreview({ paymentDecision }) {
+  const t = useTranslations("reservationSteps");
   const { totalAmount, depositRequired, depositAmount, depositPercentage } = paymentDecision;
   const remainingAmount = totalAmount - depositAmount;
 
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-[#C8A46A] bg-gradient-to-br from-[#C8A46A]/5 to-white">
       <div className="bg-[#C8A46A] p-6">
-        <h3 className="text-lg font-semibold text-white">Résumé du paiement</h3>
+        <h3 className="text-lg font-semibold text-white">{t("review.paymentSummary")}</h3>
       </div>
       <div className="p-6">
         <div className="space-y-3">
           {/* Total price */}
           <div className="flex items-center justify-between text-base">
-            <span className="text-gray-600">Prix du service</span>
+            <span className="text-gray-600">{t("review.servicePrice")}</span>
             <span className="font-semibold text-[#2F3A2E]">
               €{Number(totalAmount).toFixed(2)}
             </span>
@@ -195,7 +197,7 @@ function AutomaticPaymentPreview({ paymentDecision }) {
               {/* Deposit required — show the split */}
               <div className="flex items-center justify-between text-base">
                 <span className="font-medium text-gray-600">
-                  Acompte à payer en ligne ({depositPercentage}%)
+                  {t("review.depositOnline", { percentage: depositPercentage })}
                 </span>
                 <span className="font-bold text-[#C8A46A]">
                   €{Number(depositAmount).toFixed(2)}
@@ -203,18 +205,16 @@ function AutomaticPaymentPreview({ paymentDecision }) {
               </div>
               <div className="flex items-center justify-between text-base">
                 <span className="font-medium text-gray-600">
-                  Reste à payer au salon
+                  {t("review.remainingInSalon")}
                 </span>
                 <span className="font-semibold text-[#2F3A2E]">
                   €{Number(remainingAmount).toFixed(2)}
                 </span>
               </div>
               <div className="mt-2 rounded-lg bg-blue-50 p-4 text-sm text-blue-800">
-                <p className="font-medium">ℹ️ Acompte requis</p>
+                <p className="font-medium">{t("review.depositRequired")}</p>
                 <p className="mt-1">
-                  Si vous choisissez de payer au salon, un acompte de{" "}
-                  {depositPercentage}% est requis en ligne pour confirmer votre
-                  réservation.
+                  {t("review.depositRequiredDesc", { percentage: depositPercentage })}
                 </p>
               </div>
             </>
@@ -222,11 +222,10 @@ function AutomaticPaymentPreview({ paymentDecision }) {
             /* No deposit — customer pays fully at the salon or online */
             <div className="rounded-lg bg-green-50 p-4 text-sm text-green-800">
               <p className="flex items-center gap-1.5 font-medium">
-                <Check size={15} /> Aucun acompte requis
+                <Check size={15} /> {t("review.noDepositRequired")}
               </p>
               <p className="mt-1">
-                Si vous choisissez de payer au salon, aucun paiement en ligne
-                n&apos;est requis aujourd&apos;hui.
+                {t("review.noDepositRequiredDesc")}
               </p>
             </div>
           )}
@@ -234,7 +233,7 @@ function AutomaticPaymentPreview({ paymentDecision }) {
           <div className="border-t-2 border-gray-300" />
 
           <div className="flex items-center justify-between text-xl">
-            <span className="font-bold text-[#2F3A2E]">Total</span>
+            <span className="font-bold text-[#2F3A2E]">{t("review.total")}</span>
             <span className="font-bold text-[#2F3A2E]">
               €{Number(totalAmount).toFixed(2)}
             </span>
@@ -254,21 +253,19 @@ function AutomaticPaymentPreview({ paymentDecision }) {
 // AUTOMATIC/pay-now path (PaymentStep.jsx), where Payment is created
 // immediately with the discount already baked in.
 function ManualModeNotice() {
+  const t = useTranslations("reservationSteps");
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-amber-200 bg-gradient-to-br from-amber-50 to-white">
       <div className="bg-amber-500 p-6">
         <h3 className="text-lg font-semibold text-white">
-          Demande de réservation
+          {t("review.manualRequest")}
         </h3>
       </div>
       <div className="p-6">
         <div className="rounded-lg bg-amber-50 p-4 text-sm text-amber-800">
-          <p className="font-medium">⏳ Réservation en attente de confirmation</p>
+          <p className="font-medium">{t("review.pendingConfirmation")}</p>
           <p className="mt-2">
-            Votre demande sera examinée par notre équipe. Si elle est acceptée,
-            vous recevrez un email avec un lien de paiement pour finaliser votre
-            réservation. En cas de refus, vous serez également informé(e) par
-            email.
+            {t("review.manualDesc")}
           </p>
         </div>
       </div>
@@ -277,19 +274,19 @@ function ManualModeNotice() {
 }
 
 function MultiAppointmentNotice({ totalAmount }) {
+  const t = useTranslations("reservationSteps");
   return (
     <div className="overflow-hidden rounded-2xl border-2 border-gray-200">
-      <SectionHeader title="Informations de paiement" />
+      <SectionHeader title={t("review.paymentInfo")} />
       <div className="p-6">
         <div className="rounded-lg bg-gray-50 p-4 text-sm text-gray-700">
-          <p className="font-medium">💳 Paiement au salon</p>
+          <p className="font-medium">{t("review.salonPayment")}</p>
           <p className="mt-1">
-            Pour une réservation avec plusieurs rendez-vous, le règlement
-            s&apos;effectue directement au salon.
+            {t("review.salonPaymentDesc")}
           </p>
         </div>
         <div className="mt-4 flex items-center justify-between text-base font-semibold text-[#2F3A2E]">
-          <span>Total estimé</span>
+          <span>{t("review.totalEstimated")}</span>
           <span className="text-[#C8A46A]">€{Number(totalAmount).toFixed(2)}</span>
         </div>
       </div>
@@ -300,6 +297,7 @@ function MultiAppointmentNotice({ totalAmount }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ReviewStep({ data, nextStep, customerSession }) {
+  const t = useTranslations("reservationSteps");
   const [processing, setProcessing] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const router = useRouter();
@@ -336,11 +334,11 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
 
   const handleDirectBooking = async () => {
     if (!acceptedTerms) {
-      toast.error("Veuillez accepter les CGV et la politique de confidentialité.");
+      toast.error(t("review.acceptTermsRequired"));
       return;
     }
     setProcessing(true);
-    const loadingToastId = toast.loading("Traitement de votre réservation…");
+    const loadingToastId = toast.loading(t("review.processing"));
     try {
       const customerInfo = buildCustomerInfo();
 
@@ -359,14 +357,14 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
         });
         toast.dismiss(loadingToastId);
         if (!result.success) {
-          toast.error(result.message || "La réservation a échoué.");
+          toast.error(result.message || t("review.reservationFailed"));
           setProcessing(false);
           return;
         }
 
         // Auto-login for guest accounts (multi-reservation path)
         if (customerSession) {
-          toast.success("Réservations enregistrées avec succès !");
+          toast.success(t("review.reservationsSaved"));
         } else {
           await handleAutoSignIn(
             result.data?.isNewUser,
@@ -394,7 +392,7 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
         });
         toast.dismiss(loadingToastId);
         if (!result.success) {
-          toast.error(result.message || "La réservation a échoué.");
+          toast.error(result.message || t("review.reservationFailed"));
           setProcessing(false);
           return;
         }
@@ -403,8 +401,8 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
         if (customerSession) {
           toast.success(
             isManualMode
-              ? "Demande de réservation envoyée avec succès !"
-              : "Réservation confirmée avec succès !"
+              ? t("review.requestSent")
+              : t("review.reservationConfirmed")
           );
         } else {
           await handleAutoSignIn(
@@ -420,7 +418,7 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
     } catch (err) {
       console.error("[ReviewStep] handleDirectBooking:", err);
       toast.dismiss(loadingToastId);
-      toast.error("Une erreur est survenue. Veuillez réessayer.");
+      toast.error(t("customer.genericError"));
       setProcessing(false);
     }
   };
@@ -444,33 +442,26 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
 
         if (signInResult?.error) {
           console.warn("[ReviewStep] auto-signin error:", signInResult.error);
-          toast.error(
-            "Votre réservation a été créée, mais la connexion automatique a échoué. Veuillez vous connecter.",
-            { duration: 6000 }
-          );
+          toast.error(t("review.autoSigninFailed"), { duration: 6000 });
         } else {
           if (isNewUser) {
             toast.success(
               isManual
-                ? "Demande de réservation envoyée ! Votre compte a été créé et vous avez été connecté(e) automatiquement. Un email de bienvenue contenant vos accès vous a été envoyé."
-                : "Réservation créée avec succès ! Votre compte a été créé et vous avez été connecté(e) automatiquement. Un email de bienvenue contenant vos accès vous a été envoyé.",
+                ? t("review.autoSigninManualNew")
+                : t("review.autoSigninNew"),
               { duration: 8000 }
             );
           } else {
             toast.success(
               isManual
-                ? "Demande de réservation envoyée avec succès et vous avez été connecté(e) automatiquement."
-                : "Réservation créée avec succès et vous avez été connecté(e) automatiquement.",
+                ? t("review.autoSigninManual")
+                : t("review.autoSignin"),
               { duration: 6000 }
             );
-          }
-        }
+          }        }
       } catch (err) {
         console.warn("[ReviewStep] auto-signin failed:", err);
-        toast.error(
-          "Votre réservation a été créée, mais la connexion automatique a échoué. Veuillez vous connecter.",
-          { duration: 6000 }
-        );
+        toast.error(t("review.autoSigninFailed"), { duration: 6000 });
       }
     }
   };
@@ -481,22 +472,22 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
       return (
         <span className="flex items-center justify-center gap-2">
           <span className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-          Traitement en cours…
+          {t("review.processing")}
         </span>
       );
-    if (requiresPaymentStep) return "Procéder au paiement";
-    if (isManualMode) return "Envoyer la demande de réservation";
-    return "Confirmer la réservation";
+    if (requiresPaymentStep) return t("review.ctaPay");
+    if (isManualMode) return t("review.ctaManual");
+    return t("review.ctaConfirm");
   })();
 
   return (
     <div className="mx-auto max-w-3xl">
       <div className="mb-8 text-center">
         <h2 className="text-3xl font-bold text-[#2F3A2E]">
-          Récapitulatif de votre réservation
+          {t("review.title")}
         </h2>
         <p className="mt-2 text-gray-600">
-          Vérifiez les détails avant de confirmer
+          {t("review.subtitle")}
         </p>
       </div>
 
@@ -532,15 +523,18 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
               className="mt-0.5"
             />
             <span>
-              J&apos;ai lu et j&apos;accepte les{" "}
-              <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                Conditions générales de vente
-              </a>{" "}
-              et la{" "}
-              <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                Politique de confidentialité
-              </a>
-              .
+              {t("review.acceptTerms", {
+                cgv: (
+                  <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                    {t("review.cgv")}
+                  </a>
+                ),
+                privacy: (
+                  <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                    {t("review.privacy")}
+                  </a>
+                ),
+              })}
             </span>
           </label>
         )}

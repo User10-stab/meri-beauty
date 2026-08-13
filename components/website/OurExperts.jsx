@@ -1,41 +1,42 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import { StarIcon, ArrowIcon } from "./icons";
 
 const FALLBACK_STYLISTS = [
   {
     id: 1,
     name: "Sofia Bellamy",
-    speciality: "Coiffure & Style",
+    specialityKey: "expertSpecialtyHair",
     experience: 8,
     image: "/Images/expert.jpg",
   },
   {
     id: 2,
     name: "Yasmine El Amine",
-    speciality: "Soin du Visage",
+    specialityKey: "expertSpecialtyFacial",
     experience: 6,
     image: "/Images/expert.jpg",
   },
   {
     id: 3,
     name: "Lisa Hadden",
-    speciality: "Expertise Ongles",
+    specialityKey: "expertSpecialtyNails",
     experience: 5,
     image: "/Images/expert.jpg",
   },
   {
     id: 4,
     name: "Maya Ertas",
-    speciality: "Massage & Bien-être",
+    specialityKey: "expertSpecialtyMassage",
     experience: 7,
     image: "/Images/expert.jpg",
   },
   {
     id: 5,
     name: "Nour El Jane",
-    speciality: "Coloration & Soin",
+    specialityKey: "expertSpecialtyColor",
     experience: 4,
     image: "/Images/expert.jpg",
   },
@@ -82,6 +83,7 @@ function ChevronIcon({ direction = "right", className = "w-5 h-5" }) {
 }
 
 export default function OurExperts() {
+  const t = useTranslations("home");
   const [stylists, setStylists] = useState(FALLBACK_STYLISTS);
   const [isLoading, setIsLoading] = useState(true);
   const [headerRef, headerInView] = useInView();
@@ -137,18 +139,18 @@ export default function OurExperts() {
             <div className="mb-5 inline-flex items-center gap-3">
               <span className="h-px w-8 bg-gold" />
               <span className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-gold">
-                Nos Experts Beauté
+                {t("expertsEyebrow")}
               </span>
             </div>
 
             <h2 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[2.4rem] lg:text-[2.6rem]">
-              Nos expertes{" "}
-              <em className="font-light text-gold/80 not-italic">à votre écoute.</em>
+              {t.rich("expertsTitle", {
+                accent: (chunks) => <em className="font-light text-gold/80 not-italic">{chunks}</em>,
+              })}
             </h2>
 
             <p className="mt-4 max-w-[420px] text-[14.5px] leading-[1.8] text-ink/55">
-              Rencontrez les professionnelles qui créent des expériences beauté
-              d'exception.
+              {t("expertsBody")}
             </p>
           </div>
 
@@ -162,14 +164,14 @@ export default function OurExperts() {
             </a> */}
             <button
               onClick={scrollLeft}
-              aria-label="Défiler à gauche"
+              aria-label={t("expertsLeft")}
               className="flex h-11 w-11 items-center justify-center rounded-full border border-gold/30 text-gold transition-all duration-200 hover:bg-gold hover:text-white hover:shadow-md hover:shadow-gold/20"
             >
               <ChevronIcon direction="left" className="h-5 w-5" />
             </button>
             <button
               onClick={scrollRight}
-              aria-label="Défiler à droite"
+              aria-label={t("expertsRight")}
               className="flex h-11 w-11 items-center justify-center rounded-full bg-gold text-white shadow-md shadow-gold/30 transition-all duration-200 hover:bg-gold/90 hover:shadow-lg"
             >
               <ChevronIcon direction="right" className="h-5 w-5" />
@@ -190,7 +192,7 @@ export default function OurExperts() {
             style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
           >
             {(isLoading ? FALLBACK_STYLISTS : stylists).map((stylist, index) => (
-              <ExpertCard key={stylist.id} stylist={stylist} delay={index * 80} />
+              <ExpertCard key={stylist.id} stylist={stylist} delay={index * 80} t={t} />
             ))}
           </div>
         </div>
@@ -199,7 +201,7 @@ export default function OurExperts() {
   );
 }
 
-function ExpertCard({ stylist, delay }) {
+function ExpertCard({ stylist, delay, t }) {
   return (
     <article
       className="group relative flex w-[260px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl bg-white shadow-sm shadow-black/5 transition-all duration-300 hover:-translate-y-2 hover:shadow-xl hover:shadow-gold/10"
@@ -220,16 +222,16 @@ function ExpertCard({ stylist, delay }) {
             {stylist.name}
           </h3>
           <p className="mt-1 text-[12px] font-medium uppercase tracking-[0.12em] text-gold">
-            {stylist.speciality}
+            {stylist.specialityKey ? t(stylist.specialityKey) : stylist.speciality}
           </p>
         </div>
         <div className="flex items-center justify-between">
           <p className="text-[12px] text-ink/45">
-            {stylist.experience} ans d'expérience
+            {stylist.experience} {t("expertsYears")}
           </p>
         </div>
         <button className="group/btn mt-1 inline-flex w-full items-center justify-center gap-2 rounded-full border border-gold/30 py-2.5 text-[12px] font-semibold text-gold transition-all duration-200 hover:bg-gold hover:text-white hover:shadow-md hover:shadow-gold/20">
-          Voir le profil
+          {t("expertsProfile")}
           <ArrowIcon className="h-3.5 w-3.5 transition-transform duration-200 group-hover/btn:translate-x-1" />
         </button>
       </div>

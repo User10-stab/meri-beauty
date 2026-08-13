@@ -2,6 +2,7 @@
 
 import { RowActions } from "../Tables/RowActions";
 import { Mail, Phone, Globe } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 function InstagramIcon({ className = "w-4 h-4" }) {
   return (
@@ -20,6 +21,7 @@ function FacebookIcon({ className = "w-4 h-4" }) {
 }
 
 export function AnimatorRow({ row, onView, onEdit, onDelete }) {
+  const t = useTranslations("dashboardWorkshops.animators");
   return (
     <tr className="group border-b border-gray-100 transition-colors hover:bg-gray-50/70">
       {/* Avatar & Name */}
@@ -81,7 +83,7 @@ export function AnimatorRow({ row, onView, onEdit, onDelete }) {
               target="_blank"
               rel="noopener noreferrer"
               className="text-gray-400 hover:text-indigo-600 transition-colors"
-              title="Site web"
+              title={t("socialTitles.website")}
             >
               <Globe size={16} />
             </a>
@@ -93,7 +95,7 @@ export function AnimatorRow({ row, onView, onEdit, onDelete }) {
               target="_blank"
               rel="noopener noreferrer"
               className="text-gray-400 hover:text-pink-600 transition-colors"
-              title="Instagram"
+              title={t("socialTitles.instagram")}
             >
               <InstagramIcon className="w-4 h-4" />
             </a>
@@ -105,7 +107,7 @@ export function AnimatorRow({ row, onView, onEdit, onDelete }) {
               target="_blank"
               rel="noopener noreferrer"
               className="text-gray-400 hover:text-blue-600 transition-colors"
-              title="Facebook"
+              title={t("socialTitles.facebook")}
             >
               <FacebookIcon className="w-4 h-4" />
             </a>

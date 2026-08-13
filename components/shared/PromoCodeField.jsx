@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Loader2, Tag, X } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { validatePromoCode } from "@/actions/promo-codes";
 
 /**
@@ -13,6 +14,7 @@ import { validatePromoCode } from "@/actions/promo-codes";
  * @param {{ subtotal: number, onApplied: (promo: {code: string, discountAmount: number} | null) => void }} props
  */
 export function PromoCodeField({ subtotal, onApplied }) {
+  const t = useTranslations("promoCode");
   const [input, setInput] = useState("");
   const [applied, setApplied] = useState(null);
   const [checking, setChecking] = useState(false);
@@ -49,9 +51,9 @@ export function PromoCodeField({ subtotal, onApplied }) {
       <div className="flex items-center justify-between gap-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
         <span className="flex items-center gap-1.5 font-medium">
           <Tag size={14} />
-          Code {applied.code} appliqué
+          {t("applied", { code: applied.code })}
         </span>
-        <button type="button" onClick={handleRemove} className="text-emerald-600 hover:text-emerald-800" aria-label="Retirer le code promo">
+        <button type="button" onClick={handleRemove} className="text-emerald-600 hover:text-emerald-800" aria-label={t("removeAria")}>
           <X size={14} />
         </button>
       </div>
@@ -74,7 +76,7 @@ export function PromoCodeField({ subtotal, onApplied }) {
               handleApply();
             }
           }}
-          placeholder="Code promo"
+          placeholder={t("placeholder")}
           className="h-9 flex-1 rounded-lg border border-gray-200 px-3 text-sm uppercase tracking-wide text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
         />
         <button
@@ -83,7 +85,7 @@ export function PromoCodeField({ subtotal, onApplied }) {
           disabled={checking || !input.trim()}
           className="flex h-9 items-center justify-center rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {checking ? <Loader2 size={14} className="animate-spin" /> : "Appliquer"}
+          {checking ? <Loader2 size={14} className="animate-spin" /> : t("apply")}
         </button>
       </div>
       {error && <p className="mt-1.5 text-xs font-medium text-red-600">{error}</p>}

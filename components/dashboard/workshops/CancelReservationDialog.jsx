@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import Button from "@/components/ui/Button";
+import { useTranslations } from "next-intl";
 
 /**
  * Deposits are non-refundable by default — the client wants that relaxed
@@ -13,6 +14,7 @@ import Button from "@/components/ui/Button";
  * @param {{ reservation: object|null, onClose: () => void, onConfirm: (args: { reason: string, refundDeposit: boolean }) => void, loading: boolean }} props
  */
 export function CancelReservationDialog({ reservation, onClose, onConfirm, loading, formationMode = false }) {
+  const t = useTranslations("dashboardWorkshops.cancelDialog");
   const [refundDeposit, setRefundDeposit] = useState(false);
   const [reason, setReason] = useState("");
 
@@ -41,7 +43,7 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
     >
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-gray-dark">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white">Annuler la réservation</h2>
+          <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t("title")}</h2>
           <button type="button" onClick={handleClose} className="text-gray-400 hover:text-gray-600">
             <X size={18} />
           </button>
@@ -60,31 +62,31 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
           />
           <span>
             <span className="font-medium text-gray-800 dark:text-white">
-              {formationMode ? "Rembourser le montant payé à titre exceptionnel" : "Rembourser l'acompte à titre exceptionnel"}
+              {formationMode ? t("refundFull") : t("refundDeposit")}
             </span>
             <span className="mt-0.5 block text-xs text-gray-400">
-              Réservé aux cas exceptionnels validés par un administrateur. Par défaut, le paiement n'est jamais remboursé.
+              {t("refundHint")}
             </span>
           </span>
         </label>
 
         <div className="mt-3">
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-600">
-            Motif {reasonRequired && <span className="text-red-400">*</span>}
+            {t("reasonLabel")} {reasonRequired && <span className="text-red-400">*</span>}
           </label>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={2}
-            placeholder={reasonRequired ? "Obligatoire pour justifier le remboursement…" : "Optionnel"}
+            placeholder={reasonRequired ? t("reasonRequired") : t("reasonOptional")}
             className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           />
         </div>
 
         <p className="mt-3 text-xs text-gray-400">
           {refundDeposit
-            ? `${formationMode ? "Le montant payé" : "L'acompte versé"} sera remboursé via Stripe.`
-            : `${formationMode ? "Le montant payé" : "L'acompte versé"} ne sera pas remboursé.`}
+            ? `${formationMode ? t("fullRefunded") : t("depositRefunded")}`
+            : `${formationMode ? t("fullNotRefunded") : t("depositNotRefunded")}`}
         </p>
 
         <div className="mt-5 flex justify-end gap-2">
@@ -93,10 +95,10 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
             onClick={handleClose}
             className="flex h-9 items-center rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
           >
-            Retour
+            {t("back")}
           </button>
           <Button onClick={handleConfirm} disabled={!canConfirm || loading} className="!bg-red-600 hover:!bg-red-700">
-            {loading ? "Annulation…" : "Confirmer l'annulation"}
+            {loading ? t("cancelling") : t("confirm")}
           </Button>
         </div>
       </div>

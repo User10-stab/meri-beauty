@@ -6,6 +6,7 @@ import { X, Loader2, User, Mail, Phone, Globe, FileText } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { PhotoUpload } from "@/components/ui/PhotoUpload";
 import { createAnimator, updateAnimator } from "@/actions/workshops/create-animator";
+import { useTranslations } from "next-intl";
 
 function InstagramIcon({ className = "w-4 h-4" }) {
   return (
@@ -41,6 +42,7 @@ function ModalField({ label, children, required = false }) {
 }
 
 export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
+  const t = useTranslations("dashboardWorkshops.animators.modal");
   const isEditing = !!animator;
   const [loading, startLoading] = useTransition();
   const [form, setForm] = useState({
@@ -101,7 +103,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
         onClose();
       } else {
         setErrors(result.errors ?? {});
-        toast.error(result.message || "Une erreur est survenue.");
+        toast.error(result.message || t("errorGeneric"));
       }
     });
   }
@@ -116,10 +118,10 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
           <div>
             <h2 className="text-base font-semibold text-gray-900">
-              {isEditing ? "Modifier l'animateur" : "Nouvel animateur externe"}
+              {isEditing ? t("editTitle") : t("newTitle")}
             </h2>
             <p className="text-xs text-gray-500">
-              {isEditing ? "Modifier les informations de l'animateur" : "Ajouter un nouvel animateur externe pour vos workshops"}
+              {isEditing ? t("editSubtitle") : t("newSubtitle")}
             </p>
           </div>
           <button
@@ -135,7 +137,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
         <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5 max-h-[75vh] overflow-y-auto">
           {/* Avatar upload */}
           <div className="flex justify-center py-2">
-            <ModalField label="Photo de profil">
+            <ModalField label={t("avatarLabel")}>
               <PhotoUpload
                 value={form.avatar}
                 onChange={(url) => setForm((prev) => ({ ...prev, avatar: url }))}
@@ -146,7 +148,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
           </div>
 
           {/* Name */}
-          <ModalField label="Nom complet" required>
+          <ModalField label={t("nameLabel")} required>
             <div className="relative">
               <User size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -155,7 +157,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
                 value={form.name}
                 onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                 className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                placeholder="ex. Jean Dupont"
+                placeholder={t("namePlaceholder")}
               />
             </div>
             <FieldError message={errors.name} />
@@ -163,7 +165,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* Email */}
-            <ModalField label="Email">
+            <ModalField label={t("emailLabel")}>
               <div className="relative">
                 <Mail size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -171,14 +173,14 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
                   value={form.email}
                   onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
                   className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                  placeholder="jean.dupont@example.com"
+                  placeholder={t("emailPlaceholder")}
                 />
               </div>
               <FieldError message={errors.email} />
             </ModalField>
 
             {/* Phone */}
-            <ModalField label="Téléphone">
+            <ModalField label={t("phoneLabel")}>
               <div className="relative">
                 <Phone size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -186,7 +188,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
                   value={form.phone}
                   onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
                   className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                  placeholder="ex. 06 12 34 56 78"
+                  placeholder={t("phonePlaceholder")}
                 />
               </div>
               <FieldError message={errors.phone} />
@@ -194,14 +196,14 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
           </div>
 
           {/* Bio */}
-          <ModalField label="Biographie / Présentation">
+          <ModalField label={t("bioLabel")}>
             <div className="relative">
               <FileText size={14} className="pointer-events-none absolute left-3 top-3 text-gray-400" />
               <textarea
                 value={form.bio}
                 onChange={(e) => setForm((prev) => ({ ...prev, bio: e.target.value }))}
                 className="w-full rounded-lg border border-gray-200 pl-8 pr-3 py-2 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100 min-h-[80px] resize-none"
-                placeholder="Décrivez l'expérience et la spécialité de l'animateur..."
+                placeholder={t("bioPlaceholder")}
               />
             </div>
             <FieldError message={errors.bio} />
@@ -209,10 +211,10 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
 
           {/* Website & Socials */}
           <div className="space-y-3 pt-2 border-t border-gray-100">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">Liens & Réseaux Sociaux</h4>
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">{t("linksSection")}</h4>
 
             {/* Website */}
-            <ModalField label="Site Web">
+            <ModalField label={t("websiteLabel")}>
               <div className="relative">
                 <Globe size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
@@ -220,7 +222,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
                   value={form.website}
                   onChange={(e) => setForm((prev) => ({ ...prev, website: e.target.value }))}
                   className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                  placeholder="https://www.jeandupont.com"
+                  placeholder={t("websitePlaceholder")}
                 />
               </div>
               <FieldError message={errors.website} />
@@ -228,7 +230,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {/* Instagram */}
-              <ModalField label="Instagram (Lien)">
+              <ModalField label={t("instagramLabel")}>
                 <div className="relative">
                   <InstagramIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-3.5 w-3.5" />
                   <input
@@ -236,14 +238,14 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
                     value={form.instagram}
                     onChange={(e) => setForm((prev) => ({ ...prev, instagram: e.target.value }))}
                     className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                    placeholder="https://instagram.com/nom"
+                    placeholder={t("instagramPlaceholder")}
                   />
                 </div>
                 <FieldError message={errors.instagram} />
               </ModalField>
 
               {/* Facebook */}
-              <ModalField label="Facebook (Lien)">
+              <ModalField label={t("facebookLabel")}>
                 <div className="relative">
                   <FacebookIcon className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-3.5 w-3.5" />
                   <input
@@ -251,7 +253,7 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
                     value={form.facebook}
                     onChange={(e) => setForm((prev) => ({ ...prev, facebook: e.target.value }))}
                     className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                    placeholder="https://facebook.com/nom"
+                    placeholder={t("facebookPlaceholder")}
                   />
                 </div>
                 <FieldError message={errors.facebook} />
@@ -266,11 +268,11 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
               onClick={onClose}
               className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              Annuler
+              {t("cancel")}
             </button>
             <Button type="submit" disabled={loading} className="bg-[#2f3a2e]">
               {loading ? <Loader2 size={15} className="animate-spin mr-1.5" /> : null}
-              {isEditing ? "Mettre à jour" : "Créer l'animateur"}
+              {isEditing ? t("update") : t("create")}
             </Button>
           </div>
         </form>

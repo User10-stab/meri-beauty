@@ -1,9 +1,13 @@
 import { getCart } from "@/actions/boutique/cart";
 import { CartPageClient } from "@/components/boutique/CartPageClient";
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Mon panier – Meri Beauty" };
+export async function generateMetadata() {
+  const t = await getTranslations("boutique.metadata");
+  return { title: t("cartPage") };
+}
 
 export default async function CartPage() {
   const result = await getCart();

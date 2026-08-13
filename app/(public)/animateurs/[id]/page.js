@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getTranslations, getLocale } from "next-intl/server";
 import { getPublicAnimatorById } from "@/actions/workshops/get-public-animators";
+import { toIntlLocale } from "@/lib/intl-locale";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
+  const t = await getTranslations("animateurs");
   const result = await getPublicAnimatorById(id);
   const animator = result.data;
 
   if (!animator) {
-    return { title: "Animateur introuvable — Meri Beauty" };
+    return { title: t("metadataNotFound") };
   }
 
   return {
@@ -17,30 +20,30 @@ export async function generateMetadata({ params }) {
   };
 }
 
-function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-}
-
-function formatTime(dateStr) {
-  return new Date(dateStr).toLocaleTimeString("fr-FR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export default async function AnimatorDetailPage({ params }) {
   const { id } = await params;
+  const [t, locale] = await Promise.all([getTranslations("animateurs"), getLocale()]);
+  const intlLocale = toIntlLocale(locale);
   const result = await getPublicAnimatorById(id);
   const animator = result.data;
 
   if (!animator) {
     notFound();
   }
+
+  const formatDate = (dateStr) =>
+    new Date(dateStr).toLocaleDateString(intlLocale, {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+
+  const formatTime = (dateStr) =>
+    new Date(dateStr).toLocaleTimeString(intlLocale, {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
   return (
     <>
@@ -74,7 +77,7 @@ export default async function AnimatorDetailPage({ params }) {
               <div className="mb-4 inline-flex items-center gap-3">
                 <span className="h-px w-8 bg-gold" />
                 <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">
-                  Animateur
+                  {t("detailEyebrow")}
                 </span>
               </div>
               <h1 className="text-[2.4rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3rem] lg:text-[3.6rem]">
@@ -111,7 +114,7 @@ export default async function AnimatorDetailPage({ params }) {
                       <circle cx="12" cy="12" r="9" />
                       <path d="M2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" />
                     </svg>
-                    Site web
+                    {t("website")}
                   </a>
                 )}
                 {animator.instagram && (
@@ -124,7 +127,7 @@ export default async function AnimatorDetailPage({ params }) {
                     <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
                       <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z" />
                     </svg>
-                    Instagram
+                    {t("instagram")}
                   </a>
                 )}
               </div>
@@ -141,7 +144,7 @@ export default async function AnimatorDetailPage({ params }) {
               <div className="mb-8 inline-flex items-center gap-3">
                 <span className="h-px w-6 bg-gold" />
                 <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
-                  Ses activités ({animator.activities.length})
+                  {t("activitiesTitle", { count: animator.activities.length })}
                 </h2>
               </div>
 
@@ -164,7 +167,7 @@ export default async function AnimatorDetailPage({ params }) {
                         ) : (
                           <div className="flex h-full w-full items-center justify-center">
                             <span className="text-4xl font-bold text-gold/30">
-                              {activity.type === "WORKSHOP" ? "W" : "É"}
+                              {activity.type === "WORKSHOP" ? t("activityLetterWorkshop") : t("activityLetterEvent")}
                             </span>
                           </div>
                         )}
@@ -176,7 +179,7 @@ export default async function AnimatorDetailPage({ params }) {
                               : "bg-sky-100 text-sky-900"
                           }`}
                         >
-                          {activity.type === "WORKSHOP" ? "Atelier" : "Événement"}
+                          {activity.type === "WORKSHOP" ? t("typeWorkshop") : t("typeEvent")}
                         </span>
                       </div>
 
@@ -193,7 +196,7 @@ export default async function AnimatorDetailPage({ params }) {
                           )}
                           {activity.price > 0 && (
                             <span className="font-semibold text-gold">
-                              {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(activity.price)}
+                              {new Intl.NumberFormat(intlLocale, { style: "currency", currency: "EUR" }).format(activity.price)}
                             </span>
                           )}
                         </div>
@@ -205,9 +208,9 @@ export default async function AnimatorDetailPage({ params }) {
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <h2 className="text-xl font-bold text-ink">Aucune activité publiée</h2>
+              <h2 className="text-xl font-bold text-ink">{t("noActivitiesTitle")}</h2>
               <p className="mt-2 text-ink/50">
-                Cet animateur n&apos;a pas encore d&apos;activité programmée.
+                {t("noActivitiesDesc")}
               </p>
             </div>
           )}
@@ -221,7 +224,7 @@ export default async function AnimatorDetailPage({ params }) {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
                 <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Tous les animateurs
+              {t("backToAll")}
             </Link>
           </div>
         </div>

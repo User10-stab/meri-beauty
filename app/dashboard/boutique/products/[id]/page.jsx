@@ -3,12 +3,16 @@ import { requireAdmin } from "@/lib/route-protection";
 import { getProductById } from "@/actions/boutique/products";
 import { getBrands } from "@/actions/boutique/brands";
 import { ProductEditor } from "@/components/dashboard/boutique/ProductEditor";
-
-export const metadata = {
-  title: "Modifier le produit — Boutique — Dashboard",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata() {
+  const t = await getTranslations("dashboardBoutique.productEditor");
+  return {
+    title: t("editMetadataTitle"),
+  };
+}
 
 export default async function EditProductPage({ params }) {
   await requireAdmin();

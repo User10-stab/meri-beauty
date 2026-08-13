@@ -1,4 +1,5 @@
 import { withSentryConfig } from "@sentry/nextjs";
+import createNextIntlPlugin from "next-intl/plugin";
 
 // const CSP = [
 //   "default-src 'self'",
@@ -102,7 +103,8 @@ const nextConfig = {
   },
 };
  
-export default nextConfig;
+const withNextIntl = createNextIntlPlugin("./i18n/request.js");
+export default withNextIntl(nextConfig);
 
 
 

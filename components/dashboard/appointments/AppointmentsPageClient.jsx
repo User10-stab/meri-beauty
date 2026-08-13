@@ -1,23 +1,17 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Search, Loader2, CalendarX, Star } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
-import { confirmAppointment, rejectAppointment, completeAppointment } from "@/actions/appointment/manage-appointment";
-
-const STATUS_LABEL = {
-  PENDING: "En attente",
-  CONFIRMED: "Confirmé",
-  COMPLETED: "Terminé",
-  CANCELLED: "Annulé",
-  NO_SHOW: "Absence",
-};
+import { acceptAppointment, confirmAppointment, rejectAppointment, completeAppointment } from "@/actions/appointment/manage-appointment";
 
 const STATUS_STYLE = {
   PENDING: "bg-amber-50 text-amber-700 border-amber-200",
+  ACCEPTED: "bg-blue-50 text-blue-700 border-blue-200",
   CONFIRMED: "bg-emerald-50 text-emerald-700 border-emerald-200",
   COMPLETED: "bg-gray-50 text-gray-600 border-gray-200",
   CANCELLED: "bg-red-50 text-red-600 border-red-200",
@@ -45,6 +39,7 @@ function RatingStars({ rating }) {
 }
 
 export function AppointmentsPageClient({ initialAppointments, staffOptions, showStaffFilter }) {
+  const t = useTranslations();
   const [appointments, setAppointments] = useState(initialAppointments);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -54,6 +49,15 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [isPending, startTransition] = useTransition();
   const [rowLoadingId, setRowLoadingId] = useState(null);
+
+  const STATUS_LABEL = {
+    PENDING: t("appointmentStatus.pending"),
+    ACCEPTED: t("appointmentStatus.accepted"),
+    CONFIRMED: t("appointmentStatus.confirmed"),
+    COMPLETED: t("appointmentStatus.completed"),
+    CANCELLED: t("appointmentStatus.cancelled"),
+    NO_SHOW: t("appointmentStatus.noShow"),
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -90,9 +94,9 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     refetch({});
   }
 
-  async function handleConfirm(appointmentId) {
+  async function handleAccept(appointmentId) {
     setRowLoadingId(appointmentId);
-    const result = await confirmAppointment(appointmentId);
+    const result = await acceptAppointment(appointmentId);
     setRowLoadingId(null);
     if (result.success) {
       toast.success(result.message);
@@ -155,7 +159,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher un client…"
+            placeholder={t("appointmentTable.searchPlaceholder")}
             className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           />
         </form>
@@ -168,7 +172,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
           }}
           className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
         >
-          <option value="">Tous les statuts</option>
+          <option value="">{t("appointmentTable.allStatuses")}</option>
           {Object.entries(STATUS_LABEL).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
@@ -183,7 +187,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
             }}
             className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
-            <option value="">Toute l'équipe</option>
+            <option value="">{t("dashboard.allTeam")}</option>
             {staffOptions.map((s) => (
               <option key={s.id} value={s.id}>{s.fullName}</option>
             ))}
@@ -196,7 +200,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
             <CalendarX size={22} className="text-gray-300" />
           </div>
-          <p className="font-medium text-gray-700">Aucun rendez-vous ne correspond à votre recherche</p>
+          <p className="font-medium text-gray-700">{t("appointmentTable.noResults")}</p>
         </div>
       ) : (
         <div className={isPending ? "opacity-60 transition-opacity" : "transition-opacity"}>
@@ -260,11 +264,11 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => handleConfirm(a.id)}
+                          onClick={() => handleAccept(a.id)}
                           disabled={rowLoadingId === a.id}
                           className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
                         >
-                          {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Confirmer"}
+                          {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Accepter"}
                         </button>
                         <button
                           type="button"
@@ -272,9 +276,11 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                           disabled={rowLoadingId === a.id}
                           className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
                         >
-                          Refuser
+                          {t("appointmentActions.reject")}
                         </button>
                       </div>
+                    ) : a.status === "ACCEPTED" ? (
+                      <span className="text-xs text-gray-400">En attente client</span>
                     ) : a.status === "CONFIRMED" ? (
                       <button
                         type="button"
@@ -286,7 +292,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         disabled={rowLoadingId === a.id}
                         className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
                       >
-                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer"}
+                        {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : t("appointmentActions.complete")}
                       </button>
                     ) : (
                       <span className="text-gray-300">—</span>
@@ -301,9 +307,9 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
 
       <ConfirmDialog
         open={!!toReject}
-        title="Refuser ce rendez-vous ?"
-        message={toReject ? `Le rendez-vous de ${toReject.customer?.fullName} sera annulé.` : ""}
-        confirmLabel="Refuser"
+        title={t("appointmentTable.rejectConfirmTitle")}
+        message={toReject ? t("appointmentTable.rejectConfirmMessage", { name: toReject.customer?.fullName }) : ""}
+        confirmLabel={t("appointmentActions.reject")}
         danger
         loading={isPending}
         onConfirm={handleReject}
@@ -318,16 +324,16 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
           onClick={(e) => { if (e.target === e.currentTarget) setToComplete(null); }}
         >
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="text-base font-semibold text-gray-800">Encaisser le solde restant</h3>
+            <h3 className="text-base font-semibold text-gray-800">{t("appointmentPayment.collectBalance")}</h3>
             <p className="mt-1.5 text-sm text-gray-500">
-              {toComplete.customer?.fullName} doit encore régler{" "}
+              {toComplete.customer?.fullName} {t("appointmentPayment.stillDue")}{" "}
               <span className="font-medium text-gray-700">
                 €{(toComplete.payment.totalAmount - toComplete.payment.paidAmount).toFixed(2)}
               </span>{" "}
               sur place. Une facture sera émise pour le montant total dès l'encaissement.
             </p>
 
-            <label className="mt-4 block text-xs font-medium text-gray-500">Mode de paiement</label>
+            <label className="mt-4 block text-xs font-medium text-gray-500">{t("appointmentPayment.paymentMethod")}</label>
             <select
               value={completeMethod}
               onChange={(e) => setCompleteMethod(e.target.value)}
@@ -344,7 +350,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                 disabled={isPending}
                 className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
               >
-                Annuler
+                {t("common.cancel")}
               </button>
               <button
                 type="button"

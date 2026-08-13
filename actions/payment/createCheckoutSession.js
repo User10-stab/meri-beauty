@@ -53,25 +53,16 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   const normalizedEmail = customerInfo.email?.trim().toLowerCase();
   const normalizedPhone = customerInfo.phone?.trim();
 
-  let user = await prisma.user.findFirst({
-    where: {
-      OR: [
-        ...(normalizedEmail ? [{ email: normalizedEmail }] : []),
-        ...(normalizedPhone ? [{ phone: normalizedPhone }] : []),
-      ],
-      isDeleted: false,
-    },
-  });
-
-  if (user) {
-    return { user, isNewUser: false };
-  }
-
+  // Guest flow — always attempt to create a new account. Never silently
+  // adopt an existing account based on an unauthenticated email/phone
+  // lookup: knowing someone's email is not proof of identity, and doing
+  // so would let anyone who knows a customer's address pollute or hijack
+  // that account.
   const temporaryPassword = randomBytes(9).toString("base64url");
   const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
 
   try {
-    user = await prisma.user.create({
+    const user = await prisma.user.create({
       data: {
         fullName: customerInfo.fullName?.trim() || "Client",
         email: normalizedEmail || `${Date.now()}@guest.local`,
@@ -83,12 +74,15 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         ...buildNewsletterConsentUpdate(Boolean(customerInfo.newsletterSubscribed ?? false), "appointment_booking"),
       },
     });
+
+    return { user, isNewUser: true };
   } catch (createError) {
     // P2002 = unique constraint violation — another concurrent request
-    // already created this user between our findFirst and this create.
-    // Fall back to fetching the already-existing record instead of crashing.
+    // already created this user between our attempt and now.
+    // Fall back to the existing record. No autologin token is issued
+    // because this account was not created by *this* request.
     if (createError?.code === "P2002") {
-      user = await prisma.user.findFirst({
+      const existingUser = await prisma.user.findFirst({
         where: {
           OR: [
             ...(normalizedEmail ? [{ email: normalizedEmail }] : []),
@@ -97,18 +91,15 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         },
       });
 
-      if (!user) {
-        // Truly unexpected — propagate so the outer catch handles it
+      if (!existingUser) {
         throw createError;
       }
 
-      return { user, isNewUser: false };
+      return { user: existingUser, isNewUser: false };
     }
 
     throw createError;
   }
-
-  return { user, isNewUser: true };
 }
 
 /**

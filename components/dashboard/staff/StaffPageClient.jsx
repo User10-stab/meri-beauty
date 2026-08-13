@@ -6,6 +6,7 @@ import { UserPlus } from "lucide-react";
 import { StaffTable } from "./StaffTable";
 import { CreateStaffModal } from "./CreateStaffModal";
 import Button from "@/components/ui/Button";
+import { useTranslations } from "next-intl";
 
 /**
  * Client shell for the auto-entrepreneur page.
@@ -14,6 +15,7 @@ import Button from "@/components/ui/Button";
  */
 export function StaffPageClient({ initialData, services }) {
   const router = useRouter();
+  const t = useTranslations("dashboard.staff.autoEntrepreneur");
   const [showCreate, setShowCreate] = useState(false);
 
   const handleMutated = useCallback(() => {
@@ -30,7 +32,7 @@ export function StaffPageClient({ initialData, services }) {
       {/* Action bar */}
       <div className="flex justify-end">
         <Button  onClick={() => setShowCreate(true)}>
-          Nouveau professionnel
+          {t("newProfessional")}
         </Button>
         {/* <button
           type="button"

@@ -5,22 +5,24 @@ import { toast } from "sonner";
 import { X, Loader2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { recordStockMovement } from "@/actions/boutique/stock";
-
-const TYPES = [
-  { value: "RESTOCK", label: "Réapprovisionnement", hint: "Nouvelle livraison reçue — augmente le stock", sign: "+" },
-  { value: "LOSS", label: "Perte / casse", hint: "Produit cassé, périmé ou perdu — diminue le stock", sign: "−" },
-  { value: "SALON_USAGE", label: "Utilisation en prestation", hint: "Produit pris sur le stock de vente pour un soin — diminue le stock", sign: "−" },
-  { value: "ADJUSTMENT", label: "Correction manuelle", hint: "Écart constaté sans cause identifiée — diminue le stock", sign: "−" },
-];
+import { useTranslations } from "next-intl";
 
 /**
  * @param {{ variant: object|null, onClose: () => void, onAdjusted: () => void }} props
  */
 export function StockAdjustDialog({ variant, onClose, onAdjusted }) {
+  const t = useTranslations("dashboardBoutique.stock.adjustDialog");
   const [type, setType] = useState("RESTOCK");
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
   const [loading, startLoading] = useTransition();
+
+  const TYPES = [
+    { value: "RESTOCK", label: t("types.RESTOCK"), hint: t("types.RESTOCK_hint"), sign: "+" },
+    { value: "LOSS", label: t("types.LOSS"), hint: t("types.LOSS_hint"), sign: "−" },
+    { value: "SALON_USAGE", label: t("types.SALON_USAGE"), hint: t("types.SALON_USAGE_hint"), sign: "−" },
+    { value: "ADJUSTMENT", label: t("types.ADJUSTMENT"), hint: t("types.ADJUSTMENT_hint"), sign: "−" },
+  ];
 
   useEffect(() => {
     if (!variant) return;
@@ -61,18 +63,18 @@ export function StockAdjustDialog({ variant, onClose, onAdjusted }) {
     >
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">Ajuster le stock</h2>
+          <h2 className="text-base font-semibold text-gray-900">{t("title")}</h2>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={18} />
           </button>
         </div>
         <p className="mb-5 text-sm text-gray-500">
-          {variant.product.name} — {variant.name} · <span className="font-medium">{variant.stockQuantity}</span> en stock
+          {variant.product.name} — {variant.name} · <span className="font-medium">{variant.stockQuantity}</span> {t("currentStock")}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Type de mouvement</label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">{t("movementType")}</label>
             <div className="mt-1.5 space-y-2">
               {TYPES.map((t) => (
                 <label
@@ -92,7 +94,7 @@ export function StockAdjustDialog({ variant, onClose, onAdjusted }) {
           </div>
 
           <div>
-            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Quantité</label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">{t("quantity")}</label>
             <div className="relative mt-1.5">
               <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 font-medium text-gray-400">
                 {selected.sign}
@@ -108,19 +110,19 @@ export function StockAdjustDialog({ variant, onClose, onAdjusted }) {
             </div>
             {projected !== null && (
               <p className={`mt-1.5 text-xs ${projected < 0 ? "font-medium text-red-500" : "text-gray-400"}`}>
-                Nouveau stock : {projected}
-                {projected < 0 && " — impossible, le stock ne peut pas être négatif"}
+                {t("newStock", { stock: projected })}
+                {projected < 0 && t("cannotBeNegative")}
               </p>
             )}
           </div>
 
           <div>
-            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Motif (optionnel)</label>
+            <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">{t("reasonLabel")}</label>
             <input
               type="text"
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Livraison du 12 août, casse en réserve…"
+              placeholder={t("reasonPlaceholder")}
               className="mt-1.5 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
             />
           </div>
@@ -131,11 +133,11 @@ export function StockAdjustDialog({ variant, onClose, onAdjusted }) {
               onClick={onClose}
               className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
-              Annuler
+              {t("cancel")}
             </button>
             <Button type="submit" disabled={loading || (projected !== null && projected < 0)}>
               {loading && <Loader2 size={14} className="animate-spin" />}
-              Confirmer
+              {t("confirm")}
             </Button>
           </div>
         </form>

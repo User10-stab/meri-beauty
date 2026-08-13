@@ -1,33 +1,31 @@
 import { CalendarDays, Euro, PackageX, UserPlus } from "lucide-react";
 import { getDashboardStats } from "@/actions/dashboard/get-dashboard-stats";
+import { getTranslations, getLocale } from "next-intl/server";
+import { toIntlLocale } from "@/lib/intl-locale";
 
 export const dynamic = "force-dynamic";
 
-function formatEuro(value) {
-  return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(value);
+function formatEuro(value, locale = "fr-BE") {
+  return new Intl.NumberFormat(locale, { style: "currency", currency: "EUR" }).format(value);
 }
 
-function formatDateTime(iso) {
-  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+function formatDateTime(iso, locale = "fr-FR") {
+  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
 
-function formatDate(iso) {
-  return new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
+function formatDate(iso, locale = "fr-FR") {
+  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
 }
 
-const ORDER_STATUS_LABEL = {
-  PENDING_PAYMENT: "En attente de paiement",
-  PENDING_PICKUP: "En attente de retrait",
-  PROCESSING: "En traitement",
-  PAID: "Payée",
-  READY_FOR_PICKUP: "Prête pour retrait",
-  SHIPPED: "Expédiée",
-  COMPLETED: "Terminée",
-  CANCELLED: "Annulée",
-  EXPIRED: "Expirée",
-};
+function weekdayShort(iso, locale = "fr-FR") {
+  return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(new Date(iso));
+}
 
 export default async function Home() {
+  const t = await getTranslations();
+  const intlLocale = toIntlLocale(await getLocale());
+  const numberLocale = intlLocale;
+  
   const result = await getDashboardStats();
 
   if (!result.success) {
@@ -51,22 +49,22 @@ export default async function Home() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           icon={<Euro size={20} />}
-          label="Chiffre d'affaires ce mois-ci"
-          value={formatEuro(data.revenueThisMonth)}
+          label={t("dashboard.stats.revenueThisMonth")}
+          value={formatEuro(data.revenueThisMonth, numberLocale)}
         />
         <StatCard
           icon={<CalendarDays size={20} />}
-          label="Rendez-vous aujourd'hui"
+          label={t("dashboard.stats.appointmentsToday")}
           value={data.appointmentsToday}
         />
         <StatCard
           icon={<UserPlus size={20} />}
-          label="Nouveaux clients ce mois-ci"
+          label={t("dashboard.stats.newCustomersThisMonth")}
           value={data.newCustomersThisMonth}
         />
         <StatCard
           icon={<PackageX size={20} />}
-          label="Produits en stock bas"
+          label={t("dashboard.stats.lowStockProducts")}
           value={data.lowStockCount}
           warn={data.lowStockCount > 0}
         />
@@ -76,7 +74,7 @@ export default async function Home() {
         {/* ── Revenue trend ────────────────────────────────────────────── */}
         <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card xl:col-span-2">
           <h2 className="mb-5 text-lg font-bold text-dark dark:text-white">
-            Revenus des 7 derniers jours
+            {t("dashboard.charts.revenueLast7Days")}
           </h2>
           <div className="flex h-48 gap-3">
             {data.revenueTrend.map((day) => {
@@ -84,7 +82,7 @@ export default async function Home() {
               return (
                 <div key={day.date} className="flex flex-1 flex-col items-center gap-2">
                   <span className="text-xs font-medium text-gray-500 dark:text-dark-6">
-                    {day.total > 0 ? formatEuro(day.total) : ""}
+                    {day.total > 0 ? formatEuro(day.total, numberLocale) : ""}
                   </span>
                   <div className="flex w-full flex-1 items-end">
                     <div
@@ -93,7 +91,7 @@ export default async function Home() {
                     />
                   </div>
                   <span className="text-xs text-gray-400">
-                    {new Intl.DateTimeFormat("fr-FR", { weekday: "short" }).format(new Date(day.date))}
+                    {weekdayShort(day.date, intlLocale)}
                   </span>
                 </div>
               );
@@ -103,9 +101,9 @@ export default async function Home() {
 
         {/* ── Low stock alerts ─────────────────────────────────────────── */}
         <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-          <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">Stock bas</h2>
+          <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">{t("dashboard.alerts.lowStock")}</h2>
           {data.lowStockItems.length === 0 ? (
-            <p className="text-sm text-gray-400">Aucune alerte de stock.</p>
+            <p className="text-sm text-gray-400">{t("dashboard.noStockAlerts")}</p>
           ) : (
             <ul className="space-y-3">
               {data.lowStockItems.map((item) => (
@@ -127,9 +125,9 @@ export default async function Home() {
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* ── Upcoming appointments ────────────────────────────────────── */}
         <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-          <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">Prochains rendez-vous</h2>
+          <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">{t("dashboard.alerts.upcomingAppointments")}</h2>
           {data.upcomingAppointments.length === 0 ? (
-            <p className="text-sm text-gray-400">Aucun rendez-vous à venir.</p>
+            <p className="text-sm text-gray-400">{t("dashboard.noUpcomingAppointments")}</p>
           ) : (
             <ul className="divide-y divide-stroke dark:divide-dark-3">
               {data.upcomingAppointments.map((a) => (
@@ -139,7 +137,7 @@ export default async function Home() {
                     <p className="truncate text-xs text-gray-400">{a.serviceName} — {a.staffName}</p>
                   </div>
                   <span className="ml-2 shrink-0 text-xs font-medium text-gray-500 dark:text-dark-6">
-                    {formatDateTime(a.startTime)}
+                    {formatDateTime(a.startTime, intlLocale)}
                   </span>
                 </li>
               ))}
@@ -149,23 +147,23 @@ export default async function Home() {
 
         {/* ── Recent orders ────────────────────────────────────────────── */}
         <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-          <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">Dernières commandes</h2>
+          <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">{t("dashboard.alerts.recentOrders")}</h2>
           {data.recentOrders.length === 0 ? (
-            <p className="text-sm text-gray-400">Aucune commande pour le moment.</p>
+            <p className="text-sm text-gray-400">{t("dashboard.noOrders")}</p>
           ) : (
             <ul className="divide-y divide-stroke dark:divide-dark-3">
               {data.recentOrders.map((o) => (
                 <li key={o.id} className="flex items-center justify-between py-3 text-sm first:pt-0 last:pb-0">
                   <div className="min-w-0">
                     <p className="truncate font-medium text-dark dark:text-white">
-                      Commande n°{o.orderNumber} — {o.customerName}
+                      {t("orders.order")} #{o.orderNumber} — {o.customerName}
                     </p>
                     <p className="truncate text-xs text-gray-400">
-                      {ORDER_STATUS_LABEL[o.status] ?? o.status} · {formatDate(o.createdAt)}
+                      {t(`orderStatus.${o.status.toLowerCase()}`) ?? o.status} · {formatDate(o.createdAt, intlLocale)}
                     </p>
                   </div>
                   <span className="ml-2 shrink-0 font-medium text-dark dark:text-white">
-                    {formatEuro(o.totalAmount)}
+                    {formatEuro(o.totalAmount, numberLocale)}
                   </span>
                 </li>
               ))}

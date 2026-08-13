@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useTranslations } from "next-intl";
 
 function useInView(options = {}) {
   const ref = useRef(null);
@@ -39,6 +40,7 @@ function SparkleIcon({ className = "w-6 h-6" }) {
 
 export default function FinalCTA() {
   const [ctaRef, ctaInView] = useInView();
+  const t = useTranslations("finalCta");
 
   return (
     <section className="relative w-full overflow-hidden bg-white">
@@ -98,7 +100,7 @@ export default function FinalCTA() {
         >
           <span className="h-px w-10 bg-gold/60" />
           <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gold">
-            Offrez-vous l'excellence
+            {t("eyebrow")}
           </span>
           <span className="h-px w-10 bg-gold/60" />
         </div>
@@ -109,9 +111,9 @@ export default function FinalCTA() {
             ctaInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
           }`}
         >
-          Prête à vivre un moment{" "}
+          {t("title")}{" "}
           <em className="relative font-light text-gold/95 not-italic">
-            rien qu'à vous ?
+            {t("titleEm")}
             {/* Subtle underline accent */}
             <span className="absolute inset-x-0 -bottom-1 h-[2px] bg-gradient-to-r from-transparent via-gold/50 to-transparent" />
           </em>
@@ -123,8 +125,7 @@ export default function FinalCTA() {
             ctaInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
           }`}
         >
-          Réservez votre rendez-vous en quelques clics et découvrez une expérience
-          beauté sur-mesure.
+          {t("subtitle")}
         </p>
 
         {/* CTA Button */}
@@ -139,7 +140,7 @@ export default function FinalCTA() {
             href="/reservation"
             className="group inline-flex items-center gap-3 rounded-full bg-gold px-10 py-5 text-[16px] font-semibold text-white shadow-2xl shadow-gold/40 transition-all duration-300 hover:scale-105 hover:bg-gold/95 hover:shadow-[0_0_40px_rgba(184,150,100,0.5)]"
           >
-            Réserver maintenant
+            {t("cta")}
             <svg
               viewBox="0 0 24 24"
               fill="none"

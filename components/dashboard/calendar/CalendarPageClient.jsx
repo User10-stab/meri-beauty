@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { CalendarToolbar } from "./CalendarToolbar";
 import { StaffFilterChips } from "./StaffFilterChips";
 import { WeekView } from "./WeekView";
@@ -81,6 +82,9 @@ export function CalendarPageClient({
   workingDays = [],
   isAdmin,
 }) {
+  // ── Translations ─────────────────────────────────────────────────────────
+  const t = useTranslations();
+  
   // ── State ────────────────────────────────────────────────────────────────
   const [view, setView] = useState("week"); // "day" | "week" | "month"
   const [currentDate, setCurrentDate] = useState(() => new Date());
@@ -276,11 +280,13 @@ export function CalendarPageClient({
  * Chronological list of appointments — rendered on mobile instead of a grid.
  */
 function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
+  const t = useTranslations();
+  
   if (appointments.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white py-16 text-center shadow-sm dark:border-gray-700 dark:bg-gray-dark">
         <p className="text-sm text-gray-400">
-          Aucune réservation confirmée pour cette période.
+          {t("calendarView.noReservations")}
         </p>
       </div>
     );

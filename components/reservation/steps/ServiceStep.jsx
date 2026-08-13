@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { getBookableServices } from "@/actions/reservation/get-bookable-services";
 import { Clock } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 export default function ServiceStep({ data, updateData, nextStep }) {
+  const t = useTranslations("reservationSteps");
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -27,7 +29,7 @@ export default function ServiceStep({ data, updateData, nextStep }) {
     if (result.success) {
       setServices(result.data);
     } else {
-      toast.error(result.message || "Erreur lors du chargement");
+      toast.error(result.message || t("errorLoad"));
     }
     setLoading(false);
   };
@@ -52,11 +54,11 @@ export default function ServiceStep({ data, updateData, nextStep }) {
     return (
       <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-center">
         <p className="text-lg text-gray-600">
-          Aucun service disponible pour cette catégorie
+          {t("service.noServices")}
         </p>
         {draftedServiceIds.size > 0 && (
           <p className="text-sm text-gray-400">
-            Tous les services de cette catégorie ont déjà été ajoutés à votre réservation.
+            {t("service.allAdded")}
           </p>
         )}
       </div>
@@ -67,10 +69,10 @@ export default function ServiceStep({ data, updateData, nextStep }) {
     <div>
       <div className="mb-8 text-center">
         <h2 className="text-3xl font-bold text-[#2F3A2E]">
-          Sélectionnez un service
+          {t("service.title")}
         </h2>
         <p className="mt-2 text-gray-600">
-          {data.category?.name} • {availableServices.length} service{availableServices.length > 1 ? "s" : ""} disponible{availableServices.length > 1 ? "s" : ""}
+          {t("service.subtitle", { name: data.category?.name, count: availableServices.length })}
         </p>
       </div>
 

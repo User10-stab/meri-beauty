@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { X, Printer } from "lucide-react";
 import QRCode from "qrcode";
+import { useTranslations } from "next-intl";
 
 /**
  * Printable label for a variant's barcode — mainly for internally-generated
@@ -12,6 +13,7 @@ import QRCode from "qrcode";
  * @param {{ variant: object|null, productName: string, onClose: () => void }} props
  */
 export function BarcodeLabelDialog({ variant, productName, onClose }) {
+  const t = useTranslations("dashboardBoutique.barcodeLabelDialog");
   const [qr, setQr] = useState(null);
 
   useEffect(() => {
@@ -52,7 +54,7 @@ export function BarcodeLabelDialog({ variant, productName, onClose }) {
 
       <div className="w-full max-w-xs rounded-2xl bg-white p-6 shadow-xl print:shadow-none">
         <div className="mb-4 flex items-center justify-between print:hidden">
-          <h2 className="text-base font-semibold text-gray-900">Étiquette produit</h2>
+          <h2 className="text-base font-semibold text-gray-900">{t("title")}</h2>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={18} />
           </button>
@@ -65,7 +67,7 @@ export function BarcodeLabelDialog({ variant, productName, onClose }) {
         >
           <p className="w-full truncate px-[1mm] text-[2.6mm] font-medium leading-tight text-gray-700">{productName}</p>
           <p className="w-full truncate px-[1mm] text-[2.2mm] leading-tight text-gray-500">{variant.name}</p>
-          {qr && <img src={qr} alt="QR code produit" className="my-[0.5mm] h-[24mm] w-[24mm]" />}
+          {qr && <img src={qr} alt={t("qrCodeAlt")} className="my-[0.5mm] h-[24mm] w-[24mm]" />}
           <p className="font-mono text-[2.2mm] leading-tight tracking-wide text-gray-800">{variant.barcode}</p>
         </div>
 
@@ -75,7 +77,7 @@ export function BarcodeLabelDialog({ variant, productName, onClose }) {
           className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3d4e3b] print:hidden"
         >
           <Printer size={14} />
-          Imprimer l'étiquette
+          {t("printButton")}
         </button>
       </div>
     </div>

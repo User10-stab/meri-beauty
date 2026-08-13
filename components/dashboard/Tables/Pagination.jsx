@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 /**
  * Generates a page number array with ellipsis ("...") where needed.
@@ -35,6 +36,7 @@ function buildPageRange(current, total) {
  * @param {(page: number) => void} props.onPageChange
  */
 export function Pagination({ currentPage, totalPages, onPageChange }) {
+  const t = useTranslations("dashboard.components.pagination");
   if (totalPages <= 1) return null;
 
   const pages = buildPageRange(currentPage, totalPages);
@@ -42,14 +44,14 @@ export function Pagination({ currentPage, totalPages, onPageChange }) {
   return (
     <nav
       role="navigation"
-      aria-label="Pagination"
+      aria-label={t("ariaLabel")}
       className="flex items-center gap-1 flex-wrap"
     >
       {/* Prev */}
       <PaginationButton
         onClick={() => onPageChange(currentPage - 1)}
         disabled={currentPage === 1}
-        aria-label="Go to previous page"
+        aria-label={t("previousPage")}
       >
         <ChevronLeft size={15} />
       </PaginationButton>
@@ -69,7 +71,7 @@ export function Pagination({ currentPage, totalPages, onPageChange }) {
             key={page}
             onClick={() => onPageChange(page)}
             isActive={page === currentPage}
-            aria-label={`Go to page ${page}`}
+            aria-label={t("goToPage", { page })}
             aria-current={page === currentPage ? "page" : undefined}
           >
             {page}
@@ -81,7 +83,7 @@ export function Pagination({ currentPage, totalPages, onPageChange }) {
       <PaginationButton
         onClick={() => onPageChange(currentPage + 1)}
         disabled={currentPage === totalPages}
-        aria-label="Go to next page"
+        aria-label={t("nextPage")}
       >
         <ChevronRight size={15} />
       </PaginationButton>

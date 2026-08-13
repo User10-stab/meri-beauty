@@ -3,16 +3,13 @@ import { requireAdmin } from "@/lib/route-protection";
 import { getRentalRequests } from "@/actions/rental-requests/get-rental-requests";
 import { getServices } from "@/actions/services/get-services";
 import { RentalRequestsPageClient } from "@/components/dashboard/rental-requests/RentalRequestsPageClient";
-
-export const metadata = {
-  title: "Demandes de location — Dashboard",
-  description: "Gérez les demandes de location de votre salon.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function RentalRequestsPage() {
   await requireAdmin();
+  const t = await getTranslations("dashboard.rentalRequests");
 
   const [rentalRequestsResult, servicesResult] = await Promise.all([
     getRentalRequests(),
@@ -28,27 +25,27 @@ export default async function RentalRequestsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            Demandes de location
+            {t("title")}
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Gérez les demandes de location de votre salon.
+            {t("subtitle")}
           </p>
         </div>
 
         {/* Stats strip */}
         <div className="flex items-center gap-3">
           <StatBadge
-            label="Total"
+            label={t("totalLabel")}
             value={rentalRequests.length}
             color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
           />
           <StatBadge
-            label="En attente"
+            label={t("pendingLabel")}
             value={rentalRequests.filter((r) => r.status === "PENDING").length}
             color="bg-yellow-50 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-400"
           />
           <StatBadge
-            label="Approuvées"
+            label={t("approvedLabel")}
             value={rentalRequests.filter((r) => r.status === "APPROVED").length}
             color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
           />

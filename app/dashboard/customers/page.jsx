@@ -2,17 +2,14 @@ import { Suspense } from "react";
 import { auth } from "@/auth";
 import { getCustomers } from "@/actions/customers/get-customers";
 import { CustomersPageClient } from "@/components/dashboard/customers/CustomersPageClient";
-
-export const metadata = {
-  title: "Clients — Dashboard",
-  description: "Consultez et gérez tous vos clients.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function CustomersPage() {
   const session = await auth();
   const userRole = session?.user?.role;
+  const t = await getTranslations("dashboard.customers");
 
   const customersResult = await getCustomers();
 
@@ -25,17 +22,17 @@ export default async function CustomersPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            Clients
+            {t("title")}
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Consultez et gérez tous vos clients.
+            {t("subtitle")}
           </p>
         </div>
 
         {/* Stats strip */}
         <div className="flex items-center gap-3">
           <StatBadge
-            label="Clients"
+            label={t("statsLabel")}
             value={totalCount}
             color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
           />

@@ -111,7 +111,7 @@ export async function deleteIndependentStaff(formData) {
     }),
     prisma.user.update({
       where: { id: existing.userId },
-      data: { isActive: false, isDeleted: true, deletedAt: now },
+      data: { isActive: false, isDeleted: true, deletedAt: now, sessionVersion: { increment: 1 } },
     }),
     prisma.staffService.updateMany({
       where: { staffId: id, isActive: true },

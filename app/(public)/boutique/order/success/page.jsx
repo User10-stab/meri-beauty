@@ -1,13 +1,16 @@
 import Link from "next/link";
-import { stripe } from "@/lib/stripe";
+import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { pickupQrDataUrl } from "@/lib/qrcode";
 
-export const metadata = {
-  // Deliberately neutral — this page also renders the "payment pending" and
-  // "session not found" states, where "confirmée" would be misleading.
-  title: "Votre commande – Meri Beauty",
-};
+export async function generateMetadata() {
+  const t = await getTranslations("boutique.metadata");
+  return {
+    // Deliberately neutral — this page also renders the "payment pending" and
+    // "session not found" states, where "confirmée" would be misleading.
+    title: t("orderSuccessPage"),
+  };
+}
 
 /**
  * Landing page after checkout. The Stripe webhook (or, for pay-on-site
@@ -15,17 +18,18 @@ export const metadata = {
  * only displays the outcome. Mirrors app/(public)/reservation/success.
  */
 export default async function OrderSuccessPage({ searchParams }) {
+  const t = await getTranslations();
   const { session_id: sessionId, onsite, number, code } = await searchParams;
 
   if (onsite === "1") {
     const qr = code ? await pickupQrDataUrl(code) : null;
     return (
       <Outcome
-        title="Commande confirmée"
+        title={t("boutique.orderConfirmed")}
         message={
           <>
-            Merci ! Votre commande n°{number} est confirmée.
-            {code && " Présentez ce code (ou son QR) en boutique pour la retirer et régler le paiement sur place :"}
+            {t("boutique.thankYouOrder", { number })}
+            {code && ` ${t("boutique.presentCodePickup")}`}
           </>
         }
         pickup={code ? { code, qr } : null}
@@ -69,18 +73,18 @@ export default async function OrderSuccessPage({ searchParams }) {
   if (state === "paid") {
     return (
       <Outcome
-        title="Paiement confirmé"
+        title={t("boutique.paymentConfirmed")}
         message={
           <>
-            Merci ! Votre paiement de <span className="font-semibold text-[#C8A46A]">€{details.amount}</span> a bien été reçu
+            {t("boutique.thankYouPayment", { amount: details.amount })}
             {details?.email && (
               <>
                 {" "}
-                — une confirmation a été envoyée à <span className="font-medium text-[#2F3A2E]">{details.email}</span>
+                {t("boutique.confirmationSent", { email: details.email })}
               </>
             )}
             .
-            {pickup && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
+            {pickup && ` ${t("boutique.presentCodePickupPayment")}`}
           </>
         }
         pickup={pickup}
@@ -91,16 +95,16 @@ export default async function OrderSuccessPage({ searchParams }) {
   if (state === "unpaid") {
     return (
       <Outcome
-        title="Paiement en cours"
-        message="Votre paiement est en cours de traitement. Vous recevrez un email de confirmation dès qu'il sera validé."
+        title={t("boutique.paymentProcessing")}
+        message={t("boutique.paymentProcessingDesc")}
       />
     );
   }
 
   return (
     <Outcome
-      title="Page introuvable"
-      message="Nous n'avons pas pu retrouver votre commande. Si vous venez d'effectuer un paiement, vérifiez votre boîte mail."
+      title={t("boutique.pageNotFound")}
+      message={t("boutique.couldNotFindOrder")}
     />
   );
 }
@@ -122,7 +126,7 @@ function Outcome({ title, message, pickup }) {
           <div className="mx-auto mb-10 flex w-fit flex-col items-center gap-3 border border-neutral-200 bg-white px-8 py-6">
             {pickup.qr && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={pickup.qr} alt="QR code de retrait" width={160} height={160} className="h-40 w-40" />
+              <img src={pickup.qr} alt={t("boutique.pickupCode")} width={160} height={160} className="h-40 w-40" />
             )}
             <span className="text-xl font-semibold tracking-wide text-[#2F3A2E]">{pickup.code}</span>
           </div>
@@ -133,13 +137,13 @@ function Outcome({ title, message, pickup }) {
             href="/"
             className="inline-block border border-[#2F3A2E] px-8 py-3 text-sm font-medium uppercase tracking-wider text-[#2F3A2E] transition-colors hover:bg-[#2F3A2E] hover:text-white"
           >
-            Retour à l'accueil
+            {t("boutique.backToHome")}
           </Link>
           <Link
             href="/boutique"
             className="inline-block bg-[#C8A46A] px-8 py-3 text-sm font-medium uppercase tracking-wider text-white transition-colors hover:bg-[#B8945A]"
           >
-            Continuer mes achats
+            {t("boutique.continueShopping")}
           </Link>
         </div>
       </div>

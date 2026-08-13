@@ -7,6 +7,7 @@ import { checkEmailExists } from "@/actions/shared/check-email-exists";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 import { initCustomerVerification } from "@/actions/reservation/init-customer-verification";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
+import { useTranslations } from "next-intl";
 
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ function InputIcon({ children }) {
  * entirely — ReservationForm filters it out of the STEPS array.
  */
 export default function CustomerInfoStep({ data, updateData, nextStep }) {
+  const t = useTranslations("reservationSteps");
   const [formData, setFormData] = useState(
     data.customerInfo ?? {
       fullName: "",
@@ -88,19 +90,19 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
     e.preventDefault();
 
     if (!formData.fullName.trim()) {
-      toast.error("Veuillez entrer votre nom complet");
+      toast.error(t("customer.enterFullName"));
       return;
     }
     if (!formData.email.trim() || !formData.email.includes("@")) {
-      toast.error("Veuillez entrer une adresse email valide");
+      toast.error(t("customer.enterValidEmail"));
       return;
     }
     if (isDisposableEmail(formData.email)) {
-      toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
+      toast.error(t("customer.disposableEmail"));
       return;
     }
     if (!formData.phone.trim()) {
-      toast.error("Veuillez entrer votre numéro de téléphone");
+      toast.error(t("customer.enterPhone"));
       return;
     }
 
@@ -130,7 +132,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
       }
     } catch (err) {
       console.error("[CustomerInfoStep] initCustomerVerification failed:", err);
-      toast.error("Une erreur est survenue. Veuillez réessayer.");
+      toast.error(t("customer.genericError"));
     } finally {
       setSendingVerification(false);
     }
@@ -139,12 +141,12 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
   return (
     <div className="mx-auto max-w-2xl">
       <div className="mb-8 text-center">
-        <h2 className="text-3xl font-bold text-[#2F3A2E]">Vos informations</h2>
+        <h2 className="text-3xl font-bold text-[#2F3A2E]">{t("customer.title")}</h2>
         <p className="mt-2 text-gray-600">
-          Nous aurons besoin de ces détails pour confirmer votre réservation.
+          {t("customer.subtitle")}
         </p>
         <p className="mt-1 text-sm text-gray-400">
-          Un compte sera créé automatiquement après votre réservation.
+          {t("customer.accountCreated")}
         </p>
       </div>
 
@@ -153,7 +155,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
         <div className="rounded-2xl border-2 border-gray-200 p-6 space-y-5">
 
           {/* Full name */}
-          <Field label="Nom complet" htmlFor="fullName" required>
+          <Field label={t("customer.fullName")} htmlFor="fullName" required>
             <div className="relative">
               <InputIcon><User size={18} /></InputIcon>
               <input
@@ -162,7 +164,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
                 name="fullName"
                 value={formData.fullName}
                 onChange={handleChange}
-                placeholder="Votre nom complet"
+                placeholder={t("customer.fullNamePlaceholder")}
                 className="w-full rounded-lg border-2 border-gray-200 py-3 pl-10 pr-4 transition-all focus:border-[#C8A46A] focus:outline-none"
                 required
               />
@@ -170,7 +172,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
           </Field>
 
           {/* Email */}
-          <Field label="Email" htmlFor="email" required>
+          <Field label={t("customer.email")} htmlFor="email" required>
             <div className="relative">
               <InputIcon><Mail size={18} /></InputIcon>
               <input
@@ -180,7 +182,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
                 value={formData.email}
                 onChange={handleChange}
                 onBlur={handleEmailBlur}
-                placeholder="votre.email@exemple.com"
+                placeholder={t("customer.emailPlaceholder")}
                 className={`w-full rounded-lg border-2 py-3 pl-10 pr-4 transition-all focus:outline-none ${
                   emailStatus === "exists"
                     ? "border-amber-400 focus:border-amber-500"
@@ -211,7 +213,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
           </Field>
 
           {/* Phone */}
-          <Field label="Téléphone" htmlFor="phone" required>
+          <Field label={t("customer.phone")} htmlFor="phone" required>
             <div className="relative">
               <InputIcon><Phone size={18} /></InputIcon>
               <input
@@ -220,7 +222,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
-                placeholder="+33 6 12 34 56 78"
+                placeholder={t("customer.phonePlaceholder")}
                 className="w-full rounded-lg border-2 border-gray-200 py-3 pl-10 pr-4 transition-all focus:border-[#C8A46A] focus:outline-none"
                 required
               />
@@ -238,7 +240,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
                 className="mt-1 h-5 w-5 rounded border-gray-300 text-[#C8A46A] focus:ring-[#C8A46A]"
               />
               <span className="text-sm text-gray-600">
-                Je souhaite recevoir des offres exclusives et des actualités par email
+                {t("customer.newsletter")}
               </span>
             </label>
           </div>
@@ -246,7 +248,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
 
         {/* ── Notes ─────────────────────────────────────────────── */}
         <div className="rounded-2xl border-2 border-gray-200 p-6">
-          <Field label="Notes" htmlFor="notes">
+          <Field label={t("customer.notes")} htmlFor="notes">
             <div className="relative">
               <div className="pointer-events-none absolute left-3 top-3 text-gray-400">
                 <MessageSquare size={18} />
@@ -255,7 +257,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
                 id="notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Des demandes particulières ? Faites-le nous savoir..."
+                placeholder={t("customer.notesPlaceholder")}
                 rows={4}
                 className="w-full rounded-lg border-2 border-gray-200 py-3 pl-10 pr-4 transition-all focus:border-[#C8A46A] focus:outline-none resize-none"
               />
@@ -275,10 +277,10 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
           {sendingVerification ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 size={18} className="animate-spin" />
-              Envoi de l'email de vérification…
+              {t("customer.sendingVerification")}
             </span>
           ) : (
-            "Continuer vers le récapitulatif"
+            t("customer.continueToReview")
           )}
         </button>
       </form>

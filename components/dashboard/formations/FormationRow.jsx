@@ -1,8 +1,10 @@
 "use client";
 
 import { RowActions } from "../Tables/RowActions";
+import { useTranslations } from "next-intl";
 
 export function FormationRow({ row, onView, onEdit, onDelete }) {
+  const t = useTranslations("dashboardFormations");
   const priceFormatted = new Intl.NumberFormat("fr-FR", {
     style: "currency",
     currency: "EUR",
@@ -16,10 +18,10 @@ export function FormationRow({ row, onView, onEdit, onDelete }) {
   };
 
   const statusLabels = {
-    DRAFT: "Brouillon",
-    PUBLISHED: "Publié",
-    CANCELLED: "Annulé",
-    ARCHIVED: "Archivé",
+    DRAFT: t("statusLabels.DRAFT"),
+    PUBLISHED: t("statusLabels.PUBLISHED"),
+    CANCELLED: t("statusLabels.CANCELLED"),
+    ARCHIVED: t("statusLabels.ARCHIVED"),
   };
 
   return (
@@ -59,7 +61,7 @@ export function FormationRow({ row, onView, onEdit, onDelete }) {
               : "bg-teal-50 text-teal-800 border-teal-200"
           }`}
         >
-          {row.type === "PRIVATE" ? "Privée" : "Groupe"}
+          {row.type === "PRIVATE" ? t("typeLabels.PRIVATE") : t("typeLabels.PUBLIC")}
         </span>
       </td>
 
@@ -70,12 +72,12 @@ export function FormationRow({ row, onView, onEdit, onDelete }) {
 
       {/* Duration */}
       <td className="px-4 py-4 align-middle text-gray-600">
-        {row.duration} min
+        {row.duration} {t("unitLabels.minutes")}
       </td>
 
       {/* Capacity */}
       <td className="px-4 py-4 align-middle text-gray-600">
-        {row.type === "PRIVATE" ? "1 pers." : `${row.capacity} pers.`}
+        {row.type === "PRIVATE" ? t("unitLabels.privateCapacity") : `${row.capacity} ${t("unitLabels.persons")}`}
       </td>
 
       {/* Animator */}
@@ -96,7 +98,7 @@ export function FormationRow({ row, onView, onEdit, onDelete }) {
             <span className="text-sm font-medium text-gray-700">{row.animator.name}</span>
           </div>
         ) : (
-          <span className="text-xs text-gray-400 italic">Aucun formateur</span>
+          <span className="text-xs text-gray-400 italic">{t("unitLabels.noAnimator")}</span>
         )}
       </td>
 

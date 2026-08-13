@@ -1,13 +1,18 @@
 import PageHero from "@/components/website/PageHero";
 import ContactFormSection from "@/components/website/ContactFormSection";
 import { getSalon } from "@/actions/salon/get-salon";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Contact | Meri Beauty",
-  description: "Contactez Meri Beauty pour prendre rendez-vous ou pour toute question.",
-};
+export async function generateMetadata() {
+  const t = await getTranslations("contact");
+  return {
+    title: t("metadataTitle"),
+    description: t("metadataDescription"),
+  };
+}
 
 export default async function ContactPage() {
+  const t = await getTranslations("contact");
   const { data: salon } = await getSalon();
 
   const phone = salon?.phone || "";
@@ -17,12 +22,12 @@ export default async function ContactPage() {
   return (
     <>
       <PageHero
-        title="Contactez-nous"
-        description="Notre équipe est là pour répondre à toutes vos questions et vous accompagner. Nous vous répondrons dans les plus brefs délais."
-        buttonText="PRENDRE RENDEZ-VOUS"
+        title={t("heroTitle")}
+        description={t("heroDescription")}
+        buttonText={t("heroButton")}
         buttonLink="/reservation"
         backgroundImage="/Images/heroImage.webp"
-        label="Nous sommes à votre écoute"
+        label={t("heroLabel")}
       />
 
       <ContactFormSection salon={salon} />
@@ -34,11 +39,11 @@ export default async function ContactPage() {
             <div className="mb-4 flex items-center gap-3">
               <span className="h-px w-12 bg-gold" />
               <span className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-gold">
-                Nous trouver
+                {t("mapEyebrow")}
               </span>
             </div>
             <h2 className="text-[2rem] font-bold leading-tight text-ink sm:text-[2.4rem] lg:text-[2.8rem]">
-              Notre emplacement
+              {t("mapTitle")}
             </h2>
           </div>
 
@@ -73,7 +78,7 @@ export default async function ContactPage() {
           <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-xl bg-white p-6 shadow-md">
               <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-[0.13em] text-gold">
-                Adresse
+                {t("addressLabel")}
               </h3>
               <p className="text-ink whitespace-pre-line">
                 {address}
@@ -81,13 +86,13 @@ export default async function ContactPage() {
             </div>
             <div className="rounded-xl bg-white p-6 shadow-md">
               <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-[0.13em] text-gold">
-                Téléphone
+                {t("phoneLabel")}
               </h3>
               <p className="text-ink">{phone}</p>
             </div>
             <div className="rounded-xl bg-white p-6 shadow-md sm:col-span-2 lg:col-span-1">
               <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-[0.13em] text-gold">
-                Email
+                {t("emailLabel")}
               </h3>
               <p className="text-ink">{email}</p>
             </div>

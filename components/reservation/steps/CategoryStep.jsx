@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { getBookableCategories } from "@/actions/reservation/get-bookable-categories";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 
 export default function CategoryStep({ data, updateData, nextStep }) {
+  const t = useTranslations("reservationSteps");
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -19,7 +21,7 @@ export default function CategoryStep({ data, updateData, nextStep }) {
     if (result.success) {
       setCategories(result.data);
     } else {
-      toast.error(result.message || "Erreur lors du chargement");
+      toast.error(result.message || t("errorLoad"));
     }
     setLoading(false);
   };
@@ -41,10 +43,10 @@ export default function CategoryStep({ data, updateData, nextStep }) {
     <div>
       <div className="mb-8 text-center">
         <h2 className="text-3xl font-bold text-[#2F3A2E]">
-          Choisissez une catégorie
+          {t("category.title")}
         </h2>
         <p className="mt-2 text-gray-600">
-          Sélectionnez le type de service dont vous avez besoin
+          {t("category.subtitle")}
         </p>
       </div>
 
@@ -80,7 +82,7 @@ export default function CategoryStep({ data, updateData, nextStep }) {
                   </p>
                 )}
                 <p className="mt-3 text-xs font-medium text-[#C8A46A]">
-                  {category.servicesCount} service{category.servicesCount > 1 ? "s" : ""} disponible{category.servicesCount > 1 ? "s" : ""}
+                  {t("category.servicesCount", { count: category.servicesCount })}
                 </p>
               </div>
             </div>

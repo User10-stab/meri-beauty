@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   getWeekDays,
   buildTimeSlots,
@@ -46,6 +47,7 @@ export function WeekView({
   onAppointmentClick,
   onDayClick,
 }) {
+  const t = useTranslations();
   const days = getWeekDays(currentDate);
   const slots = buildTimeSlots(openingTime, closingTime);
   const gridRef = useRef(null);
@@ -103,6 +105,13 @@ export function WeekView({
   const activitiesByDay = days.map((day) => activityEventsForDay(activityEvents, day));
   const hasAnyActivities = showActivityLane && activitiesByDay.some((list) => list.length > 0);
 
+  // Map day index (0-6, where 0 is Sunday) to translation key
+  const dayIndexToKey = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  function getDayAbbr(dayIndex) {
+    const key = dayIndexToKey[dayIndex];
+    return t(`monthView.${key}`).substring(0, 3); // Use first 3 letters of translated day name
+  }
+
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-dark">
       {/* ── Day headers ──────────────────────────────────────────────────── */}
@@ -127,7 +136,7 @@ export function WeekView({
               } ${closed ? "bg-gray-50 dark:bg-gray-800/40" : ""}`}
             >
               <span className={`font-medium ${closed ? "text-gray-300 dark:text-gray-600" : "text-gray-400"}`}>
-                {["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"][day.getDay()]}
+                {getDayAbbr(day.getDay())}
               </span>
               <span
                 className={`mt-0.5 flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold ${

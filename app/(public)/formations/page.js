@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getPublicFormations } from "@/actions/formations/get-public-formations";
 import { AnimatedCard } from "@/components/website/AnimatedCard";
+import { getLocale, getTranslations } from "next-intl/server";
 
 export const metadata = {
   title: "Formations — Meri Beauty",
@@ -43,10 +44,10 @@ function ArrowRightIcon() {
   );
 }
 
-function FormationCard({ formation }) {
+function FormationCard({ formation, t, locale }) {
   const session = formation.sessions?.[0];
   const dateStr = session?.startDate
-    ? new Date(session.startDate).toLocaleDateString("fr-FR", {
+    ? new Date(session.startDate).toLocaleDateString(locale, {
         day: "numeric",
         month: "long",
         year: "numeric",
@@ -58,7 +59,7 @@ function FormationCard({ formation }) {
   const capacity = session?.capacity ?? formation.capacity;
   const available = Math.max(0, capacity - takenSeats);
   const priceFormatted = formation.price > 0
-    ? new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(formation.price)
+    ? new Intl.NumberFormat(locale, { style: "currency", currency: "EUR" }).format(formation.price)
     : null;
 
   return (
@@ -85,13 +86,13 @@ function FormationCard({ formation }) {
             isPrivate ? "bg-violet-100 text-violet-900" : "bg-teal-100 text-teal-900"
           }`}
         >
-          {isPrivate ? "Formation privée" : "Formation groupe"}
+          {isPrivate ? t("privateType") : t("groupType")}
         </span>
 
         {priceFormatted && (
           <div className="absolute bottom-3 left-3 rounded-lg bg-white/95 px-3 py-1.5 shadow-md backdrop-blur-sm">
             <span className="block text-[9px] font-semibold uppercase leading-none tracking-wide text-ink/45">
-              à partir de
+              {t("from")}
             </span>
             <span className="block text-base font-bold leading-tight text-gold">{priceFormatted}</span>
           </div>
@@ -100,11 +101,11 @@ function FormationCard({ formation }) {
         {session && (
           available === 0 ? (
             <span className="absolute bottom-3 right-3 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
-              Complet
+              {t("full")}
             </span>
           ) : !isPrivate && available <= 3 ? (
             <span className="absolute bottom-3 right-3 rounded-full bg-amber-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
-              {available} place{available > 1 ? "s" : ""} !
+              {t("placesRemaining", { count: available })}
             </span>
           ) : null
         )}
@@ -136,13 +137,13 @@ function FormationCard({ formation }) {
           <div className="flex items-center justify-between border-t border-ink/8 pt-3 text-[12px] text-ink/50">
             <span className="flex items-center gap-1.5">
               <UsersIcon />
-              <span>{isPrivate ? "1 personne" : `${takenSeats} / ${capacity} places`}</span>
+              <span>{isPrivate ? t("onePerson") : t("placesTaken", { taken: takenSeats, capacity })}</span>
             </span>
             {isPrivate ? (
-              <span className="font-semibold uppercase tracking-wide text-emerald-600">Disponible</span>
+              <span className="font-semibold uppercase tracking-wide text-emerald-600">{t("available")}</span>
             ) : available > 3 ? (
               <span className="font-semibold uppercase tracking-wide text-emerald-600">
-                {available} libre{available > 1 ? "s" : ""}
+                {t("placesAvailable", { count: available })}
               </span>
             ) : null}
           </div>
@@ -161,13 +162,13 @@ function FormationCard({ formation }) {
                 {formation.animator.name.charAt(0)}
               </div>
             )}
-            <span className="text-[11px] text-ink/45">Animée par</span>
+            <span className="text-[11px] text-ink/45">{t("ledBy")}</span>
             <span className="truncate text-[12px] font-medium text-ink/65">{formation.animator.name}</span>
           </div>
         )}
 
         <span className="mt-1 inline-flex items-center gap-1.5 text-[13px] font-semibold text-gold opacity-0 transition-all duration-200 group-hover:translate-x-0.5 group-hover:opacity-100">
-          Découvrir
+          {t("discover")}
           <ArrowRightIcon />
         </span>
       </div>
@@ -176,6 +177,7 @@ function FormationCard({ formation }) {
 }
 
 export default async function FormationsPage() {
+  const [t, locale] = await Promise.all([getTranslations("publicFormations"), getLocale()]);
   const result = await getPublicFormations();
   const formations = result.data ?? [];
 
@@ -197,15 +199,14 @@ export default async function FormationsPage() {
         <div className="mx-auto max-w-[1400px] px-6 md:px-10 lg:px-14 text-center">
           <div className="mb-5 inline-flex items-center gap-3">
             <span className="h-px w-8 bg-gold" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">Formations</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">{t("eyebrow")}</span>
             <span className="h-px w-8 bg-gold" />
           </div>
           <h1 className="text-[2.6rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3.2rem] lg:text-[3.8rem]">
-            Développez votre expertise <em className="font-light text-gold/80 not-italic">avec nous.</em>
+            {t.rich("title", { accent: (chunks) => <em className="font-light text-gold/80 not-italic">{chunks}</em> })}
           </h1>
           <p className="mx-auto mt-5 max-w-3xl text-[17px] leading-relaxed text-white/60">
-            Des formations professionnelles en petit comité ou en tête-à-tête, animées par nos expertes.
-            Un acompte réserve votre place, le solde se règle directement au comptoir le jour de la formation.
+            {t("description")}
           </p>
         </div>
       </section>
@@ -216,8 +217,8 @@ export default async function FormationsPage() {
           {formations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="mb-4 text-5xl">🎓</div>
-              <h2 className="text-xl font-bold text-ink">Aucune formation pour le moment</h2>
-              <p className="mt-2 text-ink/50">Nos prochaines formations arrivent bientôt. Revenez nous voir !</p>
+              <h2 className="text-xl font-bold text-ink">{t("emptyTitle")}</h2>
+              <p className="mt-2 text-ink/50">{t("emptyDescription")}</p>
             </div>
           ) : (
             <div className="space-y-16">
@@ -226,13 +227,13 @@ export default async function FormationsPage() {
                   <div className="mb-6 inline-flex items-center gap-3">
                     <span className="h-px w-6 bg-gold" />
                     <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
-                      Formations privées ({privateFormations.length})
+                      {t("privateList", { count: privateFormations.length })}
                     </h2>
                   </div>
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {privateFormations.map((formation, i) => (
                       <AnimatedCard key={formation.id} index={i}>
-                        <FormationCard formation={formation} />
+                        <FormationCard formation={formation} t={t} locale={locale} />
                       </AnimatedCard>
                     ))}
                   </div>
@@ -244,13 +245,13 @@ export default async function FormationsPage() {
                   <div className="mb-6 inline-flex items-center gap-3">
                     <span className="h-px w-6 bg-gold" />
                     <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
-                      Formations groupe ({publicFormations.length})
+                      {t("groupList", { count: publicFormations.length })}
                     </h2>
                   </div>
                   <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {publicFormations.map((formation, i) => (
                       <AnimatedCard key={formation.id} index={i}>
-                        <FormationCard formation={formation} />
+                        <FormationCard formation={formation} t={t} locale={locale} />
                       </AnimatedCard>
                     ))}
                   </div>

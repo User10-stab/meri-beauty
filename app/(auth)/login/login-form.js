@@ -6,8 +6,10 @@ import { Mail, Lock } from "lucide-react";
 import { loginSchema } from "@/lib/validations/login";
 import { loginUser } from "@/actions/auth/login";
 import AuthForm from "@/components/auth-form";
+import { useTranslations } from "next-intl";
 
 export default function LoginForm() {
+  const t = useTranslations("auth");
   const router = useRouter();
   const searchParams = useSearchParams();
   const callbackUrl = searchParams.get("callbackUrl");
@@ -31,7 +33,7 @@ export default function LoginForm() {
 
     return {
       success: true,
-      message: `Success! Redirecting you...`,
+      message: t("redirecting"),
       redirectTo,
     };
   };
@@ -45,19 +47,19 @@ export default function LoginForm() {
 
   return (
     <AuthForm
-      subtitle="Sign in to manage your premium salon space"
+      subtitle={t("signInSubtitle")}
       defaultValues={{ email: prefillEmail }}
       fields={[
         {
           name: "email",
-          label: "Email Address",
+          label: t("email"),
           type: "email",
           placeholder: "you@example.com",
           icon: Mail,
         },
         {
           name: "password",
-          label: "Password",
+          label: t("password"),
           type: "password",
           placeholder: "••••••••",
           icon: Lock,
@@ -65,11 +67,11 @@ export default function LoginForm() {
       ]}
       schema={loginSchema}
       onSubmit={onSubmit}
-      submitText="Sign In"
-      loadingText="Signing in..."
-      footerText="Don't have an account?"
+      submitText={t("signIn")}
+      loadingText={t("signingIn")}
+      footerText={t("noAccount")}
       footerLinkHref={registerHref}
-      footerLinkText="Create an account"
+      footerLinkText={t("createAccount")}
       extraElements={({ register, isLoading }) => (
         <div className="flex items-center justify-between">
           <div className="flex items-center">
@@ -81,7 +83,7 @@ export default function LoginForm() {
               className="h-4.5 w-4.5 text-[#2F3A2E] border-zinc-300 rounded focus:ring-[#2F3A2E]/40 dark:bg-zinc-800 dark:border-zinc-700 cursor-pointer"
             />
             <label htmlFor="rememberMe" className="ml-2 block text-sm text-zinc-650 dark:text-zinc-400 select-none cursor-pointer">
-              Remember me
+              {t("rememberMe")}
             </label>
           </div>
 
@@ -90,7 +92,7 @@ export default function LoginForm() {
               href="/forgot-password"
               className="font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
-              Forgot password?
+              {t("forgotPassword")}
             </Link>
           </div>
         </div>

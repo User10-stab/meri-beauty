@@ -2,16 +2,13 @@ import { Suspense } from "react";
 import { requireAdmin } from "@/lib/route-protection";
 import { getSalon } from "@/actions/salon/get-salon";
 import { SalonSettingsClient } from "@/components/dashboard/settings/SalonSettingsClient";
-
-export const metadata = {
-  title: "Paramètres du salon — Dashboard",
-  description: "Gérez les informations publiques de votre salon.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   await requireAdmin();
+  const t = await getTranslations("dashboard.settings");
 
   const result = await getSalon();
   const salon = result.data ?? null;
@@ -21,10 +18,10 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            Paramètres du salon
+            {t("title")}
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Gérez les informations publiques, horaires et fermetures de votre salon.
+            {t("subtitle")}
           </p>
         </div>
       </div>

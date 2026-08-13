@@ -2,21 +2,17 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { CalendarDays, Clock, User, FileDown, Sparkles, History, Pencil, XCircle, Loader2, AlertTriangle } from "lucide-react";
 import { formatDistanceToNowStrict, isFuture } from "date-fns";
-import { fr } from "date-fns/locale";
+import { fr, enUS, nl } from "date-fns/locale";
 import { cancelReservation } from "@/actions/reservation/cancel-reservation";
 import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
 import { AppointmentRescheduleModal } from "@/components/website/AppointmentRescheduleModal";
+import { toIntlLocale } from "@/lib/intl-locale";
 
-const STATUS_LABELS = {
-  PENDING: "En attente de confirmation",
-  CONFIRMED: "Confirmé",
-  COMPLETED: "Terminé",
-  CANCELLED: "Annulé",
-  NO_SHOW: "Absence",
-};
+const DATE_FNS_LOCALES = { fr, en: enUS, nl };
 
 const STATUS_STYLE = {
   PENDING: "bg-amber-50 text-amber-700 border-amber-100",
@@ -28,20 +24,20 @@ const STATUS_STYLE = {
 
 const UPCOMING_STATUSES = new Set(["PENDING", "CONFIRMED"]);
 
-function formatWeekday(date) {
-  return new Date(date).toLocaleDateString("fr-FR", { weekday: "long" });
+function formatWeekday(date, intlLocale) {
+  return new Date(date).toLocaleDateString(intlLocale, { weekday: "long" });
 }
 
-function formatDay(date) {
-  return new Date(date).toLocaleDateString("fr-FR", { day: "2-digit" });
+function formatDay(date, intlLocale) {
+  return new Date(date).toLocaleDateString(intlLocale, { day: "2-digit" });
 }
 
-function formatMonth(date) {
-  return new Date(date).toLocaleDateString("fr-FR", { month: "short" }).replace(".", "");
+function formatMonth(date, intlLocale) {
+  return new Date(date).toLocaleDateString(intlLocale, { month: "short" }).replace(".", "");
 }
 
-function formatFullDate(date) {
-  return new Date(date).toLocaleDateString("fr-FR", {
+function formatFullDate(date, intlLocale) {
+  return new Date(date).toLocaleDateString(intlLocale, {
     weekday: "long",
     day: "2-digit",
     month: "long",
@@ -49,11 +45,20 @@ function formatFullDate(date) {
   });
 }
 
-function formatTime(date) {
-  return new Date(date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+function formatTime(date, intlLocale) {
+  return new Date(date).toLocaleTimeString(intlLocale, { hour: "2-digit", minute: "2-digit" });
 }
 
 function StatusBadge({ status }) {
+  const t = useTranslations();
+  const STATUS_LABELS = {
+    PENDING: t("appointmentStatus.pending"),
+    CONFIRMED: t("appointmentStatus.confirmed"),
+    COMPLETED: t("appointmentStatus.completed"),
+    CANCELLED: t("appointmentStatus.cancelled"),
+    NO_SHOW: t("appointmentStatus.noShow"),
+  };
+
   return (
     <span
       className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${STATUS_STYLE[status] ?? "bg-gray-100 text-gray-600 border-gray-200"}`}
@@ -64,6 +69,7 @@ function StatusBadge({ status }) {
 }
 
 function InvoiceLink({ invoice }) {
+  const t = useTranslations();
   if (!invoice) return null;
   return (
     <a
@@ -73,12 +79,13 @@ function InvoiceLink({ invoice }) {
       className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink/60 transition-colors hover:text-gold"
     >
       <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
-      Facture {invoice.number}
+      {t("myAccount.invoiceNumber", { number: invoice.number })}
     </a>
   );
 }
 
 function DateBlock({ date, accent }) {
+  const intlLocale = toIntlLocale(useLocale());
   return (
     <div
       className={`flex w-16 shrink-0 flex-col items-center justify-center rounded-xl border py-2.5 ${
@@ -86,10 +93,10 @@ function DateBlock({ date, accent }) {
       }`}
     >
       <span className={`text-[10px] font-semibold uppercase tracking-wide ${accent ? "text-gold" : "text-ink/40"}`}>
-        {formatMonth(date)}
+        {formatMonth(date, intlLocale)}
       </span>
       <span className={`text-xl font-bold leading-tight ${accent ? "text-primary" : "text-ink"}`}>
-        {formatDay(date)}
+        {formatDay(date, intlLocale)}
       </span>
     </div>
   );
@@ -97,6 +104,7 @@ function DateBlock({ date, accent }) {
 
 function AppointmentActions({ appointment }) {
   const router = useRouter();
+  const t = useTranslations();
   const [confirming, setConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -107,10 +115,10 @@ function AppointmentActions({ appointment }) {
     setCancelling(true);
     const result = await cancelReservation(appointment.id);
     if (result.success) {
-      toast.success(result.message ?? "Rendez-vous annulé.");
+      toast.success(t("success.appointmentCancelled"));
       router.refresh();
     } else {
-      toast.error(result.message ?? "Impossible d'annuler ce rendez-vous.");
+      toast.error(t("errors.reservation"));
       setCancelling(false);
       setConfirming(false);
     }
@@ -120,7 +128,7 @@ function AppointmentActions({ appointment }) {
     return (
       <div className="mt-3 flex items-start gap-2 border-t border-ink/8 pt-3 text-[12px] text-ink/45">
         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" strokeWidth={1.75} />
-        Modification et annulation indisponibles à moins de {CANCELLATION_WINDOW_HOURS}h du rendez-vous.
+        {t("myAccount.modificationAndCancellationUnavailable", { hours: CANCELLATION_WINDOW_HOURS })}
       </div>
     );
   }
@@ -130,14 +138,14 @@ function AppointmentActions({ appointment }) {
       <div className="mt-3 flex items-center justify-end gap-2 border-t border-ink/8 pt-3">
         {confirming ? (
           <>
-            <span className="mr-auto text-xs text-ink/50">Confirmer l&apos;annulation ?</span>
+            <span className="mr-auto text-xs text-ink/50">{t("myAccount.confirmCancellation")}</span>
             <button
               type="button"
               onClick={() => setConfirming(false)}
               disabled={cancelling}
               className="text-xs font-semibold text-ink/50 hover:text-ink"
             >
-              Non
+              {t("myAccount.no")}
             </button>
             <button
               type="button"
@@ -146,7 +154,7 @@ function AppointmentActions({ appointment }) {
               className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
             >
               {cancelling && <Loader2 className="h-3 w-3 animate-spin" />}
-              Oui, annuler
+              {t("myAccount.yes")}
             </button>
           </>
         ) : (
@@ -157,7 +165,7 @@ function AppointmentActions({ appointment }) {
               className="inline-flex items-center gap-1.5 rounded-full border border-ink/10 px-3 py-1.5 text-xs font-semibold text-ink/60 transition-colors hover:border-gold/40 hover:text-ink"
             >
               <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Modifier
+              {t("common.edit")}
             </button>
             <button
               type="button"
@@ -165,7 +173,7 @@ function AppointmentActions({ appointment }) {
               className="inline-flex items-center gap-1.5 rounded-full border border-red-100 px-3 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-50"
             >
               <XCircle className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Annuler
+              {t("common.cancel")}
             </button>
           </>
         )}
@@ -186,8 +194,14 @@ function AppointmentActions({ appointment }) {
 }
 
 function NextAppointmentCard({ appointment }) {
+  const locale = useLocale();
+  const t = useTranslations();
+  const intlLocale = toIntlLocale(locale);
   const invoice = appointment.payment?.invoice;
-  const relative = formatDistanceToNowStrict(new Date(appointment.startTime), { addSuffix: true, locale: fr });
+  const relative = formatDistanceToNowStrict(new Date(appointment.startTime), {
+    addSuffix: true,
+    locale: DATE_FNS_LOCALES[locale] ?? fr,
+  });
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-gold/30 bg-white shadow-[0_8px_24px_-12px_rgba(184,150,100,0.35)]">
@@ -195,7 +209,7 @@ function NextAppointmentCard({ appointment }) {
       <div className="p-5 pl-6 sm:p-6 sm:pl-7">
         <div className="mb-4 inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gold">
           <Sparkles className="h-3.5 w-3.5" strokeWidth={2} />
-          Prochain rendez-vous · {relative}
+          {t("myAccount.nextAppointment")} · {relative}
         </div>
 
         <div className="flex flex-wrap items-start gap-4">
@@ -204,7 +218,7 @@ function NextAppointmentCard({ appointment }) {
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="text-base font-bold text-ink capitalize">{formatWeekday(appointment.startTime)}</p>
+                <p className="text-base font-bold text-ink capitalize">{formatWeekday(appointment.startTime, intlLocale)}</p>
                 <p className="text-sm font-semibold text-primary">{appointment.serviceName}</p>
               </div>
               <StatusBadge status={appointment.status} />
@@ -213,7 +227,7 @@ function NextAppointmentCard({ appointment }) {
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-[13px] text-ink/55">
               <span className="inline-flex items-center gap-1.5">
                 <Clock className="h-3.5 w-3.5 text-gold" strokeWidth={1.75} />
-                {formatTime(appointment.startTime)} – {formatTime(appointment.endTime)}
+                {formatTime(appointment.startTime, intlLocale)} – {formatTime(appointment.endTime, intlLocale)}
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <User className="h-3.5 w-3.5 text-gold" strokeWidth={1.75} />
@@ -240,6 +254,7 @@ function NextAppointmentCard({ appointment }) {
 }
 
 function AppointmentCard({ appointment, showActions = false }) {
+  const intlLocale = toIntlLocale(useLocale());
   const invoice = appointment.payment?.invoice;
 
   return (
@@ -250,7 +265,7 @@ function AppointmentCard({ appointment, showActions = false }) {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-sm font-bold text-ink">{appointment.serviceName}</p>
-            <p className="mt-0.5 text-xs capitalize text-ink/45">{formatFullDate(appointment.startTime)}</p>
+            <p className="mt-0.5 text-xs capitalize text-ink/45">{formatFullDate(appointment.startTime, intlLocale)}</p>
           </div>
           <StatusBadge status={appointment.status} />
         </div>
@@ -258,7 +273,7 @@ function AppointmentCard({ appointment, showActions = false }) {
         <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink/45">
           <span className="inline-flex items-center gap-1.5">
             <Clock className="h-3.5 w-3.5" strokeWidth={1.75} />
-            {formatTime(appointment.startTime)} – {formatTime(appointment.endTime)}
+            {formatTime(appointment.startTime, intlLocale)} – {formatTime(appointment.endTime, intlLocale)}
           </span>
           <span className="inline-flex items-center gap-1.5">
             <User className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -302,11 +317,12 @@ function EmptyState({ icon: Icon, text }) {
 }
 
 const TABS = [
-  { key: "upcoming", label: "À venir", icon: Sparkles },
-  { key: "history", label: "Historique", icon: History },
+  { key: "upcoming", label: "upcoming", icon: Sparkles },
+  { key: "history", label: "history", icon: History },
 ];
 
 export function MyAppointmentsPageClient({ appointments }) {
+  const t = useTranslations();
   const [activeTab, setActiveTab] = useState("upcoming");
 
   const { next, upcoming, history } = useMemo(() => {
@@ -333,11 +349,11 @@ export function MyAppointmentsPageClient({ appointments }) {
         <div className="mx-auto max-w-[1000px] px-6 md:px-10 text-center">
           <div className="mb-4 inline-flex items-center gap-3">
             <span className="h-px w-8 bg-gold" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">Mon compte</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">{t("nav.profile")}</span>
             <span className="h-px w-8 bg-gold" />
           </div>
           <h1 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[2.6rem]">
-            Mes rendez-vous
+            {t("nav.myAppointments")}
           </h1>
         </div>
       </section>
@@ -345,13 +361,17 @@ export function MyAppointmentsPageClient({ appointments }) {
       <section className="w-full bg-cream">
         <div className="mx-auto max-w-[1000px] px-6 py-12 md:px-10">
           {appointments.length === 0 ? (
-            <EmptyState icon={CalendarDays} text="Vous n'avez pas encore pris de rendez-vous." />
+            <EmptyState icon={CalendarDays} text={t("myAccount.noUpcomingAppointments")} />
           ) : (
             <>
               <div className="mb-8 flex flex-wrap gap-2">
-                {TABS.map((tab) => {
+                {TABS.map((tab, index) => {
                   const Icon = tab.icon;
                   const selected = activeTab === tab.key;
+                  const labels = {
+                    upcoming: t("myAccount.nextAppointment"),
+                    history: t("appointments.past"),
+                  };
                   return (
                     <button
                       key={tab.key}
@@ -364,7 +384,7 @@ export function MyAppointmentsPageClient({ appointments }) {
                       }`}
                     >
                       <Icon className="h-4 w-4" strokeWidth={1.75} />
-                      {tab.label}
+                      {labels[tab.key]}
                       <span className={`rounded-full px-1.5 text-[11px] ${selected ? "bg-white/20" : "bg-ink/5"}`}>
                         {counts[tab.key]}
                       </span>
@@ -375,7 +395,7 @@ export function MyAppointmentsPageClient({ appointments }) {
 
               {activeTab === "upcoming" && (
                 upcoming.length === 0 && !next ? (
-                  <EmptyState icon={Sparkles} text="Aucun rendez-vous à venir pour le moment." />
+                  <EmptyState icon={Sparkles} text={t("myAccount.noUpcomingAppointments")} />
                 ) : (
                   <div className="space-y-4">
                     {next && <NextAppointmentCard appointment={next} />}
@@ -388,7 +408,7 @@ export function MyAppointmentsPageClient({ appointments }) {
 
               {activeTab === "history" && (
                 history.length === 0 ? (
-                  <EmptyState icon={History} text="Aucun rendez-vous passé pour l'instant." />
+                  <EmptyState icon={History} text={t("myAccount.noUpcomingAppointments")} />
                 ) : (
                   <div className="space-y-4">
                     {history.map((a) => (

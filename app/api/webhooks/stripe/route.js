@@ -13,9 +13,6 @@ import {
 import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
 import { renderInvoicePdf } from "@/lib/pdf/render";
-import { sendLowSeatsBroadcast } from "@/actions/workshops/notify-low-seats";
-import { notifyAllInWaitingList } from "@/actions/workshops/waiting-list";
-import { sendFormationLowSeatsBroadcast } from "@/actions/formations/notify-low-seats";
 import {
   createNotificationsBulk,
   buildAppointmentConfirmedNotification,
@@ -614,10 +611,17 @@ async function processAppointmentCheckoutSession(session) {
 
     const appointment = existingPayment.appointment;
     const confirmationMode = appointment.staffService?.staff?.reservationConfirmationMode ?? "MANUAL";
-    // AUTOMATIC mode confirms as soon as the required online payment clears,
-    // regardless of any remaining salon balance. MANUAL mode still needs
-    // staff review — the payment is recorded but the appointment stays PENDING.
-    const nextAppointmentStatus = confirmationMode === "AUTOMATIC" ? "CONFIRMED" : "PENDING";
+    
+    // Determine the next appointment status based on current status and confirmation mode
+    let nextAppointmentStatus;
+    if (confirmationMode === "AUTOMATIC") {
+      // AUTOMATIC mode confirms as soon as the required online payment clears
+      nextAppointmentStatus = "CONFIRMED";
+    } else {
+      // MANUAL mode: only confirm if the appointment is already ACCEPTED (staff has accepted it)
+      // If it's still PENDING, staff needs to accept first
+      nextAppointmentStatus = appointment.status === "ACCEPTED" ? "CONFIRMED" : appointment.status;
+    }
 
     await tx.payment.update({
       where: { id: paymentId },
@@ -647,10 +651,54 @@ async function processAppointmentCheckoutSession(session) {
       },
     });
 
+    // ── Invoice — only for fully-settled payments ──────────────────────────
+    // A deposit (PARTIALLY_PAID) leaves a balance due in-salon; the invoice
+    // is issued once that balance is collected, matching the workshop and
+    // formation policy. issueInvoice must stay inside this transaction so
+    // the gapless Belgian numbering counter increments atomically with the
+    // payment status flip — a rollback never burns a number.
+    let invoice = null;
+    if (nextPaymentStatus === "PAID") {
+      const appointmentUser = existingPayment.appointment.user;
+      const serviceDesc = existingPayment.appointment.staffService?.service?.name
+        ?? "Service de beauté";
+      const staffDesc = existingPayment.appointment.staffService?.staff?.user?.fullName
+        ?? null;
+      const apptDate = existingPayment.appointment.date;
+      const apptTime = existingPayment.appointment.startTime
+        ? new Date(existingPayment.appointment.startTime).toTimeString().slice(0, 5)
+        : null;
+
+      const lineDescription = [
+        serviceDesc,
+        staffDesc ? `avec ${staffDesc}` : null,
+        apptDate
+          ? new Date(apptDate).toLocaleDateString("fr-BE", {
+              day: "2-digit",
+              month: "long",
+              year: "numeric",
+            })
+          : null,
+        apptTime,
+      ]
+        .filter(Boolean)
+        .join(" — ");
+
+      invoice = await issueInvoice(tx, {
+        paymentId,
+        source: "APPOINTMENT",
+        totalInclVat: nextPaidAmount,
+        customer: {
+          fullName: appointmentUser?.fullName ?? "Client",
+          email: appointmentUser?.email ?? "",
+          vatNumber: null, // customers don't have a VAT number on their profile
+        },
+        lines: [{ description: lineDescription, quantity: 1, unitPrice: nextPaidAmount }],
+      });
+    }
+
     // ── Notification for dashboard users ───────────────────────────────────
-    // AUTOMATIC: appointment just became CONFIRMED → emit APPOINTMENT_CONFIRMED.
-    // MANUAL: appointment stays PENDING (paid but waiting on salon OK) → no
-    // new notif; the "APPOINTMENT_CREATED" one already exists for this event.
+    // Send notification when appointment becomes CONFIRMED
     if (nextAppointmentStatus === "CONFIRMED") {
       const serviceName = appointment.staffService?.service?.name;
       const staffName = appointment.staffService?.staff?.user?.fullName;
@@ -682,6 +730,8 @@ async function processAppointmentCheckoutSession(session) {
       nextPaidAmount,
       totalAmount,
       nextAppointmentStatus,
+      invoice,
+      shouldSendConfirmationEmail: nextAppointmentStatus === "CONFIRMED",
     };
   });
 
@@ -713,31 +763,47 @@ async function processAppointmentCheckoutSession(session) {
   }
 
   // ── Emails — fire-and-forget, never fail the webhook ────────────────────
-  const [user, staffService] = await Promise.all([
-    prisma.user.findUnique({ where: { id: result.appointment.userId } }),
-    prisma.staffService.findUnique({
-      where: { id: result.appointment.staffServiceId },
-      include: { service: true, staff: { include: { user: { select: { fullName: true } } } } },
-    }),
-  ]);
-
-  if (user) {
-    const staffName = staffService?.staff?.user?.fullName ?? "votre experte";
-    const serviceName = staffService?.service?.name ?? "votre service";
-
-    sendEmail({
-      to: user.email,
-      ...paymentConfirmationEmail({
-        customerName: user.fullName,
-        serviceName,
-        staffName,
-        date: result.appointment.date,
-        time: result.appointment.startTime.toTimeString().slice(0, 5),
-        paidAmount: result.nextPaidAmount,
-        totalAmount: result.totalAmount,
-        paymentMethod: "Carte bancaire",
+  // Only send confirmation email if the appointment actually became CONFIRMED
+  if (result?.shouldSendConfirmationEmail) {
+    const [user, staffService] = await Promise.all([
+      prisma.user.findUnique({ where: { id: result.appointment.userId } }),
+      prisma.staffService.findUnique({
+        where: { id: result.appointment.staffServiceId },
+        include: { service: true, staff: { include: { user: { select: { fullName: true } } } } },
       }),
-    }).catch((err) => console.error("[stripe-webhook] appointment confirmation email failed:", err));
+    ]);
+
+    if (user) {
+      const staffName = staffService?.staff?.user?.fullName ?? "votre experte";
+      const serviceName = staffService?.service?.name ?? "votre service";
+
+      // Render the invoice PDF outside the transaction (CPU-only, no DB).
+      // Mirrors the workshop/formation pattern: null-safe — a render failure
+      // must never block the confirmation email from reaching the customer.
+      const invoicePdf = result.invoice
+        ? await renderInvoicePdf(result.invoice).catch((err) => {
+            console.error("[stripe-webhook] appointment invoice PDF render failed:", err);
+            return null;
+          })
+        : null;
+
+      sendEmail({
+        to: user.email,
+        ...paymentConfirmationEmail({
+          customerName: user.fullName,
+          serviceName,
+          staffName,
+          date: result.appointment.date,
+          time: result.appointment.startTime.toTimeString().slice(0, 5),
+          paidAmount: result.nextPaidAmount,
+          totalAmount: result.totalAmount,
+          paymentMethod: "Carte bancaire",
+        }),
+        ...(invoicePdf
+          ? { attachments: [{ filename: `facture-${result.invoice.number}.pdf`, content: invoicePdf }] }
+          : {}),
+      }).catch((err) => console.error("[stripe-webhook] appointment confirmation email failed:", err));
+    }
   }
 
   return { received: true, processed: true };

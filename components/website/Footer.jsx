@@ -6,36 +6,7 @@ import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { toggleNewsletterSubscription } from "@/actions/newsletter/toggle-subscription";
 import { Loader2, LogIn } from "lucide-react";
-
-const DAY_LABELS = {
-  MONDAY: "Lundi",
-  TUESDAY: "Mardi",
-  WEDNESDAY: "Mercredi",
-  THURSDAY: "Jeudi",
-  FRIDAY: "Vendredi",
-  SATURDAY: "Samedi",
-  SUNDAY: "Dimanche",
-};
-
-const NAVIGATION = [
-  { label: "Accueil", href: "/" },
-  { label: "Concept", href: "/#concept" },
-  { label: "Réservation", href: "/reservation" },
-  { label: "Boutique", href: "/boutique" },
-  { label: "Évènements & Ateliers", href: "/evenements" },
-  { label: "Formations", href: "/formations" },
-  { label: "Contact", href: "/contact" },
-];
-
-const FALLBACK_SERVICES = [
-  "Soins Visage",
-  "Coiffure",
-  "Manucure",
-  "Massage Bien-être",
-  "Maquillage",
-  "Rituels Corps",
-  "Beauty Coaching",
-];
+import { useTranslations } from "next-intl";
 
 function InstagramIcon({ className = "w-5 h-5" }) {
   return (
@@ -96,6 +67,7 @@ function MailIcon({ className = "w-4 h-4" }) {
 }
 
 export default function Footer({ salon, services = [] }) {
+  const t = useTranslations("footer");
   const { data: session, status } = useSession();
   const isAuthed = status === "authenticated";
   const isPending = status === "loading";
@@ -123,8 +95,17 @@ export default function Footer({ salon, services = [] }) {
     }
   };
 
-  const openDays = (salon?.workingDays ?? []).filter((d) => d.isOpen);
-  const closedDays = (salon?.workingDays ?? []).filter((d) => !d.isOpen);
+  const dayLabels = {
+    MONDAY: t("monday"), TUESDAY: t("tuesday"), WEDNESDAY: t("wednesday"),
+    THURSDAY: t("thursday"), FRIDAY: t("friday"), SATURDAY: t("saturday"), SUNDAY: t("sunday"),
+  };
+  const navigation = [
+    { label: t("home"), href: "/" }, { label: t("concept"), href: "/#concept" },
+    { label: t("booking"), href: "/reservation" }, { label: t("shop"), href: "/boutique" },
+    { label: t("events"), href: "/evenements" }, { label: t("courses"), href: "/formations" },
+    { label: t("contact"), href: "/contact" },
+  ];
+  const fallbackServices = [t("serviceFacial"), t("serviceHair"), t("serviceManicure"), t("serviceMassage"), t("serviceMakeup"), t("serviceBody"), t("serviceCoaching")];
 
   const socialLinks = [
     { icon: InstagramIcon, href: salon?.instagram || "#", label: "Instagram" },
@@ -150,7 +131,7 @@ export default function Footer({ salon, services = [] }) {
 
           {/* ── Col 1: Brand ── */}
           <div className="lg:col-span-1">
-            <Link href="#accueil" aria-label="MeriBeauty — Accueil">
+            <Link href="#accueil" aria-label={`${t("siteName")} — ${t("home")}`}>
               <Image
                 src="/Images/Logo.webp"
                 alt="MeriBeauty Studio"
@@ -161,7 +142,7 @@ export default function Footer({ salon, services = [] }) {
             </Link>
 
             <p className="mb-6 text-[13px] leading-[1.8] text-white/50">
-              {salon?.description || "Salon de beauté & bien-être à Jette. Un espace pensé pour révéler votre beauté avec justesse."}
+              {salon?.description || t("description")}
             </p>
 
             <div className="flex gap-3">
@@ -181,10 +162,10 @@ export default function Footer({ salon, services = [] }) {
           {/* ── Col 2: Navigation ── */}
           <div>
             <h4 className="mb-5 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-gold">
-              Navigation
+              {t("navigation")}
             </h4>
             <ul className="flex flex-col gap-3">
-              {NAVIGATION.map((link) => (
+              {navigation.map((link) => (
                 <li key={link.label}>
                   <Link
                     href={link.href}
@@ -200,10 +181,10 @@ export default function Footer({ salon, services = [] }) {
           {/* ── Col 3: Services ── */}
           <div>
             <h4 className="mb-5 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-gold">
-              Nos Services
+              {t("services")}
             </h4>
             <ul className="flex flex-col gap-3">
-              {(services.length > 0 ? services : FALLBACK_SERVICES).slice(0, 7).map((service) => (
+              {(services.length > 0 ? services : fallbackServices).slice(0, 7).map((service) => (
                 <li key={typeof service === "string" ? service : service.id}>
                   <a
                     href="#services"
@@ -219,7 +200,7 @@ export default function Footer({ salon, services = [] }) {
           {/* ── Col 4: Contact + Hours ── */}
           <div>
             <h4 className="mb-5 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-gold">
-              Informations
+              {t("information")}
             </h4>
 
             <ul className="mb-7 flex flex-col gap-3">
@@ -258,22 +239,22 @@ export default function Footer({ salon, services = [] }) {
             </ul>
 
             <h4 className="mb-4 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-gold">
-              Horaires
+              {t("hours")}
             </h4>
             <ul className="flex flex-col gap-2">
               {(salon?.workingDays ?? []).map(({ day, isOpen, openingTime, closingTime }) => (
                 <li key={day} className="flex items-center justify-between gap-4">
-                  <span className="text-[12px] text-white/40">{DAY_LABELS[day]}</span>
+                  <span className="text-[12px] text-white/40">{dayLabels[day]}</span>
                   <span className="text-[12px] font-medium text-white/65">
                     {isOpen
                       ? `${openingTime?.slice(0, 5)} – ${closingTime?.slice(0, 5)}`
-                      : "Fermé"}
+                      : t("closed")}
                   </span>
                 </li>
               ))}
               {(!salon?.workingDays || salon.workingDays.length === 0) && (
                 <li>
-                  <span className="text-[12px] text-white/30">Non définis</span>
+                  <span className="text-[12px] text-white/30">{t("notDefined")}</span>
                 </li>
               )}
             </ul>
@@ -282,10 +263,10 @@ export default function Footer({ salon, services = [] }) {
           {/* ── Col 5: Newsletter ── */}
           <div>
             <h4 className="mb-5 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-gold">
-              Newsletter
+              {t("newsletter")}
             </h4>
             <p className="mb-5 text-[13px] leading-[1.7] text-white/50">
-              Recevez nos actualités & offres exclusives.
+              {t("newsletterDescription")}
             </p>
 
             {feedback.message && (
@@ -301,12 +282,12 @@ export default function Footer({ salon, services = [] }) {
             <form onSubmit={handleSubscribe} className="flex flex-col gap-3">
               {isAuthed ? (
                 <p className="text-[13px] text-white/50">
-                  Vous êtes connecté en tant que <span className="text-white/70">{session.user.email}</span>.
+                  {t("signedInAs")} <span className="text-white/70">{session.user.email}</span>.
                 </p>
               ) : isPending ? (
                 <p className="flex items-center gap-2 text-[13px] text-white/50">
                   <Loader2 size={14} className="animate-spin" />
-                  Chargement…
+                  {t("loading")}
                 </p>
               ) : null}
 
@@ -316,12 +297,12 @@ export default function Footer({ salon, services = [] }) {
                 className="group flex items-center justify-center gap-2 rounded-xl bg-gold px-5 py-3 text-[13px] font-semibold text-white shadow-lg shadow-gold/20 transition-all duration-200 hover:bg-gold/90 hover:shadow-gold/30 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {subscribing ? (
-                  <><Loader2 size={16} className="animate-spin" /> Inscription…</>
+                  <><Loader2 size={16} className="animate-spin" /> {t("subscribing")}</>
                 ) : !isAuthed ? (
-                  <><LogIn size={16} /> Se connecter pour s'inscrire</>
+                  <><LogIn size={16} /> {t("signInToSubscribe")}</>
                 ) : (
                   <>
-                    S'inscrire
+                    {t("subscribe")}
                     <ArrowRightIcon className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
                   </>
                 )}
@@ -333,32 +314,32 @@ export default function Footer({ salon, services = [] }) {
         {/* Bottom bar */}
         <div className="mt-14 flex flex-col items-center justify-between gap-4 border-t border-white/8 pt-7 sm:flex-row">
           <p className="text-[12px] text-white/30">
-            &copy; {new Date().getFullYear()} {salon?.name || "MeriBeauty"}. Tous droits réservés.
+            &copy; {new Date().getFullYear()} {salon?.name || "MeriBeauty"}. {t("rightsReserved")}
           </p>
           <div className="flex gap-5">
             <Link
               href="/boutique/returns"
               className="text-[12px] text-white/30 transition-colors hover:text-white/60"
             >
-              Retourner un article
+              {t("returns")}
             </Link>
             <Link
               href="/cgv"
               className="text-[12px] text-white/30 transition-colors hover:text-white/60"
             >
-              CGV
+              {t("terms")}
             </Link>
             <Link
               href="/mentions-legales"
               className="text-[12px] text-white/30 transition-colors hover:text-white/60"
             >
-              Mentions légales
+              {t("legalNotice")}
             </Link>
             <Link
               href="/politique-de-confidentialite"
               className="text-[12px] text-white/30 transition-colors hover:text-white/60"
             >
-              Politique de confidentialité
+              {t("privacyPolicy")}
             </Link>
           </div>
         </div>

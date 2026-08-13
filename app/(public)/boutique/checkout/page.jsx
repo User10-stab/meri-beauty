@@ -3,10 +3,14 @@ import { getCart } from "@/actions/boutique/cart";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { CheckoutPageClient } from "@/components/boutique/CheckoutPageClient";
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = { title: "Commande – Meri Beauty" };
+export async function generateMetadata() {
+  const t = await getTranslations("boutique.metadata");
+  return { title: t("checkoutPage") };
+}
 
 export default async function CheckoutPage() {
   const [cartResult, session] = await Promise.all([getCart(), auth()]);

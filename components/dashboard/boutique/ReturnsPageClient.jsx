@@ -7,15 +7,9 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import Button from "@/components/ui/Button";
 import { approveReturnRequest, rejectReturnRequest, completeReturnRequest, listReturnRequests } from "@/actions/boutique/returns";
 import { Pagination } from "@/components/dashboard/Tables/Pagination";
+import { useTranslations } from "next-intl";
 
 const PAGE_SIZE = 20;
-
-const STATUS_LABEL = {
-  REQUESTED: "Demandée",
-  APPROVED: "Approuvée",
-  REJECTED: "Refusée",
-  COMPLETED: "Terminée",
-};
 
 const STATUS_STYLE = {
   REQUESTED: "bg-amber-50 text-amber-700 border-amber-100",
@@ -32,6 +26,7 @@ function formatDate(d) {
 }
 
 export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
+  const t = useTranslations("dashboardBoutique.returns");
   const [requests, setRequests] = useState(initialRequests);
   const [totalCount, setTotalCount] = useState(initialTotalCount);
   const [page, setPage] = useState(1);
@@ -39,6 +34,13 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
   const [search, setSearch] = useState("");
   const [active, setActive] = useState(null);
   const [isPending, startTransition] = useTransition();
+
+  const STATUS_LABEL = {
+    REQUESTED: t("status.REQUESTED"),
+    APPROVED: t("status.APPROVED"),
+    REJECTED: t("status.REJECTED"),
+    COMPLETED: t("status.COMPLETED"),
+  };
 
   function refetch(next) {
     const params = {
@@ -83,7 +85,7 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher n°, client… (Entrée)"
+            placeholder={t("searchPlaceholder")}
             className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           />
         </div>
@@ -95,7 +97,7 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
           }}
           className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
         >
-          <option value="">Tous les statuts</option>
+          <option value="">{t("allStatuses")}</option>
           {Object.entries(STATUS_LABEL).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
@@ -109,18 +111,18 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
             <PackageSearch size={22} className="text-gray-300" />
           </div>
           <p className="font-medium text-gray-700">
-            {totalCount > 0 ? "Aucune demande ne correspond à votre recherche" : "Aucune demande de retour pour le moment"}
+            {totalCount > 0 ? t("noMatch") : t("noRequests")}
           </p>
         </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-6">Commande</TableHead>
-              <TableHead>Client</TableHead>
-              <TableHead>Articles</TableHead>
-              <TableHead>Statut</TableHead>
-              <TableHead className="pr-6">Demandée le</TableHead>
+              <TableHead className="pl-6">{t("tableHeaders.order")}</TableHead>
+              <TableHead>{t("tableHeaders.customer")}</TableHead>
+              <TableHead>{t("tableHeaders.items")}</TableHead>
+              <TableHead>{t("tableHeaders.status")}</TableHead>
+              <TableHead className="pr-6">{t("tableHeaders.requestedOn")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -135,7 +137,7 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
                 </TableCell>
                 <TableCell>
                   <span className="text-gray-600 dark:text-dark-6">
-                    {rr.items.reduce((sum, i) => sum + i.quantity, 0)} article(s)
+                    {t("itemCount", { count: rr.items.reduce((sum, i) => sum + i.quantity, 0) })}
                   </span>
                 </TableCell>
                 <TableCell>
@@ -155,7 +157,7 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
       {totalCount > PAGE_SIZE && (
         <div className="flex items-center justify-between border-t border-stroke px-6 py-4 dark:border-dark-3">
           <span className="text-xs text-gray-500 dark:text-dark-6">
-            {totalCount} demande{totalCount > 1 ? "s" : ""} au total
+            {t("totalCount", { count: totalCount })}
           </span>
           <Pagination
             currentPage={page}
@@ -175,6 +177,7 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
 }
 
 function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
+  const t = useTranslations("dashboardBoutique.returns.detailDialog");
   const [isPending, startTransition] = useTransition();
   const [staffNote, setStaffNote] = useState("");
 
@@ -208,7 +211,7 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
         <div className="mb-4 flex items-start justify-between">
           <div>
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">
-              Retour — commande n°{rr.order?.orderNumber}
+              {t("title")} — {t("order")} n°{rr.order?.orderNumber}
             </h2>
             <p className="text-sm text-gray-500">{rr.order?.user?.fullName} — {rr.order?.user?.email}</p>
           </div>
@@ -229,14 +232,14 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
         </div>
 
         <div className="mb-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-dark-2 dark:text-dark-6">
-          <span className="font-medium text-gray-700 dark:text-white">Motif : </span>
+          <span className="font-medium text-gray-700 dark:text-white">{t("reason")} : </span>
           {rr.reason}
         </div>
 
         {["REQUESTED", "APPROVED"].includes(rr.status) && (
           <div className="mb-4">
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Note interne (optionnel)
+              {t("staffNote")}
             </label>
             <textarea
               value={staffNote}
@@ -248,7 +251,7 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
         )}
 
         {rr.staffNote && !["REQUESTED", "APPROVED"].includes(rr.status) && (
-          <p className="mb-4 text-xs text-gray-400">Note : {rr.staffNote}</p>
+          <p className="mb-4 text-xs text-gray-400">{t("staffNote")} : {rr.staffNote}</p>
         )}
 
         <div className="flex flex-wrap justify-end gap-3">
@@ -260,11 +263,11 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
                 disabled={isPending}
                 className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
               >
-                Refuser
+                {t("reject")}
               </button>
               <Button onClick={() => run(approveReturnRequest)} disabled={isPending}>
                 {isPending && <Loader2 size={14} className="animate-spin" />}
-                Approuver
+                {t("approve")}
               </Button>
             </>
           )}
@@ -276,11 +279,11 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
                 disabled={isPending}
                 className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
               >
-                Refuser
+                {t("reject")}
               </button>
               <Button onClick={() => run(completeReturnRequest)} disabled={isPending}>
                 {isPending && <Loader2 size={14} className="animate-spin" />}
-                Confirmer réception &amp; rembourser
+                {t("complete")}
               </Button>
             </>
           )}

@@ -2,32 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Package, Sparkles, GraduationCap, Loader2, FileDown, ExternalLink, Truck } from "lucide-react";
 import { cancelMyOrder } from "@/actions/boutique/orders";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
+import { toIntlLocale } from "@/lib/intl-locale";
 
 const CUSTOMER_CANCELLABLE_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP"];
-
-const ORDER_STATUS_LABELS = {
-  PENDING_PAYMENT: "Paiement en attente",
-  PENDING_PICKUP: "En attente de retrait",
-  PAID: "Payée",
-  PROCESSING: "En préparation",
-  READY_FOR_PICKUP: "Prête pour retrait",
-  SHIPPED: "Expédiée",
-  COMPLETED: "Terminée",
-  CANCELLED: "Annulée",
-  EXPIRED: "Expirée",
-};
-
-const RESERVATION_STATUS_LABELS = {
-  PENDING_DEPOSIT: "Acompte en attente",
-  CONFIRMED: "Confirmée",
-  CANCELLED: "Annulée",
-  COMPLETED: "Terminée",
-  NO_SHOW: "Absent(e)",
-};
 
 const STATUS_STYLE = {
   PENDING_PAYMENT: "bg-gray-100 text-gray-600 border-gray-200",
@@ -44,26 +26,20 @@ const STATUS_STYLE = {
   NO_SHOW: "bg-red-50 text-red-600 border-red-100",
 };
 
-const FULFILMENT_LABELS = {
-  PICKUP_PREPAID: "Retrait en boutique — payé en ligne",
-  PICKUP_ON_SITE: "Retrait en boutique — à payer sur place",
-  SHIPPING_PREPAID: "Livraison en point relais",
-};
-
-function formatPrice(n) {
-  return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(n));
+function formatPrice(n, intlLocale) {
+  return new Intl.NumberFormat(intlLocale, { style: "currency", currency: "EUR" }).format(Number(n));
 }
 
-function formatDate(date) {
-  return new Date(date).toLocaleDateString("fr-FR", {
+function formatDate(date, intlLocale) {
+  return new Date(date).toLocaleDateString(intlLocale, {
     day: "2-digit",
     month: "short",
     year: "numeric",
   });
 }
 
-function formatSessionDate(date) {
-  return new Date(date).toLocaleDateString("fr-FR", {
+function formatSessionDate(date, intlLocale) {
+  return new Date(date).toLocaleDateString(intlLocale, {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -83,6 +59,7 @@ function StatusBadge({ status, labels }) {
 }
 
 function InvoiceLink({ invoice }) {
+  const t = useTranslations();
   if (!invoice) return null;
   return (
     <a
@@ -92,7 +69,7 @@ function InvoiceLink({ invoice }) {
       className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink/60 hover:text-gold"
     >
       <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
-      Facture {invoice.number}
+      {t("myAccount.invoice")} {invoice.number}
     </a>
   );
 }
@@ -107,16 +84,38 @@ function EmptyState({ icon: Icon, text }) {
 }
 
 function OrderCard({ order }) {
+  const locale = useLocale();
+  const t = useTranslations();
   const router = useRouter();
+  const intlLocale = toIntlLocale(locale);
   const [cancelling, setCancelling] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const canCancel = CUSTOMER_CANCELLABLE_STATUSES.includes(order.status);
+
+  // Build status labels dynamically
+  const ORDER_STATUS_LABELS = {
+    PENDING_PAYMENT: t("myAccount.pendingPayment"),
+    PENDING_PICKUP: t("myAccount.pendingPickup"),
+    PAID: t("myAccount.paid"),
+    PROCESSING: t("myAccount.preparing"),
+    READY_FOR_PICKUP: t("myAccount.readyForPickup"),
+    SHIPPED: t("myAccount.shipped"),
+    COMPLETED: t("myAccount.completed"),
+    CANCELLED: t("myAccount.cancelled"),
+    EXPIRED: t("myAccount.expired"),
+  };
+
+  const FULFILMENT_LABELS = {
+    PICKUP_PREPAID: t("myAccount.pickupAtStore"),
+    PICKUP_ON_SITE: t("myAccount.pickupOnSite"),
+    SHIPPING_PREPAID: t("myAccount.shippingRelay"),
+  };
 
   async function handleCancel() {
     setCancelling(true);
     const result = await cancelMyOrder(order.id);
     if (result.success) {
-      toast.success("Commande annulée.");
+      toast.success(t("success.deleted"));
       router.refresh();
     } else {
       toast.error(result.message);
@@ -129,8 +128,8 @@ function OrderCard({ order }) {
     <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-bold text-ink">Commande #{order.orderNumber}</p>
-          <p className="mt-0.5 text-xs text-ink/45">{formatDate(order.createdAt)} · {FULFILMENT_LABELS[order.fulfilmentMode] ?? order.fulfilmentMode}</p>
+          <p className="text-sm font-bold text-ink">{t("myAccount.orderNumber")}#{order.orderNumber}</p>
+          <p className="mt-0.5 text-xs text-ink/45">{formatDate(order.createdAt, intlLocale)} · {FULFILMENT_LABELS[order.fulfilmentMode] ?? order.fulfilmentMode}</p>
         </div>
         <StatusBadge status={order.status} labels={ORDER_STATUS_LABELS} />
       </div>
@@ -139,25 +138,25 @@ function OrderCard({ order }) {
         {order.items.map((item, i) => (
           <li key={i} className="flex justify-between gap-3">
             <span className="min-w-0 truncate">{item.productName} — {item.variantName} × {item.quantity}</span>
-            <span className="shrink-0 font-medium text-ink">{formatPrice(item.unitPrice * item.quantity)}</span>
+            <span className="shrink-0 font-medium text-ink">{formatPrice(item.unitPrice * item.quantity, intlLocale)}</span>
           </li>
         ))}
       </ul>
 
       <div className="mt-3 flex items-center justify-between border-t border-ink/8 pt-3">
         {order.pickupCode && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(order.status) ? (
-          <span className="text-[11px] text-ink/45">Code de retrait : <span className="font-mono font-semibold text-ink/70">{order.pickupCode}</span></span>
+          <span className="text-[11px] text-ink/45">{t("myAccount.pickupCode")} : <span className="font-mono font-semibold text-ink/70">{order.pickupCode}</span></span>
         ) : (
           <InvoiceLink invoice={order.payment?.invoice} />
         )}
-        <span className="text-sm font-bold text-gold">{formatPrice(order.totalAmount)}</span>
+        <span className="text-sm font-bold text-gold">{formatPrice(order.totalAmount, intlLocale)}</span>
       </div>
 
       {order.fulfilmentMode === "SHIPPING_PREPAID" && order.trackingCode && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-cream px-3 py-2.5 text-xs text-ink/65">
           <span className="inline-flex items-center gap-1.5">
             <Truck className="h-3.5 w-3.5 text-gold" strokeWidth={1.75} />
-            Suivi : <strong className="font-mono text-ink">{order.trackingCode}</strong>
+            {t("myAccount.tracking")} : <strong className="font-mono text-ink">{order.trackingCode}</strong>
           </span>
           <a
             href={MONDIAL_RELAY_TRACKING_URL}
@@ -165,7 +164,7 @@ function OrderCard({ order }) {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 font-semibold text-ink hover:text-gold"
           >
-            Suivre le colis <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
+            {t("myAccount.trackPackage")} <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
           </a>
         </div>
       )}
@@ -174,14 +173,14 @@ function OrderCard({ order }) {
         <div className="mt-3 flex items-center justify-end gap-2 border-t border-ink/8 pt-3">
           {confirming ? (
             <>
-              <span className="text-xs text-ink/50">Confirmer l&apos;annulation ?</span>
+              <span className="text-xs text-ink/50">{t("myAccount.confirmCancellation")}</span>
               <button
                 type="button"
                 onClick={() => setConfirming(false)}
                 disabled={cancelling}
                 className="text-xs font-semibold text-ink/50 hover:text-ink"
               >
-                Non
+                {t("myAccount.no")}
               </button>
               <button
                 type="button"
@@ -190,7 +189,7 @@ function OrderCard({ order }) {
                 className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
               >
                 {cancelling && <Loader2 className="h-3 w-3 animate-spin" />}
-                Oui, annuler
+                {t("myAccount.yes")}
               </button>
             </>
           ) : (
@@ -199,7 +198,7 @@ function OrderCard({ order }) {
               onClick={() => setConfirming(true)}
               className="text-xs font-semibold text-red-600 hover:text-red-700"
             >
-              Annuler la commande
+              {t("myAccount.cancelOrder")}
             </button>
           )}
         </div>
@@ -209,11 +208,29 @@ function OrderCard({ order }) {
 }
 
 function ReservationCard({ reservation, kind }) {
+  const locale = useLocale();
+  const t = useTranslations();
+  const intlLocale = toIntlLocale(locale);
   const item = kind === "workshop" ? reservation.session.workshop : reservation.session.formation;
-  const typeLabel =
-    kind === "workshop"
-      ? item.type === "WORKSHOP" ? "Atelier" : "Événement"
-      : item.type === "PRIVATE" ? "Formation privée" : "Formation groupe";
+  
+  // Build status labels dynamically
+  const RESERVATION_STATUS_LABELS = {
+    PENDING_DEPOSIT: t("myAccount.pendingDeposit"),
+    CONFIRMED: t("myAccount.confirmed"),
+    CANCELLED: t("myAccount.cancelled"),
+    COMPLETED: t("myAccount.completed"),
+    NO_SHOW: t("myAccount.noShow"),
+  };
+
+  const getTypeLabel = () => {
+    if (kind === "workshop") {
+      return item.type === "WORKSHOP" ? t("myAccount.workshop") : t("myAccount.event");
+    } else {
+      return item.type === "PRIVATE" ? t("myAccount.privateTraining") : t("myAccount.groupTraining");
+    }
+  };
+
+  const typeLabel = getTypeLabel();
 
   return (
     <div className="flex gap-4 rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
@@ -232,7 +249,7 @@ function ReservationCard({ reservation, kind }) {
           <div>
             <span className="text-[10px] font-semibold uppercase tracking-wide text-gold">{typeLabel}</span>
             <p className="text-sm font-bold text-ink">{item.title}</p>
-            <p className="mt-0.5 text-xs text-ink/45">{formatSessionDate(reservation.session.startDate)} · {reservation.seatsCount} place{reservation.seatsCount > 1 ? "s" : ""}</p>
+            <p className="mt-0.5 text-xs text-ink/45">{formatSessionDate(reservation.session.startDate, intlLocale)} · {t("myAccount.seats", { count: reservation.seatsCount })}</p>
           </div>
           <StatusBadge status={reservation.status} labels={RESERVATION_STATUS_LABELS} />
         </div>
@@ -240,10 +257,13 @@ function ReservationCard({ reservation, kind }) {
         <div className="mt-3 flex items-center justify-between border-t border-ink/8 pt-3 text-[13px]">
           <span className="text-ink/50">
             {Number(reservation.balanceDue) > 0
-              ? `Payé ${formatPrice(reservation.depositAmount)} · solde ${formatPrice(reservation.balanceDue)}`
-              : "Payé intégralement"}
+              ? t("myAccount.paidDepositBalance", {
+                  deposit: formatPrice(reservation.depositAmount, intlLocale),
+                  balance: formatPrice(reservation.balanceDue, intlLocale),
+                })
+              : t("myAccount.paid")}
           </span>
-          <span className="text-sm font-bold text-gold">{formatPrice(reservation.totalPrice)}</span>
+          <span className="text-sm font-bold text-gold">{formatPrice(reservation.totalPrice, intlLocale)}</span>
         </div>
 
         <InvoiceLink invoice={reservation.payment?.invoice} />
@@ -253,12 +273,13 @@ function ReservationCard({ reservation, kind }) {
 }
 
 const TABS = [
-  { key: "orders", label: "Commandes boutique", icon: Package },
-  { key: "workshops", label: "Ateliers & Événements", icon: Sparkles },
-  { key: "formations", label: "Formations", icon: GraduationCap },
+  { key: "orders", label: "shopOrders", icon: Package },
+  { key: "workshops", label: "workshops", icon: Sparkles },
+  { key: "formations", label: "training", icon: GraduationCap },
 ];
 
 export function MonComptePageClient({ orders, workshopReservations, formationReservations }) {
+  const t = useTranslations();
   const [activeTab, setActiveTab] = useState("orders");
 
   const counts = {
@@ -273,11 +294,11 @@ export function MonComptePageClient({ orders, workshopReservations, formationRes
         <div className="mx-auto max-w-[1000px] px-6 md:px-10 text-center">
           <div className="mb-4 inline-flex items-center gap-3">
             <span className="h-px w-8 bg-gold" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">Mon compte</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">{t("myAccount.title")}</span>
             <span className="h-px w-8 bg-gold" />
           </div>
           <h1 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[2.6rem]">
-            Mes commandes &amp; réservations
+            {t("myAccount.myOrdersAndReservations")}
           </h1>
         </div>
       </section>
@@ -300,7 +321,7 @@ export function MonComptePageClient({ orders, workshopReservations, formationRes
                   }`}
                 >
                   <Icon className="h-4 w-4" strokeWidth={1.75} />
-                  {tab.label}
+                  {t(`myAccount.${tab.label}`)}
                   <span className={`rounded-full px-1.5 text-[11px] ${selected ? "bg-white/20" : "bg-ink/5"}`}>
                     {counts[tab.key]}
                   </span>
@@ -311,7 +332,7 @@ export function MonComptePageClient({ orders, workshopReservations, formationRes
 
           {activeTab === "orders" && (
             orders.length === 0 ? (
-              <EmptyState icon={Package} text="Vous n'avez pas encore passé de commande dans la boutique." />
+              <EmptyState icon={Package} text={t("myAccount.noOrders")} />
             ) : (
               <div className="space-y-4">
                 {orders.map((order) => <OrderCard key={order.id} order={order} />)}
@@ -321,7 +342,7 @@ export function MonComptePageClient({ orders, workshopReservations, formationRes
 
           {activeTab === "workshops" && (
             workshopReservations.length === 0 ? (
-              <EmptyState icon={Sparkles} text="Vous n'avez pas encore réservé d'atelier ou d'événement." />
+              <EmptyState icon={Sparkles} text={t("myAccount.noWorkshops")} />
             ) : (
               <div className="space-y-4">
                 {workshopReservations.map((r) => <ReservationCard key={r.id} reservation={r} kind="workshop" />)}
@@ -331,7 +352,7 @@ export function MonComptePageClient({ orders, workshopReservations, formationRes
 
           {activeTab === "formations" && (
             formationReservations.length === 0 ? (
-              <EmptyState icon={GraduationCap} text="Vous n'avez pas encore réservé de formation." />
+              <EmptyState icon={GraduationCap} text={t("myAccount.noFormations")} />
             ) : (
               <div className="space-y-4">
                 {formationReservations.map((r) => <ReservationCard key={r.id} reservation={r} kind="formation" />)}

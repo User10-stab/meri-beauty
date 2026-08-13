@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useTranslations } from "next-intl";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Heart,
@@ -161,7 +162,7 @@ function useInView(threshold = 0.1) {
 // INSTAGRAM VIEWER
 // Black container — media always keeps its real aspect ratio
 // ─────────────────────────────────────────────────────────────
-function InstagramViewer({ post }) {
+function InstagramViewer({ post, t }) {
   const videoRef = useRef(null);
   const [muted, setMuted] = useState(true);
   const [playing, setPlaying] = useState(true);
@@ -262,7 +263,7 @@ function InstagramViewer({ post }) {
       {isVideo && (
         <div className="absolute left-4 top-4 flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 backdrop-blur-md">
           <Film className="h-3.5 w-3.5 text-white/80" />
-          <span className="text-[12px] font-semibold text-white/90">Reel</span>
+          <span className="text-[12px] font-semibold text-white/90">{t("instagramReel")}</span>
         </div>
       )}
 
@@ -270,7 +271,7 @@ function InstagramViewer({ post }) {
       {post.media_type === "CAROUSEL_ALBUM" && (
         <div className="absolute left-4 top-4 flex items-center gap-1.5 rounded-full bg-black/55 px-3 py-1.5 backdrop-blur-md">
           <Images className="h-3.5 w-3.5 text-white/80" />
-          <span className="text-[12px] font-semibold text-white/90">Carrousel</span>
+          <span className="text-[12px] font-semibold text-white/90">{t("instagramCarousel")}</span>
         </div>
       )}
 
@@ -278,7 +279,7 @@ function InstagramViewer({ post }) {
       {isVideo && (
         <button
           onClick={() => setMuted((m) => !m)}
-          aria-label={muted ? "Activer le son" : "Couper le son"}
+          aria-label={muted ? t("instagramEnableSound") : t("instagramMuteSound")}
           className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-md transition-all hover:bg-black/75 hover:text-white"
         >
           {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
@@ -340,7 +341,7 @@ function InstagramViewer({ post }) {
 // ─────────────────────────────────────────────────────────────
 // INSTAGRAM DETAILS  —  right-hand panel
 // ─────────────────────────────────────────────────────────────
-function InstagramDetails({ post, profile }) {
+function InstagramDetails({ post, profile, t }) {
   const [liked, setLiked] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -406,7 +407,7 @@ function InstagramDetails({ post, profile }) {
               onClick={() => setExpanded(true)}
               className="mt-2 text-[13px] text-white/40 hover:text-white/70 transition-colors"
             >
-              Voir plus
+              {t("reviewsMore")}
             </button>
           )}
         </div>
@@ -416,7 +417,7 @@ function InstagramDetails({ post, profile }) {
           <button
             onClick={() => setLiked((l) => !l)}
             className="flex items-center gap-2 group"
-            aria-label="J'aime"
+            aria-label={t("instagramLike")}
           >
             <Heart
               className={`h-5 w-5 transition-all duration-200 group-hover:scale-110
@@ -427,14 +428,14 @@ function InstagramDetails({ post, profile }) {
             </span>
           </button>
 
-          <button className="flex items-center gap-2 group" aria-label="Commenter">
+          <button className="flex items-center gap-2 group" aria-label={t("instagramComment")}>
             <MessageCircle className="h-5 w-5 text-white/70 transition-all group-hover:text-white group-hover:scale-110" />
             <span className="text-[13px] font-medium text-white/60 group-hover:text-white/90 transition-colors">
               {formatCount(post.comments)}
             </span>
           </button>
 
-          <button className="flex items-center gap-2 group" aria-label="Partager">
+          <button className="flex items-center gap-2 group" aria-label={t("instagramShare")}>
             <Send className="h-5 w-5 text-white/70 transition-all group-hover:text-white group-hover:scale-110" />
           </button>
         </div>
@@ -446,7 +447,7 @@ function InstagramDetails({ post, profile }) {
           rel="noopener noreferrer"
           className="group inline-flex items-center justify-center gap-2.5 rounded-full border border-[#C6A46A]/50 px-6 py-3.5 text-[13.5px] font-semibold text-[#C6A46A] transition-all duration-300 hover:bg-[#C6A46A]/10 hover:border-[#C6A46A] hover:shadow-lg hover:shadow-[#C6A46A]/10 w-fit"
         >
-          Voir sur Instagram
+          {t("instagramViewPost")}
           <ExternalLink className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
         </a>
       </motion.div>
@@ -587,6 +588,7 @@ function InstagramThumbnailList({ posts, activeId, onSelect }) {
 // MAIN EXPORT  —  InstagramLifestyle
 // ─────────────────────────────────────────────────────────────
 export default function InstagramLifestyle({ posts = POSTS, profile }) {
+  const t = useTranslations("home");
   const [headerRef, headerInView] = useInView(0.15);
   const [contentRef, contentInView] = useInView(0.08);
 
@@ -640,12 +642,12 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
 
           {/* Heading */}
           <h2 className="mb-3 font-display text-[2rem] font-bold leading-[1.08] tracking-tight text-white/90 sm:text-[2.4rem] lg:text-[2.8rem]">
-            Suivez-nous sur Instagram
+            {t("instagramTitle")}
           </h2>
 
           {/* Description */}
           <p className="mx-auto max-w-[420px] text-[13.5px] leading-[1.7] text-white/55">
-            Découvrez nos dernières réalisations, inspirations et moments du quotidien.
+            {t("instagramBody")}
           </p>
         </motion.div>
 
@@ -665,7 +667,7 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
               whileTap={{ scale: 0.93 }}
               onClick={goPrev}
               disabled={selectedIndex === 0}
-              aria-label="Post précédent"
+              aria-label={t("instagramPreviousPost")}
               className="shrink-0 flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 backdrop-blur-md shadow-lg shadow-black/30 transition-all hover:bg-white/15 hover:text-white disabled:pointer-events-none disabled:opacity-25"
             >
               <ChevronLeft className="h-5 w-5" />
@@ -675,13 +677,13 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
             <div className="flex flex-1 min-w-0 flex-col gap-6 lg:flex-row lg:items-stretch lg:gap-8">
               {/* Viewer — 58% */}
               <div className="w-full lg:w-[58%]">
-                <InstagramViewer post={selected} />
+                <InstagramViewer post={selected} t={t} />
               </div>
 
               {/* Details — 42% */}
               <div className="w-full lg:w-[42%] lg:flex lg:items-center">
                 <div className="w-full rounded-2xl border border-white/8 bg-white/[0.04] px-5 py-5 backdrop-blur-sm lg:py-6">
-                  <InstagramDetails post={selected} profile={profile} />
+                  <InstagramDetails post={selected} profile={profile} t={t} />
                 </div>
               </div>
             </div>
@@ -692,7 +694,7 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
               whileTap={{ scale: 0.93 }}
               onClick={goNext}
               disabled={selectedIndex === posts.length - 1}
-              aria-label="Post suivant"
+              aria-label={t("instagramNextPost")}
               className="shrink-0 flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 backdrop-blur-md shadow-lg shadow-black/30 transition-all hover:bg-white/15 hover:text-white disabled:pointer-events-none disabled:opacity-25"
             >
               <ChevronRight className="h-5 w-5" />
@@ -717,7 +719,7 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
               rel="noopener noreferrer"
               className="group inline-flex items-center gap-3 rounded-full border border-white/20 px-7 py-3 text-[13px] font-semibold text-white/80 transition-all duration-300 hover:border-[#C6A46A]/60 hover:text-[#C6A46A] hover:shadow-lg hover:shadow-[#C6A46A]/10"
             >
-              Voir plus sur Instagram
+              {t("instagramViewMore")}
               <InstagramIcon className="h-4 w-4 transition-transform duration-300 group-hover:scale-110" />
             </a>
           </div>

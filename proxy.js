@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "./auth.config";
+import { defaultLocale, isLocale } from "./i18n/routing";
 
 const COOKIE_NAME = "meri_site_access";
 const GATE_PASSWORD = process.env.SITE_ACCESS_PASSWORD;
@@ -14,6 +15,7 @@ async function sha256Hex(value) {
 }
 
 export default async function proxy(request) {
+  const existingLocale = request.cookies.get("NEXT_LOCALE")?.value;
   const gateEnabled = !!GATE_PASSWORD;
 
   if (gateEnabled) {
@@ -35,7 +37,26 @@ export default async function proxy(request) {
     }
   }
 
-  return NextAuth(authConfig).auth(request);
+  const authResponse = await NextAuth(authConfig).auth(request);
+  if (!isLocale(existingLocale)) {
+    // authResponse can be null when no session modification is needed,
+    // but it can also be a plain Response from an auth redirect.
+    // NextResponse is the only object that exposes `cookies.set()`.
+    const response =
+      authResponse instanceof NextResponse
+        ? authResponse
+        : authResponse
+          ? new NextResponse(authResponse.body, authResponse)
+          : NextResponse.next();
+
+    response.cookies.set("NEXT_LOCALE", defaultLocale, {
+      path: "/",
+      maxAge: 31536000,
+      sameSite: "lax",
+    });
+    return response;
+  }
+  return authResponse;
 }
 
 export const config = {

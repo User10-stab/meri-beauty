@@ -1,7 +1,10 @@
 import Link from "next/link";
 import Image from "next/image";
+import { useTranslations } from "next-intl";
 
 export function ProductCard({ product }) {
+  const t = useTranslations("boutique");
+
   return (
     <Link href={`/boutique/${product.slug}`} className="group block">
       <div className="relative aspect-square overflow-hidden bg-neutral-50">
@@ -20,7 +23,7 @@ export function ProductCard({ product }) {
         )}
         {!product.inStock && (
           <span className="absolute left-3 top-3 bg-white px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-gray-500">
-            Épuisé
+            {t("soldOut")}
           </span>
         )}
       </div>

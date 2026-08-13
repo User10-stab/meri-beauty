@@ -11,6 +11,7 @@ import { ProductImages } from "@/components/dashboard/boutique/ProductImages";
 import { BarcodeLabelDialog } from "@/components/dashboard/boutique/BarcodeLabelDialog";
 import { createProduct, updateProduct, deleteProduct, generateUniqueSku } from "@/actions/boutique/products";
 import { getProductCategories } from "@/actions/boutique/categories";
+import { useTranslations } from "next-intl";
 
 /** Not a real EAN/UPC — a locally-unique fallback so a product with no
  * supplier barcode can still get a printable label and be found by
@@ -20,12 +21,6 @@ function generateInternalBarcode() {
   const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
   return `IN${hex}`;
 }
-
-const STATUS_OPTIONS = [
-  { value: "DRAFT", label: "Brouillon", hint: "Non visible sur la boutique" },
-  { value: "ACTIVE", label: "Actif", hint: "Visible et en vente" },
-  { value: "ARCHIVED", label: "Archivé", hint: "Retiré de la boutique" },
-];
 
 function emptyVariant(barcode) {
   return {
@@ -74,7 +69,14 @@ const inputClass =
  */
 export function ProductEditor({ product, brands, initialBarcode = null }) {
   const router = useRouter();
+  const t = useTranslations("dashboardBoutique.productEditor");
   const isEdit = !!product;
+
+  const STATUS_OPTIONS = [
+    { value: "DRAFT", label: t("status.DRAFT"), hint: t("status.DRAFT_hint") },
+    { value: "ACTIVE", label: t("status.ACTIVE"), hint: t("status.ACTIVE_hint") },
+    { value: "ARCHIVED", label: t("status.ARCHIVED"), hint: t("status.ARCHIVED_hint") },
+  ];
 
   const [name, setName] = useState(product?.name ?? "");
   const [description, setDescription] = useState(product?.description ?? "");
@@ -209,7 +211,7 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
             <ArrowLeft size={16} />
           </Link>
           <h1 className="text-lg font-semibold text-dark dark:text-white">
-            {isEdit ? "Modifier le produit" : "Nouveau produit"}
+            {isEdit ? t("editTitle") : t("newTitle")}
           </h1>
         </div>
         <div className="flex items-center gap-2">
@@ -220,56 +222,55 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
               className="flex h-9 items-center gap-2 rounded-lg border border-red-200 px-3 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
             >
               <Trash2 size={14} />
-              Supprimer
+              {t("deleteButton")}
             </button>
           )}
           <Button type="submit" disabled={isPending}>
             {isPending && <Loader2 size={14} className="animate-spin" />}
-            Enregistrer
+            {t("saveButton")}
           </Button>
         </div>
       </div>
 
       {!isEdit && initialBarcode && (
         <div className="rounded-lg border border-[#2f3a2e]/15 bg-[#2f3a2e]/5 px-4 py-3 text-sm text-[#2f3a2e]">
-          Code-barres <span className="font-semibold">{initialBarcode}</span> scanné — aucun produit ne l'utilisait
-          encore, il a été pré-rempli sur la première déclinaison ci-dessous.
+          {t("scannedBarcodeInfo", { barcode: initialBarcode })}
         </div>
       )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         {/* ── Main column ─────────────────────────────────────────────── */}
         <div className="space-y-6">
-          <Section title="Informations générales">
+          <Section title={t("sections.general")}>
             <div className="space-y-4">
-              <Field label="Nom du produit" required>
+              <Field label={t("fields.productName")} required>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Shampooing Hydratant"
+                  placeholder={t("fields.productNamePlaceholder")}
                   required
                   className={inputClass}
                 />
               </Field>
-              <Field label="Description">
+              <Field label={t("fields.description")}>
                 <textarea
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={4}
-                  placeholder="Décrivez le produit pour vos clientes…"
+                  placeholder={t("fields.descriptionPlaceholder")}
                   className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
                 />
               </Field>
             </div>
           </Section>
 
-          <Section title="Images">
+          <Section title={t("sections.images")}>
             <ProductImages value={images} onChange={setImages} />
           </Section>
 
           <Section
-            title="Déclinaisons"
+            title={t("sections.variants")}
             action={
               <button
                 type="button"
@@ -277,7 +278,7 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
                 className="flex items-center gap-1.5 text-sm font-medium text-[#2f3a2e] hover:underline"
               >
                 <Plus size={14} />
-                Ajouter une déclinaison
+                {t("variants.addVariant")}
               </button>
             }
           >
@@ -298,7 +299,7 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
 
         {/* ── Sidebar ──────────────────────────────────────────────────── */}
         <div className="space-y-6">
-          <Section title="Statut">
+          <Section title={t("sections.status")}>
             <div className="space-y-2">
               {STATUS_OPTIONS.map((opt) => (
                 <label
@@ -324,11 +325,11 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
             </div>
           </Section>
 
-          <Section title="Organisation">
+          <Section title={t("sections.organization")}>
             <div className="space-y-4">
-              <Field label="Marque" required>
+              <Field label={t("fields.brand")} required>
                 <select value={brandId} onChange={(e) => handleBrandChange(e.target.value)} required className={inputClass}>
-                  <option value="">Choisir…</option>
+                  <option value="">{t("fields.brandPlaceholder")}</option>
                   {brands.map((b) => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
@@ -336,9 +337,9 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
               </Field>
 
               <Field
-                label="Catégorie"
+                label={t("fields.category")}
                 required
-                hint={!brandId ? "Choisissez d'abord une marque." : loadingCategories ? "Chargement…" : null}
+                hint={!brandId ? t("fields.categoryHint") : loadingCategories ? t("fields.categoryLoading") : null}
               >
                 <select
                   value={categoryId}
@@ -350,14 +351,14 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
                   disabled={!brandId || loadingCategories}
                   className={`${inputClass} disabled:cursor-not-allowed disabled:bg-gray-50`}
                 >
-                  <option value="">Choisir…</option>
+                  <option value="">{t("fields.categoryPlaceholder")}</option>
                   {categories.map((c) => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </Field>
 
-              <Field label="Sous-catégorie" required hint={!categoryId ? "Choisissez d'abord une catégorie." : null}>
+              <Field label={t("fields.subcategory")} required hint={!categoryId ? t("fields.subcategoryHint") : null}>
                 <select
                   value={subcategoryId}
                   onChange={(e) => setSubcategoryId(e.target.value)}
@@ -365,7 +366,7 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
                   disabled={!categoryId}
                   className={`${inputClass} disabled:cursor-not-allowed disabled:bg-gray-50`}
                 >
-                  <option value="">Choisir…</option>
+                  <option value="">{t("fields.subcategoryPlaceholder")}</option>
                   {subcategories.map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
@@ -381,9 +382,9 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
 
       <ConfirmDialog
         open={confirmDelete}
-        title="Supprimer ce produit ?"
-        message={`"${name}" sera retiré de la boutique. Les commandes passées le conservent dans leur historique.`}
-        confirmLabel="Supprimer"
+        title={t("deleteConfirm")}
+        message={t("deleteMessage", { name })}
+        confirmLabel={t("deleteButton")}
         danger
         loading={isPending}
         onConfirm={handleDelete}
@@ -411,6 +412,7 @@ function Section({ title, action, children }) {
  * variant — an existing one can only change stock through a movement
  * (Stock page), so the ledger always reconciles. */
 function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
+  const t = useTranslations("dashboardBoutique.productEditor.variants");
   const isExisting = !!variant.id;
   const price = Number(variant.price) || 0;
   const cost = Number(variant.costPrice) || 0;
@@ -418,7 +420,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
   const [generatingSku, setGeneratingSku] = useState(false);
 
   async function handleGenerateSku() {
-    if (variant.sku && !window.confirm("Remplacer la référence actuelle par une nouvelle référence générée ?")) return;
+    if (variant.sku && !window.confirm(t("generateSkuConfirm"))) return;
     setGeneratingSku(true);
     const result = await generateUniqueSku();
     setGeneratingSku(false);
@@ -426,6 +428,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
       toast.error(result.message);
       return;
     }
+    toast.success(t("skuGenerated"));
     onChange({ sku: result.sku });
   }
 
@@ -436,7 +439,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
           type="text"
           value={variant.name}
           onChange={(e) => onChange({ name: e.target.value })}
-          placeholder="Nom de la déclinaison (250ml, Teinte 03…)"
+          placeholder={t("fields.namePlaceholder")}
           className="w-64 border-0 border-b border-transparent bg-transparent p-0 text-sm font-medium text-gray-800 outline-none focus:border-gray-300"
         />
         <div className="flex items-center gap-3">
@@ -446,7 +449,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
               checked={variant.isActive}
               onChange={(e) => onChange({ isActive: e.target.checked })}
             />
-            Active
+            {t("fields.isActive")}
           </label>
           {canRemove && (
             <button
@@ -461,7 +464,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <Field label="Référence (SKU)" required>
+        <Field label={t("fields.sku")} required>
           <div className="flex gap-1.5">
             <input
               type="text"
@@ -472,7 +475,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             />
             <button
               type="button"
-              title="Générer une référence unique"
+              title={t("fields.generateBarcode")}
               onClick={handleGenerateSku}
               disabled={generatingSku}
               className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -481,7 +484,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             </button>
           </div>
         </Field>
-        <Field label="Code-barres" hint="Code fournisseur (EAN/UPC) ou un code interne généré">
+        <Field label={t("fields.barcode")} hint={t("fields.barcodeHint")}>
           <div className="flex gap-1.5">
             <input
               type="text"
@@ -491,9 +494,9 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             />
             <button
               type="button"
-              title="Générer un code interne"
+              title={t("fields.generateBarcode")}
               onClick={() => {
-                if (variant.barcode && !window.confirm("Remplacer le code-barres actuel par un nouveau code interne ?")) return;
+                if (variant.barcode && !window.confirm(t("replaceBarcodeConfirm"))) return;
                 onChange({ barcode: generateInternalBarcode() });
               }}
               className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
@@ -503,7 +506,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             {variant.barcode && (
               <button
                 type="button"
-                title="Étiquette à imprimer"
+                title={t("printLabel")}
                 onClick={onShowLabel}
                 className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
               >
@@ -514,14 +517,14 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
         </Field>
 
         {isExisting ? (
-          <Field label="Stock" hint="Ajustez depuis la page Stock">
+          <Field label={t("fields.stock")} hint={t("stockExistingHint")}>
             <div className="flex h-9 items-center rounded-lg border border-gray-100 bg-gray-50 px-3 text-sm text-gray-500">
-              {variant.stockQuantity} en stock
-              {variant.reservedQuantity > 0 && ` (${variant.reservedQuantity} réservé)`}
+              {variant.stockQuantity} {t("stockExisting")}
+              {variant.reservedQuantity > 0 && ` (${variant.reservedQuantity} ${t("stockReserved")})`}
             </div>
           </Field>
         ) : (
-          <Field label="Stock initial">
+          <Field label={t("stockInitial")}>
             <input
               type="number"
               min="0"
@@ -532,7 +535,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
           </Field>
         )}
 
-        <Field label="Prix de vente (€)" required>
+        <Field label={t("price")} required>
           <input
             type="number"
             min="0"
@@ -543,7 +546,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             className={inputClass}
           />
         </Field>
-        <Field label="Prix d'achat (€)" required>
+        <Field label={t("costPrice")} required>
           <input
             type="number"
             min="0"
@@ -554,7 +557,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             className={inputClass}
           />
         </Field>
-        <Field label="Prix barré (€)" hint="Optionnel — pour une promotion">
+        <Field label={t("comparePrice")} hint={t("comparePriceHint")}>
           <input
             type="number"
             min="0"
@@ -564,7 +567,7 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             className={inputClass}
           />
         </Field>
-        <Field label="Seuil de stock bas">
+        <Field label={t("lowStockThreshold")}>
           <input
             type="number"
             min="0"
@@ -573,20 +576,20 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel }) {
             className={inputClass}
           />
         </Field>
-        <Field label="Poids (g)" hint="Optionnel — utilisé pour calculer les frais de port">
+        <Field label={t("weight")} hint={t("fields.weightHint")}>
           <input
             type="number"
             min="0"
             value={variant.weightGrams ?? ""}
             onChange={(e) => onChange({ weightGrams: e.target.value === "" ? "" : Number(e.target.value) })}
-            placeholder="ex. 250"
+            placeholder={t("fields.weightPlaceholder")}
             className={inputClass}
           />
         </Field>
         <div className="flex flex-col justify-end pb-1.5">
-          <span className="text-xs text-gray-400">Marge</span>
+          <span className="text-xs text-gray-400">{t("marginLabel")}</span>
           <span className={`text-sm font-medium ${margin !== null && margin < 0 ? "text-red-500" : "text-gray-700"}`}>
-            {margin !== null ? `${margin}%` : "—"}
+            {margin !== null ? t("margin", { margin }) : "—"}
           </span>
         </div>
       </div>

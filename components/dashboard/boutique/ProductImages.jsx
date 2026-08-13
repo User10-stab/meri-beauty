@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { X, Loader2, ImagePlus, Star, GripHorizontal } from "lucide-react";
+import { useTranslations } from "next-intl";
 
 const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
@@ -13,6 +14,7 @@ const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
  * @param {{ value: {path: string, alt?: string, isPrimary?: boolean}[], onChange: (images) => void }} props
  */
 export function ProductImages({ value = [], onChange }) {
+  const t = useTranslations("dashboardBoutique.productImages");
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [dragIndex, setDragIndex] = useState(null);
@@ -21,11 +23,11 @@ export function ProductImages({ value = [], onChange }) {
   async function handleFiles(files) {
     const list = Array.from(files ?? []).filter((f) => {
       if (!ALLOWED.includes(f.type)) {
-        toast.error(`${f.name} : format non accepté (JPEG, PNG, WebP ou GIF).`);
+        toast.error(t("formatError", { name: f.name }));
         return false;
       }
       if (f.size > 20 * 1024 * 1024) {
-        toast.error(`${f.name} : dépasse 20 Mo.`);
+        toast.error(t("sizeError", { name: f.name }));
         return false;
       }
       return true;
@@ -44,7 +46,7 @@ export function ProductImages({ value = [], onChange }) {
         if (data.success) {
           uploaded.push({ path: data.url, isPrimary: false });
         } else {
-          toast.error(data.message ?? `Échec du téléversement de ${file.name}.`);
+          toast.error(data.message ?? t("uploadError", { name: file.name }));
         }
       }
       if (uploaded.length) {
@@ -53,7 +55,7 @@ export function ProductImages({ value = [], onChange }) {
         onChange(next);
       }
     } catch {
-      toast.error("Erreur réseau lors du téléversement.");
+      toast.error(t("networkError"));
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -133,7 +135,7 @@ export function ProductImages({ value = [], onChange }) {
             <button
               type="button"
               onClick={() => setPrimary(i)}
-              title={img.isPrimary ? "Image principale" : "Définir comme image principale"}
+              title={img.isPrimary ? t("isPrimary") : t("setPrimaryTitle")}
               className={`absolute left-1 top-1 flex h-5 w-5 items-center justify-center rounded-full shadow ${
                 img.isPrimary ? "bg-amber-400 text-white" : "bg-white/90 text-gray-400 opacity-0 group-hover:opacity-100"
               } transition-opacity`}
@@ -143,7 +145,7 @@ export function ProductImages({ value = [], onChange }) {
             <button
               type="button"
               onClick={() => removeAt(i)}
-              aria-label="Supprimer l'image"
+              aria-label={t("removeLabel")}
               className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white opacity-0 shadow transition-opacity group-hover:opacity-100"
             >
               <X size={11} />
@@ -158,7 +160,7 @@ export function ProductImages({ value = [], onChange }) {
           className="flex h-24 w-24 flex-shrink-0 flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] disabled:opacity-60"
         >
           {uploading ? <Loader2 size={18} className="animate-spin" /> : <ImagePlus size={18} />}
-          <span className="text-[10px]">Ajouter</span>
+          <span className="text-[10px]">{t("addImages")}</span>
         </button>
       </div>
 
@@ -173,10 +175,10 @@ export function ProductImages({ value = [], onChange }) {
 
       {value.length === 0 ? (
         <p className="mt-2 text-xs text-gray-400">
-          Aucune image. La première image ajoutée devient l'image principale — cliquez sur l'étoile pour en choisir une autre.
+          {t("noImages")}
         </p>
       ) : value.length > 1 ? (
-        <p className="mt-2 text-xs text-gray-400">Glissez une image pour changer son ordre.</p>
+        <p className="mt-2 text-xs text-gray-400">{t("dragToReorder")}</p>
       ) : null}
     </div>
   );

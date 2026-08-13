@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { Sparkles, Flame, ArrowRight } from "lucide-react";
+import { getTranslations, getLocale } from "next-intl/server";
 import { getHomepageBannerData } from "@/actions/workshops/get-homepage-banner-data";
+import { toIntlLocale } from "@/lib/intl-locale";
 
-function formatSessionDate(date) {
+async function formatSessionDate(date, locale) {
   if (!date) return null;
-  return new Date(date).toLocaleDateString("fr-FR", {
+  return new Date(date).toLocaleDateString(toIntlLocale(locale), {
     weekday: "long",
     day: "numeric",
     month: "long",
   });
 }
 
-function BannerCard({ href, isLowSeats, data, sessionDate }) {
+async function BannerCard({ href, isLowSeats, data, sessionDate }) {
+  const t = await getTranslations("workshopBanner");
   return (
     <Link
       href={href}
@@ -28,8 +31,8 @@ function BannerCard({ href, isLowSeats, data, sessionDate }) {
       <div className="min-w-0 flex-1">
         <p className={`text-xs font-semibold uppercase tracking-wide ${isLowSeats ? "text-amber-600" : "text-gold"}`}>
           {isLowSeats
-            ? `Il reste juste ${data.available} place${data.available > 1 ? "s" : ""} !`
-            : "Nouveau"}
+            ? t("lowSeats", { count: data.available })
+            : t("new")}
         </p>
         <p className="truncate text-sm font-semibold text-ink">{data.activity.title}</p>
         {sessionDate && <p className="truncate text-xs text-ink/50">{sessionDate}</p>}
@@ -54,7 +57,7 @@ export default async function WorkshopBanner() {
 
   const isLowSeats = data.mode === "low_seats";
   const isFormation = data.kind === "formation";
-  const sessionDate = formatSessionDate(data.session?.startDate);
+  const sessionDate = await formatSessionDate(data.session?.startDate, await getLocale());
 
   const href = isLowSeats
     ? isFormation

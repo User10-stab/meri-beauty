@@ -11,8 +11,8 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { RowActions } from "@/components/dashboard/Tables/RowActions";
 import { ProductScanDialog } from "@/components/dashboard/boutique/ProductScanDialog";
 import { deleteProduct } from "@/actions/boutique/products";
+import { useTranslations } from "next-intl";
 
-const STATUS_LABEL = { DRAFT: "Brouillon", ACTIVE: "Actif", ARCHIVED: "Archivé" };
 const STATUS_STYLE = {
   DRAFT: "bg-gray-100 text-gray-600 border-gray-200",
   ACTIVE: "bg-emerald-50 text-emerald-700 border-emerald-100",
@@ -34,12 +34,19 @@ function priceRange(variants) {
 
 export function ProductsPageClient({ initialProducts, brands, isAdmin = false }) {
   const router = useRouter();
+  const t = useTranslations("dashboardBoutique.products");
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [toDelete, setToDelete] = useState(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  const STATUS_LABEL = {
+    DRAFT: t("status.DRAFT"),
+    ACTIVE: t("status.ACTIVE"),
+    ARCHIVED: t("status.ARCHIVED"),
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -79,7 +86,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Rechercher un produit, une référence…"
+              placeholder={t("searchPlaceholder")}
               className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
             />
           </div>
@@ -89,7 +96,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
             onChange={(e) => setBrandFilter(e.target.value)}
             className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
-            <option value="">Toutes les marques</option>
+            <option value="">{t("allBrands")}</option>
             {brands.map((b) => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
@@ -100,10 +107,10 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
             onChange={(e) => setStatusFilter(e.target.value)}
             className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
-            <option value="">Tous les statuts</option>
-            <option value="ACTIVE">Actif</option>
-            <option value="DRAFT">Brouillon</option>
-            <option value="ARCHIVED">Archivé</option>
+            <option value="">{t("allStatuses")}</option>
+            <option value="ACTIVE">{t("status.ACTIVE")}</option>
+            <option value="DRAFT">{t("status.DRAFT")}</option>
+            <option value="ARCHIVED">{t("status.ARCHIVED")}</option>
           </select>
         </div>
 
@@ -115,7 +122,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
               className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
             >
               <ScanLine size={16} />
-              Scanner
+              {t("scanner")}
             </button>
             <Link href="/dashboard/boutique/products/import">
               <button
@@ -123,13 +130,13 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
                 className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
               >
                 <Upload size={16} />
-                Importer depuis Wix
+                {t("importFromWix")}
               </button>
             </Link>
             <Link href="/dashboard/boutique/products/new">
               <Button>
                 <Plus size={16} />
-                Ajouter un produit
+                {t("addProduct")}
               </Button>
             </Link>
           </div>
@@ -158,12 +165,12 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-6">Produit</TableHead>
-              <TableHead>Catégorie</TableHead>
-              <TableHead>Prix</TableHead>
-              <TableHead>Stock</TableHead>
-              <TableHead>Statut</TableHead>
-              <TableHead className="pr-6 text-right">Actions</TableHead>
+              <TableHead className="pl-6">{t("tableHeaders.product")}</TableHead>
+              <TableHead>{t("tableHeaders.category")}</TableHead>
+              <TableHead>{t("tableHeaders.price")}</TableHead>
+              <TableHead>{t("tableHeaders.stock")}</TableHead>
+              <TableHead>{t("tableHeaders.status")}</TableHead>
+              <TableHead className="pr-6 text-right">{t("tableHeaders.actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -185,7 +192,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
                     <div>
                       <div className="font-medium text-gray-800 dark:text-white">{p.name}</div>
                       <div className="text-xs text-gray-400">
-                        {p.brand?.name ?? "Sans marque"} · {p.variants.length} déclinaison{p.variants.length > 1 ? "s" : ""}
+                        {p.brand?.name ?? t("noBrand")} · {p.variants.length} {p.variants.length > 1 ? t("variants_plural") : t("variants")}
                       </div>
                     </div>
                   </div>
@@ -201,7 +208,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
                   <div className="flex items-center gap-1.5">
                     <span className="font-medium text-gray-700 dark:text-dark-6">{p.totalStock}</span>
                     {p.lowStock && (
-                      <span title="Stock bas sur au moins une déclinaison">
+                      <span title={t("lowStockTooltip")}>
                         <AlertTriangle size={14} className="text-amber-500" />
                       </span>
                     )}
@@ -230,13 +237,13 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
 
       <ConfirmDialog
         open={!!toDelete}
-        title="Supprimer ce produit ?"
+        title={t("deleteConfirm")}
         message={
           toDelete
-            ? `"${toDelete.name}" sera retiré de la boutique. Les commandes passées le conservent dans leur historique.`
+            ? t("deleteMessage", { name: toDelete.name })
             : ""
         }
-        confirmLabel="Supprimer"
+        confirmLabel={t("deleteButton")}
         danger
         loading={isPending}
         onConfirm={handleDelete}
@@ -247,6 +254,8 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
 }
 
 function EmptyState({ hasProducts, isAdmin }) {
+  const t = useTranslations("dashboardBoutique.products.emptyState");
+  const tProducts = useTranslations("dashboardBoutique.products");
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-50">
@@ -254,19 +263,19 @@ function EmptyState({ hasProducts, isAdmin }) {
       </div>
       <div>
         <p className="font-medium text-gray-700">
-          {hasProducts ? "Aucun produit ne correspond à votre recherche" : "Aucun produit pour le moment"}
+          {hasProducts ? t("noMatch") : t("noProducts")}
         </p>
         <p className="mt-1 text-sm text-gray-400">
           {hasProducts
-            ? "Essayez d'autres filtres."
-            : "Commencez par ajouter votre premier produit à la boutique."}
+            ? t("tryOtherFilters")
+            : t("addFirst")}
         </p>
       </div>
       {!hasProducts && isAdmin && (
         <Link href="/dashboard/boutique/products/new">
           <Button className="mt-2">
             <Plus size={16} />
-            Ajouter un produit
+            {tProducts("addProduct")}
           </Button>
         </Link>
       )}

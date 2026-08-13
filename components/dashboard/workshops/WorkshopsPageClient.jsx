@@ -15,25 +15,30 @@ import { deleteAnimator } from "@/actions/workshops/create-animator";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { isAdminRole } from "@/lib/authorization";
 import Button from "@/components/ui/Button";
-
-const ACTIVITIES_COLUMNS = [
-  { key: "title", label: "Titre & Description" },
-  { key: "type", label: "Type" },
-  { key: "price", label: "Tarif" },
-  { key: "duration", label: "Durée" },
-  { key: "capacity", label: "Capacité" },
-  { key: "animator", label: "Animateur" },
-  { key: "status", label: "Statut" },
-];
-
-const ANIMATORS_COLUMNS = [
-  { key: "name", label: "Nom & Biographie" },
-  { key: "email", label: "Email" },
-  { key: "phone", label: "Téléphone" },
-  { key: "socials", label: "Réseaux / Web" },
-];
+import { useTranslations } from "next-intl";
 
 export function WorkshopsPageClient({ initialActivities = [], initialAnimators = [], userRole, currentUserId, initialTab = "activities" }) {
+  const t = useTranslations("dashboardWorkshops");
+  const tActivities = useTranslations("dashboardWorkshops.activities");
+  const tAnimators = useTranslations("dashboardWorkshops.animators");
+  
+  const ACTIVITIES_COLUMNS = [
+    { key: "title", label: tActivities("columns.title") },
+    { key: "type", label: tActivities("columns.type") },
+    { key: "price", label: tActivities("columns.price") },
+    { key: "duration", label: tActivities("columns.duration") },
+    { key: "capacity", label: tActivities("columns.capacity") },
+    { key: "animator", label: tActivities("columns.animator") },
+    { key: "status", label: tActivities("columns.status") },
+  ];
+
+  const ANIMATORS_COLUMNS = [
+    { key: "name", label: tAnimators("columns.name") },
+    { key: "email", label: tAnimators("columns.email") },
+    { key: "phone", label: tAnimators("columns.phone") },
+    { key: "socials", label: tAnimators("columns.socials") },
+  ];
+
   const router = useRouter();
   const confirm = useConfirm();
   const activeTab = initialTab;
@@ -68,7 +73,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
   }
 
   async function handleDeleteActivity(activity) {
-    if (!(await confirm(`Supprimer définitivement l'activité « ${activity.title} » ? Cette action est irréversible.`, { danger: true }))) return;
+    if (!(await confirm(tActivities("confirmDeleteActivity", { title: activity.title }), { danger: true }))) return;
 
     startDelete(async () => {
       const result = await deleteActivity(activity.id);
@@ -93,7 +98,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
   }
 
   async function handleDeleteAnimator(animator) {
-    if (!(await confirm(`Supprimer définitivement l'animateur « ${animator.name} » ? Cette action est irréversible.`, { danger: true }))) return;
+    if (!(await confirm(tAnimators("confirmDeleteAnimator", { name: animator.name }), { danger: true }))) return;
 
     startDelete(async () => {
       const result = await deleteAnimator(animator.id);
@@ -119,13 +124,13 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
           <TabButton
             href="/dashboard/workshops/activities"
             active={activeTab === "activities"}
-            label="Activités"
+            label={t("tabs.activities")}
             count={filteredActivities.length}
           />
           <TabButton
             href="/dashboard/workshops/animators"
             active={activeTab === "animators"}
-            label="Animateurs"
+            label={t("tabs.animators")}
             count={initialAnimators.length}
           />
         </div>
@@ -138,7 +143,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
             }}
             className="mb-2 bg-[#2f3a2e]"
           >
-            <Plus size={16} /> Nouvelle activité
+            <Plus size={16} /> {tActivities("buttons.newActivity")}
           </Button>
         )}
 
@@ -150,7 +155,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
             }}
             className="mb-2 bg-[#2f3a2e]"
           >
-            <Plus size={16} /> Nouvel animateur
+            <Plus size={16} /> {tActivities("buttons.newAnimator")}
           </Button>
         )}
       </div>
@@ -164,20 +169,20 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
             onChange={(e) => setFilterType(e.target.value)}
             className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
           >
-            <option value="">Tous les types</option>
-            <option value="WORKSHOP">Atelier (Workshop)</option>
-            <option value="EVENT">Événement</option>
+            <option value="">{tActivities("filters.allTypes")}</option>
+            <option value="WORKSHOP">{tActivities("filters.typeWorkshop")}</option>
+            <option value="EVENT">{tActivities("filters.typeEvent")}</option>
           </select>
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
             className="h-8 rounded-lg border border-gray-200 px-3 text-xs text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
           >
-            <option value="">Tous les statuts</option>
-            <option value="DRAFT">Brouillon</option>
-            <option value="PUBLISHED">Publié</option>
-            <option value="CANCELLED">Annulé</option>
-            <option value="ARCHIVED">Archivé</option>
+            <option value="">{tActivities("filters.allStatuses")}</option>
+            <option value="DRAFT">{tActivities("filters.statusDraft")}</option>
+            <option value="PUBLISHED">{tActivities("filters.statusPublished")}</option>
+            <option value="CANCELLED">{tActivities("filters.statusCancelled")}</option>
+            <option value="ARCHIVED">{tActivities("filters.statusArchived")}</option>
           </select>
         </div>
       )}
@@ -192,7 +197,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
             onView={handleEditActivity}
             onEdit={handleEditActivity}
             onDelete={handleDeleteActivity}
-            searchPlaceholder="Rechercher une activité..."
+            searchPlaceholder={tActivities("searchPlaceholder")}
             searchFilter={(row, query) =>
               row.title?.toLowerCase().includes(query) ||
               row.description?.toLowerCase().includes(query) ||
@@ -218,7 +223,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
             onView={handleEditAnimator}
             onEdit={handleEditAnimator}
             onDelete={handleDeleteAnimator}
-            searchPlaceholder="Rechercher un animateur..."
+            searchPlaceholder={tAnimators("searchAnimatorPlaceholder")}
             searchFilter={(row, query) =>
               row.name?.toLowerCase().includes(query) ||
               row.bio?.toLowerCase().includes(query) ||

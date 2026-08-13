@@ -9,26 +9,9 @@ import Button from "@/components/ui/Button";
 import { PickupScannerDialog } from "@/components/dashboard/boutique/PickupScannerDialog";
 import { Pagination } from "@/components/dashboard/Tables/Pagination";
 import { listOrders } from "@/actions/boutique/orders";
+import { useTranslations } from "next-intl";
 
 const PAGE_SIZE = 20;
-
-const MODE_LABEL = {
-  PICKUP_PREPAID: "Retrait (payé)",
-  PICKUP_ON_SITE: "Retrait (sur place)",
-  SHIPPING_PREPAID: "Livraison",
-};
-
-const STATUS_LABEL = {
-  PENDING_PAYMENT: "Paiement en attente",
-  PENDING_PICKUP: "En attente de retrait",
-  PAID: "Payée",
-  PROCESSING: "En préparation",
-  READY_FOR_PICKUP: "Prête pour retrait",
-  SHIPPED: "Expédiée",
-  COMPLETED: "Terminée",
-  CANCELLED: "Annulée",
-  EXPIRED: "Expirée",
-};
 
 const STATUS_STYLE = {
   PENDING_PAYMENT: "bg-gray-100 text-gray-600 border-gray-200",
@@ -48,6 +31,7 @@ function formatPrice(n) {
 
 export function OrdersPageClient({ initialOrders, initialTotalCount }) {
   const router = useRouter();
+  const t = useTranslations("dashboardBoutique.orders");
   const [orders, setOrders] = useState(initialOrders);
   const [totalCount, setTotalCount] = useState(initialTotalCount);
   const [page, setPage] = useState(1);
@@ -57,6 +41,24 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
   const [pickupLookup, setPickupLookup] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
+
+  const MODE_LABEL = {
+    PICKUP_PREPAID: t("mode.PICKUP_PREPAID"),
+    PICKUP_ON_SITE: t("mode.PICKUP_ON_SITE"),
+    SHIPPING_PREPAID: t("mode.SHIPPING_PREPAID"),
+  };
+
+  const STATUS_LABEL = {
+    PENDING_PAYMENT: t("status.PENDING_PAYMENT"),
+    PENDING_PICKUP: t("status.PENDING_PICKUP"),
+    PAID: t("status.PAID"),
+    PROCESSING: t("status.PROCESSING"),
+    READY_FOR_PICKUP: t("status.READY_FOR_PICKUP"),
+    SHIPPED: t("status.SHIPPED"),
+    COMPLETED: t("status.COMPLETED"),
+    CANCELLED: t("status.CANCELLED"),
+    EXPIRED: t("status.EXPIRED"),
+  };
 
   function refetch(next) {
     const params = {
@@ -98,7 +100,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
       const result = await listOrders({ search: code, page: 1, pageSize: 1 });
       const order = result.data?.find((o) => o.pickupCode === code);
       if (!order) {
-        toast.error("Aucune commande ne correspond à ce code.");
+        toast.error(t("pickupCodeNotFound"));
         return;
       }
       router.push(`/dashboard/boutique/orders/${order.id}`);
@@ -126,13 +128,13 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
             type="text"
             value={pickupLookup}
             onChange={(e) => setPickupLookup(e.target.value)}
-            placeholder="Code de retrait client (ex : A3F9C1B2)"
+            placeholder={t("pickupCodePlaceholder")}
             className="h-9 flex-1 rounded-lg border border-gray-200 px-3 text-sm uppercase tracking-wide text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           />
-          <Button type="submit">Vérifier</Button>
+          <Button type="submit">{t("verifyButton")}</Button>
           <Button type="button" onClick={() => setScannerOpen(true)}>
             <Camera size={14} />
-            Scanner
+            {t("scanButton")}
           </Button>
         </form>
       </div>
@@ -147,7 +149,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Rechercher client, n°, code… (Entrée)"
+              placeholder={t("searchPlaceholder")}
               className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
             />
           </div>
@@ -160,7 +162,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
             }}
             className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
-            <option value="">Tous les statuts</option>
+            <option value="">{t("allStatuses")}</option>
             {Object.entries(STATUS_LABEL).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
@@ -174,7 +176,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
             }}
             className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
-            <option value="">Tous les modes</option>
+            <option value="">{t("allModes")}</option>
             {Object.entries(MODE_LABEL).map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
@@ -189,19 +191,19 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
               <Package size={22} className="text-gray-300" />
             </div>
             <p className="font-medium text-gray-700">
-              {totalCount > 0 ? "Aucune commande ne correspond à votre recherche" : "Aucune commande pour le moment"}
+              {totalCount > 0 ? t("noMatch") : t("noOrders")}
             </p>
           </div>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="pl-6">Commande</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Mode</TableHead>
-                <TableHead>Statut</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead className="pr-6">Date</TableHead>
+                <TableHead className="pl-6">{t("tableHeaders.order")}</TableHead>
+                <TableHead>{t("tableHeaders.customer")}</TableHead>
+                <TableHead>{t("tableHeaders.mode")}</TableHead>
+                <TableHead>{t("tableHeaders.status")}</TableHead>
+                <TableHead>{t("tableHeaders.total")}</TableHead>
+                <TableHead className="pr-6">{t("tableHeaders.date")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

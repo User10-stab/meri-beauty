@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Minus, Plus, PackageSearch, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { getReturnableOrder, requestReturn } from "@/actions/boutique/returns";
+import { useTranslations } from "next-intl";
 
 function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
@@ -13,6 +14,7 @@ function formatDate(d) {
 }
 
 export function ReturnRequestClient() {
+  const t = useTranslations("boutique.returns");
   const [step, setStep] = useState("lookup"); // lookup | select | done
   const [lookingUp, setLookingUp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -53,11 +55,11 @@ export function ReturnRequestClient() {
     e.preventDefault();
     const items = Object.entries(selected).map(([orderItemId, quantity]) => ({ orderItemId, quantity }));
     if (items.length === 0) {
-      toast.error("Sélectionnez au moins un article à retourner.");
+      toast.error(t("selectItemsError"));
       return;
     }
     if (!reason.trim()) {
-      toast.error("Merci d'indiquer le motif du retour.");
+      toast.error(t("reasonError"));
       return;
     }
 
@@ -76,10 +78,9 @@ export function ReturnRequestClient() {
     return (
       <div className="mx-auto max-w-[640px] px-6 py-20 text-center md:px-10">
         <CheckCircle2 size={40} className="mx-auto mb-5 text-[#C8A46A]" />
-        <h1 className="mb-3 text-3xl text-[#2F3A2E]">Demande envoyée</h1>
+        <h1 className="mb-3 text-3xl text-[#2F3A2E]">{t("requestSentTitle")}</h1>
         <p className="text-sm text-gray-500">
-          Votre demande de retour pour la commande n°{order.orderNumber} a bien été transmise. Vous recevrez un e-mail
-          de confirmation, puis une réponse de notre équipe sous peu.
+          {t("requestSentMessage", { orderNumber: order.orderNumber })}
         </p>
       </div>
     );
@@ -87,20 +88,20 @@ export function ReturnRequestClient() {
 
   return (
     <div className="mx-auto max-w-[720px] px-6 py-12 md:px-10">
-      <h1 className="mb-2 text-3xl text-[#2F3A2E]">Retourner un article</h1>
+      <h1 className="mb-2 text-3xl text-[#2F3A2E]">{t("title")}</h1>
       <p className="mb-8 text-sm text-gray-500">
-        Conformément au droit de rétractation, vous disposez de 14 jours après réception pour retourner un article.
+        {t("subtitle")}
       </p>
 
       {step === "lookup" && (
         <form onSubmit={handleLookup} className="space-y-4 border border-neutral-200 p-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Retrouver ma commande</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("lookupTitle")}</h2>
           <input
             type="text"
             inputMode="numeric"
             value={orderNumber}
             onChange={(e) => setOrderNumber(e.target.value)}
-            placeholder="Numéro de commande (ex : 42)"
+            placeholder={t("orderNumberPlaceholder")}
             className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
             required
           />
@@ -108,7 +109,7 @@ export function ReturnRequestClient() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email utilisé lors de la commande"
+            placeholder={t("emailPlaceholder")}
             className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
             required
           />
@@ -118,7 +119,7 @@ export function ReturnRequestClient() {
             className="flex w-full items-center justify-center gap-2 bg-[#2F3A2E] px-6 py-3.5 text-sm font-semibold uppercase tracking-wider text-white transition-colors hover:bg-[#3d4e3b] disabled:opacity-50"
           >
             <PackageSearch size={16} />
-            {lookingUp ? "Recherche…" : "Retrouver ma commande"}
+            {t("lookupTitle")}
           </button>
         </form>
       )}
@@ -179,11 +180,11 @@ export function ReturnRequestClient() {
           </div>
 
           <div className="border border-neutral-200 p-6">
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Motif du retour</h2>
+            <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("reasonLabel")}</h2>
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="Expliquez brièvement pourquoi vous souhaitez retourner ce(s) article(s)"
+              placeholder={t("reasonPlaceholder")}
               rows={4}
               className="w-full resize-none border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
               required
@@ -195,7 +196,7 @@ export function ReturnRequestClient() {
             disabled={submitting}
             className="w-full bg-[#2F3A2E] px-6 py-4 text-sm font-semibold uppercase tracking-wider text-white transition-colors hover:bg-[#3d4e3b] disabled:opacity-50"
           >
-            {submitting ? "Envoi…" : "Envoyer la demande de retour"}
+            {t("title")}
           </button>
         </form>
       )}

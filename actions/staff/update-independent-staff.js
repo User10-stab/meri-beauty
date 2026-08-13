@@ -71,6 +71,7 @@ export async function updateIndependentStaff(input) {
       id:        true,
       type:      true,
       isDeleted: true,
+      isActive:  true,
       userId:    true,
       user:      { select: { id: true, fullName: true, email: true } },
     },
@@ -82,6 +83,10 @@ export async function updateIndependentStaff(input) {
   if (existing.type !== "INDEPENDENT") {
     return { success: false, message: "Ce profil n'est pas celui d'un auto-entrepreneur." };
   }
+
+  // Capture the current active state so we can detect a deactivation inside
+  // the transaction without an extra round-trip after the fact.
+  const wasActive = existing.isActive;
 
   // ── 3. Validate service IDs exist (before entering transaction) ──────────
   const newServiceIds = serviceIds ?? [];
@@ -107,6 +112,18 @@ export async function updateIndependentStaff(input) {
       const userUpdate = {};
       if (fullName !== undefined) userUpdate.fullName = fullName;
       if (phone    !== undefined) userUpdate.phone    = phone;
+
+      // Keep User.isActive in sync with Staff.isActive so the auth JWT
+      // re-validation (which checks User.isActive) correctly blocks login.
+      // On deactivation, bump sessionVersion as well — this immediately
+      // invalidates any live JWT on the staff member's next authenticated
+      // request instead of waiting for the 5-minute revalidation window.
+      if (isActive !== undefined && isActive !== wasActive) {
+        userUpdate.isActive = isActive;
+        if (!isActive) {
+          userUpdate.sessionVersion = { increment: 1 };
+        }
+      }
 
       if (Object.keys(userUpdate).length > 0) {
         await tx.user.update({

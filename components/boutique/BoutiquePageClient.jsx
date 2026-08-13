@@ -4,15 +4,17 @@ import { useState, useTransition, useMemo } from "react";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { getStorefrontProducts } from "@/actions/boutique/storefront";
 import { ProductCard } from "@/components/boutique/ProductCard";
+import { useTranslations } from "next-intl";
 
 const SORT_OPTIONS = [
-  { value: "newest", label: "Nouveautés" },
-  { value: "price-asc", label: "Prix croissant" },
-  { value: "price-desc", label: "Prix décroissant" },
-  { value: "name", label: "Nom (A–Z)" },
+  { value: "newest", labelKey: "sortNewest" },
+  { value: "price-asc", labelKey: "sortPriceAsc" },
+  { value: "price-desc", labelKey: "sortPriceDesc" },
+  { value: "name", labelKey: "sortName" },
 ];
 
 export function BoutiquePageClient({ initialProducts, categories, brands }) {
+  const t = useTranslations("boutique");
   const [products, setProducts] = useState(initialProducts);
   const [search, setSearch] = useState("");
   const [categorySlug, setCategorySlug] = useState(null);
@@ -92,12 +94,12 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
       {/* Banner */}
       <div className="bg-[#2F3A2E] px-6 py-16 text-center md:px-10">
         <span className="mb-4 inline-block text-xs font-semibold uppercase tracking-[0.32em] text-[#C8A46A]">
-          Boutique Meri Beauty
+          {t("title")} Meri Beauty
         </span>
-        <h1 className="text-4xl text-[#F8F6F2] sm:text-5xl">Nos produits</h1>
+        <h1 className="text-4xl text-[#F8F6F2] sm:text-5xl">{t("products")}</h1>
         <div className="mx-auto mt-6 h-[3px] w-16 rounded-full bg-[#C8A46A]" />
         <p className="mx-auto mt-6 max-w-xl text-[15px] leading-7 text-gray-300">
-          Une sélection de soins et produits professionnels, à retirer en boutique ou à faire livrer chez vous.
+          {t("subtitle")}
         </p>
       </div>
 
@@ -110,7 +112,7 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Rechercher un produit…"
+              placeholder={t("searchPlaceholder")}
               className="w-full border border-neutral-200 py-2.5 pl-9 pr-4 text-sm transition-colors focus:border-[#C8A46A] focus:outline-none"
             />
           </form>
@@ -122,7 +124,7 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
               className="flex items-center gap-2 border border-neutral-200 px-4 py-2.5 text-sm font-medium text-[#2F3A2E] lg:hidden"
             >
               <SlidersHorizontal size={15} />
-              Filtres
+              {t("filters")}
             </button>
             <select
               value={sort}
@@ -131,7 +133,7 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
             >
               {SORT_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
-                  {opt.label}
+                  {t(opt.labelKey)}
                 </option>
               ))}
             </select>
@@ -149,18 +151,18 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
                   className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-[#C8A46A] hover:text-[#B8945A]"
                 >
                   <X size={13} />
-                  Réinitialiser les filtres
+                  {t("resetFilters")}
                 </button>
               )}
 
               <div>
                 <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
-                  Catégories
+                  {t("categories")}
                 </h3>
                 <ul className="space-y-4">
                   {categoriesByBrand.map((group) => (
                     <li key={group.brand?.id ?? "unknown"}>
-                      <p className="mb-1.5 text-xs font-semibold text-[#2F3A2E]">{group.brand?.name ?? "Autre"}</p>
+                      <p className="mb-1.5 text-xs font-semibold text-[#2F3A2E]">{group.brand?.name ?? t("otherCategory")}</p>
                       <ul className="space-y-1.5 border-l border-neutral-200 pl-3">
                         {group.categories.map((cat) => (
                           <li key={cat.id}>
@@ -187,12 +189,12 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
                       </ul>
                     </li>
                   ))}
-                  {categories.length === 0 && <li className="text-sm text-gray-400">Aucune catégorie.</li>}
+                  {categories.length === 0 && <li className="text-sm text-gray-400">{t("emptyCategories")}</li>}
                 </ul>
               </div>
 
               <div>
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Marques</h3>
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("brands")}</h3>
                 <ul className="space-y-1.5">
                   {brands.map((brand) => (
                     <li key={brand.id}>
@@ -207,7 +209,7 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
                       </button>
                     </li>
                   ))}
-                  {brands.length === 0 && <li className="text-sm text-gray-400">Aucune marque.</li>}
+                  {brands.length === 0 && <li className="text-sm text-gray-400">{t("emptyBrands")}</li>}
                 </ul>
               </div>
             </div>
@@ -217,14 +219,14 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
           <div className={isPending ? "opacity-50 transition-opacity" : "transition-opacity"}>
             {products.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-                <p className="text-lg text-[#2F3A2E]">Aucun produit ne correspond à votre recherche.</p>
+                <p className="text-lg text-[#2F3A2E]">{t("noProductMatch")}</p>
                 {hasActiveFilters && (
                   <button
                     type="button"
                     onClick={clearFilters}
                     className="text-sm font-medium text-[#C8A46A] hover:text-[#B8945A]"
                   >
-                    Réinitialiser les filtres
+                    {t("resetFilters")}
                   </button>
                 )}
               </div>

@@ -3,17 +3,14 @@ import { auth } from "@/auth";
 import { getCategories } from "@/actions/categories/get-categories";
 import { getServices } from "@/actions/services/get-services";
 import { ServicesPageClient } from "@/components/dashboard/services/ServicesPageClient";
-
-export const metadata = {
-  title: "Services — Dashboard",
-  description: "Gérez les catégories et services de votre salon.",
-};
+import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function ServicesPage() {
   const session = await auth();
   const userRole = session?.user?.role;
+  const t = await getTranslations("dashboard.services");
   
   const [categoriesResult, servicesResult] = await Promise.all([
     getCategories(),
@@ -29,22 +26,22 @@ export default async function ServicesPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            Services
+            {t("title")}
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Gérez les catégories et services proposés dans votre salon.
+            {t("subtitle")}
           </p>
         </div>
 
       {/* Stats strip */}
       <div className="flex items-center gap-3">
         <StatBadge
-          label="Catégories"
+          label={t("categoriesLabel")}
           value={categories.length}
           color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
         />
         <StatBadge
-          label="Services"
+          label={t("servicesLabel")}
           value={services.length}
           color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
         />

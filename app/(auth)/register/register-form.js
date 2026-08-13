@@ -8,6 +8,7 @@ import { signIn } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useTranslations } from "next-intl";
 import {
   Loader2,
   Sparkles,
@@ -25,68 +26,67 @@ import {
 import { registerClientSchema } from "@/lib/validations/register-client";
 import { registerUser } from "@/actions/auth/register";
 
-const fields = [
-  {
-    name: "fullName",
-    label: "Full Name",
-    type: "text",
-    placeholder: "Jane Doe",
-    icon: User,
-    autoComplete: "name",
-  },
-  {
-    name: "nickName",
-    label: "Nickname",
-    type: "text",
-    placeholder: "Jane (optional)",
-    icon: AtSign,
-    autoComplete: "nickname",
-  },
-  {
-    name: "email",
-    label: "Email Address",
-    type: "email",
-    placeholder: "you@example.com",
-    icon: Mail,
-    autoComplete: "email",
-  },
-  {
-    name: "phone",
-    label: "Phone Number",
-    type: "tel",
-    placeholder: "+1 234 567 8900",
-    icon: Phone,
-    autoComplete: "tel",
-  },
-  {
-    name: "password",
-    label: "Password",
-    type: "password",
-    placeholder: "••••••••",
-    icon: Lock,
-    autoComplete: "new-password",
-  },
-  {
-    name: "confirmPassword",
-    label: "Confirm Password",
-    type: "password",
-    placeholder: "••••••••",
-    icon: KeyRound,
-    autoComplete: "new-password",
-  },
-];
-
 export default function RegisterForm() {
+  const t = useTranslations();
   const router = useRouter();
   const searchParams = useSearchParams();
-  // Preserve any callbackUrl so that after registration → email verification
-  // → sign in, the user lands back on the page they came from (e.g. the
-  // rental request form).
   const callbackUrl = searchParams.get("callbackUrl") || "";
   const [showPassword, setShowPassword] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [serverSuccess, setServerSuccess] = useState(null);
+
+  // Build fields array with translations
+  const fields = [
+    {
+      name: "fullName",
+      label: t("auth.fullName"),
+      type: "text",
+      placeholder: "Jane Doe",
+      icon: User,
+      autoComplete: "name",
+    },
+    {
+      name: "nickName",
+      label: t("auth.nickname"),
+      type: "text",
+      placeholder: "Jane",
+      icon: AtSign,
+      autoComplete: "nickname",
+    },
+    {
+      name: "email",
+      label: t("auth.emailAddress"),
+      type: "email",
+      placeholder: "you@example.com",
+      icon: Mail,
+      autoComplete: "email",
+    },
+    {
+      name: "phone",
+      label: t("auth.phone"),
+      type: "tel",
+      placeholder: "+1 234 567 8900",
+      icon: Phone,
+      autoComplete: "tel",
+    },
+    {
+      name: "password",
+      label: t("auth.password"),
+      type: "password",
+      placeholder: "••••••••",
+      icon: Lock,
+      autoComplete: "new-password",
+    },
+    {
+      name: "confirmPassword",
+      label: t("auth.confirmPassword"),
+      type: "password",
+      placeholder: "••••••••",
+      icon: KeyRound,
+      autoComplete: "new-password",
+    },
+  ];
 
   const {
     register,
@@ -137,10 +137,7 @@ export default function RegisterForm() {
       // Redirect to login with the callbackUrl preserved so that after email
       // verification → sign in, the user returns to where they started
       // (e.g. the rental request form).
-      toast.success(
-        "Votre compte a été créé avec succès. Un e-mail de vérification vous a été envoyé. Veuillez consulter votre boîte de réception et vérifier votre adresse e-mail avant de vous connecter.",
-        { duration: 8000 }
-      );
+      toast.success(t("auth.successCreateAccount"), { duration: 8000 });
       setServerSuccess(response.message);
 
       // Build the login URL, carrying the callbackUrl and pre-filling the
@@ -185,7 +182,7 @@ export default function RegisterForm() {
             Meri Beauty
           </h2> */}
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Create your account to get started
+            {t("auth.createAccountSubtitle")}
           </p>
         </div>
 
@@ -238,7 +235,7 @@ export default function RegisterForm() {
 
           {/* Password strength hint */}
           <p className="text-xs text-zinc-400 dark:text-zinc-500 -mt-2 pl-1">
-            Password must be at least 8 characters.
+            {t("auth.passwordHint")}
           </p>
 
           {/* Newsletter opt-in */}
@@ -251,7 +248,7 @@ export default function RegisterForm() {
               className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 dark:border-zinc-600 text-[#2F3A2E] focus:ring-[#2F3A2E]/40 dark:focus:ring-[#a8c4a2]/30 transition-colors disabled:opacity-60 cursor-pointer"
             />
             <span className="text-sm text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-300 transition-colors leading-snug">
-              Je souhaite recevoir des offres exclusives et des actualités par email.
+              {t("auth.newsletter")}
             </span>
           </label>
 
@@ -264,10 +261,10 @@ export default function RegisterForm() {
             {isLoading ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="h-5 w-5 animate-spin" />
-                Creating account...
+                {t("auth.creatingAccountEllipsis")}
               </span>
             ) : (
-              "Create Account"
+              t("auth.register")
             )}
           </button>
         </form>
@@ -275,12 +272,12 @@ export default function RegisterForm() {
         {/* Footer */}
         <div className="text-center mt-6">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            Already have an account?{" "}
+            {t("auth.alreadyHaveAccount")}{" "}
             <Link
               href={callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/login"}
               className="font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
-              Sign in
+              {t("auth.signIn")}
             </Link>
           </p>
         </div>
@@ -307,7 +304,7 @@ function FieldInput({ field, register, errors, isLoading, showPassword, onToggle
         {field.label}
         {field.name === "nickName" && (
           <span className="ml-1 normal-case font-normal text-zinc-400 dark:text-zinc-500">
-            (optional)
+            {t("auth.optional")}
           </span>
         )}
       </label>
@@ -334,7 +331,7 @@ function FieldInput({ field, register, errors, isLoading, showPassword, onToggle
           <button
             type="button"
             onClick={() => onTogglePassword(field.name)}
-            aria-label={isVisible ? "Hide password" : "Show password"}
+            aria-label={isVisible ? t("auth.hidePassword") : t("auth.showPassword")}
             className="absolute inset-y-0 right-0 pr-4 flex items-center text-zinc-400 hover:text-[#2F3A2E] dark:text-zinc-500 dark:hover:text-[#a8c4a2] transition-colors"
           >
             {isVisible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}

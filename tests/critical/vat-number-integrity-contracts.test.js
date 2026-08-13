@@ -6,9 +6,22 @@ import { createRentalRequestSchema, updateRentalRequestSchema } from "../../lib/
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
+function formatDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date, days) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
 const baseRequest = {
   rentalType: "Cabine privative",
-  startDate: "2026-09-01",
+  startDate: formatDateInputValue(addDays(new Date(), 30)),
   commissionType: "FIXED",
   specialty: "Coiffure",
 };
@@ -43,6 +56,17 @@ describe("the rental request VAT number is really validated", () => {
     });
     expect(result.success).toBe(true);
     expect(result.data.vatNumber).toBe("BE0751854027");
+  });
+
+  test("a start date before today is rejected", () => {
+    const result = createRentalRequestSchema.safeParse({
+      ...baseRequest,
+      startDate: formatDateInputValue(addDays(new Date(), -1)),
+      vatNumber: "BE0751854027",
+    });
+
+    expect(result.success).toBe(false);
+    expect(JSON.stringify(result.error.issues)).toContain("pass");
   });
 
   test("a number failing the Belgian checksum is rejected, not just bad shapes", () => {

@@ -8,7 +8,7 @@ import Image from "next/image";
 import { isValidVatFormat } from "@/lib/vat-validation";
 
 
-function useInView(options = {}) {
+function useInView(threshold = 0.1) {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
   useEffect(() => {
@@ -21,11 +21,11 @@ function useInView(options = {}) {
           observer.disconnect();
         }
       },
-      { threshold: 0.1, ...options }
+      { threshold }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [threshold]);
   return [ref, inView];
 }
 
@@ -59,6 +59,13 @@ function ArrowIcon({ className = "w-4 h-4" }) {
   );
 }
 
+function formatDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 const BENEFITS = [
   "Fauteuil ou cabine privative",
   "Flexibilité des contrats",
@@ -68,6 +75,7 @@ const BENEFITS = [
 
 export default function BecomePartner() {
   const [sectionRef, sectionInView] = useInView();
+  const todayDate = formatDateInputValue(new Date());
 
   const [formData, setFormData] = useState({
     locationType: "chair",
@@ -210,6 +218,11 @@ export default function BecomePartner() {
 
     if (!formData.startDate) {
       setSubmitStatus({ type: "error", message: "Veuillez renseigner la date de début." });
+      return;
+    }
+
+    if (formData.startDate < todayDate) {
+      setSubmitStatus({ type: "error", message: "La date de début ne peut pas être dans le passé." });
       return;
     }
 
@@ -453,6 +466,7 @@ export default function BecomePartner() {
                     id="startDate"
                     name="startDate"
                     required
+                    min={todayDate}
                     value={formData.startDate}
                     onChange={handleChange}
                     className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
@@ -469,6 +483,7 @@ export default function BecomePartner() {
                     type="date"
                     id="endDate"
                     name="endDate"
+                    min={formData.startDate || todayDate}
                     value={formData.endDate}
                     onChange={handleChange}
                     className=" w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"

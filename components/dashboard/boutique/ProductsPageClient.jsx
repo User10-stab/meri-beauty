@@ -113,22 +113,22 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
             <button
               type="button"
               onClick={() => setScanOpen(true)}
-              className="flex h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2 sm:w-auto sm:min-w-30"
+              className="flex h-10 w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2 sm:w-auto"
             >
               <ScanLine size={16} />
               Scanner
             </button>
-            <Link href="/dashboard/boutique/products/import" className="w-full sm:w-auto">
+            <Link href="/dashboard/boutique/products/import" className="w-full shrink-0 sm:w-auto">
               <button
                 type="button"
-                className="flex h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2 sm:w-auto"
+                className="flex h-10 w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2 sm:w-auto"
               >
                 <Upload size={16} />
                 Importer depuis Wix
               </button>
             </Link>
-            <Link href="/dashboard/boutique/products/new" className="w-full sm:w-auto">
-              <Button className="w-full justify-center whitespace-nowrap sm:w-auto">
+            <Link href="/dashboard/boutique/products/new" className="w-full shrink-0 sm:w-auto">
+              <Button className="w-full shrink-0 justify-center whitespace-nowrap sm:w-auto">
                 <Plus size={16} />
                 Ajouter un produit
               </Button>

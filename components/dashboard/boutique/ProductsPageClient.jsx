@@ -109,26 +109,26 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
         </div>
 
         {isAdmin && (
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:flex lg:items-center">
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:flex-nowrap">
             <button
               type="button"
               onClick={() => setScanOpen(true)}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
+              className="flex h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2 sm:w-auto sm:min-w-30"
             >
               <ScanLine size={16} />
               Scanner
             </button>
-            <Link href="/dashboard/boutique/products/import">
+            <Link href="/dashboard/boutique/products/import" className="w-full sm:w-auto">
               <button
                 type="button"
-                className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
+                className="flex h-10 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2 sm:w-auto"
               >
                 <Upload size={16} />
                 Importer depuis Wix
               </button>
             </Link>
-            <Link href="/dashboard/boutique/products/new">
-              <Button className="w-full justify-center">
+            <Link href="/dashboard/boutique/products/new" className="w-full sm:w-auto">
+              <Button className="w-full justify-center whitespace-nowrap sm:w-auto">
                 <Plus size={16} />
                 Ajouter un produit
               </Button>

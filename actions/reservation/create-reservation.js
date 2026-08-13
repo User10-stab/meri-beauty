@@ -16,7 +16,7 @@ import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { isAdminRole } from "@/lib/authorization";
-import { buildAppointmentWindow, findConflictingAppointment } from "@/lib/appointment-scheduling";
+import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
 import {
   createNotification,
   createNotificationsBulk,
@@ -26,7 +26,6 @@ import {
   getAppointmentEmailRecipients,
 } from "@/lib/notifications";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
-import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL

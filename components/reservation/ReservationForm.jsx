@@ -259,11 +259,11 @@ export default function ReservationForm({ customerSession = null }) {
   return (
     <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
       {/* ── Progress Indicator ─────────────────────────────────── */}
-      <div className="mb-12">
-        <div className="flex items-center justify-between">
+      <div className="mb-12 overflow-x-auto pb-3">
+        <div className="flex w-max min-w-full items-start justify-between gap-3">
           {STEPS.map((step, index) => (
-            <div key={step.id} className="flex flex-1 items-center">
-              <div className="flex flex-col items-center">
+            <div key={step.id} className="flex min-w-16 flex-1 items-start">
+              <div className="flex min-w-12 flex-col items-center">
                 <button
                   onClick={() => goToStep(index + 1)}
                   disabled={index + 1 >= currentStep}
@@ -291,7 +291,7 @@ export default function ReservationForm({ customerSession = null }) {
               </div>
               {index < STEPS.length - 1 && (
                 <div
-                  className={`mx-2 h-0.5 flex-1 transition-all ${
+                  className={`mx-1 mt-5 h-0.5 min-w-4 flex-1 transition-all sm:mx-2 ${
                     index + 1 < currentStep ? "bg-[#C8A46A]" : "bg-gray-300"
                   }`}
                 />
@@ -302,35 +302,37 @@ export default function ReservationForm({ customerSession = null }) {
       </div>
 
       {/* ── Step Content ───────────────────────────────────────── */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={currentStep}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.3 }}
-          className="min-h-[500px]"
-        >
-          {isDraftStep ? (
-            // AppointmentDraftsStep uses custom action props instead of nextStep/prevStep
-            <AppointmentDraftsStep
-              data={reservationData}
-              onAddAnother={handleAddAnother}
-              onContinue={handleContinueToDates}
-              onRemoveDraft={handleRemoveDraft}
-            />
-          ) : (
-            <CurrentStepComponent
-              data={reservationData}
-              updateData={updateReservationData}
-              // StaffStep gets a special nextStep that commits the draft first
-              nextStep={isStaffStep ? commitDraftAndGoToSummary : nextStep}
-              prevStep={prevStep}
-              customerSession={customerSession}
-            />
-          )}
-        </motion.div>
-      </AnimatePresence>
+      <div className="overflow-x-hidden">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={currentStep}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="min-h-[500px]"
+          >
+            {isDraftStep ? (
+              // AppointmentDraftsStep uses custom action props instead of nextStep/prevStep
+              <AppointmentDraftsStep
+                data={reservationData}
+                onAddAnother={handleAddAnother}
+                onContinue={handleContinueToDates}
+                onRemoveDraft={handleRemoveDraft}
+              />
+            ) : (
+              <CurrentStepComponent
+                data={reservationData}
+                updateData={updateReservationData}
+                // StaffStep gets a special nextStep that commits the draft first
+                nextStep={isStaffStep ? commitDraftAndGoToSummary : nextStep}
+                prevStep={prevStep}
+                customerSession={customerSession}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
 
       {/* ── Navigation Buttons ─────────────────────────────────── */}
       {/* Hidden on: last step (payment), draft step (has its own buttons) */}

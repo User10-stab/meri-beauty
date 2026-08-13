@@ -40,6 +40,12 @@ export function BarcodeLabelDialog({ variant, productName, onClose }) {
            common small thermal label rolls (35x45mm). */
         @media print {
           @page { size: 35mm 45mm; margin: 0; }
+          /* visibility:hidden (below) keeps every hidden element in the
+             page's layout flow — against a page this small, the rest of
+             the dashboard behind this dialog is "tall" enough to spill
+             into a dozen extra, blank pages. Collapsing html/body's own
+             box is what actually stops that overflow from paginating. */
+          html, body { height: 35mm; overflow: hidden; }
           body * { visibility: hidden; }
           #barcode-label, #barcode-label * { visibility: visible; }
           #barcode-label {

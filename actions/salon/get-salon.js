@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
+import { reportPublicDataError } from "@/lib/prisma-public-fallback";
 
 export async function getSalon() {
   try {
@@ -36,7 +37,7 @@ export async function getSalon() {
       },
     };
   } catch (error) {
-    console.error("[getSalon]", error);
+    reportPublicDataError("[getSalon]", error);
     return { success: false, message: "Impossible de charger les informations du salon.", data: null };
   }
 }

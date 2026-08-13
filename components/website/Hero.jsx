@@ -58,7 +58,7 @@ export default async function Hero() {
           </div>
 
           {/* Headline */}
-          <h1 className="w-full text-[3.4rem] font-bold leading-[1.05] tracking-tight text-white sm:text-[4.2rem] lg:text-[5.5rem]">
+          <h1 className="w-full text-[2.55rem] font-bold leading-[1.05] tracking-tight text-white sm:text-[4.2rem] lg:text-[5.5rem]">
             Votre Beauté,{" "}
             <em className="block font-light text-gold/90 not-italic">
               Révélée Avec Justesse.
@@ -72,17 +72,17 @@ export default async function Hero() {
           </p>
 
           {/* CTAs */}
-          <div className="mt-10 flex flex-wrap items-center gap-4">
+          <div className="mt-10 flex w-full flex-col items-stretch gap-4 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
             <a
               href="/reservation"
-              className="group inline-flex items-center gap-3 rounded-full bg-gold px-9 py-4 text-[15px] font-semibold text-white shadow-lg transition-all duration-300 hover:bg-gold/90 hover:shadow-xl hover:shadow-gold/20"
+              className="group inline-flex items-center justify-center gap-3 rounded-full bg-gold px-6 py-4 text-[15px] font-semibold text-white shadow-lg transition-all duration-300 hover:bg-gold/90 hover:shadow-xl hover:shadow-gold/20 sm:px-9"
             >
               Réserver un rendez-vous
               <ArrowIcon className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
             </a>
             <a
               href="#concept"
-              className="inline-flex items-center gap-2 rounded-full border border-white/30 px-9 py-4 text-[15px] font-semibold text-white backdrop-blur-sm transition-all duration-300 hover:border-white/60 hover:bg-white/10"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/30 px-6 py-4 text-[15px] font-semibold text-white backdrop-blur-sm transition-all duration-300 hover:border-white/60 hover:bg-white/10 sm:px-9"
             >
               Découvrir le concept
             </a>
@@ -168,11 +168,11 @@ export default async function Hero() {
 
 function MarqueeGroup(props) {
   return (
-    <div className="flex shrink-0 items-center gap-12 pr-12" {...props}>
+    <div className="flex shrink-0 items-center gap-6 pr-6 sm:gap-12 sm:pr-12" {...props}>
       {SERVICES.map((service) => (
         <span
           key={service}
-          className="flex items-center gap-12 text-[13px] font-medium uppercase tracking-[0.18em] text-white/60"
+          className="flex items-center gap-6 text-[12px] font-medium uppercase tracking-[0.18em] text-white/60 sm:gap-12 sm:text-[13px]"
         >
           {service}
           <span className="h-1.5 w-1.5 rounded-full bg-gold/70" />

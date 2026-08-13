@@ -100,7 +100,7 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 bg-primary">
-      <nav className="mx-auto grid max-w-[1400px] grid-cols-[auto_1fr_auto] items-center gap-6 px-6 py-3 md:px-10 lg:px-14">
+      <nav className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 md:px-10 lg:grid lg:grid-cols-[auto_1fr_auto] lg:gap-6 lg:px-14">
 
         {/* ── Logo (left) ── */}
         <Link href="#accueil" className="shrink-0" aria-label="Maison Adar — Accueil">
@@ -135,7 +135,7 @@ export default function Navbar() {
         </ul>
 
         {/* ── Right actions ── */}
-        <div className="relative flex items-center gap-2 md:gap-3">
+        <div className="relative flex items-center justify-self-end gap-2 md:gap-3">
           {/* Dashboard button for users with specific roles */}
           {hasDashboardRole && (
             <Link
@@ -157,9 +157,12 @@ export default function Navbar() {
                 aria-haspopup="menu"
               >
                 {session?.user?.image ? (
-                  <img
+                  <Image
                     src={session.user.image}
                     alt={session.user.name || "Avatar"}
+                    width={20}
+                    height={20}
+                    unoptimized
                     className="h-5 w-5 rounded-full object-cover"
                   />
                 ) : (
@@ -183,9 +186,12 @@ export default function Navbar() {
                     <div className="p-4">
                       <div className="flex items-center gap-3">
                         {session?.user?.image ? (
-                          <img
+                          <Image
                             src={session.user.image}
                             alt={session.user.name || "Avatar"}
+                            width={48}
+                            height={48}
+                            unoptimized
                             className="h-12 w-12 rounded-full object-cover"
                           />
                         ) : (

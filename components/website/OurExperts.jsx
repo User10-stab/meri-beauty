@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
 import { StarIcon, ArrowIcon } from "./icons";
 
@@ -41,7 +42,7 @@ const FALLBACK_STYLISTS = [
   },
 ];
 
-function useInView(options = {}) {
+function useInView(threshold = 0.15) {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
   useEffect(() => {
@@ -54,11 +55,11 @@ function useInView(options = {}) {
           observer.disconnect();
         }
       },
-      { threshold: 0.15, ...options }
+      { threshold }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [threshold]);
   return [ref, inView];
 }
 
@@ -92,11 +93,13 @@ export default function OurExperts() {
     async function loadExperts() {
       try {
         const response = await fetch("/api/staff");
-        if (!response.ok) throw new Error("Failed to fetch experts");
+        if (!response.ok) return;
         const data = await response.json();
-        setStylists(data);
-      } catch (error) {
-        console.error("[OurExperts] fetch failed", error);
+        if (Array.isArray(data) && data.length > 0) {
+          setStylists(data);
+        }
+      } catch {
+        // Keep the built-in fallback cards when the public API is unavailable.
       } finally {
         setIsLoading(false);
       }
@@ -207,9 +210,12 @@ function ExpertCard({ stylist, delay }) {
     >
       <div className="absolute inset-x-0 bottom-0 h-[3px] origin-left bg-gradient-to-r from-gold to-gold-soft transition-all duration-300 group-hover:h-[4px]" />
       <div className="relative aspect-[4/5] w-full overflow-hidden bg-cream">
-        <img
+        <Image
           src={stylist.image}
           alt={stylist.name}
+          fill
+          sizes="260px"
+          unoptimized
           className="h-full w-full object-cover object-top transition-transform duration-500 group-hover:scale-105"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent" />

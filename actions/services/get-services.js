@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { isAdminRole, ROLES } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
+import { reportPublicDataError } from "@/lib/prisma-public-fallback";
 
 /**
  * Returns services based on the current user's role.
@@ -165,7 +166,7 @@ export async function getPublicServices() {
 
     return { success: true, data: services };
   } catch (error) {
-    console.error("[getPublicServices]", error);
+    reportPublicDataError("[getPublicServices]", error);
     return {
       success: false,
       data: [],

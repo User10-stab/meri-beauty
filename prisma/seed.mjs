@@ -111,6 +111,38 @@ async function main() {
   } else {
     console.log(" Salon already exists.");
   }
+
+  // ==========================
+  // Ensure Salon legal identity
+  // ==========================
+  // Required before any online sale can be invoiced — see
+  // lib/invoicing.js#isSellerLegalDataComplete, which gates checkout on
+  // legalName/vatNumber/addressLine1/postalCode/city/countryCode all being
+  // set. Idempotent and safe to re-run: only fills fields still empty, so
+  // it never overwrites anything Marie has since edited via Réglages >
+  // Salon. Real business data (confirmed), not a placeholder.
+  const salon = await prisma.salon.findUnique({ where: { id: "main-salon" } });
+  if (salon) {
+    const legalIdentityDefaults = {
+      legalName: "Meri Beauty",
+      vatNumber: "BE0751.854.027",
+      companyRegistrationNo: "0751.854.027",
+      addressLine1: "Rue Bonaventure 113",
+      postalCode: "1090",
+      city: "Jette",
+      countryCode: "BE",
+    };
+    const missing = Object.fromEntries(
+      Object.entries(legalIdentityDefaults).filter(([field]) => !salon[field])
+    );
+
+    if (Object.keys(missing).length > 0) {
+      await prisma.salon.update({ where: { id: "main-salon" }, data: missing });
+      console.log(" Salon legal identity backfilled:", Object.keys(missing).join(", "));
+    } else {
+      console.log(" Salon legal identity already complete.");
+    }
+  }
 }
 
 main()

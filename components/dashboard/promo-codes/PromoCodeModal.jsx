@@ -11,13 +11,21 @@ const TYPE_OPTIONS = [
   { value: "FIXED", label: "Montant fixe (€)" },
 ];
 
+function toDateTimeLocal(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 /**
  * @param {{ open: boolean, promoCode: object|null, onClose: () => void, onSaved: () => void }} props
  */
 export function PromoCodeModal({ open, promoCode, onClose, onSaved }) {
   const isEditing = !!promoCode;
   const [loading, startLoading] = useTransition();
-  const [form, setForm] = useState({ code: "", type: "PERCENTAGE", value: "", minOrderAmount: "", isActive: true });
+  const [form, setForm] = useState({ code: "", type: "PERCENTAGE", value: "", minOrderAmount: "", expiresAt: "", maxUses: "", isActive: true });
   const [errors, setErrors] = useState({});
 
   useEffect(() => {
@@ -27,6 +35,8 @@ export function PromoCodeModal({ open, promoCode, onClose, onSaved }) {
       type: promoCode?.type ?? "PERCENTAGE",
       value: promoCode?.value ?? "",
       minOrderAmount: promoCode?.minOrderAmount ?? "",
+      expiresAt: toDateTimeLocal(promoCode?.expiresAt),
+      maxUses: promoCode?.maxUses ?? "",
       isActive: promoCode?.isActive ?? true,
     });
     setErrors({});
@@ -43,6 +53,8 @@ export function PromoCodeModal({ open, promoCode, onClose, onSaved }) {
         type: form.type,
         value: form.value,
         minOrderAmount: form.minOrderAmount === "" ? null : form.minOrderAmount,
+        expiresAt: form.expiresAt === "" ? null : form.expiresAt,
+        maxUses: form.maxUses === "" ? null : form.maxUses,
         isActive: form.isActive,
       };
       const result = isEditing
@@ -139,6 +151,32 @@ export function PromoCodeModal({ open, promoCode, onClose, onSaved }) {
               className="mt-1.5 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
             />
             {errors.minOrderAmount && <p className="mt-1 text-xs font-medium text-red-600">{errors.minOrderAmount}</p>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Expiration (optionnelle)</label>
+              <input
+                type="datetime-local"
+                value={form.expiresAt}
+                onChange={(e) => setForm((f) => ({ ...f, expiresAt: e.target.value }))}
+                className="mt-1.5 h-9 w-full rounded-lg border border-gray-200 px-2 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
+              />
+              {errors.expiresAt && <p className="mt-1 text-xs font-medium text-red-600">{errors.expiresAt}</p>}
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Utilisations max. (optionnel)</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={form.maxUses}
+                onChange={(e) => setForm((f) => ({ ...f, maxUses: e.target.value }))}
+                placeholder="Illimité"
+                className="mt-1.5 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
+              />
+              {errors.maxUses && <p className="mt-1 text-xs font-medium text-red-600">{errors.maxUses}</p>}
+            </div>
           </div>
 
           <label className="flex items-center gap-2 text-sm text-gray-600">

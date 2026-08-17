@@ -37,7 +37,7 @@ function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
 }
 function formatDate(d) {
-  return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" }) : "—";
+  return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" }) : "—";
 }
 
 export function OrderDetailClient({ order }) {
@@ -46,8 +46,12 @@ export function OrderDetailClient({ order }) {
   const [isPending, startTransition] = useTransition();
   const [pickupDialogOrder, setPickupDialogOrder] = useState(null);
   const [cancelling, setCancelling] = useState(false);
+  const [manualRefundConfirmed, setManualRefundConfirmed] = useState(false);
+  const [manualRefundReference, setManualRefundReference] = useState("");
   const [trackingCode, setTrackingCode] = useState(order.trackingCode ?? "");
   const [generatingLabel, setGeneratingLabel] = useState(false);
+  const [closingShipped, setClosingShipped] = useState(false);
+  const [collectedAt, setCollectedAt] = useState("");
 
   function runAction(action, ...args) {
     startTransition(async () => {
@@ -85,9 +89,26 @@ export function OrderDetailClient({ order }) {
     });
   }
 
+  function handleCloseShipped() {
+    startTransition(async () => {
+      const result = await markOrderCompleted({ orderId: order.id, collectedAt });
+      if (result.success) {
+        toast.success(result.message);
+        setClosingShipped(false);
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
+
   function handleCancel() {
     startTransition(async () => {
-      const result = await cancelOrder({ orderId: order.id });
+      const result = await cancelOrder({
+        orderId: order.id,
+        manualRefundConfirmed,
+        manualRefundReference: manualRefundReference || undefined,
+      });
       if (result.success) {
         toast.success(result.message);
         setCancelling(false);
@@ -225,6 +246,7 @@ export function OrderDetailClient({ order }) {
                   </p>
                 )}
                 {order.shippedAt && <p className="text-gray-400">{t("shippedAt", { date: formatDate(order.shippedAt) })}</p>}
+                {order.collectedAt && <p className="text-gray-400">{t("collectedAt", { date: formatDate(order.collectedAt) })}</p>}
               </div>
             )}
           </div>
@@ -324,7 +346,14 @@ export function OrderDetailClient({ order }) {
               )}
 
               {canCloseShipped && (
-                <Button className="w-full" onClick={() => runAction(markOrderCompleted, order.id)} disabled={isPending}>
+                <Button
+                  className="w-full"
+                  onClick={() => {
+                    setCollectedAt(new Date().toISOString().slice(0, 10));
+                    setClosingShipped(true);
+                  }}
+                  disabled={isPending}
+                >
                   {isPending && <Loader2 size={14} className="animate-spin" />}
                   {t("closeOrder")}
                 </Button>
@@ -333,7 +362,11 @@ export function OrderDetailClient({ order }) {
               {canCancel && (
                 <button
                   type="button"
-                  onClick={() => setCancelling(true)}
+                  onClick={() => {
+                    setManualRefundConfirmed(false);
+                    setManualRefundReference("");
+                    setCancelling(true);
+                  }}
                   disabled={isPending}
                   className="w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
                 >
@@ -355,19 +388,71 @@ export function OrderDetailClient({ order }) {
       />
 
       <ConfirmDialog
+        open={closingShipped}
+        title="Clôturer la commande"
+        message="Vérifiez le suivi Mondial Relay et indiquez la date à laquelle la cliente a récupéré le colis au point relais — cette date déclenche son délai légal de rétractation de 14 jours."
+        confirmLabel="Clôturer"
+        loading={isPending}
+        confirmDisabled={!collectedAt}
+        onConfirm={handleCloseShipped}
+        onCancel={() => setClosingShipped(false)}
+      >
+        <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+          Date de retrait au point relais
+        </label>
+        <input
+          type="date"
+          value={collectedAt}
+          max={new Date().toISOString().slice(0, 10)}
+          onChange={(e) => setCollectedAt(e.target.value)}
+          className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
+        />
+      </ConfirmDialog>
+
+      <ConfirmDialog
         open={cancelling}
         title={t("cancelConfirm")}
         message={
-          order.hasPayment
-            ? t("cancelMessagePaid")
-            : t("cancelMessageUnpaid")
+          order.payment?.requiresManualRefund
+            ? order.payment.refundInstruction
+            : order.hasPayment
+              ? t("cancelMessagePaid")
+              : t("cancelMessageUnpaid")
         }
         confirmLabel={t("cancelOrder")}
         danger
         loading={isPending}
+        confirmDisabled={Boolean(
+          order.payment?.requiresManualRefund &&
+            (!manualRefundConfirmed || (order.payment.paymentMethod === "CARD" && !manualRefundReference.trim()))
+        )}
         onConfirm={handleCancel}
         onCancel={() => setCancelling(false)}
-      />
+      >
+        {order.payment?.requiresManualRefund && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p><span className="font-semibold">Paiement d'origine : </span>{order.payment.paymentMethodLabel}</p>
+            <label className="mt-3 flex items-start gap-2 font-medium">
+              <input
+                type="checkbox"
+                checked={manualRefundConfirmed}
+                onChange={(event) => setManualRefundConfirmed(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-amber-400"
+              />
+              Je confirme que le remboursement a déjà été effectué au client.
+            </label>
+            {order.payment.paymentMethod === "CARD" && (
+              <input
+                value={manualRefundReference}
+                onChange={(event) => setManualRefundReference(event.target.value)}
+                maxLength={100}
+                placeholder="Référence du ticket terminal (obligatoire)"
+                className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#2f3a2e]"
+              />
+            )}
+          </div>
+        )}
+      </ConfirmDialog>
     </div>
   );
 }

@@ -46,6 +46,7 @@ export function NewsletterRow({ row, onView, onEdit, onDelete, onApprove, curren
       day: "2-digit",
       month: "short",
       year: "numeric",
+      timeZone: "Europe/Brussels",
     });
   }
 

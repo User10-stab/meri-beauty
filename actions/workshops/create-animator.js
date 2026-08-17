@@ -40,7 +40,7 @@ export async function createAnimator(input) {
     const parsed = animatorSchema.safeParse(input);
     if (!parsed.success) {
       const fieldErrors = {};
-      parsed.error.errors.forEach((err) => {
+      parsed.error.issues.forEach((err) => {
         fieldErrors[err.path[0]] = err.message;
       });
       return {
@@ -93,7 +93,7 @@ export async function updateAnimator(input) {
     const parsed = updateAnimatorSchema.safeParse(input);
     if (!parsed.success) {
       const fieldErrors = {};
-      parsed.error.errors.forEach((err) => {
+      parsed.error.issues.forEach((err) => {
         fieldErrors[err.path[0]] = err.message;
       });
       return {

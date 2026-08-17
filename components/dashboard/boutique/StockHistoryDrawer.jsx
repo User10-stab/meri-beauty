@@ -6,7 +6,7 @@ import { getStockMovements } from "@/actions/boutique/stock";
 import { useTranslations } from "next-intl";
 
 function formatDate(d) {
-  return new Intl.DateTimeFormat("fr-BE", { dateStyle: "medium", timeStyle: "short" }).format(new Date(d));
+  return new Intl.DateTimeFormat("fr-BE", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" }).format(new Date(d));
 }
 
 /** Slide-over showing a variant's full inventory ledger, most recent first. */

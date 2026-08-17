@@ -111,12 +111,14 @@ export default async function EvenementDetailPage({ params }) {
       day: "numeric",
       month: "long",
       year: "numeric",
+      timeZone: "Europe/Brussels",
     });
 
   const formatTime = (dateStr) =>
     new Date(dateStr).toLocaleTimeString(intlLocale, {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "Europe/Brussels",
     });
 
 function CalendarIcon() {

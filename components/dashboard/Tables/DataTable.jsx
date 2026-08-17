@@ -16,6 +16,7 @@ function formatDate(iso) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -84,6 +85,11 @@ export function DataTable({
   onDelete,
   onApprove,
   onReject,
+  // Reservation-specific: settling the on-site balance and marking a
+  // no-show. Passed straight through to a custom row renderer, like the
+  // handlers above — a row that doesn't use them simply ignores them.
+  onSettle,
+  onNoShow,
   renderRow: CustomRow,
   searchPlaceholder,
   searchFilter,
@@ -250,6 +256,8 @@ export function DataTable({
                     onDelete={handleDelete}
                     onApprove={handleApprove}
                     onReject={handleReject}
+                    onSettle={onSettle}
+                    onNoShow={onNoShow}
                   />
                 ) : (
                   <TableRow

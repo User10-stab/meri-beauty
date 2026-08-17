@@ -6,9 +6,10 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
 import { useTranslations } from "next-intl";
+import { isValidVatFormat } from "@/lib/vat-validation";
 
 
-function useInView(options = {}) {
+function useInView(threshold = 0.1) {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
   useEffect(() => {
@@ -21,11 +22,11 @@ function useInView(options = {}) {
           observer.disconnect();
         }
       },
-      { threshold: 0.1, ...options }
+      { threshold }
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [threshold]);
   return [ref, inView];
 }
 
@@ -59,6 +60,13 @@ function ArrowIcon({ className = "w-4 h-4" }) {
   );
 }
 
+function formatDateInputValue(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function BecomePartner() {
   const t = useTranslations("home");
   const tPartner = useTranslations("becomePartner");
@@ -69,6 +77,7 @@ export default function BecomePartner() {
     t("partnerBenefitAtmosphere"),
   ];
   const [sectionRef, sectionInView] = useInView();
+  const todayDate = formatDateInputValue(new Date());
 
   const [formData, setFormData] = useState({
     locationType: "chair",
@@ -209,9 +218,30 @@ export default function BecomePartner() {
       return;
     }
 
-    // Basic validation — only startDate is required
     if (!formData.startDate) {
       setSubmitStatus({ type: "error", message: tPartner("startDateRequired") });
+      return;
+    }
+
+    if (formData.startDate < todayDate) {
+      setSubmitStatus({ type: "error", message: "La date de début ne peut pas être dans le passé." });
+      return;
+    }
+
+    // The field is marked with a red asterisk and carries `required`, but that
+    // is browser-only — and the schema behind the POST route used to accept it
+    // missing. Checked here too so a typo shows an explanation instead of a
+    // bare 422 from the API.
+    if (!formData.vatNumber?.trim()) {
+      setSubmitStatus({ type: "error", message: "Veuillez renseigner votre numéro de TVA." });
+      return;
+    }
+    if (!isValidVatFormat(formData.vatNumber)) {
+      setSubmitStatus({
+        type: "error",
+        message:
+          "Numéro de TVA invalide. Indiquez le préfixe du pays, par exemple BE0751854027.",
+      });
       return;
     }
 
@@ -318,11 +348,11 @@ export default function BecomePartner() {
           Mid   = salon photo shows through (≈20%)
           Right = white form card (≈40%)
       ══════════════════════════════════════════ */}
-      <div className="relative flex min-h-[660px] w-full items-stretch">
+      <div className="relative flex w-full flex-col items-stretch lg:min-h-[660px] lg:flex-row">
 
         {/* ── LEFT: Dark green content panel ── */}
         <div
-          className={`relative z-10 flex w-full flex-col justify-center bg-primary px-10 py-16
+          className={`relative z-10 flex w-full flex-col justify-center bg-primary px-6 py-12 sm:px-10 sm:py-16
             transition-all duration-700 ease-out
             lg:w-[35%] lg:px-14 lg:py-20
             ${sectionInView ? "opacity-90 translate-x-0" : "opacity-0 -translate-x-8"}`}
@@ -375,15 +405,15 @@ export default function BecomePartner() {
 
         {/* ── RIGHT: White form card ── */}
         <div
-          className={`relative z-10 ml-auto flex w-full items-center justify-center
+          className={`relative z-10 flex w-full items-center justify-center
             transition-all duration-700 ease-out delay-200
-            lg:w-[44%]
+            lg:ml-auto lg:w-[44%]
             ${sectionInView ? "opacity-100 translate-x-0" : "opacity-0 translate-x-8"}`}
         >
           {/* Semi-transparent backdrop so form is readable over the photo */}
           <div className="absolute inset-0 bg-cream/20 backdrop-blur-[2px] lg:hidden" />
 
-          <div className="relative z-10 w-full max-w-[450px] bg-white/97 px-8 py-10 shadow-2xl shadow-black/20 lg:mr-0 lg:rounded lg:px-10 lg:py-8">
+          <div className="relative z-10 mx-4 my-8 w-full max-w-[450px] bg-white/97 px-6 py-8 shadow-2xl shadow-black/20 sm:mx-6 sm:px-8 sm:py-10 lg:mx-0 lg:mr-0 lg:rounded lg:px-10 lg:py-8">
             {/* Form heading */}
             <h3 className="mb-1 text-[1.35rem] font-bold leading-tight text-ink">
               {t("partnerFormTitle")}
@@ -422,8 +452,8 @@ export default function BecomePartner() {
               </div>
 
               {/* Date range */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid grid-rows-2 h-[80px] ">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
                   <label
                     htmlFor="startDate"
                     className="mb-1.5 block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
@@ -435,12 +465,13 @@ export default function BecomePartner() {
                     id="startDate"
                     name="startDate"
                     required
+                    min={todayDate}
                     value={formData.startDate}
                     onChange={handleChange}
                     className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
                   />
                 </div>
-                <div className="grid grid-rows-2 h-[80px] ">
+                <div className="flex flex-col gap-1.5">
                   <label
                     htmlFor="endDate"
                     className=" block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
@@ -451,6 +482,7 @@ export default function BecomePartner() {
                     type="date"
                     id="endDate"
                     name="endDate"
+                    min={formData.startDate || todayDate}
                     value={formData.endDate}
                     onChange={handleChange}
                     className=" w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
@@ -458,9 +490,9 @@ export default function BecomePartner() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                  {/* Specialty */}
-                <div className="grid grid-rows-2 ">
+                <div className="flex flex-col gap-1.5">
                   <label
                     htmlFor="specialty"
                     className="block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
@@ -480,7 +512,7 @@ export default function BecomePartner() {
                 </div>
 
                 {/* VAT Number */}
-                <div className="grid grid-rows-2 ">
+                <div className="flex flex-col gap-1.5">
                   <label
                     htmlFor="vatNumber"
                     className="block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"

@@ -16,9 +16,10 @@ import {
   FileText,
   CheckCircle,
   XCircle,
+  UserX,
   Loader2,
 } from "lucide-react";
-import { confirmAppointment, rejectAppointment, completeAppointment } from "@/actions/appointment/manage-appointment";
+import { confirmAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
 import { getStaffColor } from "./staffColors";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -30,6 +31,7 @@ function formatDate(iso) {
     day: "numeric",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -38,6 +40,7 @@ function formatTime(iso) {
   return new Date(iso).toLocaleTimeString("fr-FR", {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -119,6 +122,7 @@ export function AppointmentDrawer({
   const [feedback, setFeedback] = useState(null); // { type: "success"|"error", message }
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [completeMethod, setCompleteMethod] = useState("CASH");
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
 
   // Close on Escape
   useEffect(() => {
@@ -145,6 +149,7 @@ export function AppointmentDrawer({
     setFeedback(null);
     setShowPaymentDialog(false);
     setCompleteMethod("CASH");
+    setPaymentConfirmed(false);
   }, [appointment?.id]);
 
   async function handleConfirm() {
@@ -186,11 +191,11 @@ export function AppointmentDrawer({
   }
 
   async function handleCompleteWithPayment() {
-    if (!appointment?.id || isPending) return;
+    if (!appointment?.id || isPending || !paymentConfirmed) return;
     setIsPending(true);
     setFeedback(null);
     try {
-      const result = await completeAppointment(appointment.id, { method: completeMethod });
+      const result = await completeAppointment(appointment.id, { method: completeMethod, paymentConfirmed });
       setShowPaymentDialog(false);
       if (result.success) {
         setFeedback({ type: "success", message: result.message ?? t("success.appointmentCompleted") });
@@ -205,15 +210,35 @@ export function AppointmentDrawer({
 
   async function handleCancel() {
     if (!appointment?.id || isPending) return;
+    const reason = window.prompt("Motif de l'annulation :", "");
+    if (reason === null) return;
     setIsPending(true);
     setFeedback(null);
     try {
-      const result = await rejectAppointment(appointment.id);
+      const result = await rejectAppointment(appointment.id, reason);
       if (result.success) {
         setFeedback({ type: "success", message: t("success.appointmentCancelled") });
         onAppointmentUpdated();
       } else {
         setFeedback({ type: "error", message: result.message ?? t("errors.generic") });
+      }
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function handleNoShow() {
+    if (!appointment?.id || isPending) return;
+    if (!window.confirm("Marquer ce rendez-vous comme absence ? Aucun remboursement ne sera émis.")) return;
+    setIsPending(true);
+    setFeedback(null);
+    try {
+      const result = await markAppointmentNoShow(appointment.id);
+      if (result.success) {
+        setFeedback({ type: "success", message: result.message ?? "Rendez-vous marqué absent." });
+        onAppointmentUpdated();
+      } else {
+        setFeedback({ type: "error", message: result.message ?? "Erreur." });
       }
     } finally {
       setIsPending(false);
@@ -420,6 +445,15 @@ export function AppointmentDrawer({
                 <option value="CASH">Espèces</option>
                 <option value="CARD">Carte</option>
               </select>
+              <label className="mt-3 flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-200">
+                <input
+                  type="checkbox"
+                  checked={paymentConfirmed}
+                  onChange={(e) => setPaymentConfirmed(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300"
+                />
+                Je confirme avoir bien reçu ce paiement (espèces en main, ou carte APPROUVÉE sur le terminal).
+              </label>
               <div className="mt-3 flex justify-end gap-2">
                 <button
                   type="button"
@@ -432,7 +466,7 @@ export function AppointmentDrawer({
                 <button
                   type="button"
                   onClick={handleCompleteWithPayment}
-                  disabled={isPending}
+                  disabled={isPending || !paymentConfirmed}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#3d4e3b] disabled:opacity-60"
                 >
                   {isPending && <Loader2 size={12} className="animate-spin" />}
@@ -476,6 +510,15 @@ export function AppointmentDrawer({
                 >
                   {isPending ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle size={15} />}
                   {t("appointmentActions.complete")}
+                </button>
+                <button
+                  onClick={handleNoShow}
+                  disabled={isPending}
+                  title="Aucun remboursement ne sera émis"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 transition-colors hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-400"
+                >
+                  <UserX size={15} />
+                  Marquer absente
                 </button>
                 <button
                   onClick={handleCancel}

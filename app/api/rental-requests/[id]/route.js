@@ -130,7 +130,7 @@ export async function PATCH(request, { params }) {
   });
 
   if (!validationResult.success) {
-    const errors = validationResult.error.errors.map((err) => ({
+    const errors = validationResult.error.issues.map((err) => ({
       field: err.path.join("."),
       message: err.message,
     }));
@@ -146,6 +146,16 @@ export async function PATCH(request, { params }) {
     message,
     ownerResponse,
   } = validationResult.data;
+
+  // Approval is a conversion, not a standalone status edit: the dedicated
+  // server action creates the staff profile + contract and links all three
+  // records atomically. Allowing this route to set APPROVED would recreate
+  // the old state where an approved request had no traceable contract.
+  if (status === "APPROVED") {
+    return badRequest(
+      "Utilisez le formulaire de création du collaborateur pour approuver la demande et créer son contrat."
+    );
+  }
 
   // ── Prepare update data ──────────────────────────────────────────────────
   const updateData = {};

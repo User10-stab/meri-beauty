@@ -136,8 +136,8 @@ export function ProductImages({ value = [], onChange }) {
               type="button"
               onClick={() => setPrimary(i)}
               title={img.isPrimary ? t("isPrimary") : t("setPrimaryTitle")}
-              className={`absolute left-1 top-1 flex h-5 w-5 items-center justify-center rounded-full shadow ${
-                img.isPrimary ? "bg-amber-400 text-white" : "bg-white/90 text-gray-400 opacity-0 group-hover:opacity-100"
+              className={`absolute left-1 top-1 flex h-7 w-7 items-center justify-center rounded-full shadow sm:h-5 sm:w-5 ${
+                img.isPrimary ? "bg-amber-400 text-white" : "bg-white/90 text-gray-400 sm:opacity-0 sm:group-hover:opacity-100"
               } transition-opacity`}
             >
               <Star size={11} fill={img.isPrimary ? "currentColor" : "none"} />
@@ -146,7 +146,7 @@ export function ProductImages({ value = [], onChange }) {
               type="button"
               onClick={() => removeAt(i)}
               aria-label={t("removeLabel")}
-              className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white opacity-0 shadow transition-opacity group-hover:opacity-100"
+              className="absolute right-1 top-1 flex h-7 w-7 items-center justify-center rounded-full bg-red-500 text-white shadow transition-opacity sm:h-5 sm:opacity-0 sm:group-hover:opacity-100"
             >
               <X size={11} />
             </button>

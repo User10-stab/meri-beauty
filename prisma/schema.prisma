@@ -36,6 +36,35 @@ enum AppointmentStatus {
   NO_SHOW
 }
 
+enum AppointmentCancellationSource {
+  CUSTOMER
+  STAFF
+  ADMIN
+  STRIPE
+  REFUND_RECONCILIATION
+  SYSTEM
+}
+
+// A customer may ask the salon to make an exception to the normal
+// non-refundable deposit policy. This is deliberately a request, never a
+// cancellation: only an OWNER/ADMIN can approve it and trigger the refund.
+enum AppointmentCancellationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Ateliers and formations are admin-cancel-only by policy (the deposit is
+// non-refundable, exceptions are case-by-case). Kept as its own enum + table
+// rather than widening AppointmentCancellationRequest: the appointment
+// version is already live, and a polymorphic rewrite of a table holding real
+// requests is not a migration worth risking for shared naming.
+enum ReservationCancellationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum PaymentStatus {
   PENDING
   PAID
@@ -80,6 +109,23 @@ enum ReturnStatus {
   COMPLETED // item received, stock restored, refund/credit note issued
 }
 
+// Distinguishes the 14-day withdrawal right (CHANGED_MIND — the only
+// category actually bound by withdrawalWindow()) from claims governed by
+// other legal bases entirely: the 2-year statutory guarantee (DEFECTIVE),
+// the shop's own fulfilment error (WRONG_ITEM, DAMAGED_IN_TRANSIT), a
+// carrier issue (NOT_RECEIVED), or a discretionary exception (GOODWILL).
+// Conflating these behind one "délai dépassé" rejection is what
+// bigbatch.txt P1 "Rétractation et produit défectueux sont confondus"
+// flagged — see actions/boutique/returns.js.
+enum ReturnReasonCategory {
+  CHANGED_MIND
+  DEFECTIVE
+  WRONG_ITEM
+  DAMAGED_IN_TRANSIT
+  NOT_RECEIVED
+  GOODWILL
+}
+
 enum TransactionMethod {
   CASH
   CARD
@@ -116,6 +162,9 @@ enum NotificationType {
   APPOINTMENT_CREATED
   APPOINTMENT_CONFIRMED
   APPOINTMENT_CANCELLED
+  APPOINTMENT_NO_SHOW
+  APPOINTMENT_CANCELLATION_REQUEST
+  RESERVATION_CANCELLATION_REQUEST
   APPOINTMENT_REMINDER
   PAYMENT_RECEIVED
   PAYMENT_PENDING
@@ -162,6 +211,23 @@ enum MovementType {
   LOSS
   ADJUSTMENT
   SALON_USAGE // product taken from retail stock during a service
+  // A returned item pulled aside for inspection/disposal instead of going
+  // back into vendable stock — see ReturnItemCondition. stockQuantity is
+  // deliberately left unchanged by this movement; it exists purely as the
+  // audit trail of the item physically coming back.
+  RETURN_QUARANTINE
+}
+
+// Physical condition staff record for each returned line item at
+// completeReturnRequest time, before any restock decision is made — see
+// actions/boutique/returns.js. Only SEALED_RESELLABLE ever increments
+// ProductVariant.stockQuantity.
+enum ReturnItemCondition {
+  SEALED_RESELLABLE // unopened, resalable as-is
+  OPENED_HYGIENE // hygiene-exempt product opened/unsealed — never resold
+  DAMAGED // packaging or product damaged — quarantine for assessment
+  DEFECTIVE // faulty product — quarantine for supplier return
+  WRONG_ITEM // shop's shipping error — inspect before any restock
 }
 
 enum CommissionType {
@@ -184,6 +250,18 @@ enum FulfilmentMode {
   SHIPPING_PREPAID // pay online, bpost delivery
 }
 
+enum VatTreatment {
+  DOMESTIC
+  EU_DISTANCE_SALE
+  EU_REVERSE_CHARGE
+  EXPORT
+}
+
+enum InvoiceCustomerType {
+  B2C
+  B2B
+}
+
 enum OrderStatus {
   PENDING_PAYMENT // prepaid modes — Stripe checkout started, not yet settled
   PENDING_PICKUP // pickup+pay-on-site — confirmed, stock reserved, awaiting the customer
@@ -194,6 +272,11 @@ enum OrderStatus {
   COMPLETED // picked up, or shipped and closed out
   CANCELLED
   EXPIRED // pay-on-site pickup not collected within the deadline
+}
+
+enum OrderSource {
+  ONLINE
+  POS
 }
 
 enum WeekDay {
@@ -355,6 +438,8 @@ model WorkshopReservation {
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
 
+  cancellationRequest ReservationCancellationRequest?
+
   @@index([sessionId])
   @@index([customerId])
   @@map("workshop_reservations")
@@ -499,6 +584,8 @@ model FormationReservation {
   createdAt         DateTime                   @default(now())
   updatedAt         DateTime                   @updatedAt
 
+  cancellationRequest ReservationCancellationRequest?
+
   @@index([sessionId])
   @@index([customerId])
   @@map("formation_reservations")
@@ -506,7 +593,10 @@ model FormationReservation {
 
 // SALON
 model Salon {
-  id          String  @id @default(cuid())
+  // The application has exactly one salon. The database migration also adds
+  // a CHECK constraint so a caller cannot bypass this invariant by supplying
+  // another id explicitly.
+  id          String  @id @default("main-salon")
   name        String
   description String?
   logo        String?
@@ -514,12 +604,30 @@ model Salon {
 
   phone     String
   email     String
-  address   String?
+  address   String? // freeform, shown on the public site (footer/contact) — not used for invoices
   vatNumber String? // legal TVA/BCE number — printed on every issued invoice
+
+  // Structured legal identity, required before any invoice can be issued
+  // (see lib/invoicing.js#issueInvoice's seller-data gate) — kept separate
+  // from the freeform `address` above since Peppol/UBL export (Phase B)
+  // needs machine-parseable fields, not a single display string.
+  legalName             String?
+  companyRegistrationNo String? // BCE/KBO number — same digits as the VAT number for BE since 2017
+  addressLine1          String?
+  addressLine2          String?
+  postalCode            String?
+  city                  String?
+  countryCode           String? @default("BE")
 
   instagram String?
   facebook  String?
   tiktok    String?
+
+  // Dedup marker for notifyUnsettledAppointments (lib/appointments/) — an
+  // atomic claim against this keeps the digest genuinely daily regardless
+  // of how often the job runner ticks (every 5min in-process, plus whatever
+  // external HTTP cron cadence is configured).
+  unsettledAppointmentsDigestSentAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -558,33 +666,61 @@ model SalonClosure {
 
 // USER
 model User {
-  id                   String    @id @default(cuid())
-  fullName             String
-  nickName             String?
-  email                String    @unique
-  password             String
-  phone                String    @unique
-  role                 UserRole
-  avatar               String?
-  emailVerified        Boolean   @default(false)
-  isActive             Boolean   @default(true)
-  lastLogin            DateTime?
-  sessionVersion       Int       @default(0)
-  newsletterSubscribed Boolean   @default(false)
+  id                       String    @id @default(cuid())
+  fullName                 String
+  nickName                 String?
+  email                    String    @unique
+  password                 String
+  // A counter sale needs a receipt email, but a phone number is optional.
+  // Online checkout and booking forms still require it at their own
+  // validation boundary.
+  phone                    String?   @unique
+  role                     UserRole
+  avatar                   String?
+  emailVerified            Boolean   @default(false)
+  isActive                 Boolean   @default(true)
+  lastLogin                DateTime?
+  // Bumped whenever this user's password changes (reset or self-service) so
+  // the JWT session callback can detect and invalidate stale sessions issued
+  // before the change — see auth.js#jwt.
+  sessionVersion           Int       @default(0)
+  newsletterSubscribed     Boolean   @default(false)
   // Demonstrable, timestamped marketing consent — GDPR/ePrivacy requires
   // being able to show when/how/under-what-policy-version someone opted
   // in, not just the current boolean. Only ever set together (see
   // lib/newsletter-consent.js#buildNewsletterConsentUpdate) whenever
   // newsletterSubscribed transitions to true; left untouched on
   // unsubscribe so the original consent record stays intact as history.
-  newsletterConsentedAt   DateTime?
-  newsletterConsentSource String? // e.g. "registration", "boutique_checkout", "appointment_booking", "account_settings"
+  newsletterConsentedAt    DateTime?
+  newsletterConsentSource  String? // e.g. "registration", "boutique_checkout", "appointment_booking", "account_settings"
   newsletterConsentVersion String? // which marketing-consent copy version was shown at opt-in time
-  vatNumber            String? // Client TVA number for B2B invoices
-  isDeleted            Boolean   @default(false)
-  deletedAt            DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  isCompany                Boolean   @default(false) // account type chosen at registration — "particulier" vs "entreprise"
+  vatNumber                String? // Client TVA number for B2B invoices — required at registration when isCompany is true, VIES-verified (see lib/vat-validation.js)
+  vatValidatedAt           DateTime?
+  vatValidationName        String?
+  vatValidationAddress     String?
+  // Billing address — mandatory at registration (both particulier and
+  // entreprise: a proper invoice needs the customer's address regardless of
+  // account type, not just a VAT number for companies). Nullable at the DB
+  // level only because accounts created before this field existed have no
+  // value here — see lib/format-address.js#formatUserAddress and the
+  // self-service edit in actions/customer/settings.js#updateMyAddress for
+  // how existing accounts backfill it.
+  addressLine1             String?
+  addressLine2             String?
+  addressCity              String?
+  addressPostalCode        String?
+  addressCountry           String?   @default("BE")
+  // Same demonstrable-consent shape as the newsletter fields above — a
+  // required checkbox at signup isn't enough on its own; GDPR/e-commerce
+  // rules expect a record of WHEN a specific person agreed to WHICH version
+  // of the CGV/CGU, not just a boolean. See lib/terms-consent.js.
+  termsAcceptedAt          DateTime?
+  termsAcceptedVersion     String?
+  isDeleted                Boolean   @default(false)
+  deletedAt                DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
 
   staff                          Staff?
   appointments                   Appointment[]
@@ -599,16 +735,47 @@ model User {
   cancelledReservations          WorkshopReservation[]  @relation("ReservationCancelledBy")
   formationReservations          FormationReservation[]
   cancelledFormationReservations FormationReservation[] @relation("FormationReservationCancelledBy")
+  cancelledAppointments          Appointment[]          @relation("AppointmentCancelledBy")
   createdFormations              Formation[]            @relation("FormationCreatedBy")
   stockMovements                 InventoryMovement[]    @relation("StockMovementBy")
   carts                          Cart[]
   orders                         Order[]                @relation("OrderBuyer")
   pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
+  createdPointOfSaleOrders       Order[]                @relation("OrderCreatedByStaff")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
+  auditLogs                      AuditLog[]             @relation("AuditActor")
+  assignedDisputes               StripeDispute[]        @relation("DisputeAssignee")
+  billingProfile                 BillingProfile?
+  openedCashSessions             CashSession[]          @relation("CashSessionOpenedBy")
+  closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
+  submittedCancellationRequests  AppointmentCancellationRequest[] @relation("CancellationRequestSubmittedBy")
+  reviewedCancellationRequests   AppointmentCancellationRequest[] @relation("CancellationRequestReviewedBy")
+  submittedReservationCancellationRequests ReservationCancellationRequest[] @relation("ReservationCancellationRequestedBy")
+  reviewedReservationCancellationRequests  ReservationCancellationRequest[] @relation("ReservationCancellationReviewedBy")
 
   @@index([role])
   @@index([isActive, isDeleted])
-  auditLogs                      AuditLog[]             @relation("AuditActor")
+}
+
+// Company legal identity for B2B invoicing — separate from the billing
+// address on User (addressLine1 etc. above), which every account already
+// has regardless of isCompany. Only meaningful when User.isCompany is true;
+// its presence (companyLegalName set) is what makes an invoice B2B instead
+// of B2C — see lib/invoicing.js#issueInvoice.
+model BillingProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  companyLegalName       String
+  companyRegistrationNo  String? // BCE/KBO or equivalent, if distinct from the VAT number
+  companyLegalForm       String? // e.g. "SRL", "SA", "indépendant"
+  billingContactName     String?
+  purchaseOrderReference String? // the PO/order reference this customer wants printed on every invoice
+  peppolParticipantId    String? // reserved for Phase B — not used until live Peppol delivery exists
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // Immutable operational trail. Target records are intentionally represented
@@ -618,7 +785,7 @@ model AuditLog {
   id String @id @default(cuid())
 
   actorId   String?
-  actor     User?   @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actor     User?     @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   actorRole UserRole?
 
   action     String
@@ -633,6 +800,17 @@ model AuditLog {
   @@index([entityType, entityId, createdAt])
   @@index([actorId, createdAt])
   @@index([createdAt])
+}
+
+// Shared fixed-window counters for abuse-sensitive public operations. Unlike
+// the in-memory limiter, these counters apply across every production instance.
+model ApiRateLimitBucket {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+  updatedAt   DateTime @updatedAt
+
+  @@index([updatedAt])
 }
 
 // CATEGORY — services only. Retail products use ProductCategory.
@@ -906,8 +1084,11 @@ model Order {
   id          String @id @default(cuid())
   orderNumber Int    @unique @default(autoincrement())
 
-  userId String
-  user   User   @relation("OrderBuyer", fields: [userId], references: [id])
+  // Null for an anonymous POS "client de passage" sale — no account is
+  // created for a walk-in counter sale, see completePointOfSaleSale's
+  // isWalkIn branch. Every other order source always sets this.
+  userId String?
+  user   User?   @relation("OrderBuyer", fields: [userId], references: [id])
 
   // The cart this order was checked out from — null for older orders created
   // before this field existed. Prepaid orders keep their source cart ACTIVE
@@ -919,6 +1100,14 @@ model Order {
 
   fulfilmentMode FulfilmentMode
   status         OrderStatus    @default(PENDING_PAYMENT)
+  source         OrderSource    @default(ONLINE)
+
+  // Counter-sale attribution and idempotency. The attempt key is generated
+  // by the POS client and reused across retries, so double-clicks/network
+  // retries cannot create a second order or Stripe Checkout Session.
+  createdByStaffId String?
+  createdByStaff   User?   @relation("OrderCreatedByStaff", fields: [createdByStaffId], references: [id], onDelete: SetNull)
+  posAttemptKey    String? @unique
 
   // Set the moment a Checkout Session is created for this order (before
   // Stripe confirms anything) — lets createOrderFromCart check with Stripe
@@ -928,9 +1117,16 @@ model Order {
   // get silently cancelled by a retry click, swallowing the payment.
   stripeCheckoutSessionId String? @unique
 
-  subtotal     Decimal @db.Decimal(10, 2)
-  shippingCost Decimal @default(0) @db.Decimal(10, 2)
-  totalAmount  Decimal @db.Decimal(10, 2)
+  subtotal          Decimal      @db.Decimal(10, 2)
+  shippingCost      Decimal      @default(0) @db.Decimal(10, 2)
+  totalAmount       Decimal      @db.Decimal(10, 2)
+  taxCountryCode    String       @default("BE")
+  vatTreatment      VatTreatment @default(DOMESTIC)
+  vatRate           Decimal      @default(21) @db.Decimal(4, 2)
+  totalExclVat      Decimal?     @db.Decimal(10, 2)
+  totalVat          Decimal?     @db.Decimal(10, 2)
+  customerVatNumber String?
+  taxNote           String?
 
   // `totalAmount` above is already the post-discount figure; these two are
   // kept only so the eventual Payment row (created later, once Stripe
@@ -950,6 +1146,15 @@ model Order {
   shippingCountry    String?   @default("BE")
   bpostTrackingCode  String?
   shippedAt          DateTime?
+
+  // Set when staff closes a SHIPPING_PREPAID order and confirms — from the
+  // Mondial Relay tracking portal, since there is no delivery/collection
+  // webhook integrated yet — the date the customer actually collected the
+  // parcel from the relay point. This, not shippedAt, is the legal start of
+  // the 14-day withdrawal window (SPF Économie: le lendemain de la prise de
+  // possession réelle du bien). See withdrawalWindow() in
+  // actions/boutique/returns.js.
+  collectedAt DateTime?
 
   // Mondial Relay pickup point (current carrier). pickupPointId is null for
   // orders placed through the manual fallback form (no widget credentials
@@ -986,6 +1191,8 @@ model Order {
   @@index([status])
   @@index([expiresAt])
   @@index([fulfilmentMode])
+  @@index([source, status, createdAt])
+  @@index([createdByStaffId, createdAt])
 }
 
 // ORDER ITEM
@@ -998,12 +1205,15 @@ model OrderItem {
   orderId String
   order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  variantId String
-  variant   ProductVariant @relation(fields: [variantId], references: [id])
+  // Null for a POS ad-hoc service line — no ProductVariant backs it (see
+  // completePointOfSaleSale's SERVICE branch). productName carries the
+  // free-text description in that case.
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
 
   productName String
-  variantName String
-  sku         String
+  variantName String?
+  sku         String?
 
   unitPrice Decimal @db.Decimal(10, 2)
   quantity  Int
@@ -1027,8 +1237,9 @@ model ReturnRequest {
   orderId String
   order   Order  @relation(fields: [orderId], references: [id])
 
-  status ReturnStatus @default(REQUESTED)
-  reason String
+  status         ReturnStatus         @default(REQUESTED)
+  reasonCategory ReturnReasonCategory @default(CHANGED_MIND)
+  reason         String
 
   requestedAt DateTime @default(now())
 
@@ -1059,6 +1270,11 @@ model ReturnRequestItem {
   orderItem   OrderItem @relation(fields: [orderItemId], references: [id])
 
   quantity Int
+
+  // Set by staff at completeReturnRequest time (null until then — a
+  // REQUESTED/APPROVED return hasn't been physically inspected yet).
+  // Gates whether this item's quantity is restocked as vendable.
+  condition ReturnItemCondition?
 
   @@index([returnRequestId])
   @@index([orderItemId])
@@ -1094,13 +1310,24 @@ model Staff {
   yearsOfExperience Int
   isDeleted         Boolean   @default(false)
   deletedAt         DateTime?
-  vatNumber         String   @unique
+  vatNumber         String?   @unique
 
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
   depositEnabled              Boolean                     @default(false)
   depositPercentage           Decimal                     @default(10.0) @db.Decimal(5, 2)
   allowedPaymentMethods       AllowedPaymentMethods       @default(BOTH)
+  // % of the deposit withheld when rejectAppointment processes a late
+  // cancellation (inside the 48h window) on a deposit-type payment. Default
+  // 100 — the deposit is kept in full, matching what customers are told
+  // (MyAppointmentsPageClient.jsx / MyReservationsClient.jsx: "L'acompte
+  // reste acquis... sauf annulation exceptionnelle approuvée par
+  // l'administration") — the only way back to a full refund is an admin
+  // approving a cancellation-exception request, which passes
+  // waiveDepositForfeit: true and skips this withholding entirely. Mirrors
+  // the ateliers/formations policy (deposit non-refundable by default,
+  // refundable only via the same admin-exception path).
+  depositForfeitPercentage    Decimal                     @default(100) @db.Decimal(5, 2)
 
   // Account Setup
   setupCompleted Boolean @default(false)
@@ -1171,14 +1398,24 @@ model Appointment {
   staffServiceId String
   staffService   StaffService @relation(fields: [staffServiceId], references: [id])
 
+  // Denormalized copy of staffService.staffId, set at creation time. Exists
+  // so the DB-level no-overlap exclusion constraint can key on the actual
+  // staff member instead of staffServiceId — a staff member offering
+  // multiple services would otherwise not be protected by the constraint
+  // against being double-booked across two different services at once.
   staffId String
   staff   Staff  @relation(fields: [staffId], references: [id])
 
-  date      DateTime
-  startTime DateTime
-  endTime   DateTime
-  status    AppointmentStatus
-  notes     String?
+  date               DateTime
+  startTime          DateTime
+  endTime            DateTime
+  status             AppointmentStatus
+  notes              String?
+  cancelledAt        DateTime?
+  cancelledByUserId  String?
+  cancelledBy        User?                          @relation("AppointmentCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+  cancellationReason String?
+  cancellationSource AppointmentCancellationSource?
 
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
@@ -1187,13 +1424,92 @@ model Appointment {
   payment       Payment?
   review        Review?
   notifications Notification[]
+  cancellationRequests AppointmentCancellationRequest[]
+
+  // Dedup markers for the reminder cron (mirrors reservations'
+  // reminderSentAt), one per window since appointments send both a 24h and
+  // a 2h reminder. Without these the reminder window query keeps matching
+  // the same appointment on every cron tick until it starts.
+  reminder24hSentAt DateTime?
+  reminder2hSentAt  DateTime?
 
   @@index([staffServiceId, startTime]) // conflict checks + calendar
   @@index([staffId, startTime]) // cross-service overlap checks
   @@index([userId, startTime]) // "my appointments"
   @@index([isDeleted, status, startTime]) // dashboard filters
+  @@index([cancelledByUserId])
 }
 
+// A late cancellation request does not change the appointment or payment by
+// itself. It gives the salon a durable review queue and an audit trail of the
+// customer's stated exceptional circumstances.
+model AppointmentCancellationRequest {
+  id String @id @default(cuid())
+
+  appointmentId String @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  requestedByUserId String
+  requestedBy       User @relation("CancellationRequestSubmittedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  reason            String
+  status            AppointmentCancellationRequestStatus @default(PENDING)
+
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  reviewedBy       User? @relation("CancellationRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  decisionNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([requestedByUserId])
+  @@index([reviewedByUserId])
+}
+
+// The atelier/formation counterpart of AppointmentCancellationRequest above.
+// Customers cannot self-cancel either flow (confirmed policy: the 50%
+// deposit is non-refundable, and exceptions — medical, bereavement, genuine
+// force majeure — are Marie's call case by case). Before this, the customer
+// simply saw no way to cancel and no way to ask: a dead end that pushed
+// every such case to an untracked phone call.
+//
+// Polymorphic on exactly one of workshopReservationId / formationReservationId,
+// enforced by a raw-SQL CHECK constraint in the migration
+// ("ReservationCancellationRequest_exactly_one_source") — same approach as
+// Payment, since Prisma has no schema-level XOR.
+model ReservationCancellationRequest {
+  id String @id @default(cuid())
+
+  workshopReservationId String?              @unique
+  workshopReservation   WorkshopReservation? @relation(fields: [workshopReservationId], references: [id], onDelete: Cascade)
+
+  formationReservationId String?               @unique
+  formationReservation   FormationReservation? @relation(fields: [formationReservationId], references: [id], onDelete: Cascade)
+
+  requestedByUserId String
+  requestedBy       User   @relation("ReservationCancellationRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  reason            String
+  status            ReservationCancellationRequestStatus @default(PENDING)
+
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  reviewedBy       User?     @relation("ReservationCancellationReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  decisionNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([requestedByUserId])
+  @@index([reviewedByUserId])
+}
+
+// PAYMENT
+// Polymorphic: exactly one of appointmentId / orderId / workshopReservationId
+// / formationReservationId is set, enforced by a raw-SQL CHECK constraint
+// added after the migration (see prisma/migrations/*/migration.sql for
+// "Payment_exactly_one_source") — Prisma has no schema-level XOR.
 model Payment {
   id                     String                @id @default(cuid())
   appointmentId          String?               @unique
@@ -1213,6 +1529,12 @@ model Payment {
   paidAt                 DateTime?
   isDeleted              Boolean               @default(false)
   deletedAt              DateTime?
+  // @unique is safe on a nullable column in Postgres — NULLs are never
+  // considered duplicates of each other, so ON_SITE/cash payments (which
+  // never set this) are unaffected. This turns the webhook's idempotency
+  // check from a race-prone findFirst-then-create into a real DB guarantee:
+  // a second concurrent insert with the same session id throws P2002 instead
+  // of silently succeeding and double-fulfilling.
   transactionReference   String?               @unique
 
   // Durable refund-retry bookkeeping — see PaymentStatus.REFUND_PENDING/
@@ -1223,6 +1545,19 @@ model Payment {
   refundFailureReason String?
   refundAttemptedAt   DateTime?
   refundRetryCount    Int       @default(0)
+
+  // The exact amount (and a stable Stripe idempotency key) for the refund
+  // operation currently in flight. Set atomically with status:
+  // REFUND_PENDING, before the Stripe call — so a retry after a crash or a
+  // failed attempt replays this exact amount instead of recomputing "what's
+  // left" from the Transaction ledger, which would wrongly resolve to the
+  // full outstanding balance whenever no REFUND row was ever written (the
+  // very reason the payment is stuck). Cleared once the operation resolves
+  // (REFUNDED/PARTIALLY_REFUNDED); kept through REFUND_FAILED so retries
+  // keep using it. While either is set, no new refund may be started against
+  // this payment — see the "already pending" guard at each call site.
+  pendingRefundAmount         Decimal?
+  pendingRefundIdempotencyKey String?
 
   // Recorded here rather than on each of the 4 source models (Order,
   // WorkshopReservation, FormationReservation, Appointment) — Payment is
@@ -1237,15 +1572,65 @@ model Payment {
 
   transactions Transaction[]
   invoice      Invoice?
+  disputes     StripeDispute[]
 
   @@index([promoCodeId])
 }
 
+enum DisputeStatus {
+  NEEDS_RESPONSE
+  UNDER_REVIEW
+  WARNING_NEEDS_RESPONSE
+  WARNING_UNDER_REVIEW
+  WARNING_CLOSED
+  WON
+  LOST
+  CHARGE_REFUNDED
+}
+
+// Persistent dossier for a Stripe dispute/chargeback — before this, the only
+// record was a best-effort staff alert email (see
+// app/api/webhooks/stripe/route.js#handleChargeDisputeCreated), with no
+// durable place to track who's handling it, what was submitted, or the
+// eventual outcome. Created/updated by the charge.dispute.created /
+// charge.dispute.updated / charge.dispute.closed webhook handlers; the
+// dossier fields below (assignedStaff/responseSentAt/proof/conclusion) are
+// filled in by staff from the dashboard.
+model StripeDispute {
+  id String @id @default(cuid())
+
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id])
+
+  stripeDisputeId String        @unique
+  stripeChargeId  String?
+  amount          Decimal
+  reason          String? // Stripe's dispute reason code (e.g. "fraudulent", "product_not_received")
+  status          DisputeStatus @default(NEEDS_RESPONSE)
+  dueBy           DateTime? // evidence submission deadline from Stripe
+
+  // The dossier itself — filled in by staff, not by the webhook.
+  assignedStaffId          String?
+  assignedStaff            User?     @relation("DisputeAssignee", fields: [assignedStaffId], references: [id])
+  responseSentAt           DateTime? // when evidence was actually submitted to Stripe
+  proofOfShipmentReference String? // tracking code / pickup confirmation cited in the response
+  conclusion               String? // free-text outcome notes once resolved
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([paymentId])
+  @@index([status])
+}
+
 // PROMO CODE
-// Reusable across customers (not single-use) and never auto-expires — only
-// a manual `isActive` toggle retires one, per the client's explicit call.
-// `code` is stored uppercase so lookups are case-insensitive without a DB
-// collation dependency.
+// Reusable across customers (not single-use). Originally built to never
+// auto-expire — only a manual `isActive` toggle retires one — per the
+// client's explicit call; expiresAt/maxUses were added later (still the
+// client's call) as an OPTIONAL cap, not a requirement: left null, a code
+// behaves exactly as before (never expires, unlimited uses). `code` is
+// stored uppercase so lookups are case-insensitive without a DB collation
+// dependency.
 model PromoCode {
   id             String        @id @default(cuid())
   code           String        @unique
@@ -1253,6 +1638,9 @@ model PromoCode {
   value          Decimal       @db.Decimal(10, 2) // percentage points (0-100) or a flat EUR amount, per `type`
   minOrderAmount Decimal?      @db.Decimal(10, 2) // null = no minimum
   isActive       Boolean       @default(true)
+  expiresAt      DateTime? // null = never expires
+  maxUses        Int? // null = unlimited
+  usedCount      Int           @default(0) // incremented atomically at booking time, see resolvePromoCode callers
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -1303,10 +1691,23 @@ model Invoice {
   customerVatNumber String? // Client TVA number (copied from User.vatNumber at invoice time)
   customerAddress   String?
 
-  subtotalExclVat Decimal @db.Decimal(10, 2)
-  vatRate         Decimal @default(21) @db.Decimal(4, 2)
-  vatAmount       Decimal @db.Decimal(10, 2)
-  totalInclVat    Decimal @db.Decimal(10, 2)
+  // B2B snapshot — populated when the buyer is a company (see
+  // BillingProfile). Peppol network delivery is Phase B (not built); until
+  // then a B2B invoice is flagged for manual accountant-software entry —
+  // see customerType on the dashboard invoices list.
+  customerType           InvoiceCustomerType @default(B2C)
+  customerLegalName      String?
+  customerContactName    String?
+  customerRegistrationNo String?
+  purchaseOrderReference String?
+
+  subtotalExclVat Decimal      @db.Decimal(10, 2)
+  vatRate         Decimal      @default(21) @db.Decimal(4, 2)
+  vatAmount       Decimal      @db.Decimal(10, 2)
+  totalInclVat    Decimal      @db.Decimal(10, 2)
+  taxCountryCode  String       @default("BE")
+  vatTreatment    VatTreatment @default(DOMESTIC)
+  taxNote         String?
 
   lines       InvoiceLine[]
   creditNotes CreditNote[]
@@ -1340,11 +1741,46 @@ model CreditNote {
 
   reason       String?
   issuedAt     DateTime @default(now())
-  totalInclVat Decimal  @db.Decimal(10, 2)
+  // HT/TVA/TTC breakdown of the credited amount, at the original invoice's
+  // rate — a partial credit needs its own visible split, not just a TTC
+  // figure (spec: "préciser motif, ... HT, TVA, TTC et taux").
+  subtotalExclVat Decimal @db.Decimal(10, 2)
+  vatRate         Decimal @db.Decimal(4, 2)
+  vatAmount       Decimal @db.Decimal(10, 2)
+  totalInclVat    Decimal @db.Decimal(10, 2)
 
   returnRequest ReturnRequest?
 
   @@index([invoiceId])
+}
+
+// CASH SESSION
+// A daily till open/close boundary — before this, every CASH POS sale was
+// tracked individually (Transaction.cashReceived/changeGiven) but nothing
+// gave a running expected total or a counted-vs-expected reconciliation at
+// end of day, so a shortfall was only ever findable by recounting every
+// sale one by one.
+model CashSession {
+  id String @id @default(cuid())
+
+  openedAt     DateTime @default(now())
+  openedById   String
+  openedBy     User     @relation("CashSessionOpenedBy", fields: [openedById], references: [id])
+  openingFloat Decimal  @db.Decimal(10, 2)
+
+  closedAt     DateTime?
+  closedById   String?
+  closedBy     User?     @relation("CashSessionClosedBy", fields: [closedById], references: [id], onDelete: SetNull)
+  // expected = openingFloat + sum(CASH transactions during the session).
+  // Both null while the session is open — filled in atomically at close.
+  expectedCash Decimal?  @db.Decimal(10, 2)
+  countedCash  Decimal?  @db.Decimal(10, 2)
+  variance     Decimal?  @db.Decimal(10, 2)
+  note         String?
+
+  transactions Transaction[]
+
+  @@index([closedAt])
 }
 
 // TRANSACTION
@@ -1354,12 +1790,26 @@ model Transaction {
   paymentId String
   payment   Payment @relation(fields: [paymentId], references: [id])
 
+  // Set at sale time when a CashSession is open (POS CASH sales only) — a
+  // sale never blocks on this being unset, it's just left unassigned and
+  // reconciled manually if no session was open.
+  cashSessionId String?
+  cashSession   CashSession? @relation(fields: [cashSessionId], references: [id])
+
   amount                  Decimal
   method                  TransactionMethod
   transactionType         TransactionType
   paidAt                  DateTime
   stripeCheckoutSessionId String?
   stripePaymentIntentId   String?
+  // Receipt / transaction identifier entered after a physical terminal
+  // refund. Stripe refunds keep their identifiers in the Stripe fields.
+  manualReference         String?
+  // Cash-drawer audit trail for CASH POS sales — what the cashier actually
+  // received and how much change they handed back, so a till shortfall can
+  // be traced to a specific sale instead of only ever showing the sale total.
+  cashReceived            Decimal?
+  changeGiven             Decimal?
   createdAt               DateTime          @default(now())
   isDeleted               Boolean           @default(false)
   deletedAt               DateTime?
@@ -1383,6 +1833,8 @@ model Contract {
   notes                String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
+
+  rentalRequest RentalRequest?
 }
 
 // WORKING HOUR
@@ -1444,7 +1896,7 @@ model Notification {
   message String
 
   status    NotificationStatus
-  isRead    Boolean @default(false)
+  isRead    Boolean            @default(false)
   actionUrl String?
   sentAt    DateTime?
   createdAt DateTime           @default(now())
@@ -1513,11 +1965,13 @@ model RentalRequest {
   status         RentalRequestStatus
   message        String?
   ownerResponse  String?
-  specialty      String
+  specialty      String?
   isDeleted      Boolean             @default(false)
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
+  contractId     String?             @unique
+  contract       Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
 }
 
 // SALON GALLERY

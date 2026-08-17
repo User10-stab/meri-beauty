@@ -6,6 +6,7 @@ import bcrypt from "bcrypt";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { generateAutologinToken } from "@/lib/autologin";
 import { parseLocalDateString } from "@/lib/slot-availability";
 import {
@@ -16,6 +17,11 @@ import {
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { validateAppointmentSlot } from "@/lib/appointment-scheduling";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import {
+  TERMS_CONSENT_REQUIRED_MESSAGE,
+  buildTermsAcceptanceUpdate,
+  recordTermsAcceptance,
+} from "@/lib/terms-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -72,6 +78,9 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         emailVerified: false,
         isActive: true,
         ...buildNewsletterConsentUpdate(Boolean(customerInfo.newsletterSubscribed ?? false), "appointment_booking"),
+        // Guest booking creates the account, so this is the moment consent is
+        // given — it used to be recorded at signup only.
+        ...buildTermsAcceptanceUpdate(),
       },
     });
 
@@ -140,10 +149,17 @@ export async function createCheckoutSession(reservationData) {
     }
 
     if (!customerInfo.email || !customerInfo.fullName) {
-      return { 
-        success: false, 
-        message: "Informations client incomplètes" 
+      return {
+        success: false,
+        message: "Informations client incomplètes"
       };
+    }
+
+    // The booking form's CGV checkbox was client-side only. This action is a
+    // public POST endpoint, so the consent has to be re-established here —
+    // it is also what gets persisted onto the customer below.
+    if (reservationData?.termsAccepted !== true) {
+      return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
     }
 
     // ── 2. Load and validate staff service ────────────────────────────────────
@@ -194,6 +210,13 @@ export async function createCheckoutSession(reservationData) {
       return {
         success: false,
         message: "Le compte Stripe de ce membre du staff n'est pas encore en mesure d'effectuer des virements. Veuillez réessayer ultérieurement.",
+      };
+    }
+
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
       };
     }
 
@@ -331,6 +354,8 @@ export async function createCheckoutSession(reservationData) {
       : paymentDecision.depositAmount;
 
     const { user: customerUser, isNewUser } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    // Returning customer, or an account predating consent tracking.
+    await recordTermsAcceptance(prisma, customerUser.id);
     // Generate an autologin token for the customer — but only when this
     // request just created the account. If `resolveOrCreateCustomer` matched
     // an existing account (by email or phone, with no password check), a
@@ -472,7 +497,7 @@ export async function createCheckoutSession(reservationData) {
                     paymentDecision.paymentIntent === "FULL_ONLINE"
                       ? staffService.service.name
                       : `Acompte - ${staffService.service.name}`,
-                  description: `${staff.user?.fullName || "Expert"} • ${appointmentDate.toLocaleDateString("fr-FR")} • ${time}`,
+                  description: `${staff.user?.fullName || "Expert"} • ${appointmentDate.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} • ${time}`,
                   // Images omitted: Stripe rejects non-HTTPS URLs (localhost in dev).
                 },
                 unit_amount: Math.round(amountToPay * 100),

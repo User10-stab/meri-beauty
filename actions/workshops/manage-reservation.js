@@ -10,8 +10,9 @@ import { isAdminRole } from "@/lib/authorization";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-workshop-reservation";
 import { issueCreditNote } from "@/lib/invoicing";
+import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
+import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
 
-const CANCELLATION_CUTOFF_HOURS = 48;
 const SESSION_CHANGE_FEE_RATE = 0.1; // 10% of the reservation's total price
 
 function formatSessionDate(date) {
@@ -22,18 +23,25 @@ function formatSessionDate(date) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 
 /**
  * Admin-only: cancels a reservation on a customer's behalf. Deposits are
- * non-refundable by default (see req: "no refund once paid the deposit"),
- * and a booking can't be cancelled within 48h of its session — both
+ * non-refundable by default (see req: "no refund once paid the deposit") —
  * enforced here since there's no customer self-service cancel flow in this
  * app. The client confirmed exceptions should exist for medical reasons,
  * death, or genuine force majeure — `refundDeposit` is the admin's manual
  * case-by-case call, never automatic, so `reason` is required whenever it's
  * used (it's what justifies the exception in the reservation's own record).
+ *
+ * No time cutoff before the session: unlike a customer self-service window,
+ * this is a trusted admin acting on a case she's already reviewed — the
+ * most urgent exceptions (a customer hospitalized the day of the session)
+ * are also the ones closest to the session date, so a cutoff here would
+ * block the admin from honoring exactly the force-majeure promise made in
+ * the CGV.
  */
 export async function cancelWorkshopReservation(reservationId, { reason, refundDeposit = false } = {}) {
   try {
@@ -63,17 +71,6 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
     }
     if (reservation.status === "CANCELLED") {
       return { success: false, message: "Cette réservation est déjà annulée." };
-    }
-
-    // Cutoff runs the opposite direction from a withdrawal window: it blocks
-    // once too LITTLE time remains before a FUTURE session, not once too
-    // much time has passed since a past one.
-    const cutoff = new Date(reservation.session.startDate.getTime() - CANCELLATION_CUTOFF_HOURS * 3600 * 1000);
-    if (new Date() > cutoff) {
-      return {
-        success: false,
-        message: "Impossible d'annuler une réservation moins de 48h avant l'événement.",
-      };
     }
 
     const noteLine = refundDeposit
@@ -126,8 +123,12 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       if (remaining <= REFUND_EPSILON) {
         await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
       } else {
+        // Pinned in the same transaction as the credit note — see
+        // lib/payments/pin-pending-refund.js's doc comment for why this has
+        // to happen before the Stripe call below, not just in its catch.
+        const refundIdempotencyKey = buildRefundIdempotencyKey("workshop-cancel", payment.id);
         await prisma.$transaction(async (tx) => {
-          await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUND_PENDING" } });
+          await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey);
           if (payment.invoice) {
             await issueCreditNote(tx, {
               invoiceId: payment.invoice.id,
@@ -144,18 +145,18 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
               typeof checkoutSession.payment_intent === "string"
                 ? checkoutSession.payment_intent
                 : checkoutSession.payment_intent.id;
-            await stripe.refunds.create({
-              payment_intent: stripePaymentIntentId,
-              amount: Math.round(remaining * 100),
-              metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
-            });
+            await stripe.refunds.create(
+              {
+                payment_intent: stripePaymentIntentId,
+                amount: Math.round(remaining * 100),
+                metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
+              },
+              { idempotencyKey: refundIdempotencyKey }
+            );
 
             const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
             await prisma.$transaction([
-              prisma.payment.update({
-                where: { id: payment.id },
-                data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
-              }),
+              clearPendingRefund(prisma, payment.id, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED"),
               prisma.transaction.updateMany({
                 where: {
                   paymentId: payment.id,
@@ -180,21 +181,13 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
         } catch (err) {
           // The reservation is already cancelled and the credit note already
           // issued — that stays. But don't let the customer email below claim
-          // a refund that didn't happen; surface this to staff instead, AND
-          // persist it durably so the cron retry job
-          // (lib/payments/retry-failed-refunds.js) can pick it up even if
-          // this email is missed.
+          // a refund that didn't happen; surface this to staff instead.
+          // pendingRefundAmount/idempotencyKey are left set (not cleared) so
+          // the cron retry job (lib/payments/retry-failed-refunds.js) can
+          // pick it up even if this email is missed.
           console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
           refundFailed = true;
-          await prisma.payment.update({
-            where: { id: payment.id },
-            data: {
-              status: "REFUND_FAILED",
-              refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
-              refundAttemptedAt: new Date(),
-              refundRetryCount: { increment: 1 },
-            },
-          });
+          await markRefundFailed(prisma, payment.id, err);
         }
       }
     }
@@ -214,7 +207,7 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
     }).catch((err) => console.error("[cancelWorkshopReservation] email failed:", err));
 
     if (refundFailed) {
-      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
       if (salon?.email) {
         sendEmail({
           to: salon.email,
@@ -296,7 +289,7 @@ export async function changeReservationSession(reservationId, newSessionId) {
             currency: "eur",
             product_data: {
               name: `Frais de modification - ${reservation.session.workshop.title}`,
-              description: `Changement de séance (${new Date(newSession.startDate).toLocaleDateString("fr-FR")})`,
+              description: `Changement de séance (${new Date(newSession.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })})`,
             },
             unit_amount: Math.round(changeFeeAmount * 100),
           },
@@ -459,4 +452,42 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     console.error("[changeReservationSeats]", error);
     return { success: false, message: "Erreur lors de la modification du nombre de places." };
   }
+}
+
+/**
+ * Admin-only: closes out an atelier reservation, collecting the 50% on-site
+ * balance and issuing the final invoice. Before this existed there was no
+ * way to record that money at all — see lib/reservations/settle-reservation.js.
+ */
+export async function completeWorkshopReservation(reservationId, { method, paymentConfirmed } = {}) {
+  const session = await auth();
+  if (!session?.user) return { success: false, message: "Non authentifié." };
+  if (!isAdminRole(session.user.role)) return { success: false, message: "Non autorisé." };
+
+  const result = await settleReservation({
+    kind: "WORKSHOP",
+    reservationId,
+    method,
+    paymentConfirmed,
+    actorId: session.user.id,
+  });
+
+  if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
+  return result;
+}
+
+/** Admin-only: records a no-show. Never refunds — the deposit is kept by design. */
+export async function markWorkshopReservationNoShow(reservationId) {
+  const session = await auth();
+  if (!session?.user) return { success: false, message: "Non authentifié." };
+  if (!isAdminRole(session.user.role)) return { success: false, message: "Non autorisé." };
+
+  const result = await markReservationNoShow({
+    kind: "WORKSHOP",
+    reservationId,
+    actorId: session.user.id,
+  });
+
+  if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
+  return result;
 }

@@ -26,6 +26,11 @@ import {
   getAppointmentEmailRecipients,
 } from "@/lib/notifications";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import {
+  TERMS_CONSENT_REQUIRED_MESSAGE,
+  buildTermsAcceptanceUpdate,
+  recordTermsAcceptance,
+} from "@/lib/terms-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -125,6 +130,9 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         emailVerified: false,
         isActive: true,
         ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
+        // Guest booking creates the account, so this is the moment consent is
+        // given — it used to be recorded at signup only.
+        ...buildTermsAcceptanceUpdate(),
       },
     });
 
@@ -164,6 +172,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
             isDeleted: false,
             deletedAt: null,
             ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
+            ...buildTermsAcceptanceUpdate(),
           },
         });
 
@@ -272,6 +281,13 @@ export async function createReservation(data) {
       };
     }
 
+    // The booking form's CGV checkbox was client-side only. This action is a
+    // public POST endpoint, so the consent has to be re-established here —
+    // it is also what gets persisted onto the customer below.
+    if (data?.termsAccepted !== true) {
+      return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
+    }
+
     // ── 2. Load staff service ────────────────────────────────────────────────
     const staffService = await prisma.staffService.findUnique({
       where: { id: staffServiceId },
@@ -327,6 +343,8 @@ export async function createReservation(data) {
     let user, isNewUser, temporaryPassword;
     try {
       ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id));
+      // Returning customer, or an account predating consent tracking.
+      await recordTermsAcceptance(prisma, user.id);
     } catch (err) {
       if (err instanceof SessionExpiredError) {
         return {
@@ -364,10 +382,11 @@ export async function createReservation(data) {
     }
 
     // CASH_ONLY override: no online payment flows apply.
-    // Appointment status depends ONLY on reservationConfirmationMode.
+    // Appointment status depends ONLY on reservationConfirmationMode (the
+    // same server-derived isManuallyConfirmed computed above — never a
+    // second, independently-computed copy of the same thing).
     if (staffService.staff?.allowedPaymentMethods === "CASH_ONLY") {
-      const mode = String(staffService.staff?.reservationConfirmationMode ?? "MANUAL").toUpperCase();
-      const effectiveIsManualMode = Boolean(isManualMode || mode === "MANUAL");
+      const effectiveIsManualMode = isManuallyConfirmed;
 
       const appointmentStatus = effectiveIsManualMode ? "PENDING" : "CONFIRMED";
 
@@ -488,7 +507,7 @@ export async function createReservation(data) {
           },
           isNewUser,
           newUserCredentials: isNewUser ? { email: user.email, password: temporaryPassword } : null,
-          autologinToken: generateAutologinToken(user.email),
+          autologinToken: isNewUser ? generateAutologinToken(user.email) : null,
         },
       };
     }
@@ -843,6 +862,11 @@ export async function createMultipleReservations(data) {
       };
     }
 
+    // Same public-endpoint reasoning as createReservation above.
+    if (data?.termsAccepted !== true) {
+      return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
+    }
+
     // ── 2. Load all staff services in parallel ────────────────────────────
     const staffServices = await Promise.all(
       appointments.map(({ staffServiceId }) =>
@@ -908,6 +932,8 @@ export async function createMultipleReservations(data) {
     let user, isNewUser, temporaryPassword;
     try {
       ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id));
+      // Returning customer, or an account predating consent tracking.
+      await recordTermsAcceptance(prisma, user.id);
     } catch (err) {
       if (err instanceof SessionExpiredError) {
         return {

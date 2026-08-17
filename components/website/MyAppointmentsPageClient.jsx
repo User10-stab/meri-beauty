@@ -8,6 +8,7 @@ import { CalendarDays, Clock, User, FileDown, Sparkles, History, Pencil, XCircle
 import { formatDistanceToNowStrict, isFuture } from "date-fns";
 import { fr, enUS, nl } from "date-fns/locale";
 import { cancelReservation } from "@/actions/reservation/cancel-reservation";
+import { submitCancellationExceptionRequest } from "@/actions/reservation/cancellation-exception-request";
 import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
 import { AppointmentRescheduleModal } from "@/components/website/AppointmentRescheduleModal";
 import { toIntlLocale } from "@/lib/intl-locale";
@@ -25,15 +26,15 @@ const STATUS_STYLE = {
 const UPCOMING_STATUSES = new Set(["PENDING", "CONFIRMED"]);
 
 function formatWeekday(date, intlLocale) {
-  return new Date(date).toLocaleDateString(intlLocale, { weekday: "long" });
+  return new Date(date).toLocaleDateString(intlLocale, { weekday: "long", timeZone: "Europe/Brussels" });
 }
 
 function formatDay(date, intlLocale) {
-  return new Date(date).toLocaleDateString(intlLocale, { day: "2-digit" });
+  return new Date(date).toLocaleDateString(intlLocale, { day: "2-digit", timeZone: "Europe/Brussels" });
 }
 
 function formatMonth(date, intlLocale) {
-  return new Date(date).toLocaleDateString(intlLocale, { month: "short" }).replace(".", "");
+  return new Date(date).toLocaleDateString(intlLocale, { month: "short", timeZone: "Europe/Brussels" }).replace(".", "");
 }
 
 function formatFullDate(date, intlLocale) {
@@ -42,11 +43,12 @@ function formatFullDate(date, intlLocale) {
     day: "2-digit",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
 function formatTime(date, intlLocale) {
-  return new Date(date).toLocaleTimeString(intlLocale, { hour: "2-digit", minute: "2-digit" });
+  return new Date(date).toLocaleTimeString(intlLocale, { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
 }
 
 function StatusBadge({ status }) {
@@ -108,8 +110,15 @@ function AppointmentActions({ appointment }) {
   const [confirming, setConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestReason, setRequestReason] = useState("");
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
 
   const locked = isWithinCancellationWindow(appointment.startTime);
+  const cancellationRequest = appointment.cancellationRequest ?? null;
+  const hasPendingRequest = requestSent || cancellationRequest?.status === "PENDING";
+  const hasRejectedRequest = cancellationRequest?.status === "REJECTED";
 
   async function handleCancel() {
     setCancelling(true);
@@ -124,11 +133,49 @@ function AppointmentActions({ appointment }) {
     }
   }
 
+  async function handleExceptionRequest() {
+    setSubmittingRequest(true);
+    const result = await submitCancellationExceptionRequest({ appointmentId: appointment.id, reason: requestReason });
+    if (result.success) {
+      setRequestSent(true);
+      setRequestOpen(false);
+      toast.success(result.message);
+      router.refresh();
+    } else {
+      toast.error(result.message ?? "Impossible d'envoyer votre demande.");
+    }
+    setSubmittingRequest(false);
+  }
+
   if (locked) {
     return (
-      <div className="mt-3 flex items-start gap-2 border-t border-ink/8 pt-3 text-[12px] text-ink/45">
-        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" strokeWidth={1.75} />
-        {t("myAccount.modificationAndCancellationUnavailable", { hours: CANCELLATION_WINDOW_HOURS })}
+      <div className="mt-3 border-t border-ink/8 pt-3 text-[12px] text-ink/45">
+        <div className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" strokeWidth={1.75} />
+          <p>{t("myAccount.lockedCancellationNotice", { hours: CANCELLATION_WINDOW_HOURS })}</p>
+        </div>
+        {hasPendingRequest ? (
+          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-amber-800">{t("myAccount.exceptionRequestPending")}</p>
+        ) : hasRejectedRequest ? (
+          <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-red-700">
+            {t("myAccount.exceptionRequestRejected")}
+            {cancellationRequest.decisionNote ? ` ${t("myAccount.exceptionDecisionNote", { note: cancellationRequest.decisionNote })}` : ""}
+          </p>
+        ) : requestOpen ? (
+          <div className="mt-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+            <p className="text-amber-900">{t("myAccount.exceptionRequestInstructions")}</p>
+            <textarea value={requestReason} onChange={(event) => setRequestReason(event.target.value)} maxLength={1000} rows={3} placeholder={t("myAccount.exceptionRequestPlaceholder")} className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-amber-500" />
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setRequestOpen(false)} disabled={submittingRequest} className="text-xs font-semibold text-ink/55 hover:text-ink">{t("myAccount.back")}</button>
+              <button type="button" onClick={handleExceptionRequest} disabled={submittingRequest || requestReason.trim().length < 10} className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
+                {submittingRequest && <Loader2 className="h-3 w-3 animate-spin" />}
+                {t("myAccount.sendExceptionRequest")}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setRequestOpen(true)} className="mt-2 text-xs font-semibold text-primary hover:underline">{t("myAccount.requestExceptionReview")}</button>
+        )}
       </div>
     );
   }

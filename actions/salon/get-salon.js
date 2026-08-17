@@ -3,11 +3,13 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
+import { reportPublicDataError } from "@/lib/prisma-public-fallback";
 
 export async function getSalon() {
   try {
    
-    const salon = await prisma.salon.findFirst({
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
       include: {
         workingDays: { orderBy: { day: "asc" } },
         closures: { orderBy: { startDate: "desc" } },
@@ -35,7 +37,7 @@ export async function getSalon() {
       },
     };
   } catch (error) {
-    console.error("[getSalon]", error);
+    reportPublicDataError("[getSalon]", error);
     return { success: false, message: "Impossible de charger les informations du salon.", data: null };
   }
 }

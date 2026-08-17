@@ -105,6 +105,7 @@ export function MonthView({
                     ? new Date(appt.startTime).toLocaleTimeString("fr-FR", {
                         hour: "2-digit",
                         minute: "2-digit",
+                        timeZone: "Europe/Brussels",
                       })
                     : "";
 

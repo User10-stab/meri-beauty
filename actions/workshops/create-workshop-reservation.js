@@ -3,6 +3,8 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
+import { auth } from "@/auth";
+import { createResumeCheckoutToken, isCheckoutAuthorized } from "@/lib/resume-checkout-token";
 import bcrypt from "bcrypt";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
@@ -11,6 +13,13 @@ import { resolvePromoCode } from "@/lib/promo-codes";
 import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
+import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-workshop-reservation-payment";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import {
+  TERMS_CONSENT_REQUIRED_MESSAGE,
+  buildTermsAcceptanceUpdate,
+  recordTermsAcceptance,
+} from "@/lib/terms-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -35,7 +44,7 @@ function generateTemporaryPassword() {
  *
  * @param {string} reservationId
  */
-export async function createWorkshopReservationCheckoutSession(reservationId) {
+export async function createWorkshopReservationCheckoutSession(reservationId, checkoutToken) {
   if (!reservationId) return { success: false, message: "Identifiant de réservation manquant." };
 
   try {
@@ -44,6 +53,21 @@ export async function createWorkshopReservationCheckoutSession(reservationId) {
       include: { session: { include: { workshop: true } }, customer: { select: { id: true, email: true } } },
     });
     if (!reservation) return { success: false, message: "Réservation introuvable." };
+
+    // Exported "use server" action — a bare reservationId proves nothing.
+    // Authorize via a signed checkout token (guest / post-verification resume)
+    // or by being signed in as the reservation's customer.
+    const authSession = await auth();
+    if (
+      !isCheckoutAuthorized(reservation, {
+        resumeType: "WORKSHOP",
+        resumeId: reservationId,
+        checkoutToken,
+        sessionUserId: authSession?.user?.id,
+      })
+    ) {
+      return { success: false, message: "Vous n'êtes pas autorisé(e) à démarrer le paiement de cette réservation." };
+    }
     if (reservation.status !== "PENDING_DEPOSIT") {
       return { success: false, message: "Cette réservation n'est plus en attente de paiement." };
     }
@@ -51,11 +75,34 @@ export async function createWorkshopReservationCheckoutSession(reservationId) {
       return { success: false, message: "Le délai de réservation a expiré. Veuillez recommencer." };
     }
 
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
+      };
+    }
+
     const { session } = reservation;
     const activity = session.workshop;
     const isFullPayment = Number(reservation.balanceDue) === 0;
     const chargeAmount = isFullPayment ? Number(reservation.totalPrice) : Number(reservation.depositAmount);
     const workshopAction = isFullPayment ? "full_payment" : "deposit";
+
+    // A 100%-off promo code can bring the amount due today to exactly 0 —
+    // Stripe rejects a 0-value Checkout Session, so there's nothing to
+    // actually charge. Confirm directly through the same fulfilment path a
+    // real payment webhook uses (a synthetic "session" shaped just enough
+    // for it to read), instead of forking a second, parallel implementation.
+    if (chargeAmount <= 0) {
+      const syntheticSession = {
+        id: `free_workshop_${reservation.id}`,
+        metadata: { kind: "workshop", workshopAction, reservationId: reservation.id },
+        amount_total: 0,
+        payment_intent: null,
+      };
+      await confirmWorkshopReservationPayment(syntheticSession);
+      return { success: true, url: null, freeReservation: true, reservationId: reservation.id };
+    }
 
     const stripeSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
@@ -65,7 +112,7 @@ export async function createWorkshopReservationCheckoutSession(reservationId) {
             currency: "eur",
             product_data: {
               name: `${isFullPayment ? "Paiement total" : "Acompte"} - ${activity.title}`,
-              description: `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR")}`,
+              description: `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`,
             },
             unit_amount: Math.round(chargeAmount * 100),
           },
@@ -163,6 +210,13 @@ export async function createWorkshopReservation(data) {
       return { success: false, message: "Données manquantes." };
     }
 
+    // The booking form's CGV checkbox was client-side only. This action is a
+    // public POST endpoint, so the consent has to be re-established here —
+    // it is also what gets persisted onto the customer below.
+    if (data?.termsAccepted !== true) {
+      return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
+    }
+
     // This action can be called without the browser form and creates both a
     // customer account and a seat hold, so validate the payload here too.
     const customerValidation = validateCustomerIdentity(customerInfo);
@@ -223,11 +277,18 @@ export async function createWorkshopReservation(data) {
     // point beats the alternative (silently accepting an unconfirmed number
     // whenever VIES happens to be slow) — the customer can just retry.
     let vatNumberToSave = null;
+    // Captured alongside the number itself. lib/tax-policy.js decides
+    // reverse-charge from vatValidatedAt, so storing the number without its
+    // proof threw away the VIES call made two lines below and left a
+    // genuinely verified B2B customer taxed as if unverified — or, when the
+    // account already had an older validation, let the new number inherit the
+    // previous number's timestamp. Mirrors actions/auth/register.js.
+    let vatValidation = null;
     if (vatNumber) {
       if (!isValidVatFormat(vatNumber)) {
         return {
           success: false,
-          message: "Numéro de TVA invalide (format attendu : BE0123456789).",
+          message: "Numéro de TVA UE invalide. Ajoutez le préfixe pays (BE, FR, DE, NL…).",
           field: "vatNumber",
         };
       }
@@ -247,6 +308,11 @@ export async function createWorkshopReservation(data) {
         };
       }
       vatNumberToSave = vatNumber;
+      vatValidation = {
+        vatValidatedAt: new Date(),
+        vatValidationName: viesResult.name ?? null,
+        vatValidationAddress: viesResult.address ?? null,
+      };
     }
     let user = await prisma.user.findUnique({ where: { email } });
 
@@ -274,13 +340,22 @@ export async function createWorkshopReservation(data) {
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
           vatNumber: vatNumberToSave,
+          ...(vatValidation ?? {}),
+          ...buildTermsAcceptanceUpdate(),
         },
       });
     } else if (vatNumberToSave && user.vatNumber !== vatNumberToSave) {
       // B2B customer supplying (or updating) their VAT number for invoicing —
       // never clear it just because a later booking leaves the field blank.
-      user = await prisma.user.update({ where: { id: user.id }, data: { vatNumber: vatNumberToSave } });
+      // The number and its VIES proof are always written together.
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { vatNumber: vatNumberToSave, ...(vatValidation ?? {}) },
+      });
     }
+
+    // Returning customer, or an account predating consent tracking.
+    await recordTermsAcceptance(prisma, user.id);
 
     // Calculate pricing
     const depositPct = activity.depositPercentage ?? 50;
@@ -291,11 +366,13 @@ export async function createWorkshopReservation(data) {
     // trust a client-computed discount amount.
     let promoCodeId = null;
     let discountAmount = 0;
+    let promoMaxUses = null;
     if (promoCode) {
       const promoResult = await resolvePromoCode(promoCode, totalPrice);
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
+      promoMaxUses = promoResult.maxUses;
     }
     const discountedTotal = Math.max(0, totalPrice - discountAmount);
 
@@ -361,6 +438,20 @@ export async function createWorkshopReservation(data) {
             throw new Error(`SOLD_OUT:${available}`);
           }
 
+          // Atomic conditional claim — only succeeds while usedCount is
+          // still under the cap captured moments ago at resolvePromoCode
+          // time. Two concurrent bookings racing the last use of a capped
+          // code can't both win: the loser's WHERE clause matches zero rows.
+          if (promoCodeId && promoMaxUses != null) {
+            const claim = await tx.promoCode.updateMany({
+              where: { id: promoCodeId, usedCount: { lt: promoMaxUses } },
+              data: { usedCount: { increment: 1 } },
+            });
+            if (claim.count === 0) throw new Error("PROMO_EXHAUSTED");
+          } else if (promoCodeId) {
+            await tx.promoCode.update({ where: { id: promoCodeId }, data: { usedCount: { increment: 1 } } });
+          }
+
           return tx.workshopReservation.create({
             data: {
               sessionId,
@@ -396,6 +487,10 @@ export async function createWorkshopReservation(data) {
             message: `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
           };
         }
+        if (err.message === "PROMO_EXHAUSTED") {
+          captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
+          return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
+        }
         throw err;
       }
     }
@@ -421,7 +516,10 @@ export async function createWorkshopReservation(data) {
       return { success: true, requiresEmailVerification: true, email };
     }
 
-    const checkoutResult = await createWorkshopReservationCheckoutSession(reservation.id);
+    const checkoutResult = await createWorkshopReservationCheckoutSession(
+      reservation.id,
+      createResumeCheckoutToken({ resumeType: "WORKSHOP", resumeId: reservation.id, email }),
+    );
     if (!checkoutResult.success) return checkoutResult;
 
     return {

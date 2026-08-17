@@ -22,7 +22,7 @@ function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
 }
 function formatDate(d) {
-  return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" }) : "—";
+  return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" }) : "—";
 }
 
 export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
@@ -168,6 +168,7 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
       )}
 
       <ReturnDetailDialog
+        key={active?.id ?? "empty"}
         returnRequest={active}
         onClose={() => setActive(null)}
         onCompleted={handleReload}
@@ -176,17 +177,35 @@ export function ReturnsPageClient({ initialRequests, initialTotalCount }) {
   );
 }
 
+const CONDITION_OPTIONS = [
+  { value: "SEALED_RESELLABLE", label: "Scellé, revendable" },
+  { value: "OPENED_HYGIENE", label: "Descellé (exception hygiène)" },
+  { value: "DAMAGED", label: "Endommagé" },
+  { value: "DEFECTIVE", label: "Défectueux" },
+  { value: "WRONG_ITEM", label: "Mauvais article envoyé" },
+];
+
 function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
   const t = useTranslations("dashboardBoutique.returns.detailDialog");
   const [isPending, startTransition] = useTransition();
   const [staffNote, setStaffNote] = useState("");
+  const [manualRefundConfirmed, setManualRefundConfirmed] = useState(false);
+  const [manualRefundReference, setManualRefundReference] = useState("");
+  const [itemConditions, setItemConditions] = useState({}); // returnRequestItemId -> condition
 
   if (!returnRequest) return null;
   const rr = returnRequest;
+  const allConditionsSet = rr.items.every((item) => Boolean(itemConditions[item.id]));
 
-  function run(action) {
+  function run(action, extra) {
     startTransition(async () => {
-      const result = await action({ returnRequestId: rr.id, staffNote: staffNote || undefined });
+      const result = await action({
+        returnRequestId: rr.id,
+        staffNote: staffNote || undefined,
+        manualRefundConfirmed,
+        manualRefundReference: manualRefundReference || undefined,
+        ...extra,
+      });
       if (result.success) {
         toast.success(result.message);
         onClose();
@@ -222,19 +241,70 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
 
         <div className="mb-4 space-y-2">
           {rr.items.map((item) => (
-            <div key={item.id} className="flex justify-between text-sm">
-              <span className="text-gray-700 dark:text-dark-6">
-                {item.productName} ({item.variantName}) × {item.quantity}
-              </span>
-              <span className="text-gray-500">{item.unitPrice != null ? formatPrice(item.unitPrice * item.quantity) : ""}</span>
+            <div key={item.id} className="space-y-1.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-700 dark:text-dark-6">
+                  {item.productName} ({item.variantName}) × {item.quantity}
+                </span>
+                <span className="text-gray-500">{item.unitPrice != null ? formatPrice(item.unitPrice * item.quantity) : ""}</span>
+              </div>
+              {rr.status === "APPROVED" && (
+                <select
+                  value={itemConditions[item.id] ?? ""}
+                  onChange={(e) => setItemConditions((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                  className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                >
+                  <option value="" disabled>État de l&apos;article reçu — à sélectionner</option>
+                  {CONDITION_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              )}
+              {item.conditionLabel && rr.status !== "APPROVED" && (
+                <span className="inline-block rounded-full border border-gray-200 px-2 py-0.5 text-xs text-gray-500 dark:border-dark-3">
+                  État constaté : {item.conditionLabel}
+                </span>
+              )}
             </div>
           ))}
         </div>
 
         <div className="mb-4 rounded-lg bg-gray-50 p-3 text-sm text-gray-600 dark:bg-dark-2 dark:text-dark-6">
           <span className="font-medium text-gray-700 dark:text-white">{t("reason")} : </span>
-          {rr.reason}
+          {rr.reasonCategoryLabel ?? rr.reasonCategory}
+          {rr.reason && <span className="text-gray-500"> — {rr.reason}</span>}
         </div>
+
+        {rr.status === "APPROVED" && (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            <p><span className="font-semibold">Paiement d'origine : </span>{rr.order?.paymentMethodLabel ?? "Non renseigné"}</p>
+            {rr.order?.requiresManualRefund ? (
+              <>
+                <p className="mt-1">{rr.order?.refundInstruction}</p>
+                <label className="mt-3 flex items-start gap-2 text-sm font-medium">
+                  <input
+                    type="checkbox"
+                    checked={manualRefundConfirmed}
+                    onChange={(event) => setManualRefundConfirmed(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-amber-400"
+                  />
+                  Je confirme que le remboursement a déjà été effectué au client.
+                </label>
+                {rr.order?.paymentMethod === "CARD" && (
+                  <input
+                    value={manualRefundReference}
+                    onChange={(event) => setManualRefundReference(event.target.value)}
+                    maxLength={100}
+                    placeholder="Référence du ticket terminal (obligatoire)"
+                    className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#2f3a2e]"
+                  />
+                )}
+              </>
+            ) : (
+              <p className="mt-1">Le remboursement sera envoyé automatiquement via Stripe après confirmation de réception.</p>
+            )}
+          </div>
+        )}
 
         {["REQUESTED", "APPROVED"].includes(rr.status) && (
           <div className="mb-4">
@@ -260,7 +330,8 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
               <button
                 type="button"
                 onClick={() => run(rejectReturnRequest)}
-                disabled={isPending}
+                disabled={isPending || !staffNote.trim()}
+                title={!staffNote.trim() ? "Indiquez un motif — il sera envoyé au client" : undefined}
                 className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
               >
                 {t("reject")}
@@ -276,12 +347,24 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
               <button
                 type="button"
                 onClick={() => run(rejectReturnRequest)}
-                disabled={isPending}
+                disabled={isPending || !staffNote.trim()}
+                title={!staffNote.trim() ? "Indiquez un motif — il sera envoyé au client" : undefined}
                 className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
               >
                 {t("reject")}
               </button>
-              <Button onClick={() => run(completeReturnRequest)} disabled={isPending}>
+              <Button
+                onClick={() =>
+                  run(completeReturnRequest, {
+                    itemConditions: rr.items.map((item) => ({ returnRequestItemId: item.id, condition: itemConditions[item.id] })),
+                  })
+                }
+                disabled={
+                  isPending ||
+                  !allConditionsSet ||
+                  (rr.order?.requiresManualRefund && (!manualRefundConfirmed || (rr.order?.paymentMethod === "CARD" && !manualRefundReference.trim())))
+                }
+              >
                 {isPending && <Loader2 size={14} className="animate-spin" />}
                 {t("complete")}
               </Button>

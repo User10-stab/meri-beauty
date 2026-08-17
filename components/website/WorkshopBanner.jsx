@@ -10,6 +10,7 @@ async function formatSessionDate(date, locale) {
     weekday: "long",
     day: "numeric",
     month: "long",
+    timeZone: "Europe/Brussels",
   });
 }
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@/lib/prisma";
 import { pickupQrDataUrl } from "@/lib/qrcode";
+import { CartClearedNotifier } from "@/components/boutique/CartClearedNotifier";
 
 export async function generateMetadata() {
   const t = await getTranslations("boutique.metadata");
@@ -19,7 +20,16 @@ export async function generateMetadata() {
  */
 export default async function OrderSuccessPage({ searchParams }) {
   const t = await getTranslations();
-  const { session_id: sessionId, onsite, number, code } = await searchParams;
+  const { session_id: sessionId, onsite, free, number, code, pos_canceled: posCanceled } = await searchParams;
+
+  if (posCanceled === "1") {
+    return (
+      <Outcome
+        title={t("boutique.posPaymentNotCompleted")}
+        message={t("boutique.posPaymentNotCompletedDesc")}
+      />
+    );
+  }
 
   if (onsite === "1") {
     const qr = code ? await pickupQrDataUrl(code) : null;
@@ -29,6 +39,25 @@ export default async function OrderSuccessPage({ searchParams }) {
         message={
           <>
             {t("boutique.thankYouOrder", { number })}
+            {code && ` ${t("boutique.presentCodePickup")}`}
+          </>
+        }
+        pickup={code ? { code, qr } : null}
+      />
+    );
+  }
+
+  // A 100%-off promo code covered the entire order — already confirmed
+  // server-side (createOrderCheckoutSession), nothing was ever charged, so
+  // there's no Stripe session to verify here.
+  if (free === "1") {
+    const qr = code ? await pickupQrDataUrl(code) : null;
+    return (
+      <Outcome
+        title={t("boutique.orderConfirmed")}
+        message={
+          <>
+            {t("boutique.thankYouOrderFree", { number })}
             {code && ` ${t("boutique.presentCodePickup")}`}
           </>
         }
@@ -55,9 +84,9 @@ export default async function OrderSuccessPage({ searchParams }) {
         if (orderId) {
           const order = await prisma.order.findUnique({
             where: { id: orderId },
-            select: { pickupCode: true, fulfilmentMode: true },
+            select: { pickupCode: true, fulfilmentMode: true, source: true },
           });
-          if (order?.pickupCode && order.fulfilmentMode !== "SHIPPING_PREPAID") {
+          if (order?.source !== "POS" && order?.pickupCode && order.fulfilmentMode !== "SHIPPING_PREPAID") {
             pickup = { code: order.pickupCode, qr: await pickupQrDataUrl(order.pickupCode) };
           }
         }
@@ -72,23 +101,26 @@ export default async function OrderSuccessPage({ searchParams }) {
 
   if (state === "paid") {
     return (
-      <Outcome
-        title={t("boutique.paymentConfirmed")}
-        message={
-          <>
-            {t("boutique.thankYouPayment", { amount: details.amount })}
-            {details?.email && (
-              <>
-                {" "}
-                {t("boutique.confirmationSent", { email: details.email })}
-              </>
-            )}
-            .
-            {pickup && ` ${t("boutique.presentCodePickupPayment")}`}
-          </>
-        }
-        pickup={pickup}
-      />
+      <>
+        <CartClearedNotifier />
+        <Outcome
+          title={t("boutique.paymentConfirmed")}
+          message={
+            <>
+              {t("boutique.thankYouPayment", { amount: details.amount })}
+              {details?.email && (
+                <>
+                  {" "}
+                  {t("boutique.confirmationSent", { email: details.email })}
+                </>
+              )}
+              .
+              {pickup && ` ${t("boutique.presentCodePickupPayment")}`}
+            </>
+          }
+          pickup={pickup}
+        />
+      </>
     );
   }
 

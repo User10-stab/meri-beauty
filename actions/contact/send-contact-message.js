@@ -55,7 +55,8 @@ export async function sendContactMessage(input) {
 
   try {
     // 2. Fetch salon info (name + email for the owner)
-    const salon = await prisma.salon.findFirst({
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
       select: { name: true, email: true },
     });
 

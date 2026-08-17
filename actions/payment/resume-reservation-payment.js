@@ -3,6 +3,7 @@
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
 
 /**
  * Creates a fresh Stripe Checkout Session for an existing pending payment.
@@ -115,6 +116,13 @@ export async function resumeReservationPayment(paymentId) {
       };
     }
 
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
+      };
+    }
+
     // ── 7. Determine the amount to charge ────────────────────────────────────
     // depositAmount is 0 for FULL_ONLINE, or the configured deposit for DEPOSIT_ONLINE.
     // The amount charged is the remaining amount owed (totalAmount initially,
@@ -146,9 +154,9 @@ export async function resumeReservationPayment(paymentId) {
     const staffName        = staff.user?.fullName || "Expert";
     const serviceName      = payment.appointment.staffService.service.name;
     const appointmentDate  = new Date(payment.appointment.date)
-      .toLocaleDateString("fr-FR");
+      .toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" });
     const appointmentTime  = new Date(payment.appointment.startTime)
-      .toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+      .toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
 
     const metadata = {
       appointmentId,

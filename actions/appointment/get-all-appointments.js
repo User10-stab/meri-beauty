@@ -60,6 +60,7 @@ export async function getAllAppointments() {
             phone: true,
           },
         },
+        cancelledBy: { select: { id: true, fullName: true, role: true } },
         staffService: {
           include: {
             service: {
@@ -101,6 +102,10 @@ export async function getAllAppointments() {
       // Status
       status: appt.status,
       notes: appt.notes ?? null,
+      cancelledAt: appt.cancelledAt?.toISOString() ?? null,
+      cancellationReason: appt.cancellationReason ?? null,
+      cancellationSource: appt.cancellationSource ?? null,
+      cancelledBy: appt.cancelledBy ?? null,
       // Payment
       paymentStatus: appt.payment?.status ?? null,
       depositAmount: appt.payment?.depositAmount

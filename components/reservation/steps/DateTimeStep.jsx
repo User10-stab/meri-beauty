@@ -234,6 +234,7 @@ function formatDateLabel(dateInput, locale) {
     year: "numeric",
     month: "long",
     day: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -545,11 +546,11 @@ function AppointmentDateCard({
         <div className="flex items-center gap-3">
           {isComplete ? (
             <span className="rounded-lg bg-[#C8A46A] px-3 py-1 text-xs font-semibold text-white">
-              {selectedDate.toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short" })} • {selectedTime}
+              {selectedDate.toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short", timeZone: "Europe/Brussels" })} • {selectedTime}
             </span>
           ) : selectedDate ? (
             <span className="rounded-lg bg-white/10 px-3 py-1 text-xs text-white/80">
-              {selectedDate.toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short" })} — {t("dateTime.chooseTime")}
+              {selectedDate.toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short", timeZone: "Europe/Brussels" })} — {t("dateTime.chooseTime")}
             </span>
           ) : (
             <span className="rounded-lg bg-white/10 px-3 py-1 text-xs text-white/60">

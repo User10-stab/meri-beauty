@@ -515,7 +515,7 @@ function InstagramThumbnailList({ posts, activeId, onSelect }) {
       <button
         onClick={() => scrollBy(-1)}
         aria-label="Défiler à gauche"
-        className="absolute -left-4 top-1/2 z-10 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/60 backdrop-blur-md transition-all hover:bg-white/15 hover:text-white hover:scale-105 shadow-md"
+        className="absolute left-0 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/60 backdrop-blur-md shadow-md transition-all hover:scale-105 hover:bg-white/15 hover:text-white sm:-left-4 sm:flex"
       >
         <ChevronLeft className="h-4 w-4" />
       </button>
@@ -523,7 +523,7 @@ function InstagramThumbnailList({ posts, activeId, onSelect }) {
       {/* Scrollable strip */}
       <div
         ref={stripRef}
-        className="flex gap-3 overflow-x-auto px-6 pb-1"
+        className="flex gap-3 overflow-x-auto px-0 pb-1 sm:px-6"
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
         {posts.map((post) => {
@@ -576,7 +576,7 @@ function InstagramThumbnailList({ posts, activeId, onSelect }) {
       <button
         onClick={() => scrollBy(1)}
         aria-label="Défiler à droite"
-        className="absolute -right-4 top-1/2 z-10 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/60 backdrop-blur-md transition-all hover:bg-white/15 hover:text-white hover:scale-105 shadow-md"
+        className="absolute right-0 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/60 backdrop-blur-md shadow-md transition-all hover:scale-105 hover:bg-white/15 hover:text-white sm:-right-4 sm:flex"
       >
         <ChevronRight className="h-4 w-4" />
       </button>
@@ -659,7 +659,7 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
           transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1], delay: 0.1 }}
         >
           {/* Viewer row: [←] [viewer | details] [→] */}
-          <div className="flex items-center gap-3 lg:gap-4 py-2 px-2">
+          <div className="flex flex-col gap-4 px-0 py-2 sm:flex-row sm:items-center sm:gap-3 sm:px-2 lg:gap-4">
 
             {/* ── Prev ── */}
             <motion.button
@@ -668,7 +668,7 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
               onClick={goPrev}
               disabled={selectedIndex === 0}
               aria-label={t("instagramPreviousPost")}
-              className="shrink-0 flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 backdrop-blur-md shadow-lg shadow-black/30 transition-all hover:bg-white/15 hover:text-white disabled:pointer-events-none disabled:opacity-25"
+              className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 shadow-lg shadow-black/30 backdrop-blur-md transition-all hover:bg-white/15 hover:text-white disabled:pointer-events-none disabled:opacity-25 sm:flex"
             >
               <ChevronLeft className="h-5 w-5" />
             </motion.button>
@@ -695,7 +695,7 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
               onClick={goNext}
               disabled={selectedIndex === posts.length - 1}
               aria-label={t("instagramNextPost")}
-              className="shrink-0 flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 backdrop-blur-md shadow-lg shadow-black/30 transition-all hover:bg-white/15 hover:text-white disabled:pointer-events-none disabled:opacity-25"
+              className="hidden h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/8 text-white/70 shadow-lg shadow-black/30 backdrop-blur-md transition-all hover:bg-white/15 hover:text-white disabled:pointer-events-none disabled:opacity-25 sm:flex"
             >
               <ChevronRight className="h-5 w-5" />
             </motion.button>
@@ -703,7 +703,7 @@ export default function InstagramLifestyle({ posts = POSTS, profile }) {
           </div>
 
           {/* ── THUMBNAIL STRIP ── */}
-          <div className="mt-5 px-4">
+          <div className="mt-5 px-0 sm:px-4">
             <InstagramThumbnailList
               posts={posts}
               activeId={selected.id}

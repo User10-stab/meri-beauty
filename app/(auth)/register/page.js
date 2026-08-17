@@ -3,8 +3,8 @@ import { redirect } from "next/navigation";
 import RegisterForm from "./register-form";
 
 export const metadata = {
-  title: "Create Account | Meri Beauty",
-  description: "Sign up for a Meri Beauty account to manage your appointments and bookings.",
+  title: "Créer un compte | Meri Beauty",
+  description: "Créez votre compte Meri Beauty pour gérer vos rendez-vous et vos réservations.",
 };
 
 export default async function RegisterPage() {

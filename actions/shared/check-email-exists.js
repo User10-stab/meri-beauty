@@ -18,8 +18,13 @@ export async function checkEmailExists(email) {
 
   const user = await prisma.user.findUnique({
     where: { email: email.trim().toLowerCase() },
-    select: { id: true, isDeleted: true, emailVerified: true, isActive: true , phone: true },
+    select: { id: true, isDeleted: true, emailVerified: true, isActive: true, phone: true },
   });
 
-  return { exists: Boolean(user && !user.isDeleted && user.emailVerified && user.isActive) , phone: user?.phone || null };
+  const exists = Boolean(user && !user.isDeleted && user.emailVerified && user.isActive);
+  // Only ever surface the phone number for the same usable-account case
+  // `exists` already covers — this endpoint is unauthenticated, so an
+  // unverified/inactive/deleted account's phone must never leak just
+  // because someone typed that email in a booking form.
+  return { exists, phone: exists ? user.phone : null };
 }

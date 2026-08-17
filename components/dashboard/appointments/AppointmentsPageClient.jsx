@@ -7,7 +7,8 @@ import { Search, Loader2, CalendarX, Star } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
-import { acceptAppointment, confirmAppointment, rejectAppointment, completeAppointment } from "@/actions/appointment/manage-appointment";
+import { confirmAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { acceptAppointment } from "@/actions/appointment/manage-appointment";
 
 const STATUS_STYLE = {
   PENDING: "bg-amber-50 text-amber-700 border-amber-200",
@@ -19,8 +20,8 @@ const STATUS_STYLE = {
 };
 
 function formatDateTime(date, startTime) {
-  const d = new Date(date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
-  const t = new Date(startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  const d = new Date(date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" });
+  const t = new Date(startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
   return `${d} · ${t}`;
 }
 
@@ -45,8 +46,10 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [statusFilter, setStatusFilter] = useState("");
   const [staffFilter, setStaffFilter] = useState("");
   const [toReject, setToReject] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState("");
   const [toComplete, setToComplete] = useState(null);
   const [completeMethod, setCompleteMethod] = useState("CASH");
+  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [rowLoadingId, setRowLoadingId] = useState(null);
 
@@ -118,11 +121,24 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     }
   }
 
+  async function handleNoShow(appointmentId) {
+    if (!window.confirm("Marquer ce rendez-vous comme absence ? Aucun remboursement ne sera émis.")) return;
+    setRowLoadingId(appointmentId);
+    const result = await markAppointmentNoShow(appointmentId);
+    setRowLoadingId(null);
+    if (result.success) {
+      toast.success(result.message);
+      refetch({});
+    } else {
+      toast.error(result.message);
+    }
+  }
+
   function handleCompleteWithPayment() {
-    if (!toComplete) return;
+    if (!toComplete || !paymentConfirmed) return;
     setRowLoadingId(toComplete.id);
     startTransition(async () => {
-      const result = await completeAppointment(toComplete.id, { method: completeMethod });
+      const result = await completeAppointment(toComplete.id, { method: completeMethod, paymentConfirmed });
       setRowLoadingId(null);
       setToComplete(null);
       if (result.success) {
@@ -138,9 +154,10 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     if (!toReject) return;
     setRowLoadingId(toReject.id);
     startTransition(async () => {
-      const result = await rejectAppointment(toReject.id);
+      const result = await rejectAppointment(toReject.id, rejectionReason);
       setRowLoadingId(null);
       setToReject(null);
+      setRejectionReason("");
       if (result.success) {
         toast.success(result.message);
         refetch({});
@@ -246,6 +263,12 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[a.status]}`}>
                       {STATUS_LABEL[a.status]}
                     </span>
+                    {a.status === "CANCELLED" && (
+                      <div className="mt-1 max-w-48 text-xs text-gray-400">
+                        <div>{a.cancelledBy?.fullName ?? a.cancellationSource ?? "Système"}</div>
+                        {a.cancellationReason && <div className="truncate" title={a.cancellationReason}>{a.cancellationReason}</div>}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     {a.review ? (
@@ -272,7 +295,10 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         </button>
                         <button
                           type="button"
-                          onClick={() => setToReject(a)}
+                          onClick={() => {
+                            setRejectionReason("");
+                            setToReject(a);
+                          }}
                           disabled={rowLoadingId === a.id}
                           className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
                         >
@@ -282,7 +308,8 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     ) : a.status === "ACCEPTED" ? (
                       <span className="text-xs text-gray-400">En attente client</span>
                     ) : a.status === "CONFIRMED" ? (
-                      <button
+                      <div className="flex justify-end gap-2">
+                        <button
                         type="button"
                         onClick={() =>
                           a.payment?.status === "PARTIALLY_PAID"
@@ -294,6 +321,36 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                       >
                         {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : t("appointmentActions.complete")}
                       </button>
+                        <button
+                          type="button"
+                          onClick={() => handleNoShow(a.id)}
+                          disabled={rowLoadingId === a.id}
+                          title={t("appointmentActions.markNoShow")}
+                          className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
+                        >
+                          {t("appointmentActions.markNoShow")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleNoShow(a.id)}
+                          disabled={rowLoadingId === a.id}
+                          title="Aucun remboursement ne sera émis"
+                          className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
+                        >
+                          Absente
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRejectionReason("");
+                            setToReject(a);
+                          }}
+                          disabled={rowLoadingId === a.id}
+                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+                        >
+                          {t("appointmentActions.cancel")}
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-gray-300">—</span>
                     )}
@@ -313,8 +370,23 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         danger
         loading={isPending}
         onConfirm={handleReject}
-        onCancel={() => setToReject(null)}
-      />
+        onCancel={() => {
+          setToReject(null);
+          setRejectionReason("");
+        }}
+      >
+        <label htmlFor="appointment-cancellation-reason" className="mb-1 block text-sm font-medium text-gray-700">
+          Motif de l&apos;annulation
+        </label>
+        <textarea
+          id="appointment-cancellation-reason"
+          value={rejectionReason}
+          onChange={(event) => setRejectionReason(event.target.value.slice(0, 1000))}
+          rows={3}
+          placeholder="Expliquez pourquoi ce rendez-vous est annulé…"
+          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
+        />
+      </ConfirmDialog>
 
       {toComplete && (
         <div
@@ -343,6 +415,16 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               <option value="CARD">Carte</option>
             </select>
 
+            <label className="mt-4 flex items-start gap-2 text-xs font-medium text-gray-700">
+              <input
+                type="checkbox"
+                checked={paymentConfirmed}
+                onChange={(e) => setPaymentConfirmed(e.target.checked)}
+                className="mt-0.5 h-3.5 w-3.5 rounded border-gray-300"
+              />
+              Je confirme avoir bien reçu ce paiement (espèces en main, ou carte APPROUVÉE sur le terminal).
+            </label>
+
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
@@ -355,7 +437,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               <button
                 type="button"
                 onClick={handleCompleteWithPayment}
-                disabled={isPending}
+                disabled={isPending || !paymentConfirmed}
                 className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f3a2e]/90 disabled:opacity-50"
               >
                 {isPending ? <Loader2 size={14} className="animate-spin" /> : "Encaisser et terminer"}

@@ -1,17 +1,19 @@
 import { Suspense } from "react";
 import { requireAdmin } from "@/lib/route-protection";
 import { getSalon } from "@/actions/salon/get-salon";
+import { listAdminAccounts } from "@/actions/dashboard/admin-accounts";
 import { SalonSettingsClient } from "@/components/dashboard/settings/SalonSettingsClient";
 import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const t = await getTranslations("dashboard.settings");
 
-  const result = await getSalon();
+  const [result, adminsResult] = await Promise.all([getSalon(), listAdminAccounts()]);
   const salon = result.data ?? null;
+  const admins = adminsResult.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -37,7 +39,7 @@ export default async function SettingsPage() {
       )}
 
       <Suspense fallback={<SettingsSkeleton />}>
-        <SalonSettingsClient initialData={salon} />
+        <SalonSettingsClient initialData={salon} initialAdmins={admins} currentUserId={user.id} />
       </Suspense>
     </div>
   );

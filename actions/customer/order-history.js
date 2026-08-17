@@ -40,6 +40,11 @@ export async function getMyOrderHistory() {
           },
         },
         payment: invoiceSelect,
+        // Drives the "demande en attente / refusée" state on the reservation
+        // card — neither flow allows self-cancellation, so the customer's
+        // only route is an exception request (see
+        // actions/reservations/cancellation-request.js).
+        cancellationRequest: { select: { status: true, decisionNote: true } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -54,6 +59,7 @@ export async function getMyOrderHistory() {
           },
         },
         payment: invoiceSelect,
+        cancellationRequest: { select: { status: true, decisionNote: true } },
       },
       orderBy: { createdAt: "desc" },
     }),

@@ -345,6 +345,11 @@ export async function createProduct(input) {
     }
 
     revalidatePath("/dashboard/boutique/products");
+    // /boutique is a static page (see app/(public)/boutique/page.jsx) — it
+    // renders once at build time and never refreshes on its own, so a new
+    // product would otherwise stay invisible to customers until the next
+    // full rebuild.
+    revalidatePath("/boutique");
     // Deliberately not returning the raw `product` object here: its variants
     // carry Prisma Decimal instances (price/costPrice/comparePrice), and a
     // Server Action's return value is serialized across the client boundary
@@ -481,6 +486,9 @@ export async function updateProduct(input) {
 
     revalidatePath("/dashboard/boutique/products");
     revalidatePath(`/dashboard/boutique/products/${id}`);
+    // Same static-page gap as createProduct — without this, a status change
+    // (e.g. DRAFT → ACTIVE) never reaches the public storefront on its own.
+    revalidatePath("/boutique");
     return { success: true, message: "Produit mis à jour." };
   } catch (error) {
     console.error("[updateProduct]", error);
@@ -513,6 +521,7 @@ export async function deleteProduct(id) {
     ]);
 
     revalidatePath("/dashboard/boutique/products");
+    revalidatePath("/boutique");
     return { success: true, message: "Produit supprimé." };
   } catch (error) {
     console.error("[deleteProduct]", error);

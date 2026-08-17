@@ -20,6 +20,7 @@ function formatDate(date, locale) {
     day: "2-digit",
     month: "long",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -27,6 +28,7 @@ function formatTime(date, locale) {
   return new Date(date).toLocaleTimeString(toIntlLocale(locale), {
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 

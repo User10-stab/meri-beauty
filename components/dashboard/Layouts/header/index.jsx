@@ -15,7 +15,7 @@ export function Header({ user }) {
   const { toggleSidebar, isMobile } = useSidebarContext();
 
   return (
-    <header className="border-stroke shadow-1 dark:border-stroke-dark dark:bg-gray-dark sticky top-0 z-20 flex items-center justify-between border-b bg-white px-4 py-5 md:px-5 2xl:px-10">
+    <header className="border-stroke shadow-1 dark:border-stroke-dark dark:bg-gray-dark sticky top-0 z-20 flex min-w-0 items-center justify-between gap-2 border-b bg-white px-3 py-4 sm:px-4 md:px-5 2xl:px-10">
       <button
         onClick={toggleSidebar}
         className="dark:border-stroke-dark rounded-lg border px-1.5 py-1 lg:hidden dark:bg-[#020D1A] hover:dark:bg-[#FFFFFF1A]"
@@ -39,7 +39,7 @@ export function Header({ user }) {
         <p className="font-medium">{t("subtitle")}</p>
       </div>
 
-      <div className="2xsm:gap-4 flex flex-1 items-center justify-end gap-2">
+      <div className="2xsm:gap-4 flex min-w-0 flex-1 items-center justify-end gap-2">
         <HeaderSearch />
 
         <LocaleSwitcher />

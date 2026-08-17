@@ -8,15 +8,27 @@ import {
   requireRole,
 } from "../../lib/authorization.js";
 
-function invoicingTx({ invoiceTotal = 121, credited = 0 } = {}) {
+const COMPLETE_SALON = {
+  name: "Meri Beauty",
+  vatNumber: "BE0751854027",
+  legalName: "Meri Beauty",
+  companyRegistrationNo: "0751.854.027",
+  addressLine1: "Rue Bonaventure 113",
+  addressLine2: null,
+  postalCode: "1090",
+  city: "Jette",
+  countryCode: "BE",
+};
+
+function invoicingTx({ invoiceTotal = 121, invoiceVatRate = 21, credited = 0, salon = COMPLETE_SALON } = {}) {
   return {
     $queryRaw: vi.fn()
       .mockResolvedValueOnce([{ lastNumber: 7 }])
       .mockResolvedValueOnce([{ lastNumber: 3 }]),
-    salon: { findFirst: vi.fn().mockResolvedValue({ name: "Meri Beauty", vatNumber: "BE0751854027" }) },
+    salon: { findUnique: vi.fn().mockResolvedValue(salon) },
     invoice: {
       create: vi.fn(async ({ data }) => ({ id: "inv-1", ...data })),
-      findUnique: vi.fn().mockResolvedValue({ totalInclVat: invoiceTotal }),
+      findUnique: vi.fn().mockResolvedValue({ totalInclVat: invoiceTotal, vatRate: invoiceVatRate }),
     },
     creditNote: {
       aggregate: vi.fn().mockResolvedValue({ _sum: { totalInclVat: credited } }),
@@ -41,6 +53,71 @@ describe("invoice and credit-note issuance", () => {
     expect(invoice.subtotalExclVat).toBe(100);
     expect(invoice.vatAmount).toBe(21);
     expect(invoice.totalInclVat).toBe(121);
+    expect(invoice.customerType).toBe("B2C");
+  });
+
+  test("fails closed when the seller's legal identity is incomplete, rather than emitting a partial document", async () => {
+    const tx = invoicingTx({ salon: { ...COMPLETE_SALON, addressLine1: null } });
+    await expect(issueInvoice(tx, {
+      paymentId: "pay-1",
+      source: "ORDER",
+      totalInclVat: 121,
+      customer: { fullName: "Client", email: "client@example.test" },
+      lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
+    })).rejects.toThrow("SELLER_LEGAL_DATA_INCOMPLETE");
+    expect(tx.invoice.create).not.toHaveBeenCalled();
+  });
+
+  test("a company customer with a billing profile produces a B2B invoice snapshot", async () => {
+    const tx = invoicingTx();
+    const invoice = await issueInvoice(tx, {
+      paymentId: "pay-1",
+      source: "ORDER",
+      totalInclVat: 121,
+      customer: {
+        fullName: "Jane Doe",
+        email: "jane@example.test",
+        isCompany: true,
+        legalName: "Doe Consulting SRL",
+        companyRegistrationNo: "0123.456.789",
+        purchaseOrderReference: "PO-42",
+      },
+      lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
+    });
+
+    expect(invoice.customerType).toBe("B2B");
+    expect(invoice.customerLegalName).toBe("Doe Consulting SRL");
+    expect(invoice.customerContactName).toBe("Jane Doe");
+    expect(invoice.customerRegistrationNo).toBe("0123.456.789");
+    expect(invoice.purchaseOrderReference).toBe("PO-42");
+  });
+
+  test("isCompany alone (no BillingProfile legalName yet) stays B2C, not a half-populated B2B invoice", async () => {
+    const tx = invoicingTx();
+    const invoice = await issueInvoice(tx, {
+      paymentId: "pay-1",
+      source: "ORDER",
+      totalInclVat: 121,
+      customer: { fullName: "Jane Doe", email: "jane@example.test", isCompany: true },
+      lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
+    });
+
+    expect(invoice.customerType).toBe("B2C");
+    expect(invoice.customerLegalName).toBeNull();
+  });
+
+  test("a credit note is broken down into HT/TVA/TTC at the original invoice's rate", async () => {
+    const tx = invoicingTx({ invoiceTotal: 121, invoiceVatRate: 21 });
+    const creditNote = await issueCreditNote(tx, {
+      invoiceId: "inv-1",
+      reason: "Retour partiel",
+      totalInclVat: 60.5,
+    });
+
+    expect(creditNote.vatRate).toBe(21);
+    expect(creditNote.subtotalExclVat).toBe(50);
+    expect(creditNote.vatAmount).toBe(10.5);
+    expect(creditNote.totalInclVat).toBe(60.5);
   });
 
   test("credit notes cannot exceed the original invoice", async () => {

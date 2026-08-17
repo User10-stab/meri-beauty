@@ -47,7 +47,7 @@ function serializeStuckPayment(payment) {
     customerEmail = payment.order.user?.email ?? null;
   } else if (payment.appointment) {
     type = "Rendez-vous";
-    reference = payment.appointment.date ? new Date(payment.appointment.date).toLocaleDateString("fr-FR") : "—";
+    reference = payment.appointment.date ? new Date(payment.appointment.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" }) : "—";
     customerName = payment.appointment.user?.fullName ?? null;
     customerEmail = payment.appointment.user?.email ?? null;
   } else if (payment.workshopReservation) {

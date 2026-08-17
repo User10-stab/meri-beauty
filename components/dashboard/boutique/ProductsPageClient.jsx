@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -52,7 +53,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
     const q = search.trim().toLowerCase();
     return initialProducts.filter((p) => {
       if (q) {
-        const hay = `${p.name} ${p.brand?.name ?? ""} ${p.variants.map((v) => v.sku).join(" ")}`.toLowerCase();
+        const hay = `${p.name} ${p.brand?.name ?? ""} ${p.variants.map((v) => `${v.sku} ${v.barcode ?? ""}`).join(" ")}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (brandFilter && p.brand?.id !== brandFilter) return false;
@@ -76,11 +77,11 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
   }
 
   return (
-    <div className="flex h-[75vh] flex-col rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+    <div className="flex h-[75vh] min-w-0 flex-col rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
       {/* Toolbar — Wix-style: search + filters on the left, primary action on the right */}
-      <div className="flex shrink-0 flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-stroke px-3 py-4 dark:border-dark-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-1 flex-wrap items-center gap-3">
-          <div className="relative w-full max-w-xs">
+          <div className="relative w-full lg:max-w-xs">
             <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
@@ -94,7 +95,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
           <select
             value={brandFilter}
             onChange={(e) => setBrandFilter(e.target.value)}
-            className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
           >
             <option value="">{t("allBrands")}</option>
             {brands.map((b) => (
@@ -105,7 +106,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
           >
             <option value="">{t("allStatuses")}</option>
             <option value="ACTIVE">{t("status.ACTIVE")}</option>
@@ -115,26 +116,26 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
         </div>
 
         {isAdmin && (
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end lg:flex-nowrap">
             <button
               type="button"
               onClick={() => setScanOpen(true)}
-              className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
+              className="flex h-10 w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2 sm:w-auto"
             >
               <ScanLine size={16} />
               {t("scanner")}
             </button>
-            <Link href="/dashboard/boutique/products/import">
+            <Link href="/dashboard/boutique/products/import" className="w-full shrink-0 sm:w-auto">
               <button
                 type="button"
-                className="flex h-10 items-center gap-2 rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2"
+                className="flex h-10 w-full shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:text-white dark:hover:bg-dark-2 sm:w-auto"
               >
                 <Upload size={16} />
                 {t("importFromWix")}
               </button>
             </Link>
-            <Link href="/dashboard/boutique/products/new">
-              <Button>
+            <Link href="/dashboard/boutique/products/new" className="w-full shrink-0 sm:w-auto">
+              <Button className="w-full shrink-0 justify-center whitespace-nowrap sm:w-auto">
                 <Plus size={16} />
                 {t("addProduct")}
               </Button>
@@ -182,9 +183,9 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
               >
                 <TableCell className="pl-6">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
+                    <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
                       {p.thumbnail ? (
-                        <img src={p.thumbnail} alt="" className="h-full w-full object-cover" />
+                        <Image src={p.thumbnail} alt="" fill sizes="40px" unoptimized className="object-cover" />
                       ) : (
                         <Package size={16} className="text-gray-300" />
                       )}

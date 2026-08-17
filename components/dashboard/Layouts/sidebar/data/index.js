@@ -28,6 +28,11 @@ const ALL_NAV_DATA = [
             title: "Tous les rendez-vous",
             url: "/dashboard/appointments",
           },
+          {
+            title: "Demandes exceptionnelles",
+            url: "/dashboard/appointments/exceptions",
+            roles: DASHBOARD_PERMISSIONS.APPOINTMENT_CANCELLATION_EXCEPTIONS,
+          },
         ],
       },
       {
@@ -48,6 +53,7 @@ const ALL_NAV_DATA = [
         items: [
           { title: "Compte Stripe", url: "/dashboard/payments" },
           { title: "Réconciliation", url: "/dashboard/payments/reconciliation", roles: DASHBOARD_PERMISSIONS.PAYMENT_RECONCILIATION },
+          { title: "Litiges Stripe", url: "/dashboard/payments/disputes", roles: DASHBOARD_PERMISSIONS.STRIPE_DISPUTES },
         ],
       },
       {
@@ -58,6 +64,11 @@ const ALL_NAV_DATA = [
           { title: "Animateurs", url: "/dashboard/workshops/animators", roles: DASHBOARD_PERMISSIONS.WORKSHOPS },
           { title: "Réservations", url: "/dashboard/workshops/reservations", roles: DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS },
           { title: "Liste d'attente", url: "/dashboard/workshops/waiting-list", roles: DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS },
+          // Shared queue for atelier AND formation cancellation requests —
+          // one review screen, since the decision and its consequences are
+          // identical for both. Same admin-only gate as the appointment
+          // exceptions page.
+          { title: "Demandes d'annulation", url: "/dashboard/reservations/exceptions", roles: DASHBOARD_PERMISSIONS.APPOINTMENT_CANCELLATION_EXCEPTIONS },
         ],
         roles: DASHBOARD_PERMISSIONS.WORKSHOPS,
       },
@@ -89,6 +100,8 @@ const ALL_NAV_DATA = [
         title: "Boutique",
         icon: Icons.ShoppingBagIcon,
         items: [
+          { title: "Caisse", url: "/dashboard/boutique/point-of-sale", roles: DASHBOARD_PERMISSIONS.ORDERS },
+          { title: "Clôture de caisse", url: "/dashboard/boutique/caisse", roles: DASHBOARD_PERMISSIONS.ORDERS },
           // Staff: read-only catalogue browsing (no cost/margin data) + stock adjustments.
           { title: "Produits", url: "/dashboard/boutique/products", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK },
           { title: "Catégories", url: "/dashboard/boutique/categories", roles: DASHBOARD_PERMISSIONS.BOUTIQUE }, // Admin only — structural CRUD

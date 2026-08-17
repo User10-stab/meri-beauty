@@ -1,16 +1,17 @@
 "use server";
 
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
+import { isCheckoutAuthorized, createResumeCheckoutToken } from "@/lib/resume-checkout-token";
 import { sendEmail } from "@/lib/email";
 import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
-import { checkoutSchema, shipOrderSchema, cancelOrderSchema } from "@/lib/validations/commerce";
+import { checkoutSchema, shipOrderSchema, cancelOrderSchema, closeShippedOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
-import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
+import { issueInvoice, issueCreditNote, buildInvoiceCustomer, isSellerLegalDataComplete } from "@/lib/invoicing";
 import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
@@ -18,8 +19,17 @@ import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-order-payment";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { captureError, captureWarning } from "@/lib/monitoring";
+import { calculateVatTotals, repriceBelgianGross, resolveGoodsVatPolicy } from "@/lib/tax-policy";
+import {
+  getOrderPaymentMethod,
+  isManualOrderRefund,
+  manualRefundInstruction,
+  refundMethodLabel,
+  validateManualRefundConfirmation,
+} from "@/lib/payments/refund-method";
 
 /**
  * Checkout + order fulfilment.
@@ -117,6 +127,10 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         role: "CUSTOMER",
         isActive: true,
         ...buildNewsletterConsentUpdate(Boolean(customerInfo.newsletterSubscribed ?? false), "boutique_checkout"),
+        // Guest checkout creates the account, so this is the moment consent is
+        // given — it used to be recorded at signup only, which meant a guest who
+        // never registered left no record at all.
+        ...buildTermsAcceptanceUpdate(),
       },
     });
 
@@ -147,6 +161,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
 }
 
 function serializeOrder(order) {
+  const paymentMethod = getOrderPaymentMethod(order.payment);
   return {
     id: order.id,
     orderNumber: order.orderNumber,
@@ -155,6 +170,11 @@ function serializeOrder(order) {
     subtotal: Number(order.subtotal),
     shippingCost: Number(order.shippingCost),
     totalAmount: Number(order.totalAmount),
+    taxCountryCode: order.taxCountryCode,
+    vatTreatment: order.vatTreatment,
+    vatRate: Number(order.vatRate),
+    totalExclVat: order.totalExclVat == null ? null : Number(order.totalExclVat),
+    totalVat: order.totalVat == null ? null : Number(order.totalVat),
     shippingCarrier: order.shippingCarrier,
     pickupPointId: order.pickupPointId,
     pickupPointName: order.pickupPointName,
@@ -163,6 +183,7 @@ function serializeOrder(order) {
     pickupPointCity: order.pickupPointCity,
     trackingCode: order.trackingCode,
     shippedAt: order.shippedAt,
+    collectedAt: order.collectedAt,
     pickupCode: order.pickupCode,
     pickedUpAt: order.pickedUpAt,
     expiresAt: order.expiresAt,
@@ -174,6 +195,15 @@ function serializeOrder(order) {
       ? { id: order.user.id, fullName: order.user.fullName, email: order.user.email, phone: order.user.phone }
       : null,
     hasPayment: Boolean(order.payment),
+    payment: order.payment
+      ? {
+          status: order.payment.status,
+          paymentMethod,
+          paymentMethodLabel: refundMethodLabel(paymentMethod),
+          requiresManualRefund: isManualOrderRefund(order.payment),
+          refundInstruction: manualRefundInstruction(paymentMethod),
+        }
+      : null,
     invoice: order.payment?.invoice
       ? { id: order.payment.invoice.id, number: order.payment.invoice.number, issuedAt: order.payment.invoice.issuedAt }
       : null,
@@ -217,6 +247,7 @@ export async function createOrderFromCart(input) {
     return {
       success: false,
       message:
+        errors.termsAccepted?.[0] ??
         errors.fulfilmentMode?.[0] ??
         errors.pickupPoint?.[0] ??
         errors.customerInfo?.[0] ??
@@ -242,6 +273,9 @@ export async function createOrderFromCart(input) {
     }
 
     const { user } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    // Returning customer, or an account created before consent was tracked:
+    // record that they accepted the current CGV at this order.
+    await recordTermsAcceptance(prisma, user.id);
 
     // A customer who abandoned a prepaid checkout and comes back to retry
     // (closed the Stripe tab, card declined, etc.) hits this same cart again
@@ -327,10 +361,17 @@ export async function createOrderFromCart(input) {
       return { success: false, message: "Trop de tentatives. Veuillez réessayer dans quelques minutes." };
     }
 
-    const subtotal = fullCart.items.reduce(
-      (sum, item) => sum + Number(item.variant.price) * item.quantity,
-      0
-    );
+    const destinationCountry = fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint?.countryCode ?? "BE" : "BE";
+    const taxPolicy = resolveGoodsVatPolicy({
+      fulfilmentMode,
+      destinationCountry,
+      customer: user,
+    });
+    const pricedItems = fullCart.items.map((item) => ({
+      ...item,
+      taxUnitPrice: repriceBelgianGross(item.variant.price, taxPolicy.vatRate),
+    }));
+    const subtotal = pricedItems.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
 
     // Calculate shipping based on total weight (Marie's requirement)
     let shippingCost = 0;
@@ -345,6 +386,7 @@ export async function createOrderFromCart(input) {
           message: "Votre commande dépasse 30 kg. Merci de nous contacter pour un devis de livraison personnalisé."
         };
       }
+      shippingCost = repriceBelgianGross(shippingCost, taxPolicy.vatRate);
     }
 
     // Re-validated here regardless of the client's live preview — a code
@@ -352,14 +394,17 @@ export async function createOrderFromCart(input) {
     // discount amount is never trusted from the client.
     let promoCodeId = null;
     let discountAmount = 0;
+    let promoMaxUses = null;
     if (promoCode) {
       const promoResult = await resolvePromoCode(promoCode, subtotal);
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
+      promoMaxUses = promoResult.maxUses;
     }
 
     const totalAmount = Math.max(0, subtotal + shippingCost - discountAmount);
+    const taxTotals = calculateVatTotals(totalAmount, taxPolicy.vatRate);
 
     const isOnSite = fulfilmentMode === "PICKUP_ON_SITE";
     const pickupCode = fulfilmentMode !== "SHIPPING_PREPAID" ? await uniquePickupCode() : null;
@@ -430,6 +475,13 @@ export async function createOrderFromCart(input) {
           subtotal,
           shippingCost,
           totalAmount,
+          taxCountryCode: taxPolicy.taxCountryCode,
+          vatTreatment: taxPolicy.vatTreatment,
+          vatRate: taxPolicy.vatRate,
+          totalExclVat: taxTotals.totalExclVat,
+          totalVat: taxTotals.vatAmount,
+          customerVatNumber: taxPolicy.customerVatNumber,
+          taxNote: taxPolicy.taxNote,
           promoCodeId,
           discountAmount,
           pickupPointId: pickupPoint?.id ?? null,
@@ -437,21 +489,36 @@ export async function createOrderFromCart(input) {
           pickupPointAddress: pickupPoint?.address ?? null,
           pickupPointPostalCode: pickupPoint?.postalCode ?? null,
           pickupPointCity: pickupPoint?.city ?? null,
+          shippingCountry: destinationCountry,
           pickupCode,
           expiresAt,
           notes: notes || null,
           items: {
-            create: fullCart.items.map((item) => ({
+            create: pricedItems.map((item) => ({
               variantId: item.variantId,
               productName: item.variant.product.name,
               variantName: item.variant.name,
               sku: item.variant.sku,
-              unitPrice: item.variant.price,
+              unitPrice: item.taxUnitPrice,
               quantity: item.quantity,
             })),
           },
         },
       });
+
+      // Atomic conditional claim — only succeeds while usedCount is still
+      // under the cap captured moments ago at resolvePromoCode time. Two
+      // concurrent checkouts racing the last use of a capped code can't
+      // both win: the loser's WHERE clause matches zero rows.
+      if (promoCodeId && promoMaxUses != null) {
+        const claim = await tx.promoCode.updateMany({
+          where: { id: promoCodeId, usedCount: { lt: promoMaxUses } },
+          data: { usedCount: { increment: 1 } },
+        });
+        if (claim.count === 0) throw new Error("PROMO_EXHAUSTED");
+      } else if (promoCodeId) {
+        await tx.promoCode.update({ where: { id: promoCodeId }, data: { usedCount: { increment: 1 } } });
+      }
 
       // PICKUP_ON_SITE has no payment step — the order is confirmed right here, so the
       // cart empties immediately, same as any normal checkout. The two prepaid modes
@@ -500,12 +567,31 @@ export async function createOrderFromCart(input) {
     return {
       success: true,
       message: "Commande créée, paiement requis.",
-      data: { orderId: order.id, orderNumber: order.orderNumber, requiresPayment: true },
+      data: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        requiresPayment: true,
+        // Authorizes the immediate createOrderCheckoutSession call the client
+        // makes next: that builder is a public "use server" action, so the
+        // orderId alone can't be the proof of ownership. Bound to this buyer,
+        // valid 30 min.
+        checkoutToken: createResumeCheckoutToken({ resumeType: "ORDER", resumeId: order.id, email: user.email }),
+      },
     };
   } catch (error) {
     if (error.message === "STOCK_RACE") {
       captureWarning("Stock race lost during checkout", { area: "stock-capacity" });
       return { success: false, message: "Le stock a changé entre-temps — vérifiez votre panier et réessayez." };
+    }
+    if (error.message === "PROMO_EXHAUSTED") {
+      captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
+      return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
+    }
+    if (error.message === "EXPORT_REQUIRES_MANUAL_REVIEW") {
+      return { success: false, message: "Cette destination hors UE nécessite une vérification fiscale et douanière manuelle avant paiement." };
+    }
+    if (error.message === "VAT_RATE_NOT_CONFIGURED") {
+      return { success: false, message: "Le taux de TVA de cette destination n’est pas configuré. Contactez Meri Beauty." };
     }
     captureError(error, { area: "stock-capacity", context: "createOrderFromCart" });
     return { success: false, message: "Impossible de créer la commande." };
@@ -525,13 +611,13 @@ function sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAm
       `Bonjour ${user.fullName},\n\n` +
       `Votre commande n°${order.orderNumber} (${totalAmount.toFixed(2)} €) est confirmée. ` +
       `Présentez ce code en boutique pour la récupérer et régler le paiement sur place : ${pickupCode}\n\n` +
-      `Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR")} — passé ce délai, la commande sera annulée.\n\n` +
+      `Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} — passé ce délai, la commande sera annulée.\n\n` +
       `L'équipe Meri Beauty`,
     html:
       `<p>Bonjour ${user.fullName},</p>` +
       `<p>Votre commande n°${order.orderNumber} (<strong>${totalAmount.toFixed(2)} €</strong>) est confirmée.</p>` +
       `<p>Présentez ce code en boutique pour la récupérer et régler le paiement sur place : <strong>${pickupCode}</strong></p>` +
-      `<p>Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR")} — passé ce délai, la commande sera annulée.</p>` +
+      `<p>Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} — passé ce délai, la commande sera annulée.</p>` +
       `<p>L'équipe Meri Beauty</p>`,
   }).catch((err) => console.error("[sendPickupConfirmationEmail] failed:", err));
 }
@@ -546,7 +632,7 @@ function sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAm
  *
  * @param {string} orderId
  */
-export async function resumeOrderAfterVerification(orderId) {
+export async function resumeOrderAfterVerification(orderId, checkoutToken) {
   if (!orderId) return { success: false, message: "Identifiant de commande manquant." };
 
   const order = await prisma.order.findUnique({
@@ -554,6 +640,22 @@ export async function resumeOrderAfterVerification(orderId) {
     include: { user: { select: { fullName: true, email: true } } },
   });
   if (!order) return { success: false, message: "Commande introuvable." };
+
+  // Exported "use server" action — the orderId alone proves nothing. The
+  // pickup code below and the pickup-confirmation e-mail are gated behind
+  // this check. The resume path reaches here with a signed resumeToken from
+  // retryCheckoutSession; a logged-in owner is also authorized.
+  const authSession = await auth();
+  if (
+    !isCheckoutAuthorized(order, {
+      resumeType: "ORDER",
+      resumeId: orderId,
+      checkoutToken,
+      sessionUserId: authSession?.user?.id,
+    })
+  ) {
+    return { success: false, message: "Vous n'êtes pas autorisé(e) à reprendre cette commande." };
+  }
 
   if (order.fulfilmentMode === "PICKUP_ON_SITE") {
     if (order.status !== "PENDING_PICKUP") {
@@ -571,11 +673,11 @@ export async function resumeOrderAfterVerification(orderId) {
     };
   }
 
-  return createOrderCheckoutSession(orderId);
+  return createOrderCheckoutSession(orderId, checkoutToken);
 }
 
 /** Stripe Checkout Session for a PENDING_PAYMENT order (prepaid modes only). */
-export async function createOrderCheckoutSession(orderId) {
+export async function createOrderCheckoutSession(orderId, checkoutToken) {
   if (!orderId) return { success: false, message: "Identifiant de commande manquant." };
 
   try {
@@ -584,11 +686,51 @@ export async function createOrderCheckoutSession(orderId) {
       include: { items: true, user: { select: { email: true } } },
     });
     if (!order) return { success: false, message: "Commande introuvable." };
+
+    // This is an exported "use server" action reachable by anyone — a bare
+    // orderId proves nothing. Authorize via a signed checkout token (guest
+    // checkout / post-verification resume) or by being signed in as the
+    // order's owner, BEFORE any Stripe session or pickup code is handed out.
+    const authSession = await auth();
+    if (
+      !isCheckoutAuthorized(order, {
+        resumeType: "ORDER",
+        resumeId: orderId,
+        checkoutToken,
+        sessionUserId: authSession?.user?.id,
+      })
+    ) {
+      return { success: false, message: "Vous n'êtes pas autorisé(e) à démarrer le paiement de cette commande." };
+    }
     if (order.status !== "PENDING_PAYMENT") {
       return { success: false, message: "Cette commande n'est plus en attente de paiement." };
     }
     if (order.expiresAt && order.expiresAt < new Date()) {
       return { success: false, message: "Le délai de paiement pour cette commande a expiré." };
+    }
+
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
+      };
+    }
+
+    // A 100%-off promo code can bring the total to exactly 0 — Stripe
+    // Checkout Sessions in "payment" mode reject a 0-value line item, so
+    // there's nothing to actually charge. Confirm the order directly
+    // through the same fulfilment path a real Stripe payment uses (a
+    // synthetic "session" shaped just enough for fulfillOrderPayment to
+    // read), instead of forking a second, parallel implementation.
+    if (Number(order.totalAmount) <= 0) {
+      const syntheticSession = {
+        id: `free_order_${order.id}`,
+        metadata: { kind: "order", orderId: order.id },
+        amount_total: 0,
+        payment_intent: null,
+      };
+      await fulfillOrderPayment(syntheticSession);
+      return { success: true, url: null, freeOrder: true, orderNumber: order.orderNumber, pickupCode: order.pickupCode };
     }
 
     const lineItems = order.items.map((item) => ({
@@ -675,7 +817,7 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
         take: pageSize,
         include: {
           user: { select: { id: true, fullName: true, email: true, phone: true } },
-          payment: { select: { id: true } },
+          payment: { select: { id: true, transactionReference: true, status: true, transactions: { select: { method: true, transactionType: true } } } },
           items: true,
         },
       }),
@@ -698,7 +840,7 @@ export async function getOrderById(orderId) {
       where: { id: orderId },
       include: {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
-        payment: { include: { invoice: { include: { creditNotes: true } } } },
+        payment: { include: { invoice: { include: { creditNotes: true } }, transactions: true } },
         items: true,
         returnRequests: { include: { items: true }, orderBy: { requestedAt: "desc" } },
       },
@@ -757,7 +899,26 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
   try {
     const order = await prisma.order.findFirst({
       where: orderId ? { id: orderId } : { pickupCode },
-      include: { items: true, payment: true, user: { select: { fullName: true, email: true, vatNumber: true } } },
+      include: {
+        items: true,
+        payment: true,
+        user: {
+          select: {
+            fullName: true,
+            email: true,
+            vatNumber: true,
+            addressLine1: true,
+            addressLine2: true,
+            addressCity: true,
+            addressPostalCode: true,
+            addressCountry: true,
+            isCompany: true,
+            billingProfile: {
+              select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+            },
+          },
+        },
+      },
     });
     if (!order) return { success: false, message: "Commande introuvable — vérifiez le code." };
     if (order.fulfilmentMode === "SHIPPING_PREPAID") {
@@ -805,8 +966,12 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
           paymentId: payment.id,
           source: "ORDER",
           totalInclVat: Number(order.totalAmount),
-          customer: { fullName: order.user.fullName, email: order.user.email, vatNumber: order.user.vatNumber },
+          customer: buildInvoiceCustomer(order.user, { vatNumberOverride: order.customerVatNumber ?? order.user.vatNumber }),
           lines: orderInvoiceLines(order),
+          vatRate: Number(order.vatRate),
+          vatTreatment: order.vatTreatment,
+          taxCountryCode: order.taxCountryCode,
+          taxNote: order.taxNote,
         });
 
         for (const item of order.items) {
@@ -927,19 +1092,37 @@ export async function markOrderShipped(input) {
   }
 }
 
-export async function markOrderCompleted(orderId) {
+/**
+ * Closes a shipped order. Requires the date staff confirmed (from the
+ * Mondial Relay tracking portal) that the customer actually collected the
+ * parcel — this becomes Order.collectedAt, the legal start of the 14-day
+ * withdrawal window (see withdrawalWindow() in actions/boutique/returns.js).
+ * Closing without a real date would let the return window silently start
+ * from nothing, the exact gap this action exists to close.
+ */
+export async function markOrderCompleted(input) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
+
+  const parsed = closeShippedOrderSchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return { success: false, message: errors.collectedAt?.[0] ?? errors.orderId?.[0] ?? "Données invalides." };
+  }
+  const { orderId, collectedAt } = parsed.data;
 
   try {
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     if (!order) return { success: false, message: "Commande introuvable." };
+    if (order.shippedAt && collectedAt.getTime() < order.shippedAt.getTime()) {
+      return { success: false, message: "La date de retrait ne peut pas être antérieure à la date d'expédition." };
+    }
 
     // Atomic claim, gated on the prior status — same double-click/race guard
     // as markOrderShipped/markOrderReadyForPickup above.
     const claim = await prisma.order.updateMany({
       where: { id: orderId, status: "SHIPPED" },
-      data: { status: "COMPLETED" },
+      data: { status: "COMPLETED", collectedAt },
     });
     if (claim.count === 0) {
       return { success: false, message: "Seule une commande expédiée peut être clôturée." };
@@ -959,12 +1142,28 @@ export async function markOrderCompleted(orderId) {
  * cancelMyOrder — every authorization/ownership/status decision happens in
  * the caller, this just performs the cancellation once that's settled.
  */
-const CANCELLABLE_ORDER_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP", "SHIPPED"];
+// Once a parcel is shipped, do not restock or refund it through a generic
+// cancellation: the goods are no longer physically in the salon. It must go
+// through the return workflow once received (or a separately audited loss /
+// carrier-claim process).
+const CANCELLABLE_ORDER_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP"];
 
-async function performOrderCancellation(order, reason) {
+async function performOrderCancellation(order, reason, manualRefund = {}) {
   const orderId = order.id;
   try {
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
+
+    // A refund on this same payment (e.g. from a partial return on the same
+    // order) may already be in flight — its exact pending amount lives in a
+    // single pair of columns on Payment, so starting a second refund now
+    // would overwrite it and strand that amount from ever being safely
+    // retried. Must resolve (succeed or be manually reconciled) first.
+    if (wasSold && ["REFUND_PENDING", "REFUND_FAILED"].includes(order.payment.status)) {
+      return {
+        success: false,
+        message: "Un remboursement est déjà en cours de traitement pour cette commande — attendez sa résolution (ou réessayez-le depuis la page Réconciliation) avant d'annuler.",
+      };
+    }
 
     // Cap against what's actually still outstanding — a prior partial return
     // can already have refunded part of this payment, so summing (not just
@@ -983,6 +1182,26 @@ async function performOrderCancellation(order, reason) {
       });
       const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
       remaining = Number(order.payment.paidAmount) - alreadyRefunded;
+    }
+
+    const originalMethod = getOrderPaymentMethod(order.payment);
+    const needsManualRefund = wasSold && isManualOrderRefund(order.payment) && remaining > REFUND_EPSILON;
+    if (needsManualRefund) {
+      const confirmationError = validateManualRefundConfirmation({
+        method: originalMethod,
+        confirmed: manualRefund.confirmed,
+        reference: manualRefund.reference,
+      });
+      if (confirmationError) {
+        return {
+          success: false,
+          message: confirmationError,
+          requiresManualRefundConfirmation: true,
+          paymentMethod: originalMethod,
+          paymentMethodLabel: refundMethodLabel(originalMethod),
+          refundInstruction: manualRefundInstruction(originalMethod),
+        };
+      }
     }
 
     const { claimed, creditNote } = await prisma.$transaction(async (tx) => {
@@ -1033,6 +1252,42 @@ async function performOrderCancellation(order, reason) {
         });
       }
 
+      if (needsManualRefund) {
+        const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
+        await tx.transaction.create({
+          data: {
+            paymentId: order.payment.id,
+            amount: remaining,
+            method: originalMethod,
+            transactionType: "REFUND",
+            paidAt: new Date(),
+            manualReference: originalMethod === "CARD" ? manualRefund.reference.trim() : null,
+          },
+        });
+        await tx.payment.update({
+          where: { id: order.payment.id },
+          data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+        });
+      }
+
+      await tx.auditLog.create({
+        data: {
+          actorId: manualRefund.actorId ?? null,
+          actorRole: manualRefund.actorRole ?? null,
+          action: "order.cancelled",
+          entityType: "Order",
+          entityId: orderId,
+          metadata: {
+            orderNumber: order.orderNumber,
+            reason: reason ?? null,
+            refundAmount: remaining,
+            refundMethod: needsManualRefund ? originalMethod : order.payment?.transactionReference ? "ONLINE" : null,
+            manualReference: needsManualRefund && originalMethod === "CARD" ? manualRefund.reference.trim() : null,
+            manualRefundConfirmed: needsManualRefund,
+          },
+        },
+      });
+
       return { claimed: true, creditNote };
     });
 
@@ -1045,14 +1300,24 @@ async function performOrderCancellation(order, reason) {
       if (remaining > REFUND_EPSILON) {
         // Recorded before the Stripe call, not just in the catch block below —
         // a crash/timeout mid-call would otherwise leave nothing durable to
-        // retry against; see lib/payments/retry-failed-refunds.js.
-        await prisma.payment.update({ where: { id: order.payment.id }, data: { status: "REFUND_PENDING" } });
+        // retry against; see lib/payments/retry-failed-refunds.js. Pinning
+        // the exact amount + a stable idempotency key here (not recomputed
+        // later) is what lets a retry replay precisely this operation
+        // instead of resolving to the full remaining balance on the payment.
+        const refundIdempotencyKey = `cancel-${orderId}-${randomUUID()}`;
+        await prisma.payment.update({
+          where: { id: order.payment.id },
+          data: { status: "REFUND_PENDING", pendingRefundAmount: remaining, pendingRefundIdempotencyKey: refundIdempotencyKey },
+        });
         try {
           const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
           if (session.payment_intent) {
             const stripePaymentIntentId =
               typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent.id;
-            await stripe.refunds.create({ payment_intent: stripePaymentIntentId, amount: Math.round(remaining * 100) });
+            await stripe.refunds.create(
+              { payment_intent: stripePaymentIntentId, amount: Math.round(remaining * 100) },
+              { idempotencyKey: refundIdempotencyKey }
+            );
             const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
             await prisma.$transaction([
               prisma.transaction.updateMany({
@@ -1076,9 +1341,35 @@ async function performOrderCancellation(order, reason) {
               }),
               prisma.payment.update({
                 where: { id: order.payment.id },
-                data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+                data: {
+                  status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
+                  pendingRefundAmount: null,
+                  pendingRefundIdempotencyKey: null,
+                },
+              }),
+              prisma.auditLog.create({
+                data: {
+                  actorId: manualRefund.actorId ?? null,
+                  actorRole: manualRefund.actorRole ?? null,
+                  action: "order.cancellation_refund_completed",
+                  entityType: "Order",
+                  entityId: orderId,
+                  metadata: { orderNumber: order.orderNumber, amount: remaining, method: "ONLINE", automatedByStripe: true },
+                },
+              }),
+              prisma.auditLog.create({
+                data: {
+                  actorId: manualRefund.actorId ?? null,
+                  actorRole: manualRefund.actorRole ?? null,
+                  action: "order.cancellation_refund_completed",
+                  entityType: "Order",
+                  entityId: orderId,
+                  metadata: { orderNumber: order.orderNumber, amount: remaining, method: "ONLINE", automatedByStripe: true },
+                },
               }),
             ]);
+          } else {
+            throw new Error("STRIPE_PAYMENT_INTENT_MISSING");
           }
         } catch (err) {
           // The order is already cancelled and stock restored — that's correct
@@ -1112,35 +1403,42 @@ async function performOrderCancellation(order, reason) {
     const refundNote = wasSold
       ? refundFailed
         ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
+        : needsManualRefund
+          ? " Le remboursement a été effectué directement en boutique."
         : " Le remboursement apparaîtra sur votre compte sous quelques jours."
       : "";
 
-    sendEmail({
-      to: order.user.email,
-      subject: `Commande annulée – n°${order.orderNumber} – Meri Beauty`,
-      text:
-        `Bonjour ${order.user.fullName},\n\n` +
-        `Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
-        (reason ? ` Raison : ${reason}` : "") +
-        `\n\nL'équipe Meri Beauty`,
-      html:
-        `<p>Bonjour ${order.user.fullName},</p>` +
-        `<p>Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
-        (reason ? ` Raison : ${reason}` : "") +
-        `</p><p>L'équipe Meri Beauty</p>`,
-      ...(creditNotePdf
-        ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] }
-        : {}),
-    }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
+    // A walk-in POS "client de passage" order has no user/email to notify —
+    // nothing to send here, the cashier already has whatever ticket/refund
+    // record was handed over in person.
+    if (order.user) {
+      sendEmail({
+        to: order.user.email,
+        subject: `Commande annulée – n°${order.orderNumber} – Meri Beauty`,
+        text:
+          `Bonjour ${order.user.fullName},\n\n` +
+          `Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
+          (reason ? ` Raison : ${reason}` : "") +
+          `\n\nL'équipe Meri Beauty`,
+        html:
+          `<p>Bonjour ${order.user.fullName},</p>` +
+          `<p>Votre commande n°${order.orderNumber} a été annulée.${refundNote}` +
+          (reason ? ` Raison : ${reason}` : "") +
+          `</p><p>L'équipe Meri Beauty</p>`,
+        ...(creditNotePdf
+          ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] }
+          : {}),
+      }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
+    }
 
     if (refundFailed) {
-      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
       if (salon?.email) {
         sendEmail({
           to: salon.email,
           subject: `⚠️ Remboursement Stripe échoué – Commande n°${order.orderNumber}`,
-          text: `Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
-          html: `<p>Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
+          text: `Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user?.email ?? "client de passage"}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
+          html: `<p>Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user?.email ?? "client de passage"}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
         }).catch((err) => console.error("[performOrderCancellation] refund-failure alert email failed:", err));
       }
     }
@@ -1170,7 +1468,7 @@ export async function cancelOrder(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return { success: false, message: errors.orderId?.[0] ?? "Données invalides." };
   }
-  const { orderId, reason } = parsed.data;
+  const { orderId, reason, manualRefundConfirmed, manualRefundReference } = parsed.data;
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -1184,6 +1482,9 @@ export async function cancelOrder(input) {
   if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
     return { success: false, message: "Cette commande ne peut plus être annulée." };
   }
+  if (order.status === "SHIPPED") {
+    return { success: false, message: "Cette commande est déjà expédiée. Attendez le retour physique des articles avant de procéder au remboursement." };
+  }
 
   // Cancelling an unpaid order is routine order management — but cancelling
   // a paid one triggers restock + a real Stripe refund, which per policy
@@ -1195,7 +1496,12 @@ export async function cancelOrder(input) {
     };
   }
 
-  return performOrderCancellation(order, reason);
+  return performOrderCancellation(order, reason, {
+    confirmed: manualRefundConfirmed,
+    reference: manualRefundReference,
+    actorId: guard.session.user.id,
+    actorRole: guard.session.user.role,
+  });
 }
 
 /**
@@ -1229,6 +1535,5 @@ export async function cancelMyOrder(orderId) {
     return { success: false, message: "Cette commande ne peut plus être annulée en ligne — contactez-nous." };
   }
 
-  return performOrderCancellation(order, "Annulée par le client");
+  return performOrderCancellation(order, "Annulée par le client", { actorId: session.user.id, actorRole: session.user.role });
 }
-

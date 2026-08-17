@@ -69,6 +69,11 @@ export default function PaymentStep({ data, customerSession }) {
   const router = useRouter();
 
   const drafts = data.appointmentDrafts ?? [];
+  // Declared here, before the allowedPaymentMethods read below — this was
+  // previously declared further down, after its own first use, which is a
+  // temporal dead zone: `const` bindings throw ReferenceError when read
+  // before initialization, crashing every render of this step.
+  const draft = drafts[0];
   const rawTotal = drafts.reduce((sum, d) => sum + Number(d.price ?? 0), 0);
   const discountAmount = appliedPromo?.discountAmount ?? 0;
 
@@ -97,7 +102,6 @@ export default function PaymentStep({ data, customerSession }) {
       ? depositAmount
       : 0;
 
-  const draft = drafts[0];
   const staffServiceId = draft?.staffService?.id ?? data.staffService?.id;
 
   // ── Handlers ──────────────────────────────────────────────────────────────
@@ -144,6 +148,9 @@ export default function PaymentStep({ data, customerSession }) {
         paymentMethod,
         notes:         data.notes,
         promoCode:     appliedPromo?.code ?? null,
+        // Re-checked and recorded server-side — the guard above is only a
+        // courtesy message, the action is a public endpoint.
+        termsAccepted: acceptedTerms,
       });
 
       toast.dismiss(loadingToastId);
@@ -212,6 +219,9 @@ export default function PaymentStep({ data, customerSession }) {
         paymentMethod: "cash",
         notes:         data.notes,
         promoCode:     appliedPromo?.code ?? null,
+        // Re-checked and recorded server-side — the guard above is only a
+        // courtesy message, the action is a public endpoint.
+        termsAccepted: acceptedTerms,
       });
 
       toast.dismiss(loadingToastId);

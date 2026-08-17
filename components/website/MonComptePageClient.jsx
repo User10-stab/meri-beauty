@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Package, Sparkles, GraduationCap, Loader2, FileDown, ExternalLink, Truck } from "lucide-react";
+import { Package, Sparkles, GraduationCap, Loader2, FileDown, ExternalLink, Truck, AlertTriangle } from "lucide-react";
 import { cancelMyOrder } from "@/actions/boutique/orders";
+import { submitReservationCancellationRequest } from "@/actions/reservations/cancellation-request";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { toIntlLocale } from "@/lib/intl-locale";
 
@@ -35,6 +36,7 @@ function formatDate(date, intlLocale) {
     day: "2-digit",
     month: "short",
     year: "numeric",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -45,6 +47,7 @@ function formatSessionDate(date, intlLocale) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -137,8 +140,8 @@ function OrderCard({ order }) {
       <ul className="mt-4 space-y-1 border-t border-ink/8 pt-3 text-[13px] text-ink/65">
         {order.items.map((item, i) => (
           <li key={i} className="flex justify-between gap-3">
-            <span className="min-w-0 truncate">{item.productName} — {item.variantName} × {item.quantity}</span>
-            <span className="shrink-0 font-medium text-ink">{formatPrice(item.unitPrice * item.quantity, intlLocale)}</span>
+            <span className="min-w-0 truncate">{item.productName}{item.variantName ? ` — ${item.variantName}` : ""} × {item.quantity}</span>
+            <span className="shrink-0 font-medium text-ink">{formatPrice(item.unitPrice * item.quantity)}</span>
           </li>
         ))}
       </ul>
@@ -207,6 +210,110 @@ function OrderCard({ order }) {
   );
 }
 
+const REQUESTABLE_RESERVATION_STATUSES = new Set(["PENDING_DEPOSIT", "CONFIRMED"]);
+
+/**
+ * Neither ateliers nor formations allow self-cancellation — the 50% deposit
+ * is non-refundable and exceptions are decided case by case. Before this
+ * block existed the customer saw no cancel control and no explanation at
+ * all, so the only route out was an untracked phone call.
+ */
+function ReservationCancellationRequest({ reservation, kind }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const request = reservation.cancellationRequest;
+
+  if (!REQUESTABLE_RESERVATION_STATUSES.has(reservation.status)) return null;
+
+  async function handleSubmit() {
+    setSubmitting(true);
+    const result = await submitReservationCancellationRequest({
+      kind: kind === "workshop" ? "WORKSHOP" : "FORMATION",
+      reservationId: reservation.id,
+      reason,
+    });
+    if (result.success) {
+      toast.success(result.message);
+      setOpen(false);
+      router.refresh();
+    } else {
+      toast.error(result.message ?? "Impossible d'envoyer votre demande.");
+    }
+    setSubmitting(false);
+  }
+
+  return (
+    <div className="mt-3 border-t border-ink/8 pt-3 text-[12px] text-ink/45">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" strokeWidth={1.75} />
+        <p>
+          L&apos;annulation en ligne n&apos;est pas possible et l&apos;acompte reste acquis, sauf annulation
+          exceptionnelle approuvée par l&apos;équipe.
+        </p>
+      </div>
+
+      {request?.status === "PENDING" ? (
+        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-amber-800">
+          Votre demande est en attente d&apos;une décision de l&apos;équipe. Aucun remboursement n&apos;est engagé avant son accord.
+        </p>
+      ) : request?.status === "REJECTED" ? (
+        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-red-700">
+          Votre demande exceptionnelle a été refusée. La réservation et l&apos;acompte restent inchangés.
+          {request.decisionNote ? ` Message de l'équipe : ${request.decisionNote}` : ""}
+        </p>
+      ) : request?.status === "APPROVED" ? (
+        <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700">
+          Votre demande a été acceptée — la réservation est annulée et le remboursement est en cours.
+        </p>
+      ) : open ? (
+        <div className="mt-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+          <p className="text-amber-900">
+            Expliquez votre situation. Cette demande n&apos;annule pas la réservation et ne garantit pas un remboursement.
+          </p>
+          <textarea
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            maxLength={1000}
+            rows={3}
+            placeholder="Ex. maladie soudaine, avec toute information utile pour l'équipe"
+            className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-amber-500"
+          />
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              disabled={submitting}
+              className="text-xs font-semibold text-ink/55 hover:text-ink"
+            >
+              Retour
+            </button>
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || reason.trim().length < 10}
+              className="inline-flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {submitting && <Loader2 className="h-3 w-3 animate-spin" />}
+              Envoyer la demande
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="mt-2 text-xs font-semibold text-primary hover:underline"
+        >
+          Demander une annulation exceptionnelle
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ReservationCard({ reservation, kind }) {
   const locale = useLocale();
   const t = useTranslations();
@@ -267,6 +374,8 @@ function ReservationCard({ reservation, kind }) {
         </div>
 
         <InvoiceLink invoice={reservation.payment?.invoice} />
+
+        <ReservationCancellationRequest reservation={reservation} kind={kind} />
       </div>
     </div>
   );

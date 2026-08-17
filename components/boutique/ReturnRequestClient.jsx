@@ -10,8 +10,17 @@ function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
 }
 function formatDate(d) {
-  return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" });
+  return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric", timeZone: "Europe/Brussels" });
 }
+
+const REASON_CATEGORY_OPTIONS = [
+  { value: "CHANGED_MIND", label: "Changement d'avis" },
+  { value: "DEFECTIVE", label: "Produit défectueux" },
+  { value: "WRONG_ITEM", label: "Article incorrect reçu" },
+  { value: "DAMAGED_IN_TRANSIT", label: "Endommagé pendant le transport" },
+  { value: "NOT_RECEIVED", label: "Colis jamais reçu" },
+  { value: "GOODWILL", label: "Autre / geste commercial" },
+];
 
 export function ReturnRequestClient() {
   const t = useTranslations("boutique.returns");
@@ -22,6 +31,7 @@ export function ReturnRequestClient() {
   const [email, setEmail] = useState("");
   const [order, setOrder] = useState(null);
   const [selected, setSelected] = useState({}); // orderItemId -> quantity
+  const [reasonCategory, setReasonCategory] = useState("");
   const [reason, setReason] = useState("");
 
   async function handleLookup(e) {
@@ -35,6 +45,7 @@ export function ReturnRequestClient() {
     }
     setOrder(result.data);
     setSelected({});
+    setReasonCategory("");
     setStep("select");
   }
 
@@ -58,13 +69,23 @@ export function ReturnRequestClient() {
       toast.error(t("selectItemsError"));
       return;
     }
+    if (!reasonCategory) {
+      toast.error("Merci de sélectionner un motif de retour.");
+      return;
+    }
     if (!reason.trim()) {
       toast.error(t("reasonError"));
       return;
     }
 
     setSubmitting(true);
-    const result = await requestReturn({ orderNumber: order.orderNumber, email, reason: reason.trim(), items });
+    const result = await requestReturn({
+      orderNumber: order.orderNumber,
+      email,
+      reasonCategory,
+      reason: reason.trim(),
+      items,
+    });
     setSubmitting(false);
 
     if (!result.success) {
@@ -130,7 +151,13 @@ export function ReturnRequestClient() {
             <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
               Commande n°{order.orderNumber}
             </h2>
-            <p className="mb-4 text-xs text-gray-400">Retour possible jusqu'au {formatDate(order.deadline)}</p>
+            <p className="mb-4 text-xs text-gray-400">
+              {order.estimatedDeadline
+                ? "Date de réception non confirmée — contactez-nous si vous n'êtes pas sûr(e) d'être encore dans les délais."
+                : order.withdrawalExpired
+                  ? "Le délai de 14 jours pour un simple changement d'avis est dépassé. Pour un produit défectueux, un article incorrect ou un colis endommagé, vous restez couvert et pouvez faire votre demande ci-dessous."
+                  : `Retour possible jusqu'au ${formatDate(order.deadline)}`}
+            </p>
 
             <div className="space-y-3">
               {order.items.map((item) => {
@@ -181,6 +208,22 @@ export function ReturnRequestClient() {
 
           <div className="border border-neutral-200 p-6">
             <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("reasonLabel")}</h2>
+            <select
+              value={reasonCategory}
+              onChange={(e) => setReasonCategory(e.target.value)}
+              className="mb-3 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+              required
+            >
+              <option value="" disabled>Sélectionnez un motif</option>
+              {REASON_CATEGORY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            {order.withdrawalExpired && reasonCategory === "CHANGED_MIND" && (
+              <p className="mb-3 text-xs text-amber-700">
+                Le délai de 14 jours pour un changement d&apos;avis est dépassé pour cette commande.
+              </p>
+            )}
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}

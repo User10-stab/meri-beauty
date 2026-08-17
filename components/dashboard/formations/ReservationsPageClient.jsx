@@ -5,10 +5,15 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DataTable } from "../Tables/DataTable";
 import { ReservationRow } from "./ReservationRow";
-import { cancelFormationReservation } from "@/actions/formations/manage-reservation";
+import {
+  cancelFormationReservation,
+  completeFormationReservation,
+  markFormationReservationNoShow,
+} from "@/actions/formations/manage-reservation";
 import { isAdminRole } from "@/lib/authorization";
 import { useTranslations } from "next-intl";
 import { CancelReservationDialog } from "@/components/dashboard/workshops/CancelReservationDialog";
+import { SettleReservationDialog } from "@/components/dashboard/reservations/SettleReservationDialog";
 
 export function ReservationsPageClient({ initialReservations = [], userRole }) {
   const t = useTranslations("dashboardFormations.reservations");
@@ -25,6 +30,33 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
   const isAdmin = isAdminRole(userRole);
   const [toCancel, setToCancel] = useState(null);
   const [isCancelling, startCancel] = useTransition();
+  const [toSettle, setToSettle] = useState(null);
+  const [isSettling, startSettle] = useTransition();
+
+  function handleSettle({ method, paymentConfirmed }) {
+    startSettle(async () => {
+      const result = await completeFormationReservation(toSettle.id, { method, paymentConfirmed });
+      if (result.success) {
+        toast.success(result.message);
+        setToSettle(null);
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
+
+  function handleNoShow(row) {
+    startSettle(async () => {
+      const result = await markFormationReservationNoShow(row.id);
+      if (result.success) {
+        toast.success(result.message);
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
 
   function handleConfirmCancel({ reason, refundDeposit }) {
     startCancel(async () => {
@@ -61,7 +93,13 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         onClose={() => setToCancel(null)}
         onConfirm={handleConfirmCancel}
         loading={isCancelling}
-        formationMode
+      />
+
+      <SettleReservationDialog
+        reservation={toSettle}
+        onClose={() => setToSettle(null)}
+        onConfirm={handleSettle}
+        loading={isSettling}
       />
     </div>
   );

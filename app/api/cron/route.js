@@ -93,6 +93,7 @@ export async function GET(req) {
         formationHoldsExpired: results.expireStaleFormationHolds?.expiredCount ?? null,
         refundsRetried: results.retryFailedRefunds?.retried ?? null,
         refundsRecovered: results.retryFailedRefunds?.succeeded ?? null,
+        refundsNeedingManualReconciliation: results.retryFailedRefunds?.needsManualReconciliation ?? null,
         missedRefundsChecked: results.reconcileMissedRefunds?.checked ?? null,
         missedRefundsRecovered: results.reconcileMissedRefunds?.reconciled ?? null,
         failedJobs: settled

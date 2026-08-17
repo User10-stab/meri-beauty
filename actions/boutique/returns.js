@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
@@ -9,11 +10,27 @@ import {
   returnRequestReceivedEmail,
   returnApprovedEmail,
   returnCompletedEmail,
+  returnRejectedEmail,
 } from "@/lib/email-templates";
 import { DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
-import { lookupOrderForReturnSchema, requestReturnSchema, returnActionSchema } from "@/lib/validations/commerce";
+import {
+  lookupOrderForReturnSchema,
+  requestReturnSchema,
+  returnActionSchema,
+  completeReturnRequestSchema,
+  rejectReturnRequestSchema,
+} from "@/lib/validations/commerce";
 import { issueCreditNote } from "@/lib/invoicing";
 import { renderCreditNotePdf } from "@/lib/pdf/render";
+import {
+  getOrderPaymentMethod,
+  isManualOrderRefund,
+  manualRefundInstruction,
+  refundMethodLabel,
+  validateManualRefundConfirmation,
+} from "@/lib/payments/refund-method";
+import { allocateOrderDiscount } from "@/lib/orders/discount-allocation";
+import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 
 /**
  * Belgian/EU 14-day right of withdrawal.
@@ -24,17 +41,61 @@ import { renderCreditNotePdf } from "@/lib/pdf/render";
  * side reuses the same ORDERS permission as the rest of order fulfilment —
  * this is the same day-to-day counter work, not a separate admin area.
  *
- * Withdrawal window: starts at pickup (pickedUpAt) or shipping (shippedAt —
- * a proxy for delivery, since carrier tracking isn't integrated; the +3 day
- * grace on top of the legal 14 covers typical transit time so the window
- * never closes before the customer could plausibly have received the
- * parcel). Partial returns are supported: an order can have several
- * ReturnRequests over time as long as the total requested quantity per
- * item never exceeds what was bought.
+ * Withdrawal window: starts at pickup (pickedUpAt, in-store collection) or,
+ * for shipped orders, at collectedAt — the date staff confirm from the
+ * Mondial Relay tracking portal that the customer actually collected the
+ * parcel from the relay point, entered when the order is closed
+ * (markOrderCompleted). That is the true legal trigger (SPF Économie: le
+ * lendemain de la prise de possession réelle du bien), not shippedAt.
+ *
+ * Orders closed before collectedAt existed (or before staff started
+ * recording it) have no confirmed collection date. For those, shippedAt is
+ * used only as a wide, non-punitive estimate — never to auto-close the
+ * window early, since we genuinely don't know when the customer received
+ * the parcel. See bigbatch.txt P0 "Le délai de retour d'une livraison
+ * commence trop tôt" — a shippedAt+17 estimate closed real cases days
+ * before the actual 14-day-from-receipt deadline.
+ *
+ * Partial returns are supported: an order can have several ReturnRequests
+ * over time as long as the total requested quantity per item never exceeds
+ * what was bought.
  */
 
-const WITHDRAWAL_DAYS_PICKUP = 14;
-const WITHDRAWAL_DAYS_SHIPPING = 14 + 3; // + transit grace, no delivery-confirmation webhook
+const WITHDRAWAL_DAYS = 14;
+// Outer sanity bound for the shippedAt-only estimate (no confirmed
+// collectedAt yet) — mirrors the EU rule that an incomplete withdrawal
+// disclosure extends the window up to 12 months, rather than inventing an
+// arbitrary shorter cutoff that could still reject a legitimate return.
+const UNCONFIRMED_SHIPPING_ESTIMATE_DAYS = 365;
+
+// The public lookup takes only orderNumber + email — no account, no
+// CAPTCHA. Without a cap, either could be brute-forced: many order numbers
+// against one IP, or one order number hammered from many IPs to guess the
+// matching email. See bigbatch.txt P1 "Le formulaire public peut être
+// abusé".
+const RETURN_LOOKUP_IP_WINDOW_MS = 5 * 60 * 1000;
+const RETURN_LOOKUP_IP_MAX = 10;
+const RETURN_LOOKUP_ORDER_WINDOW_MS = 15 * 60 * 1000;
+const RETURN_LOOKUP_ORDER_MAX = 10;
+const RETURN_REQUEST_IP_WINDOW_MS = 10 * 60 * 1000;
+const RETURN_REQUEST_IP_MAX = 5;
+
+const RETURN_REASON_CATEGORY_LABEL = {
+  CHANGED_MIND: "Changement d'avis",
+  DEFECTIVE: "Produit défectueux",
+  WRONG_ITEM: "Article incorrect",
+  DAMAGED_IN_TRANSIT: "Endommagé pendant le transport",
+  NOT_RECEIVED: "Colis non reçu",
+  GOODWILL: "Geste commercial",
+};
+
+const RETURN_CONDITION_LABEL = {
+  SEALED_RESELLABLE: "Scellé, revendable",
+  OPENED_HYGIENE: "Descellé (exception hygiène)",
+  DAMAGED: "Endommagé",
+  DEFECTIVE: "Défectueux",
+  WRONG_ITEM: "Mauvais article envoyé",
+};
 
 async function requireOrdersAccess() {
   const session = await auth();
@@ -46,12 +107,18 @@ async function requireOrdersAccess() {
 }
 
 function withdrawalWindow(order) {
-  const start = order.pickedUpAt ?? order.shippedAt;
-  if (!start) return null;
-  const days = order.fulfilmentMode === "SHIPPING_PREPAID" ? WITHDRAWAL_DAYS_SHIPPING : WITHDRAWAL_DAYS_PICKUP;
-  const end = new Date(start);
-  end.setDate(end.getDate() + days);
-  return { start, end };
+  const confirmedStart = order.pickedUpAt ?? order.collectedAt;
+  if (confirmedStart) {
+    const end = new Date(confirmedStart);
+    end.setDate(end.getDate() + WITHDRAWAL_DAYS);
+    return { start: confirmedStart, end, estimated: false };
+  }
+  if (order.fulfilmentMode === "SHIPPING_PREPAID" && order.shippedAt) {
+    const end = new Date(order.shippedAt);
+    end.setDate(end.getDate() + UNCONFIRMED_SHIPPING_ESTIMATE_DAYS);
+    return { start: order.shippedAt, end, estimated: true };
+  }
+  return null;
 }
 
 /** Quantity per orderItem already covered by a non-rejected return request. */
@@ -67,9 +134,12 @@ function claimedQuantities(order) {
 }
 
 function serializeReturnRequest(rr) {
+  const paymentMethod = getOrderPaymentMethod(rr.order?.payment);
   return {
     id: rr.id,
     status: rr.status,
+    reasonCategory: rr.reasonCategory,
+    reasonCategoryLabel: RETURN_REASON_CATEGORY_LABEL[rr.reasonCategory] ?? rr.reasonCategory,
     reason: rr.reason,
     requestedAt: rr.requestedAt,
     processedAt: rr.processedAt,
@@ -79,6 +149,10 @@ function serializeReturnRequest(rr) {
       ? {
           id: rr.order.id,
           orderNumber: rr.order.orderNumber,
+          paymentMethod,
+          paymentMethodLabel: refundMethodLabel(paymentMethod),
+          requiresManualRefund: isManualOrderRefund(rr.order.payment),
+          refundInstruction: manualRefundInstruction(paymentMethod),
           user: rr.order.user
             ? { fullName: rr.order.user.fullName, email: rr.order.user.email }
             : null,
@@ -91,6 +165,8 @@ function serializeReturnRequest(rr) {
       productName: item.orderItem?.productName,
       variantName: item.orderItem?.variantName,
       unitPrice: item.orderItem ? Number(item.orderItem.unitPrice) : null,
+      condition: item.condition,
+      conditionLabel: item.condition ? RETURN_CONDITION_LABEL[item.condition] : null,
     })),
   };
 }
@@ -110,6 +186,16 @@ export async function getReturnableOrder(input) {
   }
   const { orderNumber, email } = parsed.data;
 
+  const ip = await getClientIp();
+  if (
+    isRateLimited("return-lookup-ip", ip, { windowMs: RETURN_LOOKUP_IP_WINDOW_MS, max: RETURN_LOOKUP_IP_MAX }) ||
+    isRateLimited("return-lookup-order", String(orderNumber), { windowMs: RETURN_LOOKUP_ORDER_WINDOW_MS, max: RETURN_LOOKUP_ORDER_MAX })
+  ) {
+    return { success: false, message: "Trop de tentatives. Veuillez patienter avant de réessayer." };
+  }
+  recordRateLimitHit("return-lookup-ip", ip);
+  recordRateLimitHit("return-lookup-order", String(orderNumber));
+
   try {
     const order = await prisma.order.findFirst({
       where: { orderNumber, user: { email: email.trim().toLowerCase() } },
@@ -127,16 +213,20 @@ export async function getReturnableOrder(input) {
       return { success: false, message: "Cette commande n'est pas encore finalisée — pas de retour possible pour le moment." };
     }
 
+    // The 14-day withdrawal window only ever gates a CHANGED_MIND request —
+    // a defective/wrong-item/damaged/not-received/goodwill claim isn't
+    // bound by it at all (see requestReturn). The reason isn't chosen yet
+    // at lookup time, so this step never hard-rejects on the window; it
+    // only reports whether it has passed so the UI can steer the customer
+    // toward the right reason. requestReturn is the authoritative gate.
     const window = withdrawalWindow(order);
-    if (!window || new Date() > window.end) {
-      return {
-        success: false,
-        message: "Le délai de rétractation de 14 jours pour cette commande est dépassé.",
-      };
-    }
+    const withdrawalExpired = Boolean(window && !window.estimated && new Date() > window.end);
 
     const claimed = claimedQuantities(order);
     const items = order.items
+      // POS ad-hoc service lines (variantId null) have no stock to return
+      // to — they're a counter sale, not something to ship back.
+      .filter((item) => item.variantId !== null)
       .map((item) => ({
         id: item.id,
         productName: item.productName,
@@ -156,7 +246,9 @@ export async function getReturnableOrder(input) {
       data: {
         orderId: order.id,
         orderNumber: order.orderNumber,
-        deadline: window.end,
+        deadline: window && !window.estimated ? window.end : null,
+        estimatedDeadline: Boolean(window?.estimated),
+        withdrawalExpired,
         items,
       },
     };
@@ -173,10 +265,21 @@ export async function requestReturn(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: errors.reason?.[0] ?? errors.items?.[0] ?? errors.orderNumber?.[0] ?? errors.email?.[0] ?? "Données invalides.",
+      message:
+        errors.reasonCategory?.[0] ?? errors.reason?.[0] ?? errors.items?.[0] ?? errors.orderNumber?.[0] ?? errors.email?.[0] ?? "Données invalides.",
     };
   }
-  const { orderNumber, email, reason, items } = parsed.data;
+  const { orderNumber, email, reasonCategory, reason, items } = parsed.data;
+
+  const ip = await getClientIp();
+  if (
+    isRateLimited("return-request-ip", ip, { windowMs: RETURN_REQUEST_IP_WINDOW_MS, max: RETURN_REQUEST_IP_MAX }) ||
+    isRateLimited("return-lookup-order", String(orderNumber), { windowMs: RETURN_LOOKUP_ORDER_WINDOW_MS, max: RETURN_LOOKUP_ORDER_MAX })
+  ) {
+    return { success: false, message: "Trop de tentatives. Veuillez patienter avant de réessayer." };
+  }
+  recordRateLimitHit("return-request-ip", ip);
+  recordRateLimitHit("return-lookup-order", String(orderNumber));
 
   try {
     const order = await prisma.order.findFirst({
@@ -188,9 +291,21 @@ export async function requestReturn(input) {
       return { success: false, message: "Cette commande n'est pas encore finalisée — pas de retour possible pour le moment." };
     }
 
-    const window = withdrawalWindow(order);
-    if (!window || new Date() > window.end) {
-      return { success: false, message: "Le délai de rétractation de 14 jours pour cette commande est dépassé." };
+    // The 14-day withdrawal window only governs a simple change of mind.
+    // Defective goods carry the separate 2-year statutory guarantee; a
+    // wrong/damaged/lost item or a goodwill exception aren't rétractation
+    // claims at all — none of these are time-boxed by this check. See
+    // bigbatch.txt P1 "Rétractation et produit défectueux sont confondus".
+    if (reasonCategory === "CHANGED_MIND") {
+      const window = withdrawalWindow(order);
+      if (!window || (!window.estimated && new Date() > window.end)) {
+        return {
+          success: false,
+          message:
+            "Le délai de rétractation de 14 jours pour un changement d'avis est dépassé. " +
+            "Pour un produit défectueux ou non conforme, vous restez couvert par la garantie légale — contactez le salon directement.",
+        };
+      }
     }
 
     // Serialize return-request creation per order: two concurrent requests
@@ -224,6 +339,7 @@ export async function requestReturn(input) {
       const created = await tx.returnRequest.create({
         data: {
           orderId: order.id,
+          reasonCategory,
           reason,
           items: { create: items.map((i) => ({ orderItemId: i.orderItemId, quantity: i.quantity })) },
         },
@@ -288,7 +404,14 @@ export async function listReturnRequests({ status, search, page = 1, pageSize = 
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: {
-          order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
+          order: {
+            select: {
+              id: true,
+              orderNumber: true,
+              user: { select: { fullName: true, email: true } },
+              payment: { select: { transactionReference: true, transactions: { select: { method: true, transactionType: true } } } },
+            },
+          },
           items: { include: { orderItem: true } },
         },
       }),
@@ -309,7 +432,14 @@ export async function getReturnRequestById(id) {
     const rr = await prisma.returnRequest.findUnique({
       where: { id },
       include: {
-        order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            user: { select: { fullName: true, email: true } },
+            payment: { select: { transactionReference: true, transactions: { select: { method: true, transactionType: true } } } },
+          },
+        },
         items: { include: { orderItem: true } },
       },
     });
@@ -366,21 +496,33 @@ export async function rejectReturnRequest(input) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
 
-  const parsed = returnActionSchema.safeParse(input);
-  if (!parsed.success) return { success: false, message: "Données invalides." };
+  const parsed = rejectReturnRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return { success: false, message: errors.staffNote?.[0] ?? "Données invalides." };
+  }
   const { returnRequestId, staffNote } = parsed.data;
 
   try {
-    const rr = await prisma.returnRequest.findUnique({ where: { id: returnRequestId } });
+    const rr = await prisma.returnRequest.findUnique({
+      where: { id: returnRequestId },
+      include: { order: { include: { user: true } } },
+    });
     if (!rr) return { success: false, message: "Demande de retour introuvable." };
     if (!["REQUESTED", "APPROVED"].includes(rr.status)) {
       return { success: false, message: "Cette demande ne peut plus être refusée." };
     }
 
+    const decidedAt = new Date();
     await prisma.returnRequest.update({
       where: { id: returnRequestId },
-      data: { status: "REJECTED", staffNote: staffNote ?? null, processedAt: new Date(), processedByStaffId: guard.session.user.id },
+      data: { status: "REJECTED", staffNote, processedAt: decidedAt, processedByStaffId: guard.session.user.id },
     });
+
+    sendEmail({
+      to: rr.order.user.email,
+      ...returnRejectedEmail({ customerName: rr.order.user.fullName, orderNumber: rr.order.orderNumber, reason: staffNote, decidedAt }),
+    }).catch((err) => console.error("[rejectReturnRequest] email failed:", err));
 
     revalidatePath("/dashboard/boutique/returns");
     return { success: true, message: "Demande de retour refusée." };
@@ -393,8 +535,8 @@ export async function rejectReturnRequest(input) {
 /**
  * Staff confirms the item(s) are physically back: restocks, issues a credit
  * note against the order's invoice, and refunds — Stripe if the order was
- * paid online, otherwise it's a cash/card reimbursement handled at the
- * counter (nothing further for this action to do about the money itself).
+ * paid online, otherwise it requires an explicit confirmation that the
+ * physical cash/card-terminal reimbursement has happened at the counter.
  * Shipping is only refunded if this completion returns every remaining
  * item on the order — a partial return never touches the delivery fee.
  */
@@ -408,9 +550,12 @@ export async function completeReturnRequest(input) {
     return { success: false, message: "Seul un administrateur peut finaliser un retour (remboursement requis). Contactez un administrateur." };
   }
 
-  const parsed = returnActionSchema.safeParse(input);
-  if (!parsed.success) return { success: false, message: "Données invalides." };
-  const { returnRequestId, staffNote } = parsed.data;
+  const parsed = completeReturnRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    const errors = parsed.error.flatten().fieldErrors;
+    return { success: false, message: errors.itemConditions?.[0] ?? "Données invalides." };
+  }
+  const { returnRequestId, staffNote, manualRefundConfirmed, manualRefundReference, itemConditions } = parsed.data;
 
   try {
     const rr = await prisma.returnRequest.findUnique({
@@ -420,7 +565,7 @@ export async function completeReturnRequest(input) {
         order: {
           include: {
             items: true,
-            payment: { include: { invoice: true } },
+            payment: { include: { invoice: true, transactions: true } },
             user: true,
             returnRequests: { include: { items: true } },
           },
@@ -433,7 +578,37 @@ export async function completeReturnRequest(input) {
       return { success: false, message: "Aucune facture n'est associée à cette commande — impossible d'émettre une note de crédit." };
     }
 
-    const refundAmount = rr.items.reduce((sum, i) => sum + Number(i.orderItem.unitPrice) * i.quantity, 0);
+    // Every physical line item must be inspected and classified before any
+    // stock decision is made — see ReturnItemCondition. Reject rather than
+    // default-guessing a condition for anything staff didn't explicitly set.
+    const conditionByItemId = new Map(itemConditions.map((c) => [c.returnRequestItemId, c.condition]));
+    for (const item of rr.items) {
+      if (!conditionByItemId.has(item.id)) {
+        return { success: false, message: "Indiquez l'état de chaque article retourné avant de finaliser." };
+      }
+    }
+
+    const originalMethod = getOrderPaymentMethod(rr.order.payment);
+    const manualConfirmationError = validateManualRefundConfirmation({
+      method: originalMethod,
+      confirmed: manualRefundConfirmed,
+      reference: manualRefundReference,
+    });
+    if (manualConfirmationError) return { success: false, message: manualConfirmationError };
+
+    // Net (post-discount) amount per order item, not the face-value
+    // unitPrice — an order with a promo code paid less than the sticker
+    // price per item, and refunding the sticker price on a partial return
+    // both over-refunds this item and wrongly eats into the cap that a
+    // later return of a different item on the same order needs. See
+    // allocateOrderDiscount() / bigbatch.txt P0 "Les promotions rendent les
+    // retours partiels incorrects".
+    const netAmountByOrderItemId = allocateOrderDiscount(rr.order);
+    const refundAmount = rr.items.reduce((sum, i) => {
+      const netForFullQuantity = netAmountByOrderItemId.get(i.orderItemId) ?? Number(i.orderItem.unitPrice) * i.orderItem.quantity;
+      const netUnitPrice = netForFullQuantity / i.orderItem.quantity;
+      return sum + netUnitPrice * i.quantity;
+    }, 0);
 
     // Is every unit of the order now returned? Only COMPLETED requests
     // (items physically confirmed back) count toward this — an APPROVED
@@ -453,6 +628,8 @@ export async function completeReturnRequest(input) {
     const totalRefund = refundAmount + shippingRefund;
     const REFUND_EPSILON = 0.01;
 
+    const manualRefund = isManualOrderRefund(rr.order.payment);
+    const refundIdempotencyKey = `return-${rr.id}-${randomUUID()}`;
     const { creditNote, alreadyRefunded, paidAmount } = await prisma.$transaction(async (tx) => {
       // Atomically claim this return: the WHERE clause only matches while
       // status is still APPROVED, so if two requests race here only one
@@ -471,7 +648,15 @@ export async function completeReturnRequest(input) {
 
       // Lock the payment row so two return requests on the same order can't
       // both read "nothing refunded yet" and both slip under the cap.
-      await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${rr.order.payment.id} FOR UPDATE`;
+      const lockedPayment = await tx.$queryRaw`SELECT status FROM "Payment" WHERE id = ${rr.order.payment.id} FOR UPDATE`;
+      if (["REFUND_PENDING", "REFUND_FAILED"].includes(lockedPayment[0]?.status)) {
+        // A prior refund on this same payment (this return or another one)
+        // hasn't resolved yet — its exact pending amount lives in a single
+        // pair of columns on Payment, so starting a second operation now
+        // would overwrite it and strand that amount from ever being safely
+        // retried. Must resolve (succeed or be manually reconciled) first.
+        throw new Error("REFUND_ALREADY_PENDING");
+      }
       const priorRefunds = await tx.transaction.aggregate({
         where: { paymentId: rr.order.payment.id, transactionType: "REFUND" },
         _sum: { amount: true },
@@ -482,21 +667,46 @@ export async function completeReturnRequest(input) {
         throw new Error("REFUND_CAP_EXCEEDED");
       }
 
+      // Only a sealed, resalable item goes back into vendable stock. Every
+      // other condition is received into quarantine — recorded for audit,
+      // but stockQuantity is left untouched — so an opened cosmetic, a
+      // damaged item, or a supplier defect can never re-enter the shop
+      // shelf without a separate, deliberate stock movement.
       for (const item of rr.items) {
-        const updated = await tx.productVariant.update({
-          where: { id: item.orderItem.variantId },
-          data: { stockQuantity: { increment: item.quantity } },
-        });
-        await tx.inventoryMovement.create({
-          data: {
-            variantId: item.orderItem.variantId,
-            type: "RETURN",
-            quantity: item.quantity,
-            previousStock: updated.stockQuantity - item.quantity,
-            newStock: updated.stockQuantity,
-            reason: `Retour — commande n°${rr.order.orderNumber}`,
-          },
-        });
+        const condition = conditionByItemId.get(item.id);
+        await tx.returnRequestItem.update({ where: { id: item.id }, data: { condition } });
+
+        if (condition === "SEALED_RESELLABLE") {
+          const updated = await tx.productVariant.update({
+            where: { id: item.orderItem.variantId },
+            data: { stockQuantity: { increment: item.quantity } },
+          });
+          await tx.inventoryMovement.create({
+            data: {
+              variantId: item.orderItem.variantId,
+              type: "RETURN",
+              quantity: item.quantity,
+              previousStock: updated.stockQuantity - item.quantity,
+              newStock: updated.stockQuantity,
+              reason: `Retour — commande n°${rr.order.orderNumber} — scellé, remis en stock vendable`,
+            },
+          });
+        } else {
+          const variant = await tx.productVariant.findUniqueOrThrow({
+            where: { id: item.orderItem.variantId },
+            select: { stockQuantity: true },
+          });
+          await tx.inventoryMovement.create({
+            data: {
+              variantId: item.orderItem.variantId,
+              type: "RETURN_QUARANTINE",
+              quantity: item.quantity,
+              previousStock: variant.stockQuantity,
+              newStock: variant.stockQuantity,
+              reason: `Retour — commande n°${rr.order.orderNumber} — état : ${RETURN_CONDITION_LABEL[condition]} — mis en quarantaine, non revendable`,
+            },
+          });
+        }
       }
 
       const creditNote = await issueCreditNote(tx, {
@@ -506,6 +716,61 @@ export async function completeReturnRequest(input) {
       });
 
       await tx.returnRequest.update({ where: { id: rr.id }, data: { creditNoteId: creditNote.id } });
+
+      if (manualRefund) {
+        const newTotalRefunded = alreadyRefunded + totalRefund;
+        const fullyRefunded = newTotalRefunded + REFUND_EPSILON >= paidAmount;
+        await tx.transaction.create({
+          data: {
+            paymentId: rr.order.payment.id,
+            amount: totalRefund,
+            method: originalMethod,
+            transactionType: "REFUND",
+            paidAt: new Date(),
+            manualReference: originalMethod === "CARD" ? manualRefundReference.trim() : null,
+          },
+        });
+        await tx.payment.update({
+          where: { id: rr.order.payment.id },
+          data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+        });
+      } else {
+        // Persist this before contacting Stripe: a process crash or timeout
+        // after the external call remains visible to the retry/reconciliation
+        // jobs instead of silently looking paid forever. Pinning the exact
+        // amount + a stable idempotency key here (not recomputed later) is
+        // what lets a retry replay precisely this operation instead of
+        // resolving to the full remaining balance on the payment.
+        await tx.payment.update({
+          where: { id: rr.order.payment.id },
+          data: {
+            status: "REFUND_PENDING",
+            refundAttemptedAt: new Date(),
+            pendingRefundAmount: totalRefund,
+            pendingRefundIdempotencyKey: refundIdempotencyKey,
+          },
+        });
+      }
+
+      if (manualRefund) {
+        await tx.auditLog.create({
+          data: {
+            actorId: guard.session.user.id,
+            actorRole: guard.session.user.role,
+            action: "order.return_refund_completed",
+            entityType: "ReturnRequest",
+            entityId: rr.id,
+            metadata: {
+              orderId: rr.order.id,
+              orderNumber: rr.order.orderNumber,
+              amount: totalRefund,
+              method: originalMethod,
+              manualReference: originalMethod === "CARD" ? manualRefundReference.trim() : null,
+              automatedByStripe: false,
+            },
+          },
+        });
+      }
 
       return { creditNote, alreadyRefunded, paidAmount };
     });
@@ -520,16 +785,29 @@ export async function completeReturnRequest(input) {
     if (rr.order.payment.transactionReference) {
       try {
         const session = await stripe.checkout.sessions.retrieve(rr.order.payment.transactionReference);
-        if (session.payment_intent) {
-          await stripe.refunds.create({ payment_intent: session.payment_intent, amount: Math.round(totalRefund * 100) });
-        }
+        const stripePaymentIntentId =
+          typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+        if (!stripePaymentIntentId) throw new Error("STRIPE_PAYMENT_INTENT_MISSING");
+        await stripe.refunds.create(
+          { payment_intent: stripePaymentIntentId, amount: Math.round(totalRefund * 100) },
+          { idempotencyKey: refundIdempotencyKey }
+        );
       } catch (err) {
         console.error("[completeReturnRequest] REFUND FAILED for return", rr.id, err);
         refundFailed = true;
+        await prisma.payment.update({
+          where: { id: rr.order.payment.id },
+          data: {
+            status: "REFUND_FAILED",
+            refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
+            refundAttemptedAt: new Date(),
+            refundRetryCount: { increment: 1 },
+          },
+        });
       }
     }
 
-    if (!refundFailed) {
+    if (!refundFailed && !manualRefund) {
       const newTotalRefunded = alreadyRefunded + totalRefund;
       const fullyRefunded = newTotalRefunded + REFUND_EPSILON >= paidAmount;
       await prisma.$transaction([
@@ -537,14 +815,50 @@ export async function completeReturnRequest(input) {
           data: {
             paymentId: rr.order.payment.id,
             amount: totalRefund,
-            method: rr.order.payment.transactionReference ? "ONLINE" : "CASH",
+            method: "ONLINE",
             transactionType: "REFUND",
             paidAt: new Date(),
           },
         }),
         prisma.payment.update({
           where: { id: rr.order.payment.id },
-          data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+          data: {
+            status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
+            pendingRefundAmount: null,
+            pendingRefundIdempotencyKey: null,
+          },
+        }),
+        prisma.auditLog.create({
+          data: {
+            actorId: guard.session.user.id,
+            actorRole: guard.session.user.role,
+            action: "order.return_refund_completed",
+            entityType: "ReturnRequest",
+            entityId: rr.id,
+            metadata: {
+              orderId: rr.order.id,
+              orderNumber: rr.order.orderNumber,
+              amount: totalRefund,
+              method: "ONLINE",
+              automatedByStripe: true,
+            },
+          },
+        }),
+        prisma.auditLog.create({
+          data: {
+            actorId: guard.session.user.id,
+            actorRole: guard.session.user.role,
+            action: "order.return_refund_completed",
+            entityType: "ReturnRequest",
+            entityId: rr.id,
+            metadata: {
+              orderId: rr.order.id,
+              orderNumber: rr.order.orderNumber,
+              amount: totalRefund,
+              method: "ONLINE",
+              automatedByStripe: true,
+            },
+          },
         }),
       ]);
     }
@@ -561,12 +875,13 @@ export async function completeReturnRequest(input) {
         orderNumber: rr.order.orderNumber,
         refundAmount: totalRefund,
         refundFailed,
+        manualRefund,
       }),
       ...(creditNotePdf ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] } : {}),
     }).catch((err) => console.error("[completeReturnRequest] email failed:", err));
 
     if (refundFailed) {
-      const salon = await prisma.salon.findFirst({ select: { email: true } });
+      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
       if (salon?.email) {
         sendEmail({
           to: salon.email,
@@ -591,6 +906,12 @@ export async function completeReturnRequest(input) {
     }
     if (error.message === "REFUND_CAP_EXCEEDED") {
       return { success: false, message: "Ce remboursement dépasserait le montant réellement payé pour cette commande." };
+    }
+    if (error.message === "REFUND_ALREADY_PENDING") {
+      return {
+        success: false,
+        message: "Un remboursement est déjà en cours de traitement pour cette commande — attendez sa résolution (ou réessayez-le depuis la page Réconciliation) avant d'en lancer un autre.",
+      };
     }
     console.error("[completeReturnRequest]", error);
     return { success: false, message: "Impossible de finaliser ce retour." };

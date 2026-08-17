@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, AlertTriangle, Boxes, History } from "lucide-react";
+import { Search, AlertTriangle, Boxes, History, ScanLine } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { StockAdjustDialog } from "@/components/dashboard/boutique/StockAdjustDialog";
 import { StockHistoryDrawer } from "@/components/dashboard/boutique/StockHistoryDrawer";
@@ -13,6 +13,7 @@ export function StockPageClient({ initialVariants }) {
   const router = useRouter();
   const t = useTranslations("dashboardBoutique.stock");
   const [search, setSearch] = useState("");
+  const [scannedCode, setScannedCode] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [adjusting, setAdjusting] = useState(null);
   const [historyFor, setHistoryFor] = useState(null);
@@ -27,9 +28,46 @@ export function StockPageClient({ initialVariants }) {
     });
   }, [initialVariants, search, lowStockOnly]);
 
+  function handleUsbScan(event) {
+    event.preventDefault();
+    const code = scannedCode.trim();
+    if (!code) return;
+
+    const variant = initialVariants.find(
+      (item) => item.barcode?.trim() === code || item.sku?.trim().toLowerCase() === code.toLowerCase()
+    );
+
+    setSearch(code);
+    setScannedCode("");
+    if (!variant) {
+      toast.error("Aucune déclinaison ne correspond à ce QR code ou code-barres.");
+      return;
+    }
+
+    toast.success(`${variant.product.name} — ${variant.name}`);
+    setAdjusting(variant);
+  }
+
   return (
     <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-      <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center">
+      <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 lg:flex-row lg:items-center">
+        <form onSubmit={handleUsbScan} className="flex w-full max-w-md gap-2">
+          <div className="relative flex-1">
+            <ScanLine size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#c8a46a]" />
+            <input
+              type="text"
+              value={scannedCode}
+              onChange={(event) => setScannedCode(event.target.value)}
+              placeholder="Lecteur USB : scannez un QR ou code-barres"
+              autoComplete="off"
+              autoFocus
+              className="h-9 w-full rounded-lg border border-[#c8a46a]/50 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#c8a46a] focus:ring-2 focus:ring-[#c8a46a]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+          </div>
+          <button type="submit" className="rounded-lg bg-[#2f3a2e] px-3 text-xs font-semibold text-white hover:bg-[#3d4e3b]">
+            Ouvrir
+          </button>
+        </form>
         <div className="relative w-full max-w-xs">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input

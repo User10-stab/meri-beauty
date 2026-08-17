@@ -20,7 +20,8 @@ export async function getNewsletters() {
 
     // Get the salon associated with this admin user
     // We assume the first salon (single-salon setup for now)
-    const salon = await prisma.salon.findFirst({
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
       orderBy: { createdAt: "asc" },
       select: { id: true },
     });

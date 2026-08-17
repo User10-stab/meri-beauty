@@ -22,7 +22,7 @@ function formatPrice(n) {
 }
 
 function formatDate(d) {
-  return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" }) : "—";
+  return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" }) : "—";
 }
 
 export function ReconciliationPageClient({ initialPayments }) {

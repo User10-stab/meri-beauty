@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { CalendarDays, Euro, PackageX, UserPlus } from "lucide-react";
 import { getDashboardStats } from "@/actions/dashboard/get-dashboard-stats";
 import { getTranslations, getLocale } from "next-intl/server";
 import { toIntlLocale } from "@/lib/intl-locale";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +12,11 @@ function formatEuro(value, locale = "fr-BE") {
 }
 
 function formatDateTime(iso, locale = "fr-FR") {
-  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" }).format(new Date(iso));
 }
 
 function formatDate(iso, locale = "fr-FR") {
-  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric" }).format(new Date(iso));
+  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" }).format(new Date(iso));
 }
 
 function weekdayShort(iso, locale = "fr-FR") {
@@ -25,8 +27,10 @@ export default async function Home() {
   const t = await getTranslations();
   const intlLocale = toIntlLocale(await getLocale());
   const numberLocale = intlLocale;
-  
-  const result = await getDashboardStats();
+  const [result, legalDataComplete] = await Promise.all([
+    getDashboardStats(),
+    isSellerLegalDataComplete(),
+  ]);
 
   if (!result.success) {
     return (
@@ -45,6 +49,21 @@ export default async function Home() {
 
   return (
     <div className="space-y-6">
+      {!legalDataComplete && (
+        <div
+          role="alert"
+          className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/10 dark:text-amber-400"
+        >
+          <span className="mt-0.5 shrink-0 text-lg leading-none">⚠</span>
+          <span>
+            {t("dashboard.legalDataIncomplete")} {" "}
+            <Link href="/dashboard/settings" className="font-medium underline underline-offset-2">
+              {t("dashboard.salonSettings")}
+            </Link>{" "}
+            {t("dashboard.legalDataIncompleteSuffix")}
+          </span>
+        </div>
+      )}
       {/* ── Stat cards ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard

@@ -12,7 +12,9 @@ import {
 } from "@/lib/api-response";
 import { auth } from "@/auth";
 import { requireCustomer, hasPermission, DASHBOARD_PERMISSIONS, AUTH_ERRORS } from "@/lib/authorization";
+import { getAppBaseUrl } from "@/lib/site-url";
 import { sendEmail } from "@/lib/email";
+import { escapeHtml } from "@/lib/email-templates";
 import {
   createNotificationsBulk,
   buildRentalRequestSubmittedNotification,
@@ -126,7 +128,7 @@ export async function POST(request) {
   const validationResult = createRentalRequestSchema.safeParse(body);
 
   if (!validationResult.success) {
-    const errors = validationResult.error.errors.map((err) => ({
+    const errors = validationResult.error.issues.map((err) => ({
       field: err.path.join("."),
       message: err.message,
     }));
@@ -139,12 +141,39 @@ export async function POST(request) {
   // ── Create rental request ────────────────────────────────────────────────
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // Update user's VAT number if provided
+      // Update the account's VAT number, and drop the verification proof
+      // whenever the number actually changes.
+      //
+      // This used to write `vatNumber` on its own. User.vatNumber is paired
+      // with vatValidatedAt / vatValidationName / vatValidationAddress, set
+      // by the VIES lookup at signup — and lib/tax-policy.js#hasRecentVatValidation
+      // reads vatValidatedAt to decide whether a sale qualifies for
+      // reverse-charge. Replacing the number while leaving the old timestamp
+      // in place made a never-verified number look verified, on real invoices.
+      // No malice needed: correcting a typo here was enough to inherit the
+      // previous number's verification.
+      //
+      // Clearing rather than re-verifying is deliberate — this endpoint is a
+      // lead form, and a VIES outage must not cost Marie a rental enquiry.
+      // The number is format-checked by the schema; re-verification belongs
+      // where the contract is signed.
       if (vatNumber && session.user.id) {
-        await tx.user.update({
+        const current = await tx.user.findUnique({
           where: { id: session.user.id },
-          data: { vatNumber },
+          select: { vatNumber: true },
         });
+
+        if (current?.vatNumber !== vatNumber) {
+          await tx.user.update({
+            where: { id: session.user.id },
+            data: {
+              vatNumber,
+              vatValidatedAt: null,
+              vatValidationName: null,
+              vatValidationAddress: null,
+            },
+          });
+        }
       }
 
       const rentalRequest = await tx.rentalRequest.create({
@@ -215,7 +244,7 @@ export async function POST(request) {
           to: admin.email,
           subject: "Nouvelle demande de location – Meri Beauty",
           text: `Bonjour,\n\nUne nouvelle demande de location a été soumise.\n\nType: ${result.rentalRequest.rentalType}\nDate de début: ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}\n${result.rentalRequest.endDate ? `Date de fin: ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}\n` : ""}Type de commission: ${result.rentalRequest.commissionType}\n\nMessage: ${result.rentalRequest.message || "Aucun message"}\n\nVeuillez consulter le tableau de bord pour traiter cette demande.\n\nL'équipe Meri Beauty`,
-          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p><p><strong>Type:</strong> ${result.rentalRequest.rentalType}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${result.rentalRequest.endDate ? `<br><strong>Date de fin:</strong> ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}` : ""}<br><strong>Type de commission:</strong> ${result.rentalRequest.commissionType}</p><p><strong>Message:</strong> ${result.rentalRequest.message || "Aucun message"}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
+          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p><p><strong>Type:</strong> ${escapeHtml(result.rentalRequest.rentalType)}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${result.rentalRequest.endDate ? `<br><strong>Date de fin:</strong> ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}` : ""}<br><strong>Type de commission:</strong> ${escapeHtml(result.rentalRequest.commissionType)}</p><p><strong>Message:</strong> ${escapeHtml(result.rentalRequest.message || "Aucun message")}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
         }).catch((err) => console.error("[POST /api/rental-requests] admin email failed:", err));
       }
     }

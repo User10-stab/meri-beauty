@@ -10,10 +10,15 @@ import {
 import { sendEmail } from "@/lib/email";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import {
+  TERMS_CONSENT_REQUIRED_MESSAGE,
+  buildTermsAcceptanceUpdate,
+  recordTermsAcceptance,
+} from "@/lib/terms-consent";
 
 /**
  * Formation equivalent of actions/workshops/waiting-list.js — same shape
- * (join / notify-all / check-status / validate-priority / convert), backed
+ * (join / notify-all / validate-priority / convert), backed
  * by the same polymorphic WaitingListEntry table via formationSessionId
  * instead of sessionId. Kept as a separate file rather than generalizing
  * the atelier one, matching this project's existing convention of keeping
@@ -31,6 +36,7 @@ function formatSessionDate(date) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -41,11 +47,16 @@ function generateTemporaryPassword() {
 }
 
 /** Join the waiting list for a formation session. */
-export async function joinFormationWaitingList({ sessionId, customerInfo: submittedCustomerInfo }) {
+export async function joinFormationWaitingList({ sessionId, customerInfo: submittedCustomerInfo, termsAccepted }) {
   try {
     let customerInfo = submittedCustomerInfo;
     if (!sessionId || !customerInfo?.email) {
       return { success: false, message: "Données manquantes." };
+    }
+
+    // Same public-endpoint reasoning as the atelier waiting list.
+    if (termsAccepted !== true) {
+      return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
     }
 
     const customerValidation = validateCustomerIdentity(customerInfo);
@@ -98,6 +109,7 @@ export async function joinFormationWaitingList({ sessionId, customerInfo: submit
           password: hashedPassword,
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
+          ...buildTermsAcceptanceUpdate(),
         },
       });
 
@@ -110,39 +122,60 @@ export async function joinFormationWaitingList({ sessionId, customerInfo: submit
       }).catch(() => {});
     }
 
-    const existing = await prisma.waitingListEntry.findFirst({
-      where: {
-        formationSessionId: sessionId,
-        customerId: user.id,
-        status: { in: ["WAITING", "NOTIFIED"] },
-      },
+    // Returning customer, or an account predating consent tracking.
+    await recordTermsAcceptance(prisma, user.id);
+
+    const seatsRequested = customerInfo.seatsRequested ?? 1;
+
+    // Serialised per session — see the atelier equivalent for why: the
+    // existence check and the position calculation are read-then-write, so
+    // two racing submissions otherwise produce a duplicate entry and two
+    // people holding the same position number.
+    const { entry, position, alreadyOnList } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`meri-waiting-list-formation-${sessionId}`}))`;
+
+      const existing = await tx.waitingListEntry.findFirst({
+        where: {
+          formationSessionId: sessionId,
+          customerId: user.id,
+          status: { in: ["WAITING", "NOTIFIED"] },
+        },
+      });
+
+      if (existing) {
+        return { entry: existing, position: existing.position, alreadyOnList: true };
+      }
+
+      const lastEntry = await tx.waitingListEntry.findFirst({
+        where: { formationSessionId: sessionId },
+        orderBy: { position: "desc" },
+      });
+      const nextPosition = (lastEntry?.position ?? 0) + 1;
+
+      const created = await tx.waitingListEntry.create({
+        data: {
+          formationSessionId: sessionId,
+          customerId: user.id,
+          seatsRequested,
+          position: nextPosition,
+          status: "WAITING",
+        },
+      });
+
+      return { entry: created, position: nextPosition, alreadyOnList: false };
     });
 
-    if (existing) {
+    if (alreadyOnList) {
       return {
         success: true,
-        position: existing.position,
-        entryId: existing.id,
+        alreadyOnList: true,
+        position,
+        entryId: entry.id,
+        seatsRequested: entry.seatsRequested,
+        email,
         message: "Vous êtes déjà inscrit(e) sur la liste d'attente pour cette session.",
       };
     }
-
-    const lastEntry = await prisma.waitingListEntry.findFirst({
-      where: { formationSessionId: sessionId },
-      orderBy: { position: "desc" },
-    });
-    const nextPosition = (lastEntry?.position ?? 0) + 1;
-
-    const seatsRequested = customerInfo.seatsRequested ?? 1;
-    const entry = await prisma.waitingListEntry.create({
-      data: {
-        formationSessionId: sessionId,
-        customerId: user.id,
-        seatsRequested,
-        position: nextPosition,
-        status: "WAITING",
-      },
-    });
 
     sendEmail({
       to: email,
@@ -150,15 +183,17 @@ export async function joinFormationWaitingList({ sessionId, customerInfo: submit
         customerName: customerInfo.fullName,
         formationTitle: session.formation.title,
         sessionDate: formatSessionDate(session.startDate),
-        position: nextPosition,
+        position,
         seatsRequested,
       }),
     }).catch((err) => console.error("[joinFormationWaitingList] confirmation email failed:", err));
 
     return {
       success: true,
-      position: nextPosition,
+      alreadyOnList: false,
+      position,
       entryId: entry.id,
+      seatsRequested,
       isNewUser,
       temporaryPassword,
       email,
@@ -175,33 +210,9 @@ export async function joinFormationWaitingList({ sessionId, customerInfo: submit
   }
 }
 
-/** Check if a user is already on the waiting list for a formation session. */
-export async function checkFormationWaitingListStatus(sessionId, customerEmail) {
-  try {
-    if (!sessionId || !customerEmail) return { success: true, data: null };
-
-    const user = await prisma.user.findUnique({ where: { email: customerEmail.trim().toLowerCase() } });
-    if (!user) return { success: true, data: null };
-
-    const entry = await prisma.waitingListEntry.findFirst({
-      where: {
-        formationSessionId: sessionId,
-        customerId: user.id,
-        status: { in: ["WAITING", "NOTIFIED"] },
-      },
-    });
-
-    if (!entry) return { success: true, data: null };
-
-    return {
-      success: true,
-      data: { id: entry.id, position: entry.position, status: entry.status, expiresAt: entry.expiresAt },
-    };
-  } catch (error) {
-    console.error("[checkFormationWaitingListStatus]", error?.message || error);
-    return { success: false, data: null };
-  }
-}
+// checkFormationWaitingListStatus was removed alongside its atelier twin —
+// unused, and as a "use server" export it answered "is this email on the
+// waiting list?" about any address a caller supplied.
 
 /** Validate a priority waiting list entry for reservation. */
 export async function validateFormationWaitingListPriority(waitingListEntryId) {

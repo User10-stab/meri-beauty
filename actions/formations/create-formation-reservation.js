@@ -3,6 +3,8 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
+import { auth } from "@/auth";
+import { createResumeCheckoutToken, isCheckoutAuthorized } from "@/lib/resume-checkout-token";
 import bcrypt from "bcrypt";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
@@ -10,6 +12,13 @@ import { resolvePromoCode } from "@/lib/promo-codes";
 import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
+import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import {
+  TERMS_CONSENT_REQUIRED_MESSAGE,
+  buildTermsAcceptanceUpdate,
+  recordTermsAcceptance,
+} from "@/lib/terms-consent";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -34,7 +43,7 @@ function generateTemporaryPassword() {
  *
  * @param {string} reservationId
  */
-export async function createFormationReservationCheckoutSession(reservationId) {
+export async function createFormationReservationCheckoutSession(reservationId, checkoutToken) {
   if (!reservationId) return { success: false, message: "Identifiant de réservation manquant." };
 
   try {
@@ -43,6 +52,21 @@ export async function createFormationReservationCheckoutSession(reservationId) {
       include: { session: { include: { formation: true } }, customer: { select: { id: true, email: true } } },
     });
     if (!reservation) return { success: false, message: "Réservation introuvable." };
+
+    // Exported "use server" action — a bare reservationId proves nothing.
+    // Authorize via a signed checkout token (guest / post-verification resume)
+    // or by being signed in as the reservation's customer.
+    const authSession = await auth();
+    if (
+      !isCheckoutAuthorized(reservation, {
+        resumeType: "FORMATION",
+        resumeId: reservationId,
+        checkoutToken,
+        sessionUserId: authSession?.user?.id,
+      })
+    ) {
+      return { success: false, message: "Vous n'êtes pas autorisé(e) à démarrer le paiement de cette réservation." };
+    }
     if (reservation.status !== "PENDING_DEPOSIT") {
       return { success: false, message: "Cette réservation n'est plus en attente de paiement." };
     }
@@ -50,11 +74,34 @@ export async function createFormationReservationCheckoutSession(reservationId) {
       return { success: false, message: "Le délai de réservation a expiré. Veuillez recommencer." };
     }
 
+    if (!(await isSellerLegalDataComplete())) {
+      return {
+        success: false,
+        message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
+      };
+    }
+
     const { session } = reservation;
     const formation = session.formation;
     const isFullPayment = Number(reservation.balanceDue) === 0;
     const chargeAmount = isFullPayment ? Number(reservation.totalPrice) : Number(reservation.depositAmount);
     const formationAction = isFullPayment ? "full_payment" : "deposit";
+
+    // A 100%-off promo code can bring the amount due today to exactly 0 —
+    // Stripe rejects a 0-value Checkout Session, so there's nothing to
+    // actually charge. Confirm directly through the same fulfilment path a
+    // real payment webhook uses (a synthetic "session" shaped just enough
+    // for it to read), instead of forking a second, parallel implementation.
+    if (chargeAmount <= 0) {
+      const syntheticSession = {
+        id: `free_formation_${reservation.id}`,
+        metadata: { kind: "formation", formationAction, reservationId: reservation.id },
+        amount_total: 0,
+        payment_intent: null,
+      };
+      await confirmFormationReservationPayment(syntheticSession);
+      return { success: true, url: null, freeReservation: true, reservationId: reservation.id };
+    }
 
     const stripeSession = await stripe.checkout.sessions.create({
       payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
@@ -66,8 +113,8 @@ export async function createFormationReservationCheckoutSession(reservationId) {
               name: `${isFullPayment ? "Paiement total" : "Acompte"} - ${formation.title}`,
               description:
                 formation.type === "PRIVATE"
-                  ? `Formation individuelle • ${new Date(session.startDate).toLocaleDateString("fr-FR")}`
-                  : `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR")}`,
+                  ? `Formation individuelle • ${new Date(session.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`
+                  : `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`,
             },
             unit_amount: Math.round(chargeAmount * 100),
           },
@@ -157,6 +204,13 @@ export async function createFormationReservation(data) {
       return { success: false, message: "Données manquantes." };
     }
 
+    // The booking form's CGV checkbox was client-side only. This action is a
+    // public POST endpoint, so the consent has to be re-established here —
+    // it is also what gets persisted onto the customer below.
+    if (data?.termsAccepted !== true) {
+      return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
+    }
+
     const customerValidation = validateCustomerIdentity(customerInfo);
     if (!customerValidation.success) {
       return { success: false, field: customerValidation.field, message: customerValidation.message };
@@ -218,11 +272,16 @@ export async function createFormationReservation(data) {
     // point beats the alternative (silently accepting an unconfirmed number
     // whenever VIES happens to be slow) — the customer can just retry.
     let vatNumberToSave = null;
+    // Captured alongside the number — see the identical fix in
+    // actions/workshops/create-workshop-reservation.js. Storing the number
+    // without its VIES proof discarded the check made just below, so
+    // lib/tax-policy.js treated a verified B2B customer as unverified.
+    let vatValidation = null;
     if (vatNumber) {
       if (!isValidVatFormat(vatNumber)) {
         return {
           success: false,
-          message: "Numéro de TVA invalide (format attendu : BE0123456789).",
+          message: "Numéro de TVA UE invalide. Ajoutez le préfixe pays (BE, FR, DE, NL…).",
           field: "vatNumber",
         };
       }
@@ -242,6 +301,11 @@ export async function createFormationReservation(data) {
         };
       }
       vatNumberToSave = vatNumber;
+      vatValidation = {
+        vatValidatedAt: new Date(),
+        vatValidationName: viesResult.name ?? null,
+        vatValidationAddress: viesResult.address ?? null,
+      };
     }
     let user = await prisma.user.findUnique({ where: { email } });
 
@@ -269,13 +333,22 @@ export async function createFormationReservation(data) {
           phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           role: "CUSTOMER",
           vatNumber: vatNumberToSave,
+          ...(vatValidation ?? {}),
+          ...buildTermsAcceptanceUpdate(),
         },
       });
     } else if (vatNumberToSave && user.vatNumber !== vatNumberToSave) {
       // B2B customer supplying (or updating) their VAT number for invoicing —
       // never clear it just because a later booking leaves the field blank.
-      user = await prisma.user.update({ where: { id: user.id }, data: { vatNumber: vatNumberToSave } });
+      // The number and its VIES proof are always written together.
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { vatNumber: vatNumberToSave, ...(vatValidation ?? {}) },
+      });
     }
+
+    // Returning customer, or an account predating consent tracking.
+    await recordTermsAcceptance(prisma, user.id);
 
     // Calculate pricing
     const depositPct = formation.depositPercentage ?? 50;
@@ -286,11 +359,13 @@ export async function createFormationReservation(data) {
     // trust a client-computed discount amount.
     let promoCodeId = null;
     let discountAmount = 0;
+    let promoMaxUses = null;
     if (promoCode) {
       const promoResult = await resolvePromoCode(promoCode, totalPrice);
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
+      promoMaxUses = promoResult.maxUses;
     }
     const discountedTotal = Math.max(0, totalPrice - discountAmount);
 
@@ -350,6 +425,16 @@ export async function createFormationReservation(data) {
             throw new Error(`SOLD_OUT:${available}`);
           }
 
+          if (promoCodeId && promoMaxUses != null) {
+            const claim = await tx.promoCode.updateMany({
+              where: { id: promoCodeId, usedCount: { lt: promoMaxUses } },
+              data: { usedCount: { increment: 1 } },
+            });
+            if (claim.count === 0) throw new Error("PROMO_EXHAUSTED");
+          } else if (promoCodeId) {
+            await tx.promoCode.update({ where: { id: promoCodeId }, data: { usedCount: { increment: 1 } } });
+          }
+
           return tx.formationReservation.create({
             data: {
               sessionId,
@@ -388,6 +473,10 @@ export async function createFormationReservation(data) {
                 : `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
           };
         }
+        if (err.message === "PROMO_EXHAUSTED") {
+          captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
+          return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
+        }
         throw err;
       }
     }
@@ -412,7 +501,10 @@ export async function createFormationReservation(data) {
       return { success: true, requiresEmailVerification: true, email };
     }
 
-    const checkoutResult = await createFormationReservationCheckoutSession(reservation.id);
+    const checkoutResult = await createFormationReservationCheckoutSession(
+      reservation.id,
+      createResumeCheckoutToken({ resumeType: "FORMATION", resumeId: reservation.id, email }),
+    );
     if (!checkoutResult.success) return checkoutResult;
 
     return {

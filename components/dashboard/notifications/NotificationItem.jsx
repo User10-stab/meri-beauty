@@ -76,7 +76,7 @@ export default function NotificationItem({
     <div
       onClick={handleRowClick}
       className={[
-        "group relative flex items-start gap-3 px-3 py-3 transition-colors",
+        "group relative flex items-start gap-2 px-3 py-3 pr-12 transition-colors sm:gap-3",
         isUnread
           ? "bg-sky-50/50 hover:bg-sky-50 dark:bg-sky-500/5 dark:hover:bg-sky-500/10"
           : "hover:bg-gray-50 dark:hover:bg-white/5",
@@ -95,10 +95,10 @@ export default function NotificationItem({
       </div>
 
       <div className="min-w-0 flex-1">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
           <p
             className={[
-              "truncate text-[13px] leading-tight",
+              "min-w-0 text-[13px] leading-tight sm:truncate",
               isUnread
                 ? "font-semibold text-gray-900 dark:text-gray-100"
                 : "font-medium text-gray-700 dark:text-gray-300",
@@ -111,7 +111,7 @@ export default function NotificationItem({
           </p>
           <time
             dateTime={notification.createdAt}
-            className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400"
+            className="shrink-0 text-[11px] leading-none text-gray-500 dark:text-gray-400"
           >
             {formatMessageTime(notification.createdAt)}
           </time>
@@ -129,14 +129,14 @@ export default function NotificationItem({
       </div>
 
       <div
-        className="flex shrink-0 items-start gap-1 opacity-0 transition-opacity group-hover:opacity-100"
+        className="absolute right-3 top-3 flex shrink-0 items-start gap-1 transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
         data-notif-action
       >
         {isUnread && (
           <button
             type="button"
             onClick={handleMarkReadClick}
-            className="rounded-md p-1 text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 dark:hover:bg-white/10 dark:hover:text-gray-300"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-gray-200/60 hover:text-gray-600 dark:hover:bg-white/10 dark:hover:text-gray-300"
             title="Marquer comme lu"
             aria-label="Marquer comme lu"
           >
@@ -158,7 +158,7 @@ export default function NotificationItem({
         <button
           type="button"
           onClick={handleDelete}
-          className="rounded-md p-1 text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-500/15 dark:hover:text-red-400"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-500/15 dark:hover:text-red-400"
           title="Supprimer"
           aria-label="Supprimer la notification"
         >

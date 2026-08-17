@@ -323,6 +323,7 @@ function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
                   weekday: "long",
                   day: "numeric",
                   month: "long",
+                  timeZone: "Europe/Brussels",
                 })}
               </p>
             </div>
@@ -342,6 +343,7 @@ function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
                         ? new Date(appt.startTime).toLocaleTimeString("fr-FR", {
                             hour: "2-digit",
                             minute: "2-digit",
+                            timeZone: "Europe/Brussels",
                           })
                         : "—"}
                     </p>

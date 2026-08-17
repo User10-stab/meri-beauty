@@ -6,8 +6,9 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { emailVerificationEmail, welcomeWithCredentialsEmail } from "@/lib/email-templates";
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
-import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-verification";
+import { createResumeCheckoutToken } from "@/lib/resume-checkout-token";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
@@ -73,7 +74,7 @@ export async function verifyEmail(rawToken) {
   if (!rawToken || typeof rawToken !== "string" || rawToken.trim().length === 0) {
     return {
       success: false,
-      message: "Invalid or expired verification link. Please request a new one.",
+      message: "Ce lien de vérification est invalide ou a expiré. Veuillez en demander un nouveau.",
     };
   }
 
@@ -81,14 +82,13 @@ export async function verifyEmail(rawToken) {
   // pending token) — without this, a caller could hammer this action to
   // burn CPU proportional to however many tokens are currently pending,
   // independent of whether their own token is even real.
-  const ip = await getClientIp();
-  if (isRateLimited("verify-email-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+  const ip = hashRateLimitValue(await getClientIp());
+  if (await consumeSharedRateLimit("verify-email-submit", ip, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
-      message: "Too many attempts. Please wait a few minutes before trying again.",
+      message: "Trop de tentatives. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("verify-email-submit", ip);
 
   try {
     const allTokens = await prisma.emailVerificationToken.findMany({
@@ -107,7 +107,7 @@ export async function verifyEmail(rawToken) {
     if (!matchedToken) {
       return {
         success: false,
-        message: "Invalid or expired verification link. Please request a new one.",
+        message: "Ce lien de vérification est invalide ou a expiré. Veuillez en demander un nouveau.",
       };
     }
 
@@ -119,7 +119,7 @@ export async function verifyEmail(rawToken) {
     if (!user) {
       return {
         success: false,
-        message: "Invalid or expired verification link. Please request a new one.",
+        message: "Ce lien de vérification est invalide ou a expiré. Veuillez en demander un nouveau.",
       };
     }
 
@@ -155,6 +155,7 @@ export async function verifyEmail(rawToken) {
     let resumeSuccess = null;
     let resumeUrl = null;
     let resumeMessage = null;
+    let resumeToken = null;
 
     if (matchedToken.resumeType) {
       const temporaryPassword = generateTemporaryPassword();
@@ -171,26 +172,54 @@ export async function verifyEmail(rawToken) {
         }),
       }).catch((err) => console.error("[verifyEmail] credentials email failed:", err));
 
+      // A resumeToken authorizes the manual "Réessayer le paiement" button to
+      // re-enter this checkout: retryCheckoutSession is a public "use server"
+      // action, so without a signed, ownership-bound capability any caller
+      // could resume — and harvest the pickup code of — an arbitrary
+      // order/reservation. Bound to the just-verified e-mail, valid 30 min;
+      // the inline resume below reuses the same token.
+      resumeToken = createResumeCheckoutToken({
+        resumeType: matchedToken.resumeType,
+        resumeId: matchedToken.resumeId,
+        email: matchedToken.email,
+      });
+
       // If this fails (e.g. a Stripe API hiccup), the token has already been
       // consumed and the account is verified either way — the caller shows a
       // manual retry-payment screen rather than leaving the person stuck.
       const resumeResult = await retryCheckoutSession({
         resumeType: matchedToken.resumeType,
         resumeId: matchedToken.resumeId,
+        resumeToken,
       });
       resumeSuccess = resumeResult.success;
-      resumeUrl = resumeResult.success ? resumeResult.url : null;
+      if (resumeResult.success) {
+        // A full promo can settle a checkout without Stripe. Those paths
+        // intentionally return no Checkout URL because there is nothing to
+        // redirect to, so build the local success destination explicitly.
+        // Without this, a guest's reservation/order was confirmed but their
+        // verification page looked like a dead end.
+        if (resumeResult.url) {
+          resumeUrl = resumeResult.url;
+        } else if (resumeResult.freeOrder) {
+          resumeUrl = `/boutique/order/success?free=1&number=${encodeURIComponent(resumeResult.orderNumber)}${resumeResult.pickupCode ? `&code=${encodeURIComponent(resumeResult.pickupCode)}` : ""}`;
+        } else if (resumeResult.freeReservation) {
+          const successPath = matchedToken.resumeType === "WORKSHOP" ? "/reservation-atelier/succes" : "/reservation-formation/succes";
+          resumeUrl = `${successPath}?reservation_id=${encodeURIComponent(resumeResult.reservationId)}`;
+        }
+      }
       resumeMessage = resumeResult.message ?? null;
     }
 
     return {
       success: true,
-      message: "Your email has been verified successfully. You can now log in.",
+      message: "Votre adresse e-mail a bien été confirmée. Vous pouvez maintenant vous connecter.",
       userId: user.id,
       // Set only for tokens issued mid-checkout — null for plain
       // registration tokens.
       resumeType: matchedToken.resumeType,
       resumeId: matchedToken.resumeId,
+      resumeToken,
       resumeSuccess,
       resumeUrl,
       resumeMessage,
@@ -199,7 +228,7 @@ export async function verifyEmail(rawToken) {
     console.error("[verifyEmail]", error);
     return {
       success: false,
-      message: "Something went wrong. Please try again later.",
+      message: "Une erreur est survenue. Veuillez réessayer plus tard.",
     };
   }
 }
@@ -211,7 +240,7 @@ export async function resendVerificationEmail(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return {
       success: false,
-      message: "Please enter a valid email address.",
+      message: "Veuillez saisir une adresse e-mail valide.",
       errors: {
         email: errors.email?.[0] ?? null,
       },
@@ -221,14 +250,13 @@ export async function resendVerificationEmail(input) {
   const { email } = parsed.data;
   const ip = await getClientIp();
 
-  const rateLimitKey = `${email}:${ip}`;
-  if (isRateLimited("verify-email", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
+  const rateLimitKey = hashRateLimitValue(`${email}:${ip}`);
+  if (await consumeSharedRateLimit("verify-email", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
     return {
       success: false,
-      message: "Too many requests. Please wait a few minutes before trying again.",
+      message: "Trop de demandes. Veuillez patienter quelques minutes avant de réessayer.",
     };
   }
-  recordRateLimitHit("verify-email", rateLimitKey);
 
   try {
     const user = await prisma.user.findUnique({
@@ -239,9 +267,24 @@ export async function resendVerificationEmail(input) {
     if (!user || user.emailVerified) {
       return {
         success: true,
-        message: "If an unverified account exists with that email, a verification link has been sent.",
+        message: "Si un compte non confirmé existe avec cette adresse e-mail, un lien de vérification vient d'être envoyé.",
       };
     }
+
+    // Carry the checkout context onto the replacement token.
+    //
+    // resumeType/resumeId live only on the token row. A resend used to mint a
+    // bare token, so a guest whose first link expired — the exact reason
+    // anyone clicks "renvoyer" — would verify their address and then hit a
+    // dead end: account confirmed, but the order or reservation they had
+    // already created was never resumed, never paid, and quietly expired along
+    // with its stock or seat hold. Read before the deleteMany below, which
+    // would otherwise remove the very expired row this needs.
+    const pendingCheckout = await prisma.emailVerificationToken.findFirst({
+      where: { email: user.email, used: false, resumeType: { not: null } },
+      orderBy: { createdAt: "desc" },
+      select: { resumeType: true, resumeId: true },
+    });
 
     const plainToken = crypto.randomUUID();
     const tokenHash = await hashToken(plainToken);
@@ -259,6 +302,8 @@ export async function resendVerificationEmail(input) {
         email: user.email,
         tokenHash,
         expiresAt,
+        resumeType: pendingCheckout?.resumeType ?? null,
+        resumeId: pendingCheckout?.resumeId ?? null,
       },
     });
 
@@ -272,12 +317,20 @@ export async function resendVerificationEmail(input) {
       expiresInMinutes: TOKEN_EXPIRY_MINUTES,
     });
 
-    await sendEmail({
+    const emailResult = await sendEmail({
       to: user.email,
       subject: emailTemplate.subject,
       text: emailTemplate.text,
       html: emailTemplate.html,
     });
+
+    if (!emailResult?.success) {
+      console.error("[resendVerificationEmail] provider did not deliver the verification email");
+      return {
+        success: false,
+        message: "Le service d’e-mail est temporairement indisponible. Veuillez réessayer dans quelques instants.",
+      };
+    }
 
     return {
       success: true,
@@ -287,7 +340,7 @@ export async function resendVerificationEmail(input) {
     console.error("[resendVerificationEmail]", error);
     return {
       success: false,
-      message: "Something went wrong. Please try again later.",
+      message: "Une erreur est survenue. Veuillez réessayer plus tard.",
     };
   }
 }

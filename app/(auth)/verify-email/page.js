@@ -4,8 +4,8 @@ import { verifyEmail } from "@/actions/auth/verify-email";
 import VerifyEmailForm from "./verify-email-form";
 
 export const metadata = {
-  title: "Verify Email | Meri Beauty",
-  description: "Verify your email address to activate your Meri Beauty account.",
+  title: "Confirmer votre e-mail | Meri Beauty",
+  description: "Confirmez votre adresse e-mail pour activer votre compte Meri Beauty.",
 };
 
 export default async function VerifyEmailPage({ searchParams }) {
@@ -17,13 +17,22 @@ export default async function VerifyEmailPage({ searchParams }) {
 
   const params = await searchParams;
   const token = params?.token || "";
+  const deliveryFailed = params?.deliveryFailed === "1";
+  const defaultEmail = typeof params?.email === "string" ? params.email : "";
 
-  const result = token ? await verifyEmail(token) : { success: false, message: "No verification token provided." };
+  const result = token
+    ? await verifyEmail(token)
+    : deliveryFailed
+      ? {
+          success: false,
+          message: "Votre compte a bien été créé, mais l’e-mail de vérification n’a pas pu être envoyé. Vérifiez le service d’e-mail puis demandez un nouveau lien ci-dessous.",
+        }
+      : { success: false, message: "Aucun lien de vérification fourni." };
 
   // Plain registration tokens have no resumeType — nothing further to do,
   // the form below shows its usual "verified, go sign in" card.
   if (!result.success || !result.resumeType || !result.resumeId) {
-    return <VerifyEmailForm success={result.success} message={result.message} />;
+    return <VerifyEmailForm success={result.success} message={result.message} defaultEmail={defaultEmail} />;
   }
 
   // Checkout-issued token: verifyEmail() already tried to start payment
@@ -40,6 +49,7 @@ export default async function VerifyEmailPage({ searchParams }) {
       paymentFailedMessage={result.resumeMessage}
       resumeType={result.resumeType}
       resumeId={result.resumeId}
+      resumeToken={result.resumeToken}
     />
   );
 }

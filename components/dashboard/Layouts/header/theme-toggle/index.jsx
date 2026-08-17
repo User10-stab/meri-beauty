@@ -15,7 +15,7 @@ const THEMES = [
 ];
 
 export function ThemeToggleSwitch() {
-  const { setTheme, theme } = useTheme();
+  const { setTheme, theme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -26,13 +26,18 @@ export function ThemeToggleSwitch() {
     return null;
   }
 
+  const activeTheme = resolvedTheme ?? theme ?? "light";
+  const nextTheme = activeTheme === "dark" ? "light" : "dark";
+
   return (
     <button
-      onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+      type="button"
+      onClick={() => setTheme(nextTheme)}
       className="group cursor-pointer rounded-full bg-gray-3 p-1.25 text-dark outline-0 hover:outline-primary focus:outline-primary focus-visible:outline dark:bg-[#020D1A] dark:text-current"
+      aria-pressed={activeTheme === "dark"}
     >
       <span className="sr-only">
-        Switch to {theme === "light" ? "dark" : "light"} mode
+        Switch to {nextTheme} mode
       </span>
 
       <span aria-hidden className="relative flex gap-2.5">

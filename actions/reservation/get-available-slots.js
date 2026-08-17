@@ -13,8 +13,14 @@ import {
  * @param {string}        staffServiceId
  * @param {string|Date}   date  — "YYYY-MM-DD" string (preferred) or a Date object.
  *                                Always treated as a local calendar date; no UTC shift.
+ * @param {string}        [excludeAppointmentId] - when rescheduling, the
+ *   appointment's own (still-present, not-yet-moved) slot must be excluded
+ *   from "existing appointments" — otherwise the grid shown here (still
+ *   blocked by its old slot) can disagree with validateAppointmentSlot's
+ *   grid (which does exclude it, see lib/appointment-scheduling.js), and a
+ *   time offered here gets spuriously rejected on submit.
  */
-export async function getAvailableSlots(staffServiceId, date) {
+export async function getAvailableSlots(staffServiceId, date, excludeAppointmentId = null) {
   try {
     if (!staffServiceId || !date) {
       return { success: false, message: "Paramètres manquants" };
@@ -41,7 +47,8 @@ export async function getAvailableSlots(staffServiceId, date) {
     //    the Server Action serialisation boundary (Date → ISO string → Date).
     const selectedDate = parseLocalDateString(date);
 
-    const salon = await prisma.salon.findFirst({
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
       include: { closures: true, workingDays: true },
     });
 
@@ -60,6 +67,7 @@ export async function getAvailableSlots(staffServiceId, date) {
         date: { gte: startOfDay, lte: endOfDay },
         status: { in: ["PENDING", "CONFIRMED"] },
         isDeleted: false,
+        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
       },
       include: {
         staffService: {
@@ -105,8 +113,11 @@ export async function getAvailableSlots(staffServiceId, date) {
  * @param {Date}    monthDate  — any Date whose month/year identify the target month.
  *                               This value comes from the client as a local Date and
  *                               is safe to use directly via getFullYear/getMonth.
+ * @param {string}  [excludeAppointmentId] - see getAvailableSlots above; same
+ *   reasoning applies here, otherwise the appointment being rescheduled can
+ *   grey out its own current day as unavailable.
  */
-export async function getMonthAvailability(staffServiceId, monthDate) {
+export async function getMonthAvailability(staffServiceId, monthDate, excludeAppointmentId = null) {
   try {
     if (!staffServiceId || !monthDate) {
       return { success: false, message: "Paramètres manquants" };
@@ -138,7 +149,8 @@ export async function getMonthAvailability(staffServiceId, monthDate) {
     const endOfMonth   = new Date(year, month + 1, 0);      // local midnight last day
     endOfMonth.setHours(23, 59, 59, 999);
 
-    const salon = await prisma.salon.findFirst({
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
       include: { closures: true, workingDays: true },
     });
 
@@ -150,6 +162,7 @@ export async function getMonthAvailability(staffServiceId, monthDate) {
         date: { gte: startOfMonth, lte: endOfMonth },
         status: { in: ["PENDING", "CONFIRMED"] },
         isDeleted: false,
+        ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
       },
       include: {
         staffService: {

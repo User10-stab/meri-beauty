@@ -20,12 +20,17 @@ const STATUS_LABELS = {
 };
 
 function formatSessionDate(date) {
+  // Explicit timeZone, not just the server's pinned TZ (instrumentation.js) —
+  // without it this renders in Brussels time on the server but the visiting
+  // browser's own local time on the client, causing a hydration mismatch
+  // (and silently the wrong appointment time for anyone outside Belgium).
   return new Date(date).toLocaleDateString("fr-FR", {
     day: "2-digit",
     month: "short",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
   });
 }
 
@@ -74,7 +79,31 @@ export function ReservationRow({ row, onEdit, onDelete }) {
 
       {/* Actions — Admin only (view-only for staff, per the confirmed permissions table) */}
       <td className="px-4 py-4 pr-5 align-middle">
-        <RowActions row={row} onEdit={onEdit} onDelete={onDelete} />
+        <div className="flex items-center justify-end gap-2">
+          {/* Only a CONFIRMED booking can be settled or marked absent — the
+              two ways an atelier actually ends once the session has run. */}
+          {row.status === "CONFIRMED" && onSettle && (
+            <button
+              type="button"
+              onClick={() => onSettle(row)}
+              className="rounded-lg border border-emerald-200 px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-50"
+              title="Encaisser le solde et clôturer"
+            >
+              Clôturer
+            </button>
+          )}
+          {row.status === "CONFIRMED" && onNoShow && (
+            <button
+              type="button"
+              onClick={() => onNoShow(row)}
+              className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+              title="Le client n'est pas venu — aucun remboursement"
+            >
+              Absent
+            </button>
+          )}
+          <RowActions row={row} onEdit={onEdit} onDelete={onDelete} />
+        </div>
       </td>
     </tr>
   );

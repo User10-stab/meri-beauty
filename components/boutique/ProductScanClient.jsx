@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { toast } from "sonner";
-import { CameraOff, ShoppingBag, X } from "lucide-react";
+import { CameraOff, ShoppingBag, ScanLine, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { getStorefrontProductByBarcode } from "@/actions/boutique/storefront";
 import { addToCart } from "@/actions/boutique/cart";
@@ -29,6 +29,7 @@ export function ProductScanClient() {
   const [error, setError] = useState(null);
   const [found, setFound] = useState(null);
   const [adding, setAdding] = useState(false);
+  const [usbCode, setUsbCode] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +85,25 @@ export function ProductScanClient() {
     setFound(null);
   }
 
+  async function handleUsbScan(event) {
+    event.preventDefault();
+    const code = usbCode.trim();
+    if (!code || busyRef.current || foundRef.current) return;
+
+    busyRef.current = true;
+    const lookup = await getStorefrontProductByBarcode(code);
+    busyRef.current = false;
+    if (!lookup.success) {
+      toast.error(lookup.message);
+      return;
+    }
+
+    setUsbCode("");
+    foundRef.current = true;
+    lastCodeRef.current = code;
+    setFound(lookup.data);
+  }
+
   async function handleAddToCart() {
     if (!found) return;
     setAdding(true);
@@ -106,6 +126,21 @@ export function ProductScanClient() {
       <p className="mb-8 text-sm text-gray-500">
         {t("scanSubtitle")}
       </p>
+
+      <form onSubmit={handleUsbScan} className="mb-4 flex w-full gap-2">
+        <div className="relative flex-1">
+          <ScanLine size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#c8a46a]" />
+          <input
+            value={usbCode}
+            onChange={(event) => setUsbCode(event.target.value)}
+            placeholder="Lecteur USB : QR ou code-barres"
+            autoComplete="off"
+            autoFocus
+            className="h-11 w-full border border-neutral-200 bg-white pl-10 pr-3 text-sm outline-none focus:border-[#2f3a2e]"
+          />
+        </div>
+        <button type="submit" className="bg-[#2f3a2e] px-4 text-sm font-semibold text-white">Lire</button>
+      </form>
 
       {error ? (
         <div className="flex w-full flex-col items-center gap-3 border border-neutral-200 bg-neutral-50 px-6 py-16">

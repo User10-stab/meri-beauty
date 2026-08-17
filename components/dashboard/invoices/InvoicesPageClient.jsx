@@ -23,9 +23,8 @@ export function InvoicesPageClient({ initialInvoices }) {
   function formatPrice(n) {
     return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
   }
-
   function formatDate(d) {
-    return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" });
+    return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" });
   }
 
   const filtered = useMemo(() => {
@@ -93,6 +92,14 @@ export function InvoicesPageClient({ initialInvoices }) {
                 <TableCell className="pl-6">
                   <span className="font-medium text-gray-800 dark:text-white">{inv.number}</span>
                   {inv.orderNumber && <span className="block text-xs text-gray-400">{t("orderNumber", { number: inv.orderNumber })}</span>}
+                  {inv.customerType === "B2B" && (
+                    <span
+                      className="mt-1 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700"
+                      title={t("b2bInvoiceHint")}
+                    >
+                      {t("b2bManualLabel")}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <span className="text-gray-700 dark:text-dark-6">{inv.customerName}</span>

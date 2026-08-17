@@ -35,7 +35,7 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
 
   const trimmed = vatNumber?.trim() || null;
   if (trimmed && !isValidVatFormat(trimmed)) {
-    return { success: false, message: "Numéro de TVA invalide (format attendu : BE0123456789)." };
+    return { success: false, message: "Numéro de TVA UE invalide. Ajoutez le préfixe pays (BE, FR, DE, NL…)." };
   }
 
   try {
@@ -46,7 +46,16 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
     if (!existing) return { success: false, message: "Client introuvable." };
 
     await prisma.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: customerId }, data: { vatNumber: trimmed } });
+      await tx.user.update({
+        where: { id: customerId },
+        data: {
+          vatNumber: trimmed,
+          // Manual overrides are never sufficient for an automatic 0% sale.
+          vatValidatedAt: null,
+          vatValidationName: null,
+          vatValidationAddress: null,
+        },
+      });
 
       await writeAuditLog(tx, {
         action: AUDIT_ACTIONS.CUSTOMER_VAT_NUMBER_OVERRIDDEN,

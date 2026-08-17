@@ -115,7 +115,7 @@ function ReservationFormationSuccesContent() {
               <p className="text-xs text-ink/50">
                 {new Date(r.session?.startDate).toLocaleDateString(toIntlLocale(locale), {
                   weekday: "long", day: "numeric", month: "long", year: "numeric",
-                  hour: "2-digit", minute: "2-digit",
+                  hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels",
                 })}
               </p>
               <hr className="border-ink/8" />

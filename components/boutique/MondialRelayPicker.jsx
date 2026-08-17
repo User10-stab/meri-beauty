@@ -58,6 +58,7 @@ function WidgetPickupPointPicker({ value, onChange }) {
           id: data.ID ?? data.Num ?? null,
           name: data.Nom ?? "",
           address: [data.Adresse1, data.Adresse2].filter(Boolean).join(" ").trim(),
+          countryCode: data.Pays ?? "BE",
           postalCode: data.CP ?? "",
           city: data.Ville ?? "",
         });

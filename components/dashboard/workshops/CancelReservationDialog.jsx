@@ -15,6 +15,9 @@ import { useTranslations } from "next-intl";
  */
 export function CancelReservationDialog({ reservation, onClose, onConfirm, loading, formationMode = false }) {
   const t = useTranslations("dashboardWorkshops.cancelDialog");
+function formatPrice(value) {
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
+}
   const [refundDeposit, setRefundDeposit] = useState(false);
   const [reason, setReason] = useState("");
 
@@ -22,6 +25,14 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
 
   const reasonRequired = refundDeposit;
   const canConfirm = !reasonRequired || reason.trim().length > 0;
+
+  // The checkbox always refunds whatever was actually paid, not just a
+  // deposit — for a full-payment booking (balanceDue === 0) that's the
+  // entire amount. Label it accordingly so an admin doesn't think they're
+  // only refunding a partial deposit when it's actually the full sum.
+  const isFullPayment = Number(reservation.balanceDue) === 0;
+  const paidAmount = Number(reservation.payment?.paidAmount ?? reservation.depositAmount ?? 0);
+  const paidLabel = isFullPayment ? "le paiement total" : "l'acompte";
 
   function handleClose() {
     setRefundDeposit(false);
@@ -62,10 +73,12 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
           />
           <span>
             <span className="font-medium text-gray-800 dark:text-white">
-              {formationMode ? t("refundFull") : t("refundDeposit")}
+              {isFullPayment ? t("refundFull") : t("refundDeposit")} ({formatPrice(paidAmount)})
             </span>
             <span className="mt-0.5 block text-xs text-gray-400">
-              {t("refundHint")}
+              {isFullPayment
+                ? t("fullPaymentRefundHint")
+                : t("refundHint")}
             </span>
           </span>
         </label>
@@ -85,8 +98,8 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
 
         <p className="mt-3 text-xs text-gray-400">
           {refundDeposit
-            ? `${formationMode ? t("fullRefunded") : t("depositRefunded")}`
-            : `${formationMode ? t("fullNotRefunded") : t("depositNotRefunded")}`}
+            ? `${formatPrice(paidAmount)} (${paidLabel}) sera remboursé via Stripe.`
+            : `${formatPrice(paidAmount)} (${paidLabel}) ne sera pas remboursé.`}
         </p>
 
         <div className="mt-5 flex justify-end gap-2">

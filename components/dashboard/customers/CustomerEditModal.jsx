@@ -104,7 +104,7 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
               type="text"
               value={vatNumber}
               onChange={(e) => setVatNumber(e.target.value)}
-              placeholder="BE0123456789"
+              placeholder="BE0123456789 ou FRXX123456789"
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#2f3a2e] focus:outline-none"
             />
             <p className="mt-1 text-xs text-gray-500">

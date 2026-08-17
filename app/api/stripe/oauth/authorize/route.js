@@ -133,6 +133,18 @@ export async function GET(request) {
     url = buildStripeOAuthUrl({ staffId: staff.id, userId: session.user.id });
   } catch (error) {
     console.error("[GET /api/stripe/oauth/authorize]", error);
+
+    // A missing STRIPE_CONNECT_CLIENT_ID / STRIPE_OAUTH_REDIRECT_URI is a
+    // deployment configuration gap, not a server fault. Returning a bare 500
+    // left the staff member staring at "Erreur de connexion au serveur" with
+    // nothing to act on, so name the actual problem.
+    if (error?.message?.includes("is not configured")) {
+      return badRequest(
+        "La connexion Stripe n'est pas configurée sur ce serveur " +
+          "(STRIPE_CONNECT_CLIENT_ID / STRIPE_OAUTH_REDIRECT_URI manquants). Contactez l'administrateur."
+      );
+    }
+
     return serverError();
   }
 

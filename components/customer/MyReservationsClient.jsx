@@ -43,6 +43,7 @@ function formatAmount(amount, locale) {
 
 const APPOINTMENT_STATUS_CONFIG = {
   PENDING: { labelKey: "pending", className: "bg-amber-100 text-amber-800" },
+  ACCEPTED: { labelKey: "accepted", className: "bg-blue-100 text-blue-800" },
   CONFIRMED: { labelKey: "confirmed", className: "bg-emerald-100 text-emerald-800" },
   COMPLETED: { labelKey: "completed", className: "bg-gray-100 text-gray-600" },
   CANCELLED: { labelKey: "cancelled", className: "bg-red-100 text-red-700" },
@@ -101,7 +102,7 @@ function ReservationCard({ reservation, onCancelled }) {
   // ── 48-hour window check ─────────────────────────────────────────────────
   const blocked = isWithinCancellationWindow(reservation.startTime);
 
-  // Actions are only available for PENDING or CONFIRMED, not-yet-cancelled
+  // Actions are available for every active appointment state.
   const isActionable =
     !isCancelled &&
     effectiveStatus !== "COMPLETED" &&
@@ -241,6 +242,15 @@ function ReservationCard({ reservation, onCancelled }) {
 
       {/* ── Footer actions ──────────────────────────────────────────────── */}
       <div className="space-y-3 border-t border-gray-100 bg-gradient-to-b from-gray-50/50 to-white px-6 py-5">
+        {reservation.awaitingPaymentChoice && !isCancelled && (
+          <Link
+            href={`/appointment/${reservation.id}/payment`}
+            className="flex w-full items-center justify-center rounded-xl bg-[#2f3a2e] px-4 py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:bg-[#3d4e3b] hover:shadow-xl"
+          >
+            {t("choosePayment")}
+          </Link>
+        )}
+
         {/* Finalise payment */}
         {reservation.awaitingPayment && !isCancelled && (
           <button

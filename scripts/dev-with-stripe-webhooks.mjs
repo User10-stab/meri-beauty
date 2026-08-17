@@ -15,7 +15,11 @@ if (!secretKey.startsWith("sk_test_") && process.env.ALLOW_LIVE_STRIPE_CLI !== "
 
 const localStripe = join(homedir(), ".local", "bin", "stripe");
 const stripeCommand = process.env.STRIPE_CLI_PATH || (existsSync(localStripe) ? localStripe : "stripe");
-const nextCommand = join(process.cwd(), "node_modules", ".bin", "next");
+// Launch the JavaScript entry point through Node instead of spawning
+// node_modules/.bin/next directly. The latter is a shell shim on Unix and a
+// next.cmd wrapper on Windows, so spawning the extensionless path fails with
+// ENOENT on Windows before Next can start.
+const nextCli = join(process.cwd(), "node_modules", "next", "dist", "bin", "next");
 
 let nextProcess = null;
 let lineBuffer = "";
@@ -35,9 +39,13 @@ function processStripeOutput(chunk) {
     const webhookSecret = line.match(/whsec_[A-Za-z0-9]+/)?.[0];
     if (webhookSecret && !nextProcess) {
       console.log("[dev:stripe] listener prêt → /api/webhooks/stripe");
-      nextProcess = spawn(nextCommand, ["dev"], {
+      nextProcess = spawn(process.execPath, [nextCli, "dev"], {
         stdio: "inherit",
         env: { ...process.env, STRIPE_WEBHOOK_SECRET: webhookSecret },
+      });
+      nextProcess.on("error", (error) => {
+        console.error(`[dev:stripe] impossible de lancer Next.js: ${error.message}`);
+        stop(1);
       });
       nextProcess.on("exit", (code) => stop(code ?? 0));
       continue;

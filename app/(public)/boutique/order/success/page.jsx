@@ -1,17 +1,14 @@
 import Link from "next/link";
-import { getTranslations } from "next-intl/server";
+import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { pickupQrDataUrl } from "@/lib/qrcode";
 import { CartClearedNotifier } from "@/components/boutique/CartClearedNotifier";
 
-export async function generateMetadata() {
-  const t = await getTranslations("boutique.metadata");
-  return {
-    // Deliberately neutral — this page also renders the "payment pending" and
-    // "session not found" states, where "confirmée" would be misleading.
-    title: t("orderSuccessPage"),
-  };
-}
+export const metadata = {
+  // Deliberately neutral — this page also renders the "payment pending" and
+  // "session not found" states, where "confirmée" would be misleading.
+  title: "Votre commande – Meri Beauty",
+};
 
 /**
  * Landing page after checkout. The Stripe webhook (or, for pay-on-site
@@ -19,14 +16,13 @@ export async function generateMetadata() {
  * only displays the outcome. Mirrors app/(public)/reservation/success.
  */
 export default async function OrderSuccessPage({ searchParams }) {
-  const t = await getTranslations();
   const { session_id: sessionId, onsite, free, number, code, pos_canceled: posCanceled } = await searchParams;
 
   if (posCanceled === "1") {
     return (
       <Outcome
-        title={t("boutique.posPaymentNotCompleted")}
-        message={t("boutique.posPaymentNotCompletedDesc")}
+        title="Paiement non terminé"
+        message="Aucun paiement n'a été confirmé. Vous pouvez revenir auprès de notre équipe en caisse."
       />
     );
   }
@@ -35,11 +31,11 @@ export default async function OrderSuccessPage({ searchParams }) {
     const qr = code ? await pickupQrDataUrl(code) : null;
     return (
       <Outcome
-        title={t("boutique.orderConfirmed")}
+        title="Commande confirmée"
         message={
           <>
-            {t("boutique.thankYouOrder", { number })}
-            {code && ` ${t("boutique.presentCodePickup")}`}
+            Merci ! Votre commande n°{number} est confirmée.
+            {code && " Présentez ce code (ou son QR) en boutique pour la retirer et régler le paiement sur place :"}
           </>
         }
         pickup={code ? { code, qr } : null}
@@ -54,11 +50,11 @@ export default async function OrderSuccessPage({ searchParams }) {
     const qr = code ? await pickupQrDataUrl(code) : null;
     return (
       <Outcome
-        title={t("boutique.orderConfirmed")}
+        title="Commande confirmée"
         message={
           <>
-            {t("boutique.thankYouOrderFree", { number })}
-            {code && ` ${t("boutique.presentCodePickup")}`}
+            Merci ! Votre commande n°{number} est confirmée — le code promo appliqué couvre l&apos;intégralité du montant, aucun paiement n&apos;était nécessaire.
+            {code && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
           </>
         }
         pickup={code ? { code, qr } : null}
@@ -104,18 +100,18 @@ export default async function OrderSuccessPage({ searchParams }) {
       <>
         <CartClearedNotifier />
         <Outcome
-          title={t("boutique.paymentConfirmed")}
+          title="Paiement confirmé"
           message={
             <>
-              {t("boutique.thankYouPayment", { amount: details.amount })}
+              Merci ! Votre paiement de <span className="font-semibold text-[#C8A46A]">€{details.amount}</span> a bien été reçu
               {details?.email && (
                 <>
                   {" "}
-                  {t("boutique.confirmationSent", { email: details.email })}
+                  — une confirmation a été envoyée à <span className="font-medium text-[#2F3A2E]">{details.email}</span>
                 </>
               )}
               .
-              {pickup && ` ${t("boutique.presentCodePickupPayment")}`}
+              {pickup && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
             </>
           }
           pickup={pickup}
@@ -127,16 +123,16 @@ export default async function OrderSuccessPage({ searchParams }) {
   if (state === "unpaid") {
     return (
       <Outcome
-        title={t("boutique.paymentProcessing")}
-        message={t("boutique.paymentProcessingDesc")}
+        title="Paiement en cours"
+        message="Votre paiement est en cours de traitement. Vous recevrez un email de confirmation dès qu'il sera validé."
       />
     );
   }
 
   return (
     <Outcome
-      title={t("boutique.pageNotFound")}
-      message={t("boutique.couldNotFindOrder")}
+      title="Page introuvable"
+      message="Nous n'avons pas pu retrouver votre commande. Si vous venez d'effectuer un paiement, vérifiez votre boîte mail."
     />
   );
 }
@@ -158,7 +154,7 @@ function Outcome({ title, message, pickup }) {
           <div className="mx-auto mb-10 flex w-fit flex-col items-center gap-3 border border-neutral-200 bg-white px-8 py-6">
             {pickup.qr && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={pickup.qr} alt={t("boutique.pickupCode")} width={160} height={160} className="h-40 w-40" />
+              <img src={pickup.qr} alt="QR code de retrait" width={160} height={160} className="h-40 w-40" />
             )}
             <span className="text-xl font-semibold tracking-wide text-[#2F3A2E]">{pickup.code}</span>
           </div>
@@ -169,13 +165,13 @@ function Outcome({ title, message, pickup }) {
             href="/"
             className="inline-block border border-[#2F3A2E] px-8 py-3 text-sm font-medium uppercase tracking-wider text-[#2F3A2E] transition-colors hover:bg-[#2F3A2E] hover:text-white"
           >
-            {t("boutique.backToHome")}
+            Retour à l'accueil
           </Link>
           <Link
             href="/boutique"
             className="inline-block bg-[#C8A46A] px-8 py-3 text-sm font-medium uppercase tracking-wider text-white transition-colors hover:bg-[#B8945A]"
           >
-            {t("boutique.continueShopping")}
+            Continuer mes achats
           </Link>
         </div>
       </div>

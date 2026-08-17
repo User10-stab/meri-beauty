@@ -90,8 +90,8 @@ function StatusBadge({ status }) {
 /**
  * Menu items are derived from the row's status.
  *
- * PENDING   → Confirm, Divider, Cancel
- * CONFIRMED → View details, Reschedule, Divider, Cancel
+ * PENDING   → Accept, Divider, Cancel
+ * ACCEPTED/CONFIRMED → View details
  * Others    → View details  (always something in the menu)
  */
 function getMenuItems(status, handlers) {
@@ -102,7 +102,7 @@ function getMenuItems(status, handlers) {
       return [
         {
           key: "confirm",
-          label: "Confirmer",
+          label: "Accepter",
           icon: CheckCircle2,
           onClick: onConfirm,
           variant: "success",
@@ -117,6 +117,7 @@ function getMenuItems(status, handlers) {
         },
       ];
 
+    case "ACCEPTED":
     case "CONFIRMED":
       return [
         {

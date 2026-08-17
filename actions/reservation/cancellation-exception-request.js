@@ -93,7 +93,7 @@ export async function submitCancellationExceptionRequest(input) {
   if (!appointment || appointment.userId !== session.user.id) {
     return { success: false, message: "Rendez-vous introuvable." };
   }
-  if (!["PENDING", "CONFIRMED"].includes(appointment.status)) {
+  if (!["PENDING", "ACCEPTED", "CONFIRMED"].includes(appointment.status)) {
     return { success: false, message: "Ce rendez-vous ne peut plus faire l'objet d'une demande." };
   }
   if (!isWithinCancellationWindow(appointment.startTime)) {

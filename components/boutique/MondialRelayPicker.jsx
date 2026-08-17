@@ -8,8 +8,9 @@ import { useTranslations } from "next-intl";
 const BRAND_ID = process.env.NEXT_PUBLIC_MONDIAL_RELAY_BRAND_ID || "";
 
 const WIDGET_JS = "https://widget.mondialrelay.com/parcelshop-picker/jquery.plugin.mondialrelay.parcelshoppicker.min.js";
-const WIDGET_CSS = "https://widget.mondialrelay.com/parcelshop-picker/jquery.plugin.mondialrelay.parcelshoppicker.min.css";
 const JQUERY_SRC = "https://code.jquery.com/jquery-3.7.1.min.js";
+const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
 
 /**
  * Mondial Relay pickup-point picker for checkout.
@@ -31,57 +32,101 @@ export function MondialRelayPicker({ value, onChange }) {
   if (!BRAND_ID) {
     return <ManualPickupPointForm value={value} onChange={onChange} t={t} />;
   }
-  return <WidgetPickupPointPicker value={value} onChange={onChange} />;
+  return <WidgetPickupPointPicker value={value} onChange={onChange} t={t} />;
 }
 
-function WidgetPickupPointPicker({ value, onChange }) {
+function WidgetPickupPointPicker({ value, onChange, t }) {
   const containerRef = useRef(null);
-  const targetRef = useRef(null);
   const [jqueryReady, setJqueryReady] = useState(false);
+  const [leafletReady, setLeafletReady] = useState(false);
   const [widgetReady, setWidgetReady] = useState(false);
+  const [widgetFailed, setWidgetFailed] = useState(false);
   const initializedRef = useRef(false);
 
   useEffect(() => {
-    if (!jqueryReady || !widgetReady || initializedRef.current || !containerRef.current) return;
+    if (!jqueryReady || !leafletReady || !widgetReady || initializedRef.current || !containerRef.current) return;
     initializedRef.current = true;
 
-    const $ = window.jQuery;
-    $(containerRef.current).MR_ParcelShopPicker({
-      Target: targetRef.current,
-      Brand: BRAND_ID,
-      Country: "BE",
-      NbResults: 10,
-      ShowResultsOnMap: true,
-      EnableGeolocalisatedSearch: true,
-      OnParcelShopSelected: function (data) {
-        onChange({
-          id: data.ID ?? data.Num ?? null,
-          name: data.Nom ?? "",
-          address: [data.Adresse1, data.Adresse2].filter(Boolean).join(" ").trim(),
-          countryCode: data.Pays ?? "BE",
-          postalCode: data.CP ?? "",
-          city: data.Ville ?? "",
-        });
-      },
-    });
+    try {
+      const $ = window.jQuery;
+      if (!$?.fn?.MR_ParcelShopPicker) throw new Error("Mondial Relay widget unavailable");
+
+      $(containerRef.current).MR_ParcelShopPicker({
+        Target: "#mr-parcel-shop-target",
+        Brand: BRAND_ID,
+        Country: "BE",
+        NbResults: 10,
+        Responsive: true,
+        Theme: "mondialrelay",
+        ShowResultsOnMap: true,
+        EnableGeolocalisatedSearch: true,
+        OnParcelShopSelected: function (data) {
+          onChange({
+            id: data.ID ?? data.Num ?? null,
+            name: data.Nom ?? "",
+            address: [data.Adresse1, data.Adresse2].filter(Boolean).join(" ").trim(),
+            countryCode: data.Pays ?? "BE",
+            postalCode: data.CP ?? "",
+            city: data.Ville ?? "",
+          });
+        },
+      });
+    } catch (error) {
+      console.error("[MondialRelayPicker] initialization failed", error);
+      setWidgetFailed(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jqueryReady, widgetReady]);
+  }, [jqueryReady, leafletReady, widgetReady]);
+
+  useEffect(() => {
+    if (!widgetReady || widgetFailed || !initializedRef.current) return;
+    const timeout = window.setTimeout(() => {
+      if (containerRef.current && containerRef.current.childElementCount === 0) {
+        console.error("[MondialRelayPicker] widget rendered no content; using manual fallback");
+        setWidgetFailed(true);
+      }
+    }, 10_000);
+    return () => window.clearTimeout(timeout);
+  }, [widgetReady, widgetFailed]);
+
+  if (widgetFailed) {
+    return <ManualPickupPointForm value={value} onChange={onChange} t={t} widgetUnavailable />;
+  }
 
   return (
     <div className="space-y-3">
-      {/* The widget script assumes a global `jQuery` at parse time — loading both
-          scripts in parallel let the widget sometimes execute first and throw
-          "jQuery is not defined", silently leaving MR_ParcelShopPicker
-          unregistered. Gating the second Script behind jqueryReady forces
-          them to run strictly in order. */}
-      <Script src={JQUERY_SRC} strategy="afterInteractive" onLoad={() => setJqueryReady(true)} />
+      {/* Official load order: jQuery, Leaflet, then Mondial Relay. onReady is
+          required here because Next.js only fires onLoad the first time a
+          script loads; this picker must initialize again after navigation. */}
+      <Script
+        id="mondial-relay-jquery"
+        src={JQUERY_SRC}
+        strategy="afterInteractive"
+        onReady={() => setJqueryReady(true)}
+        onError={() => setWidgetFailed(true)}
+      />
       {jqueryReady && (
-        <Script src={WIDGET_JS} strategy="afterInteractive" onLoad={() => setWidgetReady(true)} />
+        <Script
+          id="mondial-relay-leaflet"
+          src={LEAFLET_JS}
+          strategy="afterInteractive"
+          onReady={() => setLeafletReady(true)}
+          onError={() => setWidgetFailed(true)}
+        />
       )}
-      <link rel="stylesheet" href={WIDGET_CSS} />
+      {jqueryReady && leafletReady && (
+        <Script
+          id="mondial-relay-widget"
+          src={WIDGET_JS}
+          strategy="afterInteractive"
+          onReady={() => setWidgetReady(true)}
+          onError={() => setWidgetFailed(true)}
+        />
+      )}
+      <link rel="stylesheet" href={LEAFLET_CSS} />
 
       <div ref={containerRef} id="mr-parcel-shop-zone" />
-      <input ref={targetRef} type="hidden" />
+      <input id="mr-parcel-shop-target" type="hidden" />
 
       {value?.name && (
         <div className="flex items-start gap-2 border border-[#C8A46A]/40 bg-[#C8A46A]/5 p-3 text-sm">
@@ -96,7 +141,7 @@ function WidgetPickupPointPicker({ value, onChange }) {
   );
 }
 
-function ManualPickupPointForm({ value, onChange, t }) {
+function ManualPickupPointForm({ value, onChange, t, widgetUnavailable = false }) {
   const point = value ?? { name: "", address: "", postalCode: "", city: "" };
 
   function handleChange(e) {
@@ -109,7 +154,9 @@ function ManualPickupPointForm({ value, onChange, t }) {
       <div className="flex items-start gap-2 border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
         <Search size={14} className="mt-0.5 flex-shrink-0" />
         <p>
-          {t("autoSearchComing")}
+          {widgetUnavailable
+            ? "La carte Mondial Relay est temporairement indisponible. Saisissez les informations du point relais souhaité pour continuer."
+            : t("autoSearchComing")}
         </p>
       </div>
       <input

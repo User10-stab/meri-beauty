@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 import {
   buildAvailabilityForDate,
   parseLocalDateString,
@@ -65,7 +66,7 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
           staffId: staffService.staff.id,
         },
         date: { gte: startOfDay, lte: endOfDay },
-        status: { in: ["PENDING", "CONFIRMED"] },
+        status: { in: ACTIVE_APPOINTMENT_STATUSES },
         isDeleted: false,
         ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
       },
@@ -160,7 +161,7 @@ export async function getMonthAvailability(staffServiceId, monthDate, excludeApp
           staffId: staffService.staff.id,
         },
         date: { gte: startOfMonth, lte: endOfMonth },
-        status: { in: ["PENDING", "CONFIRMED"] },
+        status: { in: ACTIVE_APPOINTMENT_STATUSES },
         isDeleted: false,
         ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
       },

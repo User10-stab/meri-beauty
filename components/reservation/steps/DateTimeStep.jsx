@@ -17,8 +17,6 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
-import { useLocale, useTranslations } from "next-intl";
-import { toIntlLocale } from "@/lib/intl-locale";
 
 // ─── Availability re-validation helpers ───────────────────────────────────────
 
@@ -30,23 +28,23 @@ import { toIntlLocale } from "@/lib/intl-locale";
  * @param {string} staffServiceId
  * @param {Date}   date
  * @param {string} time           — "HH:MM"
- * @param {(reason: string) => string} unavailableMessage  — resolves reason → message
- * @param {(key: string) => string}   t                    — translation fn
  * @returns {Promise<boolean>}
  */
-async function validateSlotAvailability(staffServiceId, date, time, unavailableMessage, t) {
+async function validateSlotAvailability(staffServiceId, date, time) {
   if (!staffServiceId || !date || !time) return false;
 
   const result = await getAvailableSlots(staffServiceId, date);
 
   if (!result.success) {
-    toast.error(result.message || t("dateTime.checkAvailabilityFailed"));
+    toast.error(result.message || "Impossible de vérifier la disponibilité du créneau.");
     return false;
   }
 
   if (!result.data.isWorkingDay) {
     const reason = result.data.reason;
-    const msg = unavailableMessage(reason) || t("dateTime.dayUnavailable");
+    const msg =
+      UNAVAILABLE_REASON_MESSAGES[reason] ||
+      "Ce jour n'est plus disponible. Veuillez choisir une autre date.";
     toast.error(msg);
     return false;
   }
@@ -57,7 +55,9 @@ async function validateSlotAvailability(staffServiceId, date, time, unavailableM
   );
 
   if (!windowStillAvailable) {
-    toast.error(t("dateTime.slotUnavailable"));
+    toast.error(
+      "Ce créneau n'est plus disponible. Veuillez en sélectionner un autre."
+    );
     return false;
   }
 
@@ -70,18 +70,16 @@ async function validateSlotAvailability(staffServiceId, date, time, unavailableM
  *
  * @param {Array<{ staffService: { id: string }, duration: number }>} drafts
  * @param {{ draftIndex: number, date: string, time: string }[]}       appointments
- * @param {(reason: string) => string} unavailableMessage
- * @param {(key: string) => string}   t
  * @returns {Promise<boolean>}
  */
-async function validateMultiSlotAvailability(drafts, appointments, unavailableMessage, t) {
+async function validateMultiSlotAvailability(drafts, appointments) {
   for (const appt of appointments) {
     const draft = drafts[appt.draftIndex];
     const staffServiceId = draft?.staffService?.id;
     const date = new Date(appt.date);
     const time = appt.time;
 
-    const ok = await validateSlotAvailability(staffServiceId, date, time, unavailableMessage, t);
+    const ok = await validateSlotAvailability(staffServiceId, date, time);
     if (!ok) return false;
   }
   return true;
@@ -89,21 +87,11 @@ async function validateMultiSlotAvailability(drafts, appointments, unavailableMe
 
 // ─── Calendar constants & helpers ─────────────────────────────────────────────
 
-function getMonthNames(locale) {
-  const fmt = new Intl.DateTimeFormat(toIntlLocale(locale), { month: "long" });
-  return Array.from({ length: 12 }, (_, m) =>
-    fmt.format(new Date(2000, m, 1)).replace(/^./, (c) => c.toUpperCase())
-  );
-}
-
-function getDayNames(locale) {
-  const fmt = new Intl.DateTimeFormat(toIntlLocale(locale), { weekday: "short" });
-  const names = Array.from({ length: 7 }, (_, d) =>
-    fmt.format(new Date(2000, 1, 6 + d)).replace(/\.$/, "")
-  );
-  // Reorder to Sunday-first to match getDay() indexing
-  return [names[6], ...names.slice(0, 6)];
-}
+const MONTHS = [
+  "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+  "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+];
+const DAYS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 
 function getDaysInMonth(date) {
   const year = date.getFullYear();
@@ -139,28 +127,24 @@ function formatTimeFromMinutes(minutes) {
   return `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
 }
 
-const UNAVAILABLE_REASON_KEYS = {
-  "Staff not available": "staffNotAvailable",
-  "User deleted": "userDeleted",
-  "No working hours configured": "noWorkingHours",
-  "No active contract": "noActiveContract",
-  "Contract has not started yet": "contractNotStarted",
-  "Contract has expired": "contractExpired",
-  "Salon closed this day": "salonClosedDay",
-  "Staff not working this day": "staffNotWorkingDay",
-  "Staff on time off": "staffOnTimeOff",
-  "Salon closure": "salonClosure",
+const UNAVAILABLE_REASON_MESSAGES = {
+  "Staff not available": "Le membre du personnel n'est pas disponible",
+  "User deleted": "Le compte a été supprimé",
+  "No working hours configured": "Aucun horaire de travail configuré",
+  "No active contract": "Aucun contrat actif",
+  "Contract has not started yet": "Le contrat n'a pas encore commencé",
+  "Contract has expired": "Le contrat a expiré",
+  "Salon closed this day": "Le salon est fermé ce jour",
+  "Staff not working this day": "Le membre du personnel ne travaille pas ce jour",
+  "Staff on time off": "Le membre du personnel est en congé",
+  "Salon closure": "Le salon est fermé (exception)",
 };
 
 function CalendarWidget({ selectedDate, onDateSelect, disabledDates = new Set(), month, onMonthChange }) {
-  const t = useTranslations("reservationSteps");
-  const locale = useLocale();
-  const months = getMonthNames(locale);
-  const dayNames = getDayNames(locale);
   const [internalMonth, setInternalMonth] = useState(selectedDate ?? new Date());
   const currentMonth = month ?? internalMonth;
   const setCurrentMonth = onMonthChange ?? setInternalMonth;
-  const monthDays = getDaysInMonth(currentMonth);
+  const days = getDaysInMonth(currentMonth);
 
   const isDisabled = (date) => {
     if (!date) return true;
@@ -175,28 +159,28 @@ function CalendarWidget({ selectedDate, onDateSelect, disabledDates = new Set(),
           type="button"
           onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1))}
           className="rounded-lg p-1.5 hover:bg-gray-100"
-          aria-label={t("dateTime.prevMonthAria")}
+          aria-label="Mois précédent"
         >
           <ChevronLeft size={16} />
         </button>
         <span className="text-sm font-semibold text-[#2F3A2E]">
-          {months[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+          {MONTHS[currentMonth.getMonth()]} {currentMonth.getFullYear()}
         </span>
         <button
           type="button"
           onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1))}
           className="rounded-lg p-1.5 hover:bg-gray-100"
-          aria-label={t("dateTime.nextMonthAria")}
+          aria-label="Mois suivant"
         >
           <ChevronRight size={16} />
         </button>
       </div>
 
       <div className="grid grid-cols-7 gap-1">
-        {dayNames.map((d) => (
+        {DAYS.map((d) => (
           <div key={d} className="pb-1 text-center text-[10px] font-semibold text-gray-400">{d}</div>
         ))}
-        {monthDays.map((day, i) => (
+        {days.map((day, i) => (
           <button
             key={i}
             type="button"
@@ -219,7 +203,7 @@ function CalendarWidget({ selectedDate, onDateSelect, disabledDates = new Set(),
 
       <div className="mt-2 flex items-center gap-1.5 text-[10px] text-gray-400">
         <span className="inline-flex h-2.5 w-2.5 rounded-full border border-red-200 bg-red-50" />
-        <span>{t("dateTime.unavailableDates")}</span>
+        <span>Dates indisponibles</span>
       </div>
     </div>
   );
@@ -227,9 +211,9 @@ function CalendarWidget({ selectedDate, onDateSelect, disabledDates = new Set(),
 
 // ─── Formatting ───────────────────────────────────────────────────────────────
 
-function formatDateLabel(dateInput, locale) {
+function formatDateLabel(dateInput) {
   const date = new Date(dateInput);
-  return date.toLocaleDateString(toIntlLocale(locale), {
+  return date.toLocaleDateString("fr-FR", {
     weekday: "long",
     year: "numeric",
     month: "long",
@@ -259,25 +243,24 @@ function StaffChip({ staff }) {
 }
 
 function DraftSummary({ drafts }) {
-  const t = useTranslations("reservationSteps");
   const totalDuration = drafts.reduce((s, d) => s + (d.duration ?? 0), 0);
   const totalPrice = drafts.reduce((s, d) => s + Number(d.price ?? 0), 0);
 
   return (
     <div className="rounded-2xl border-2 border-gray-200 bg-gray-50 p-5">
       <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
-        {t("dateTime.draftsTitle", { count: drafts.length })}
+        Vos rendez-vous ({drafts.length})
       </h3>
       <div className="space-y-3">
         {drafts.map((draft, i) => (
           <div key={i} className="rounded-xl border border-gray-200 bg-white p-3">
-            <p className="text-xs font-semibold text-[#C8A46A]">{t("dateTime.appointment", { index: i + 1 })}</p>
+            <p className="text-xs font-semibold text-[#C8A46A]">Rendez-vous {i + 1}</p>
             <p className="mt-1 text-sm font-semibold text-[#2F3A2E]">{draft.service?.name ?? "—"}</p>
             <div className="mt-2">
               <StaffChip staff={draft.staff} />
             </div>
             <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-              <span className="flex items-center gap-1"><Clock size={12} />{t("minutes", { count: draft.duration ?? "—" })}</span>
+              <span className="flex items-center gap-1"><Clock size={12} />{draft.duration ?? "—"} min</span>
               <span className="flex items-center gap-1 font-semibold text-[#C8A46A]">
                 <Euro size={12} />{Number(draft.price ?? 0).toFixed(2)}
               </span>
@@ -286,28 +269,27 @@ function DraftSummary({ drafts }) {
         ))}
       </div>
       <div className="mt-4 flex items-center justify-between border-t border-gray-200 pt-3 text-sm font-semibold text-[#2F3A2E]">
-        <span>{t("dateTime.totalEstimated")}</span>
-        <span className="text-[#C8A46A]">€{totalPrice.toFixed(2)} • {t("minutes", { count: totalDuration })}</span>
+        <span>Total estimé</span>
+        <span className="text-[#C8A46A]">€{totalPrice.toFixed(2)} • {totalDuration} min</span>
       </div>
     </div>
   );
 }
 
 function ModeSwitcher({ mode, onChange }) {
-  const t = useTranslations("reservationSteps");
   const options = [
     {
       id: "same-day",
-      label: t("dateTime.sameDay"),
-      sublabel: t("dateTime.recommended"),
-      description: t("dateTime.sameDayDesc"),
+      label: "Même jour",
+      sublabel: "Recommandé",
+      description: "Tous vos rendez-vous le même jour",
       icon: <Calendar size={20} />,
     },
     {
       id: "multi-day",
-      label: t("dateTime.multiDay"),
+      label: "Plusieurs jours",
       sublabel: null,
-      description: t("dateTime.multiDayDesc"),
+      description: "Chaque rendez-vous à une date différente",
       icon: <CalendarDays size={20} />,
     },
   ];
@@ -342,21 +324,19 @@ function ModeSwitcher({ mode, onChange }) {
 }
 
 function LoadingState() {
-  const t = useTranslations("reservationSteps");
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-16 text-gray-500">
       <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#C8A46A] border-t-transparent" />
-      <p className="text-sm">{t("dateTime.searching")}</p>
+      <p className="text-sm">Recherche des créneaux les plus proches…</p>
     </div>
   );
 }
 
 function EmptyState({ message }) {
-  const t = useTranslations("reservationSteps");
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-gray-400">
       <Clock size={32} className="text-gray-300" />
-      <p className="text-sm">{message ?? t("dateTime.noSlots")}</p>
+      <p className="text-sm">{message ?? "Aucun créneau disponible pour le moment."}</p>
     </div>
   );
 }
@@ -364,8 +344,6 @@ function EmptyState({ message }) {
 // ─── Proposal cards ───────────────────────────────────────────────────────────
 
 function SingleProposalCard({ proposal, drafts, selected, onSelect, index }) {
-  const t = useTranslations("reservationSteps");
-  const locale = useLocale();
   const draft = drafts[0];
   const duration = draft?.duration ?? 60;
   
@@ -389,15 +367,15 @@ function SingleProposalCard({ proposal, drafts, selected, onSelect, index }) {
         <div>
           {proposal.recommended && (
             <span className="mb-2 inline-flex items-center gap-1 rounded-full bg-[#C8A46A] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-              <Sparkles size={10} /> {t("dateTime.recommended")}
+              <Sparkles size={10} /> Recommandé
             </span>
           )}
           {!proposal.recommended && (
             <span className="mb-2 inline-block text-xs font-medium text-gray-400">
-              {t("dateTime.option", { index: index + 1 })}
+              Option {index + 1}
             </span>
           )}
-          <p className="text-base font-semibold text-[#2F3A2E]">{formatDateLabel(proposal.date, locale)}</p>
+          <p className="text-base font-semibold text-[#2F3A2E]">{formatDateLabel(proposal.date)}</p>
           <p className="mt-1 flex items-center gap-1.5 text-sm text-[#C8A46A]">
             <Clock size={15} />
             {timeRange}
@@ -410,8 +388,6 @@ function SingleProposalCard({ proposal, drafts, selected, onSelect, index }) {
 }
 
 function SameDayProposalCard({ proposal, drafts, selected, onSelect, index }) {
-  const t = useTranslations("reservationSteps");
-  const locale = useLocale();
   return (
     <button
       type="button"
@@ -426,19 +402,19 @@ function SameDayProposalCard({ proposal, drafts, selected, onSelect, index }) {
         <div className="flex-1">
           {proposal.recommended ? (
             <span className="mb-2 inline-flex items-center gap-1 rounded-full bg-[#C8A46A] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-              <Sparkles size={10} /> {t("dateTime.recommended")}
+              <Sparkles size={10} /> Recommandé
             </span>
           ) : (
             <span className="mb-2 inline-block text-xs font-medium text-gray-400">
-              {t("dateTime.option", { index: index + 1 })}
+              Option {index + 1}
             </span>
           )}
 
-          <p className="text-base font-semibold text-[#2F3A2E]">{formatDateLabel(proposal.date, locale)}</p>
+          <p className="text-base font-semibold text-[#2F3A2E]">{formatDateLabel(proposal.date)}</p>
           <p className="mt-1 text-sm text-gray-600">
             {proposal.startTime} → {proposal.finishTime}
             {proposal.totalWaitingTime > 0 && (
-              <span className="text-gray-400"> • {t("dateTime.waitingMinutes", { count: proposal.totalWaitingTime })}</span>
+              <span className="text-gray-400"> • {proposal.totalWaitingTime} min d&apos;attente</span>
             )}
           </p>
 
@@ -457,7 +433,7 @@ function SameDayProposalCard({ proposal, drafts, selected, onSelect, index }) {
                   className="flex items-center justify-between rounded-lg bg-white/80 px-3 py-2 text-xs"
                 >
                   <span className="font-medium text-[#2F3A2E]">
-                    {draft?.service?.name ?? t("dateTime.appointment", { index: appt.draftIndex + 1 })}
+                    {draft?.service?.name ?? `Rendez-vous ${appt.draftIndex + 1}`}
                   </span>
                   <span className="text-[#C8A46A]">{timeRange}</span>
                 </div>
@@ -466,8 +442,8 @@ function SameDayProposalCard({ proposal, drafts, selected, onSelect, index }) {
           </div>
 
           <div className="mt-3 flex gap-4 text-xs text-gray-500">
-            <span>{t("dateTime.careMinutes", { count: proposal.totalDuration })}</span>
-            <span>{t("dateTime.appointmentsCount", { count: proposal.appointmentCount })}</span>
+            <span>{proposal.totalDuration} min de soins</span>
+            <span>{proposal.appointmentCount} rendez-vous</span>
           </div>
         </div>
         {selected && <CheckCircle2 size={22} className="flex-shrink-0 text-[#C8A46A]" />}
@@ -486,8 +462,6 @@ function AppointmentDateCard({
   onDateSelect,
   onTimeSelect,
 }) {
-  const t = useTranslations("reservationSteps");
-  const locale = useLocale();
   const [open, setOpen] = useState(true);
   const [availableWindows, setAvailableWindows] = useState([]);
   const [disabledDates, setDisabledDates] = useState(new Set());
@@ -515,10 +489,10 @@ function AppointmentDateCard({
         setAvailableWindows(result.data.reservationWindows || []);
 
         if (!result.data.isWorkingDay && result.data.reason) {
-          toast.error(UNAVAILABLE_REASON_KEYS[result.data.reason] ? t(`dateTime.unavailableReasons.${UNAVAILABLE_REASON_KEYS[result.data.reason]}`) : t("dateTime.dayNotAvailable"));
+          toast.error(UNAVAILABLE_REASON_MESSAGES[result.data.reason] || "Ce jour n'est pas disponible");
         }
       } else {
-        toast.error(result.message || t("errorLoad"));
+        toast.error(result.message || "Erreur lors du chargement");
         setAvailableWindows([]);
       }
       setLoadingSlots(false);
@@ -546,15 +520,15 @@ function AppointmentDateCard({
         <div className="flex items-center gap-3">
           {isComplete ? (
             <span className="rounded-lg bg-[#C8A46A] px-3 py-1 text-xs font-semibold text-white">
-              {selectedDate.toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short", timeZone: "Europe/Brussels" })} • {selectedTime}
+              {selectedDate.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", timeZone: "Europe/Brussels" })} • {selectedTime}
             </span>
           ) : selectedDate ? (
             <span className="rounded-lg bg-white/10 px-3 py-1 text-xs text-white/80">
-              {selectedDate.toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short", timeZone: "Europe/Brussels" })} — {t("dateTime.chooseTime")}
+              {selectedDate.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", timeZone: "Europe/Brussels" })} — choisir l&apos;heure
             </span>
           ) : (
             <span className="rounded-lg bg-white/10 px-3 py-1 text-xs text-white/60">
-              {t("dateTime.dateTimeNotChosen")}
+              Date et heure non choisies
             </span>
           )}
           <ChevronRight
@@ -569,7 +543,7 @@ function AppointmentDateCard({
           <div className="flex items-center justify-between rounded-xl bg-gray-50 px-4 py-3">
             <StaffChip staff={draft.staff} />
             <div className="flex items-center gap-3 text-sm text-gray-500">
-              <span className="flex items-center gap-1"><Clock size={14} />{t("minutes", { count: draft.duration ?? "—" })}</span>
+              <span className="flex items-center gap-1"><Clock size={14} />{draft.duration ?? "—"} min</span>
               <span className="flex items-center gap-1 font-semibold text-[#C8A46A]">
                 <Euro size={14} />{Number(draft.price ?? 0).toFixed(2)}
               </span>
@@ -577,7 +551,7 @@ function AppointmentDateCard({
           </div>
 
           <div className="rounded-xl border border-gray-200 p-4">
-            <h4 className="mb-4 text-sm font-semibold text-[#2F3A2E]">{t("dateTime.chooseDate")}</h4>
+            <h4 className="mb-4 text-sm font-semibold text-[#2F3A2E]">Choisissez une date</h4>
             <CalendarWidget
               selectedDate={selectedDate}
               month={currentMonth}
@@ -591,16 +565,16 @@ function AppointmentDateCard({
             {selectedDate && (
               <div className="mt-3 flex items-center gap-2 rounded-lg bg-[#C8A46A]/10 p-2 text-xs">
                 <Calendar size={14} className="text-[#C8A46A]" />
-                <span className="font-medium text-[#2F3A2E]">{formatDateLabel(selectedDate, locale)}</span>
+                <span className="font-medium text-[#2F3A2E]">{formatDateLabel(selectedDate)}</span>
               </div>
             )}
           </div>
 
           <div className="rounded-xl border border-gray-200 p-4">
-            <h4 className="mb-3 text-sm font-semibold text-[#2F3A2E]">{t("dateTime.availableSlots")}</h4>
+            <h4 className="mb-3 text-sm font-semibold text-[#2F3A2E]">Créneaux disponibles</h4>
             {!selectedDate ? (
               <div className="flex h-24 items-center justify-center text-xs text-gray-400">
-                {t("dateTime.selectDateFirst")}
+                Sélectionnez d&apos;abord une date
               </div>
             ) : loadingSlots ? (
               <div className="flex h-24 items-center justify-center">
@@ -608,7 +582,7 @@ function AppointmentDateCard({
               </div>
             ) : availableWindows.length === 0 ? (
               <div className="flex h-24 items-center justify-center text-xs text-gray-400">
-                {t("dateTime.noSlotsToday")}
+                Aucun créneau disponible ce jour
               </div>
             ) : (
               <div className="grid max-h-48 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
@@ -637,15 +611,14 @@ function AppointmentDateCard({
 }
 
 function MultiDayManualView({ drafts, perDraftDates, perDraftTimes, onDraftDateSelect, onDraftTimeSelect }) {
-  const t = useTranslations("reservationSteps");
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border-2 border-gray-200 p-5">
         <h3 className="mb-1 text-base font-semibold text-[#2F3A2E]">
-          {t("dateTime.planEach")}
+          Planifiez chaque rendez-vous
         </h3>
         <p className="text-sm text-gray-500">
-          {t("dateTime.planEachDesc")}
+          Choisissez une date et une heure pour chaque rendez-vous ci-dessous.
         </p>
       </div>
 
@@ -667,8 +640,6 @@ function MultiDayManualView({ drafts, perDraftDates, perDraftTimes, onDraftDateS
 // ─── Single-draft direct calendar + slot picker ───────────────────────────────
 
 function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTimeSelect, onConfirm, validating }) {
-  const t = useTranslations("reservationSteps");
-  const locale = useLocale();
   const [disabledDates, setDisabledDates] = useState(new Set());
   const [availableWindows, setAvailableWindows] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
@@ -696,11 +667,11 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
         setAvailableWindows(result.data.reservationWindows || []);
         if (!result.data.isWorkingDay && result.data.reason) {
           toast.error(
-            UNAVAILABLE_REASON_KEYS[result.data.reason] ? t(`dateTime.unavailableReasons.${UNAVAILABLE_REASON_KEYS[result.data.reason]}`) : t("dateTime.dayNotAvailable")
+            UNAVAILABLE_REASON_MESSAGES[result.data.reason] || "Ce jour n'est pas disponible"
           );
         }
       } else {
-        toast.error(result.message || t("errorLoad"));
+        toast.error(result.message || "Erreur lors du chargement");
         setAvailableWindows([]);
       }
       setLoadingSlots(false);
@@ -711,7 +682,7 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
     <div className="space-y-5">
       {/* Calendar */}
       <div className="rounded-2xl border-2 border-gray-200 p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[#2F3A2E]">{t("dateTime.chooseDate")}</h3>
+        <h3 className="mb-4 text-sm font-semibold text-[#2F3A2E]">Choisissez une date</h3>
         <CalendarWidget
           selectedDate={selectedDate}
           month={currentMonth}
@@ -725,17 +696,17 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
         {selectedDate && (
           <div className="mt-3 flex items-center gap-2 rounded-lg bg-[#C8A46A]/10 px-3 py-2 text-xs">
             <Calendar size={13} className="flex-shrink-0 text-[#C8A46A]" />
-            <span className="font-medium text-[#2F3A2E]">{formatDateLabel(selectedDate, locale)}</span>
+            <span className="font-medium text-[#2F3A2E]">{formatDateLabel(selectedDate)}</span>
           </div>
         )}
       </div>
 
       {/* Time slots */}
       <div className="rounded-2xl border-2 border-gray-200 p-5">
-        <h3 className="mb-4 text-sm font-semibold text-[#2F3A2E]">{t("dateTime.availableSlots")}</h3>
+        <h3 className="mb-4 text-sm font-semibold text-[#2F3A2E]">Créneaux disponibles</h3>
         {!selectedDate ? (
           <div className="flex h-28 items-center justify-center text-sm text-gray-400">
-            {t("dateTime.selectDateFirst")}
+            Sélectionnez d&apos;abord une date
           </div>
         ) : loadingSlots ? (
           <div className="flex h-28 items-center justify-center">
@@ -743,7 +714,7 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
           </div>
         ) : availableWindows.length === 0 ? (
           <div className="flex h-28 items-center justify-center text-sm text-gray-400">
-            {t("dateTime.noSlotsToday")}
+            Aucun créneau disponible ce jour
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
@@ -781,10 +752,10 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
           {validating ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 size={16} className="animate-spin" />
-              {t("dateTime.verifying")}
+              Vérification en cours…
             </span>
           ) : (
-            t("dateTime.confirmSlot")
+            "Confirmer ce créneau"
           )}
         </button>
       )}
@@ -801,7 +772,6 @@ function AutoProposalView({
   onConfirm,
   validating,
 }) {
-  const t = useTranslations("reservationSteps");
   const [loading, setLoading] = useState(true);
   const [proposals, setProposals] = useState([]);
   const [resultType, setResultType] = useState(null);
@@ -821,7 +791,7 @@ function AutoProposalView({
     });
 
     if (!result.success) {
-      toast.error(result.message || t("errorLoad"));
+      toast.error(result.message || "Erreur lors de la recherche");
       setProposals([]);
     } else {
       setProposals(result.proposals ?? []);
@@ -843,10 +813,10 @@ function AutoProposalView({
     <div className="space-y-4">
       <div className="rounded-2xl border-2 border-gray-200 p-5">
         <h3 className="mb-1 text-base font-semibold text-[#2F3A2E]">
-          {t("dateTime.availableSlots")}
+          Créneaux disponibles
         </h3>
         <p className="mb-5 text-sm text-gray-500">
-          {t("dateTime.proposalsFound")}
+          Nous avons trouvé les prochains créneaux disponibles. Choisissez celui qui vous convient.
         </p>
 
         <div className="space-y-3">
@@ -891,10 +861,10 @@ function AutoProposalView({
           {validating ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 size={16} className="animate-spin" />
-              {t("dateTime.verifying")}
+              Vérification…
             </span>
           ) : (
-            t("dateTime.confirmSchedule")
+            "Confirmer cet horaire"
           )}
         </button>
       )}
@@ -906,8 +876,6 @@ function AutoProposalView({
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export default function DateTimeStep({ data, updateData, nextStep }) {
-  const t = useTranslations("reservationSteps");
-  const locale = useLocale();
   const drafts = data.appointmentDrafts?.length
     ? data.appointmentDrafts
     : data.staffService
@@ -980,14 +948,9 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
     updateData({ time });
   };
 
-  const unavailableMessage = (reason) => {
-    const key = UNAVAILABLE_REASON_KEYS[reason];
-    return key ? t(`dateTime.unavailableReasons.${key}`) : t("dateTime.dayNotAvailable");
-  };
-
   const handleSingleConfirm = async () => {
     if (!singleDate || !singleTime) {
-      toast.error(t("dateTime.selectDateTime"));
+      toast.error("Veuillez sélectionner une date et une heure");
       return;
     }
 
@@ -995,7 +958,7 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
     const staffServiceId = draft?.staffService?.id ?? data.staffService?.id;
 
     setValidating(true);
-    const slotOk = await validateSlotAvailability(staffServiceId, singleDate, singleTime, unavailableMessage, t);
+    const slotOk = await validateSlotAvailability(staffServiceId, singleDate, singleTime);
     setValidating(false);
 
     if (!slotOk) {
@@ -1037,7 +1000,7 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
 
   const handleAutoConfirm = async () => {
     if (!selectedProposal) {
-      toast.error(t("dateTime.selectSlot"));
+      toast.error("Veuillez sélectionner un créneau");
       return;
     }
 
@@ -1048,7 +1011,7 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
       : [{ draftIndex: 0, date: selectedProposal.date, time: selectedProposal.time }];
 
     setValidating(true);
-    const allOk = await validateMultiSlotAvailability(drafts, appointments, unavailableMessage, t);
+    const allOk = await validateMultiSlotAvailability(drafts, appointments);
     setValidating(false);
 
     if (!allOk) {
@@ -1065,7 +1028,7 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
 
   const handleMultiDayConfirm = async () => {
     if (!allMultiDaySelectionsComplete) {
-      toast.error(t("dateTime.selectEachDateTime"));
+      toast.error("Veuillez choisir une date et une heure pour chaque rendez-vous");
       return;
     }
 
@@ -1076,7 +1039,7 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
     }));
 
     setValidating(true);
-    const allOk = await validateMultiSlotAvailability(drafts, appointments, unavailableMessage, t);
+    const allOk = await validateMultiSlotAvailability(drafts, appointments);
     setValidating(false);
 
     if (!allOk) {
@@ -1095,14 +1058,14 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
   };
 
   const subtitle = isMultiDraft
-    ? `${t("dateTime.appointmentsCount", { count: drafts.length })} • ${drafts.map((d) => d.staff?.user?.fullName).filter(Boolean).join(", ")}`
+    ? `${drafts.length} rendez-vous • ${drafts.map((d) => d.staff?.user?.fullName).filter(Boolean).join(", ")}`
     : `${drafts[0]?.staff?.user?.fullName ?? data.staff?.user?.fullName ?? ""} • ${drafts[0]?.service?.name ?? data.service?.name ?? ""}`;
 
   return (
     <div>
       <div className="mb-8 text-center">
         <h2 className="text-3xl font-bold text-[#2F3A2E]">
-          {t("dateTime.title")}
+          Choisissez votre créneau
         </h2>
         <p className="mt-2 text-gray-600">{subtitle}</p>
       </div>
@@ -1129,7 +1092,7 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
             <div className="space-y-6">
               <div className="rounded-2xl border-2 border-gray-200 p-5">
                 <p className="mb-4 text-sm font-semibold text-[#2F3A2E]">
-                  {t("dateTime.howPlan")}
+                  Comment souhaitez-vous planifier vos rendez-vous ?
                 </p>
                 <ModeSwitcher mode={schedulingMode} onChange={handleModeChange} />
               </div>
@@ -1154,14 +1117,14 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
                           : "bg-[#C8A46A] hover:bg-[#B8945A]"
                       }`}
                     >
-{validating ? (
-              <span className="flex items-center justify-center gap-2">
-                <Loader2 size={16} className="animate-spin" />
-                {t("dateTime.verifying")}
-              </span>
-            ) : (
-              t("dateTime.confirmSlot")
-            )}
+                      {validating ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Loader2 size={16} className="animate-spin" />
+                          Vérification en cours…
+                        </span>
+                      ) : (
+                        "Confirmer les horaires"
+                      )}
                     </button>
                   )}
                 </>

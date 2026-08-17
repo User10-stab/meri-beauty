@@ -86,7 +86,7 @@ export async function getMyReservations() {
         date:        appt.date,
         startTime:   appt.startTime,
         endTime:     appt.endTime,
-        status:      appt.status,       // PENDING | CONFIRMED | COMPLETED | CANCELLED | NO_SHOW
+        status:      appt.status,       // PENDING | ACCEPTED | CONFIRMED | COMPLETED | CANCELLED | NO_SHOW
         notes:       appt.notes,
 
         // Service & staff
@@ -138,6 +138,11 @@ export async function getMyReservations() {
           (payment.paymentType === "ONLINE" || payment.paymentType === "DEPOSIT") &&
           appt.status !== "CANCELLED" &&
           appt.status !== "COMPLETED",
+
+        // Manual requests do not have a Payment row until the customer makes
+        // a choice after staff acceptance. Keep the route discoverable even
+        // if the acceptance email is missed.
+        awaitingPaymentChoice: appt.status === "ACCEPTED" && payment === null,
 
         cancellationRequest: appt.cancellationRequests[0]
           ? {

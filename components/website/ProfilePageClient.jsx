@@ -2,14 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useLocale, useTranslations } from "next-intl";
 import { Loader2, Lock, Star, Mail, Receipt, BadgeCheck, BadgeX, ShieldQuestion, MapPin, Building2 } from "lucide-react";
 import { updateMyProfile } from "@/actions/customer/profile";
 import { updateNewsletterPreference, updateMyVatNumber, updateMyAddress, updateMyBillingProfile } from "@/actions/customer/settings";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { createAppointmentReview } from "@/actions/review/review-actions";
 import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/review-eligibility";
-import { toIntlLocale } from "@/lib/intl-locale";
 
 function Field({ label, error, children }) {
   return (
@@ -21,8 +19,8 @@ function Field({ label, error, children }) {
   );
 }
 
-function formatAppointmentDate(startTime, intlLocale) {
-  return new Date(startTime).toLocaleDateString(intlLocale, {
+function formatAppointmentDate(startTime) {
+  return new Date(startTime).toLocaleDateString("fr-FR", {
     weekday: "long",
     day: "2-digit",
     month: "long",
@@ -31,14 +29,14 @@ function formatAppointmentDate(startTime, intlLocale) {
   });
 }
 
-function formatAppointmentTime(startTime, endTime, intlLocale) {
-  const start = new Date(startTime).toLocaleTimeString(intlLocale, { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
-  const end = new Date(endTime).toLocaleTimeString(intlLocale, { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
+function formatAppointmentTime(startTime, endTime) {
+  const start = new Date(startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
+  const end = new Date(endTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
   return `${start} → ${end}`;
 }
 
-function formatReviewDate(date, intlLocale) {
-  return new Date(date).toLocaleDateString(intlLocale, {
+function formatReviewDate(date) {
+  return new Date(date).toLocaleDateString("fr-FR", {
     day: "2-digit",
     month: "long",
     year: "numeric",
@@ -47,7 +45,6 @@ function formatReviewDate(date, intlLocale) {
 }
 
 function StarRatingInput({ value, onChange }) {
-  const t = useTranslations("profile");
   return (
     <div className="flex items-center gap-2">
       {[1, 2, 3, 4, 5].map((rating) => {
@@ -58,7 +55,7 @@ function StarRatingInput({ value, onChange }) {
             type="button"
             onClick={() => onChange(rating)}
             className="rounded-full p-1 transition-transform hover:scale-110"
-            aria-label={t("starRating", { count: rating })}
+            aria-label={`${rating} étoile${rating > 1 ? "s" : ""}`}
           >
             <Star className={`h-7 w-7 ${active ? "fill-[#C8A46A] text-[#C8A46A]" : "text-neutral-300"}`} />
           </button>
@@ -82,9 +79,6 @@ function StaticStars({ rating }) {
 }
 
 function ReviewModal({ appointment, onClose, onSaved }) {
-  const t = useTranslations("profile");
-  const tAccount = useTranslations("myAccount");
-  const intlLocale = toIntlLocale(useLocale());
   const [rating, setRating] = useState(appointment.review?.rating ?? 0);
   const [comment, setComment] = useState(appointment.review?.comment ?? "");
   const [submitting, setSubmitting] = useState(false);
@@ -130,29 +124,29 @@ function ReviewModal({ appointment, onClose, onSaved }) {
       <div className="w-full max-w-lg border border-neutral-200 bg-white p-6 shadow-xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">{tAccount("leaveReview")}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">Laisser un avis</p>
             <h3 className="mt-1 text-xl font-bold text-primary">{appointment.serviceName}</h3>
             <p className="mt-1 text-sm text-neutral-500">
-              {formatAppointmentDate(appointment.startTime, intlLocale)} • {formatAppointmentTime(appointment.startTime, appointment.endTime, intlLocale)}
+              {formatAppointmentDate(appointment.startTime)} • {formatAppointmentTime(appointment.startTime, appointment.endTime)}
             </p>
           </div>
           <button type="button" onClick={onClose} className="text-sm font-semibold text-neutral-400 hover:text-neutral-600">
-            {t("close")}
+            Fermer
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-          <Field label={t("starRatingLabel")} error={errors.rating}>
+          <Field label="Votre note" error={errors.rating}>
             <StarRatingInput value={rating} onChange={setRating} />
           </Field>
 
-          <Field label={t("commentOptional")} error={errors.comment}>
+          <Field label="Commentaire (optionnel)" error={errors.comment}>
             <textarea
               rows={5}
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               maxLength={REVIEW_COMMENT_MAX_LENGTH}
-              placeholder={t("commentPlaceholder")}
+              placeholder="Partagez votre expérience…"
               className="w-full resize-none border border-neutral-200 px-4 py-3 text-sm focus:border-gold focus:outline-none"
             />
             <div className="mt-1 text-right text-xs text-neutral-400">
@@ -167,7 +161,7 @@ function ReviewModal({ appointment, onClose, onSaved }) {
               disabled={submitting}
               className="border border-neutral-200 px-5 py-3 text-sm font-semibold text-neutral-600 hover:bg-neutral-50"
             >
-              {tAccount("cancel")}
+              Annuler
             </button>
             <button
               type="submit"
@@ -175,7 +169,7 @@ function ReviewModal({ appointment, onClose, onSaved }) {
               className="inline-flex items-center gap-2 bg-gold px-5 py-3 text-sm font-semibold uppercase tracking-wide text-white hover:bg-gold/90 disabled:opacity-60"
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-              {t("sendReview")}
+              Envoyer l&apos;avis
             </button>
           </div>
         </form>
@@ -185,28 +179,16 @@ function ReviewModal({ appointment, onClose, onSaved }) {
 }
 
 function AppointmentReviewCard({ appointment, onReviewCreated }) {
-  const t = useTranslations("profile");
-  const tAccount = useTranslations("myAccount");
-  const tStatus = useTranslations("appointmentStatus");
-  const intlLocale = toIntlLocale(useLocale());
   const canLeaveReview = appointment.status === "COMPLETED" && !appointment.review;
-
-  const STATUS_LABELS = {
-    PENDING: tStatus("pending"),
-    CONFIRMED: tStatus("confirmed"),
-    COMPLETED: tStatus("completed"),
-    CANCELLED: tStatus("cancelled"),
-    NO_SHOW: tStatus("noShow"),
-  };
 
   return (
     <div className="border border-ink/8 bg-white p-5">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm font-semibold text-primary">{appointment.serviceName}</p>
-          <p className="mt-1 text-sm text-neutral-500">{t("withStaff", { staff: appointment.staffName })}</p>
+          <p className="mt-1 text-sm text-neutral-500">Avec {appointment.staffName}</p>
           <p className="mt-2 text-sm text-neutral-600">
-            {formatAppointmentDate(appointment.startTime, intlLocale)} • {formatAppointmentTime(appointment.startTime, appointment.endTime, intlLocale)}
+            {formatAppointmentDate(appointment.startTime)} • {formatAppointmentTime(appointment.startTime, appointment.endTime)}
           </p>
         </div>
 
@@ -220,7 +202,7 @@ function AppointmentReviewCard({ appointment, onReviewCreated }) {
                   ? "bg-amber-50 text-amber-700"
                   : "bg-neutral-100 text-neutral-500"
           }`}>
-            {STATUS_LABELS[appointment.status] ?? appointment.status}
+            {appointment.status}
           </span>
 
           {canLeaveReview ? (
@@ -230,12 +212,12 @@ function AppointmentReviewCard({ appointment, onReviewCreated }) {
               className="inline-flex items-center gap-2 border border-[#C8A46A] px-4 py-2 text-sm font-semibold text-[#C8A46A] hover:bg-[#C8A46A]/5"
             >
               <Star className="h-4 w-4 fill-current" />
-              {tAccount("leaveReview")}
+              Laisser un avis
             </button>
           ) : appointment.review ? (
             <div className="rounded-md bg-neutral-50 px-4 py-2 text-sm text-neutral-600">
               <StaticStars rating={appointment.review.rating} />
-              <p className="mt-1 font-medium">{tAccount("reviewSent")}</p>
+              <p className="mt-1 font-medium">Avis envoyé</p>
             </div>
           ) : null}
         </div>
@@ -244,7 +226,7 @@ function AppointmentReviewCard({ appointment, onReviewCreated }) {
       {appointment.review && (
         <div className="mt-4 border-t border-neutral-200 pt-4">
           <StaticStars rating={appointment.review.rating} />
-          <p className="mt-2 text-xs text-neutral-400">{tAccount("sentOn")} {formatReviewDate(appointment.review.createdAt, intlLocale)}</p>
+          <p className="mt-2 text-xs text-neutral-400">Envoyé le {formatReviewDate(appointment.review.createdAt)}</p>
           {appointment.review.comment && <p className="mt-2 text-sm text-neutral-600">{appointment.review.comment}</p>}
         </div>
       )}
@@ -398,7 +380,6 @@ function AddressCard({ initialAddress }) {
 }
 
 function VatNumberCard({ initialVatNumber }) {
-  const tAccount = useTranslations("myAccount");
   const [vatNumber, setVatNumber] = useState(initialVatNumber ?? "");
   const [savedVatNumber, setSavedVatNumber] = useState(initialVatNumber ?? "");
   const [saving, setSaving] = useState(false);
@@ -423,7 +404,7 @@ function VatNumberCard({ initialVatNumber }) {
 
   async function handleVerify() {
     if (!vatNumber.trim()) {
-      toast.error(tAccount("pleaseEnterVatNumber"));
+      toast.error("Renseignez d'abord un numéro de TVA.");
       return;
     }
     setVatCheck({ loading: true });
@@ -436,9 +417,9 @@ function VatNumberCard({ initialVatNumber }) {
       valid: result.valid,
       message: result.valid
         ? result.name
-          ? tAccount("activeRegistered", { name: result.name })
-          : tAccount("activeVies")
-        : tAccount("notRecognized"),
+          ? `Actif — enregistré au nom de « ${result.name} ».`
+          : "Actif dans le registre VIES."
+        : "Ce numéro n'est pas reconnu par le registre européen VIES.",
     });
   }
 
@@ -447,9 +428,10 @@ function VatNumberCard({ initialVatNumber }) {
       <div className="flex items-start gap-3">
         <Receipt className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.75} />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-ink">{tAccount("vatnumber")}</p>
+          <p className="text-sm font-bold text-ink">Numéro de TVA</p>
           <p className="mt-0.5 text-xs text-ink/50">
-            {tAccount("vatNumberDescription")}
+            Réservez en tant que professionnel(le) et ce numéro apparaîtra sur vos factures — de quoi
+            déduire la TVA et passer l&apos;achat en frais professionnels.
           </p>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -470,7 +452,7 @@ function VatNumberCard({ initialVatNumber }) {
               className="inline-flex items-center gap-1.5 border border-neutral-200 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
             >
               {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
-              {tAccount("verify")}
+              Vérifier
             </button>
             <button
               type="button"
@@ -479,7 +461,7 @@ function VatNumberCard({ initialVatNumber }) {
               className="inline-flex items-center gap-1.5 bg-gold px-4 text-xs font-semibold uppercase tracking-wide text-white transition-colors hover:bg-gold/90 disabled:cursor-not-allowed disabled:bg-gray-300"
             >
               {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {tAccount("save")}
+              Enregistrer
             </button>
           </div>
 
@@ -609,8 +591,6 @@ function BillingProfileCard({ initialBillingProfile }) {
 }
 
 export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVatNumber, initialAddress, initialBillingProfile }) {
-  const t = useTranslations("profile");
-  const tAccount = useTranslations("myAccount");
   const [fullName, setFullName] = useState(user.fullName ?? "");
   const [email, setEmail] = useState(user.email ?? "");
   const [phone, setPhone] = useState(user.phone ?? "");
@@ -630,10 +610,10 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
   const appointmentCards = useMemo(
     () => appointments.map((appointment) => ({
       ...appointment,
-      serviceName: appointment.staffService?.service?.name ?? t("fallbackAppointment"),
+      serviceName: appointment.staffService?.service?.name ?? "Rendez-vous",
       staffName: appointment.staffService?.staff?.user?.fullName ?? "—",
     })),
-    [appointments, t]
+    [appointments]
   );
 
   async function handleSubmit(e) {
@@ -703,11 +683,11 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
         <div className="mx-auto max-w-[900px] px-6 text-center md:px-10">
           <div className="mb-4 inline-flex items-center gap-3">
             <span className="h-px w-8 bg-gold" />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">{t("eyebrow")}</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">Mon profil</span>
             <span className="h-px w-8 bg-gold" />
           </div>
           <h1 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[2.6rem]">
-            {t("title")}
+            Mes informations et réservations
           </h1>
         </div>
       </section>
@@ -715,15 +695,15 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
       <section className="w-full bg-cream">
         <div className="mx-auto max-w-[900px] space-y-10 px-6 py-12 md:px-10">
           <form onSubmit={handleSubmit} className="space-y-6 border border-ink/8 bg-white p-6 sm:p-8">
-            <Field label={tAccount("fullNameLabel")} error={errors.fullName}>
+            <Field label="Nom complet" error={errors.fullName}>
               <input className={inputClass} value={fullName} onChange={(e) => setFullName(e.target.value)} required />
             </Field>
 
-            <Field label={tAccount("emailLabel")} error={errors.email}>
+            <Field label="Email" error={errors.email}>
               <input type="email" className={inputClass} value={email} onChange={(e) => setEmail(e.target.value)} required />
             </Field>
 
-            <Field label={tAccount("phoneLabel")} error={errors.phone}>
+            <Field label="Téléphone" error={errors.phone}>
               <input type="tel" className={inputClass} value={phone} onChange={(e) => setPhone(e.target.value)} required />
             </Field>
 
@@ -731,9 +711,9 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
               <div className="flex items-center gap-2.5">
                 <Lock className="h-4 w-4 text-ink/40" />
                 <div>
-                  <p className="text-sm font-medium text-ink">{tAccount("passwordLabel")}</p>
+                  <p className="text-sm font-medium text-ink">Mot de passe</p>
                   <p className="text-xs text-ink/45">
-                    {newPassword ? t("newPasswordWillBeSet") : t("leaveBlankToKeep")}
+                    {newPassword ? "Un nouveau mot de passe sera défini" : "Laissez vide pour le conserver"}
                   </p>
                 </div>
               </div>
@@ -742,16 +722,16 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
                 onClick={() => setShowPasswordFields((prev) => !prev)}
                 className="text-sm font-semibold text-gold hover:text-gold/80"
               >
-                {showPasswordFields ? tAccount("cancel") : t("modify")}
+                {showPasswordFields ? "Annuler" : "Modifier"}
               </button>
             </div>
 
             {showPasswordFields && (
-              <Field label={tAccount("newPassword")} error={errors.newPassword}>
+              <Field label="Nouveau mot de passe" error={errors.newPassword}>
                 <input
                   type="password"
                   className={inputClass}
-                  placeholder={t("minimumCharacters")}
+                  placeholder="Minimum 8 caractères"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                 />
@@ -760,7 +740,7 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
 
             {hasChanges && (
               <div className="border border-amber-200 bg-amber-50 p-4">
-                <Field label={t("currentPasswordConfirm")} error={errors.currentPassword}>
+                <Field label="Mot de passe actuel (pour confirmer)" error={errors.currentPassword}>
                   <input
                     type="password"
                     className={inputClass}
@@ -779,7 +759,7 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
                 className="inline-flex items-center gap-2 bg-gold px-6 py-3 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-gold/90 disabled:cursor-not-allowed disabled:bg-gray-300"
               >
                 {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                {tAccount("save")}
+                Enregistrer
               </button>
             </div>
           </form>
@@ -789,9 +769,9 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
               <div className="flex items-start gap-3">
                 <Mail className="mt-0.5 h-5 w-5 shrink-0 text-gold" strokeWidth={1.75} />
                 <div>
-                  <p className="text-sm font-bold text-ink">{tAccount("newsLetter")}</p>
+                  <p className="text-sm font-bold text-ink">Newsletter</p>
                   <p className="mt-0.5 text-xs text-ink/50">
-                    {tAccount("receiveUpdates")}
+                    Recevez nos actualités, offres et nouveautés par email.
                   </p>
                 </div>
               </div>
@@ -810,16 +790,16 @@ export function ProfilePageClient({ user, initialNewsletterSubscribed, initialVa
 
           <section className="space-y-5">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">{tAccount("myReservations")}</p>
-              <h2 className="mt-1 text-2xl font-bold text-primary">{t("appointmentsAndReviews")}</h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">Mes réservations</p>
+              <h2 className="mt-1 text-2xl font-bold text-primary">Rendez-vous et avis</h2>
               <p className="mt-2 text-sm text-neutral-500">
-                {t("leaveReviewHint")}
+                Vous pouvez laisser un avis une fois votre rendez-vous terminé.
               </p>
             </div>
 
             {appointmentCards.length === 0 ? (
               <div className="border border-ink/8 bg-white p-6 text-sm text-neutral-500">
-                {t("noAppointments")}
+                Aucun rendez-vous pour le moment.
               </div>
             ) : (
               <div className="space-y-4">

@@ -6,7 +6,7 @@ import { stripe } from "@/lib/stripe";
 import { ROLES, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
-import { reservationAcceptedWithPaymentLinkEmail, reservationConfirmedEmail } from "@/lib/email-templates";
+import { reservationAcceptedWithPaymentLinkEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
@@ -71,13 +71,15 @@ async function authorizeAppointmentAction(appointmentId) {
 }
 
 /**
- * Accepts an appointment (staff action). Transitions PENDING → ACCEPTED.
+ * Accepts a manual appointment request and sends the customer to the payment
+ * choice page. Final confirmation happens only after the customer chooses an
+ * on-site payment or Stripe confirms an online payment.
  * Called by the salon owner/staff from the dashboard.
  *
  * @param {string} appointmentId
  * @returns {Promise<{ success: boolean, message?: string }>}
  */
-export async function acceptAppointment(appointmentId) {
+export async function confirmAppointment(appointmentId) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -103,18 +105,15 @@ export async function acceptAppointment(appointmentId) {
           include: {
             service: true,
             staff: {
-              select: {
-                id: true,
+              include: {
                 user: {
                   select: { fullName: true },
                 },
-                allowedPaymentMethods: true,
-                depositEnabled: true,
-                depositPercentage: true,
               },
             },
           },
         },
+        payment: { select: { id: true, status: true } },
       },
     });
 
@@ -125,63 +124,45 @@ export async function acceptAppointment(appointmentId) {
     if (appointment.status !== "PENDING") {
       return {
         success: false,
-        message: "Ce rendez-vous n'est pas en attente d'acceptation",
+        message: "Ce rendez-vous n'est pas en attente de confirmation",
       };
     }
 
-    // ── Update status + create notification atomically ──────────────────────
-    const claimed = await prisma.$transaction(async (tx) => {
-      const claim = await tx.appointment.updateMany({
-        where: { id: appointmentId, status: "PENDING" },
-        data: { status: "ACCEPTED" },
-      });
-      if (claim.count === 0) return false;
+    // A PENDING appointment with a Payment row belongs to the automatic
+    // pay-now flow. Staff acceptance must never race or bypass its webhook.
+    if (appointment.payment) {
+      return {
+        success: false,
+        message: "Ce rendez-vous attend déjà la confirmation de son paiement Stripe.",
+      };
+    }
 
-      const serviceName = appointment.staffService?.service?.name;
-      const staffName = appointment.staffService?.staff?.user?.fullName;
-      const customerName = appointment.user?.fullName;
-
-      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
-
-      if (recipientUserIds.length > 0) {
-        await createNotificationsBulk(
-          recipientUserIds.map((uid) =>
-            buildAppointmentConfirmedNotification({
-              userId: uid,
-              appointmentId: appointment.id,
-              date: appointment.date,
-              startTime: appointment.startTime,
-              serviceName,
-              staffName,
-              customerName,
-            })
-          ),
-          { tx }
-        );
-      }
-      return true;
+    const claim = await prisma.appointment.updateMany({
+      where: { id: appointmentId, status: "PENDING", payment: null },
+      data: { status: "ACCEPTED" },
     });
+    const claimed = claim.count === 1;
 
     if (!claimed) {
       return {
         success: false,
-        message: "Ce rendez-vous n'est pas en attente d'acceptation",
+        message: "Ce rendez-vous n'est pas en attente de confirmation",
       };
     }
 
-    // Generate confirmation/payment URL
-    const paymentUrl = `${process.env.NEXT_PUBLIC_APP_URL}/appointment/${appointmentId}/payment`;
+    // Generate payment URL
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://meribeauty.com";
+    const paymentUrl = `${appUrl}/appointment/${appointmentId}/payment`;
 
-    // Send acceptance email with confirmation/payment link
+    // Send confirmation email with payment link
     const totalAmount = Number(appointment.staffService.price);
-    const staff = appointment.staffService?.staff;
 
     sendEmail({
       to: appointment.user.email,
       ...reservationAcceptedWithPaymentLinkEmail({
         customerName: appointment.user.fullName,
         serviceName: appointment.staffService.service.name,
-        staffName: staff?.user?.fullName || "Expert",
+        staffName: appointment.staffService.staff?.user?.fullName || "Expert",
         date: appointment.date,
         time: appointment.startTime.toLocaleTimeString("fr-FR", {
           hour: "2-digit",
@@ -190,141 +171,9 @@ export async function acceptAppointment(appointmentId) {
         }),
         totalAmount,
         paymentUrl,
-        allowedPaymentMethods: staff?.allowedPaymentMethods || "BOTH",
-        depositEnabled: staff?.depositEnabled || false,
-        depositPercentage: Number(staff?.depositPercentage || 10),
-      }),
-    }).catch((err) =>
-      console.error("[acceptAppointment] email failed:", err)
-    );
-
-    return {
-      success: true,
-      message: "Rendez-vous accepté et email envoyé au client",
-    };
-  } catch (error) {
-    console.error("[acceptAppointment]", error);
-    return {
-      success: false,
-      message: "Erreur lors de l'acceptation du rendez-vous",
-    };
-  }
-}
-
-/**
- * Confirms an appointment (customer action). Transitions ACCEPTED → CONFIRMED.
- * Called by the customer after staff acceptance, for cash-only or no-payment-required flows.
- *
- * @param {string} appointmentId
- * @returns {Promise<{ success: boolean, message?: string }>}
- */
-export async function confirmAppointment(appointmentId) {
-  try {
-    if (!appointmentId) {
-      return { success: false, message: "ID de rendez-vous manquant" };
-    }
-
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, message: "Authentification requise" };
-    }
-
-    // Load appointment with related data
-    const appointment = await prisma.appointment.findUnique({
-      where: { id: appointmentId, isDeleted: false },
-      include: {
-        user: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-          },
-        },
-        staffService: {
-          include: {
-            service: true,
-            staff: {
-              include: {
-                user: {
-                  select: { fullName: true },
-                },
-              },
-            },
-          },
-        },
-        payment: true,
-      },
-    });
-
-    if (!appointment) {
-      return { success: false, message: "Rendez-vous introuvable" };
-    }
-
-    // Verify the user is the appointment owner
-    if (appointment.userId !== session.user.id) {
-      return { success: false, message: "Vous n'êtes pas autorisé à confirmer ce rendez-vous" };
-    }
-
-    if (appointment.status !== "ACCEPTED") {
-      return {
-        success: false,
-        message: "Ce rendez-vous n'est pas prêt à être confirmé",
-      };
-    }
-
-    // ── Update status atomically ─────────────────────────────────────────────
-    const claimed = await prisma.$transaction(async (tx) => {
-      const claim = await tx.appointment.updateMany({
-        where: { id: appointmentId, status: "ACCEPTED" },
-        data: { status: "CONFIRMED" },
-      });
-      if (claim.count === 0) return false;
-
-      const serviceName = appointment.staffService?.service?.name;
-      const staffName = appointment.staffService?.staff?.user?.fullName;
-      const customerName = appointment.user?.fullName;
-
-      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
-
-      if (recipientUserIds.length > 0) {
-        await createNotificationsBulk(
-          recipientUserIds.map((uid) =>
-            buildAppointmentConfirmedNotification({
-              userId: uid,
-              appointmentId: appointment.id,
-              date: appointment.date,
-              startTime: appointment.startTime,
-              serviceName,
-              staffName,
-              customerName,
-            })
-          ),
-          { tx }
-        );
-      }
-      return true;
-    });
-
-    if (!claimed) {
-      return {
-        success: false,
-        message: "Ce rendez-vous n'est pas prêt à être confirmé",
-      };
-    }
-
-    // Send confirmation email
-    sendEmail({
-      to: appointment.user.email,
-      ...reservationConfirmedEmail({
-        customerName: appointment.user.fullName,
-        serviceName: appointment.staffService.service.name,
-        staffName: appointment.staffService.staff?.user?.fullName || "Expert",
-        date: appointment.date,
-        time: appointment.startTime.toLocaleTimeString("fr-FR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        totalAmount: Number(appointment.staffService.price),
+        allowedPaymentMethods: appointment.staffService.staff?.allowedPaymentMethods ?? "BOTH",
+        depositEnabled: Boolean(appointment.staffService.staff?.depositEnabled),
+        depositPercentage: Number(appointment.staffService.staff?.depositPercentage ?? 0),
       }),
     }).catch((err) =>
       console.error("[confirmAppointment] email failed:", err)
@@ -332,7 +181,7 @@ export async function confirmAppointment(appointmentId) {
 
     return {
       success: true,
-      message: "Rendez-vous confirmé avec succès",
+      message: "Rendez-vous accepté — le client peut maintenant choisir son paiement.",
     };
   } catch (error) {
     console.error("[confirmAppointment]", error);
@@ -480,7 +329,7 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       // without this, two concurrent rejects (double-click, or staff and a
       // webhook racing) both pass a plain read-then-check and both refund.
       const claim = await tx.appointment.updateMany({
-        where: { id: appointmentId, status: { in: ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW"] } },
+        where: { id: appointmentId, status: { in: ["PENDING", "ACCEPTED", "CONFIRMED", "COMPLETED", "NO_SHOW"] } },
         data: {
           status: "CANCELLED",
           cancelledAt: new Date(),
@@ -764,7 +613,10 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     }
 
     const payment = appointment.payment;
-    const hasBalanceDue = Boolean(payment) && payment.status === "PARTIALLY_PAID" && Number(payment.remainingAmount) > 0;
+    const hasBalanceDue = Boolean(payment) && Number(payment.remainingAmount) > 0 && (
+      payment.status === "PARTIALLY_PAID" ||
+      (payment.status === "PENDING" && payment.paymentType === "ON_SITE")
+    );
 
     if (hasBalanceDue && !["CASH", "CARD"].includes(method)) {
       return { success: false, message: "Mode de paiement requis pour encaisser le solde restant." };

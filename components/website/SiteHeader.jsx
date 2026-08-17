@@ -9,25 +9,28 @@ import { useSession, signOut } from "next-auth/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getCart } from "@/actions/boutique/cart";
 import LocaleSwitcher from "@/components/LocaleSwitcher";
-import { useTranslations } from "next-intl";
+
+const NAV_LINKS = [
+  { label: "Accueil", href: "/" },
+  { label: "Concept", href: "/#concept" },
+  { label: "Réservation", href: "/reservation" },
+  { label: "Boutique", href: "/boutique" },
+  { label: "Évènements & Ateliers", href: "/evenements" },
+  { label: "Formations", href: "/formations" },
+  { label: "Contact", href: "/contact" },
+];
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState("Accueil");
   const [cartItemCount, setCartItemCount] = useState(0);
-  const tNav = useTranslations("nav");
-  const tCommon = useTranslations("common");
   const { data: session, status } = useSession();
-  const isAuthed = status === "authenticated";
-  const links = [
-    { label: tCommon("home"), href: "/" },
-    { label: tNav("concept"), href: "/#concept" },
-    { label: tNav("booking"), href: "/reservation" },
-    { label: tNav("shop"), href: "/boutique" },
-    { label: tNav("events"), href: "/evenements" },
-    { label: tNav("courses"), href: "/formations" },
-    { label: tNav("contact"), href: "/contact" },
-  ];
+  // See Footer.jsx for why this is gated on mount rather than fetching the
+  // session server-side (avoids a hydration mismatch without forcing every
+  // public route to render dynamically).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const isAuthed = mounted && status === "authenticated";
 
   // Fetched client-side (not passed from the layout) so the shared public
   // layout never touches cookies() — see app/(public)/layout.js. Re-fetches
@@ -119,7 +122,7 @@ export default function Navbar() {
 
         {/* ── Desktop nav links (center) ── */}
         <ul className="hidden items-center justify-center gap-7 lg:flex xl:gap-9">
-          {links.map((link) => (
+          {NAV_LINKS.map((link) => (
             <li key={link.label}>
               <Link
                 href={link.href}
@@ -140,13 +143,14 @@ export default function Navbar() {
         {/* ── Right actions ── */}
         <div className="relative flex items-center justify-self-end gap-2 md:gap-3">
           <LocaleSwitcher className="text-cream/70" />
+
           {/* Dashboard button for users with specific roles */}
           {hasDashboardRole && (
             <Link
               href="/dashboard"
               className="ml-2 hidden rounded-full border border-gold px-5 py-2 text-[13px] font-medium text-gold transition-all duration-200 hover:bg-gold hover:text-white sm:inline-flex"
             >
-              {tNav("dashboard")}
+              Tableau de bord
             </Link>
           )}
 
@@ -255,7 +259,7 @@ export default function Navbar() {
                         className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
                         role="menuitem"
                       >
-                        {tNav("logout")}
+                        Déconnexion
                       </button>
                     </div>
                   </motion.div>
@@ -284,7 +288,7 @@ export default function Navbar() {
               href="/login"
               className="ml-2 hidden rounded-full border border-gold px-5 py-2 text-[13px] font-medium text-gold bg-white/5 transition-all duration-200 hover:bg-gold hover:text-primary sm:inline-flex"
             >
-              {tNav("login")}
+              Se connecter
             </Link>
           )}
 
@@ -306,7 +310,7 @@ export default function Navbar() {
         }`}
       >
         <ul className="flex flex-col px-6 pb-6 pt-1">
-          {links.map((link) => (
+          {NAV_LINKS.map((link) => (
             <li key={link.label}>
               <Link
                 href={link.href}

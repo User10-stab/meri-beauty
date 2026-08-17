@@ -13,7 +13,7 @@ import {
   getAppointmentEmailRecipients,
 } from "@/lib/notifications";
 
-const RESCHEDULABLE_STATUSES = ["PENDING", "CONFIRMED"];
+const RESCHEDULABLE_STATUSES = ["PENDING", "ACCEPTED", "CONFIRMED"];
 
 /**
  * Moves an existing appointment to a new date/time for the same staff member

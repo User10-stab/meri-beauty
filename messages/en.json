@@ -319,8 +319,6 @@
     "newsletter": "I want to receive exclusive offers and news by email.",
     "alreadyHaveAccount": "Already have an account?",
     "successCreateAccount": "Your account has been created successfully. A verification email has been sent. Please check your inbox and verify your email address before signing in.",
-    "successCreateAccountEmailFailed": "Your account was created, but the verification email could not be sent. You'll be able to request a new link.",
-    "successCreateAccountVatPending": "Your account has been created. Your VAT number is registered pending VIES verification. Please verify your email address before signing in.",
     "showPassword": "Show password",
     "hidePassword": "Hide password",
     "optional": "(optional)",
@@ -569,9 +567,6 @@
     "paymentProcessingDesc": "Your payment is being processed. You will receive a confirmation email as soon as it is validated.",
     "pageNotFound": "Page not found",
     "couldNotFindOrder": "We couldn't find your order. If you just made a payment, check your email.",
-    "posPaymentNotCompleted": "Payment not completed",
-    "posPaymentNotCompletedDesc": "No payment was confirmed. You can return to our till staff.",
-    "thankYouOrderFree": "Thank you! Your order #{number} is confirmed — the applied promo code covers the full amount, no payment was necessary.",
     "backToHome": "Back to home",
     "continueShopping": "Continue shopping",
     "pickupCode": "Pickup code",
@@ -727,7 +722,6 @@
         "newAnimator": "New animator"
       },
       "searchPlaceholder": "Search an activity...",
-      "searchAnimatorPlaceholder": "Search an animator...",
       "confirmDeleteActivity": "Permanently delete activity \"{title}\"? This action is irreversible.",
       "confirmDeleteAnimator": "Permanently delete animator \"{name}\"? This action is irreversible.",
       "statusLabels": {
@@ -792,6 +786,7 @@
       }
     },
     "animators": {
+      "searchAnimatorPlaceholder": "Search an animator...",
       "columns": {
         "name": "Name & Bio",
         "email": "Email",
@@ -872,7 +867,6 @@
       "refundDeposit": "Refund deposit as an exception",
       "refundFull": "Refund paid amount as an exception",
       "refundHint": "Reserved for exceptional cases validated by an administrator. By default, payment is never refunded.",
-      "fullPaymentRefundHint": "This customer paid in full — the checkbox above refunds the entire amount, not just a deposit.",
       "reasonLabel": "Reason",
       "reasonRequired": "Required to justify refund...",
       "reasonOptional": "Optional",
@@ -1022,8 +1016,6 @@
       "documents": "Documents"
     },
     "orderNumber": "Order #{number}",
-    "b2bManualLabel": "B2B — enter manually",
-    "b2bInvoiceHint": "No automatic Peppol sending — enter manually in the accounting software.",
     "downloadInvoice": "Invoice",
     "downloadCreditNote": "{number}"
   },
@@ -1285,8 +1277,7 @@
         "categoryLoading": "Loading…",
         "subcategory": "Subcategory",
         "subcategoryPlaceholder": "Choose…",
-        "subcategoryHint": "Choose a category first.",
-        "subcategoryOptionalHint": "Optional — if left blank, the product is filed under \"General\"."
+        "subcategoryHint": "Choose a category first."
       },
       "status": {
         "DRAFT": "Draft",
@@ -1488,7 +1479,6 @@
       "trackingPlaceholder": "e.g. 1234567890123",
       "markShipped": "Mark shipped",
       "closeOrder": "Close order",
-      "collectedAt": "Collected on {date}",
       "cancelOrder": "Cancel order",
       "cancelConfirm": "Cancel this order?",
       "cancelMessagePaid": "The customer has already paid online — a Stripe refund will be automatically triggered and stock will be returned to sale.",
@@ -1647,15 +1637,6 @@
     "cancelOrder": "Cancel order",
     "noUpcomingReservations": "No upcoming reservations right now.",
     "modificationAndCancellationUnavailable": "Modification and cancellation unavailable less than {hours} hours before the appointment.",
-    "lockedCancellationNotice": "Modification and cancellation are unavailable less than {hours} hours before the appointment. The deposit remains due unless an exceptional cancellation is approved by the administration.",
-    "exceptionRequestPending": "Your request is awaiting a team decision. No refund will be initiated before approval.",
-    "exceptionRequestRejected": "Your exceptional request was rejected. The appointment and deposit remain unchanged.",
-    "exceptionDecisionNote": "Team message: {note}",
-    "exceptionRequestInstructions": "After contacting the salon, explain your situation. This request does not cancel the appointment and does not guarantee a refund.",
-    "exceptionRequestPlaceholder": "E.g. sudden illness, with any useful information for the team",
-    "back": "Back",
-    "sendExceptionRequest": "Send request",
-    "requestExceptionReview": "Request an exceptional review",
     "nextAppointment": "Next appointment",
     "with": "With",
     "leaveReview": "Leave a review",
@@ -1799,9 +1780,6 @@
       "upcomingAppointments": "Upcoming appointments",
       "recentOrders": "Recent orders"
     },
-    "legalDataIncomplete": "The salon's legal identity is incomplete. As long as",
-    "salonSettings": "Settings > Salon",
-    "legalDataIncompleteSuffix": "is not completed (legal name, VAT, address), no online sale can be finalized: customers are blocked before payment.",
     "appointments": {
       "subtitle": "View and manage all appointments.",
       "title": "All appointments"
@@ -1968,10 +1946,36 @@
   },
   "appointmentStatus": {
     "pending": "Pending",
+    "accepted": "Accepted — awaiting your payment choice",
     "confirmed": "Confirmed",
     "completed": "Completed",
     "cancelled": "Cancelled",
     "noShow": "No-show"
+  },
+  "acceptedAppointmentPayment": {
+    "acceptedBadge": "Request accepted",
+    "title": "Finalize your appointment",
+    "subtitle": "Choose how you want to pay. Your appointment becomes confirmed after this step.",
+    "service": "Service",
+    "staff": "Expert",
+    "date": "Date",
+    "time": "Time",
+    "chooseTitle": "Choose a payment option",
+    "fullOnlineTitle": "Pay in full online",
+    "fullOnlineDescription": "Pay {amount} securely with Stripe.",
+    "depositTitle": "Pay a {percentage}% deposit",
+    "depositDescription": "Pay {deposit} now, then {balance} at the salon.",
+    "onSiteTitle": "Pay at the salon",
+    "onSiteDescription": "Your appointment is confirmed now; {amount} is due at the salon.",
+    "choose": "Choose",
+    "processing": "Processing…",
+    "secureNotice": "Online payments are processed securely by Stripe.",
+    "confirmedTitle": "Appointment confirmed",
+    "confirmedDescription": "Your time is reserved. We look forward to welcoming you.",
+    "viewAppointments": "View my appointments",
+    "unavailableTitle": "Payment choice unavailable",
+    "unavailableDescription": "This appointment is no longer awaiting a payment choice.",
+    "genericError": "Something went wrong. Please try again."
   },
   "paymentStatus": {
     "pending": "Pending",
@@ -2088,6 +2092,7 @@
     "paymentStatusPaid": "Paid",
     "paymentStatusRefunded": "Refunded",
     "finalizePayment": "Finalise payment",
+    "choosePayment": "Choose payment method",
     "redirecting": "Redirecting…",
     "modify": "Modify",
     "cancel": "Cancel",
@@ -2363,16 +2368,6 @@
     "priorityPlace": "A spot has opened up! Finalize your booking quickly: it will be assigned to the first person who books.",
     "wlSuccessTitle": "You are on the waiting list!",
     "wlSuccessDesc": "You are in position #{position} on the waiting list. As soon as a spot opens up, an email will be sent to everyone on the list. The spot will go to the first person who finalizes their booking — be quick!",
-    "wlAlreadyOnListTitle": "You were already on the waiting list",
-    "wlAlreadyOnListDesc": "Your earlier registration is still active — nothing was added twice.",
-    "wlConfirmationSentDesc": "We've sent you a confirmation email.",
-    "wlYourPosition": "Your position",
-    "wlSeatsRequestedLabel": "Seats requested",
-    "wlWhatHappensNow": "What happens now",
-    "wlBullet1": "No payment is required from you right now, and no spot is reserved in your name.",
-    "wlBullet2": "As soon as a spot frees up, an email goes out <strong>at the same time</strong> to everyone on the list.",
-    "wlBullet3": "The spot goes to the first person who finalizes their booking and pays the deposit — your position is not a guaranteed priority.",
-    "wlBullet4": "To unsubscribe, email us at <link>contact@meribeautystudio.com</link>.",
     "seeOtherActivities": "Discover other activities",
     "seeOtherFormations": "See other trainings",
     "seatsTitle": "Number of seats",

@@ -11,21 +11,18 @@ import {
   markFormationReservationNoShow,
 } from "@/actions/formations/manage-reservation";
 import { isAdminRole } from "@/lib/authorization";
-import { useTranslations } from "next-intl";
 import { CancelReservationDialog } from "@/components/dashboard/workshops/CancelReservationDialog";
 import { SettleReservationDialog } from "@/components/dashboard/reservations/SettleReservationDialog";
 
-export function ReservationsPageClient({ initialReservations = [], userRole }) {
-  const t = useTranslations("dashboardFormations.reservations");
-  
-  const COLUMNS = [
-    { key: "formation", label: t("columns.formation") },
-    { key: "customer", label: t("columns.customer") },
-    { key: "seatsCount", label: t("columns.seats") },
-    { key: "status", label: t("columns.status") },
-    { key: "payment", label: t("columns.payment") },
-  ];
+const COLUMNS = [
+  { key: "formation", label: "Formation & Séance" },
+  { key: "customer", label: "Client" },
+  { key: "seatsCount", label: "Places" },
+  { key: "status", label: "Statut" },
+  { key: "payment", label: "Paiement" },
+];
 
+export function ReservationsPageClient({ initialReservations = [], userRole }) {
   const router = useRouter();
   const isAdmin = isAdminRole(userRole);
   const [toCancel, setToCancel] = useState(null);
@@ -81,7 +78,9 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         columns={COLUMNS}
         renderRow={ReservationRow}
         onDelete={isAdmin ? setToCancel : undefined}
-        searchPlaceholder={t("searchPlaceholder")}
+        onSettle={isAdmin ? (row) => setToSettle(row) : undefined}
+        onNoShow={isAdmin ? handleNoShow : undefined}
+        searchPlaceholder="Rechercher une réservation..."
         searchFilter={(row, query) =>
           row.session?.formation?.title?.toLowerCase().includes(query) ||
           row.customer?.fullName?.toLowerCase().includes(query) ||

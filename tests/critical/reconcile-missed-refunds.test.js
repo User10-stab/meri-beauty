@@ -188,7 +188,7 @@ describe("reconcileMissedRefunds — connected accounts (appointments)", () => {
       { stripeAccount: "acct_staff_1" },
     );
     expect(prismaClient.__txStub.appointment.updateMany).toHaveBeenCalledWith({
-      where: { id: "appt_1", status: { in: ["PENDING", "CONFIRMED"] } },
+      where: { id: "appt_1", status: { in: ["PENDING", "ACCEPTED", "CONFIRMED"] } },
       data: expect.objectContaining({ status: "CANCELLED" }),
     });
   });
@@ -212,7 +212,7 @@ describe("reconcileMissedRefunds — connected accounts (appointments)", () => {
 
     expect(result.reconciled).toBe(1); // ledger/payment status still syncs
     expect(prismaClient.__txStub.appointment.updateMany).toHaveBeenCalledWith({
-      where: { id: "appt_1", status: { in: ["PENDING", "CONFIRMED"] } }, // COMPLETED can't match this claim
+      where: { id: "appt_1", status: { in: ["PENDING", "ACCEPTED", "CONFIRMED"] } }, // COMPLETED can't match this claim
       data: expect.objectContaining({ status: "CANCELLED" }),
     });
     expect(prismaClient.__txStub.payment.update).toHaveBeenCalledWith(

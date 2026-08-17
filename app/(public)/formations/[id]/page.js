@@ -1,20 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getTranslations, getLocale } from "next-intl/server";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
 import { getAppBaseUrl } from "@/lib/site-url";
-import { toIntlLocale } from "@/lib/intl-locale";
 
 const SITE_URL = getAppBaseUrl();
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const t = await getTranslations("formationDetail");
   const result = await getPublicFormationById(id);
   const formation = result.data;
 
   if (!formation) {
-    return { title: t("metadataNotFound") };
+    return { title: "Formation introuvable — Meri Beauty" };
   }
 
   return {
@@ -62,6 +59,24 @@ function buildCourseSchema(formation) {
         }
       : {}),
   };
+}
+
+function formatDate(dateStr) {
+  return new Date(dateStr).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "Europe/Brussels",
+  });
+}
+
+function formatTime(dateStr) {
+  return new Date(dateStr).toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Brussels",
+  });
 }
 
 function CalendarIcon() {
@@ -112,7 +127,6 @@ function GlobeIcon() {
 
 export default async function FormationDetailPage({ params }) {
   const { id } = await params;
-  const [t, locale] = await Promise.all([getTranslations("formationDetail"), getLocale()]);
   const result = await getPublicFormationById(id);
   const formation = result.data;
 
@@ -120,33 +134,16 @@ export default async function FormationDetailPage({ params }) {
     notFound();
   }
 
-  const intlLocale = toIntlLocale(locale);
   const isPrivate = formation.type === "PRIVATE";
   const depositPct = formation.depositPercentage ?? 50;
   const depositAmount = (formation.price * depositPct) / 100;
   const balanceAmount = formation.price - depositAmount;
 
-  const priceFormatted = new Intl.NumberFormat(intlLocale, { style: "currency", currency: "EUR" }).format(formation.price);
-  const depositFormatted = new Intl.NumberFormat(intlLocale, { style: "currency", currency: "EUR" }).format(depositAmount);
-  const balanceFormatted = new Intl.NumberFormat(intlLocale, { style: "currency", currency: "EUR" }).format(balanceAmount);
+  const priceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(formation.price);
+  const depositFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(depositAmount);
+  const balanceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(balanceAmount);
 
   const courseSchema = buildCourseSchema(formation);
-
-  const formatDate = (dateStr) =>
-    new Date(dateStr).toLocaleDateString(intlLocale, {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      timeZone: "Europe/Brussels",
-    });
-
-  const formatTime = (dateStr) =>
-    new Date(dateStr).toLocaleTimeString(intlLocale, {
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: "Europe/Brussels",
-    });
 
   return (
     <>
@@ -192,7 +189,7 @@ export default async function FormationDetailPage({ params }) {
                 isPrivate ? "bg-violet-100 text-violet-900" : "bg-teal-100 text-teal-900"
               }`}
             >
-              {isPrivate ? t("typePrivate") : t("typeGroup")}
+              {isPrivate ? "Formation privée" : "Formation groupe"}
             </span>
             <span className="h-px w-8 bg-gold" />
           </div>
@@ -213,7 +210,7 @@ export default async function FormationDetailPage({ params }) {
                 <div className="rounded-2xl border border-ink/8 bg-white p-6 shadow-sm sm:p-8">
                   <div className="mb-5 flex items-center gap-3">
                     <span className="h-px w-6 bg-gold" />
-                    <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">{t("about")}</h2>
+                    <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">À propos</h2>
                   </div>
                   <div className="space-y-4 text-[15.5px] leading-[1.9] text-ink/70">
                     {formation.description
@@ -231,8 +228,8 @@ export default async function FormationDetailPage({ params }) {
                 <div>
                   <h2 className="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-gold">
                     {formation.sessions.length > 1
-                      ? t("sessionsAvailable", { count: formation.sessions.length })
-                      : t("dateAndTime")}
+                      ? `Sessions disponibles (${formation.sessions.length})`
+                      : "Date et horaire"}
                   </h2>
                   <div className="space-y-4">
                     {formation.sessions.map((session, index) => {
@@ -246,7 +243,7 @@ export default async function FormationDetailPage({ params }) {
                             <div className="space-y-2">
                               {formation.sessions.length > 1 && (
                                 <span className="text-xs font-semibold uppercase tracking-wide text-gold">
-                                  {t("sessionNumber", { index: index + 1 })}
+                                  Session #{index + 1}
                                 </span>
                               )}
                               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink/65">
@@ -263,23 +260,23 @@ export default async function FormationDetailPage({ params }) {
                               <div className="space-y-1.5 mt-2">
                                 <span className="flex items-center gap-1.5 text-sm text-ink/55">
                                   <UsersIcon />
-                                  <span>{isPrivate ? t("individual") : t("placesOccupied", { taken, capacity: cap })}</span>
+                                  <span>{isPrivate ? "Formation individuelle" : `${taken} / ${cap} places occupées`}</span>
                                 </span>
                                 {avail === 0 ? (
                                   <span className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-800">
-                                    {t("full")}
+                                    Complet
                                   </span>
                                 ) : isPrivate ? (
                                   <span className="inline-flex rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-                                    {t("availableShort")}
+                                    Disponible
                                   </span>
                                 ) : avail <= 3 ? (
                                   <span className="inline-flex rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-                                    {t("onlyLeft", { count: avail })}
+                                    Plus que {avail} place{avail > 1 ? "s" : ""} !
                                   </span>
                                 ) : (
                                   <span className="inline-flex rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-                                    {t("available", { count: avail })}
+                                    {avail} disponible{avail > 1 ? "s" : ""}
                                   </span>
                                 )}
                               </div>
@@ -288,19 +285,22 @@ export default async function FormationDetailPage({ params }) {
                             <div className="flex flex-col items-end gap-2">
                               {depositPct > 0 && formation.price > 0 && (
                                 <p className="text-right text-xs leading-snug text-ink/50">
-                                  {t("payTodayDeposit", { deposit: depositFormatted, balance: balanceFormatted })}
+                                  Vous ne réglez aujourd&apos;hui que{" "}
+                                  <strong className="text-gold">{depositFormatted}</strong>.
+                                  <br />
+                                  Le solde de <strong className="text-ink/70">{balanceFormatted}</strong> sera à payer sur place.
                                 </p>
                               )}
                               {avail === 0 ? (
                                 <span className="inline-flex shrink-0 cursor-not-allowed items-center gap-2 rounded-full bg-gray-200 px-5 py-2.5 text-[13px] font-semibold text-gray-500">
-                                  {t("full")}
+                                  Complet
                                 </span>
                               ) : (
                                 <Link
                                   href={`/reservation-formation?formation=${formation.id}&session=${session.id}`}
                                   className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gold px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gold/90 hover:shadow-md"
                                 >
-                                  {t("book")}
+                                  Réserver
                                 </Link>
                               )}
                             </div>
@@ -308,7 +308,7 @@ export default async function FormationDetailPage({ params }) {
 
                           {session.registrationDeadline && (
                             <p className="mt-3 text-xs text-ink/40">
-                              {t("registerBefore", { date: formatDate(session.registrationDeadline) })}
+                              Inscription avant le {formatDate(session.registrationDeadline)}
                             </p>
                           )}
                         </div>
@@ -320,13 +320,13 @@ export default async function FormationDetailPage({ params }) {
 
               {(!formation.sessions || formation.sessions.length === 0) && (
                 <div className="rounded-xl border border-ink/8 bg-white p-6 text-center">
-                  <p className="text-ink/50">{t("noSessions")}</p>
+                  <p className="text-ink/50">Aucune session programmée pour le moment.</p>
                 </div>
               )}
 
               <div className="rounded-xl border border-red-100 bg-red-50 p-5">
                 <p className="text-sm text-red-800">
-                  {t("nonRefundable")}
+                  ⚠️ L&apos;acompte et le solde ne sont remboursables en aucun cas, que vous participiez ou non à la formation.
                 </p>
               </div>
             </div>
@@ -334,31 +334,29 @@ export default async function FormationDetailPage({ params }) {
             {/* Sidebar */}
             <div className="space-y-6">
               <div className="rounded-xl border border-ink/8 bg-white p-6 shadow-sm">
-                <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">{t("information")}</h3>
+                <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">Informations</h3>
                 <ul className="space-y-4">
                   <li className="flex items-start gap-3">
                     <EuroIcon className="mt-0.5" />
                     <div>
                       <p className="text-sm font-semibold text-ink">{priceFormatted}</p>
                       <p className="text-xs text-ink/45">
-                        {depositPct > 0
-                          ? t("priceWithDeposit", { pct: depositPct })
-                          : ""}
+                        Tarif {depositPct > 0 && `(dont ${depositPct}% d'acompte à la réservation)`}
                       </p>
                     </div>
                   </li>
                   <li className="flex items-center gap-3">
                     <ClockIcon />
                     <div>
-                      <p className="text-sm font-semibold text-ink">{t("durationValue", { count: formation.duration })}</p>
-                      <p className="text-xs text-ink/45">{t("durationLabel")}</p>
+                      <p className="text-sm font-semibold text-ink">{formation.duration} min</p>
+                      <p className="text-xs text-ink/45">Durée</p>
                     </div>
                   </li>
                   <li className="flex items-center gap-3">
                     <UsersIcon />
                     <div>
-                      <p className="text-sm font-semibold text-ink">{isPrivate ? t("capacityPrivate") : t("capacityValue", { count: formation.capacity })}</p>
-                      <p className="text-xs text-ink/45">{t("capacityLabel")}</p>
+                      <p className="text-sm font-semibold text-ink">{isPrivate ? "1 personne" : `${formation.capacity} personnes`}</p>
+                      <p className="text-xs text-ink/45">Capacité</p>
                     </div>
                   </li>
                   {formation.language && (
@@ -366,7 +364,7 @@ export default async function FormationDetailPage({ params }) {
                       <GlobeIcon />
                       <div>
                         <p className="text-sm font-semibold text-ink">{formation.language}</p>
-                        <p className="text-xs text-ink/45">{t("languageLabel")}</p>
+                        <p className="text-xs text-ink/45">Langue</p>
                       </div>
                     </li>
                   )}
@@ -375,7 +373,7 @@ export default async function FormationDetailPage({ params }) {
 
               {formation.animator && (
                 <div className="rounded-xl border border-ink/8 bg-white p-6 shadow-sm">
-                  <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">{t("hostedBy")}</h3>
+                  <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">Animée par</h3>
                   <Link href={`/animateurs/${formation.animator.id}`} className="group flex items-center gap-4">
                     <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-cream">
                       {formation.animator.avatar ? (
@@ -409,7 +407,7 @@ export default async function FormationDetailPage({ params }) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
                   <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                {t("backToFormations")}
+                Retour aux formations
               </Link>
             </div>
           </div>

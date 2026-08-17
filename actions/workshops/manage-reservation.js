@@ -282,7 +282,7 @@ export async function changeReservationSession(reservationId, newSessionId) {
     const changeFeeAmount = Number(reservation.totalPrice) * SESSION_CHANGE_FEE_RATE;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
+      payment_method_types: ["card"], // Bancontact disabled for now — see docs/QUESTIONS_FOR_MARIE.md
       line_items: [
         {
           price_data: {
@@ -404,7 +404,7 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     const amountToCharge = changeFeeAmount + priceDelta;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
+      payment_method_types: ["card"], // Bancontact disabled for now — see docs/QUESTIONS_FOR_MARIE.md
       line_items: [
         {
           price_data: {

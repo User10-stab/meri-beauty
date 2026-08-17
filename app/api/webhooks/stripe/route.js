@@ -134,7 +134,7 @@ export async function POST(req) {
   // appointment payments are Connect direct charges on the staff's own
   // account, which this platform-level webhook doesn't receive events for
   // (needs the separate Connect webhook endpoint — see P10 in
-  // PRE_LAUNCH_FIXES.md).
+  // docs/PRE_LAUNCH_FIXES.md).
   if (event.type === "charge.refunded") {
     try {
       await handleChargeRefunded(event.data.object);

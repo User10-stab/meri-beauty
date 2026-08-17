@@ -116,6 +116,6 @@ Copy the `whsec_...` it prints into `STRIPE_WEBHOOK_SECRET` in `.env` and restar
   `.env` from `~/Desktop/env` (make sure outbound 5432 isn't blocked on your network).
 - **Build fails on `/sitemap.xml`** — same root cause, DB unreachable during build. This
   is also a real bug worth fixing (`app/sitemap.js` has no error handling around its
-  Prisma calls) — see `PROD_READINESS_CHECKLIST.md`.
+  Prisma calls) — see `docs/PROD_READINESS_CHECKLIST.md`.
 - **Stuck behind a password gate you didn't expect** — check if `SITE_ACCESS_PASSWORD`
   is set in your `.env`; unset it for normal local dev.

@@ -625,7 +625,7 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     // terminal's "APPROUVÉ" screen — without this, staff could mark the
     // balance paid (and the system would treat it as real, invoiceable
     // revenue) before any money actually changed hands, exactly like the
-    // POS terminal-sale risk this mirrors. See PRODUCTION_ISSUES.md #2.
+    // POS terminal-sale risk this mirrors. See docs/PRODUCTION_ISSUES.md #2.
     if (hasBalanceDue && paymentConfirmed !== true) {
       return { success: false, message: "Confirmez avoir bien reçu le paiement avant de terminer le rendez-vous.", requiresPaymentConfirmation: true };
     }

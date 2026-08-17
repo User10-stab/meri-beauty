@@ -6,7 +6,7 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
 // Three findings from a 48h-pre-launch risk pass, cross-checked against
-// PRODUCTION_ISSUES.md's still-open 🔴 items.
+// docs/PRODUCTION_ISSUES.md's still-open 🔴 items.
 describe("48h pre-launch risk fixes", () => {
   test("workshop seat-increase re-checks capacity under lock before applying", () => {
     const webhook = source("app/api/webhooks/stripe/route.js");

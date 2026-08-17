@@ -13,7 +13,14 @@ import {
 import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
 import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-workshop-reservation-payment";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
-import { issueCreditNote } from "@/lib/invoicing";
+import {
+  issueCreditNote,
+  issueInvoice,
+  buildInvoiceCustomer,
+  buildServiceInvoiceLines,
+} from "@/lib/invoicing";
+import { renderInvoicePdf } from "@/lib/pdf/render";
+import { resolveAppointmentStatusAfterPayment } from "@/lib/appointment-status";
 import {
   createNotificationsBulk,
   buildAppointmentConfirmedNotification,
@@ -30,6 +37,11 @@ import {
 } from "@/lib/payments/reconcile-reservation-refund";
 import { captureCriticalError } from "@/lib/monitoring";
 import { refundSession } from "@/lib/stripe-refund-session";
+import {
+  isForeignCheckoutSession,
+  getDeploymentId,
+  DEPLOYMENT_METADATA_KEY,
+} from "@/lib/stripe-deployment";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -81,6 +93,21 @@ export async function POST(req) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
+  // ── 1b. Ignore Checkout Sessions created by another deployment ───────────
+  // Several deployments share one Stripe account (localhost, staging VPS,
+  // production), and Stripe delivers every event to every endpoint. Without
+  // this, a session created elsewhere reaches handlers whose database has no
+  // such order/reservation, which they correctly read as a failed sale and
+  // refund — cancelling a payment the originating deployment just fulfilled.
+  // See lib/stripe-deployment.js.
+  if (event.type.startsWith("checkout.session.") && isForeignCheckoutSession(event.data.object)) {
+    console.info(
+      `[stripe-webhook] ignoring ${event.type} for ${event.data.object.id} — created by deployment ` +
+        `"${event.data.object.metadata?.[DEPLOYMENT_METADATA_KEY]}", this is "${getDeploymentId()}"`
+    );
+    return NextResponse.json({ received: true, ignored: "foreign-deployment" });
+  }
+
   // ── 2. Route by event type ────────────────────────────────────────────────
   if (event.type === "account.updated") {
     try {
@@ -109,7 +136,7 @@ export async function POST(req) {
   // appointment payments are Connect direct charges on the staff's own
   // account, which this platform-level webhook doesn't receive events for
   // (needs the separate Connect webhook endpoint — see P10 in
-  // PRE_LAUNCH_FIXES.md).
+  // docs/PRE_LAUNCH_FIXES.md).
   if (event.type === "charge.refunded") {
     try {
       await handleChargeRefunded(event.data.object);
@@ -653,7 +680,27 @@ async function processAppointmentCheckoutSession(session) {
       include: {
         appointment: {
           include: {
-            user: { select: { fullName: true } },
+            user: {
+              select: {
+                fullName: true,
+                email: true,
+                vatNumber: true,
+                addressLine1: true,
+                addressLine2: true,
+                addressCity: true,
+                addressPostalCode: true,
+                addressCountry: true,
+                isCompany: true,
+                billingProfile: {
+                  select: {
+                    companyLegalName: true,
+                    companyRegistrationNo: true,
+                    billingContactName: true,
+                    purchaseOrderReference: true,
+                  },
+                },
+              },
+            },
             staffService: {
               include: {
                 service: { select: { name: true } },
@@ -753,11 +800,29 @@ async function processAppointmentCheckoutSession(session) {
       },
     });
 
+    // Full online payments are invoiced in the same transaction as settlement
+    // so the gapless Belgian invoice number is never consumed on rollback.
+    // Deposits are invoiced only after the remaining balance is collected.
+    let invoice = null;
+    if (nextPaymentStatus === "PAID") {
+      invoice = await issueInvoice(tx, {
+        paymentId,
+        source: "APPOINTMENT",
+        totalInclVat: nextPaidAmount,
+        customer: buildInvoiceCustomer(appointment.user),
+        lines: buildServiceInvoiceLines({
+          description: appointment.staffService?.service?.name ?? "Prestation",
+          totalAmount: nextPaidAmount,
+          discountAmount: Number(existingPayment.discountAmount ?? 0),
+        }),
+      });
+    }
+
     // ── Notification for dashboard users ───────────────────────────────────
     // AUTOMATIC: appointment just became CONFIRMED → emit APPOINTMENT_CONFIRMED.
     // MANUAL: appointment stays PENDING (paid but waiting on salon OK) → no
     // new notif; the "APPOINTMENT_CREATED" one already exists for this event.
-    if (nextAppointmentStatus === "CONFIRMED") {
+    if (appointment.status !== "CONFIRMED" && nextAppointmentStatus === "CONFIRMED") {
       const serviceName = appointment.staffService?.service?.name;
       const staffName = appointment.staffService?.staff?.user?.fullName;
       const customerName = appointment.user?.fullName;
@@ -788,6 +853,7 @@ async function processAppointmentCheckoutSession(session) {
       nextPaidAmount,
       totalAmount,
       nextAppointmentStatus,
+      invoice,
     };
   });
 
@@ -831,6 +897,18 @@ async function processAppointmentCheckoutSession(session) {
     const staffName = staffService?.staff?.user?.fullName ?? "votre experte";
     const serviceName = staffService?.service?.name ?? "votre service";
 
+    const invoicePdf = result.invoice
+      ? await renderInvoicePdf(result.invoice).catch((error) => {
+          captureCriticalError(error, {
+            area: "stripe-webhook",
+            operation: "appointment-invoice-pdf",
+            appointmentId,
+            paymentId,
+          });
+          return null;
+        })
+      : null;
+
     sendEmail({
       to: user.email,
       ...paymentConfirmationEmail({
@@ -843,6 +921,9 @@ async function processAppointmentCheckoutSession(session) {
         totalAmount: result.totalAmount,
         paymentMethod: "Carte bancaire",
       }),
+      ...(invoicePdf
+        ? { attachments: [{ filename: `facture-${result.invoice.number}.pdf`, content: invoicePdf }] }
+        : {}),
     }).catch((err) => console.error("[stripe-webhook] appointment confirmation email failed:", err));
   }
 

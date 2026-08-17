@@ -1,7 +1,6 @@
 "use client";
 
 import { RowActions } from "../Tables/RowActions";
-import { useTranslations } from "next-intl";
 
 const STATUS_STYLES = {
   PENDING_DEPOSIT: "bg-amber-50 text-amber-700 border-amber-200",
@@ -34,8 +33,7 @@ function formatSessionDate(date) {
   });
 }
 
-export function ReservationRow({ row, onEdit, onDelete }) {
-  const t = useTranslations("dashboardWorkshops.reservations");
+export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow }) {
   const priceFormatted = (value) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
 
@@ -70,10 +68,10 @@ export function ReservationRow({ row, onEdit, onDelete }) {
       {/* Payment */}
       <td className="px-4 py-4 align-middle text-sm">
         <span className="block text-gray-700">
-          {t("paymentLabels.paid")} <span className="font-semibold">{priceFormatted(row.payment?.paidAmount ?? row.depositAmount)}</span>
+          Payé : <span className="font-semibold">{priceFormatted(row.payment?.paidAmount ?? row.depositAmount)}</span>
         </span>
         {Number(row.balanceDue) > 0 && (
-          <span className="block text-xs text-amber-600">{t("paymentLabels.balance")} {priceFormatted(row.balanceDue)}</span>
+          <span className="block text-xs text-amber-600">Solde : {priceFormatted(row.balanceDue)}</span>
         )}
       </td>
 

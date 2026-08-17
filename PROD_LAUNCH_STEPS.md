@@ -5,7 +5,7 @@ Current state (as of 2026-08-08): deployed to prod on OVH, reachable at
 (`SITE_ACCESS_PASSWORD` in `middleware.js`) is on — effectively a private staging
 environment at the real domain. That gate is actually the right move right now; don't
 remove it until the steps below are done. This is the ordered path from here to public
-launch. Full detail/rationale for each item lives in `PROD_READINESS_CHECKLIST.md` — this
+launch. Full detail/rationale for each item lives in `docs/PROD_READINESS_CHECKLIST.md` — this
 file is the sequence.
 
 ---
@@ -57,7 +57,7 @@ file is the sequence.
          (or whatever the route is), and set `STRIPE_WEBHOOK_SECRET` to the secret
          Stripe gives you for *that* endpoint — not the local `stripe listen` one.
        - Also register the separate **Stripe Connect** webhook and set
-         `STRIPE_CONNECT_WEBHOOK_SECRET` (see `PROD_READINESS_CHECKLIST.md`, this was
+         `STRIPE_CONNECT_WEBHOOK_SECRET` (see `docs/PROD_READINESS_CHECKLIST.md`, this was
          a gap: one webhook secret can't correctly serve both event types).
 10. [ ] Confirm `pm2 startup` + `pm2 save` were run so the app survives a VPS reboot,
         not just a process crash (you said PM2's already handling the process itself).
@@ -87,7 +87,7 @@ file is the sequence.
 14. [ ] Spot-check the remaining unverified HIGH items from
         `SECURITY_FIXES_SPEC.md`: refund-amount cap behavior, refund-failure handling,
         cancel-vs-webhook race, Mondial Relay pickup-point validation. (Listed in
-        `PROD_READINESS_CHECKLIST.md` under High Priority.)
+        `docs/PROD_READINESS_CHECKLIST.md` under High Priority.)
 
 ## Step 7 — Open the gate
 
@@ -114,4 +114,4 @@ file is the sequence.
 
 Favicon/manifest, blog/GEO content, OG images, remaining `npm audit` HIGH findings (fix
 via a `next@15.5.23` bump when convenient), minor dependency bumps. Full list in
-`PROD_READINESS_CHECKLIST.md` under Low Priority.
+`docs/PROD_READINESS_CHECKLIST.md` under Low Priority.

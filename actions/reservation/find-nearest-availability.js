@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 import {
   startOfDay,
   addDays,
@@ -54,7 +55,7 @@ async function loadSchedulingContext(drafts, maxDaysToScan) {
         staffId: { in: staffIds },
       },
       date: { gte: fromDate, lte: toDate },
-      status: { in: ["PENDING", "CONFIRMED"] },
+      status: { in: ACTIVE_APPOINTMENT_STATUSES },
       isDeleted: false,
     },
     include: {

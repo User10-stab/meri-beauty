@@ -109,55 +109,39 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
     if (user) return { user, isNewUser: false, temporaryPassword: null };
   }
 
-  const normalizedEmail = customerInfo.email?.trim().toLowerCase();
-  const normalizedPhone = customerInfo.phone?.trim();
+  const existing = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: customerInfo.email.trim().toLowerCase() },
+        ...(customerInfo.phone ? [{ phone: customerInfo.phone.trim() }] : []),
+      ],
+      isDeleted: false,
+    },
+  });
+  if (existing) return { user: existing, isNewUser: false, temporaryPassword: null };
 
-  // Guest flow — always attempt to create a new account. Never silently
-  // adopt an existing account based on an unauthenticated email/phone
-  // lookup: knowing someone's email is not proof of identity.
+  // Throwaway placeholder — never shown to anyone. The real, usable
+  // password is generated once the email is confirmed (see
+  // actions/shared/resume-checkout-after-verification.js).
   const placeholderHash = await bcrypt.hash(randomBytes(9).toString("base64url"), BCRYPT_SALT_ROUNDS);
 
-  try {
-    const user = await prisma.user.create({
-      data: {
-        fullName: customerInfo.fullName.trim(),
-        email: normalizedEmail,
-        phone: normalizedPhone || "",
-        password: placeholderHash,
-        role: "CUSTOMER",
-        isActive: true,
-        ...buildNewsletterConsentUpdate(Boolean(customerInfo.newsletterSubscribed ?? false), "boutique_checkout"),
-        // Guest checkout creates the account, so this is the moment consent is
-        // given — it used to be recorded at signup only, which meant a guest who
-        // never registered left no record at all.
-        ...buildTermsAcceptanceUpdate(),
-      },
-    });
+  const user = await prisma.user.create({
+    data: {
+      fullName: customerInfo.fullName.trim(),
+      email: customerInfo.email.trim().toLowerCase(),
+      phone: customerInfo.phone.trim(),
+      password: placeholderHash,
+      role: "CUSTOMER",
+      isActive: true,
+      ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "boutique_checkout"),
+      // Guest checkout creates the account, so this is the moment consent is
+      // given — it used to be recorded at signup only, which meant a guest who
+      // never registered left no record at all.
+      ...buildTermsAcceptanceUpdate(),
+    },
+  });
 
-    return { user, isNewUser: true, temporaryPassword: null };
-  } catch (createError) {
-    // P2002 = unique constraint violation — another concurrent request
-    // already created this user between our attempt and now.
-    // Fall back to the existing record.
-    if (createError?.code === "P2002") {
-      const existingUser = await prisma.user.findFirst({
-        where: {
-          OR: [
-            ...(normalizedEmail ? [{ email: normalizedEmail }] : []),
-            ...(normalizedPhone ? [{ phone: normalizedPhone }] : []),
-          ],
-        },
-      });
-
-      if (!existingUser) {
-        throw createError;
-      }
-
-      return { user: existingUser, isNewUser: false, temporaryPassword: null };
-    }
-
-    throw createError;
-  }
+  return { user, isNewUser: true, temporaryPassword: null };
 }
 
 function serializeOrder(order) {
@@ -756,7 +740,7 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
     const metadata = { kind: "order", orderId: order.id };
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"], // Bancontact disabled for now — see QUESTIONS_FOR_MARIE.md
+      payment_method_types: ["card"], // Bancontact disabled for now — see docs/QUESTIONS_FOR_MARIE.md
       line_items: lineItems,
       mode: "payment",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/boutique/order/success?session_id={CHECKOUT_SESSION_ID}`,

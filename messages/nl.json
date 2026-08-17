@@ -318,8 +318,6 @@
     "passwordHint": "Wachtwoord moet minstens 8 tekens bevatten.",
     "newsletter": "Ik wil exclusieve aanbiedingen en nieuws per e-mail ontvangen.",
     "alreadyHaveAccount": "Heb je al een account?",
-    "successCreateAccountEmailFailed": "Je account is aangemaakt, maar de verificatie-e-mail kon niet worden verzonden. Je kunt een nieuwe link aanvragen.",
-    "successCreateAccountVatPending": "Je account is aangemaakt. Je btw-nummer is geregistreerd in afwachting van VIES-verificatie. Verifieer je e-mailadres voordat je inlogt.",
     "successCreateAccount": "Je account is succesvol aangemaakt. Een verificatie-e-mail is verzonden. Controleer je inbox en verifieer je e-mailadres voordat je inlogt.",
     "showPassword": "Wachtwoord weergeven",
     "hidePassword": "Wachtwoord verbergen",
@@ -569,9 +567,6 @@
     "paymentProcessingDesc": "Uw betaling wordt verwerkt. U ontvangt zodra deze is gevalideerd een bevestigingse-mail.",
     "pageNotFound": "Pagina niet gevonden",
     "couldNotFindOrder": "We konden uw bestelling niet vinden. Als u zojuist een betaling hebt gedaan, controleer dan uw e-mail.",
-    "posPaymentNotCompleted": "Betaling niet voltooid",
-    "posPaymentNotCompletedDesc": "Er is geen betaling bevestigd. U kunt terugkeren naar onze kassamedewerker.",
-    "thankYouOrderFree": "Dank u! Uw bestelling #{number} is bevestigd — de toegepaste kortingscode dekt het volledige bedrag, er was geen betaling nodig.",
     "backToHome": "Terug naar startpagina",
     "continueShopping": "Verder winkelen",
     "pickupCode": "Ophaalcode",
@@ -592,6 +587,15 @@
     "decreaseQuantity": "Aantal verminderen",
     "increaseQuantity": "Aantal verhogen",
     "adding": "Toevoegen…",
+    "descriptionTitle": "Beschrijving",
+    "deliveryTitle": "Levering & retour",
+    "deliveryPickupLine": "Gratis afhalen in de salon zodra uw bestelling klaarligt.",
+    "deliveryShippingLine": "Levering in een Mondial Relay-afhaalpunt — gratis vanaf € 150.",
+    "deliveryReturnsLine": "U heeft 14 dagen na ontvangst om van gedachten te veranderen.",
+    "referenceTitle": "Referentie",
+    "trustPickup": "Afhalen in salon",
+    "trustShipping": "Afhaalpunt",
+    "trustSecure": "Veilig betalen",
     "scanProduct": "Scan een product",
     "cartTitle": "Mijn winkelmandje",
     "cartEmptyTitle": "Uw winkelmandje is leeg",
@@ -727,7 +731,6 @@
         "newAnimator": "Nieuwe animator"
       },
       "searchPlaceholder": "Zoek een activiteit...",
-      "searchAnimatorPlaceholder": "Zoek een animator...",
       "confirmDeleteActivity": "Activiteit \"{title}\" definitief verwijderen? Deze actie is onomkeerbaar.",
       "confirmDeleteAnimator": "Animator \"{name}\" definitief verwijderen? Deze actie is onomkeerbaar.",
       "statusLabels": {
@@ -792,6 +795,7 @@
       }
     },
     "animators": {
+      "searchAnimatorPlaceholder": "Zoek een animator...",
       "columns": {
         "name": "Naam & Bio",
         "email": "E-mail",
@@ -872,7 +876,6 @@
       "refundDeposit": "Aanbetaling als uitzondering terugbetalen",
       "refundFull": "Betaald bedrag als uitzondering terugbetalen",
       "refundHint": "Gereserveerd voor uitzonderlijke gevallen die door een beheerder zijn gevalideerd. Standaard wordt betaling nooit terugbetaald.",
-      "fullPaymentRefundHint": "Deze klant heeft het volledige bedrag betaald — het bovenstaande vakje betaalt het volledige bedrag terug, niet alleen het voorschot.",
       "reasonLabel": "Reden",
       "reasonRequired": "Verplicht om terugbetaling te rechtvaardigen...",
       "reasonOptional": "Optioneel",
@@ -1022,8 +1025,6 @@
       "documents": "Documenten"
     },
     "orderNumber": "Bestelling nr. {number}",
-    "b2bManualLabel": "B2B — handmatig invoeren",
-    "b2bInvoiceHint": "Geen automatische Peppol-verzending — handmatig invoeren in de boekhoudsoftware.",
     "downloadInvoice": "Factuur",
     "downloadCreditNote": "{number}"
   },
@@ -1392,7 +1393,7 @@
         "selectProductsError": "Selecteer het Wix productbestand."
       },
       "stepMapping": {
-        "intro": "{productsCount} producten gevonden, met {slugsCount} verschillende Wix tags. Wix onderscheidt merk en categorie niet — geef aan wat elke tag vertegenwoordigt. Een tag geclassificeerd als \"Categorie\" wordt een categorie onder het merk van het product, met een generieke \"Algemeen\" subcategorie daaronder, om later te verfijnen. Een suggestie is vooraf ingevuld wanneer productnamen dit bevestigen; verifieer en corrigeer de rest.",
+        "intro": "{productsCount} producten gevonden, met {slugsCount} verschillende Wix tags. Wix onderscheidt merk en categorie niet — geef aan wat elke tag vertegenwoordigt. Een tag geclassificeerd als \"Categorie\" wordt een categorie onder het merk van het product, met een generieke \"Algemeen\" subcategorie daaronder, om later te verfijnen. Een suggestie is vooraf ingevuld wanneer productnamen dit bevestigen; verifieer en corrigeer de rest. Let op: de naam van de fabrikant (bv. \"Purple\", \"Staleks\") staat niet altijd vooraan in elke productnaam — in dat geval klopt de suggestie niet en wordt het merk als categorie geclassificeerd en omgekeerd. Als een tag een merk-/fabrikantnaam is, kies dan \"Merk\", ook als de suggestie \"Categorie\" zegt.",
         "table": {
           "wixLabel": "Wix tag",
           "usedBy": "Gebruikt door",
@@ -1407,7 +1408,7 @@
         "continue": "Doorgaan"
       },
       "stepReview": {
-        "unclassifiedWarning": "{count} product(en) hebben geen tag geclassificeerd als \"Categorie\" — ze worden geïmporteerd onder \"Ongeclassificeerd\" en kunnen opnieuw worden geclassificeerd vanaf de productpagina.",
+        "unclassifiedWarning": "{count} product(en) hebben geen merk en/of categorie geïdentificeerd — ze worden geïmporteerd onder \"Ongeclassificeerd\" en kunnen opnieuw worden geclassificeerd vanaf de productpagina.",
         "table": {
           "product": "Product",
           "brand": "Merk",
@@ -1419,6 +1420,12 @@
         },
         "back": "Terug",
         "importButton": "{count} product(en) importeren als concept"
+      },
+      "stepImporting": {
+        "title": "Importeren bezig…",
+        "progress": "{done} van {total} producten verwerkt",
+        "warning": "Sluit deze pagina niet en navigeer niet weg tot de import voltooid is.",
+        "leaveConfirm": "De import is nog bezig — als je nu vertrekt, wordt deze onderbroken. Toch vertrekken?"
       },
       "stepDone": {
         "success": "{count} product(en) geïmporteerd als concept — beoordeel ze (prijs, afbeeldingen, beschrijving) voordat je ze actief maakt in de winkel.",
@@ -1481,7 +1488,6 @@
       "trackingPlaceholder": "bijv. 1234567890123",
       "markShipped": "Markeer verzonden",
       "closeOrder": "Bestelling sluiten",
-      "collectedAt": "Opgehaald op {date}",
       "cancelOrder": "Bestelling annuleren",
       "cancelConfirm": "Deze bestelling annuleren?",
       "cancelMessagePaid": "De klant heeft al online betaald — een Stripe terugbetaling wordt automatisch geactiveerd en voorraad wordt weer beschikbaar voor verkoop.",
@@ -1640,15 +1646,6 @@
     "cancelOrder": "Bestelling annuleren",
     "noUpcomingReservations": "Geen komende reserveringen op dit moment.",
     "modificationAndCancellationUnavailable": "Wijziging en annulering niet beschikbaar minder dan {hours} uur voor de afspraak.",
-    "lockedCancellationNotice": "Wijzigen en annuleren zijn minder dan {hours} uur voor de afspraak niet meer mogelijk. Het voorschot blijft verschuldigd, tenzij de administratie een uitzonderlijke annulering goedkeurt.",
-    "exceptionRequestPending": "Uw aanvraag wacht op een beslissing van het team. Er wordt vóór goedkeuring geen terugbetaling gestart.",
-    "exceptionRequestRejected": "Uw uitzonderlijke aanvraag is afgewezen. De afspraak en het voorschot blijven ongewijzigd.",
-    "exceptionDecisionNote": "Bericht van het team: {note}",
-    "exceptionRequestInstructions": "Leg na contact met de salon uw situatie uit. Deze aanvraag annuleert de afspraak niet en garandeert geen terugbetaling.",
-    "exceptionRequestPlaceholder": "Bijv. plotselinge ziekte, met nuttige informatie voor het team",
-    "back": "Terug",
-    "sendExceptionRequest": "Aanvraag verzenden",
-    "requestExceptionReview": "Uitzonderlijke beoordeling aanvragen",
     "nextAppointment": "Volgende afspraak",
     "with": "Met",
     "leaveReview": "Laat een review achter",
@@ -1789,12 +1786,9 @@
     },
     "alerts": {
       "lowStock": "Lage voorraad",
-      "upcomingAppointments": "Aankomende afspraken",
+      "upcomingAppointments": "Komende afspraken",
       "recentOrders": "Recente bestellingen"
     },
-    "legalDataIncomplete": "De wettelijke identiteit van de salon is onvolledig. Zolang",
-    "salonSettings": "Instellingen > Salon",
-    "legalDataIncompleteSuffix": "niet is ingevuld (wettelijke naam, btw-nummer, adres), kan geen online verkoop worden afgerond: klanten worden vóór betaling geblokkeerd.",
     "appointments": {
       "subtitle": "Bekijk en beheer alle afspraken.",
       "title": "Alle afspraken"
@@ -1961,10 +1955,36 @@
   },
   "appointmentStatus": {
     "pending": "In behandeling",
+    "accepted": "Geaccepteerd — wacht op uw betaalkeuze",
     "confirmed": "Bevestigd",
     "completed": "Voltooid",
     "cancelled": "Geannuleerd",
     "noShow": "Niet verschenen"
+  },
+  "acceptedAppointmentPayment": {
+    "acceptedBadge": "Aanvraag geaccepteerd",
+    "title": "Uw afspraak afronden",
+    "subtitle": "Kies hoe u wilt betalen. Na deze stap wordt uw afspraak bevestigd.",
+    "service": "Dienst",
+    "staff": "Expert",
+    "date": "Datum",
+    "time": "Tijd",
+    "chooseTitle": "Kies een betaaloptie",
+    "fullOnlineTitle": "Volledig online betalen",
+    "fullOnlineDescription": "Betaal {amount} veilig via Stripe.",
+    "depositTitle": "Betaal een voorschot van {percentage}%",
+    "depositDescription": "Betaal nu {deposit} en vervolgens {balance} in het salon.",
+    "onSiteTitle": "Betalen in het salon",
+    "onSiteDescription": "Uw afspraak wordt nu bevestigd; {amount} betaalt u in het salon.",
+    "choose": "Kiezen",
+    "processing": "Bezig…",
+    "secureNotice": "Online betalingen worden veilig verwerkt door Stripe.",
+    "confirmedTitle": "Afspraak bevestigd",
+    "confirmedDescription": "Uw tijdstip is gereserveerd. We kijken ernaar uit u te verwelkomen.",
+    "viewAppointments": "Mijn afspraken bekijken",
+    "unavailableTitle": "Betaalkeuze niet beschikbaar",
+    "unavailableDescription": "Deze afspraak wacht niet langer op een betaalkeuze.",
+    "genericError": "Er is iets misgegaan. Probeer het opnieuw."
   },
   "paymentStatus": {
     "pending": "In behandeling",
@@ -2081,6 +2101,7 @@
     "paymentStatusPaid": "Betaald",
     "paymentStatusRefunded": "Terugbetaald",
     "finalizePayment": "Betaling voltooien",
+    "choosePayment": "Betaalmethode kiezen",
     "redirecting": "Doorverwijzen…",
     "modify": "Wijzigen",
     "cancel": "Annuleren",
@@ -2355,16 +2376,6 @@
     "typePrivate": "Privéopleiding",
     "typeGroup": "Groepsopleiding",
     "priorityPlace": "Er is een plaats vrijgekomen! Voltooi snel uw boeking: de plaats wordt toegewezen aan de eerste persoon die boekt.",
-    "wlAlreadyOnListTitle": "U stond al op de wachtlijst",
-    "wlAlreadyOnListDesc": "Uw eerdere inschrijving is nog steeds actief — er is niets dubbel toegevoegd.",
-    "wlConfirmationSentDesc": "We hebben u een bevestigingse-mail gestuurd.",
-    "wlYourPosition": "Uw positie",
-    "wlSeatsRequestedLabel": "Aangevraagde plaatsen",
-    "wlWhatHappensNow": "Wat gebeurt er nu",
-    "wlBullet1": "Er wordt momenteel geen betaling van u gevraagd en er is geen plaats op uw naam gereserveerd.",
-    "wlBullet2": "Zodra er een plaats vrijkomt, wordt er <strong>tegelijkertijd</strong> een e-mail verstuurd naar alle ingeschreven personen.",
-    "wlBullet3": "De plaats gaat naar de eerste persoon die zijn/haar reservering afrondt en het voorschot betaalt — uw positie is geen gegarandeerde prioriteit.",
-    "wlBullet4": "Om u uit te schrijven, mail ons op <link>contact@meribeautystudio.com</link>.",
     "wlSuccessTitle": "U staat op de wachtlijst!",
     "wlSuccessDesc": "U staat op positie #{position} van de wachtlijst. Zodra een plaats vrijkomt, wordt er een e-mail gestuurd naar alle ingeschreven personen. De plaats wordt toegewezen aan de eerste persoon die zijn boeking voltooit — wees snel!",
     "seeOtherActivities": "Ontdek andere activiteiten",

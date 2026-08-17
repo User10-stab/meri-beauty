@@ -4,13 +4,11 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
-import { useTranslations } from "next-intl";
 import { Mail, Loader2, Sparkles, AlertCircle, Check, ArrowLeft } from "lucide-react";
 import { forgotPasswordSchema } from "@/lib/validations/forgot-password";
 import { forgotPassword } from "@/actions/auth/forgot-password";
 
 export default function ForgotPasswordForm() {
-  const t = useTranslations();
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [serverSuccess, setServerSuccess] = useState(null);
@@ -44,7 +42,7 @@ export default function ForgotPasswordForm() {
       setIsLoading(false);
     } catch (error) {
       console.error("[forgotPasswordForm] submit error:", error);
-      setServerError("An unexpected error occurred. Please try again.");
+      setServerError("Une erreur inattendue est survenue. Veuillez réessayer.");
       setIsLoading(false);
     }
   };
@@ -59,10 +57,10 @@ export default function ForgotPasswordForm() {
             <Sparkles className="h-6 w-6" />
           </div>
           <h2 className="text-3xl font-extrabold tracking-tight text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
-            {t("auth.resetPassword")}
+            Mot de passe oublié
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {t("auth.forgotSubtitle")}
+            Saisissez votre adresse e-mail pour recevoir un lien de réinitialisation sécurisé
           </p>
         </div>
 
@@ -91,7 +89,7 @@ export default function ForgotPasswordForm() {
                 htmlFor="email"
                 className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider"
               >
-                {t("auth.emailAddress")}
+                Adresse e-mail
               </label>
               <div className="relative rounded-2xl shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -130,10 +128,10 @@ export default function ForgotPasswordForm() {
               {isLoading ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  {t("auth.requestingLink")}
+                  Envoi du lien…
                 </span>
               ) : (
-                t("auth.sendResetLink")
+                "Envoyer le lien"
               )}
             </button>
           </div>
@@ -146,7 +144,7 @@ export default function ForgotPasswordForm() {
             className="inline-flex items-center gap-2 text-sm font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
           >
             <ArrowLeft className="h-4 w-4" />
-            {t("auth.backToSignIn")}
+            Retour à la connexion
           </Link>
         </div>
       </div>

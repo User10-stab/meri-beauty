@@ -8,7 +8,6 @@ import { signIn } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
 import { toast } from "sonner";
-import { useTranslations } from "next-intl";
 import {
   Loader2,
   Sparkles,
@@ -55,8 +54,58 @@ const VIES_COUNTRY_CODES = new Set([
 
 const companyCountryOptions = countryOptions.filter((country) => VIES_COUNTRY_CODES.has(country.code));
 
+const fields = [
+  {
+    name: "fullName",
+    label: "Nom complet",
+    type: "text",
+    placeholder: "Marie Dupont",
+    icon: User,
+    autoComplete: "name",
+  },
+  {
+    name: "nickName",
+    label: "Surnom",
+    type: "text",
+    placeholder: "Marie (facultatif)",
+    icon: AtSign,
+    autoComplete: "nickname",
+  },
+  {
+    name: "email",
+    label: "Adresse e-mail",
+    type: "email",
+    placeholder: "you@example.com",
+    icon: Mail,
+    autoComplete: "email",
+  },
+  {
+    name: "phone",
+    label: "Numéro de téléphone",
+    type: "tel",
+    placeholder: "+32 470 12 34 56",
+    icon: Phone,
+    autoComplete: "tel",
+  },
+  {
+    name: "password",
+    label: "Mot de passe",
+    type: "password",
+    placeholder: "••••••••",
+    icon: Lock,
+    autoComplete: "new-password",
+  },
+  {
+    name: "confirmPassword",
+    label: "Confirmez le mot de passe",
+    type: "password",
+    placeholder: "••••••••",
+    icon: KeyRound,
+    autoComplete: "new-password",
+  },
+];
+
 export default function RegisterForm() {
-  const t = useTranslations();
   const router = useRouter();
   const searchParams = useSearchParams();
   // Preserve any callbackUrl so that after registration → email verification
@@ -71,58 +120,6 @@ export default function RegisterForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [serverSuccess, setServerSuccess] = useState(null);
-
-  // Build fields array with translations
-  const fields = [
-    {
-      name: "fullName",
-      label: t("auth.fullName"),
-      type: "text",
-      placeholder: "Jane Doe",
-      icon: User,
-      autoComplete: "name",
-    },
-    {
-      name: "nickName",
-      label: t("auth.nickname"),
-      type: "text",
-      placeholder: "Jane",
-      icon: AtSign,
-      autoComplete: "nickname",
-    },
-    {
-      name: "email",
-      label: t("auth.emailAddress"),
-      type: "email",
-      placeholder: "you@example.com",
-      icon: Mail,
-      autoComplete: "email",
-    },
-    {
-      name: "phone",
-      label: t("auth.phone"),
-      type: "tel",
-      placeholder: "+1 234 567 8900",
-      icon: Phone,
-      autoComplete: "tel",
-    },
-    {
-      name: "password",
-      label: t("auth.password"),
-      type: "password",
-      placeholder: "••••••••",
-      icon: Lock,
-      autoComplete: "new-password",
-    },
-    {
-      name: "confirmPassword",
-      label: t("auth.confirmPassword"),
-      type: "password",
-      placeholder: "••••••••",
-      icon: KeyRound,
-      autoComplete: "new-password",
-    },
-  ];
 
   const {
     register,
@@ -209,12 +206,15 @@ export default function RegisterForm() {
       // verification → sign in, the user returns to where they started
       // (e.g. the rental request form).
       if (response.emailDeliveryFailed) {
-        toast.warning(t("auth.successCreateAccountEmailFailed"), { duration: 10000 });
+        toast.warning(
+          "Votre compte a bien été créé, mais l’e-mail de vérification n’a pas pu être envoyé. Vous pourrez demander un nouveau lien.",
+          { duration: 10000 }
+        );
       } else {
         toast.success(
           response.vatVerificationPending
-            ? t("auth.successCreateAccountVatPending")
-            : t("auth.successCreateAccount"),
+            ? "Votre compte a été créé. Votre numéro de TVA est enregistré en attente de vérification VIES. Vérifiez votre adresse e-mail avant de vous connecter."
+            : "Votre compte a été créé avec succès. Un e-mail de vérification vous a été envoyé. Veuillez consulter votre boîte de réception et vérifier votre adresse e-mail avant de vous connecter.",
           { duration: 8000 }
         );
       }
@@ -269,7 +269,7 @@ export default function RegisterForm() {
             Meri Beauty
           </h2> */}
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {t("auth.createAccountSubtitle")}
+            Créez votre compte pour commencer
           </p>
         </div>
 
@@ -301,7 +301,6 @@ export default function RegisterForm() {
                 isLoading={isLoading}
                 showPassword={showPassword}
                 onTogglePassword={togglePasswordVisibility}
-                t={t}
               />
             ))}
           </div>
@@ -317,14 +316,13 @@ export default function RegisterForm() {
                 isLoading={isLoading}
                 showPassword={showPassword}
                 onTogglePassword={togglePasswordVisibility}
-                t={t}
               />
             ))}
           </div>
 
           {/* Password strength hint */}
           <p className="text-xs text-zinc-400 dark:text-zinc-500 -mt-2 pl-1">
-            {t("auth.passwordHint")}
+            Le mot de passe doit contenir au moins 8 caractères.
           </p>
 
           {/* Account type — asked directly at signup, not inferred later */}
@@ -534,7 +532,7 @@ export default function RegisterForm() {
               className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 dark:border-zinc-600 text-[#2F3A2E] focus:ring-[#2F3A2E]/40 dark:focus:ring-[#a8c4a2]/30 transition-colors disabled:opacity-60 cursor-pointer"
             />
             <span className="text-sm text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-700 dark:group-hover:text-zinc-300 transition-colors leading-snug">
-              {t("auth.newsletter")}
+              Je souhaite recevoir des offres exclusives et des actualités par email.
             </span>
           </label>
 
@@ -576,10 +574,10 @@ export default function RegisterForm() {
             {isLoading ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="h-5 w-5 animate-spin" />
-                {t("auth.creatingAccountEllipsis")}
+                Création du compte…
               </span>
             ) : (
-              t("auth.register")
+              "Créer mon compte"
             )}
           </button>
         </form>
@@ -587,12 +585,12 @@ export default function RegisterForm() {
         {/* Footer */}
         <div className="text-center mt-6">
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {t("auth.alreadyHaveAccount")}{" "}
+            Vous avez déjà un compte ?{" "}
             <Link
               href={callbackUrl ? `/login?callbackUrl=${encodeURIComponent(callbackUrl)}` : "/login"}
               className="font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
-              {t("auth.signIn")}
+              Se connecter
             </Link>
           </p>
         </div>
@@ -604,7 +602,7 @@ export default function RegisterForm() {
 /**
  * Reusable field input extracted to keep the form JSX clean.
  */
-function FieldInput({ field, register, errors, isLoading, showPassword, onTogglePassword, t }) {
+function FieldInput({ field, register, errors, isLoading, showPassword, onTogglePassword }) {
   const Icon = field.icon;
   const isPasswordField = field.type === "password";
   const isVisible = showPassword[field.name];
@@ -619,7 +617,7 @@ function FieldInput({ field, register, errors, isLoading, showPassword, onToggle
         {field.label}
         {field.name === "nickName" && (
           <span className="ml-1 normal-case font-normal text-zinc-400 dark:text-zinc-500">
-            {t("auth.optional")}
+            (optional)
           </span>
         )}
       </label>
@@ -646,7 +644,7 @@ function FieldInput({ field, register, errors, isLoading, showPassword, onToggle
           <button
             type="button"
             onClick={() => onTogglePassword(field.name)}
-            aria-label={isVisible ? t("auth.hidePassword") : t("auth.showPassword")}
+            aria-label={isVisible ? "Masquer le mot de passe" : "Afficher le mot de passe"}
             className="absolute inset-y-0 right-0 pr-4 flex items-center text-zinc-400 hover:text-[#2F3A2E] dark:text-zinc-500 dark:hover:text-[#a8c4a2] transition-colors"
           >
             {isVisible ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}

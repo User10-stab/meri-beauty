@@ -5,14 +5,17 @@ import Link from "next/link";
 import { Mail, Lock } from "lucide-react";
 import { loginSchema } from "@/lib/validations/login";
 import { loginUser } from "@/actions/auth/login";
+import { normalizeCallbackUrl } from "@/lib/safe-callback-url";
 import AuthForm from "@/components/auth-form";
-import { useTranslations } from "next-intl";
 
 export default function LoginForm() {
-  const t = useTranslations("auth");
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl");
+  const callbackUrl = normalizeCallbackUrl(
+    searchParams.get("callbackUrl"),
+    "",
+    typeof window !== "undefined" ? window.location.origin : null
+  );
   const prefillEmail = searchParams.get("email") || "";
 
   const onSubmit = async (data) => {
@@ -25,7 +28,7 @@ export default function LoginForm() {
     // A callbackUrl means the person was sent here mid-checkout/booking
     // (e.g. the "an account already exists" nudge) — send them back to
     // exactly where they were instead of the generic role-based default.
-    const redirectTo = callbackUrl ? decodeURIComponent(callbackUrl) : response.redirectTo || "/dashboard";
+    const redirectTo = callbackUrl || response.redirectTo || "/dashboard";
 
     window.location.href = redirectTo;
     router.replace(redirectTo);
@@ -33,7 +36,7 @@ export default function LoginForm() {
 
     return {
       success: true,
-      message: t("redirecting"),
+      message: "Connexion réussie. Redirection en cours…",
       redirectTo,
     };
   };
@@ -47,19 +50,19 @@ export default function LoginForm() {
 
   return (
     <AuthForm
-      subtitle={t("signInSubtitle")}
+      subtitle="Connectez-vous à votre espace Meri Beauty"
       defaultValues={{ email: prefillEmail }}
       fields={[
         {
           name: "email",
-          label: t("email"),
+          label: "Adresse e-mail",
           type: "email",
           placeholder: "you@example.com",
           icon: Mail,
         },
         {
           name: "password",
-          label: t("password"),
+          label: "Mot de passe",
           type: "password",
           placeholder: "••••••••",
           icon: Lock,
@@ -67,11 +70,11 @@ export default function LoginForm() {
       ]}
       schema={loginSchema}
       onSubmit={onSubmit}
-      submitText={t("signIn")}
-      loadingText={t("signingIn")}
-      footerText={t("noAccount")}
+      submitText="Se connecter"
+      loadingText="Connexion en cours…"
+      footerText="Vous n'avez pas encore de compte ?"
       footerLinkHref={registerHref}
-      footerLinkText={t("createAccount")}
+      footerLinkText="Créer un compte"
       extraElements={({ register, isLoading }) => (
         <div className="flex items-center justify-between">
           <div className="flex items-center">
@@ -83,7 +86,7 @@ export default function LoginForm() {
               className="h-4.5 w-4.5 text-[#2F3A2E] border-zinc-300 rounded focus:ring-[#2F3A2E]/40 dark:bg-zinc-800 dark:border-zinc-700 cursor-pointer"
             />
             <label htmlFor="rememberMe" className="ml-2 block text-sm text-zinc-650 dark:text-zinc-400 select-none cursor-pointer">
-              {t("rememberMe")}
+              Se souvenir de moi
             </label>
           </div>
 
@@ -92,7 +95,7 @@ export default function LoginForm() {
               href="/forgot-password"
               className="font-semibold text-[#2F3A2E] hover:text-[#3d4d3c] dark:text-[#a8c4a2] dark:hover:text-[#c2d9bc] transition-colors"
             >
-              {t("forgotPassword")}
+              Mot de passe oublié ?
             </Link>
           </div>
         </div>

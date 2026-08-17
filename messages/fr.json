@@ -319,8 +319,6 @@
     "newsletter": "Je souhaite recevoir les offres exclusives et les actualités par e-mail.",
     "alreadyHaveAccount": "Vous avez déjà un compte ?",
     "successCreateAccount": "Votre compte a été créé avec succès. Un e-mail de vérification a été envoyé. Vérifiez votre boîte de réception et confirmez votre adresse e-mail avant de vous connecter.",
-    "successCreateAccountEmailFailed": "Votre compte a bien été créé, mais l’e-mail de vérification n’a pas pu être envoyé. Vous pourrez demander un nouveau lien.",
-    "successCreateAccountVatPending": "Votre compte a été créé. Votre numéro de TVA est enregistré en attente de vérification VIES. Vérifiez votre adresse e-mail avant de vous connecter.",
     "showPassword": "Afficher le mot de passe",
     "hidePassword": "Masquer le mot de passe",
     "optional": "(optionnel)",
@@ -569,9 +567,6 @@
     "paymentProcessingDesc": "Votre paiement est en cours de traitement. Vous recevrez un e-mail de confirmation dès qu'il sera validé.",
     "pageNotFound": "Page non trouvée",
     "couldNotFindOrder": "Nous n'avons pas pu trouver votre commande. Si vous venez d'effectuer un paiement, vérifiez votre e-mail.",
-    "posPaymentNotCompleted": "Paiement non terminé",
-    "posPaymentNotCompletedDesc": "Aucun paiement n'a été confirmé. Vous pouvez revenir auprès de notre équipe en caisse.",
-    "thankYouOrderFree": "Merci ! Votre commande n°{number} est confirmée — le code promo appliqué couvre l'intégralité du montant, aucun paiement n'était nécessaire.",
     "backToHome": "Retour à l'accueil",
     "continueShopping": "Continuer vos achats",
     "pickupCode": "Code de retrait",
@@ -592,6 +587,15 @@
     "decreaseQuantity": "Diminuer la quantité",
     "increaseQuantity": "Augmenter la quantité",
     "adding": "Ajout…",
+    "descriptionTitle": "Description",
+    "deliveryTitle": "Livraison & retours",
+    "deliveryPickupLine": "Retrait gratuit au salon dès que votre commande est prête.",
+    "deliveryShippingLine": "Livraison en point relais Mondial Relay — offerte à partir de 150 €.",
+    "deliveryReturnsLine": "Vous disposez de 14 jours après réception pour changer d'avis.",
+    "referenceTitle": "Référence",
+    "trustPickup": "Retrait en salon",
+    "trustShipping": "Point relais",
+    "trustSecure": "Paiement sécurisé",
     "scanProduct": "Scanner un produit",
     "cartTitle": "Mon panier",
     "cartEmptyTitle": "Votre panier est vide",
@@ -727,7 +731,6 @@
         "newAnimator": "Nouvel animateur"
       },
       "searchPlaceholder": "Rechercher une activité...",
-      "searchAnimatorPlaceholder": "Rechercher un animateur...",
       "confirmDeleteActivity": "Supprimer définitivement l'activité « {title} » ? Cette action est irréversible.",
       "confirmDeleteAnimator": "Supprimer définitivement l'animateur « {name} » ? Cette action est irréversible.",
       "statusLabels": {
@@ -792,6 +795,7 @@
       }
     },
     "animators": {
+      "searchAnimatorPlaceholder": "Rechercher un animateur...",
       "columns": {
         "name": "Nom & Biographie",
         "email": "Email",
@@ -872,7 +876,6 @@
       "refundDeposit": "Rembourser l'acompte à titre exceptionnel",
       "refundFull": "Rembourser le montant payé à titre exceptionnel",
       "refundHint": "Réservé aux cas exceptionnels validés par un administrateur. Par défaut, le paiement n'est jamais remboursé.",
-      "fullPaymentRefundHint": "Ce client a payé l'intégralité — la case ci-dessus rembourse la totalité, pas un simple acompte.",
       "reasonLabel": "Motif",
       "reasonRequired": "Obligatoire pour justifier le remboursement…",
       "reasonOptional": "Optionnel",
@@ -1022,8 +1025,6 @@
       "documents": "Documents"
     },
     "orderNumber": "Commande n°{number}",
-    "b2bManualLabel": "B2B — à facturer manuellement",
-    "b2bInvoiceHint": "Pas d'envoi Peppol automatique — à saisir manuellement dans le logiciel comptable.",
     "downloadInvoice": "Facture",
     "downloadCreditNote": "{number}"
   },
@@ -1431,7 +1432,7 @@
         "selectProductsError": "Sélectionnez le fichier produits Wix."
       },
       "stepMapping": {
-        "intro": "{productsCount} produits trouvés, avec {slugsCount} étiquettes Wix différentes. Wix ne distingue pas marque et catégorie — indiquez ce que chaque étiquette représente. Une étiquette classée « Catégorie » devient une catégorie sous la marque du produit, avec une sous-catégorie générique « Général » en dessous, à affiner plus tard. Une suggestion est déjà pré-remplie quand les noms de produits le confirment ; vérifiez et corrigez le reste.",
+        "intro": "{productsCount} produits trouvés, avec {slugsCount} étiquettes Wix différentes. Wix ne distingue pas marque et catégorie — indiquez ce que chaque étiquette représente. Une étiquette classée « Catégorie » devient une catégorie sous la marque du produit, avec une sous-catégorie générique « Général » en dessous, à affiner plus tard. Une suggestion est déjà pré-remplie quand les noms de produits le confirment ; vérifiez et corrigez le reste. Attention : le nom du fabricant (ex. « Purple », « Staleks ») n'apparaît pas toujours au début du nom de chaque produit — dans ce cas la suggestion se trompe et classe la marque comme catégorie, et inversement. Si une étiquette est un nom de marque/fabricant, choisissez « Marque » même si la suggestion dit « Catégorie ».",
         "table": {
           "wixLabel": "Étiquette Wix",
           "usedBy": "Utilisée par",
@@ -1446,7 +1447,7 @@
         "continue": "Continuer"
       },
       "stepReview": {
-        "unclassifiedWarning": "{count} produit(s) n'ont aucune étiquette classée « Catégorie » — ils seront importés sous « Non classé » et pourront être reclassés depuis la fiche produit.",
+        "unclassifiedWarning": "{count} produit(s) n'ont pas de marque et/ou de catégorie identifiée — ils seront importés sous « Non classé » et pourront être reclassés depuis la fiche produit.",
         "table": {
           "product": "Produit",
           "brand": "Marque",
@@ -1458,6 +1459,12 @@
         },
         "back": "Retour",
         "importButton": "Importer {count} produit(s) en brouillon"
+      },
+      "stepImporting": {
+        "title": "Importation en cours…",
+        "progress": "{done} sur {total} produits traités",
+        "warning": "Ne fermez pas cette page et ne naviguez pas ailleurs tant que l'importation n'est pas terminée.",
+        "leaveConfirm": "L'importation est en cours — si vous quittez maintenant, elle sera interrompue. Quitter quand même ?"
       },
       "stepDone": {
         "success": "{count} produit(s) importé(s) en brouillon — passez-les en revue (prix, images, description) avant de les rendre actifs sur la boutique.",
@@ -1520,7 +1527,6 @@
       "trackingPlaceholder": "ex : 1234567890123",
       "markShipped": "Marquer expédiée",
       "closeOrder": "Clôturer la commande",
-      "collectedAt": "Récupérée le {date}",
       "cancelOrder": "Annuler la commande",
       "cancelConfirm": "Annuler cette commande ?",
       "cancelMessagePaid": "Le client a déjà payé en ligne — un remboursement Stripe sera automatiquement déclenché et le stock sera remis en vente.",
@@ -1640,15 +1646,6 @@
     "cancelOrder": "Annuler la commande",
     "noUpcomingReservations": "Aucune réservation à venir pour le moment.",
     "modificationAndCancellationUnavailable": "Modification et annulation indisponibles moins de {hours} heures avant le rendez-vous.",
-    "lockedCancellationNotice": "Modification et annulation indisponibles à moins de {hours} heures du rendez-vous. L'acompte reste acquis sauf annulation exceptionnelle approuvée par l'administration.",
-    "exceptionRequestPending": "Votre demande est en attente d'une décision de l'équipe. Aucun remboursement n'est engagé avant son accord.",
-    "exceptionRequestRejected": "Votre demande exceptionnelle a été refusée. Le rendez-vous et l'acompte restent inchangés.",
-    "exceptionDecisionNote": "Message de l'équipe : {note}",
-    "exceptionRequestInstructions": "Après avoir contacté le salon, expliquez votre situation. Cette demande n'annule pas le rendez-vous et ne garantit pas un remboursement.",
-    "exceptionRequestPlaceholder": "Ex. maladie soudaine, avec toute information utile pour l'équipe",
-    "back": "Retour",
-    "sendExceptionRequest": "Envoyer la demande",
-    "requestExceptionReview": "Demander un examen exceptionnel",
     "nextAppointment": "Prochain rendez-vous",
     "with": "Avec",
     "leaveReview": "Laisser un avis",
@@ -1790,11 +1787,8 @@
     "alerts": {
       "lowStock": "Stock bas",
       "upcomingAppointments": "Prochains rendez-vous",
-      "recentOrders": "Commandes récentes"
+      "recentOrders": "Dernières commandes"
     },
-    "legalDataIncomplete": "L'identité légale du salon est incomplète. Tant que",
-    "salonSettings": "Réglages > Salon",
-    "legalDataIncompleteSuffix": "n'est pas rempli (nom légal, TVA, adresse), aucune vente en ligne ne peut être finalisée : les client·es sont bloqué·es avant paiement.",
     "appointments": {
       "title": "Tous les rendez-vous",
       "subtitle": "Consultez et gérez l'ensemble des rendez-vous."
@@ -1961,10 +1955,36 @@
   },
   "appointmentStatus": {
     "pending": "En attente",
+    "accepted": "Accepté — en attente de votre choix de paiement",
     "confirmed": "Confirmé",
     "completed": "Complété",
     "cancelled": "Annulé",
     "noShow": "Absent"
+  },
+  "acceptedAppointmentPayment": {
+    "acceptedBadge": "Demande acceptée",
+    "title": "Finaliser votre rendez-vous",
+    "subtitle": "Choisissez votre mode de paiement. Le rendez-vous sera confirmé après cette étape.",
+    "service": "Service",
+    "staff": "Experte",
+    "date": "Date",
+    "time": "Heure",
+    "chooseTitle": "Choisissez une option de paiement",
+    "fullOnlineTitle": "Payer la totalité en ligne",
+    "fullOnlineDescription": "Payez {amount} de manière sécurisée avec Stripe.",
+    "depositTitle": "Payer un acompte de {percentage}%",
+    "depositDescription": "Payez {deposit} maintenant, puis {balance} au salon.",
+    "onSiteTitle": "Payer au salon",
+    "onSiteDescription": "Votre rendez-vous est confirmé maintenant ; {amount} seront à régler au salon.",
+    "choose": "Choisir",
+    "processing": "Traitement…",
+    "secureNotice": "Les paiements en ligne sont traités de manière sécurisée par Stripe.",
+    "confirmedTitle": "Rendez-vous confirmé",
+    "confirmedDescription": "Votre créneau est réservé. Nous avons hâte de vous accueillir.",
+    "viewAppointments": "Voir mes rendez-vous",
+    "unavailableTitle": "Choix de paiement indisponible",
+    "unavailableDescription": "Ce rendez-vous n'attend plus de choix de paiement.",
+    "genericError": "Une erreur est survenue. Veuillez réessayer."
   },
   "paymentStatus": {
     "pending": "En attente",
@@ -2090,6 +2110,7 @@
     "paymentStatusPaid": "Payé",
     "paymentStatusRefunded": "Remboursé",
     "finalizePayment": "Finaliser le paiement",
+    "choosePayment": "Choisir le mode de paiement",
     "redirecting": "Redirection…",
     "modify": "Modifier",
     "cancel": "Annuler",
@@ -2355,16 +2376,6 @@
     "typePrivate": "Formation privée",
     "typeGroup": "Formation groupe",
     "priorityPlace": "Une place s'est libérée ! Finalisez votre réservation rapidement : elle sera attribuée à la première personne qui réserve.",
-    "wlAlreadyOnListTitle": "Vous étiez déjà sur la liste d'attente",
-    "wlAlreadyOnListDesc": "Votre inscription précédente est toujours active — rien n'a été ajouté en double.",
-    "wlConfirmationSentDesc": "Nous vous avons envoyé un email de confirmation.",
-    "wlYourPosition": "Votre position",
-    "wlSeatsRequestedLabel": "Places demandées",
-    "wlWhatHappensNow": "Ce qui se passe maintenant",
-    "wlBullet1": "Aucun paiement ne vous est demandé pour l'instant, et aucune place n'est bloquée à votre nom.",
-    "wlBullet2": "Dès qu'une place se libère, un email part <strong>en même temps</strong> à toutes les personnes inscrites.",
-    "wlBullet3": "La place revient à la première personne qui finalise sa réservation et règle l'acompte — votre position n'est pas une priorité garantie.",
-    "wlBullet4": "Pour vous désinscrire, écrivez-nous à <link>contact@meribeautystudio.com</link>.",
     "wlSuccessTitle": "Vous êtes inscrit(e) sur la liste d'attente !",
     "wlSuccessDesc": "Vous êtes en position #{position} sur la liste d'attente. Dès qu'une place se libère, un email sera envoyé à toutes les personnes inscrites. La place sera attribuée à la première personne qui finalise sa réservation — soyez rapide !",
     "seeOtherActivities": "Découvrir d'autres activités",

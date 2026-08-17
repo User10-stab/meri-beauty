@@ -12,12 +12,30 @@ import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { MondialRelayPicker } from "@/components/boutique/MondialRelayPicker";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
-import { useTranslations } from "next-intl";
 
+const MODES = [
+  {
+    value: "PICKUP_PREPAID",
+    icon: Store,
+    title: "Retrait en boutique — payer en ligne",
+    description: "Payez maintenant, récupérez votre commande au salon.",
+  },
+  {
+    value: "PICKUP_ON_SITE",
+    icon: Wallet,
+    title: "Retrait en boutique — payer sur place",
+    description: "Réservez maintenant, réglez en boutique au retrait (sous 7 jours).",
+  },
+  {
+    value: "SHIPPING_PREPAID",
+    icon: Truck,
+    title: "Livraison en point relais",
+    description: "Payez maintenant, livraison Mondial Relay. Frais de port calculés au poids — gratuite dès €150.",
+  },
+];
 
 export function CheckoutPageClient({ cart, customerSession }) {
   const router = useRouter();
-  const t = useTranslations("boutique.checkout");
   const isAuthenticated = Boolean(customerSession);
 
   const [fulfilmentMode, setFulfilmentMode] = useState(null);
@@ -105,34 +123,36 @@ export function CheckoutPageClient({ cart, customerSession }) {
     e.preventDefault();
 
     if (!fulfilmentMode) {
-      toast.error(t("errors.selectMode"));
+      toast.error("Veuillez choisir un mode de retrait.");
       return;
     }
     if (quoteRequired) {
-      toast.error(t("errors.overweight"));
+      toast.error("Votre commande dépasse 30 kg. Contactez-nous pour un devis de livraison personnalisé.");
       return;
     }
     if (!acceptedTerms) {
-      toast.error(t("errors.acceptTerms"));
+      toast.error("Veuillez accepter les CGV et la politique de confidentialité.");
       return;
     }
     if (!isAuthenticated) {
       if (!customerInfo.fullName.trim() || !customerInfo.email.trim() || !customerInfo.phone.trim()) {
-        toast.error(t("errors.completeInfo"));
+        toast.error("Veuillez compléter vos informations de contact.");
         return;
       }
       if (isDisposableEmail(customerInfo.email)) {
-        toast.error(t("errors.disposableEmail"));
+        toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
         return;
       }
       if (emailStatus === "exists") {
-        toast.error(t("errors.accountExists"));
+        toast.error(
+          "Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même »."
+        );
         return;
       }
     }
     if (fulfilmentMode === "SHIPPING_PREPAID") {
       if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !/^\d{4}$/.test((pickupPoint?.postalCode ?? "").trim())) {
-        toast.error(t("errors.selectRelay"));
+        toast.error("Veuillez choisir un point relais Mondial Relay valide.");
         return;
       }
     }
@@ -175,9 +195,9 @@ export function CheckoutPageClient({ cart, customerSession }) {
         return;
       }
 
-      const sessionResult = await createOrderCheckoutSession(result.data.orderId);
-      if (!sessionResult.success || !sessionResult.url) {
-        toast.error(sessionResult.message || t("errors.paymentFailed"));
+      const sessionResult = await createOrderCheckoutSession(result.data.orderId, result.data.checkoutToken);
+      if (!sessionResult.success) {
+        toast.error(sessionResult.message || "Impossible de démarrer le paiement.");
         setSubmitting(false);
         return;
       }
@@ -198,7 +218,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
       window.location.href = sessionResult.url;
     } catch (error) {
       console.error("[CheckoutPageClient]", error);
-      toast.error(t("errors.unexpectedError"));
+      toast.error("Une erreur est survenue. Veuillez réessayer.");
       setSubmitting(false);
     }
   }
@@ -206,15 +226,15 @@ export function CheckoutPageClient({ cart, customerSession }) {
   async function handleRequestQuote() {
     const info = isAuthenticated ? customerSession : customerInfo;
     if (!info?.fullName?.trim() || !info?.email?.trim() || !info?.phone?.trim()) {
-      toast.error(t("errors.completeInfo"));
+      toast.error("Veuillez compléter vos informations de contact.");
       return;
     }
     if (!isAuthenticated && isDisposableEmail(info.email)) {
-      toast.error(t("errors.disposableEmail"));
+      toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
       return;
     }
     if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !/^\d{4}$/.test((pickupPoint?.postalCode ?? "").trim())) {
-      toast.error(t("errors.selectRelay"));
+      toast.error("Veuillez choisir un point relais Mondial Relay valide.");
       return;
     }
 
@@ -242,9 +262,10 @@ export function CheckoutPageClient({ cart, customerSession }) {
         <div className="mb-6 inline-flex h-16 w-16 items-center justify-center rounded-full bg-[#C8A46A]/10">
           <CheckCircle2 className="h-8 w-8 text-[#C8A46A]" />
         </div>
-        <h1 className="text-2xl font-bold text-[#2F3A2E]">{t("emailVerification.title")}</h1>
+        <h1 className="text-2xl font-bold text-[#2F3A2E]">Confirmez votre email</h1>
         <p className="mx-auto mt-3 max-w-md text-ink/60 text-gray-500">
-          {t("emailVerification.message", { email: pendingVerificationEmail })}
+          Nous avons envoyé un email de confirmation à <strong>{pendingVerificationEmail}</strong>. Une fois confirmée,
+          vous recevrez vos identifiants de connexion par email et pourrez finaliser votre paiement.
         </p>
       </div>
     );
@@ -252,19 +273,15 @@ export function CheckoutPageClient({ cart, customerSession }) {
 
   return (
     <div className="mx-auto max-w-[1000px] px-6 py-12 md:px-10">
-      <h1 className="mb-8 text-3xl text-[#2F3A2E]">{t("title")}</h1>
+      <h1 className="mb-8 text-3xl text-[#2F3A2E]">Finaliser la commande</h1>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_320px]">
         <div className="space-y-8">
           {/* Fulfilment mode */}
           <section>
-            <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("fulfilmentMode")}</h2>
+            <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Mode de retrait</h2>
             <div className="space-y-3">
-              {[
-                { value: "PICKUP_PREPAID", icon: Store },
-                { value: "PICKUP_ON_SITE", icon: Wallet },
-                { value: "SHIPPING_PREPAID", icon: Truck },
-              ].map((mode) => {
+              {MODES.map((mode) => {
                 const Icon = mode.icon;
                 const selected = fulfilmentMode === mode.value;
                 return (
@@ -284,8 +301,8 @@ export function CheckoutPageClient({ cart, customerSession }) {
                       <Icon size={19} />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-[#2F3A2E]">{t(`modes.${mode.value}.title`)}</p>
-                      <p className="mt-0.5 text-sm text-gray-500">{t(`modes.${mode.value}.description`)}</p>
+                      <p className="text-sm font-semibold text-[#2F3A2E]">{mode.title}</p>
+                      <p className="mt-0.5 text-sm text-gray-500">{mode.description}</p>
                     </div>
                     {selected && <Check size={20} className="flex-shrink-0 text-[#C8A46A]" />}
                   </button>
@@ -298,7 +315,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
           {fulfilmentMode === "SHIPPING_PREPAID" && (
             <section className="border border-neutral-200 p-6">
               <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
-                {t("mondialRelayTitle")}
+                Point relais Mondial Relay
               </h2>
               <MondialRelayPicker value={pickupPoint} onChange={setPickupPoint} />
             </section>
@@ -307,13 +324,13 @@ export function CheckoutPageClient({ cart, customerSession }) {
           {/* Customer info */}
           {!isAuthenticated && (
             <section className="border border-neutral-200 p-6">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("yourInfo")}</h2>
+              <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Vos informations</h2>
               <div className="space-y-4">
                 <input
                   name="fullName"
                   value={customerInfo.fullName}
                   onChange={handleCustomerChange}
-                  placeholder={t("fullName")}
+                  placeholder="Nom complet"
                   className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
                   required
                 />
@@ -324,7 +341,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
                     value={customerInfo.email}
                     onChange={handleCustomerChange}
                     onBlur={handleEmailBlur}
-                    placeholder={t("email")}
+                    placeholder="Email"
                     className={`w-full border px-4 py-3 text-sm focus:outline-none ${
                       emailStatus === "exists" ? "border-amber-400 focus:border-amber-500" : "border-neutral-200 focus:border-[#C8A46A]"
                     }`}
@@ -348,7 +365,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
                   name="phone"
                   value={customerInfo.phone}
                   onChange={handleCustomerChange}
-                  placeholder={t("phone")}
+                  placeholder="Téléphone"
                   className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
                   required
                 />
@@ -360,21 +377,21 @@ export function CheckoutPageClient({ cart, customerSession }) {
                     onChange={handleCustomerChange}
                     className="mt-1 h-4 w-4 rounded border-gray-300 text-[#C8A46A] focus:ring-[#C8A46A]"
                   />
-                  <span className="text-sm text-gray-600">{t("newsletterSubscribe")}</span>
+                  <span className="text-sm text-gray-600">Je souhaite recevoir des offres exclusives par email</span>
                 </label>
-                <p className="text-xs text-gray-400">{t("accountCreatedNote")}</p>
+                <p className="text-xs text-gray-400">Un compte sera créé automatiquement pour suivre votre commande.</p>
               </div>
             </section>
           )}
 
           {/* Notes */}
           <section className="border border-neutral-200 p-6">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("notes")}</h2>
+            <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Notes (optionnel)</h2>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              placeholder={t("notesPlaceholder")}
+              placeholder="Une demande particulière ?"
               className="w-full resize-none border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
             />
           </section>
@@ -382,7 +399,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
 
         {/* Summary */}
         <div className="h-fit border border-neutral-200 p-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("summary")}</h2>
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Récapitulatif</h2>
           <ul className="space-y-2 text-sm text-gray-600">
             {cart.items.map((item) => (
               <li key={item.id} className="flex justify-between gap-3">
@@ -401,29 +418,29 @@ export function CheckoutPageClient({ cart, customerSession }) {
 
           <div className="mt-4 space-y-1.5 border-t border-neutral-100 pt-4 text-sm">
             <div className="flex justify-between text-gray-600">
-              <span>{t("subtotal")}</span>
+              <span>Sous-total</span>
               <span>€{cart.subtotal.toFixed(2)}</span>
             </div>
             {discountAmount > 0 && (
               <div className="flex justify-between text-emerald-600">
-                <span>{t("discount", { code: appliedPromo.code })}</span>
+                <span>Réduction ({appliedPromo.code})</span>
                 <span>-€{discountAmount.toFixed(2)}</span>
               </div>
             )}
             <div className="flex justify-between text-gray-600">
-              <span>{t("shipping")}</span>
+              <span>Livraison</span>
               <span>
                 {fulfilmentMode !== "SHIPPING_PREPAID"
                   ? "—"
                   : quoteRequired
-                    ? t("shippingQuoteRequired")
+                    ? "Devis requis"
                     : shippingCost === 0
-                      ? t("shippingFree")
+                      ? "Offerte"
                       : `€${shippingCost.toFixed(2)}`}
               </span>
             </div>
             <div className="flex justify-between border-t border-neutral-100 pt-2 text-base font-semibold text-[#2F3A2E]">
-              <span>{t("total")}</span>
+              <span>Total</span>
               <span>{quoteRequired ? "—" : `€${total.toFixed(2)}`}</span>
             </div>
           </div>
@@ -432,14 +449,15 @@ export function CheckoutPageClient({ cart, customerSession }) {
             quoteRequest.sent ? (
               <div className="mt-4 flex items-start gap-3 border border-green-200 bg-green-50 p-4 text-sm text-green-800">
                 <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-green-600" />
-                <p>{t("quoteSent")}</p>
+                <p>Votre demande de devis a été envoyée. Nous vous recontacterons sous peu par email ou téléphone.</p>
               </div>
             ) : (
               <div className="mt-4 space-y-3 border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                 <div className="flex items-start gap-3">
                   <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
                   <p>
-                    {t("quoteWarning", { weight: shippingDetails.totalWeightKg?.toFixed(1) })}
+                    Votre commande dépasse 30&nbsp;kg ({shippingDetails.totalWeightKg?.toFixed(1)}&nbsp;kg) : aucun tarif de
+                    livraison automatique ne s&apos;applique. Demandez un devis personnalisé, ou choisissez le retrait en boutique.
                   </p>
                 </div>
                 <button
@@ -449,7 +467,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
                   className="inline-flex items-center gap-2 rounded-full bg-amber-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:opacity-60"
                 >
                   {quoteRequest.submitting && <Loader2 size={14} className="animate-spin" />}
-                  {t("requestQuote")}
+                  Demander un devis
                 </button>
               </div>
             )
@@ -463,18 +481,15 @@ export function CheckoutPageClient({ cart, customerSession }) {
               className="mt-0.5"
             />
             <span>
-              {t("termsAccept", {
-                cgvLink: (
-                  <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                    {t("cgvLink")}
-                  </a>
-                ),
-                privacyLink: (
-                  <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                    {t("privacyLink")}
-                  </a>
-                ),
-              })}
+              J&apos;ai lu et j&apos;accepte les{" "}
+              <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                Conditions générales de vente
+              </a>{" "}
+              et la{" "}
+              <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
+                Politique de confidentialité
+              </a>
+              .
             </span>
           </label>
 
@@ -486,10 +501,10 @@ export function CheckoutPageClient({ cart, customerSession }) {
             {submitting ? (
               <>
                 <Loader2 size={16} className="animate-spin" />
-                {t("processing")}
+                Traitement…
               </>
             ) : (
-              t("confirmOrder")
+              "Confirmer la commande"
             )}
           </button>
         </div>

@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Image from "next/image";
-import { useTranslations } from "next-intl";
 import { StarIcon } from "./icons";
 
 /**
@@ -48,7 +46,6 @@ function QuoteIcon({ className = "w-8 h-8" }) {
 }
 
 export default function ClientReviews({ reviews = [] }) {
-  const t = useTranslations("home");
   const [headerRef, headerInView] = useInView();
   const [carouselRef, carouselInView] = useInView();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -96,15 +93,14 @@ export default function ClientReviews({ reviews = [] }) {
           <div className="mb-5 inline-flex items-center gap-3">
             <span className="h-px w-8 bg-gold" />
             <span className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-gold">
-              {t("reviewsEyebrow")}
+              Avis Clients
             </span>
             <span className="h-px w-8 bg-gold" />
           </div>
 
           <h2 className="mb-6 text-[2rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[2.4rem] lg:text-[2.6rem]">
-            {t.rich("reviewsTitle", {
-              accent: (chunks) => <em className="font-light text-gold/80 not-italic">{chunks}</em>,
-            })}
+            Elles nous font{" "}
+            <em className="font-light text-gold/80 not-italic">confiance.</em>
           </h2>
 
           {/* Art. VI.99/2 CDE requires stating how reviews are verified as
@@ -150,7 +146,7 @@ export default function ClientReviews({ reviews = [] }) {
               <button
                 key={i}
                 onClick={() => goTo(i)}
-                aria-label={`${t("reviewsSlide")} ${i + 1}`}
+                aria-label={`Aller au slide ${i + 1}`}
                 className={`h-2 rounded-full transition-all duration-300 ${
                   i === currentIndex
                     ? "w-8 bg-gold"

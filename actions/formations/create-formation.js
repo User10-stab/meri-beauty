@@ -17,16 +17,16 @@ const sessionSchema = z.object({
 });
 
 const formationSchema = z.object({
-  type: z.enum(["PRIVATE", "PUBLIC"], { required_error: "Le type de formation est obligatoire." }),
+  type: z.enum(["PRIVATE", "PUBLIC"], { error: "Le type de formation est obligatoire." }),
   title: z.string().trim().min(2, "Le titre doit contenir au moins 2 caractères.").max(100, "Le titre ne peut pas dépasser 100 caractères."),
   description: z.string().trim().max(1000, "La description ne peut pas dépasser 1000 caractères.").optional().nullable(),
   cover: z.string().optional().nullable(),
-  price: z.coerce.number({ invalid_type_error: "Le prix est invalide." }).nonnegative("Le prix ne peut pas être négatif."),
-  duration: z.coerce.number({ invalid_type_error: "La durée est invalide." }).int().positive("La durée doit être supérieure à 0 minutes."),
+  price: z.coerce.number({ error: "Le prix est invalide." }).nonnegative("Le prix ne peut pas être négatif."),
+  duration: z.coerce.number({ error: "La durée est invalide." }).int().positive("La durée doit être supérieure à 0 minutes."),
   language: z.string().trim().optional().nullable(),
   // PRIVATE is forced to 1 below regardless of what's submitted — PUBLIC has
   // no ceiling (unlike ateliers' max-8), just a positive-int floor.
-  capacity: z.coerce.number({ invalid_type_error: "La capacité est invalide." }).int().positive("La capacité doit être d'au moins 1 personne."),
+  capacity: z.coerce.number({ error: "La capacité est invalide." }).int().positive("La capacité doit être d'au moins 1 personne."),
   animatorId: z.string().optional().nullable(),
   status: z.enum(["DRAFT", "PUBLISHED", "CANCELLED", "ARCHIVED"]).optional().default("DRAFT"),
   allowMultipleSessions: z.boolean().optional().default(false),

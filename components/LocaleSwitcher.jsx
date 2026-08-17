@@ -1,7 +1,7 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 const OPTIONS = [
   { value: "fr", label: "FR" },
@@ -13,19 +13,17 @@ export default function LocaleSwitcher({ className = "" }) {
   const locale = useLocale();
   const t = useTranslations("common");
   const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   function changeLocale(event) {
     const nextLocale = event.target.value;
     if (nextLocale === locale) return;
     document.cookie = `NEXT_LOCALE=${nextLocale};path=/;max-age=31536000;samesite=lax`;
+    // refresh() alone re-fetches and re-renders Server Components (root
+    // layout included) with the new cookie value. A router.replace() fired
+    // right after used to race it — replacing to the same URL could resolve
+    // from an already-cached segment and win over the pending refresh,
+    // which is why the language only ever updated after a hard reload.
     router.refresh();
-    // Preserve the current route and let Next re-render server translations.
-    if (pathname) {
-      const query = searchParams?.toString();
-      router.replace(query ? `${pathname}?${query}` : pathname);
-    }
   }
 
   return (

@@ -71,13 +71,15 @@ async function authorizeAppointmentAction(appointmentId) {
 }
 
 /**
- * Accepts an appointment (staff action). Transitions PENDING → ACCEPTED.
+ * Accepts a manual appointment request and sends the customer to the payment
+ * choice page. Final confirmation happens only after the customer chooses an
+ * on-site payment or Stripe confirms an online payment.
  * Called by the salon owner/staff from the dashboard.
  *
  * @param {string} appointmentId
  * @returns {Promise<{ success: boolean, message?: string }>}
  */
-export async function acceptAppointment(appointmentId) {
+export async function confirmAppointment(appointmentId) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -103,18 +105,15 @@ export async function acceptAppointment(appointmentId) {
           include: {
             service: true,
             staff: {
-              select: {
-                id: true,
+              include: {
                 user: {
                   select: { fullName: true },
                 },
-                allowedPaymentMethods: true,
-                depositEnabled: true,
-                depositPercentage: true,
               },
             },
           },
         },
+        payment: { select: { id: true, status: true } },
       },
     });
 
@@ -125,47 +124,29 @@ export async function acceptAppointment(appointmentId) {
     if (appointment.status !== "PENDING") {
       return {
         success: false,
-        message: "Ce rendez-vous n'est pas en attente d'acceptation",
+        message: "Ce rendez-vous n'est pas en attente de confirmation",
       };
     }
 
-    // ── Update status + create notification atomically ──────────────────────
-    const claimed = await prisma.$transaction(async (tx) => {
-      const claim = await tx.appointment.updateMany({
-        where: { id: appointmentId, status: "PENDING" },
-        data: { status: "ACCEPTED" },
-      });
-      if (claim.count === 0) return false;
+    // A PENDING appointment with a Payment row belongs to the automatic
+    // pay-now flow. Staff acceptance must never race or bypass its webhook.
+    if (appointment.payment) {
+      return {
+        success: false,
+        message: "Ce rendez-vous attend déjà la confirmation de son paiement Stripe.",
+      };
+    }
 
-      const serviceName = appointment.staffService?.service?.name;
-      const staffName = appointment.staffService?.staff?.user?.fullName;
-      const customerName = appointment.user?.fullName;
-
-      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
-
-      if (recipientUserIds.length > 0) {
-        await createNotificationsBulk(
-          recipientUserIds.map((uid) =>
-            buildAppointmentConfirmedNotification({
-              userId: uid,
-              appointmentId: appointment.id,
-              date: appointment.date,
-              startTime: appointment.startTime,
-              serviceName,
-              staffName,
-              customerName,
-            })
-          ),
-          { tx }
-        );
-      }
-      return true;
+    const claim = await prisma.appointment.updateMany({
+      where: { id: appointmentId, status: "PENDING", payment: null },
+      data: { status: "ACCEPTED" },
     });
+    const claimed = claim.count === 1;
 
     if (!claimed) {
       return {
         success: false,
-        message: "Ce rendez-vous n'est pas en attente d'acceptation",
+        message: "Ce rendez-vous n'est pas en attente de confirmation",
       };
     }
 
@@ -180,7 +161,7 @@ export async function acceptAppointment(appointmentId) {
       ...reservationAcceptedEmail({
         customerName: appointment.user.fullName,
         serviceName: appointment.staffService.service.name,
-        staffName: staff?.user?.fullName || "Expert",
+        staffName: appointment.staffService.staff?.user?.fullName || "Expert",
         date: appointment.date,
         time: appointment.startTime.toLocaleTimeString("fr-FR", {
           hour: "2-digit",
@@ -343,7 +324,7 @@ export async function confirmAppointment(appointmentId) {
 
     return {
       success: true,
-      message: "Rendez-vous confirmé avec succès",
+      message: "Rendez-vous accepté — le client peut maintenant choisir son paiement.",
     };
   } catch (error) {
     console.error("[confirmAppointment]", error);
@@ -491,7 +472,7 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       // without this, two concurrent rejects (double-click, or staff and a
       // webhook racing) both pass a plain read-then-check and both refund.
       const claim = await tx.appointment.updateMany({
-        where: { id: appointmentId, status: { in: ["PENDING", "CONFIRMED", "COMPLETED", "NO_SHOW"] } },
+        where: { id: appointmentId, status: { in: ["PENDING", "ACCEPTED", "CONFIRMED", "COMPLETED", "NO_SHOW"] } },
         data: {
           status: "CANCELLED",
           cancelledAt: new Date(),
@@ -775,7 +756,10 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     }
 
     const payment = appointment.payment;
-    const hasBalanceDue = Boolean(payment) && payment.status === "PARTIALLY_PAID" && Number(payment.remainingAmount) > 0;
+    const hasBalanceDue = Boolean(payment) && Number(payment.remainingAmount) > 0 && (
+      payment.status === "PARTIALLY_PAID" ||
+      (payment.status === "PENDING" && payment.paymentType === "ON_SITE")
+    );
 
     if (hasBalanceDue && !["CASH", "CARD"].includes(method)) {
       return { success: false, message: "Mode de paiement requis pour encaisser le solde restant." };
@@ -784,7 +768,7 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     // terminal's "APPROUVÉ" screen — without this, staff could mark the
     // balance paid (and the system would treat it as real, invoiceable
     // revenue) before any money actually changed hands, exactly like the
-    // POS terminal-sale risk this mirrors. See PRODUCTION_ISSUES.md #2.
+    // POS terminal-sale risk this mirrors. See docs/PRODUCTION_ISSUES.md #2.
     if (hasBalanceDue && paymentConfirmed !== true) {
       return { success: false, message: "Confirmez avoir bien reçu le paiement avant de terminer le rendez-vous.", requiresPaymentConfirmation: true };
     }

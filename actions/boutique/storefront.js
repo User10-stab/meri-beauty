@@ -23,9 +23,12 @@ function serializeCard(product) {
     id: product.id,
     name: product.name,
     slug: product.slug,
-    brand: { id: product.subcategory.category.brand.id, name: product.subcategory.category.brand.name },
-    category: { id: product.subcategory.category.id, name: product.subcategory.category.name },
-    subcategory: { id: product.subcategory.id, name: product.subcategory.name },
+    // A product can be ACTIVE with no subcategory (client decision, 17 Aug
+    // 2026 — see lib/validations/boutique.js) — never assume the chain
+    // resolves.
+    brand: product.subcategory ? { id: product.subcategory.category.brand.id, name: product.subcategory.category.brand.name } : null,
+    category: product.subcategory ? { id: product.subcategory.category.id, name: product.subcategory.category.name } : null,
+    subcategory: product.subcategory ? { id: product.subcategory.id, name: product.subcategory.name } : null,
     image: product.images[0]?.path ?? null,
     priceFrom: Math.min(...prices),
     comparePriceFrom: compareValues.some((v) => v != null) ? Math.min(...compareValues.filter((v) => v != null)) : null,
@@ -234,9 +237,13 @@ export async function getStorefrontProductBySlug(slug) {
         name: product.name,
         slug: product.slug,
         description: product.description,
-        brand: product.subcategory.category.brand,
-        category: { id: product.subcategory.category.id, name: product.subcategory.category.name, slug: product.subcategory.category.slug },
-        subcategory: { id: product.subcategory.id, name: product.subcategory.name },
+        // A product can be ACTIVE with no subcategory (client decision, 17
+        // Aug 2026) — never assume the chain resolves.
+        brand: product.subcategory?.category.brand ?? null,
+        category: product.subcategory
+          ? { id: product.subcategory.category.id, name: product.subcategory.category.name, slug: product.subcategory.category.slug }
+          : null,
+        subcategory: product.subcategory ? { id: product.subcategory.id, name: product.subcategory.name } : null,
         images: product.images.map((img) => ({ path: img.path, alt: img.alt })),
         variants: product.variants.map((v) => ({
           id: v.id,

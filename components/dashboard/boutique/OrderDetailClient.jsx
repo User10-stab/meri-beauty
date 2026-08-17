@@ -10,7 +10,24 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PickupConfirmDialog } from "@/components/dashboard/boutique/PickupConfirmDialog";
 import { markOrderReadyForPickup, markOrderShipped, markOrderCompleted, cancelOrder } from "@/actions/boutique/orders";
 import { generateShippingLabel } from "@/actions/boutique/mondial-relay";
-import { useTranslations } from "next-intl";
+
+const MODE_LABEL = {
+  PICKUP_PREPAID: "Retrait en boutique (payé en ligne)",
+  PICKUP_ON_SITE: "Retrait en boutique (paiement sur place)",
+  SHIPPING_PREPAID: "Livraison Mondial Relay",
+};
+
+const STATUS_LABEL = {
+  PENDING_PAYMENT: "Paiement en attente",
+  PENDING_PICKUP: "En attente de retrait",
+  PAID: "Payée",
+  PROCESSING: "En préparation",
+  READY_FOR_PICKUP: "Prête pour retrait",
+  SHIPPED: "Expédiée",
+  COMPLETED: "Terminée",
+  CANCELLED: "Annulée",
+  EXPIRED: "Expirée",
+};
 
 const STATUS_STYLE = {
   PENDING_PAYMENT: "bg-gray-100 text-gray-600 border-gray-200",
@@ -26,6 +43,12 @@ const STATUS_STYLE = {
 
 const CANCELLABLE = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP"];
 
+const RETURN_STATUS_LABEL = {
+  REQUESTED: "Demandée",
+  APPROVED: "Approuvée",
+  REJECTED: "Refusée",
+  COMPLETED: "Terminée",
+};
 const RETURN_STATUS_STYLE = {
   REQUESTED: "bg-amber-50 text-amber-700 border-amber-100",
   APPROVED: "bg-blue-50 text-blue-700 border-blue-100",
@@ -41,7 +64,6 @@ function formatDate(d) {
 }
 
 export function OrderDetailClient({ order }) {
-  const t = useTranslations("dashboardBoutique.orderDetail");
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [pickupDialogOrder, setPickupDialogOrder] = useState(null);
@@ -68,7 +90,7 @@ export function OrderDetailClient({ order }) {
   function handleShip(e) {
     e.preventDefault();
     if (!trackingCode.trim()) {
-      toast.error(t("trackingRequired"));
+      toast.error("Le numéro de suivi est obligatoire.");
       return;
     }
     runAction(markOrderShipped, { orderId: order.id, trackingCode: trackingCode.trim() });
@@ -133,16 +155,16 @@ export function OrderDetailClient({ order }) {
         <Link href="/dashboard/boutique/orders" className="text-gray-400 hover:text-gray-600">
           <ArrowLeft size={18} />
         </Link>
-        <h1 className="text-2xl font-bold text-dark dark:text-white">{t("title", { orderNumber: order.orderNumber })}</h1>
+        <h1 className="text-2xl font-bold text-dark dark:text-white">Commande n°{order.orderNumber}</h1>
         <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[order.status]}`}>
-          {t("statusLabels." + order.status)}
+          {STATUS_LABEL[order.status]}
         </span>
       </div>
-      <p className="-mt-4 text-sm text-gray-500">{t("modeLabels." + order.fulfilmentMode)} · {formatDate(order.createdAt)}</p>
+      <p className="-mt-4 text-sm text-gray-500">{MODE_LABEL[order.fulfilmentMode]} · {formatDate(order.createdAt)}</p>
 
       {order.cancelReason && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {t("cancelReason", { reason: order.cancelReason })}
+          Raison : {order.cancelReason}
         </div>
       )}
 
@@ -151,7 +173,7 @@ export function OrderDetailClient({ order }) {
           {/* Items */}
           <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
             <div className="border-b border-stroke px-6 py-4 dark:border-dark-3">
-              <h2 className="font-semibold text-gray-800 dark:text-white">{t("items")}</h2>
+              <h2 className="font-semibold text-gray-800 dark:text-white">Articles</h2>
             </div>
             <ul className="divide-y divide-gray-100 px-6">
               {order.items.map((item) => (
@@ -159,7 +181,9 @@ export function OrderDetailClient({ order }) {
                   <div>
                     <p className="font-medium text-gray-800 dark:text-white">{item.productName}</p>
                     <p className="text-xs text-gray-400">
-                      {t("itemDetails", { variantName: item.variantName, sku: item.sku, quantity: item.quantity })}
+                      {item.variantName ? `${item.variantName} · ` : ""}
+                      {item.sku ? `${item.sku} · ` : ""}
+                      × {item.quantity}
                     </p>
                   </div>
                   <span className="font-medium text-gray-700 dark:text-dark-6">
@@ -170,15 +194,15 @@ export function OrderDetailClient({ order }) {
             </ul>
             <div className="space-y-1.5 border-t border-stroke px-6 py-4 dark:border-dark-3">
               <div className="flex justify-between text-sm text-gray-500">
-                <span>{t("subtotal")}</span>
+                <span>Sous-total</span>
                 <span>{formatPrice(order.subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm text-gray-500">
-                <span>{t("shipping")}</span>
-                <span>{order.shippingCost > 0 ? formatPrice(order.shippingCost) : t("shippingFree")}</span>
+                <span>Livraison</span>
+                <span>{order.shippingCost > 0 ? formatPrice(order.shippingCost) : "Offerte / —"}</span>
               </div>
               <div className="flex justify-between text-base font-semibold text-gray-800 dark:text-white">
-                <span>{t("total")}</span>
+                <span>Total</span>
                 <span>{formatPrice(order.totalAmount)}</span>
               </div>
             </div>
@@ -186,7 +210,7 @@ export function OrderDetailClient({ order }) {
 
           {order.notes && (
             <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-              <h2 className="mb-2 font-semibold text-gray-800 dark:text-white">{t("customerNotes")}</h2>
+              <h2 className="mb-2 font-semibold text-gray-800 dark:text-white">Notes du client</h2>
               <p className="text-sm text-gray-600 dark:text-dark-6">{order.notes}</p>
             </div>
           )}
@@ -195,7 +219,7 @@ export function OrderDetailClient({ order }) {
         <div className="space-y-6">
           {/* Customer */}
           <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-            <h2 className="mb-3 font-semibold text-gray-800 dark:text-white">{t("customer")}</h2>
+            <h2 className="mb-3 font-semibold text-gray-800 dark:text-white">Client</h2>
             <p className="font-medium text-gray-700 dark:text-dark-6">{order.user?.fullName}</p>
             <div className="mt-2 space-y-1.5 text-sm text-gray-500">
               <a href={`mailto:${order.user?.email}`} className="flex items-center gap-2 hover:text-[#2f3a2e]">
@@ -212,7 +236,7 @@ export function OrderDetailClient({ order }) {
           {/* Fulfilment info */}
           <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
             <h2 className="mb-3 font-semibold text-gray-800 dark:text-white">
-              {isPickupMode ? t("pickup") : t("delivery")}
+              {isPickupMode ? "Retrait" : "Livraison"}
             </h2>
 
             {isPickupMode ? (
@@ -224,9 +248,9 @@ export function OrderDetailClient({ order }) {
                   </div>
                 )}
                 {order.pickedUpAt ? (
-                  <p className="text-gray-500">{t("pickedUpAt", { date: formatDate(order.pickedUpAt) })}</p>
+                  <p className="text-gray-500">Retirée le {formatDate(order.pickedUpAt)}</p>
                 ) : order.expiresAt ? (
-                  <p className="text-gray-500">{t("expiresAt", { date: formatDate(order.expiresAt) })}</p>
+                  <p className="text-gray-500">À retirer avant le {formatDate(order.expiresAt)}</p>
                 ) : null}
               </div>
             ) : (
@@ -242,11 +266,11 @@ export function OrderDetailClient({ order }) {
                 </p>
                 {order.trackingCode && (
                   <p className="flex items-center gap-2 text-gray-500">
-                    <Truck size={14} /> {t("trackingMondialRelay", { code: order.trackingCode })}
+                    <Truck size={14} /> Suivi Mondial Relay : {order.trackingCode}
                   </p>
                 )}
-                {order.shippedAt && <p className="text-gray-400">{t("shippedAt", { date: formatDate(order.shippedAt) })}</p>}
-                {order.collectedAt && <p className="text-gray-400">{t("collectedAt", { date: formatDate(order.collectedAt) })}</p>}
+                {order.shippedAt && <p className="text-gray-400">Expédiée le {formatDate(order.shippedAt)}</p>}
+                {order.collectedAt && <p className="text-gray-400">Récupérée le {formatDate(order.collectedAt)}</p>}
               </div>
             )}
           </div>
@@ -254,14 +278,14 @@ export function OrderDetailClient({ order }) {
           {/* Documents */}
           {order.invoice && (
             <div className="space-y-2 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-              <h2 className="mb-1 font-semibold text-gray-800 dark:text-white">{t("documents")}</h2>
+              <h2 className="mb-1 font-semibold text-gray-800 dark:text-white">Documents</h2>
               <a
                 href={`/api/invoices/${order.invoice.id}/pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] dark:border-dark-3 dark:text-dark-6"
               >
-                <span>{t("invoice", { number: order.invoice.number })}</span>
+                <span>Facture {order.invoice.number}</span>
                 <Download size={14} />
               </a>
               {order.creditNotes.map((cn) => (
@@ -272,7 +296,7 @@ export function OrderDetailClient({ order }) {
                   rel="noopener noreferrer"
                   className="flex items-center justify-between rounded-lg border border-red-100 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50"
                 >
-                  <span>{t("creditNote", { number: cn.number })}</span>
+                  <span>Note de crédit {cn.number}</span>
                   <FileMinus size={14} />
                 </a>
               ))}
@@ -282,17 +306,17 @@ export function OrderDetailClient({ order }) {
           {/* Returns */}
           {order.returnRequests?.length > 0 && (
             <div className="space-y-2 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-              <h2 className="mb-1 font-semibold text-gray-800 dark:text-white">{t("returns")}</h2>
+              <h2 className="mb-1 font-semibold text-gray-800 dark:text-white">Retours</h2>
               {order.returnRequests.map((rr) => (
                 <div key={rr.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-dark-3">
-                  <span className="text-gray-700 dark:text-dark-6">{t("itemCount", { count: rr.itemCount })}</span>
+                  <span className="text-gray-700 dark:text-dark-6">{rr.itemCount} article(s)</span>
                   <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${RETURN_STATUS_STYLE[rr.status]}`}>
-                    {t("returnStatusLabels." + rr.status)}
+                    {RETURN_STATUS_LABEL[rr.status]}
                   </span>
                 </div>
               ))}
               <Link href="/dashboard/boutique/returns" className="mt-1 inline-block text-xs font-medium text-[#2f3a2e] hover:underline">
-                {t("manageReturns")}
+                Gérer les retours →
               </Link>
             </div>
           )}
@@ -300,18 +324,18 @@ export function OrderDetailClient({ order }) {
           {/* Actions */}
           {(canMarkReady || canCompletePickup || canShip || canCloseShipped || canCancel) && (
             <div className="space-y-3 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-              <h2 className="font-semibold text-gray-800 dark:text-white">{t("actions")}</h2>
+              <h2 className="font-semibold text-gray-800 dark:text-white">Actions</h2>
 
               {canMarkReady && (
                 <Button className="w-full" onClick={() => runAction(markOrderReadyForPickup, order.id)} disabled={isPending}>
                   {isPending && <Loader2 size={14} className="animate-spin" />}
-                  {t("markReady")}
+                  Marquer prête pour retrait
                 </Button>
               )}
 
               {canCompletePickup && (
                 <Button className="w-full" onClick={() => setPickupDialogOrder(order)} disabled={isPending}>
-                  {t("confirmPickup")}
+                  Confirmer le retrait
                 </Button>
               )}
 
@@ -324,22 +348,22 @@ export function OrderDetailClient({ order }) {
                     className="flex w-full items-center justify-center gap-2 rounded-lg border border-[#2f3a2e] px-4 py-2 text-sm font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/5 disabled:opacity-50 dark:border-dark-3 dark:text-dark-6"
                   >
                     {generatingLabel && <Loader2 size={14} className="animate-spin" />}
-                    {t("generateLabel")}
+                    Générer l&apos;étiquette Mondial Relay
                   </button>
                   <form onSubmit={handleShip} className="space-y-2">
                     <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">
-                      {t("trackingNumber")}
+                      Numéro de suivi (manuel si pas d&apos;étiquette générée)
                     </label>
                     <input
                       type="text"
                       value={trackingCode}
                       onChange={(e) => setTrackingCode(e.target.value)}
-                      placeholder={t("trackingPlaceholder")}
+                      placeholder="ex : 1234567890123"
                       className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
                     />
                     <Button type="submit" className="w-full" disabled={isPending}>
                       {isPending && <Loader2 size={14} className="animate-spin" />}
-                      {t("markShipped")}
+                      Marquer expédiée
                     </Button>
                   </form>
                 </div>
@@ -354,8 +378,7 @@ export function OrderDetailClient({ order }) {
                   }}
                   disabled={isPending}
                 >
-                  {isPending && <Loader2 size={14} className="animate-spin" />}
-                  {t("closeOrder")}
+                  Clôturer la commande
                 </Button>
               )}
 
@@ -370,7 +393,7 @@ export function OrderDetailClient({ order }) {
                   disabled={isPending}
                   className="w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
                 >
-                  {t("cancelOrder")}
+                  Annuler la commande
                 </button>
               )}
             </div>
@@ -411,15 +434,15 @@ export function OrderDetailClient({ order }) {
 
       <ConfirmDialog
         open={cancelling}
-        title={t("cancelConfirm")}
+        title="Annuler cette commande ?"
         message={
           order.payment?.requiresManualRefund
             ? order.payment.refundInstruction
             : order.hasPayment
-              ? t("cancelMessagePaid")
-              : t("cancelMessageUnpaid")
+              ? "Le client a déjà payé en ligne — un remboursement Stripe sera automatiquement déclenché et le stock sera remis en vente."
+            : "Le stock réservé sera libéré."
         }
-        confirmLabel={t("cancelOrder")}
+        confirmLabel="Annuler la commande"
         danger
         loading={isPending}
         confirmDisabled={Boolean(

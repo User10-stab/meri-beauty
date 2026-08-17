@@ -2,6 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getLowStockVariants } from "@/actions/boutique/stock";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
@@ -62,7 +63,7 @@ export async function getDashboardStats() {
         where: {
           isDeleted: false,
           date: { gte: today, lt: tomorrow },
-          status: { in: ["PENDING", "CONFIRMED", "COMPLETED"] },
+          status: { in: [...ACTIVE_APPOINTMENT_STATUSES, "COMPLETED"] },
         },
       }),
       prisma.user.count({
@@ -72,7 +73,7 @@ export async function getDashboardStats() {
       prisma.appointment.findMany({
         where: {
           isDeleted: false,
-          status: { in: ["PENDING", "CONFIRMED"] },
+          status: { in: ACTIVE_APPOINTMENT_STATUSES },
           startTime: { gte: now },
         },
         orderBy: { startTime: "asc" },

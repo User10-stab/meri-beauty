@@ -11,6 +11,14 @@ import { CreateStaffModal } from "@/components/dashboard/staff/CreateStaffModal"
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { createStaffFromRental } from "@/actions/staff/create-staff-from-rental";
 
+/** `<input type="date">` needs a plain YYYY-MM-DD value — the request's
+ * dates come back from the server as ISO datetime strings. */
+function toDateInputValue(value) {
+  if (!value) return "";
+  const iso = value instanceof Date ? value.toISOString() : String(value);
+  return iso.slice(0, 10);
+}
+
 const COLUMNS = [
   { key: "rentalType", label: "Type" },
   { key: "user", label: "Utilisateur" },
@@ -201,6 +209,13 @@ export function RentalRequestsPageClient({ initialData, services = [] }) {
             fullName: approvingRef.current.user?.fullName ?? "",
             email: approvingRef.current.user?.email ?? "",
             phone: approvingRef.current.user?.phone ?? "",
+            // The applicant already chose these on their rental request —
+            // re-asking the admin to retype them from scratch is how a
+            // start date silently drifts from what was actually agreed.
+            contract: {
+              startDate: toDateInputValue(approvingRef.current.startDate),
+              endDate: toDateInputValue(approvingRef.current.endDate),
+            },
           }}
         />
       )}

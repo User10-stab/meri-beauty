@@ -8,7 +8,6 @@ import { CameraOff, ShoppingBag, ScanLine, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { getStorefrontProductByBarcode } from "@/actions/boutique/storefront";
 import { addToCart } from "@/actions/boutique/cart";
-import { useTranslations } from "next-intl";
 
 /**
  * In-store self-scan: point the camera at a product's barcode (EAN/UPC on
@@ -20,7 +19,6 @@ import { useTranslations } from "next-intl";
  * card is showing (foundRef), so resuming is instant.
  */
 export function ProductScanClient() {
-  const t = useTranslations("boutique");
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
   const busyRef = useRef(false);
@@ -69,7 +67,7 @@ export function ProductScanClient() {
       .catch((err) => {
         if (cancelled) return;
         console.error("[ProductScanClient] camera init failed:", err);
-        setError(t("cameraError"));
+        setError("Impossible d'accéder à la caméra — vérifiez les autorisations de votre navigateur.");
       });
 
     return () => {
@@ -77,7 +75,7 @@ export function ProductScanClient() {
       controlsRef.current?.stop();
       controlsRef.current = null;
     };
-  }, [t]);
+  }, []);
 
   function resumeScanning() {
     foundRef.current = false;
@@ -114,17 +112,17 @@ export function ProductScanClient() {
       toast.error(result.message);
       return;
     }
-    toast.success(t("addedToCart"));
+    toast.success("Ajouté au panier.");
     window.dispatchEvent(new Event("boutique:cart-updated")); // updates the header badge (client-fetched)
     resumeScanning();
   }
 
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col items-center justify-center px-6 py-16 text-center">
-      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-[#C8A46A]">{t("title")}</p>
-      <h1 className="mb-3 text-2xl text-[#2F3A2E]">{t("scanProduct")}</h1>
+      <p className="mb-1 text-xs font-semibold uppercase tracking-[0.2em] text-[#C8A46A]">Boutique</p>
+      <h1 className="mb-3 text-2xl text-[#2F3A2E]">Scanner un produit</h1>
       <p className="mb-8 text-sm text-gray-500">
-        {t("scanSubtitle")}
+        Visez le QR ou code-barres avec la caméra, ou utilisez un lecteur USB.
       </p>
 
       <form onSubmit={handleUsbScan} className="mb-4 flex w-full gap-2">
@@ -176,7 +174,7 @@ export function ProductScanClient() {
                       )}
                     </div>
                     {found.availableQuantity === 0 && (
-                      <p className="mt-0.5 text-xs text-red-500">{t("outOfStock")}</p>
+                      <p className="mt-0.5 text-xs text-red-500">Rupture de stock</p>
                     )}
                   </div>
                 </div>
@@ -188,7 +186,7 @@ export function ProductScanClient() {
                     className="flex flex-1 items-center justify-center gap-1.5 border border-neutral-200 px-4 py-2.5 text-sm font-medium text-[#2F3A2E] transition-colors hover:bg-neutral-50"
                   >
                     <X size={14} />
-                    {t("cancel")}
+                    Annuler
                   </button>
                   <button
                     type="button"
@@ -197,7 +195,7 @@ export function ProductScanClient() {
                     className="flex flex-1 items-center justify-center gap-1.5 bg-[#C8A46A] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#B8945A] disabled:cursor-not-allowed disabled:bg-gray-300"
                   >
                     <ShoppingBag size={14} />
-                    {adding ? t("adding") : t("addToCart")}
+                    {adding ? "Ajout…" : "Ajouter au panier"}
                   </button>
                 </div>
               </div>
@@ -207,7 +205,7 @@ export function ProductScanClient() {
       )}
 
       <Link href="/boutique" className="mt-8 text-sm font-medium text-[#2F3A2E] underline underline-offset-4">
-        {t("backToBoutique")}
+        Retour à la boutique
       </Link>
     </div>
   );

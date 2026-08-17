@@ -1,20 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getTranslations, getLocale } from "next-intl/server";
 import { getPublicActivityById } from "@/actions/workshops/get-public-activities";
 import { getAppBaseUrl } from "@/lib/site-url";
-import { toIntlLocale } from "@/lib/intl-locale";
 
 const SITE_URL = getAppBaseUrl();
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
-  const t = await getTranslations("evenementDetail");
   const result = await getPublicActivityById(id);
   const activity = result.data;
 
   if (!activity) {
-    return { title: t("metadataNotFound") };
+    return { title: "Activité introuvable — Meri Beauty" };
   }
 
   return {
@@ -71,55 +68,23 @@ function buildEventSchema(activity) {
   return events;
 }
 
-export default async function EvenementDetailPage({ params }) {
-  const { id } = await params;
-  const [t, locale] = await Promise.all([getTranslations("evenementDetail"), getLocale()]);
-  const result = await getPublicActivityById(id);
-  const activity = result.data;
+function formatDate(dateStr) {
+  return new Date(dateStr).toLocaleDateString("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "Europe/Brussels",
+  });
+}
 
-  if (!activity) {
-    notFound();
-  }
-
-  const intlLocale = toIntlLocale(locale);
-  const depositPct = activity.depositPercentage ?? 50;
-  const depositAmount = (activity.price * depositPct) / 100;
-  const balanceAmount = activity.price - depositAmount;
-
-  const priceFormatted = new Intl.NumberFormat(intlLocale, {
-    style: "currency",
-    currency: "EUR",
-  }).format(activity.price);
-
-  const depositFormatted = new Intl.NumberFormat(intlLocale, {
-    style: "currency",
-    currency: "EUR",
-  }).format(depositAmount);
-
-  const balanceFormatted = new Intl.NumberFormat(intlLocale, {
-    style: "currency",
-    currency: "EUR",
-  }).format(balanceAmount);
-
-  const isWorkshop = activity.type === "WORKSHOP";
-
-  const eventSchemas = buildEventSchema(activity);
-
-  const formatDate = (dateStr) =>
-    new Date(dateStr).toLocaleDateString(intlLocale, {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-      timeZone: "Europe/Brussels",
-    });
-
-  const formatTime = (dateStr) =>
-    new Date(dateStr).toLocaleTimeString(intlLocale, {
-      hour: "2-digit",
-      minute: "2-digit",
-      timeZone: "Europe/Brussels",
-    });
+function formatTime(dateStr) {
+  return new Date(dateStr).toLocaleTimeString("fr-FR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Brussels",
+  });
+}
 
 function CalendarIcon() {
   return (
@@ -167,6 +132,38 @@ function GlobeIcon() {
   );
 }
 
+export default async function EvenementDetailPage({ params }) {
+  const { id } = await params;
+  const result = await getPublicActivityById(id);
+  const activity = result.data;
+
+  if (!activity) {
+    notFound();
+  }
+
+  const depositPct = activity.depositPercentage ?? 50;
+  const depositAmount = (activity.price * depositPct) / 100;
+  const balanceAmount = activity.price - depositAmount;
+
+  const priceFormatted = new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+  }).format(activity.price);
+
+  const depositFormatted = new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+  }).format(depositAmount);
+
+  const balanceFormatted = new Intl.NumberFormat("fr-FR", {
+    style: "currency",
+    currency: "EUR",
+  }).format(balanceAmount);
+
+  const isWorkshop = activity.type === "WORKSHOP";
+
+  const eventSchemas = buildEventSchema(activity);
+
   return (
     <>
       {eventSchemas?.map((schema, i) => (
@@ -213,7 +210,7 @@ function GlobeIcon() {
                 : "bg-sky-100 text-sky-900"
                 }`}
             >
-              {isWorkshop ? t("typeWorkshop") : t("typeEvent")}
+              {isWorkshop ? "Atelier" : "Événement"}
             </span>
             <span className="h-px w-8 bg-gold" />
           </div>
@@ -242,7 +239,7 @@ function GlobeIcon() {
                   <div className="mb-5 flex items-center gap-3">
                     <span className="h-px w-6 bg-gold" />
                     <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
-                      {t("about")}
+                      À propos
                     </h2>
                   </div>
                   <div className="space-y-4 text-[15.5px] leading-[1.9] text-ink/70">
@@ -262,8 +259,8 @@ function GlobeIcon() {
                 <div>
                   <h2 className="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-gold">
                     {activity.sessions.length > 1
-                      ? t("sessionsAvailable", { count: activity.sessions.length })
-                      : t("dateAndTime")}
+                      ? `Sessions disponibles (${activity.sessions.length})`
+                      : "Date et horaire"}
                   </h2>
                   <div className="space-y-4">
                     {activity.sessions.map((session, index) => (
@@ -275,7 +272,7 @@ function GlobeIcon() {
                           <div className="space-y-2">
                             {activity.sessions.length > 1 && (
                               <span className="text-xs font-semibold uppercase tracking-wide text-gold">
-                                {t("sessionNumber", { index: index + 1 })}
+                                Session #{index + 1}
                               </span>
                             )}
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink/65">
@@ -298,20 +295,20 @@ function GlobeIcon() {
                                   <span className="flex items-center gap-1.5 text-sm text-ink/55">
                                     <UsersIcon className="h-4 w-4" />
                                     <span>
-                                      {t("placesOccupied", { taken, capacity: cap })}
+                                      {taken} / {cap} place{cap > 1 ? "s" : ""} occupée{taken > 1 ? "s" : ""}
                                     </span>
                                   </span>
                                   {avail === 0 ? (
                                     <span className="inline-flex rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-800">
-                                      {t("full")}
+                                      Complet
                                     </span>
                                   ) : avail <= 3 ? (
                                     <span className="inline-flex rounded bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
-                                      {t("onlyLeft", { count: avail })}
+                                      Plus que {avail} place{avail > 1 ? "s" : ""} !
                                     </span>
                                   ) : (
                                     <span className="inline-flex rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
-                                      {t("available", { count: avail })}
+                                      {avail} disponible{avail > 1 ? "s" : ""}
                                     </span>
                                   )}
                                 </div>
@@ -322,7 +319,12 @@ function GlobeIcon() {
                           <div className="flex flex-col items-end gap-2">
                             {depositPct > 0 && activity.price > 0 && (
                               <p className="text-right text-xs leading-snug text-ink/50">
-                                {t("payTodayDeposit", { deposit: depositFormatted, balance: balanceFormatted })}
+                                Vous ne réglez aujourd&apos;hui que{" "}
+                                <strong className="text-gold">{depositFormatted}</strong>.
+                                <br />
+                                Le solde de{" "}
+                                <strong className="text-ink/70">{balanceFormatted}</strong>{" "}
+                                sera à payer sur place.
                               </p>
                             )}
                             {(() => {
@@ -336,7 +338,7 @@ function GlobeIcon() {
                                     href={`/reservation-atelier?activity=${activity.id}&session=${session.id}&waitingList=true`}
                                     className="inline-flex shrink-0 items-center gap-2 rounded-full bg-amber-600 px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-amber-700 hover:shadow-md"
                                   >
-                                    {t("joinWaitingList")}
+                                    Rejoindre la liste d&apos;attente
                                   </Link>
                                 );
                               }
@@ -346,7 +348,7 @@ function GlobeIcon() {
                                   href={`/reservation-atelier?activity=${activity.id}&session=${session.id}`}
                                   className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gold px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gold/90 hover:shadow-md"
                                 >
-                                  {t("book")}
+                                  Réserver
                                 </Link>
                               );
                             })()}
@@ -355,7 +357,7 @@ function GlobeIcon() {
 
                         {session.registrationDeadline && (
                           <p className="mt-3 text-xs text-ink/40">
-                            {t("registerBefore", { date: formatDate(session.registrationDeadline) })}
+                            Inscription avant le {formatDate(session.registrationDeadline)}
                           </p>
                         )}
                       </div>
@@ -366,7 +368,7 @@ function GlobeIcon() {
 
               {(!activity.sessions || activity.sessions.length === 0) && (
                 <div className="rounded-xl border border-ink/8 bg-white p-6 text-center">
-                  <p className="text-ink/50">{t("noSessions")}</p>
+                  <p className="text-ink/50">Aucune session programmée pour le moment.</p>
                 </div>
               )}
             </div>
@@ -375,7 +377,7 @@ function GlobeIcon() {
             <div className="space-y-6">
               <div className="rounded-xl border border-ink/8 bg-white p-6 shadow-sm">
                 <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">
-                  {t("information")}
+                  Informations
                 </h3>
                 <ul className="space-y-4">
                   <li className="flex items-start gap-3">
@@ -383,24 +385,22 @@ function GlobeIcon() {
                     <div>
                       <p className="text-sm font-semibold text-ink">{priceFormatted}</p>
                       <p className="text-xs text-ink/45">
-                        {depositPct > 0
-                          ? t("priceWithDeposit", { pct: depositPct })
-                          : ""}
+                        Tarif {depositPct > 0 && `(dont ${depositPct}% d'acompte à la réservation)`}
                       </p>
                     </div>
                   </li>
                   <li className="flex items-center gap-3">
                     <ClockIcon />
                     <div>
-                      <p className="text-sm font-semibold text-ink">{t("durationValue", { count: activity.duration })}</p>
-                      <p className="text-xs text-ink/45">{t("durationLabel")}</p>
+                      <p className="text-sm font-semibold text-ink">{activity.duration} min</p>
+                      <p className="text-xs text-ink/45">Durée</p>
                     </div>
                   </li>
                   <li className="flex items-center gap-3">
                     <UsersIcon />
                     <div>
-                      <p className="text-sm font-semibold text-ink">{t("capacityValue", { count: activity.capacity })}</p>
-                      <p className="text-xs text-ink/45">{t("capacityLabel")}</p>
+                      <p className="text-sm font-semibold text-ink">{activity.capacity} personnes</p>
+                      <p className="text-xs text-ink/45">Capacité</p>
                     </div>
                   </li>
                   {activity.language && (
@@ -408,7 +408,7 @@ function GlobeIcon() {
                       <GlobeIcon />
                       <div>
                         <p className="text-sm font-semibold text-ink">{activity.language}</p>
-                        <p className="text-xs text-ink/45">{t("languageLabel")}</p>
+                        <p className="text-xs text-ink/45">Langue</p>
                       </div>
                     </li>
                   )}
@@ -419,7 +419,7 @@ function GlobeIcon() {
               {activity.animator && (
                 <div className="rounded-xl border border-ink/8 bg-white p-6 shadow-sm">
                   <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">
-                    {t("hostedBy")}
+                    Animé par
                   </h3>
                   <Link
                     href={`/animateurs/${activity.animator.id}`}
@@ -460,7 +460,7 @@ function GlobeIcon() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
                   <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                {t("backToActivities")}
+                Retour aux activités
               </Link>
             </div>
           </div>

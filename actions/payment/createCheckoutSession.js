@@ -7,6 +7,7 @@ import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 import { generateAutologinToken } from "@/lib/autologin";
 import { parseLocalDateString } from "@/lib/slot-availability";
 import {
@@ -242,7 +243,7 @@ export async function createCheckoutSession(reservationData) {
           staffId: staffService.staffId,
         },
         date: appointmentDate,
-        status: { in: ["PENDING", "CONFIRMED"] },
+        status: { in: ACTIVE_APPOINTMENT_STATUSES },
         isDeleted: false,
       },
       include: {

@@ -48,7 +48,7 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
             staff: { select: { id: true, user: { select: { fullName: true } } } },
           },
         },
-        payment: { select: { status: true, totalAmount: true, paidAmount: true } },
+        payment: { select: { status: true, paymentType: true, totalAmount: true, paidAmount: true, remainingAmount: true } },
         review: { select: { id: true, rating: true, comment: true, createdAt: true } },
       },
     });
@@ -71,7 +71,13 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
         staffId: a.staffService.staff?.id ?? null,
         staffName: a.staffService.staff?.user?.fullName ?? "—",
         payment: a.payment
-          ? { status: a.payment.status, totalAmount: Number(a.payment.totalAmount), paidAmount: Number(a.payment.paidAmount) }
+          ? {
+              status: a.payment.status,
+              paymentType: a.payment.paymentType,
+              totalAmount: Number(a.payment.totalAmount),
+              paidAmount: Number(a.payment.paidAmount),
+              remainingAmount: Number(a.payment.remainingAmount),
+            }
           : null,
         review: a.review
           ? {

@@ -205,7 +205,7 @@ export function CartPageClient({ initialCart }) {
             href="/boutique/checkout"
             className="mt-6 flex w-full items-center justify-center bg-[#C8A46A] px-6 py-3.5 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-[#B8945A]"
           >
-            {t("checkout")}
+            {t("checkoutAction")}
           </Link>
           <Link
             href="/boutique"

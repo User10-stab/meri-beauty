@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 
 // react-pdf isn't involved here, but Prisma + Buffer-free string building is
 // still Node-only in practice for this project's setup.
@@ -88,7 +89,7 @@ export async function GET(req, { params }) {
     const appointments = await prisma.appointment.findMany({
       where: {
         isDeleted: false,
-        status: { in: ["PENDING", "CONFIRMED", "COMPLETED"] },
+        status: { in: [...ACTIVE_APPOINTMENT_STATUSES, "COMPLETED"] },
         startTime: { gte: rangeStart, lte: rangeEnd },
         staffService: { staff: { calendarToken: token } },
       },

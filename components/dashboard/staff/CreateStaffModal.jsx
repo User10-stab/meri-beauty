@@ -229,10 +229,10 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       vatNumber:         "",
       serviceIds:        [],
       contract: {
-        fixedRent: "",
-        startDate: "",
-        endDate:   "",
-        notes:     "",
+        fixedRent: initialValues.contract?.fixedRent ?? "",
+        startDate: initialValues.contract?.startDate ?? "",
+        endDate:   initialValues.contract?.endDate ?? "",
+        notes:     initialValues.contract?.notes ?? "",
       },
     },
   });

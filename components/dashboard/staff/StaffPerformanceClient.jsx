@@ -53,7 +53,7 @@ function computeMetrics(appointments, range) {
   const completed = inRange.filter((a) => a.status === "COMPLETED");
   const cancelled = inRange.filter((a) => a.status === "CANCELLED");
   const noShow = inRange.filter((a) => a.status === "NO_SHOW");
-  const upcoming = inRange.filter((a) => ["PENDING", "CONFIRMED"].includes(a.status));
+  const upcoming = inRange.filter((a) => ["PENDING", "ACCEPTED", "CONFIRMED"].includes(a.status));
 
   const revenue = completed.reduce((sum, a) => sum + a.amountTotal, 0);
   const collected = completed.reduce((sum, a) => sum + a.amountPaid, 0);

@@ -21,8 +21,15 @@ export default async function ProductsPage() {
   const isAdmin = isAdminRole(user.role);
   const t = await getTranslations("dashboardBoutique.products");
 
+  // ProductsPageClient has no pagination UI — it filters (search/brand/
+  // status) entirely client-side over whatever this fetch returns. A small
+  // pageSize here silently hides every product past the cut, with nothing
+  // in the UI to suggest more exist (confirmed: a 175-product Wix import
+  // only ever showed the first 50). High enough to comfortably cover a
+  // single salon's full catalogue; revisit with real server-side pagination
+  // if the catalogue ever grows past this.
   const [productsResult, brandsResult] = await Promise.all([
-    getProducts({ pageSize: 50 }),
+    getProducts({ pageSize: 2000 }),
     getBrands({ includeInactive: true }),
   ]);
 

@@ -15,7 +15,7 @@ import {
   getAppointmentEmailRecipients,
 } from "@/lib/notifications";
 
-const CANCELLABLE_STATUSES = ["PENDING", "CONFIRMED"];
+const CANCELLABLE_STATUSES = ["PENDING", "ACCEPTED", "CONFIRMED"];
 
 /**
  * Allows an authenticated CUSTOMER to cancel one of their own reservations.

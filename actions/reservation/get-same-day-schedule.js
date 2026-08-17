@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 import {
   startOfDay,
   buildPerDraftSlotsForDate,
@@ -45,7 +46,7 @@ export async function getSameDaySchedule({ drafts, date, maxProposals = DEFAULT_
             staffId: { in: staffServices.map(ss => ss.staffId) },
           },
           date: { gte: selectedDate, lte: endOfDay },
-          status: { in: ["PENDING", "CONFIRMED"] },
+          status: { in: ACTIVE_APPOINTMENT_STATUSES },
           isDeleted: false,
         },
         include: {

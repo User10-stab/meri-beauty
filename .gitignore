@@ -43,7 +43,9 @@ next-env.d.ts
 
 /app/generated/prisma
 
-# local-only notes, not for the shared repo
+# local-only notes, not for the shared repo. Point-in-time audits and specs
+# live in /docs so the repo root stays down to the docs you actually read
+# while working: setup, testing, and the prod runbooks.
 /docs
 CLIENT_DECISION_FORM.md
 MERGE_NOTES_*.md
@@ -54,9 +56,14 @@ google-form-generator.gs
 google-form-generator-round2.gs
 google-form-generator-round3.gs
 
-# one-off Wix data exports, not app code
-catalog_products_from_wix.csv
-inventory_from_wix.csv
+# one-off Wix data exports and client briefs — real business data, not app
+# code, and nothing in the codebase reads them.
+catalog_products*.csv
+inventory*.csv
+*.docx
+
+# other AI/dev assistant state
+.zcode/
 
 # Google Forms response exports (client survey answers, not app code)
 Merri Beauty — Points de suivi*.csv

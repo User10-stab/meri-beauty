@@ -3,13 +3,16 @@ import { requireAdmin } from "@/lib/route-protection";
 import { getSalon } from "@/actions/salon/get-salon";
 import { listAdminAccounts } from "@/actions/dashboard/admin-accounts";
 import { SalonSettingsClient } from "@/components/dashboard/settings/SalonSettingsClient";
-import { getTranslations } from "next-intl/server";
+
+export const metadata = {
+  title: "Paramètres du salon — Dashboard",
+  description: "Gérez les informations publiques de votre salon.",
+};
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const { user } = await requireAdmin();
-  const t = await getTranslations("dashboard.settings");
 
   const [result, adminsResult] = await Promise.all([getSalon(), listAdminAccounts()]);
   const salon = result.data ?? null;
@@ -20,10 +23,10 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-dark dark:text-white">
-            {t("title")}
+            Paramètres du salon
           </h1>
           <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            {t("subtitle")}
+            Gérez les informations publiques, horaires et fermetures de votre salon.
           </p>
         </div>
       </div>

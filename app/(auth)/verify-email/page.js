@@ -1,6 +1,5 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { verifyEmail } from "@/actions/auth/verify-email";
 import VerifyEmailForm from "./verify-email-form";
 
 export const metadata = {
@@ -20,14 +19,20 @@ export default async function VerifyEmailPage({ searchParams }) {
   const deliveryFailed = params?.deliveryFailed === "1";
   const defaultEmail = typeof params?.email === "string" ? params.email : "";
 
-  const result = token
-    ? await verifyEmail(token)
-    : deliveryFailed
-      ? {
-          success: false,
-          message: "Votre compte a bien été créé, mais l’e-mail de vérification n’a pas pu être envoyé. Vérifiez le service d’e-mail puis demandez un nouveau lien ci-dessous.",
-        }
-      : { success: false, message: "Aucun lien de vérification fourni." };
+  if (token) {
+    // Do not consume verification tokens during the GET render: mailbox link
+    // scanners and security previews can fetch this page before the customer
+    // ever sees it. The client form asks for an explicit click, then invokes
+    // verifyEmail() as a POST-backed Server Action.
+    return <VerifyEmailForm verificationToken={token} defaultEmail={defaultEmail} />;
+  }
+
+  const result = deliveryFailed
+    ? {
+        success: false,
+        message: "Votre compte a bien été créé, mais l’e-mail de vérification n’a pas pu être envoyé. Vérifiez le service d’e-mail puis demandez un nouveau lien ci-dessous.",
+      }
+    : { success: false, message: "Aucun lien de vérification fourni." };
 
   // Plain registration tokens have no resumeType — nothing further to do,
   // the form below shows its usual "verified, go sign in" card.

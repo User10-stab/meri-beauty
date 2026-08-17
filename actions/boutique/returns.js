@@ -720,6 +720,13 @@ export async function completeReturnRequest(input) {
       if (manualRefund) {
         const newTotalRefunded = alreadyRefunded + totalRefund;
         const fullyRefunded = newTotalRefunded + REFUND_EPSILON >= paidAmount;
+        // Attach to whichever till session is open so the counter cash is
+        // reconcilable at close (see lib/cash-sessions.js). Never blocks the
+        // refund if none is open — the row is simply left unassigned.
+        const openCashSession =
+          originalMethod === "CASH"
+            ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
+            : null;
         await tx.transaction.create({
           data: {
             paymentId: rr.order.payment.id,
@@ -728,6 +735,7 @@ export async function completeReturnRequest(input) {
             transactionType: "REFUND",
             paidAt: new Date(),
             manualReference: originalMethod === "CARD" ? manualRefundReference.trim() : null,
+            cashSessionId: openCashSession?.id ?? null,
           },
         });
         await tx.payment.update({
@@ -826,22 +834,6 @@ export async function completeReturnRequest(input) {
             status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
             pendingRefundAmount: null,
             pendingRefundIdempotencyKey: null,
-          },
-        }),
-        prisma.auditLog.create({
-          data: {
-            actorId: guard.session.user.id,
-            actorRole: guard.session.user.role,
-            action: "order.return_refund_completed",
-            entityType: "ReturnRequest",
-            entityId: rr.id,
-            metadata: {
-              orderId: rr.order.id,
-              orderNumber: rr.order.orderNumber,
-              amount: totalRefund,
-              method: "ONLINE",
-              automatedByStripe: true,
-            },
           },
         }),
         prisma.auditLog.create({

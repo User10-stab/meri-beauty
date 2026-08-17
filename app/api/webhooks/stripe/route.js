@@ -42,6 +42,7 @@ import {
   getDeploymentId,
   DEPLOYMENT_METADATA_KEY,
 } from "@/lib/stripe-deployment";
+import { roundMoney } from "@/lib/tax-policy";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -307,7 +308,7 @@ async function handleAccountUpdated(account) {
 // ─── charge.refunded / charge.dispute.created ────────────────────────────────
 
 function round2(n) {
-  return Math.round(n * 100) / 100;
+  return roundMoney(n);
 }
 
 /**
@@ -767,10 +768,14 @@ async function processAppointmentCheckoutSession(session) {
     // An ACCEPTED appointment reached this webhook through the staff-review
     // confirmation page, so successful payment completes that acceptance even
     // when the staff default is MANUAL. New bookings still follow the normal
-    // confirmation-mode rule.
-    const nextAppointmentStatus = confirmationMode === "AUTOMATIC" || appointment.status === "ACCEPTED"
-      ? "CONFIRMED"
-      : "PENDING";
+    // confirmation-mode rule. Delegated to resolveAppointmentStatusAfterPayment
+    // rather than inlined, so a delayed/duplicate webhook delivery for an
+    // appointment that's already CONFIRMED (or further along) preserves its
+    // current status instead of forcing it back to PENDING.
+    const nextAppointmentStatus = resolveAppointmentStatusAfterPayment({
+      currentStatus: appointment.status,
+      confirmationMode,
+    });
 
     await tx.payment.update({
       where: { id: paymentId },

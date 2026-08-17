@@ -351,7 +351,8 @@ export async function createFormationReservation(data) {
     await recordTermsAcceptance(prisma, user.id);
 
     // Calculate pricing
-    const depositPct = formation.depositPercentage ?? 50;
+    const rawDepositPct = Number(formation.depositPercentage ?? 50);
+    const depositPct = Number.isFinite(rawDepositPct) ? Math.min(100, Math.max(0, rawDepositPct)) : 0;
     const unitPrice = Number(formation.price);
     const totalPrice = unitPrice * seatsCount;
 

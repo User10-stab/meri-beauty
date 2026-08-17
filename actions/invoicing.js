@@ -59,7 +59,6 @@ export async function listInvoices({ search, source } = {}) {
         creditNotes: true,
         payment: { select: { orderId: true, appointmentId: true, order: { select: { orderNumber: true } } } },
       },
-      take: 200,
     });
 
     return { success: true, data: invoices.map(serializeInvoice) };

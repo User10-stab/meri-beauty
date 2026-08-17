@@ -134,7 +134,7 @@ export async function getMyReservations() {
         //   - the payment requires an online payment (ONLINE or DEPOSIT type)
         awaitingPayment:
           payment !== null &&
-          payment.status === "PENDING" &&
+          ["PENDING", "FAILED"].includes(payment.status) &&
           (payment.paymentType === "ONLINE" || payment.paymentType === "DEPOSIT") &&
           appt.status !== "CANCELLED" &&
           appt.status !== "COMPLETED",

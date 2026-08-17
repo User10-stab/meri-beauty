@@ -88,20 +88,9 @@ export default function LoginForm() {
       footerText="Vous n'avez pas encore de compte ?"
       footerLinkHref={registerHref}
       footerLinkText="Créer un compte"
-      extraElements={({ register, isLoading }) => (
+      extraElements={() => (
         <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <input
-              id="rememberMe"
-              type="checkbox"
-              disabled={isLoading}
-              {...register("rememberMe")}
-              className="h-4.5 w-4.5 text-[#2F3A2E] border-zinc-300 rounded focus:ring-[#2F3A2E]/40 dark:bg-zinc-800 dark:border-zinc-700 cursor-pointer"
-            />
-            <label htmlFor="rememberMe" className="ml-2 block text-sm text-zinc-650 dark:text-zinc-400 select-none cursor-pointer">
-              Se souvenir de moi
-            </label>
-          </div>
+          <div />
 
           <div className="text-sm">
             <Link

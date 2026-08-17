@@ -19,7 +19,7 @@ const RATE_LIMIT_MAX_ATTEMPTS = 10;
 /**
  * Server action to log in a user for dashboard access.
  * Only accepts ADMIN, OWNER, and STAFF accounts.
- * @param {{ email: string, password: string, rememberMe?: boolean }} input
+ * @param {{ email: string, password: string }} input
  */
 export async function loginUser(input) {
   const parsed = loginSchema.safeParse(input);
@@ -122,6 +122,5 @@ export async function loginUser(input) {
 /**
  * Server action to log in a customer for website access.
  * Only accepts CUSTOMER accounts.
- * @param {{ email: string, password: string, rememberMe?: boolean }} input
+ * @param {{ email: string, password: string }} input
  */
-

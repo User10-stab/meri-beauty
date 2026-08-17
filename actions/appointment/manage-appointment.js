@@ -561,6 +561,12 @@ export async function markAppointmentNoShow(appointmentId) {
     if (!appointment) {
       return { success: false, message: "Rendez-vous introuvable" };
     }
+    // A future appointment hasn't happened yet — there's no "absence" to
+    // record until the scheduled time has passed. Mirrors the same guard
+    // on completeAppointment.
+    if (appointment.startTime > new Date()) {
+      return { success: false, message: "Ce rendez-vous n'a pas encore eu lieu — impossible de le marquer comme absence." };
+    }
 
     const markedNote = `Marqué absent le ${new Date().toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`;
 
@@ -692,6 +698,13 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     if (appointment.status !== "CONFIRMED") {
       return { success: false, message: "Seul un rendez-vous confirmé peut être marqué comme terminé." };
     }
+    // A future appointment hasn't happened yet — completing it would let
+    // staff collect a balance and issue an invoice for a service not yet
+    // rendered. Mirrors the same "already started" requirement as
+    // markAppointmentNoShow.
+    if (appointment.startTime > new Date()) {
+      return { success: false, message: "Ce rendez-vous n'a pas encore eu lieu — impossible de le marquer comme terminé." };
+    }
 
     const payment = appointment.payment;
     const hasBalanceDue = Boolean(payment) && Number(payment.remainingAmount) > 0 && (
@@ -711,7 +724,22 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
       return { success: false, message: "Confirmez avoir bien reçu le paiement avant de terminer le rendez-vous.", requiresPaymentConfirmation: true };
     }
 
-    const { invoice, balance } = await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
+      // Atomic claim, gated on the appointment still being CONFIRMED —
+      // without this, two concurrent completions (double-click, or two
+      // staff members racing) both pass the plain read-then-check above and
+      // both collect the balance, creating duplicate FINAL_PAYMENT
+      // transaction rows (and racing on the invoice's unique paymentId,
+      // which turns the loser's request into a confusing generic error
+      // instead of a clean "already completed").
+      const claim = await tx.appointment.updateMany({
+        where: { id: appointmentId, status: "CONFIRMED" },
+        data: { status: "COMPLETED" },
+      });
+      if (claim.count === 0) {
+        return { claimed: false };
+      }
+
       let invoice = null;
       let balance = 0;
 
@@ -750,13 +778,13 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
         });
       }
 
-      await tx.appointment.update({
-        where: { id: appointmentId },
-        data: { status: "COMPLETED" },
-      });
-
-      return { invoice, balance };
+      return { claimed: true, invoice, balance };
     });
+
+    if (!result.claimed) {
+      return { success: false, message: "Ce rendez-vous vient de changer d'état. Actualisez la page." };
+    }
+    const { invoice, balance } = result;
 
     if (invoice) {
       const invoicePdf = await renderInvoicePdf(invoice).catch((err) => {

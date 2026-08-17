@@ -174,6 +174,9 @@ export async function checkWorkshopSessionAvailability(sessionId) {
 
     const takenSeats = reserved._sum.seatsCount ?? 0;
     const capacity = session.capacity ?? session.workshop.capacity;
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      return { success: false, message: "Capacité de session invalide." };
+    }
     const available = capacity - takenSeats;
 
     // This is a plain read, called on every /reservation-atelier page load —
@@ -207,9 +210,11 @@ export async function createWorkshopReservation(data) {
     let { sessionId, activityId, seatsCount, customerInfo, isPriority, waitingListEntryId, paymentMethod, promoCode } = data;
     const isFullPayment = paymentMethod === "FULL";
 
-    if (!sessionId || !activityId || !seatsCount || !customerInfo?.email) {
+    const parsedSeatsCount = Number(seatsCount);
+    if (!sessionId || !activityId || !customerInfo?.email || !Number.isInteger(parsedSeatsCount) || parsedSeatsCount < 1) {
       return { success: false, message: "Données manquantes." };
     }
+    seatsCount = parsedSeatsCount;
 
     // The booking form's CGV checkbox was client-side only. This action is a
     // public POST endpoint, so the consent has to be re-established here —
@@ -359,7 +364,8 @@ export async function createWorkshopReservation(data) {
     await recordTermsAcceptance(prisma, user.id);
 
     // Calculate pricing
-    const depositPct = activity.depositPercentage ?? 50;
+    const rawDepositPct = Number(activity.depositPercentage ?? 50);
+    const depositPct = Number.isFinite(rawDepositPct) ? Math.min(100, Math.max(0, rawDepositPct)) : 0;
     const unitPrice = Number(activity.price);
     const totalPrice = unitPrice * seatsCount;
 
@@ -433,6 +439,9 @@ export async function createWorkshopReservation(data) {
 
           const takenSeats = reserved._sum.seatsCount ?? 0;
           const capacity = session.capacity ?? activity.capacity;
+          if (!Number.isInteger(capacity) || capacity < 1) {
+            throw new Error("INVALID_SESSION_CAPACITY");
+          }
           const available = capacity - takenSeats;
 
           if (seatsCount > available) {
@@ -491,6 +500,10 @@ export async function createWorkshopReservation(data) {
         if (err.message === "PROMO_EXHAUSTED") {
           captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
           return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
+        }
+        if (err.message === "INVALID_SESSION_CAPACITY") {
+          captureWarning("Workshop session has invalid capacity during checkout", { area: "stock-capacity", sessionId });
+          return { success: false, message: "Capacité de session invalide. Contactez l'équipe Meri Beauty." };
         }
         throw err;
       }

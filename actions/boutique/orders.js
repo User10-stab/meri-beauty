@@ -1043,6 +1043,14 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
           },
         });
 
+        // Attach to whichever till session is open so the counter cash is
+        // reconcilable at close (see lib/cash-sessions.js). Never blocks the
+        // payment if none is open — the row is simply left unassigned.
+        const openCashSession =
+          method === "CASH"
+            ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
+            : null;
+
         await tx.transaction.create({
           data: {
             paymentId: payment.id,
@@ -1050,6 +1058,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
             method,
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
+            cashSessionId: openCashSession?.id ?? null,
           },
         });
 
@@ -1336,6 +1345,13 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
         }
       }
 
+      if (order.promoCodeId) {
+        await tx.promoCode.updateMany({
+          where: { id: order.promoCodeId, usedCount: { gt: 0 } },
+          data: { usedCount: { decrement: 1 } },
+        });
+      }
+
       let creditNote = null;
       if (wasSold && order.payment.invoice && remaining > REFUND_EPSILON) {
         creditNote = await issueCreditNote(tx, {
@@ -1347,6 +1363,13 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
 
       if (needsManualRefund) {
         const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
+        // Attach to whichever till session is open so the counter cash is
+        // reconcilable at close (see lib/cash-sessions.js). Never blocks the
+        // refund if none is open — the row is simply left unassigned.
+        const openCashSession =
+          originalMethod === "CASH"
+            ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
+            : null;
         await tx.transaction.create({
           data: {
             paymentId: order.payment.id,
@@ -1355,6 +1378,7 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
             transactionType: "REFUND",
             paidAt: new Date(),
             manualReference: originalMethod === "CARD" ? manualRefund.reference.trim() : null,
+            cashSessionId: openCashSession?.id ?? null,
           },
         });
         await tx.payment.update({
@@ -1438,16 +1462,6 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
                   status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
                   pendingRefundAmount: null,
                   pendingRefundIdempotencyKey: null,
-                },
-              }),
-              prisma.auditLog.create({
-                data: {
-                  actorId: manualRefund.actorId ?? null,
-                  actorRole: manualRefund.actorRole ?? null,
-                  action: "order.cancellation_refund_completed",
-                  entityType: "Order",
-                  entityId: orderId,
-                  metadata: { orderNumber: order.orderNumber, amount: remaining, method: "ONLINE", automatedByStripe: true },
                 },
               }),
               prisma.auditLog.create({
@@ -1626,6 +1640,9 @@ export async function cancelMyOrder(orderId) {
   }
   if (!["PENDING_PAYMENT", "PENDING_PICKUP"].includes(order.status)) {
     return { success: false, message: "Cette commande ne peut plus être annulée en ligne — contactez-nous." };
+  }
+  if (order.source === "POS") {
+    return { success: false, message: "Cette vente en caisse ne peut pas être annulée depuis l'espace client — contactez l'équipe." };
   }
 
   return performOrderCancellation(order, "Annulée par le client", { actorId: session.user.id, actorRole: session.user.role });

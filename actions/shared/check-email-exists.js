@@ -16,8 +16,8 @@ import { prisma } from "@/lib/prisma";
 export async function checkEmailExists(email) {
   if (!email || typeof email !== "string") return { exists: false };
 
-  const user = await prisma.user.findUnique({
-    where: { email: email.trim().toLowerCase() },
+  const user = await prisma.user.findFirst({
+    where: { email: email.trim().toLowerCase(), isDeleted: false },
     select: { id: true, isDeleted: true, emailVerified: true, isActive: true, phone: true },
   });
 

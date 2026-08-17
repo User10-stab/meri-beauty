@@ -63,9 +63,13 @@ export async function updatePersonalInfo(input) {
       };
     }
 
-    // Check unique constraints for email and phone if they are being changed
+    // Check unique constraints for email and phone if they are being changed.
+    // Ignore soft-deleted users so a deleted account can be re-created cleanly.
     if (email && email !== user.email) {
-      const emailExists = await prisma.user.findUnique({ where: { email } });
+      const emailExists = await prisma.user.findFirst({
+        where: { email, isDeleted: false },
+        select: { id: true },
+      });
       if (emailExists) {
         return {
           success: false,
@@ -76,7 +80,10 @@ export async function updatePersonalInfo(input) {
     }
 
     if (phone && phone !== user.phone) {
-      const phoneExists = await prisma.user.findUnique({ where: { phone } });
+      const phoneExists = await prisma.user.findFirst({
+        where: { phone, isDeleted: false },
+        select: { id: true },
+      });
       if (phoneExists) {
         return {
           success: false,

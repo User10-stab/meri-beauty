@@ -528,15 +528,15 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
               className="mt-0.5"
             />
             <span>
-              {t("review.acceptTerms", {
-                cgv: (
+              {t.rich("review.acceptTerms", {
+                cgv: (chunks) => (
                   <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                    {t("review.cgv")}
+                    {chunks}
                   </a>
                 ),
-                privacy: (
+                privacy: (chunks) => (
                   <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                    {t("review.privacy")}
+                    {chunks}
                   </a>
                 ),
               })}

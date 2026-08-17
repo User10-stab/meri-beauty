@@ -401,15 +401,15 @@ export default function PaymentStep({ data, customerSession }) {
             className="mt-0.5"
           />
 <span>
-              {t("payment.acceptTerms", {
-                cgv: (
+             {t.rich("review.acceptTerms", {
+                cgv: (chunks) => (
                   <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                    {t("payment.cgv")}
+                    {chunks}
                   </a>
                 ),
-                privacy: (
+                privacy: (chunks) => (
                   <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#C8A46A]">
-                    {t("payment.privacy")}
+                    {chunks}
                   </a>
                 ),
               })}

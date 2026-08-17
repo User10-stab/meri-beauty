@@ -117,14 +117,20 @@ export async function updateMyProfile(input) {
     }
 
     if (email && email !== user.email) {
-      const emailExists = await prisma.user.findUnique({ where: { email } });
+      const emailExists = await prisma.user.findFirst({
+        where: { email, isDeleted: false },
+        select: { id: true },
+      });
       if (emailExists) {
         return { success: false, message: "Cet email est déjà utilisé.", errors: { email: "Cet email est déjà utilisé." } };
       }
     }
 
     if (phone && phone !== user.phone) {
-      const phoneExists = await prisma.user.findUnique({ where: { phone } });
+      const phoneExists = await prisma.user.findFirst({
+        where: { phone, isDeleted: false },
+        select: { id: true },
+      });
       if (phoneExists) {
         return { success: false, message: "Ce numéro de téléphone est déjà utilisé.", errors: { phone: "Ce numéro est déjà utilisé." } };
       }

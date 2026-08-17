@@ -74,8 +74,8 @@ export async function resumeReservationPayment(paymentId) {
     }
 
     // ── 4. Verify the payment is still pending ───────────────────────────────
-    // PAID and PARTIALLY_PAID payments must not be retried.
-    if (payment.status !== "PENDING") {
+    // FAILED payments are retryable; settled payments are not.
+    if (!['PENDING', 'FAILED'].includes(payment.status)) {
       return {
         success: false,
         message: "Ce paiement n'est plus en attente et ne peut pas être repris.",

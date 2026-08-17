@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import {
   paymentConfirmationEmail,
+  reservationPaymentFailedEmail,
+  staffReservationConfirmedEmail,
   workshopSessionChangeEmail,
   workshopSeatsChangeEmail,
   staffPaymentFailedEmail,
@@ -92,7 +94,7 @@ export async function POST(req) {
 
   if (event.type === "payment_intent.payment_failed") {
     try {
-      await handlePaymentIntentFailed(event.data.object);
+      await handlePaymentIntentFailed(event.data.object, event.account);
       return NextResponse.json({ received: true });
     } catch (err) {
       captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
@@ -153,6 +155,11 @@ export async function POST(req) {
       kind: failedSession.metadata?.kind ?? "appointment",
       metadata: failedSession.metadata,
     });
+    await notifyAppointmentPaymentFailed({
+      paymentId: failedSession.metadata?.paymentId,
+      appointmentId: failedSession.metadata?.appointmentId,
+      failedSessionId: failedSession.id,
+    });
     return NextResponse.json({ received: true });
   }
 
@@ -160,6 +167,11 @@ export async function POST(req) {
     const expiredSession = event.data.object;
     console.info(`[stripe-webhook] checkout session expired: ${expiredSession.id}`, {
       kind: expiredSession.metadata?.kind ?? "appointment",
+    });
+    await notifyAppointmentPaymentFailed({
+      paymentId: expiredSession.metadata?.paymentId,
+      appointmentId: expiredSession.metadata?.appointmentId,
+      failedSessionId: expiredSession.id,
     });
     return NextResponse.json({ received: true });
   }
@@ -705,7 +717,13 @@ async function processAppointmentCheckoutSession(session) {
     // AUTOMATIC mode confirms as soon as the required online payment clears,
     // regardless of any remaining salon balance. MANUAL mode still needs
     // staff review — the payment is recorded but the appointment stays PENDING.
-    const nextAppointmentStatus = confirmationMode === "AUTOMATIC" ? "CONFIRMED" : "PENDING";
+    // An ACCEPTED appointment reached this webhook through the staff-review
+    // confirmation page, so successful payment completes that acceptance even
+    // when the staff default is MANUAL. New bookings still follow the normal
+    // confirmation-mode rule.
+    const nextAppointmentStatus = confirmationMode === "AUTOMATIC" || appointment.status === "ACCEPTED"
+      ? "CONFIRMED"
+      : "PENDING";
 
     await tx.payment.update({
       where: { id: paymentId },
@@ -828,11 +846,35 @@ async function processAppointmentCheckoutSession(session) {
     }).catch((err) => console.error("[stripe-webhook] appointment confirmation email failed:", err));
   }
 
+  if (result.nextAppointmentStatus === "CONFIRMED") {
+    const recipients = await getAppointmentEmailRecipients(result.appointment.staffId);
+    const staffName = staffService?.staff?.user?.fullName ?? "votre experte";
+    const serviceName = staffService?.service?.name ?? "votre service";
+    for (const recipient of recipients) {
+      sendEmail({
+        to: recipient.email,
+        ...staffReservationConfirmedEmail({
+          staffName: recipient.fullName,
+          customerName: user?.fullName ?? "Client",
+          serviceName,
+          date: result.appointment.date,
+          time: result.appointment.startTime.toLocaleTimeString("fr-FR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: "Europe/Brussels",
+          }),
+          duration: staffService?.duration,
+          totalAmount: result.totalAmount,
+        }),
+      }).catch((err) => console.error("[stripe-webhook] staff confirmation email failed:", err));
+    }
+  }
+
   return { received: true, processed: true };
 }
 
 /** Stripe Connect `account.updated` — see handleAccountUpdated above; kept as a case in the same dispatcher. */
-async function handlePaymentIntentFailed(paymentIntent) {
+async function handlePaymentIntentFailed(paymentIntent, connectedAccountId = null) {
   const paymentIntentId = paymentIntent?.id || null;
   if (!paymentIntentId) {
     console.warn("[stripe-webhook] payment_intent.payment_failed missing payment intent ID");
@@ -865,6 +907,31 @@ async function handlePaymentIntentFailed(paymentIntent) {
   });
 
   if (!transaction?.payment?.appointment) {
+    const paymentId = paymentIntent?.metadata?.paymentId;
+    const appointmentId = paymentIntent?.metadata?.appointmentId;
+    if (paymentId && appointmentId) {
+      await notifyAppointmentPaymentFailed({ paymentId, appointmentId, failedSessionId: null });
+      return;
+    }
+
+    // Older Checkout Sessions may not have PaymentIntent metadata. Resolve
+    // their session metadata from the connected account when Stripe includes it.
+    if (connectedAccountId) {
+      const sessions = await stripe.checkout.sessions.list(
+        { payment_intent: paymentIntentId, limit: 1 },
+        { stripeAccount: connectedAccountId }
+      );
+      const session = sessions.data?.[0];
+      if (session?.metadata?.paymentId && session?.metadata?.appointmentId) {
+        await notifyAppointmentPaymentFailed({
+          paymentId: session.metadata.paymentId,
+          appointmentId: session.metadata.appointmentId,
+          failedSessionId: session.id,
+        });
+        return;
+      }
+    }
+
     console.warn(`[stripe-webhook] Transaction/appointment not found for payment intent ${paymentIntentId}`);
     return;
   }
@@ -872,19 +939,11 @@ async function handlePaymentIntentFailed(paymentIntent) {
   const payment = transaction.payment;
   const appointment = payment.appointment;
 
-  // Atomic: payment FAILED + appointment CANCELLED commit together
-  await prisma.$transaction(async (tx) => {
-    await tx.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
-    await tx.appointment.update({
-      where: { id: payment.appointmentId },
-      data: {
-        status: "CANCELLED",
-        cancelledAt: new Date(),
-        cancellationReason: "Paiement Stripe échoué",
-        cancellationSource: "STRIPE",
-      },
-    });
-  });
+  await notifyAppointmentPaymentFailed({
+    paymentId: payment.id,
+    appointmentId: payment.appointmentId,
+    failedSessionId: payment.transactionReference,
+});
 
   // Dashboard notifications (outside transaction - business operation already committed)
   const serviceName = appointment.staffService?.service?.name;
@@ -935,6 +994,48 @@ async function handlePaymentIntentFailed(paymentIntent) {
     appointmentId: payment.appointmentId,
     failureReason: paymentIntent?.last_payment_error?.message || "Unknown",
   });
+}
+
+async function notifyAppointmentPaymentFailed({ paymentId, appointmentId, failedSessionId = null }) {
+  if (!paymentId || !appointmentId) return;
+
+  const payment = await prisma.payment.findUnique({
+    where: { id: paymentId },
+    include: {
+      appointment: {
+        include: {
+          user: { select: { fullName: true, email: true } },
+          staffService: {
+            include: {
+              service: { select: { name: true } },
+              staff: { include: { user: { select: { fullName: true } } } },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!payment?.appointment || payment.appointment.id !== appointmentId) return;
+
+  const changed = await prisma.payment.updateMany({
+    where: { id: payment.id, status: "PENDING" },
+    data: { status: "FAILED", ...(failedSessionId ? { transactionReference: failedSessionId } : {}) },
+  });
+  if (changed.count !== 1) return;
+
+  const appointment = payment.appointment;
+  const retryUrl = `${process.env.NEXT_PUBLIC_APP_URL}/reservation/retry-payment?paymentId=${encodeURIComponent(payment.id)}`;
+  await sendEmail({
+    to: appointment.user.email,
+    ...reservationPaymentFailedEmail({
+      customerName: appointment.user.fullName,
+      serviceName: appointment.staffService.service.name,
+      staffName: appointment.staffService.staff?.user?.fullName ?? "Expert",
+      date: appointment.date,
+      time: appointment.startTime.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" }),
+      retryUrl,
+    }),
+  }).catch((error) => console.error("[stripe-webhook] payment-failed email failed:", error));
 }
 
 // ─── checkout.session.completed (workshops/events, formations) ───────────────

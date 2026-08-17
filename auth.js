@@ -6,8 +6,8 @@ import { authConfig } from "./auth.config";
 import { ROLES, canAccessDashboard, isAdminRole } from "@/lib/authorization";
 
 async function getStaffOnboardingState(userId) {
-  const staff = await prisma.staff.findUnique({
-    where: { userId },
+  const staff = await prisma.staff.findFirst({
+    where: { userId, isDeleted: false },
     select: {
       id: true,
       setupCompleted: true,

@@ -5,6 +5,7 @@ import {
   buildAvailabilityForDate,
   parseLocalDateString,
   formatLocalDateKey,
+  filterFutureReservationWindows,
 } from "@/lib/slot-availability";
 
 /**
@@ -84,6 +85,10 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
       salon,
       existingAppointments,
     });
+    availability.reservationWindows = filterFutureReservationWindows(
+      availability.reservationWindows,
+      selectedDate
+    );
 
     return {
       success: true,

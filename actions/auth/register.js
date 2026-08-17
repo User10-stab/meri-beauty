@@ -124,6 +124,24 @@ export async function registerUser(input) {
     const expiresAt = new Date(Date.now() + TOKEN_EXPIRY_MINUTES * 60 * 1000);
 
     const user = await prisma.$transaction(async (tx) => {
+      const activeUserWithEmail = await tx.user.findFirst({
+        where: { email: email.toLowerCase(), isDeleted: false },
+        select: { id: true },
+      });
+      if (activeUserWithEmail) {
+        throw Object.assign(new Error("Duplicate active email"), { code: "P2002", meta: { target: ["email"] } });
+      }
+
+      const activeUserWithPhone = phone
+        ? await tx.user.findFirst({
+            where: { phone, isDeleted: false },
+            select: { id: true },
+          })
+        : null;
+      if (activeUserWithPhone) {
+        throw Object.assign(new Error("Duplicate active phone"), { code: "P2002", meta: { target: ["phone"] } });
+      }
+
       const newUser = await tx.user.create({
         data: {
           fullName,

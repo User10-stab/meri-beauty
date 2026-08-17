@@ -7,10 +7,12 @@ import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
 import {
   reservationReceivedEmail,
-  paymentConfirmationEmail,
+  reservationConfirmedEmail,
+  reservationCreatedAutomaticEmail,
   welcomeWithCredentialsEmail,
   multiReservationConfirmationEmail,
-  staffReservationCreatedEmail,
+  staffReservationConfirmedEmail,
+  staffMultipleReservationsConfirmedEmail,
 } from "@/lib/email-templates";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
@@ -446,23 +448,23 @@ export async function createReservation(data) {
       const payment = null;
       const totalAmount = rawTotalAmount;
 
-      // 8. Send emails: manual-mode → reservationReceivedEmail; automatic → paymentConfirmationEmail (ON_SITE)
-      // We reuse the existing code below by continuing with effectiveIsManualMode.
-      // (We keep the rest of the function unchanged, aside from using these locals.)
-
-      // Send email to assigned staff member and admin/owner users
-      const emailRecipients = await getAppointmentEmailRecipients(staffService.staff?.id);
-      for (const recipient of emailRecipients) {
-        await sendEmail({
-          to: recipient.email,
-          ...staffReservationCreatedEmail({
-            staffName: recipient.fullName,
-            customerName: user.fullName,
-            serviceName,
-            date: appointmentDate,
-            time,
-          }),
-        }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+      // Send a staff appointment email only once the appointment is confirmed.
+      if (appointmentStatus === "CONFIRMED") {
+        const emailRecipients = await getAppointmentEmailRecipients(staffService.staff?.id);
+        for (const recipient of emailRecipients) {
+          await sendEmail({
+            to: recipient.email,
+            ...staffReservationConfirmedEmail({
+              staffName: recipient.fullName,
+              customerName: user.fullName,
+              serviceName,
+              date: appointmentDate,
+              time,
+              duration: staffService.duration,
+              totalAmount: rawTotalAmount,
+            }),
+          }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+        }
       }
 
       if (effectiveIsManualMode) {
@@ -474,20 +476,19 @@ export async function createReservation(data) {
             staffName,
             date: appointmentDate,
             time,
+            duration: staffService.duration,
+            totalAmount: rawTotalAmount,
           }),
         }).catch((err) => console.error("[createReservation] reservation received email failed:", err));
       } else {
         await sendEmail({
           to: user.email,
-          ...paymentConfirmationEmail({
+          ...reservationCreatedAutomaticEmail({
             customerName: user.fullName,
             serviceName,
             staffName,
             date: appointmentDate,
             time,
-            paidAmount: 0,
-            totalAmount,
-            paymentMethod: "ON_SITE",
           }),
         }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
       }
@@ -517,6 +518,7 @@ export async function createReservation(data) {
       confirmationMode,
       depositEnabled: Boolean(staffService.staff?.depositEnabled),
       depositPercentage: Number(staffService.staff?.depositPercentage ?? 0),
+      allowedPaymentMethods: staffService.staff?.allowedPaymentMethods,
       totalAmount: rawTotalAmount,
       paymentMethod,
       discountAmount,
@@ -600,9 +602,9 @@ export async function createReservation(data) {
     }
 
     // ── 8. Send emails (fire-and-forget — never block the reservation) ───────
-    // 8a. Reservation confirmation — sent to all customers
-    if (effectiveIsManualMode) {
-      // Manual mode: "reservation received, pending staff review" email
+    // 8a. A pending appointment gets a pending-request email. A confirmed
+    // appointment gets the simple reservation confirmation email.
+    if (appointmentStatus !== "CONFIRMED") {
       await sendEmail({
         to: user.email,
         ...reservationReceivedEmail({
@@ -614,37 +616,34 @@ export async function createReservation(data) {
         }),
       }).catch((err) => console.error("[createReservation] reservation received email failed:", err));
     } else {
-      // Automatic mode, cash/no-deposit path: appointment is confirmed immediately.
-      // No online payment was taken, so we send a payment confirmation showing €0
-      // paid and the full amount remaining (to be paid at the salon).
       await sendEmail({
         to: user.email,
-        ...paymentConfirmationEmail({
+        ...reservationCreatedAutomaticEmail({
           customerName: user.fullName,
           serviceName,
           staffName,
           date: appointmentDate,
           time,
-          paidAmount: 0,
-          totalAmount,
-          paymentMethod: "ON_SITE",
         }),
       }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
     }
 
-    // 8b. Send email to assigned staff member and admin/owner users
-    const emailRecipients = await getAppointmentEmailRecipients(staffService.staffId);
-    for (const recipient of emailRecipients) {
-      await sendEmail({
-        to: recipient.email,
-        ...staffReservationCreatedEmail({
-          staffName: recipient.fullName,
-          customerName: user.fullName,
-          serviceName,
-          date: appointmentDate,
-          time,
-        }),
-      }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+    // 8b. Staff is notified only for a confirmed appointment. Pending
+    // requests remain visible through the existing dashboard notification.
+    if (appointmentStatus === "CONFIRMED") {
+      const emailRecipients = await getAppointmentEmailRecipients(staffService.staffId);
+      for (const recipient of emailRecipients) {
+        await sendEmail({
+          to: recipient.email,
+          ...staffReservationConfirmedEmail({
+            staffName: recipient.fullName,
+            customerName: user.fullName,
+            serviceName,
+            date: appointmentDate,
+            time,
+          }),
+        }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+      }
     }
 
     // 8c. Welcome email with credentials — only for brand-new accounts
@@ -806,15 +805,6 @@ export async function confirmPayment(paymentId, transactionReference = null) {
       }
     });
 
-    // NOTE: `paymentConfirmationEmail` is imported but was never sent anywhere
-    // in the original file. If a payment-confirmation email is expected here,
-    // wire it up, e.g.:
-    //
-    // sendEmail({
-    //   to: payment.appointment... (needs a user relation/email available),
-    //   ...paymentConfirmationEmail({ ... }),
-    // }).catch((err) => console.error("[confirmPayment] confirmation email failed:", err));
-
     return { success: true, message: "Paiement confirmé" };
   } catch (error) {
     console.error("[confirmPayment]", error);
@@ -959,7 +949,7 @@ export async function createMultipleReservations(data) {
             date: appointmentDate,
             startTime,
             endTime,
-            status: "PENDING",
+            status: "CONFIRMED",
             notes: notes || null,
           },
         });
@@ -1023,27 +1013,34 @@ export async function createMultipleReservations(data) {
       }),
     }).catch((err) => console.error("[createMultipleReservations] confirmation email failed:", err));
 
-    // 7b. Send email to staff members and admin/owner users for each appointment
-    for (let i = 0; i < createdAppointments.length; i++) {
-      const appt = createdAppointments[i];
-      const staffId = staffServices[i].staff?.id;
-      const serviceName = staffServices[i].service?.name ?? "—";
-      const time = appointments[i].time;
-      const appointmentDate = timeWindows[i].appointmentDate;
-
-      const emailRecipients = await getAppointmentEmailRecipients(staffId);
-      for (const recipient of emailRecipients) {
-        await sendEmail({
-          to: recipient.email,
-          ...staffReservationCreatedEmail({
-            staffName: recipient.fullName,
-            customerName: user.fullName,
-            serviceName,
-            date: appointmentDate,
-            time,
-          }),
-        }).catch((err) => console.error("[createMultipleReservations] dashboard email failed:", err));
+    // 7b. Send one consolidated email to each staff/dashboard recipient.
+    const staffAppointments = appointments.map(({ time }, i) => ({
+      serviceName: staffServices[i].service?.name ?? "—",
+      date: timeWindows[i].appointmentDate,
+      time,
+      duration: staffServices[i].duration,
+      amount: Number(staffServices[i].price ?? 0),
+      staffId: staffServices[i].staff?.id,
+    }));
+    const recipientsByEmail = new Map();
+    for (const appointment of staffAppointments) {
+      const recipients = await getAppointmentEmailRecipients(appointment.staffId);
+      for (const recipient of recipients) {
+        if (!recipientsByEmail.has(recipient.email)) {
+          recipientsByEmail.set(recipient.email, { fullName: recipient.fullName });
+        }
       }
+    }
+    for (const [email, recipient] of recipientsByEmail) {
+      await sendEmail({
+        to: email,
+        ...staffMultipleReservationsConfirmedEmail({
+          staffName: recipient.fullName,
+          customerName: user.fullName,
+          appointments: staffAppointments,
+          totalAmount,
+        }),
+      }).catch((err) => console.error("[createMultipleReservations] consolidated staff email failed:", err));
     }
 
     // 7c. Welcome email for brand-new accounts

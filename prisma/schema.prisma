@@ -669,12 +669,12 @@ model User {
   id                       String    @id @default(cuid())
   fullName                 String
   nickName                 String?
-  email                    String    @unique
+  email                    String    
   password                 String
   // A counter sale needs a receipt email, but a phone number is optional.
   // Online checkout and booking forms still require it at their own
   // validation boundary.
-  phone                    String?   @unique
+  phone                    String?  
   role                     UserRole
   avatar                   String?
   emailVerified            Boolean   @default(false)
@@ -1310,8 +1310,7 @@ model Staff {
   yearsOfExperience Int
   isDeleted         Boolean   @default(false)
   deletedAt         DateTime?
-  vatNumber         String?   @unique
-
+  vatNumber         String?   
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
   depositEnabled              Boolean                     @default(false)

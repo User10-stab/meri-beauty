@@ -6,7 +6,7 @@ import { stripe } from "@/lib/stripe";
 import { ROLES, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
-import { reservationAcceptedWithPaymentLinkEmail, reservationConfirmedEmail } from "@/lib/email-templates";
+import { reservationAcceptedEmail, reservationConfirmedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
@@ -169,16 +169,15 @@ export async function acceptAppointment(appointmentId) {
       };
     }
 
-    // Generate confirmation/payment URL
+    // The page reuses the shared payment decision engine server-side.
     const paymentUrl = `${process.env.NEXT_PUBLIC_APP_URL}/appointment/${appointmentId}/payment`;
 
-    // Send acceptance email with confirmation/payment link
-    const totalAmount = Number(appointment.staffService.price);
+    // Send one focused acceptance email; payment choices belong to the linked flow.
     const staff = appointment.staffService?.staff;
 
     sendEmail({
       to: appointment.user.email,
-      ...reservationAcceptedWithPaymentLinkEmail({
+      ...reservationAcceptedEmail({
         customerName: appointment.user.fullName,
         serviceName: appointment.staffService.service.name,
         staffName: staff?.user?.fullName || "Expert",
@@ -188,11 +187,7 @@ export async function acceptAppointment(appointmentId) {
           minute: "2-digit",
           timeZone: "Europe/Brussels",
         }),
-        totalAmount,
-        paymentUrl,
-        allowedPaymentMethods: staff?.allowedPaymentMethods || "BOTH",
-        depositEnabled: staff?.depositEnabled || false,
-        depositPercentage: Number(staff?.depositPercentage || 10),
+        confirmationUrl: paymentUrl,
       }),
     }).catch((err) =>
       console.error("[acceptAppointment] email failed:", err)
@@ -269,6 +264,22 @@ export async function confirmAppointment(appointmentId) {
       return {
         success: false,
         message: "Ce rendez-vous n'est pas prêt à être confirmé",
+      };
+    }
+
+    const allowedPaymentMethods = appointment.staffService.staff?.allowedPaymentMethods;
+    const depositRequired = Boolean(appointment.staffService.staff?.depositEnabled)
+      && Number(appointment.staffService.staff?.depositPercentage ?? 0) > 0;
+    if (allowedPaymentMethods !== "CASH_ONLY" && depositRequired) {
+      return {
+        success: false,
+        message: "Un acompte ou un paiement en ligne est requis pour confirmer ce rendez-vous.",
+      };
+    }
+    if (allowedPaymentMethods === "ONLINE_ONLY") {
+      return {
+        success: false,
+        message: "Le paiement en ligne est requis pour confirmer ce rendez-vous.",
       };
     }
 

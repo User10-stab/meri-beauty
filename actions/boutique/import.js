@@ -11,6 +11,7 @@ import {
   summarizeSlugs,
   resolveProductClassification,
 } from "@/lib/wixImport";
+import { getOrCreateGeneralSubcategory } from "@/lib/boutique/general-subcategory";
 
 /**
  * One-off Wix catalogue migration. Two steps, deliberately not one click:
@@ -67,11 +68,32 @@ export async function previewWixImport({ productsCsv, inventoryCsv }) {
   if (!products.length) return { success: false, message: "Aucun produit trouvé dans ce fichier." };
 
   const stockByHandle = inventoryCsv?.trim() ? parseWixInventoryCsv(inventoryCsv) : new Map();
-  const withStock = products.map((p) => ({
-    ...p,
-    stockQuantity: stockByHandle.get(p.handle) ?? 0,
-    stockIsExact: stockByHandle.has(p.handle),
-  }));
+
+  // A product already brought in by a previous import run is recognized by
+  // its stable Wix handle — re-running the import (e.g. after Marie fills
+  // in more barcodes on Wix, since barcode is often missing on the first
+  // export) must backfill that product's barcode, never create a duplicate.
+  const handles = products.map((p) => p.handle).filter(Boolean);
+  const alreadyImported = handles.length
+    ? await prisma.product.findMany({
+        where: { wixHandle: { in: handles }, isDeleted: false },
+        select: { wixHandle: true, variants: { where: { isDeleted: false }, select: { barcode: true }, take: 1 } },
+      })
+    : [];
+  const importedByHandle = new Map(alreadyImported.map((p) => [p.wixHandle, p]));
+
+  const withStock = products.map((p) => {
+    const existing = importedByHandle.get(p.handle);
+    return {
+      ...p,
+      stockQuantity: stockByHandle.get(p.handle) ?? 0,
+      stockIsExact: stockByHandle.has(p.handle),
+      alreadyImported: !!existing,
+      // Only meaningful when alreadyImported — whether this re-import would
+      // actually change anything (a barcode to fill in) or is a no-op.
+      willFillBarcode: !!existing && !existing.variants[0]?.barcode && !!p.barcode,
+    };
+  });
 
   return {
     success: true,
@@ -99,10 +121,36 @@ export async function runWixImport({ products, slugMapping }) {
   const subcategoryCache = new Map(); // categoryId -> subcategoryId ("Général")
 
   const createdIds = [];
+  const updatedIds = [];
   const errors = [];
 
   for (const p of products) {
     try {
+      // Re-import support: a product already brought in by a previous run
+      // is recognized by its stable Wix handle. Re-running the import (the
+      // normal workflow once Marie starts filling in barcodes on Wix, since
+      // they're rarely all present on the first export) must only backfill
+      // the barcode gap — never touch anything staff may have since edited
+      // in the dashboard (subcategory, weight, price, status...), and never
+      // create a duplicate product.
+      if (p.handle) {
+        const existing = await prisma.product.findFirst({
+          where: { wixHandle: p.handle, isDeleted: false },
+          include: { variants: { where: { isDeleted: false }, orderBy: { position: "asc" }, take: 1 } },
+        });
+        if (existing) {
+          const variant = existing.variants[0];
+          if (variant && !variant.barcode && p.barcode) {
+            await prisma.productVariant.update({
+              where: { id: variant.id },
+              data: { barcode: p.barcode },
+            });
+            updatedIds.push(existing.id);
+          }
+          continue;
+        }
+      }
+
       const { brandName, categoryName } = resolveProductClassification(p, slugMapping);
 
       const resolvedBrandName = brandName || PLACEHOLDER;
@@ -130,12 +178,7 @@ export async function runWixImport({ products, slugMapping }) {
       const categoryId = categoryCache.get(categoryKey);
 
       if (!subcategoryCache.has(categoryId)) {
-        let sub = await prisma.productSubcategory.findFirst({ where: { categoryId, name: "Général" } });
-        if (!sub) {
-          sub = await prisma.productSubcategory.create({
-            data: { name: "Général", categoryId, slug: await uniqueSlug("productSubcategory", "general", { categoryId }) },
-          });
-        }
+        const sub = await getOrCreateGeneralSubcategory(categoryId);
         subcategoryCache.set(categoryId, sub.id);
       }
       const subcategoryId = subcategoryCache.get(categoryId);
@@ -149,6 +192,7 @@ export async function runWixImport({ products, slugMapping }) {
           description: p.description || null,
           subcategoryId,
           status: "DRAFT", // reviewed by staff before going live on the storefront
+          wixHandle: p.handle || null,
           variants: {
             create: [
               {
@@ -185,14 +229,26 @@ export async function runWixImport({ products, slugMapping }) {
       createdIds.push(product.id);
     } catch (error) {
       console.error("[runWixImport] failed for product:", p.name, error);
-      errors.push({ name: p.name, message: error.message });
+      const isBarcodeClash = error.code === "P2002" && error.meta?.target?.includes?.("barcode");
+      errors.push({
+        name: p.name,
+        message: isBarcodeClash
+          ? "Ce code-barres est déjà utilisé par un autre produit."
+          : error.message,
+      });
     }
   }
 
   revalidatePath("/dashboard/boutique/products");
   return {
     success: true,
-    message: `${createdIds.length} produit(s) importé(s) en brouillon${errors.length ? `, ${errors.length} échec(s)` : ""}.`,
-    data: { createdCount: createdIds.length, errors },
+    message: [
+      `${createdIds.length} produit(s) importé(s) en brouillon`,
+      updatedIds.length ? `${updatedIds.length} code(s)-barres complété(s) sur des produits déjà importés` : null,
+      errors.length ? `${errors.length} échec(s)` : null,
+    ]
+      .filter(Boolean)
+      .join(", ") + ".",
+    data: { createdCount: createdIds.length, updatedCount: updatedIds.length, errors },
   };
 }

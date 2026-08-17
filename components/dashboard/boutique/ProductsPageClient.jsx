@@ -137,6 +137,12 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
         )}
       </div>
 
+      <p className="px-3 pt-3 text-xs text-gray-500 dark:text-dark-6 sm:px-6">
+        {filtered.length === initialProducts.length
+          ? `${initialProducts.length} produit${initialProducts.length > 1 ? "s" : ""}`
+          : `${filtered.length} sur ${initialProducts.length} produit${initialProducts.length > 1 ? "s" : ""}`}
+      </p>
+
       {isAdmin && (
         <ProductScanDialog
           open={scanOpen}

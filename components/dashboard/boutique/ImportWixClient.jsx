@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -12,6 +12,18 @@ import { useTranslations } from "next-intl";
 
 function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
+}
+
+// A single request importing 175 products sequentially can take several
+// minutes with zero feedback — indistinguishable from a hang, and easy to
+// mistake for "finished" if the tab gets abandoned mid-flight. Splitting the
+// work into small batches lets the UI show real progress between requests.
+const IMPORT_BATCH_SIZE = 15;
+
+function chunk(array, size) {
+  const out = [];
+  for (let i = 0; i < array.length; i += size) out.push(array.slice(i, i + size));
+  return out;
 }
 
 function readFile(file) {
@@ -26,8 +38,9 @@ function readFile(file) {
 export function ImportWixClient() {
   const t = useTranslations("dashboardBoutique.importWix");
   const router = useRouter();
-  const [step, setStep] = useState("upload"); // upload | mapping | review | done
+  const [step, setStep] = useState("upload"); // upload | mapping | review | importing | done
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
 
   const [productsCsv, setProductsCsv] = useState(null);
   const [inventoryCsv, setInventoryCsv] = useState(null);
@@ -35,6 +48,19 @@ export function ImportWixClient() {
   const [slugs, setSlugs] = useState([]);
   const [slugMapping, setSlugMapping] = useState({});
   const [result, setResult] = useState(null);
+
+  // Warn on tab close/refresh while a multi-minute import is mid-flight —
+  // closing the tab does abort the in-flight request, unlike switching tabs.
+  useEffect(() => {
+    if (step !== "importing") return;
+    function handleBeforeUnload(e) {
+      e.preventDefault();
+      e.returnValue = t("stepImporting.leaveConfirm");
+      return e.returnValue;
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [step, t]);
 
   async function handleAnalyze() {
     if (!productsCsv) {
@@ -64,30 +90,57 @@ export function ImportWixClient() {
     [products, slugMapping, t]
   );
 
-  const unclassifiedCount = resolved.filter((p) => p.categoryName === t("unclassified")).length;
+  // Both brand AND category must be checked — a product can resolve a real
+  // category while still having no brand (or vice-versa), and each falls
+  // back to "Non classé" independently. Checking only category here used to
+  // undercount, so the warning banner stayed silent on products that were
+  // about to land with no brand at all.
+  const unclassifiedCount = resolved.filter(
+    (p) => p.categoryName === t("unclassified") || p.brandName === t("unclassified")
+  ).length;
+  const alreadyImportedCount = resolved.filter((p) => p.alreadyImported).length;
 
   async function handleImport() {
-    setLoading(true);
-    const res = await runWixImport({ products, slugMapping });
-    setLoading(false);
+    setStep("importing");
+    setProgress({ done: 0, total: products.length });
 
-    if (!res.success) {
-      toast.error(res.message);
-      return;
+    const batches = chunk(products, IMPORT_BATCH_SIZE);
+    let createdCount = 0;
+    let updatedCount = 0;
+    const errors = [];
+
+    for (const batch of batches) {
+      const res = await runWixImport({ products: batch, slugMapping });
+      if (!res.success) {
+        toast.error(res.message);
+        setStep("review");
+        return;
+      }
+      createdCount += res.data.createdCount;
+      updatedCount += res.data.updatedCount;
+      errors.push(...res.data.errors);
+      setProgress((prev) => ({ ...prev, done: prev.done + batch.length }));
     }
-    setResult(res.data);
+
+    setResult({ createdCount, updatedCount, errors });
     setStep("done");
   }
 
   return (
     <div className="space-y-6 pb-16">
       <div className="flex items-center gap-3">
-        <Link
-          href="/dashboard/boutique/products"
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100"
-        >
-          <ArrowLeft size={16} />
-        </Link>
+        {step === "importing" ? (
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-300">
+            <ArrowLeft size={16} />
+          </span>
+        ) : (
+          <Link
+            href="/dashboard/boutique/products"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100"
+          >
+            <ArrowLeft size={16} />
+          </Link>
+        )}
         <h1 className="text-lg font-semibold text-dark dark:text-white">{t("title")}</h1>
       </div>
 
@@ -198,6 +251,15 @@ export function ImportWixClient() {
             </div>
           )}
 
+          {alreadyImportedCount > 0 && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+              <span>
+                {alreadyImportedCount} produit(s) déjà importé(s) précédemment — ils ne seront pas dupliqués, seul un code-barres manquant sera complété si Wix en fournit un maintenant.
+              </span>
+            </div>
+          )}
+
           <div className="overflow-x-auto rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark">
             <table className="w-full text-sm">
               <thead>
@@ -208,6 +270,7 @@ export function ImportWixClient() {
                   <th className="px-4 py-3">{t("stepReview.table.price")}</th>
                   <th className="px-4 py-3">{t("stepReview.table.stock")}</th>
                   <th className="px-4 py-3">{t("stepReview.table.images")}</th>
+                  <th className="px-4 py-3">Statut</th>
                 </tr>
               </thead>
               <tbody>
@@ -222,6 +285,15 @@ export function ImportWixClient() {
                       {!p.stockIsExact && <span className="ml-1 text-amber-500">{t("stepReview.table.toRecount")}</span>}
                     </td>
                     <td className="px-4 py-2.5 text-gray-500">{p.images.length}</td>
+                    <td className="px-4 py-2.5">
+                      {!p.alreadyImported ? (
+                        <span className="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700">Nouveau</span>
+                      ) : p.willFillBarcode ? (
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">Code-barres à compléter</span>
+                      ) : (
+                        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">Déjà importé — inchangé</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -232,10 +304,35 @@ export function ImportWixClient() {
             <button type="button" onClick={() => setStep("mapping")} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
               {t("stepReview.back")}
             </button>
-            <Button type="button" onClick={handleImport} disabled={loading}>
-              {loading && <Loader2 size={14} className="animate-spin" />}
+            <Button type="button" onClick={handleImport}>
               {t("stepReview.importButton", { count: products.length })}
             </Button>
+          </div>
+        </div>
+      )}
+
+      {step === "importing" && (
+        <div className="max-w-lg space-y-5 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark">
+          <div className="flex items-center gap-3">
+            <Loader2 size={20} className="animate-spin text-[#2f3a2e]" />
+            <p className="text-sm font-medium text-gray-800 dark:text-white">{t("stepImporting.title")}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-dark-3">
+              <div
+                className="h-full rounded-full bg-[#2f3a2e] transition-all duration-300"
+                style={{ width: `${progress.total ? Math.round((progress.done / progress.total) * 100) : 0}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-500 dark:text-dark-6">
+              {t("stepImporting.progress", { done: progress.done, total: progress.total })}
+            </p>
+          </div>
+
+          <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+            <span>{t("stepImporting.warning")}</span>
           </div>
         </div>
       )}
@@ -246,6 +343,9 @@ export function ImportWixClient() {
             <CheckCircle2 size={22} className="text-green-600" />
             <p className="text-sm text-gray-700">
               {t("stepDone.success", { count: result.createdCount })}
+              {result.updatedCount > 0 && (
+                <> {result.updatedCount} code(s)-barres complété(s) sur des produits déjà importés.</>
+              )}
             </p>
           </div>
 

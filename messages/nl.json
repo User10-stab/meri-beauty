@@ -1384,7 +1384,7 @@
         "selectProductsError": "Selecteer het Wix productbestand."
       },
       "stepMapping": {
-        "intro": "{productsCount} producten gevonden, met {slugsCount} verschillende Wix tags. Wix onderscheidt merk en categorie niet — geef aan wat elke tag vertegenwoordigt. Een tag geclassificeerd als \"Categorie\" wordt een categorie onder het merk van het product, met een generieke \"Algemeen\" subcategorie daaronder, om later te verfijnen. Een suggestie is vooraf ingevuld wanneer productnamen dit bevestigen; verifieer en corrigeer de rest.",
+        "intro": "{productsCount} producten gevonden, met {slugsCount} verschillende Wix tags. Wix onderscheidt merk en categorie niet — geef aan wat elke tag vertegenwoordigt. Een tag geclassificeerd als \"Categorie\" wordt een categorie onder het merk van het product, met een generieke \"Algemeen\" subcategorie daaronder, om later te verfijnen. Een suggestie is vooraf ingevuld wanneer productnamen dit bevestigen; verifieer en corrigeer de rest. Let op: de naam van de fabrikant (bv. \"Purple\", \"Staleks\") staat niet altijd vooraan in elke productnaam — in dat geval klopt de suggestie niet en wordt het merk als categorie geclassificeerd en omgekeerd. Als een tag een merk-/fabrikantnaam is, kies dan \"Merk\", ook als de suggestie \"Categorie\" zegt.",
         "table": {
           "wixLabel": "Wix tag",
           "usedBy": "Gebruikt door",
@@ -1399,7 +1399,7 @@
         "continue": "Doorgaan"
       },
       "stepReview": {
-        "unclassifiedWarning": "{count} product(en) hebben geen tag geclassificeerd als \"Categorie\" — ze worden geïmporteerd onder \"Ongeclassificeerd\" en kunnen opnieuw worden geclassificeerd vanaf de productpagina.",
+        "unclassifiedWarning": "{count} product(en) hebben geen merk en/of categorie geïdentificeerd — ze worden geïmporteerd onder \"Ongeclassificeerd\" en kunnen opnieuw worden geclassificeerd vanaf de productpagina.",
         "table": {
           "product": "Product",
           "brand": "Merk",
@@ -1411,6 +1411,12 @@
         },
         "back": "Terug",
         "importButton": "{count} product(en) importeren als concept"
+      },
+      "stepImporting": {
+        "title": "Importeren bezig…",
+        "progress": "{done} van {total} producten verwerkt",
+        "warning": "Sluit deze pagina niet en navigeer niet weg tot de import voltooid is.",
+        "leaveConfirm": "De import is nog bezig — als je nu vertrekt, wordt deze onderbroken. Toch vertrekken?"
       },
       "stepDone": {
         "success": "{count} product(en) geïmporteerd als concept — beoordeel ze (prijs, afbeeldingen, beschrijving) voordat je ze actief maakt in de winkel.",

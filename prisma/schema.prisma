@@ -920,6 +920,14 @@ model Product {
 
   status ProductStatus @default(DRAFT)
 
+  // Wix export's stable per-product "handle" — set when a product is
+  // brought in via the Wix importer. Lets a later re-import (e.g. after
+  // Marie fills in more barcodes on Wix, since Wix's own barcode field is
+  // unreliable/incomplete on export) recognize the same product and
+  // backfill its barcode instead of creating a duplicate. Null for any
+  // product never imported from Wix.
+  wixHandle String? @unique
+
   // Never hard-delete: OrderItem references variants of this product forever.
   isDeleted Boolean   @default(false)
   deletedAt DateTime?

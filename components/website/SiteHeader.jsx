@@ -8,6 +8,7 @@ import { UserIcon, BagIcon, MenuIcon, CloseIcon } from "./icons";
 import { useSession, signOut } from "next-auth/react";
 import { AnimatePresence, motion } from "framer-motion";
 import { getCart } from "@/actions/boutique/cart";
+import LocaleSwitcher from "@/components/LocaleSwitcher";
 
 const NAV_LINKS = [
   { label: "Accueil", href: "/" },
@@ -24,7 +25,12 @@ export default function Navbar() {
   const [active, setActive] = useState("Accueil");
   const [cartItemCount, setCartItemCount] = useState(0);
   const { data: session, status } = useSession();
-  const isAuthed = status === "authenticated";
+  // See Footer.jsx for why this is gated on mount rather than fetching the
+  // session server-side (avoids a hydration mismatch without forcing every
+  // public route to render dynamically).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const isAuthed = mounted && status === "authenticated";
 
   // Fetched client-side (not passed from the layout) so the shared public
   // layout never touches cookies() — see app/(public)/layout.js. Re-fetches
@@ -136,6 +142,8 @@ export default function Navbar() {
 
         {/* ── Right actions ── */}
         <div className="relative flex items-center justify-self-end gap-2 md:gap-3">
+          <LocaleSwitcher className="text-cream/70" />
+
           {/* Dashboard button for users with specific roles */}
           {hasDashboardRole && (
             <Link

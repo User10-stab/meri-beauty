@@ -8,20 +8,20 @@ import { isAdminRole, canAccessDashboard, ROLES } from "@/lib/authorization";
 
 const staffAssignmentSchema = z.object({
   staffId: z.string().min(1, "Le professionnel est obligatoire."),
-  price: z.coerce.number({ invalid_type_error: "Le prix est invalide." }).nonnegative("Le prix ne peut pas être négatif."),
-  duration: z.coerce.number({ invalid_type_error: "La durée est invalide." }).int("La durée doit être un nombre entier.").nonnegative("La durée ne peut pas être négative."),
+  price: z.coerce.number({ error: "Le prix est invalide." }).nonnegative("Le prix ne peut pas être négatif."),
+  duration: z.coerce.number({ error: "La durée est invalide." }).int("La durée doit être un nombre entier.").nonnegative("La durée ne peut pas être négative."),
   margin: z.coerce.number().nonnegative("La marge ne peut pas être négative.").optional().nullable(),
   photo: z.string().optional().nullable(),
 });
 
 const createServiceSchema = z.object({
   name: z
-    .string({ required_error: "Le nom du service est obligatoire." })
+    .string({ error: "Le nom du service est obligatoire." })
     .trim()
     .min(2, "Le nom doit contenir au moins 2 caractères.")
     .max(100, "Le nom ne peut pas dépasser 100 caractères."),
   categoryId: z
-    .string({ required_error: "La catégorie est obligatoire." })
+    .string({ error: "La catégorie est obligatoire." })
     .min(1, "La catégorie est obligatoire."),
   description: z
     .string()
@@ -53,12 +53,12 @@ const createServiceSchema = z.object({
 const updateServiceSchema = z.object({
   id: z.string().min(1, "L'identifiant du service est obligatoire."),
   name: z
-    .string({ required_error: "Le nom du service est obligatoire." })
+    .string({ error: "Le nom du service est obligatoire." })
     .trim()
     .min(2, "Le nom doit contenir au moins 2 caractères.")
     .max(100, "Le nom ne peut pas dépasser 100 caractères."),
   categoryId: z
-    .string({ required_error: "La catégorie est obligatoire." })
+    .string({ error: "La catégorie est obligatoire." })
     .min(1, "La catégorie est obligatoire."),
   description: z
     .string()
@@ -660,7 +660,7 @@ export async function getCategories() {
 
 const createCategorySchema = z.object({
   name: z
-    .string({ required_error: "Le nom de la catégorie est obligatoire." })
+    .string({ error: "Le nom de la catégorie est obligatoire." })
     .trim()
     .min(2, "Le nom doit contenir au moins 2 caractères.")
     .max(60, "Le nom ne peut pas dépasser 60 caractères."),
@@ -752,7 +752,7 @@ export async function createCategory(input) {
 const updateCategorySchema = z.object({
   id: z.string().min(1, "L'identifiant de la catégorie est obligatoire."),
   name: z
-    .string({ required_error: "Le nom de la catégorie est obligatoire." })
+    .string({ error: "Le nom de la catégorie est obligatoire." })
     .trim()
     .min(2, "Le nom doit contenir au moins 2 caractères.")
     .max(60, "Le nom ne peut pas dépasser 60 caractères."),

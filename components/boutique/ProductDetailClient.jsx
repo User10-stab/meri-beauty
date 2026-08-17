@@ -44,10 +44,18 @@ export function ProductDetailClient({ product, initialVariantId }) {
           <Link href="/boutique" className="hover:text-[#2F3A2E]">
             {t("title")}
           </Link>
-          <ChevronRight size={12} />
-          <span>{product.category.name}</span>
-          <ChevronRight size={12} />
-          <span className="text-[#2F3A2E]">{product.subcategory.name}</span>
+          {product.category && (
+            <>
+              <ChevronRight size={12} />
+              <span>{product.category.name}</span>
+            </>
+          )}
+          {product.subcategory && (
+            <>
+              <ChevronRight size={12} />
+              <span className="text-[#2F3A2E]">{product.subcategory.name}</span>
+            </>
+          )}
         </nav>
 
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">

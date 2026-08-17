@@ -11,6 +11,7 @@ import { AppToaster } from "@/components/AppToaster";
 import { getMetadataBase } from "@/lib/site-url";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
+import { auth } from "@/auth";
 
 const cormorant = Cormorant_Garamond({
   subsets: ["latin"],
@@ -48,11 +49,17 @@ export const metadata = {
 export default async function RootLayout({ children }) {
   const locale = await getLocale();
   const messages = await getMessages();
+  // Fetched once here (a JWT decode, not a DB query — see auth.js) and
+  // passed into SessionProvider so useSession() agrees with the server on
+  // its very first client render. Without this, every useSession() consumer
+  // starts at "loading" client-side regardless of the real session cookie,
+  // producing a hydration mismatch on any UI branching on auth state.
+  const session = await auth();
   return (
     <html lang={locale} suppressHydrationWarning className={cormorant.variable}>
       <body className="antialiased" suppressHydrationWarning>
         <NextIntlClientProvider locale={locale} messages={messages}>
-          <Providers>
+          <Providers session={session}>
             <ConfirmProvider>
               <NextTopLoader color="#5750F1" showSpinner={false} />
               {children}

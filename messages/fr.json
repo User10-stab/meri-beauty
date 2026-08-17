@@ -1423,7 +1423,7 @@
         "selectProductsError": "Sélectionnez le fichier produits Wix."
       },
       "stepMapping": {
-        "intro": "{productsCount} produits trouvés, avec {slugsCount} étiquettes Wix différentes. Wix ne distingue pas marque et catégorie — indiquez ce que chaque étiquette représente. Une étiquette classée « Catégorie » devient une catégorie sous la marque du produit, avec une sous-catégorie générique « Général » en dessous, à affiner plus tard. Une suggestion est déjà pré-remplie quand les noms de produits le confirment ; vérifiez et corrigez le reste.",
+        "intro": "{productsCount} produits trouvés, avec {slugsCount} étiquettes Wix différentes. Wix ne distingue pas marque et catégorie — indiquez ce que chaque étiquette représente. Une étiquette classée « Catégorie » devient une catégorie sous la marque du produit, avec une sous-catégorie générique « Général » en dessous, à affiner plus tard. Une suggestion est déjà pré-remplie quand les noms de produits le confirment ; vérifiez et corrigez le reste. Attention : le nom du fabricant (ex. « Purple », « Staleks ») n'apparaît pas toujours au début du nom de chaque produit — dans ce cas la suggestion se trompe et classe la marque comme catégorie, et inversement. Si une étiquette est un nom de marque/fabricant, choisissez « Marque » même si la suggestion dit « Catégorie ».",
         "table": {
           "wixLabel": "Étiquette Wix",
           "usedBy": "Utilisée par",
@@ -1438,7 +1438,7 @@
         "continue": "Continuer"
       },
       "stepReview": {
-        "unclassifiedWarning": "{count} produit(s) n'ont aucune étiquette classée « Catégorie » — ils seront importés sous « Non classé » et pourront être reclassés depuis la fiche produit.",
+        "unclassifiedWarning": "{count} produit(s) n'ont pas de marque et/ou de catégorie identifiée — ils seront importés sous « Non classé » et pourront être reclassés depuis la fiche produit.",
         "table": {
           "product": "Produit",
           "brand": "Marque",
@@ -1450,6 +1450,12 @@
         },
         "back": "Retour",
         "importButton": "Importer {count} produit(s) en brouillon"
+      },
+      "stepImporting": {
+        "title": "Importation en cours…",
+        "progress": "{done} sur {total} produits traités",
+        "warning": "Ne fermez pas cette page et ne naviguez pas ailleurs tant que l'importation n'est pas terminée.",
+        "leaveConfirm": "L'importation est en cours — si vous quittez maintenant, elle sera interrompue. Quitter quand même ?"
       },
       "stepDone": {
         "success": "{count} produit(s) importé(s) en brouillon — passez-les en revue (prix, images, description) avant de les rendre actifs sur la boutique.",

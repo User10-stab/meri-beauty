@@ -1384,7 +1384,7 @@
         "selectProductsError": "Select the Wix products file."
       },
       "stepMapping": {
-        "intro": "{productsCount} products found, with {slugsCount} different Wix tags. Wix does not distinguish brand and category — indicate what each tag represents. A tag classified as \"Category\" becomes a category under the product's brand, with a generic \"General\" subcategory below, to be refined later. A suggestion is pre-filled when product names confirm it; verify and correct the rest.",
+        "intro": "{productsCount} products found, with {slugsCount} different Wix tags. Wix does not distinguish brand and category — indicate what each tag represents. A tag classified as \"Category\" becomes a category under the product's brand, with a generic \"General\" subcategory below, to be refined later. A suggestion is pre-filled when product names confirm it; verify and correct the rest. Careful: a manufacturer name (e.g. \"Purple\", \"Staleks\") doesn't always appear at the start of every product's name — when that's the case the suggestion gets it backwards, classifying the brand as a category and vice-versa. If a tag is a brand/manufacturer name, pick \"Brand\" even if the suggestion says \"Category\".",
         "table": {
           "wixLabel": "Wix tag",
           "usedBy": "Used by",
@@ -1399,7 +1399,7 @@
         "continue": "Continue"
       },
       "stepReview": {
-        "unclassifiedWarning": "{count} product(s) have no tag classified as \"Category\" — they will be imported under \"Unclassified\" and can be reclassified from the product page.",
+        "unclassifiedWarning": "{count} product(s) have no brand and/or category identified — they will be imported under \"Unclassified\" and can be reclassified from the product page.",
         "table": {
           "product": "Product",
           "brand": "Brand",
@@ -1411,6 +1411,12 @@
         },
         "back": "Back",
         "importButton": "Import {count} product(s) as draft"
+      },
+      "stepImporting": {
+        "title": "Import in progress…",
+        "progress": "{done} of {total} products processed",
+        "warning": "Don't close this page or navigate away until the import is finished.",
+        "leaveConfirm": "The import is still running — leaving now will interrupt it. Leave anyway?"
       },
       "stepDone": {
         "success": "{count} product(s) imported as draft — review them (price, images, description) before making them active on the shop.",

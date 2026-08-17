@@ -150,6 +150,7 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
     const payload = {
       name,
       description: description || null,
+      categoryId,
       subcategoryId,
       status,
       variants: variants.map((v, i) => ({
@@ -358,13 +359,18 @@ export function ProductEditor({ product, brands, initialBarcode = null }) {
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
+                {errors.categoryId && (
+                  <p className="mt-1 text-xs font-medium text-red-600">{errors.categoryId}</p>
+                )}
               </Field>
 
-              <Field label="Sous-catégorie" required hint={!categoryId ? "Choisissez d'abord une catégorie." : null}>
+              <Field
+                label="Sous-catégorie"
+                hint={!categoryId ? "Choisissez d'abord une catégorie." : "Optionnel — si vous ne précisez pas, le produit est classé sous « Général »."}
+              >
                 <select
                   value={subcategoryId}
                   onChange={(e) => setSubcategoryId(e.target.value)}
-                  required
                   disabled={!categoryId}
                   className={`${inputClass} disabled:cursor-not-allowed disabled:bg-gray-50`}
                 >
@@ -594,14 +600,13 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
             className={inputClass}
           />
         </Field>
-        <Field label="Poids (g)" required hint="Utilisé pour calculer les frais de port Mondial Relay">
+        <Field label="Poids (g)" hint="Optionnel — non fourni par Wix. Utilisé pour les frais de port Mondial Relay, à renseigner quand connu.">
           <input
             type="number"
-            min="1"
+            min="0"
             value={variant.weightGrams ?? ""}
             onChange={(e) => onChange({ weightGrams: e.target.value === "" ? "" : Number(e.target.value) })}
             placeholder="ex. 250"
-            required
             className={inputClass}
           />
         </Field>

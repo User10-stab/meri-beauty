@@ -10,6 +10,7 @@ import {
   updateProductSchema,
   slugify,
 } from "@/lib/validations/boutique";
+import { getOrCreateGeneralSubcategory } from "@/lib/boutique/general-subcategory";
 
 /**
  * Product + variant management.
@@ -57,6 +58,34 @@ async function uniqueProductSlug(base, excludeId = null) {
     n += 1;
     slug = `${base}-${n}`;
   }
+}
+
+/**
+ * Every product belongs to a real category — a specific subcategory is
+ * optional, and falls back to that category's "Général" catch-all when
+ * staff leave it blank (see lib/boutique/general-subcategory.js). Returns
+ * either `{ subcategoryId }` or `{ error }` (an action-shaped error ready
+ * to return as-is).
+ */
+async function resolveSubcategoryId(categoryId, submittedSubcategoryId) {
+  const category = await prisma.productCategory.findUnique({ where: { id: categoryId }, select: { id: true } });
+  if (!category) {
+    return { error: { success: false, message: "Catégorie introuvable.", errors: { categoryId: "Catégorie introuvable." } } };
+  }
+
+  if (submittedSubcategoryId) {
+    const subcategory = await prisma.productSubcategory.findUnique({
+      where: { id: submittedSubcategoryId },
+      select: { id: true, categoryId: true },
+    });
+    if (!subcategory || subcategory.categoryId !== categoryId) {
+      return { error: { success: false, message: "Sous-catégorie introuvable.", errors: { subcategoryId: "Sous-catégorie introuvable." } } };
+    }
+    return { subcategoryId: submittedSubcategoryId };
+  }
+
+  const general = await getOrCreateGeneralSubcategory(categoryId);
+  return { subcategoryId: general.id };
 }
 
 /** Attaches computed profit/margin to a variant without storing them. */
@@ -243,7 +272,7 @@ export async function getProductById(id) {
       success: true,
       data: {
         ...product,
-        brandId: product.subcategory.category.brandId,
+        brandId: product.subcategory?.category.brandId ?? null,
         variants: product.variants.map(canSeeMargin ? withMargin : withoutMargin),
       },
     };
@@ -268,20 +297,12 @@ export async function createProduct(input) {
     };
   }
 
-  const { name, description, subcategoryId, status, variants, images } = parsed.data;
+  const { name, description, categoryId, subcategoryId: submittedSubcategoryId, status, variants, images } = parsed.data;
 
   try {
-    const subcategory = await prisma.productSubcategory.findUnique({
-      where: { id: subcategoryId },
-      select: { id: true },
-    });
-    if (!subcategory) {
-      return {
-        success: false,
-        message: "Sous-catégorie introuvable.",
-        errors: { subcategoryId: "Sous-catégorie introuvable." },
-      };
-    }
+    const resolved = await resolveSubcategoryId(categoryId, submittedSubcategoryId);
+    if (resolved.error) return resolved.error;
+    const subcategoryId = resolved.subcategoryId;
 
     // SKU/barcode collisions fail loudly and early — the alternative is a
     // half-created product blocked by a unique constraint mid-transaction.
@@ -383,7 +404,7 @@ export async function updateProduct(input) {
     };
   }
 
-  const { id, name, description, subcategoryId, status, variants, images } = parsed.data;
+  const { id, name, description, categoryId, subcategoryId: submittedSubcategoryId, status, variants, images } = parsed.data;
 
   try {
     const existing = await prisma.product.findUnique({
@@ -391,6 +412,10 @@ export async function updateProduct(input) {
       include: { variants: { where: { isDeleted: false } } },
     });
     if (!existing) return { success: false, message: "Produit introuvable." };
+
+    const resolved = await resolveSubcategoryId(categoryId, submittedSubcategoryId);
+    if (resolved.error) return resolved.error;
+    const subcategoryId = resolved.subcategoryId;
 
     const skuClash = await findVariantClash(variants, id);
     if (skuClash) return skuClash;

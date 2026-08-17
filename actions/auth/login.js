@@ -48,8 +48,8 @@ export async function loginUser(input) {
   }
 
   try {
-      const user = await prisma.user.findUnique({
-        where: { email },
+      const user = await prisma.user.findFirst({
+        where: { email, isDeleted: false },
         select: {
           role: true,
           emailVerified: true,

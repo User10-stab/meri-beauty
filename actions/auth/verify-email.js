@@ -111,8 +111,8 @@ export async function verifyEmail(rawToken) {
       };
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email: matchedToken.email },
+    const user = await prisma.user.findFirst({
+      where: { email: matchedToken.email, isDeleted: false },
       select: { id: true, fullName: true },
     });
 
@@ -259,8 +259,8 @@ export async function resendVerificationEmail(input) {
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { email },
+    const user = await prisma.user.findFirst({
+      where: { email, isDeleted: false },
       select: { id: true, fullName: true, email: true, emailVerified: true },
     });
 

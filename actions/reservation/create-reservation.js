@@ -53,6 +53,19 @@ class SessionExpiredError extends Error {
   }
 }
 
+/**
+ * Thrown by resolveOrCreateCustomer's P2002 fallback when the unique-index
+ * collision is on phone rather than email — see the comment above that
+ * fallback for why this can no longer be resolved by taking over the
+ * conflicting account.
+ */
+class PhoneAlreadyRegisteredError extends Error {
+  constructor() {
+    super("Phone already registered to another account");
+    this.name = "PhoneAlreadyRegisteredError";
+  }
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -141,54 +154,27 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
     return { user, isNewUser: true, temporaryPassword };
   } catch (createError) {
     // P2002 = unique constraint violation — another request already
-    // created this user between our findFirst and this create.
+    // created this user between our findFirst and this create. The unique
+    // indexes backing email/phone are active-only (partial indexes, see
+    // migration 20260817153631_active_only_uniqueness), so a collision here
+    // can only be against an ACTIVE user — never a soft-deleted one. The old
+    // fallback re-queried without an isDeleted filter anyway and, if it
+    // happened to land on a soft-deleted namesake, "revived" that account by
+    // overwriting its password and forcing emailVerified: true with no proof
+    // the caller actually owns that email — an account-takeover path. It
+    // also force-verified whatever active user it matched, same problem.
+    // The only safe outcome of a real active-row collision is: the email is
+    // ours (same person double-submitting, e.g. a retried request) — reuse
+    // that account as-is, without touching its verification state — or the
+    // phone belongs to someone else's account under a different email, which
+    // we can only refuse.
     if (createError?.code === "P2002") {
-      let existingUser = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { email: customerInfo.email.trim().toLowerCase() },
-            ...(customerInfo.phone ? [{ phone: customerInfo.phone.trim() }] : []),
-          ],
-        },
+      const existingUser = await prisma.user.findFirst({
+        where: { email: customerInfo.email.trim().toLowerCase(), isDeleted: false },
       });
 
       if (!existingUser) {
-        // Truly unexpected — propagate so the outer catch handles it
-        throw createError;
-      }
-
-      if (existingUser.isDeleted) {
-        const temporaryPassword = generateTemporaryPassword();
-        const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
-
-        user = await prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            fullName: customerInfo.fullName.trim(),
-            email: customerInfo.email.trim().toLowerCase(),
-            phone: customerInfo.phone.trim(),
-            password: hashedPassword,
-            role: "CUSTOMER",
-            emailVerified: true,
-            isActive: true,
-            isDeleted: false,
-            deletedAt: null,
-            ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
-            ...buildTermsAcceptanceUpdate(),
-          },
-        });
-
-        return { user, isNewUser: true, temporaryPassword };
-      }
-
-      if (!existingUser.emailVerified || !existingUser.isActive) {
-        existingUser = await prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            emailVerified: true,
-            isActive: true,
-          },
-        });
+        throw new PhoneAlreadyRegisteredError();
       }
 
       return { user: existingUser, isNewUser: false, temporaryPassword: null };
@@ -234,8 +220,8 @@ async function sendWelcomeEmailIfNew({ user, isNewUser, temporaryPassword }, log
  */
 export async function checkEmailExists(email) {
   if (!email) return { exists: false };
-  const user = await prisma.user.findUnique({
-    where: { email: email.trim().toLowerCase() },
+  const user = await prisma.user.findFirst({
+    where: { email: email.trim().toLowerCase(), isDeleted: false },
     select: { id: true },
   });
   return { exists: Boolean(user) };
@@ -352,6 +338,13 @@ export async function createReservation(data) {
         return {
           success: false,
           message: "Votre session a expiré. Veuillez vous reconnecter et réessayer.",
+        };
+      }
+      if (err instanceof PhoneAlreadyRegisteredError) {
+        return {
+          success: false,
+          field: "phone",
+          message: "Ce numéro de téléphone est déjà associé à un autre compte. Connectez-vous ou utilisez un autre numéro.",
         };
       }
       throw err;
@@ -888,6 +881,32 @@ export async function createMultipleReservations(data) {
       buildAppointmentWindow(date, time, staffServices[i].duration)
     );
 
+    // ── 3b. Check drafts against each other for same-staff overlaps ───────
+    // findConflictingAppointment (below) only checks each draft against
+    // appointments that already exist in the DB — two drafts in this same
+    // batch booked with the same staff at overlapping times are invisible to
+    // each other there, since neither exists yet when both checks run in
+    // parallel. Without this, the second insert in the transaction below
+    // hits the DB's overlap exclusion constraint directly and surfaces as a
+    // raw, unhandled error instead of a clean validation message.
+    for (let i = 0; i < appointments.length; i++) {
+      for (let j = i + 1; j < appointments.length; j++) {
+        if (staffServices[i].staffId !== staffServices[j].staffId) continue;
+        if (timeWindows[i].appointmentDate.getTime() !== timeWindows[j].appointmentDate.getTime()) continue;
+        const occupiedEndI = new Date(timeWindows[i].endTime);
+        occupiedEndI.setMinutes(occupiedEndI.getMinutes() + Number(staffServices[i].margin ?? 0));
+        const occupiedEndJ = new Date(timeWindows[j].endTime);
+        occupiedEndJ.setMinutes(occupiedEndJ.getMinutes() + Number(staffServices[j].margin ?? 0));
+        const overlap = timeWindows[i].startTime < occupiedEndJ && timeWindows[j].startTime < occupiedEndI;
+        if (overlap) {
+          return {
+            success: false,
+            message: `Les rendez-vous ${i + 1} et ${j + 1} se chevauchent avec le même membre du personnel. Veuillez choisir des horaires différents.`,
+          };
+        }
+      }
+    }
+
     // ── 4. Check slot availability for every appointment ──────────────────
     const conflicts = await Promise.all(
       appointments.map(({ staffServiceId }, i) => {
@@ -931,8 +950,25 @@ export async function createMultipleReservations(data) {
           message: "Votre session a expiré. Veuillez vous reconnecter et réessayer.",
         };
       }
+      if (err instanceof PhoneAlreadyRegisteredError) {
+        return {
+          success: false,
+          field: "phone",
+          message: "Ce numéro de téléphone est déjà associé à un autre compte. Connectez-vous ou utilisez un autre numéro.",
+        };
+      }
       throw err;
     }
+
+    // A multi-appointment booking never goes through PaymentStep — there's no
+    // deposit and no online-payment step for it (see getReservationPaymentDecision's
+    // appointmentCount !== 1 branch, the single source of truth for this rule).
+    // Every leg lands PENDING regardless of the staff member's own
+    // reservationConfirmationMode, same as CASH_ONLY/MANUAL single bookings —
+    // it's confirmed later from the staff dashboard, never auto-confirmed here.
+    const multiAppointmentStatus = getReservationPaymentDecision({
+      appointmentCount: appointments.length,
+    }).appointmentStatusBeforePayment;
 
     // ── 6. Create all appointments atomically ─────────────────────────────
     const createdAppointments = await prisma.$transaction(async (tx) => {
@@ -949,7 +985,7 @@ export async function createMultipleReservations(data) {
             date: appointmentDate,
             startTime,
             endTime,
-            status: "CONFIRMED",
+            status: multiAppointmentStatus,
             notes: notes || null,
           },
         });
@@ -1010,6 +1046,7 @@ export async function createMultipleReservations(data) {
         })),
         totalDepositPaid: 0,
         totalAmount,
+        isPending: multiAppointmentStatus === "PENDING",
       }),
     }).catch((err) => console.error("[createMultipleReservations] confirmation email failed:", err));
 

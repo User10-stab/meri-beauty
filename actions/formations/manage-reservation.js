@@ -8,7 +8,7 @@ import { formationCancellationEmail } from "@/lib/email-templates";
 import { isAdminRole } from "@/lib/authorization";
 import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting-list";
 import { stripe } from "@/lib/stripe";
-import { issueCreditNote } from "@/lib/invoicing";
+import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
 
@@ -56,7 +56,7 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       where: { id: reservationId },
       include: {
         session: { include: { formation: true } },
-        customer: true,
+        customer: { include: { billingProfile: true } },
         payment: { include: { invoice: true, transactions: true } },
       },
     });
@@ -155,6 +155,33 @@ export async function cancelFormationReservation(reservationId, { reason, refund
           await markRefundFailed(prisma, payment.id, error);
         }
       }
+    } else if (
+      !refundPayment &&
+      reservation.payment &&
+      Number(reservation.payment.paidAmount) > 0.01 &&
+      !reservation.payment.invoice
+    ) {
+      // Deposit kept, not refunded — this is now final, non-refundable
+      // revenue, and Belgian law requires an invoice for it just as much as
+      // for a normally-settled reservation (see settleReservation's own
+      // issueInvoice call). Never invoiced at collection time (see
+      // lib/reservations/settle-reservation.js's doc comment), so this is
+      // the only point where that invoice gets issued for a forfeited
+      // deposit.
+      const payment = reservation.payment;
+      await prisma.$transaction(async (tx) => {
+        await issueInvoice(tx, {
+          paymentId: payment.id,
+          source: "FORMATION",
+          totalInclVat: Number(payment.paidAmount),
+          customer: buildInvoiceCustomer(reservation.customer),
+          lines: buildServiceInvoiceLines({
+            description: `Annulation — acompte non remboursable — ${reservation.session.formation.title}`,
+            totalAmount: Number(payment.paidAmount),
+          }),
+        });
+        await tx.payment.update({ where: { id: payment.id }, data: { status: "PAID" } });
+      });
     }
 
     notifyAllInFormationWaitingList(reservation.sessionId).catch((err) =>

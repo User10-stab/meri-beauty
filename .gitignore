@@ -33,6 +33,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# bare "env" copies (the .env* rule above does not match a name without the dot)
+/env
+/env.*
 
 # vercel
 .vercel

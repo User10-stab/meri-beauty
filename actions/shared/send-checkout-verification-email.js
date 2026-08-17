@@ -48,5 +48,13 @@ export async function sendCheckoutVerificationEmail({ email, fullName, resumeTyp
     expiresInMinutes: TOKEN_EXPIRY_MINUTES,
   });
 
-  await sendEmail({ to: email, ...emailTemplate });
+  // sendEmail reports provider failures by returning { success: false } rather
+  // than throwing, so an unchecked call makes a rejected send look identical to
+  // a delivered one — the caller would show "check your inbox" for mail that
+  // never left. Callers catch to tell the customer the send failed, so turn a
+  // failed result back into the throw they're already written to expect.
+  const result = await sendEmail({ to: email, ...emailTemplate });
+  if (!result?.success) {
+    throw new Error(`Verification email to ${email} was not sent: ${result?.error ?? "unknown error"}`);
+  }
 }

@@ -6,7 +6,7 @@ import { Search, Loader2, CalendarX, Star } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
-import { confirmAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
 
 const STATUS_LABEL = {
   PENDING: "En attente",
@@ -96,7 +96,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
 
   async function handleConfirm(appointmentId) {
     setRowLoadingId(appointmentId);
-    const result = await confirmAppointment(appointmentId);
+    const result = await acceptAppointment(appointmentId);
     setRowLoadingId(null);
     if (result.success) {
       toast.success(result.message);

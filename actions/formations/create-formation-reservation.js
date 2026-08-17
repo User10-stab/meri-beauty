@@ -307,11 +307,11 @@ export async function createFormationReservation(data) {
         vatValidationAddress: viesResult.address ?? null,
       };
     }
-    let user = await prisma.user.findUnique({ where: { email } });
+    let user = await prisma.user.findFirst({ where: { email, isDeleted: false } });
 
     if (!user) {
       if (phone) {
-        const phoneExists = await prisma.user.findUnique({ where: { phone } });
+        const phoneExists = await prisma.user.findFirst({ where: { phone, isDeleted: false } });
         if (phoneExists) {
           return {
             success: false,
@@ -501,16 +501,20 @@ export async function createFormationReservation(data) {
       return { success: true, requiresEmailVerification: true, email };
     }
 
-    const checkoutResult = await createFormationReservationCheckoutSession(
-      reservation.id,
-      createResumeCheckoutToken({ resumeType: "FORMATION", resumeId: reservation.id, email }),
-    );
+    // Also handed back to the client below so it can prove authorization on
+    // this reservation to convertFormationWaitingListEntry — that action is a
+    // public "use server" endpoint with no session for a guest booking, so a
+    // bare waitingListEntryId/reservationId pair proves nothing on its own
+    // (see isCheckoutAuthorized's doc comment).
+    const checkoutToken = createResumeCheckoutToken({ resumeType: "FORMATION", resumeId: reservation.id, email });
+    const checkoutResult = await createFormationReservationCheckoutSession(reservation.id, checkoutToken);
     if (!checkoutResult.success) return checkoutResult;
 
     return {
       success: true,
       url: checkoutResult.url,
       reservationId: reservation.id,
+      checkoutToken,
       temporaryPassword: null,
       isNewUser: false,
       email,

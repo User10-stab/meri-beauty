@@ -272,7 +272,7 @@ function ReservationFormationContent() {
 
     if (result.success && result.url) {
       if (waitingListId) {
-        await convertFormationWaitingListEntry(waitingListId, result.reservationId);
+        await convertFormationWaitingListEntry(waitingListId, result.reservationId, result.checkoutToken);
       }
 
       window.location.href = result.url;
@@ -280,7 +280,7 @@ function ReservationFormationContent() {
       // A 100%-off promo code covered the whole reservation — already
       // confirmed server-side, nothing to pay on Stripe's side.
       if (waitingListId) {
-        await convertFormationWaitingListEntry(waitingListId, result.reservationId);
+        await convertFormationWaitingListEntry(waitingListId, result.reservationId, result.checkoutToken);
       }
       router.push(`/reservation-formation/succes?reservation_id=${result.reservationId}`);
     } else if (result.success && result.requiresEmailVerification) {

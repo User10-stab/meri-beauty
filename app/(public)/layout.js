@@ -90,8 +90,14 @@ export default async function PublicLayout({ children }) {
         All h1/h2/h3 inside public pages get Bodoni Moda automatically.
         The [&_h1],[&_h2],[&_h3] selectors scope it only to this layout
         so the dashboard/admin UI is unaffected.
+
+        bg-white: `body` carries the admin dashboard's gray canvas
+        (css/style.css, bg-gray-2) globally, and public pages don't paint
+        their own background over their full height — so on any page short
+        enough to leave space below the content, that dashboard gray showed
+        through instead of matching the rest of the site.
       */}
-      <main className="w-full min-h-screen [&_h1]:font-display [&_h2]:font-display [&_h3]:font-display">
+      <main className="w-full min-h-screen bg-white [&_h1]:font-display [&_h2]:font-display [&_h3]:font-display">
         {children}
       </main>
 

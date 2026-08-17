@@ -109,37 +109,89 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
     if (user) return { user, isNewUser: false, temporaryPassword: null };
   }
 
-  const existing = await prisma.user.findFirst({
-    where: {
-      OR: [
-        { email: customerInfo.email.trim().toLowerCase() },
-        ...(customerInfo.phone ? [{ phone: customerInfo.phone.trim() }] : []),
-      ],
-      isDeleted: false,
-    },
-  });
-  if (existing) return { user: existing, isNewUser: false, temporaryPassword: null };
+  const email = customerInfo.email.trim().toLowerCase();
+  const phone = customerInfo.phone?.trim();
+
+  // Only required once we know the resolved/about-to-be-created user doesn't
+  // already have an address on file — a returning guest shouldn't have to
+  // resubmit it. Mirrors completePointOfSaleSale's needsAddress gate.
+  const suppliedAddress = customerInfo.addressLine1 && customerInfo.addressCity && customerInfo.addressPostalCode
+    ? {
+        addressLine1: customerInfo.addressLine1,
+        addressLine2: customerInfo.addressLine2 || null,
+        addressCity: customerInfo.addressCity,
+        addressPostalCode: customerInfo.addressPostalCode,
+        addressCountry: customerInfo.addressCountry || "BE",
+      }
+    : null;
+
+  // The email is the identity the buyer actually typed, so it alone decides
+  // which account this is. Treating phone as an equal alternative here handed
+  // back whichever account owned the number and silently dropped the address
+  // they entered: the order was attached to that other account and the
+  // confirmation mail went to its owner, while the "check your inbox" screen
+  // quoted an address the buyer had never seen and could not open.
+  const existing = await prisma.user.findFirst({ where: { email, isDeleted: false } });
+  if (existing) {
+    if (!existing.addressLine1) {
+      if (!suppliedAddress) throw new Error("ADDRESS_REQUIRED");
+      const updated = await prisma.user.update({ where: { id: existing.id }, data: suppliedAddress });
+      return { user: updated, isNewUser: false, temporaryPassword: null };
+    }
+    return { user: existing, isNewUser: false, temporaryPassword: null };
+  }
+
+  // New email, but the number is already on a different account. Refuse rather
+  // than merge — the active-only unique index on phone (user_active_phone_idx)
+  // would reject the create below anyway, and saying so beats surfacing a
+  // P2002 as the generic "Impossible de créer la commande."
+  if (phone) {
+    const phoneOwner = await prisma.user.findFirst({
+      where: { phone, isDeleted: false },
+      select: { id: true },
+    });
+    if (phoneOwner) throw new Error("PHONE_ALREADY_REGISTERED");
+  }
+
+  // Brand-new account — mandatory-address rule applies the same as normal
+  // registration (lib/validations/register.js), since this is the moment
+  // the account is created.
+  if (!suppliedAddress) throw new Error("ADDRESS_REQUIRED");
 
   // Throwaway placeholder — never shown to anyone. The real, usable
   // password is generated once the email is confirmed (see
   // actions/shared/resume-checkout-after-verification.js).
   const placeholderHash = await bcrypt.hash(randomBytes(9).toString("base64url"), BCRYPT_SALT_ROUNDS);
 
-  const user = await prisma.user.create({
-    data: {
-      fullName: customerInfo.fullName.trim(),
-      email: customerInfo.email.trim().toLowerCase(),
-      phone: customerInfo.phone.trim(),
-      password: placeholderHash,
-      role: "CUSTOMER",
-      isActive: true,
-      ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "boutique_checkout"),
-      // Guest checkout creates the account, so this is the moment consent is
-      // given — it used to be recorded at signup only, which meant a guest who
-      // never registered left no record at all.
-      ...buildTermsAcceptanceUpdate(),
-    },
-  });
+  let user;
+  try {
+    user = await prisma.user.create({
+      data: {
+        fullName: customerInfo.fullName.trim(),
+        email,
+        phone,
+        password: placeholderHash,
+        role: "CUSTOMER",
+        isActive: true,
+        ...suppliedAddress,
+        ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "boutique_checkout"),
+        // Guest checkout creates the account, so this is the moment consent is
+        // given — it used to be recorded at signup only, which meant a guest who
+        // never registered left no record at all.
+        ...buildTermsAcceptanceUpdate(),
+      },
+    });
+  } catch (error) {
+    // Two concurrent first-time checkouts can both clear the lookups above and
+    // then race this insert; the active-only unique indexes let exactly one
+    // win. Re-read the winner when it's the same email (same person, double
+    // submit), and report the number as taken when it isn't.
+    if (error.code !== "P2002") throw error;
+
+    const conflict = await prisma.user.findFirst({ where: { email, isDeleted: false } });
+    if (!conflict) throw new Error("PHONE_ALREADY_REGISTERED");
+    return { user: conflict, isNewUser: false, temporaryPassword: null };
+  }
 
   return { user, isNewUser: true, temporaryPassword: null };
 }
@@ -577,6 +629,20 @@ export async function createOrderFromCart(input) {
     if (error.message === "VAT_RATE_NOT_CONFIGURED") {
       return { success: false, message: "Le taux de TVA de cette destination n’est pas configuré. Contactez Meri Beauty." };
     }
+    if (error.message === "PHONE_ALREADY_REGISTERED") {
+      return {
+        success: false,
+        message: "Ce numéro de téléphone est déjà associé à un autre compte. Connectez-vous ou utilisez un autre numéro.",
+      };
+    }
+    if (error.message === "ADDRESS_REQUIRED") {
+      return {
+        success: false,
+        message: "L'adresse de facturation est obligatoire.",
+        requiresAddress: true,
+        errors: { addressLine1: "Obligatoire", addressCity: "Obligatoire", addressPostalCode: "Obligatoire" },
+      };
+    }
     captureError(error, { area: "stock-capacity", context: "createOrderFromCart" });
     return { success: false, message: "Impossible de créer la commande." };
   }
@@ -693,6 +759,30 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
       return { success: false, message: "Le délai de paiement pour cette commande a expiré." };
     }
 
+    // Reuse the live Stripe session instead of minting a new one on every
+    // retry-button click / post-verification resume / accidental double
+    // submit. Without this, each call created a fresh live session and the
+    // old one stayed payable — two tabs, two charges, no refund (the webhook
+    // only recognizes a *duplicate* of the exact same session as harmless).
+    if (order.stripeCheckoutSessionId) {
+      const previousSession = await stripe.checkout.sessions
+        .retrieve(order.stripeCheckoutSessionId)
+        .catch(() => null);
+      if (previousSession?.status === "open") {
+        return { success: true, url: previousSession.url };
+      }
+      if (previousSession?.status === "complete") {
+        // Already paid (or being finalized) via the previous session — the
+        // webhook just hasn't landed yet. Creating a second session here
+        // would be a real double charge; make the customer wait it out
+        // instead.
+        return {
+          success: false,
+          message: "Votre paiement précédent est en cours de confirmation. Merci de patienter quelques instants et de rafraîchir la page.",
+        };
+      }
+    }
+
     if (!(await isSellerLegalDataComplete())) {
       return {
         success: false,
@@ -739,9 +829,26 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
 
     const metadata = { kind: "order", orderId: order.id };
 
+    // Line items stay at full face value (same reasoning as orderInvoiceLines:
+    // per-item price stays legible) — the promo discount, if any, is applied
+    // as a Stripe-side coupon so the amount actually charged matches
+    // order.totalAmount. Without this, Stripe charged full price while the
+    // checkout UI had shown the discounted total.
+    let discounts;
+    if (Number(order.discountAmount) > 0) {
+      const coupon = await stripe.coupons.create({
+        amount_off: Math.round(Number(order.discountAmount) * 100),
+        currency: "eur",
+        duration: "once",
+        name: "Code promotionnel",
+      });
+      discounts = [{ coupon: coupon.id }];
+    }
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ["card"], // Bancontact disabled for now — see docs/QUESTIONS_FOR_MARIE.md
       line_items: lineItems,
+      ...(discounts ? { discounts } : {}),
       mode: "payment",
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/boutique/order/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/boutique/cart?canceled=true`,
@@ -1203,6 +1310,8 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
       }
 
       for (const item of order.items) {
+        // POS ad-hoc service lines (variantId null) carry no stock to adjust.
+        if (!item.variantId) continue;
         if (wasSold) {
           const updated = await tx.productVariant.update({
             where: { id: item.variantId },

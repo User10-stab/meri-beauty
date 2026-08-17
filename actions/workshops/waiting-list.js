@@ -3,6 +3,8 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
+import { auth } from "@/auth";
+import { isCheckoutAuthorized } from "@/lib/resume-checkout-token";
 import { sendEmail } from "@/lib/email";
 import { welcomeWithCredentialsEmail, waitingListJoinConfirmationEmail } from "@/lib/email-templates";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
@@ -79,7 +81,7 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
     // Resolve or create user
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
-    let user = await prisma.user.findUnique({ where: { email } });
+    let user = await prisma.user.findFirst({ where: { email, isDeleted: false } });
 
     let temporaryPassword = null;
     let isNewUser = false;
@@ -87,7 +89,7 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
     if (!user) {
       // Check phone uniqueness
       if (phone) {
-        const phoneExists = await prisma.user.findUnique({ where: { phone } });
+        const phoneExists = await prisma.user.findFirst({ where: { phone, isDeleted: false } });
         if (phoneExists) {
           return {
             success: false,
@@ -247,12 +249,15 @@ export async function validateWaitingListPriority(waitingListEntryId) {
  * Mark a waiting list entry as converted after successful reservation.
  *
  * Both ids are client-supplied (called right after createWorkshopReservation
- * returns its new id), so we verify the reservation actually belongs to the
- * same customer + session as the waiting-list entry before writing anything
- * — otherwise any caller who knows/guesses a waiting-list entry id could
- * attach an unrelated reservationId to it.
+ * returns its new id) and this is a public "use server" endpoint with no
+ * session for a guest booking — a bare (waitingListEntryId, reservationId)
+ * pair proves nothing on its own, it just has to already be a real matching
+ * pair, which anyone who intercepted or guessed both ids could still supply.
+ * checkoutToken is the same signed capability createWorkshopReservation just
+ * minted to authorize Stripe checkout on this exact reservation — requiring
+ * it here (or a session that owns the reservation) closes that gap.
  */
-export async function convertWaitingListEntry(waitingListEntryId, reservationId) {
+export async function convertWaitingListEntry(waitingListEntryId, reservationId, checkoutToken) {
   try {
     const entry = await prisma.waitingListEntry.findUnique({
       where: { id: waitingListEntryId },
@@ -268,6 +273,18 @@ export async function convertWaitingListEntry(waitingListEntryId, reservationId)
       !reservation ||
       reservation.sessionId !== entry.sessionId ||
       reservation.customerId !== entry.customerId
+    ) {
+      return { success: false };
+    }
+
+    const authSession = await auth();
+    if (
+      !isCheckoutAuthorized(reservation, {
+        resumeType: "WORKSHOP",
+        resumeId: reservationId,
+        checkoutToken,
+        sessionUserId: authSession?.user?.id,
+      })
     ) {
       return { success: false };
     }

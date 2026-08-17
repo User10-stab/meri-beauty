@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 // — same rules (name/email/phone + optional password change, current password
 // always required to confirm), nothing staff-specific in it.
 import { updatePersonalInfoSchema } from "@/lib/validations/staff-settings";
+import { sendVerificationEmail } from "@/actions/auth/verify-email";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -136,6 +137,8 @@ export async function updateMyProfile(input) {
       }
     }
 
+    const emailChanged = email !== undefined && email !== user.email;
+
     const updateData = {};
     if (fullName !== undefined) updateData.fullName = fullName;
     if (email !== undefined) updateData.email = email;
@@ -145,6 +148,13 @@ export async function updateMyProfile(input) {
       // Invalidates any other session logged in with the old password.
       updateData.sessionVersion = { increment: 1 };
     }
+    if (emailChanged) {
+      // A changed address is unproven until its owner clicks the link below
+      // — leaving emailVerified true would let anyone the account holder
+      // points this field at (typo or otherwise) inherit a trusted email on
+      // an account they don't own. Same rule as a brand-new signup.
+      updateData.emailVerified = false;
+    }
 
     if (Object.keys(updateData).length === 0) {
       return { success: false, message: "Aucune information à mettre à jour." };
@@ -152,8 +162,19 @@ export async function updateMyProfile(input) {
 
     await prisma.user.update({ where: { id: user.id }, data: updateData });
 
+    if (emailChanged) {
+      sendVerificationEmail({ email, fullName: fullName ?? user.fullName }).catch((err) =>
+        console.error("[updateMyProfile] verification email failed:", err)
+      );
+    }
+
     revalidatePath("/profile");
-    return { success: true, message: "Profil mis à jour avec succès." };
+    return {
+      success: true,
+      message: emailChanged
+        ? "Profil mis à jour avec succès. Vérifiez votre boîte mail pour confirmer votre nouvelle adresse."
+        : "Profil mis à jour avec succès.",
+    };
   } catch (error) {
     if (error?.code === "P2002") {
       const target = error.meta?.target;

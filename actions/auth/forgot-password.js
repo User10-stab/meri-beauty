@@ -47,8 +47,8 @@ export async function forgotPassword(input) {
   }
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { email },
+    const user = await prisma.user.findFirst({
+      where: { email, isDeleted: false },
       select: { id: true, fullName: true, email: true },
     });
 

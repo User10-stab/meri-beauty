@@ -246,8 +246,8 @@ function AutomaticPaymentPreview({ paymentDecision }) {
 }
 
 // No promo-code field here: a MANUAL-mode request has no Payment row (and no
-// online charge) until staff confirms it, and confirmation
-// (actions/appointment/manage-appointment.js#confirmAppointment) rebuilds the
+// online charge) until staff accepts it, and acceptance
+// (actions/appointment/manage-appointment.js#acceptAppointment) rebuilds the
 // price from scratch off the raw StaffService price for its own separate
 // payment link — there's nowhere downstream a discount applied at this step
 // would actually survive to. Promo codes for appointments only apply to the
@@ -573,11 +573,13 @@ function buildMultiDraftInputs(data) {
 
   return drafts.map((draft, i) => {
     if (proposal?.appointments) {
-      // Same-day auto-scheduled
+      // Same-day auto-scheduled OR multi-day manual selection.
+      // Multi-day entries carry their own `date`; same-day entries don't and
+      // fall back to the shared top-level `proposal.date`.
       const appt = proposal.appointments.find((a) => a.draftIndex === i);
       return {
         staffServiceId: draft.staffService.id,
-        date:           new Date(proposal.date),
+        date:           new Date(appt?.date ?? proposal.date),
         time:           appt?.time ?? data.time,
       };
     }

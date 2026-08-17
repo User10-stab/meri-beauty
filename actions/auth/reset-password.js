@@ -108,17 +108,36 @@ export async function resetPassword(input) {
 
     const hashedPassword = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 
-    await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { email: matchedToken.email },
+    const claimed = await prisma.$transaction(async (tx) => {
+      // email is no longer @unique on User (uniqueness moved to the
+      // active-only partial index, user_active_email_idx — a soft-deleted
+      // row keeps its old email indefinitely) — a bare `where: { email }`
+      // both fails Prisma's unique-input requirement and, if it matched
+      // anything, could match a soft-deleted account rather than the live
+      // one. Scoping to isDeleted: false is what stops a recycled address
+      // (soft-deleted A, new B signed up with the same email) from letting
+      // A's old reset link change B's password: this token was minted
+      // against A's email string, but only the account that's actually
+      // live for that address today may be reset.
+      const claim = await tx.user.updateMany({
+        where: { email: matchedToken.email, isDeleted: false },
         data: { password: hashedPassword, sessionVersion: { increment: 1 } },
       });
+      if (claim.count === 0) return false;
 
       await tx.passwordResetToken.update({
         where: { id: matchedToken.id },
         data: { used: true },
       });
+      return true;
     });
+
+    if (!claimed) {
+      return {
+        success: false,
+        message: "Ce lien de réinitialisation est invalide ou a expiré. Veuillez en demander un nouveau.",
+      };
+    }
 
     await prisma.passwordResetToken.deleteMany({
       where: {

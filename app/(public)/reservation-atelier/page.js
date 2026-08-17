@@ -265,7 +265,7 @@ function ReservationAtelierContent() {
 
     if (result.success && result.url) {
       if (waitingListId) {
-        await convertWaitingListEntry(waitingListId, result.reservationId);
+        await convertWaitingListEntry(waitingListId, result.reservationId, result.checkoutToken);
       }
 
       window.location.href = result.url;
@@ -273,7 +273,7 @@ function ReservationAtelierContent() {
       // A 100%-off promo code covered the whole reservation — already
       // confirmed server-side, nothing to pay on Stripe's side.
       if (waitingListId) {
-        await convertWaitingListEntry(waitingListId, result.reservationId);
+        await convertWaitingListEntry(waitingListId, result.reservationId, result.checkoutToken);
       }
       router.push(`/reservation-atelier/succes?reservation_id=${result.reservationId}`);
     } else if (result.success && result.requiresEmailVerification) {

@@ -1138,7 +1138,17 @@ async function applyWorkshopSessionChangeFee(session, meta) {
 
   const reservation = await prisma.workshopReservation.findUnique({
     where: { id: reservationId },
-    include: { session: { include: { workshop: true } }, customer: true, payment: true },
+    include: {
+      session: { include: { workshop: true } },
+      customer: {
+        include: {
+          billingProfile: {
+            select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+          },
+        },
+      },
+      payment: { include: { invoice: { select: { id: true } } } },
+    },
   });
 
   if (!reservation) {
@@ -1201,6 +1211,26 @@ async function applyWorkshopSessionChangeFee(session, meta) {
           paidAt: new Date(),
         },
       });
+
+      // Real collected revenue needs a legal document. Guarded on the
+      // Payment row not already carrying one — Invoice.paymentId is @unique,
+      // and a second session-change fee against the same reservation (its
+      // Payment row is 1:1 and reused across fee events) would otherwise
+      // collide. See the flagged edge case in the audit report: this guard
+      // silently skips invoicing a legitimate second fee rather than
+      // resolving where that revenue's invoice should go.
+      if (!reservation.payment.invoice) {
+        await issueInvoice(tx, {
+          paymentId: reservation.payment.id,
+          source: "WORKSHOP",
+          totalInclVat: changeFeeAmount,
+          customer: buildInvoiceCustomer(reservation.customer),
+          lines: buildServiceInvoiceLines({
+            description: `Frais de changement de séance — ${reservation.session.workshop.title}`,
+            totalAmount: changeFeeAmount,
+          }),
+        });
+      }
     }
     return true;
   });
@@ -1250,7 +1280,17 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
 
   const reservation = await prisma.workshopReservation.findUnique({
     where: { id: reservationId },
-    include: { session: { include: { workshop: true } }, customer: true, payment: true },
+    include: {
+      session: { include: { workshop: true } },
+      customer: {
+        include: {
+          billingProfile: {
+            select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+          },
+        },
+      },
+      payment: { include: { invoice: { select: { id: true } } } },
+    },
   });
 
   if (!reservation) {
@@ -1337,6 +1377,46 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
           paidAt: new Date(),
         },
       });
+
+      // A seat increase raises what the reservation is actually worth —
+      // keep the linked Payment row's totals in step, or settleReservation
+      // (which computes the final balance/invoice purely from
+      // Payment.totalAmount/remainingAmount, not WorkshopReservation.totalPrice)
+      // would under-bill and under-invoice the customer at final settlement.
+      // The deposit already paid is untouched (no additional deposit is
+      // collected for added seats — only this flat fee, handled separately
+      // above); remainingAmount is recomputed from the new total minus what's
+      // actually been paid, not by adding the delta, so this can't compound
+      // rounding drift if it ever ran twice.
+      if (isIncrease && newTotalPrice) {
+        await tx.payment.update({
+          where: { id: reservation.payment.id },
+          data: {
+            totalAmount: Number(newTotalPrice),
+            remainingAmount: Number(newTotalPrice) - Number(reservation.payment.paidAmount),
+          },
+        });
+      }
+
+      // Real collected revenue needs a legal document. Guarded on the
+      // Payment row not already carrying one — Invoice.paymentId is @unique,
+      // and a second seats-change fee against the same reservation (its
+      // Payment row is 1:1 and reused across fee events) would otherwise
+      // collide. See the flagged edge case in the audit report: this guard
+      // silently skips invoicing a legitimate second fee rather than
+      // resolving where that revenue's invoice should go.
+      if (!reservation.payment.invoice) {
+        await issueInvoice(tx, {
+          paymentId: reservation.payment.id,
+          source: "WORKSHOP",
+          totalInclVat: changeFeeAmount,
+          customer: buildInvoiceCustomer(reservation.customer),
+          lines: buildServiceInvoiceLines({
+            description: `Frais de changement de nombre de places — ${reservation.session.workshop.title}`,
+            totalAmount: changeFeeAmount,
+          }),
+        });
+      }
     }
     return { claimed: true };
   });

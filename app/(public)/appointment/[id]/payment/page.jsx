@@ -21,11 +21,15 @@ export default async function AcceptedAppointmentPaymentPage({ params }) {
       staffService: {
         select: {
           price: true,
-          depositEnabled: true,
-          depositPercentage: true,
-          allowedPaymentMethods: true,
           service: { select: { name: true } },
-          staff: { select: { user: { select: { fullName: true } } } },
+          staff: {
+            select: {
+              depositEnabled: true,
+              depositPercentage: true,
+              allowedPaymentMethods: true,
+              user: { select: { fullName: true } },
+            },
+          },
         },
       },
     },
@@ -38,9 +42,14 @@ export default async function AcceptedAppointmentPaymentPage({ params }) {
       appointment={{
         ...appointment,
         price: Number(appointment.staffService.price),
-        depositPercentage: Number(appointment.staffService.depositPercentage ?? 0),
+        depositPercentage: Number(appointment.staffService.staff?.depositPercentage ?? 0),
         staffName: appointment.staffService.staff?.user?.fullName ?? "Expert",
         serviceName: appointment.staffService.service.name,
+        staffService: {
+          ...appointment.staffService,
+          depositEnabled: appointment.staffService.staff?.depositEnabled ?? false,
+          allowedPaymentMethods: appointment.staffService.staff?.allowedPaymentMethods ?? "BOTH",
+        },
       }}
     />
   );

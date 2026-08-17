@@ -6,14 +6,13 @@ import { stripe } from "@/lib/stripe";
 import { ROLES, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
-import { reservationAcceptedEmail, reservationConfirmedEmail } from "@/lib/email-templates";
+import { reservationAcceptedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { renderInvoicePdf } from "@/lib/pdf/render";
 import {
   createNotificationsBulk,
-  buildAppointmentConfirmedNotification,
   buildAppointmentCancelledNotification,
   buildAppointmentNoShowNotification,
   getAppointmentNotificationRecipients,
@@ -79,7 +78,7 @@ async function authorizeAppointmentAction(appointmentId) {
  * @param {string} appointmentId
  * @returns {Promise<{ success: boolean, message?: string }>}
  */
-export async function confirmAppointment(appointmentId) {
+export async function acceptAppointment(appointmentId) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -188,154 +187,6 @@ export async function confirmAppointment(appointmentId) {
 }
 
 /**
- * Confirms an appointment (customer action). Transitions ACCEPTED → CONFIRMED.
- * Called by the customer after staff acceptance, for cash-only or no-payment-required flows.
- *
- * @param {string} appointmentId
- * @returns {Promise<{ success: boolean, message?: string }>}
- */
-export async function confirmAppointment(appointmentId) {
-  try {
-    if (!appointmentId) {
-      return { success: false, message: "ID de rendez-vous manquant" };
-    }
-
-    const session = await auth();
-    if (!session?.user) {
-      return { success: false, message: "Authentification requise" };
-    }
-
-    // Load appointment with related data
-    const appointment = await prisma.appointment.findUnique({
-      where: { id: appointmentId, isDeleted: false },
-      include: {
-        user: {
-          select: {
-            id: true,
-            fullName: true,
-            email: true,
-          },
-        },
-        staffService: {
-          include: {
-            service: true,
-            staff: {
-              include: {
-                user: {
-                  select: { fullName: true },
-                },
-              },
-            },
-          },
-        },
-        payment: true,
-      },
-    });
-
-    if (!appointment) {
-      return { success: false, message: "Rendez-vous introuvable" };
-    }
-
-    // Verify the user is the appointment owner
-    if (appointment.userId !== session.user.id) {
-      return { success: false, message: "Vous n'êtes pas autorisé à confirmer ce rendez-vous" };
-    }
-
-    if (appointment.status !== "ACCEPTED") {
-      return {
-        success: false,
-        message: "Ce rendez-vous n'est pas prêt à être confirmé",
-      };
-    }
-
-    const allowedPaymentMethods = appointment.staffService.staff?.allowedPaymentMethods;
-    const depositRequired = Boolean(appointment.staffService.staff?.depositEnabled)
-      && Number(appointment.staffService.staff?.depositPercentage ?? 0) > 0;
-    if (allowedPaymentMethods !== "CASH_ONLY" && depositRequired) {
-      return {
-        success: false,
-        message: "Un acompte ou un paiement en ligne est requis pour confirmer ce rendez-vous.",
-      };
-    }
-    if (allowedPaymentMethods === "ONLINE_ONLY") {
-      return {
-        success: false,
-        message: "Le paiement en ligne est requis pour confirmer ce rendez-vous.",
-      };
-    }
-
-    // ── Update status atomically ─────────────────────────────────────────────
-    const claimed = await prisma.$transaction(async (tx) => {
-      const claim = await tx.appointment.updateMany({
-        where: { id: appointmentId, status: "ACCEPTED" },
-        data: { status: "CONFIRMED" },
-      });
-      if (claim.count === 0) return false;
-
-      const serviceName = appointment.staffService?.service?.name;
-      const staffName = appointment.staffService?.staff?.user?.fullName;
-      const customerName = appointment.user?.fullName;
-
-      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
-
-      if (recipientUserIds.length > 0) {
-        await createNotificationsBulk(
-          recipientUserIds.map((uid) =>
-            buildAppointmentConfirmedNotification({
-              userId: uid,
-              appointmentId: appointment.id,
-              date: appointment.date,
-              startTime: appointment.startTime,
-              serviceName,
-              staffName,
-              customerName,
-            })
-          ),
-          { tx }
-        );
-      }
-      return true;
-    });
-
-    if (!claimed) {
-      return {
-        success: false,
-        message: "Ce rendez-vous n'est pas prêt à être confirmé",
-      };
-    }
-
-    // Send confirmation email
-    sendEmail({
-      to: appointment.user.email,
-      ...reservationConfirmedEmail({
-        customerName: appointment.user.fullName,
-        serviceName: appointment.staffService.service.name,
-        staffName: appointment.staffService.staff?.user?.fullName || "Expert",
-        date: appointment.date,
-        time: appointment.startTime.toLocaleTimeString("fr-FR", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        totalAmount: Number(appointment.staffService.price),
-      }),
-    }).catch((err) =>
-      console.error("[confirmAppointment] email failed:", err)
-    );
-
-    return {
-      success: true,
-      message: "Rendez-vous accepté — le client peut maintenant choisir son paiement.",
-    };
-  } catch (error) {
-    console.error("[confirmAppointment]", error);
-    return {
-      success: false,
-      message: "Erreur lors de la confirmation du rendez-vous",
-    };
-  }
-}
-
-/**
  * Rejects/cancels an appointment.
  * Called by the salon owner/staff from the dashboard.
  *
@@ -368,6 +219,16 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
             id: true,
             fullName: true,
             email: true,
+            vatNumber: true,
+            addressLine1: true,
+            addressLine2: true,
+            addressCity: true,
+            addressPostalCode: true,
+            addressCountry: true,
+            isCompany: true,
+            billingProfile: {
+              select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+            },
           },
         },
         staffService: {
@@ -386,17 +247,20 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
 
     const payment = appointment.payment;
     const wasPaid = Boolean(payment) && ["PAID", "PARTIALLY_PAID"].includes(payment.status);
-    // authorizeAppointmentAction already guarantees STAFF only reach this
-    // point for appointments assigned to them.
-    const cancelledByAssignedStaff = authCheck.userRole === ROLES.STAFF;
 
     // Cancelling an unpaid request is routine appointment management (STAFF
     // may do it for their own appointments, per authorizeAppointmentAction
     // above) — but cancelling a paid one triggers a real Stripe refund, which
-    // per policy only OWNER/ADMIN may issue.
+    // per policy only OWNER/ADMIN may issue, with no staff exemption: the
+    // site promises customers a late deposit "reste acquis sauf annulation
+    // exceptionnelle approuvée par l'administration" (see migration
+    // 20260812190000), so the same late cancellation must never refund 100%
+    // just because the assigned staff member (rather than an admin) clicked
+    // cancel — only admin decides whether to waive the forfeit
+    // (waiveDepositForfeit below).
     if (wasPaid) {
       const session = await auth();
-      if (!isAdminRole(session?.user?.role) && !cancelledByAssignedStaff) {
+      if (!isAdminRole(session?.user?.role)) {
         return {
           success: false,
           message: "Seul un administrateur peut annuler un rendez-vous déjà payé (remboursement requis). Contactez un administrateur.",
@@ -438,19 +302,22 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
 
     // A late cancellation (inside the 48h window a customer can no longer
     // self-cancel through, so it's processed here instead, e.g. by phone)
-    // withholds a configurable share of a deposit-type payment. Default
-    // depositForfeitPercentage is 0 — today's exact "always fully refunded"
-    // behaviour — so this is a no-op until a staff member's percentage is
-    // explicitly set above zero. Only applies to deposit payments, not a
-    // full/balance payment, and never to a no-show (see markAppointmentNoShow,
-    // which withholds everything by design and doesn't go through here).
+    // withholds a configurable share of a deposit-type payment.
+    // depositForfeitPercentage defaults to 100 (migration 20260812190000) —
+    // the deposit stays acquired by default, matching what customers are
+    // told, unless an admin explicitly waives it via waiveDepositForfeit.
+    // Only applies to deposit payments, not a full/balance payment, and
+    // never to a no-show (see markAppointmentNoShow, which withholds
+    // everything by design and doesn't go through here). Reaching this point
+    // at all already implies an admin is cancelling — the wasPaid gate above
+    // no longer lets assigned staff through, so there's no separate
+    // staff-exemption to apply here.
     let forfeitAmount = 0;
     if (
       wasPaid &&
       appointment.status !== "COMPLETED" &&
       payment.paymentType === "DEPOSIT" &&
       isWithinCancellationWindow(appointment.startTime) &&
-      !cancelledByAssignedStaff &&
       !waiveDepositForfeit
     ) {
       const forfeitPercentage = Number(appointment.staffService?.staff?.depositForfeitPercentage ?? 0);
@@ -488,6 +355,25 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
           invoiceId: payment.invoice.id,
           reason: cancellationReasonWithForfeit,
           totalInclVat: remaining,
+        });
+      }
+
+      // The forfeited share of the deposit is money that's now finally,
+      // non-refundably realized — it needs its own invoice, same as a
+      // collected balance (completeAppointment) or a no-show deposit
+      // (markAppointmentNoShow). A forfeited deposit will essentially never
+      // already have payment.invoice set (deposits aren't invoiced at
+      // collection time), but guard on it anyway for idempotency.
+      if (forfeitAmount > REFUND_EPSILON && !payment.invoice) {
+        await issueInvoice(tx, {
+          paymentId: payment.id,
+          source: "APPOINTMENT",
+          totalInclVat: forfeitAmount,
+          customer: buildInvoiceCustomer(appointment.user),
+          lines: buildServiceInvoiceLines({
+            description: `Frais d'annulation — ${appointment.staffService?.service?.name ?? "Prestation"}`,
+            totalAmount: forfeitAmount,
+          }),
         });
       }
 
@@ -621,12 +507,18 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
 
 /**
  * Marks a CONFIRMED appointment as a no-show. Unlike rejectAppointment, this
- * never touches Payment or calls Stripe — whatever was captured (deposit or
+ * never issues a refund or calls Stripe — whatever was captured (deposit or
  * full payment) stays exactly as captured, no automatic refund in either
  * direction. Before this existed, the only way to close out a missed
  * appointment was "Annuler", which always issues a full refund and treats a
  * no-show identically to a business-initiated cancellation — rewarding the
  * absence instead of recording it.
+ *
+ * It does mark the Payment PAID and issue an invoice for the forfeited
+ * deposit: that money is now finally, non-refundably realized the moment
+ * the no-show is recorded, and taxable money changing hands with no invoice
+ * is exactly the gap this closes (mirrors completeAppointment's balance
+ * invoicing and rejectAppointment's late-cancellation forfeit invoicing).
  *
  * @param {string} appointmentId
  * @returns {Promise<{ success: boolean, message?: string }>}
@@ -645,8 +537,25 @@ export async function markAppointmentNoShow(appointmentId) {
     const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId, isDeleted: false },
       include: {
-        user: { select: { id: true, fullName: true } },
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+            vatNumber: true,
+            addressLine1: true,
+            addressLine2: true,
+            addressCity: true,
+            addressPostalCode: true,
+            addressCountry: true,
+            isCompany: true,
+            billingProfile: {
+              select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+            },
+          },
+        },
         staffService: { include: { service: { select: { name: true } } } },
+        payment: { include: { invoice: true } },
       },
     });
     if (!appointment) {
@@ -668,6 +577,35 @@ export async function markAppointmentNoShow(appointmentId) {
         },
       });
       if (claim.count === 0) return false;
+
+      // The deposit is kept in full, by design, and never refunded — that
+      // makes it finally, non-refundably realized revenue the moment the
+      // no-show is recorded, same as a collected balance (completeAppointment)
+      // or a forfeited late-cancellation deposit (rejectAppointment). Guard
+      // on payment.invoice for idempotency, same reasoning as those.
+      const noShowPayment = appointment.payment;
+      if (
+        noShowPayment &&
+        !["PAID", "REFUNDED", "PARTIALLY_REFUNDED"].includes(noShowPayment.status) &&
+        Number(noShowPayment.paidAmount) > 0.01 &&
+        !noShowPayment.invoice
+      ) {
+        await tx.payment.update({
+          where: { id: noShowPayment.id },
+          data: { status: "PAID" },
+        });
+
+        await issueInvoice(tx, {
+          paymentId: noShowPayment.id,
+          source: "APPOINTMENT",
+          totalInclVat: Number(noShowPayment.paidAmount),
+          customer: buildInvoiceCustomer(appointment.user),
+          lines: buildServiceInvoiceLines({
+            description: `Absence — acompte non remboursable — ${appointment.staffService?.service?.name ?? "Prestation"}`,
+            totalAmount: Number(noShowPayment.paidAmount),
+          }),
+        });
+      }
 
       const serviceName = appointment.staffService?.service?.name;
       const customerName = appointment.user?.fullName;

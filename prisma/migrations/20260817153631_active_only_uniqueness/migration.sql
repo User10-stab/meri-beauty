@@ -41,5 +41,5 @@ ON "User" (phone)
 WHERE "isDeleted" = false AND phone IS NOT NULL;
 
 CREATE UNIQUE INDEX "staff_active_vat_number_idx"
-ON "Staff" (vatNumber)
-WHERE "isDeleted" = false AND vatNumber IS NOT NULL;
+ON "Staff" ("vatNumber")
+WHERE "isDeleted" = false AND "vatNumber" IS NOT NULL;

@@ -5,6 +5,8 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { Loader2, Sparkles, AlertCircle, Check, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { useTranslations } from "next-intl";
+import LocaleSwitcher from "@/components/LocaleSwitcher";
 
 /**
  * Reusable, configuration-driven authentication form wrapper.
@@ -40,6 +42,7 @@ export default function AuthForm({
   backToSignIn = false,
   defaultValues,
 }) {
+  const t = useTranslations("common");
   const [showPassword, setShowPassword] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
@@ -79,7 +82,7 @@ export default function AuthForm({
       setIsLoading(false);
     } catch (error) {
       console.error("[AuthForm] submit error:", error);
-      setServerError("Une erreur inattendue est survenue. Veuillez réessayer.");
+      setServerError(t("unexpectedError"));
       setIsLoading(false);
     }
   };
@@ -87,6 +90,7 @@ export default function AuthForm({
   return (
     <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
       <div className="max-w-md w-full space-y-8 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 transition-all duration-300">
+        <div className="flex justify-end"><LocaleSwitcher /></div>
         
         {/* Header block */}
         <div className="text-center space-y-3">

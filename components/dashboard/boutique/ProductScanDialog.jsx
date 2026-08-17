@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X, CameraOff, Loader2, ScanLine } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { getProductByBarcode } from "@/actions/boutique/products";
+import { useTranslations } from "next-intl";
 
 /**
  * Staff-side barcode scan from the products list. A known barcode opens that
@@ -15,6 +16,7 @@ import { getProductByBarcode } from "@/actions/boutique/products";
  * @param {{ open: boolean, onClose: () => void, onFound: (productId: string) => void, onNotFound: (barcode: string) => void }} props
  */
 export function ProductScanDialog({ open, onClose, onFound, onNotFound }) {
+  const t = useTranslations("dashboardBoutique.productScanDialog");
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
   const busyRef = useRef(false);
@@ -78,7 +80,7 @@ export function ProductScanDialog({ open, onClose, onFound, onNotFound }) {
       .catch((err) => {
         if (cancelled) return;
         console.error("[ProductScanDialog] camera init failed:", err);
-        setError("Impossible d'accéder à la caméra — vérifiez les autorisations de votre navigateur.");
+        setError(t("cameraError"));
       });
 
     return () => {
@@ -99,7 +101,7 @@ export function ProductScanDialog({ open, onClose, onFound, onNotFound }) {
     >
       <div className="max-h-[calc(100vh-24px)] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-4 shadow-xl sm:p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">Scanner un produit</h2>
+          <h2 className="text-base font-semibold text-gray-900">{t("title")}</h2>
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X size={18} />
           </button>
@@ -139,6 +141,7 @@ export function ProductScanDialog({ open, onClose, onFound, onNotFound }) {
         )}
 
         <p className="mt-4 text-center text-xs text-gray-400">
+          {t("hint")}
           USB ou caméra · code connu → fiche produit · code inconnu → nouveau produit pré-rempli.
         </p>
       </div>

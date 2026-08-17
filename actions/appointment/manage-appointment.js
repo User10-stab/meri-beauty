@@ -6,7 +6,7 @@ import { stripe } from "@/lib/stripe";
 import { ROLES, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
-import { reservationAcceptedWithPaymentLinkEmail } from "@/lib/email-templates";
+import { reservationAcceptedWithPaymentLinkEmail, reservationConfirmedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
@@ -71,13 +71,13 @@ async function authorizeAppointmentAction(appointmentId) {
 }
 
 /**
- * Confirms an appointment and sends a payment link email to the customer.
+ * Accepts an appointment (staff action). Transitions PENDING → ACCEPTED.
  * Called by the salon owner/staff from the dashboard.
  *
  * @param {string} appointmentId
  * @returns {Promise<{ success: boolean, message?: string }>}
  */
-export async function confirmAppointment(appointmentId) {
+export async function acceptAppointment(appointmentId) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -103,10 +103,14 @@ export async function confirmAppointment(appointmentId) {
           include: {
             service: true,
             staff: {
-              include: {
+              select: {
+                id: true,
                 user: {
                   select: { fullName: true },
                 },
+                allowedPaymentMethods: true,
+                depositEnabled: true,
+                depositPercentage: true,
               },
             },
           },
@@ -121,19 +125,157 @@ export async function confirmAppointment(appointmentId) {
     if (appointment.status !== "PENDING") {
       return {
         success: false,
-        message: "Ce rendez-vous n'est pas en attente de confirmation",
+        message: "Ce rendez-vous n'est pas en attente d'acceptation",
       };
     }
 
     // ── Update status + create notification atomically ──────────────────────
-    // The status transition claim (updateMany gated on PENDING) and the
-    // notification creation are wrapped together in a single transaction so
-    // that if either step fails, neither is committed — this prevents a
-    // "confirmed but no notification ever shown to dashboard staff" scenario
-    // when the notif write transiently fails.
     const claimed = await prisma.$transaction(async (tx) => {
       const claim = await tx.appointment.updateMany({
         where: { id: appointmentId, status: "PENDING" },
+        data: { status: "ACCEPTED" },
+      });
+      if (claim.count === 0) return false;
+
+      const serviceName = appointment.staffService?.service?.name;
+      const staffName = appointment.staffService?.staff?.user?.fullName;
+      const customerName = appointment.user?.fullName;
+
+      const recipientUserIds = await getAppointmentNotificationRecipients(appointment.staffId, { tx });
+
+      if (recipientUserIds.length > 0) {
+        await createNotificationsBulk(
+          recipientUserIds.map((uid) =>
+            buildAppointmentConfirmedNotification({
+              userId: uid,
+              appointmentId: appointment.id,
+              date: appointment.date,
+              startTime: appointment.startTime,
+              serviceName,
+              staffName,
+              customerName,
+            })
+          ),
+          { tx }
+        );
+      }
+      return true;
+    });
+
+    if (!claimed) {
+      return {
+        success: false,
+        message: "Ce rendez-vous n'est pas en attente d'acceptation",
+      };
+    }
+
+    // Generate confirmation/payment URL
+    const paymentUrl = `${process.env.NEXT_PUBLIC_APP_URL}/appointment/${appointmentId}/payment`;
+
+    // Send acceptance email with confirmation/payment link
+    const totalAmount = Number(appointment.staffService.price);
+    const staff = appointment.staffService?.staff;
+
+    sendEmail({
+      to: appointment.user.email,
+      ...reservationAcceptedWithPaymentLinkEmail({
+        customerName: appointment.user.fullName,
+        serviceName: appointment.staffService.service.name,
+        staffName: staff?.user?.fullName || "Expert",
+        date: appointment.date,
+        time: appointment.startTime.toLocaleTimeString("fr-FR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Europe/Brussels",
+        }),
+        totalAmount,
+        paymentUrl,
+        allowedPaymentMethods: staff?.allowedPaymentMethods || "BOTH",
+        depositEnabled: staff?.depositEnabled || false,
+        depositPercentage: Number(staff?.depositPercentage || 10),
+      }),
+    }).catch((err) =>
+      console.error("[acceptAppointment] email failed:", err)
+    );
+
+    return {
+      success: true,
+      message: "Rendez-vous accepté et email envoyé au client",
+    };
+  } catch (error) {
+    console.error("[acceptAppointment]", error);
+    return {
+      success: false,
+      message: "Erreur lors de l'acceptation du rendez-vous",
+    };
+  }
+}
+
+/**
+ * Confirms an appointment (customer action). Transitions ACCEPTED → CONFIRMED.
+ * Called by the customer after staff acceptance, for cash-only or no-payment-required flows.
+ *
+ * @param {string} appointmentId
+ * @returns {Promise<{ success: boolean, message?: string }>}
+ */
+export async function confirmAppointment(appointmentId) {
+  try {
+    if (!appointmentId) {
+      return { success: false, message: "ID de rendez-vous manquant" };
+    }
+
+    const session = await auth();
+    if (!session?.user) {
+      return { success: false, message: "Authentification requise" };
+    }
+
+    // Load appointment with related data
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: appointmentId, isDeleted: false },
+      include: {
+        user: {
+          select: {
+            id: true,
+            fullName: true,
+            email: true,
+          },
+        },
+        staffService: {
+          include: {
+            service: true,
+            staff: {
+              include: {
+                user: {
+                  select: { fullName: true },
+                },
+              },
+            },
+          },
+        },
+        payment: true,
+      },
+    });
+
+    if (!appointment) {
+      return { success: false, message: "Rendez-vous introuvable" };
+    }
+
+    // Verify the user is the appointment owner
+    if (appointment.userId !== session.user.id) {
+      return { success: false, message: "Vous n'êtes pas autorisé à confirmer ce rendez-vous" };
+    }
+
+    if (appointment.status !== "ACCEPTED") {
+      return {
+        success: false,
+        message: "Ce rendez-vous n'est pas prêt à être confirmé",
+      };
+    }
+
+    // ── Update status atomically ─────────────────────────────────────────────
+    const claimed = await prisma.$transaction(async (tx) => {
+      const claim = await tx.appointment.updateMany({
+        where: { id: appointmentId, status: "ACCEPTED" },
         data: { status: "CONFIRMED" },
       });
       if (claim.count === 0) return false;
@@ -166,19 +308,14 @@ export async function confirmAppointment(appointmentId) {
     if (!claimed) {
       return {
         success: false,
-        message: "Ce rendez-vous n'est pas en attente de confirmation",
+        message: "Ce rendez-vous n'est pas prêt à être confirmé",
       };
     }
 
-    // Generate payment URL
-    const paymentUrl = `${process.env.NEXT_PUBLIC_APP_URL}/appointment/${appointmentId}/payment`;
-
-    // Send confirmation email with payment link
-    const totalAmount = Number(appointment.staffService.price);
-    
+    // Send confirmation email
     sendEmail({
       to: appointment.user.email,
-      ...reservationAcceptedWithPaymentLinkEmail({
+      ...reservationConfirmedEmail({
         customerName: appointment.user.fullName,
         serviceName: appointment.staffService.service.name,
         staffName: appointment.staffService.staff?.user?.fullName || "Expert",
@@ -186,10 +323,8 @@ export async function confirmAppointment(appointmentId) {
         time: appointment.startTime.toLocaleTimeString("fr-FR", {
           hour: "2-digit",
           minute: "2-digit",
-          timeZone: "Europe/Brussels",
         }),
-        totalAmount,
-        paymentUrl,
+        totalAmount: Number(appointment.staffService.price),
       }),
     }).catch((err) =>
       console.error("[confirmAppointment] email failed:", err)
@@ -197,7 +332,7 @@ export async function confirmAppointment(appointmentId) {
 
     return {
       success: true,
-      message: "Rendez-vous confirmé et email envoyé au client",
+      message: "Rendez-vous confirmé avec succès",
     };
   } catch (error) {
     console.error("[confirmAppointment]", error);

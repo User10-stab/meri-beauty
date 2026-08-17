@@ -14,16 +14,19 @@ import {
   markWorkshopReservationNoShow,
 } from "@/actions/workshops/manage-reservation";
 import { isAdminRole } from "@/lib/authorization";
-
-const COLUMNS = [
-  { key: "activity", label: "Activité & Séance" },
-  { key: "customer", label: "Client" },
-  { key: "seatsCount", label: "Places" },
-  { key: "status", label: "Statut" },
-  { key: "payment", label: "Paiement" },
-];
+import { useTranslations } from "next-intl";
 
 export function ReservationsPageClient({ initialReservations = [], userRole }) {
+  const t = useTranslations("dashboardWorkshops.reservations");
+  
+  const COLUMNS = [
+    { key: "activity", label: t("columns.activity") },
+    { key: "customer", label: t("columns.customer") },
+    { key: "seatsCount", label: t("columns.seats") },
+    { key: "status", label: t("columns.status") },
+    { key: "payment", label: t("columns.payment") },
+  ];
+
   const router = useRouter();
   const isAdmin = isAdminRole(userRole);
   const [isCancelling, startCancel] = useTransition();
@@ -78,9 +81,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         renderRow={ReservationRow}
         onEdit={isAdmin ? (row) => setChangeModalReservation(row) : undefined}
         onDelete={isAdmin ? (row) => setToCancel(row) : undefined}
-        onSettle={isAdmin ? (row) => setToSettle(row) : undefined}
-        onNoShow={isAdmin ? handleNoShow : undefined}
-        searchPlaceholder="Rechercher une réservation..."
+        searchPlaceholder={t("searchPlaceholder")}
         searchFilter={(row, query) =>
           row.session?.workshop?.title?.toLowerCase().includes(query) ||
           row.customer?.fullName?.toLowerCase().includes(query) ||

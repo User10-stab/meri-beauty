@@ -3,14 +3,10 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { X, ChevronLeft, ChevronRight, Clock, Loader2 } from "lucide-react";
+import { useLocale, useTranslations } from "next-intl";
 import { getAvailableSlots, getMonthAvailability } from "@/actions/reservation/get-available-slots";
 import { rescheduleAppointment } from "@/actions/reservation/reschedule-appointment";
-
-const MONTHS = [
-  "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
-  "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
-];
-const DAYS = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
+import { toIntlLocale } from "@/lib/intl-locale";
 
 function getDaysInMonth(date) {
   const year = date.getFullYear();
@@ -25,6 +21,19 @@ function getDaysInMonth(date) {
 
 function getDateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function getMonthName(date, intlLocale) {
+  return new Date(date.getFullYear(), date.getMonth(), 1).toLocaleDateString(intlLocale, { month: "long", year: "numeric" });
+}
+
+function getDayNames(intlLocale) {
+  const base = new Date(2024, 0, 7);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(base);
+    d.setDate(base.getDate() + i);
+    return d.toLocaleDateString(intlLocale, { weekday: "short" });
+  });
 }
 
 function isSameDay(a, b) {
@@ -52,6 +61,9 @@ function currentTimeHHmm(appointment) {
 }
 
 export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled }) {
+  const locale = useLocale();
+  const t = useTranslations("appointmentReschedule");
+  const intlLocale = toIntlLocale(locale);
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedTime, setSelectedTime] = useState(null);
@@ -83,12 +95,12 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
       if (result.success) {
         setWindows(result.data.reservationWindows || []);
       } else {
-        toast.error(result.message || "Erreur lors du chargement des créneaux.");
+        toast.error(result.message || t("slotsLoadError"));
         setWindows([]);
       }
       setLoadingSlots(false);
     });
-  }, [selectedDate, appointment.staffServiceId, appointment.id]);
+  }, [selectedDate, appointment.staffServiceId, appointment.id, t]);
 
   const days = getDaysInMonth(currentMonth);
   const isDisabled = (date) => {
@@ -110,10 +122,10 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
     const result = await rescheduleAppointment(appointment.id, { date: selectedDate, time: selectedTime });
     setSubmitting(false);
     if (result.success) {
-      toast.success(result.message ?? "Rendez-vous déplacé.");
+      toast.success(result.message ?? t("rescheduledSuccess"));
       onRescheduled();
     } else {
-      toast.error(result.message ?? "Impossible de déplacer ce rendez-vous.");
+      toast.error(result.message ?? t("rescheduledError"));
     }
   }
 
@@ -124,18 +136,18 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Modifier le rendez-vous"
+        aria-label={t("title")}
         className="relative flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
       >
         <div className="flex items-start justify-between border-b border-ink/8 px-5 py-4">
           <div>
-            <p className="text-sm font-bold text-ink">Modifier le rendez-vous</p>
+            <p className="text-sm font-bold text-ink">{t("title")}</p>
             <p className="mt-0.5 text-xs text-ink/45">{appointment.serviceName} · {appointment.staffName}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Fermer"
+            aria-label={t("close")}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink/40 transition-colors hover:bg-ink/5 hover:text-ink"
           >
             <X className="h-4 w-4" />
@@ -148,25 +160,25 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
               type="button"
               onClick={() => setCurrentMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1))}
               className="rounded-lg p-1.5 text-ink/50 hover:bg-ink/5"
-              aria-label="Mois précédent"
+              aria-label={t("prevMonth")}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <span className="text-sm font-semibold text-ink">
-              {MONTHS[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+              {getMonthName(currentMonth, intlLocale)}
             </span>
             <button
               type="button"
               onClick={() => setCurrentMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1))}
               className="rounded-lg p-1.5 text-ink/50 hover:bg-ink/5"
-              aria-label="Mois suivant"
+              aria-label={t("nextMonth")}
             >
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>
 
           <div className="grid grid-cols-7 gap-1">
-            {DAYS.map((d) => (
+            {getDayNames(intlLocale).map((d) => (
               <div key={d} className="pb-1 text-center text-[10px] font-semibold text-ink/35">{d}</div>
             ))}
             {days.map((day, i) => (
@@ -194,15 +206,15 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
           </div>
 
           <div className="mt-5">
-            <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-ink/45">Créneaux disponibles</p>
+            <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-ink/45">{t("availableSlots")}</p>
             {!selectedDate ? (
-              <p className="py-6 text-center text-xs text-ink/35">Choisissez d&apos;abord une date.</p>
+              <p className="py-6 text-center text-xs text-ink/35">{t("selectDateFirst")}</p>
             ) : loadingSlots ? (
               <div className="flex justify-center py-6">
                 <Loader2 className="h-5 w-5 animate-spin text-gold" />
               </div>
             ) : displayWindows.length === 0 ? (
-              <p className="py-6 text-center text-xs text-ink/35">Aucun créneau disponible ce jour.</p>
+              <p className="py-6 text-center text-xs text-ink/35">{t("noSlotsDay")}</p>
             ) : (
               <div className="grid grid-cols-4 gap-2">
                 {displayWindows.map((w) => (
@@ -231,7 +243,7 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
             onClick={onClose}
             className="flex-1 rounded-lg border border-ink/10 px-4 py-2.5 text-sm font-semibold text-ink/60 transition-colors hover:bg-ink/5"
           >
-            Annuler
+            {t("cancel")}
           </button>
           <button
             type="button"
@@ -240,7 +252,7 @@ export function AppointmentRescheduleModal({ appointment, onClose, onRescheduled
             className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gold px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-gold/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            Confirmer
+            {t("confirm")}
           </button>
         </div>
       </div>

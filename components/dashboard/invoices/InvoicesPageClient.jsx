@@ -3,28 +3,29 @@
 import { useMemo, useState } from "react";
 import { Search, Receipt, Download, FileMinus } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
-
-const SOURCE_LABEL = {
-  ORDER: "Commande",
-  APPOINTMENT: "Rendez-vous",
-};
-
-const SOURCE_STYLE = {
-  ORDER: "bg-blue-50 text-blue-700 border-blue-100",
-  APPOINTMENT: "bg-violet-50 text-violet-700 border-violet-100",
-};
-
-function formatPrice(n) {
-  return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
-}
-
-function formatDate(d) {
-  return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" });
-}
+import { useTranslations } from "next-intl";
 
 export function InvoicesPageClient({ initialInvoices }) {
+  const t = useTranslations("dashboardInvoices");
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+
+  const SOURCE_LABEL = {
+    ORDER: t("sourceLabels.ORDER"),
+    APPOINTMENT: t("sourceLabels.APPOINTMENT"),
+  };
+
+  const SOURCE_STYLE = {
+    ORDER: "bg-blue-50 text-blue-700 border-blue-100",
+    APPOINTMENT: "bg-violet-50 text-violet-700 border-violet-100",
+  };
+
+  function formatPrice(n) {
+    return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
+  }
+  function formatDate(d) {
+    return new Date(d).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" });
+  }
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -47,7 +48,7 @@ export function InvoicesPageClient({ initialInvoices }) {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher n°, client…"
+            placeholder={t("searchPlaceholder")}
             className="h-9 w-full rounded-lg border border-gray-200 pl-9 pr-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           />
         </div>
@@ -57,7 +58,7 @@ export function InvoicesPageClient({ initialInvoices }) {
           onChange={(e) => setSourceFilter(e.target.value)}
           className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
         >
-          <option value="">Toutes les sources</option>
+          <option value="">{t("filterAllSources")}</option>
           {Object.entries(SOURCE_LABEL).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
@@ -70,19 +71,19 @@ export function InvoicesPageClient({ initialInvoices }) {
             <Receipt size={22} className="text-gray-300" />
           </div>
           <p className="font-medium text-gray-700">
-            {initialInvoices.length > 0 ? "Aucune facture ne correspond à votre recherche" : "Aucune facture pour le moment"}
+            {initialInvoices.length > 0 ? t("emptySearch") : t("empty")}
           </p>
         </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="pl-6">N° facture</TableHead>
-              <TableHead>Client</TableHead>
-              <TableHead>Source</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead>Total TTC</TableHead>
-              <TableHead className="pr-6 text-right">Documents</TableHead>
+              <TableHead className="pl-6">{t("columns.number")}</TableHead>
+              <TableHead>{t("columns.customer")}</TableHead>
+              <TableHead>{t("columns.source")}</TableHead>
+              <TableHead>{t("columns.date")}</TableHead>
+              <TableHead>{t("columns.total")}</TableHead>
+              <TableHead className="pr-6 text-right">{t("columns.documents")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -90,13 +91,13 @@ export function InvoicesPageClient({ initialInvoices }) {
               <TableRow key={inv.id}>
                 <TableCell className="pl-6">
                   <span className="font-medium text-gray-800 dark:text-white">{inv.number}</span>
-                  {inv.orderNumber && <span className="block text-xs text-gray-400">Commande n°{inv.orderNumber}</span>}
+                  {inv.orderNumber && <span className="block text-xs text-gray-400">{t("orderNumber", { number: inv.orderNumber })}</span>}
                   {inv.customerType === "B2B" && (
                     <span
                       className="mt-1 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700"
-                      title="Pas d'envoi Peppol automatique — à saisir manuellement dans le logiciel comptable."
+                      title={t("b2bInvoiceHint")}
                     >
-                      B2B — à facturer manuellement
+                      {t("b2bManualLabel")}
                     </span>
                   )}
                 </TableCell>
@@ -123,7 +124,7 @@ export function InvoicesPageClient({ initialInvoices }) {
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 rounded-lg border border-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e] hover:text-white"
                     >
-                      <Download size={12} /> Facture
+                      <Download size={12} /> {t("downloadInvoice")}
                     </a>
                     {inv.creditNotes.map((cn) => (
                       <a
@@ -133,7 +134,7 @@ export function InvoicesPageClient({ initialInvoices }) {
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
                       >
-                        <FileMinus size={12} /> {cn.number}
+                        <FileMinus size={12} /> {t("downloadCreditNote", { number: cn.number })}
                       </a>
                     ))}
                   </div>

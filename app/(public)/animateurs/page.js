@@ -1,22 +1,17 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { getPublicAnimators } from "@/actions/workshops/get-public-animators";
 
-export const metadata = {
-  title: "Nos Animateurs — Meri Beauty",
-  description: "Découvrez les professionnels qui animent nos ateliers et événements beauté.",
-};
-
-function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "Europe/Brussels",
-  });
+export async function generateMetadata() {
+  const t = await getTranslations("animateurs");
+  return {
+    title: t("metadataTitle"),
+    description: t("metadataDescription"),
+  };
 }
 
 export default async function AnimateursPage() {
+  const t = await getTranslations("animateurs");
   const result = await getPublicAnimators();
   const animators = result.data ?? [];
 
@@ -36,17 +31,16 @@ export default async function AnimateursPage() {
           <div className="mb-5 inline-flex items-center gap-3">
             <span className="h-px w-8 bg-gold" />
             <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">
-              Nos Animateurs
+              {t("heroEyebrow")}
             </span>
             <span className="h-px w-8 bg-gold" />
           </div>
           <h1 className="text-[2.6rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3.2rem] lg:text-[3.8rem]">
-            Des professionnels{" "}
-            <em className="font-light text-gold/80 not-italic">passionnés.</em>
+            {t("heroTitle")}{" "}
+            <em className="font-light text-gold/80 not-italic">{t("heroTitleEm")}</em>
           </h1>
           <p className="mx-auto mt-5 max-w-3xl text-[17px] leading-relaxed text-white/60">
-            Rencontrez les animateurs qui partagent leur savoir-faire et leur passion lors de nos
-            ateliers et événements.
+            {t("heroSubtitle")}
           </p>
         </div>
       </section>
@@ -57,9 +51,9 @@ export default async function AnimateursPage() {
           {animators.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <div className="mb-4 text-5xl">🎭</div>
-              <h2 className="text-xl font-bold text-ink">Aucun animateur pour le moment</h2>
+              <h2 className="text-xl font-bold text-ink">{t("emptyTitle")}</h2>
               <p className="mt-2 text-ink/50">
-                Nos animateurs arrivent bientôt. Revenez nous découvrir !
+                {t("emptyDesc")}
               </p>
             </div>
           ) : (
@@ -98,7 +92,7 @@ export default async function AnimateursPage() {
                         <rect x="3" y="4" width="18" height="18" rx="2" />
                         <path d="M3 10h18M8 2v4M16 2v4" strokeLinecap="round" />
                       </svg>
-                      {animator._count.activities} activité{animator._count.activities > 1 ? "s" : ""}
+                      {animator._count.activities} {t("activitiesCount", { count: animator._count.activities })}
                     </span>
                   )}
 
@@ -107,12 +101,12 @@ export default async function AnimateursPage() {
                     <div className="mt-4 flex items-center gap-3 border-t border-cream/80 pt-4">
                       {animator.website && (
                         <span className="text-xs text-ink/40 hover:text-gold transition-colors">
-                          Site web
+                          {t("website")}
                         </span>
                       )}
                       {animator.instagram && (
                         <span className="text-xs text-ink/40 hover:text-gold transition-colors">
-                          Instagram
+                          {t("instagram")}
                         </span>
                       )}
                     </div>

@@ -430,6 +430,7 @@ function PersonalInfoSection({ data, onSuccess }) {
 // ─── Section 2: Profile ────────────────────────────────────────────────────
 
 function ProfileSection({ data, onSuccess }) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);

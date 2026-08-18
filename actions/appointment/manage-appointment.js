@@ -306,12 +306,10 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
     // depositForfeitPercentage defaults to 100 (migration 20260812190000) —
     // the deposit stays acquired by default, matching what customers are
     // told, unless an admin explicitly waives it via waiveDepositForfeit.
-    // Only applies to deposit payments, not a full/balance payment, and
-    // never to a no-show (see markAppointmentNoShow, which withholds
-    // everything by design and doesn't go through here). Reaching this point
-    // at all already implies an admin is cancelling — the wasPaid gate above
-    // no longer lets assigned staff through, so there's no separate
-    // staff-exemption to apply here.
+    // Only applies to deposit payments, not a full/balance payment. Reaching
+    // this point at all already implies an admin is cancelling — the wasPaid
+    // gate above no longer lets assigned staff through, so there's no
+    // separate staff-exemption to apply here.
     //
     // Declining a request the salon never accepted is the exception. Under
     // pay-first, a MANUAL booking is paid while still PENDING, so a staff
@@ -321,8 +319,20 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
     // been committed to by anyone, so it always refunds in full.
     const isDeclineOfUnacceptedRequest = appointment.status === "PENDING";
 
+    // markAppointmentNoShow already recorded this payment as fully,
+    // non-refundably forfeited (see its own doc comment) regardless of
+    // paymentType — a FULL_ONLINE no-show is forfeited exactly like a
+    // DEPOSIT one. Cancelling it afterward (e.g. to close out the calendar
+    // entry) must not reopen that decision: the DEPOSIT-only branch below
+    // would otherwise skip the forfeit for anything but a deposit payment
+    // and refund it in full, undoing the no-show policy.
+    const isNoShowClosure = appointment.status === "NO_SHOW";
+
     let forfeitAmount = 0;
-    if (
+    if (wasPaid && isNoShowClosure) {
+      forfeitAmount = remaining;
+      remaining = 0;
+    } else if (
       wasPaid &&
       appointment.status !== "COMPLETED" &&
       !isDeclineOfUnacceptedRequest &&

@@ -275,6 +275,18 @@ export async function createReservation(data) {
       };
     }
 
+    // A staffService created via "assign to me" starts at price 0 / duration 0
+    // ("to be configured later") but isActive: true — nothing else in the
+    // listing/booking path filters that out, so without this guard it's
+    // publicly bookable as a free, instant appointment the moment working
+    // hours exist for that staff member.
+    if (Number(staffService.price) <= 0 || Number(staffService.duration) <= 0) {
+      return {
+        success: false,
+        message: "Service non disponible. Ce service n'a pas encore été configuré par le professionnel.",
+      };
+    }
+
     // ── 3. Build appointment window ──────────────────────────────────────────
     const { appointmentDate, startTime, endTime } = buildAppointmentWindow(
       date,
@@ -847,6 +859,15 @@ export async function createMultipleReservations(data) {
       return {
         success: false,
         message: "Un ou plusieurs services sont introuvables. Veuillez recommencer votre réservation.",
+      };
+    }
+
+    // Same "not yet configured" guard as createReservation above.
+    const unconfigured = staffServices.findIndex((ss) => Number(ss.price) <= 0 || Number(ss.duration) <= 0);
+    if (unconfigured !== -1) {
+      return {
+        success: false,
+        message: "Un ou plusieurs services n'ont pas encore été configurés par le professionnel.",
       };
     }
 

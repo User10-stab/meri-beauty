@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
+import { Plus } from "lucide-react";
 import { CalendarToolbar } from "./CalendarToolbar";
 import { StaffFilterChips } from "./StaffFilterChips";
 import { WeekView } from "./WeekView";
 import { DayView } from "./DayView";
 import { MonthView } from "./MonthView";
 import { AppointmentDrawer } from "./AppointmentDrawer";
+import { CreateManualAppointmentModal } from "./CreateManualAppointmentModal";
 import { getCalendarAppointments } from "@/actions/appointment/get-calendar-appointments";
 import { getCalendarEvents } from "@/actions/dashboard/get-calendar-events";
 import {
@@ -81,6 +83,7 @@ export function CalendarPageClient({
   closingTime = "19:00",
   workingDays = [],
   isAdmin,
+  currentStaffId = null,
 }) {
   // ── Translations ─────────────────────────────────────────────────────────
   const t = useTranslations();
@@ -93,6 +96,7 @@ export function CalendarPageClient({
   const [activityEvents, setActivityEvents] = useState(initialActivityEvents);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   // ── Date range for current view ──────────────────────────────────────────
@@ -190,14 +194,26 @@ export function CalendarPageClient({
   return (
     <div className="flex flex-col gap-4">
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-      <CalendarToolbar
-        view={view}
-        onViewChange={handleViewChange}
-        periodLabel={getPeriodLabel()}
-        onPrev={() => navigate(-1)}
-        onNext={() => navigate(1)}
-        onToday={goToday}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex-1">
+          <CalendarToolbar
+            view={view}
+            onViewChange={handleViewChange}
+            periodLabel={getPeriodLabel()}
+            onPrev={() => navigate(-1)}
+            onNext={() => navigate(1)}
+            onToday={goToday}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
+          className="flex h-13 items-center gap-1.5 rounded-xl bg-[#2f3a2e] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#3d4e3b]"
+        >
+          <Plus size={16} />
+          Nouveau rendez-vous
+        </button>
+      </div>
 
       {/* ── Staff filter (admin only) ──────────────────────────────────────── */}
       {isAdmin && staff.length > 0 && (
@@ -269,6 +285,17 @@ export function CalendarPageClient({
         onClose={handleDrawerClose}
         onAppointmentUpdated={handleAppointmentUpdated}
         isAdmin={isAdmin}
+      />
+
+      {/* ── Add manual appointment ───────────────────────────────────────── */}
+      <CreateManualAppointmentModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => fetchAppointments(view, currentDate)}
+        staffList={staff}
+        isAdmin={isAdmin}
+        currentStaffId={currentStaffId}
+        defaultDate={view === "day" ? currentDate : null}
       />
     </div>
   );

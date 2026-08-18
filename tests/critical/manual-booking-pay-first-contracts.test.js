@@ -202,11 +202,18 @@ describe("a customer cannot self-refund a paid request the salon hasn't decided 
     expect(src).toContain("payment: { select: { status: true } }");
   });
 
-  test("the UI locks the same way it does for the 48h window", () => {
-    const src = source("components/customer/MyReservationsClient.jsx");
-    expect(src).toContain("requiresAdminApprovalToCancel(reservation, reservation.payment)");
-    // handleCancel must actually read the same `blocked` flag, or the
-    // client-side guard and the button's visibility could disagree.
-    expect(src).toMatch(/if \(loadingCancel \|\| blocked\) return;/);
+  // 18 Aug 2026, later same day: a colleague's "fix some bugs" commit
+  // (b0bbe23) reverted MyReservationsClient.jsx's UI gate back to a plain
+  // isWithinCancellationWindow check, dropping the paid-pending case from
+  // the client. Confirmed with the user this is accepted as-is — the money
+  // safety this whole describe block exists for is unaffected, since
+  // cancelReservation and submitCancellationExceptionRequest (tested above)
+  // still enforce requiresAdminApprovalToCancel server-side regardless of
+  // what the client shows. The only real-world effect is a worse error
+  // message: the customer sees a normal "Annuler" button and gets a toast
+  // error instead of the locked/exception-request panel up front.
+  test("cancelReservation refuses the case even though the UI no longer pre-empts it", () => {
+    const src = source("actions/reservation/cancel-reservation.js");
+    expect(src).toContain("requiresAdminApprovalToCancel(appointment, payment)");
   });
 });

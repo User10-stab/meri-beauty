@@ -1,4 +1,4 @@
-import { requireDashboard } from "@/lib/route-protection";
+import { requireDashboard, getCurrentStaffId } from "@/lib/route-protection";
 import { isAdminRole } from "@/lib/authorization";
 import { getCalendarAppointments } from "@/actions/appointment/get-calendar-appointments";
 import { getStaffForCalendar } from "@/actions/staff/get-staff-for-calendar";
@@ -67,7 +67,7 @@ export default async function CalendarPage() {
   // ── Initial data: current week ─────────────────────────────────────────
   const range = weekRange(new Date());
 
-  const [appointmentsResult, staffResult, salonResult, eventsResult] = await Promise.all([
+  const [appointmentsResult, staffResult, salonResult, eventsResult, currentStaffId] = await Promise.all([
     getCalendarAppointments(range),
     getStaffForCalendar(),
     getSalon(),
@@ -75,6 +75,9 @@ export default async function CalendarPage() {
     // STAFF (Animator is a separate, unlinked directory from Staff), so no
     // extra gating is needed here.
     getCalendarEvents(range),
+    // Only meaningful for a STAFF caller — null for admin/owner, who instead
+    // pick a staff member explicitly when adding a manual appointment.
+    isAdmin ? Promise.resolve(null) : getCurrentStaffId(),
   ]);
 
   const appointments = appointmentsResult.data ?? [];
@@ -117,6 +120,7 @@ export default async function CalendarPage() {
         closingTime={closingTime}
         workingDays={workingDays}
         isAdmin={isAdmin}
+        currentStaffId={currentStaffId}
       />
     </div>
   );

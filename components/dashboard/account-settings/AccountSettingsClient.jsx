@@ -23,12 +23,13 @@ import {
   Copy,
   RefreshCw,
   Check,
+  Pencil,
 } from "lucide-react";
 import { updatePersonalInfo } from "@/actions/staff/update-personal-info";
 import { updateStaffProfile } from "@/actions/staff/update-staff-profile";
 import { updateReservationSettings } from "@/actions/staff/update-reservation-settings";
 import { upsertMyWorkingHours } from "@/actions/staff/upsert-my-working-hours";
-import { createStaffTimeOff } from "@/actions/staff/manage-time-off";
+import { createStaffTimeOff, updateStaffTimeOff, deleteStaffTimeOff } from "@/actions/staff/manage-time-off";
 import { getOrCreateCalendarToken, regenerateCalendarToken } from "@/actions/staff/manage-calendar-token";
 import { updatePaymentSettings } from "@/actions/staff/update-payment-settings";
 import Button from "@/components/ui/Button";
@@ -1080,29 +1081,47 @@ function WorkingHoursSection({ data, onSuccess }) {
 
 function TimeOffSection({ data, onSuccess }) {
   const [isPending, startTransition] = useTransition();
-  const [startDate, setStartDate] = useState(() => {
-    const today = new Date();
-    return today.toISOString().split("T")[0];
-  });
-  const [endDate, setEndDate] = useState(() => {
-    const today = new Date();
-    return today.toISOString().split("T")[0];
-  });
+  const [deletingId, setDeletingId] = useState(null);
+  const todayIso = () => new Date().toISOString().split("T")[0];
+  const [startDate, setStartDate] = useState(todayIso);
+  const [endDate, setEndDate] = useState(todayIso);
   const [reason, setReason] = useState("");
   const [errors, setErrors] = useState({});
+  const [editingId, setEditingId] = useState(null);
 
   const timeOffs = data?.timeOffs ?? [];
+
+  function resetForm() {
+    setEditingId(null);
+    setStartDate(todayIso());
+    setEndDate(todayIso());
+    setReason("");
+    setErrors({});
+  }
+
+  function startEdit(item) {
+    setEditingId(item.id);
+    setStartDate(item.startDate.split("T")[0]);
+    setEndDate(item.endDate.split("T")[0]);
+    setReason(item.reason ?? "");
+    setErrors({});
+  }
 
   function handleSave() {
     setErrors({});
     startTransition(async () => {
-      const res = await createStaffTimeOff({ startDate, endDate, reason });
+      const res = editingId
+        ? await updateStaffTimeOff(editingId, { startDate, endDate, reason })
+        : await createStaffTimeOff({ startDate, endDate, reason });
+
       if (res.success) {
         toast.success(res.message);
-        onSuccess([...(timeOffs || []), res.data]);
-        setStartDate(new Date().toISOString().split("T")[0]);
-        setEndDate(new Date().toISOString().split("T")[0]);
-        setReason("");
+        if (editingId) {
+          onSuccess(timeOffs.map((t) => (t.id === editingId ? { ...t, ...res.data } : t)));
+        } else {
+          onSuccess([...(timeOffs || []), res.data]);
+        }
+        resetForm();
       } else {
         if (res.errors) {
           setErrors(res.errors);
@@ -1112,6 +1131,22 @@ function TimeOffSection({ data, onSuccess }) {
           toast.error(res.message);
         }
       }
+    });
+  }
+
+  function handleDelete(id) {
+    if (!confirm("Supprimer définitivement cette période d’indisponibilité ?")) return;
+    setDeletingId(id);
+    startTransition(async () => {
+      const res = await deleteStaffTimeOff(id);
+      if (res.success) {
+        toast.success(res.message);
+        onSuccess(timeOffs.filter((t) => t.id !== id));
+        if (editingId === id) resetForm();
+      } else {
+        toast.error(res.message);
+      }
+      setDeletingId(null);
     });
   }
 
@@ -1146,10 +1181,22 @@ function TimeOffSection({ data, onSuccess }) {
           <FieldError message={errors.reason} />
         </div>
 
-        <div className="flex justify-end border-t border-gray-100 pt-3.5 dark:border-gray-800">
+        <div className="flex justify-end gap-2 border-t border-gray-100 pt-3.5 dark:border-gray-800">
+          {editingId ? (
+            <button
+              type="button"
+              onClick={resetForm}
+              disabled={isPending}
+              className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:pointer-events-none disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              Annuler
+            </button>
+          ) : null}
           <Button onClick={handleSave} disabled={isPending}>
             {isPending ? (
               <><Loader2 size={16} className="animate-spin" /> Enregistrement…</>
+            ) : editingId ? (
+              <><Save size={16} /> Modifier l’indisponibilité</>
             ) : (
               <><Save size={16} /> Ajouter l’indisponibilité</>
             )}
@@ -1165,16 +1212,40 @@ function TimeOffSection({ data, onSuccess }) {
           {timeOffs.length > 0 ? (
             <div className="space-y-1.5">
               {timeOffs.map((item) => (
-                <div key={item.id} className="flex flex-col gap-0.5 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs dark:border-gray-800 dark:bg-gray-900/70 sm:flex-row sm:items-center sm:justify-between">
+                <div key={item.id} className="flex flex-col gap-1.5 rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs dark:border-gray-800 dark:bg-gray-900/70 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="font-medium text-gray-900 dark:text-white">
                       {formatDate(item.startDate)} {item.endDate && item.endDate !== item.startDate ? `– ${formatDate(item.endDate)}` : ""}
                     </p>
                     {item.reason ? <p className="text-[11px] text-gray-500 dark:text-gray-400">{item.reason}</p> : null}
                   </div>
-                  <span className="inline-flex w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-                    Indisponible
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                      Indisponible
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => startEdit(item)}
+                      disabled={isPending}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                      aria-label="Modifier"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(item.id)}
+                      disabled={isPending}
+                      className="flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                      aria-label="Supprimer"
+                    >
+                      {deletingId === item.id ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Trash2 size={13} />
+                      )}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

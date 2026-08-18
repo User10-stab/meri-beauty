@@ -312,10 +312,20 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
     // at all already implies an admin is cancelling — the wasPaid gate above
     // no longer lets assigned staff through, so there's no separate
     // staff-exemption to apply here.
+    //
+    // Declining a request the salon never accepted is the exception. Under
+    // pay-first, a MANUAL booking is paid while still PENDING, so a staff
+    // member turning it down would otherwise pocket the whole deposit for a
+    // slot they refused — the forfeit exists to cover a late *customer*
+    // cancellation, not a salon decision. A still-PENDING request has never
+    // been committed to by anyone, so it always refunds in full.
+    const isDeclineOfUnacceptedRequest = appointment.status === "PENDING";
+
     let forfeitAmount = 0;
     if (
       wasPaid &&
       appointment.status !== "COMPLETED" &&
+      !isDeclineOfUnacceptedRequest &&
       payment.paymentType === "DEPOSIT" &&
       isWithinCancellationWindow(appointment.startTime) &&
       !waiveDepositForfeit

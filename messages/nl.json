@@ -2310,6 +2310,7 @@
       "manualRequest": "Reserveringsaanvraag",
       "pendingConfirmation": "⏳ Reservering wacht op bevestiging",
       "manualDesc": "Uw aanvraag wordt door ons team beoordeeld. Als deze wordt geaccepteerd, ontvangt u een e-mail met een betaallink om uw reservering te voltooien. Bij weigering wordt u ook per e-mail geïnformeerd.",
+      "manualPayFirstDesc": "Dit bedrag wordt nu afgeschreven om uw tijdslot vast te houden. Uw aanvraag moet nog door ons team worden geaccepteerd; bij weigering wordt u volledig terugbetaald.",
       "paymentInfo": "Betaalinformatie",
       "salonPayment": "💳 Betaling in de salon",
       "salonPaymentDesc": "Voor een reservering met meerdere afspraken wordt rechtstreeks in de salon betaald.",

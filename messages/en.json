@@ -2310,6 +2310,7 @@
       "manualRequest": "Reservation request",
       "pendingConfirmation": "⏳ Reservation awaiting confirmation",
       "manualDesc": "Your request will be reviewed by our team. If it is accepted, you will receive an email with a payment link to finalise your reservation. If it is declined, you will also be notified by email.",
+      "manualPayFirstDesc": "This amount is charged now to hold your slot. Your request still needs to be accepted by our team; if it is declined, you will be refunded in full.",
       "paymentInfo": "Payment information",
       "salonPayment": "💳 Payment at the salon",
       "salonPaymentDesc": "For a reservation with multiple appointments, payment is made directly at the salon.",

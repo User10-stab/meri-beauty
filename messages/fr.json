@@ -2310,6 +2310,7 @@
       "manualRequest": "Demande de réservation",
       "pendingConfirmation": "⏳ Réservation en attente de confirmation",
       "manualDesc": "Votre demande sera examinée par notre équipe. Si elle est acceptée, vous recevrez un email avec un lien de paiement pour finaliser votre réservation. En cas de refus, vous serez également informé(e) par email.",
+      "manualPayFirstDesc": "Ce montant est prélevé maintenant pour retenir votre créneau. Votre demande doit encore être acceptée par notre équipe ; en cas de refus, vous serez intégralement remboursé(e).",
       "paymentInfo": "Informations de paiement",
       "salonPayment": "💳 Paiement au salon",
       "salonPaymentDesc": "Pour une réservation avec plusieurs rendez-vous, le règlement s'effectue directement au salon.",

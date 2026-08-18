@@ -61,6 +61,37 @@ describe("an unpaid appointment can be settled from the appointments list", () =
     expect(loader).toMatch(/payment:\s*\{[\s\S]*?paymentType:\s*true/);
   });
 
+  // /mes-reservations is the page the salon wants to keep, so it must not be
+  // the weaker of the two: it previously lacked the exception request,
+  // reschedule, invoice PDF and reviews that /appointments already had.
+  test("both customer pages offer the same feature set", () => {
+    const pages = {
+      "/appointments": source("components/website/MyAppointmentsPageClient.jsx"),
+      "/mes-reservations": source("components/customer/MyReservationsClient.jsx"),
+    };
+    const required = [
+      "resumeReservationPayment",
+      "awaitingPaymentChoice",
+      "submitCancellationExceptionRequest",
+      "AppointmentRescheduleModal",
+      "/api/invoices/",
+    ];
+    for (const [name, src] of Object.entries(pages)) {
+      for (const feature of required) {
+        expect(src, `${name} is missing ${feature}`).toContain(feature);
+      }
+      expect(src, `${name} is missing the review display`).toMatch(/review\.rating/);
+    }
+  });
+
+  test("the reservations loader supplies what those features read", () => {
+    const loader = source("actions/reservation/get-my-reservations.js");
+    expect(loader).toMatch(/invoice:\s*\{\s*select/);   // invoice PDF
+    expect(loader).toContain("review:");                 // review display
+    expect(loader).toContain("staffServiceId:");         // reschedule modal
+    expect(loader).toContain("cancellationRequest:");    // exception request
+  });
+
   test("the payment step is not gated behind the 48h cancellation lock", () => {
     const client = source("components/website/MyAppointmentsPageClient.jsx");
 

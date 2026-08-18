@@ -2,10 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useLocale, useTranslations } from "next-intl";
+import { FileDown } from "lucide-react";
 import { resumeReservationPayment } from "@/actions/payment/resume-reservation-payment";
 import { cancelReservation } from "@/actions/reservation/cancel-reservation";
+import { submitCancellationExceptionRequest } from "@/actions/reservation/cancellation-exception-request";
+import { AppointmentRescheduleModal } from "@/components/website/AppointmentRescheduleModal";
 import {
   isWithinCancellationWindow,
   CANCELLATION_WINDOW_HOURS,
@@ -73,12 +77,40 @@ function ReservationCard({ reservation, onCancelled }) {
   const t = useTranslations("myReservations");
   const tApptStatus = useTranslations("appointmentStatus");
   const locale = useLocale();
+  const router = useRouter();
   const [loadingPayment, setLoadingPayment] = useState(false);
   const [loadingCancel, setLoadingCancel] = useState(false);
   // Track local cancelled state so the card updates instantly without a full reload
   const [isCancelled, setIsCancelled] = useState(
     reservation.status === "CANCELLED",
   );
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestReason, setRequestReason] = useState("");
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
+
+  const cancellationRequest = reservation.cancellationRequest ?? null;
+  const hasPendingRequest = requestSent || cancellationRequest?.status === "PENDING";
+  const hasRejectedRequest = cancellationRequest?.status === "REJECTED";
+  const invoice = reservation.payment?.invoice ?? null;
+
+  async function handleExceptionRequest() {
+    setSubmittingRequest(true);
+    const result = await submitCancellationExceptionRequest({
+      appointmentId: reservation.id,
+      reason: requestReason,
+    });
+    if (result.success) {
+      setRequestSent(true);
+      setRequestOpen(false);
+      toast.success(result.message);
+      router.refresh();
+    } else {
+      toast.error(result.message ?? t("exceptionRequestFailed"));
+    }
+    setSubmittingRequest(false);
+  }
 
   const effectiveStatus = isCancelled ? "CANCELLED" : reservation.status;
   const apptStatusConfig =
@@ -283,28 +315,90 @@ function ReservationCard({ reservation, onCancelled }) {
         {isActionable && (
           <>
             {blocked ? (
-              /* 48-hour lock notice */
-              <div className="flex items-start gap-3 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
-                <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                </svg>
-                <p className="text-xs text-amber-800 leading-relaxed font-medium">
-                  {t("cancellationLocked", { hours: CANCELLATION_WINDOW_HOURS })}
-                </p>
+              /* 48-hour lock notice, plus the only route left once it bites:
+                 asking the team to review the cancellation as an exception. */
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
+                  <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                  </svg>
+                  <p className="text-xs text-amber-800 leading-relaxed font-medium">
+                    {t("cancellationLocked", { hours: CANCELLATION_WINDOW_HOURS })}
+                  </p>
+                </div>
+
+                {hasPendingRequest ? (
+                  <p className="rounded-xl bg-amber-50 px-4 py-3 text-xs font-medium leading-relaxed text-amber-800">
+                    {t("exceptionRequestPending")}
+                  </p>
+                ) : hasRejectedRequest ? (
+                  <p className="rounded-xl bg-red-50 px-4 py-3 text-xs font-medium leading-relaxed text-red-700">
+                    {t("exceptionRequestRejected")}
+                    {cancellationRequest.decisionNote ? ` ${cancellationRequest.decisionNote}` : ""}
+                  </p>
+                ) : requestOpen ? (
+                  <div className="space-y-2 rounded-xl border-2 border-amber-200 bg-amber-50/70 p-3">
+                    <p className="text-xs leading-relaxed text-amber-900">{t("exceptionRequestIntro")}</p>
+                    <textarea
+                      value={requestReason}
+                      onChange={(event) => setRequestReason(event.target.value)}
+                      maxLength={1000}
+                      rows={3}
+                      placeholder={t("exceptionRequestPlaceholder")}
+                      className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-amber-500"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRequestOpen(false)}
+                        disabled={submittingRequest}
+                        className="text-xs font-semibold text-gray-500 hover:text-gray-700"
+                      >
+                        {t("exceptionRequestBack")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExceptionRequest}
+                        disabled={submittingRequest || requestReason.trim().length < 10}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-[#2f3a2e] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                      >
+                        {submittingRequest && (
+                          <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                        )}
+                        {t("exceptionRequestSend")}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setRequestOpen(true)}
+                    className="text-xs font-semibold text-[#2f3a2e] hover:underline"
+                  >
+                    {t("exceptionRequestCta")}
+                  </button>
+                )}
               </div>
             ) : (
               /* Modify + Cancel row */
               <div className="grid grid-cols-2 gap-3">
-                {/* Modify — links to the reservation booking flow pre-filled */}
-                <Link
-                  href={`/reservation?modify=${reservation.id}`}
+                {/* Reschedule in place. This used to bounce out to the
+                    booking flow via ?modify=, which restarted the whole
+                    wizard; the modal picks a new slot against this same
+                    appointment and keeps it. */}
+                <button
+                  type="button"
+                  onClick={() => setRescheduleOpen(true)}
                   className="flex items-center justify-center gap-2 rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-bold text-gray-700 transition-all hover:border-[#2f3a2e] hover:text-[#2f3a2e] hover:shadow-md"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
                   </svg>
-                  {t("modify")}
-                </Link>
+                  {t("reschedule")}
+                </button>
 
                 {/* Cancel */}
                 <button
@@ -342,7 +436,54 @@ function ReservationCard({ reservation, onCancelled }) {
             </p>
           </div>
         )}
+
+        {/* The customer's own review of this appointment, once left */}
+        {reservation.review && (
+          <div className="border-t border-gray-100 pt-3 text-sm text-gray-600">
+            <span className="tracking-tight text-[#b89664]">
+              {"★".repeat(reservation.review.rating)}
+              <span className="text-gray-200">{"★".repeat(5 - reservation.review.rating)}</span>
+            </span>
+            {reservation.review.comment && (
+              <span className="ml-2 text-gray-500">{reservation.review.comment}</span>
+            )}
+          </div>
+        )}
+
+        {/* Invoice PDF, once one has been issued */}
+        {invoice && (
+          <div className="border-t border-gray-100 pt-3">
+            <a
+              href={`/api/invoices/${invoice.id}/pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 transition-colors hover:text-[#b89664]"
+            >
+              <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+              {t("invoice", { number: invoice.number })}
+            </a>
+          </div>
+        )}
       </div>
+
+      {rescheduleOpen && (
+        <AppointmentRescheduleModal
+          // The modal was written against the /appointments shape, which
+          // flattens these two; map rather than reshape the loader, so the
+          // rest of this page keeps its nested service/staff objects.
+          appointment={{
+            ...reservation,
+            serviceName: reservation.service?.name,
+            staffName: reservation.staff?.fullName,
+          }}
+          onClose={() => setRescheduleOpen(false)}
+          onRescheduled={() => {
+            setRescheduleOpen(false);
+            toast.success(t("rescheduledToast"));
+            router.refresh();
+          }}
+        />
+      )}
 
       {/* Stripe notice only when payment button is shown */}
       {reservation.awaitingPayment && !isCancelled && (

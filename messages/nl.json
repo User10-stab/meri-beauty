@@ -2117,7 +2117,18 @@
     "cancelledToast": "Reservering geannuleerd.",
     "cancelFailedToast": "Kan deze reservering niet annuleren.",
     "sessionFailedToast": "Kan de betalingssessie niet aanmaken. Probeer het opnieuw.",
-    "genericErrorToast": "Er is een fout opgetreden. Probeer het opnieuw."
+    "genericErrorToast": "Er is een fout opgetreden. Probeer het opnieuw.",
+    "invoice": "Factuur {number}",
+    "reschedule": "Verzetten",
+    "rescheduledToast": "Afspraak verzet.",
+    "exceptionRequestCta": "Uitzonderlijke beoordeling aanvragen",
+    "exceptionRequestIntro": "Leg uw situatie uit nadat u contact hebt opgenomen met de salon. Deze aanvraag annuleert de afspraak niet en garandeert geen terugbetaling.",
+    "exceptionRequestPlaceholder": "Bv. plotselinge ziekte, met alle nuttige informatie voor het team",
+    "exceptionRequestSend": "Aanvraag versturen",
+    "exceptionRequestBack": "Terug",
+    "exceptionRequestPending": "Uw aanvraag wacht op een beslissing van het team. Er wordt niets terugbetaald vóór hun akkoord.",
+    "exceptionRequestRejected": "Uw uitzonderlijke aanvraag is geweigerd. De afspraak en het voorschot blijven ongewijzigd.",
+    "exceptionRequestFailed": "Uw aanvraag kon niet worden verzonden."
   },
   "reservationSuccess": {
     "pollingTitle": "Bevestigen…",

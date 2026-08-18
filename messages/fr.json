@@ -2126,7 +2126,18 @@
     "cancelledToast": "Réservation annulée.",
     "cancelFailedToast": "Impossible d'annuler cette réservation.",
     "sessionFailedToast": "Impossible de créer la session de paiement. Veuillez réessayer.",
-    "genericErrorToast": "Une erreur est survenue. Veuillez réessayer."
+    "genericErrorToast": "Une erreur est survenue. Veuillez réessayer.",
+    "invoice": "Facture {number}",
+    "reschedule": "Reprogrammer",
+    "rescheduledToast": "Rendez-vous reprogrammé.",
+    "exceptionRequestCta": "Demander un examen exceptionnel",
+    "exceptionRequestIntro": "Après avoir contacté le salon, expliquez votre situation. Cette demande n'annule pas le rendez-vous et ne garantit pas un remboursement.",
+    "exceptionRequestPlaceholder": "Ex. maladie soudaine, avec toute information utile pour l'équipe",
+    "exceptionRequestSend": "Envoyer la demande",
+    "exceptionRequestBack": "Retour",
+    "exceptionRequestPending": "Votre demande est en attente d'une décision de l'équipe. Aucun remboursement n'est engagé avant son accord.",
+    "exceptionRequestRejected": "Votre demande exceptionnelle a été refusée. Le rendez-vous et l'acompte restent inchangés.",
+    "exceptionRequestFailed": "Impossible d'envoyer votre demande."
   },
   "reservationSuccess": {
     "pollingTitle": "Confirmation en cours…",

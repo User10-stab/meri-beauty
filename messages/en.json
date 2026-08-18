@@ -2117,7 +2117,18 @@
     "cancelledToast": "Reservation cancelled.",
     "cancelFailedToast": "Unable to cancel this reservation.",
     "sessionFailedToast": "Unable to create the payment session. Please try again.",
-    "genericErrorToast": "An error occurred. Please try again."
+    "genericErrorToast": "An error occurred. Please try again.",
+    "invoice": "Invoice {number}",
+    "reschedule": "Reschedule",
+    "rescheduledToast": "Appointment rescheduled.",
+    "exceptionRequestCta": "Request an exceptional review",
+    "exceptionRequestIntro": "After contacting the salon, explain your situation. This request does not cancel the appointment and does not guarantee a refund.",
+    "exceptionRequestPlaceholder": "E.g. sudden illness, with any detail useful to the team",
+    "exceptionRequestSend": "Send request",
+    "exceptionRequestBack": "Back",
+    "exceptionRequestPending": "Your request is awaiting a decision from the team. No refund is issued before their approval.",
+    "exceptionRequestRejected": "Your exceptional request was declined. The appointment and the deposit remain unchanged.",
+    "exceptionRequestFailed": "Could not send your request."
   },
   "reservationSuccess": {
     "pollingTitle": "Confirming…",

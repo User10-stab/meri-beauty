@@ -52,6 +52,8 @@ export async function getMyReservations() {
         },
         payment: {
           include: {
+            // The issued invoice, so a settled booking can offer its PDF.
+            invoice: { select: { id: true, number: true } },
             transactions: {
               where:   { isDeleted: false },
               orderBy: { paidAt: "asc" },
@@ -66,6 +68,7 @@ export async function getMyReservations() {
             },
           },
         },
+        review: { select: { id: true, rating: true, comment: true } },
         cancellationRequests: {
           orderBy: { createdAt: "desc" },
           take: 1,
@@ -119,6 +122,7 @@ export async function getMyReservations() {
               remainingAmount:     Number(payment.remainingAmount),
               paidAt:              payment.paidAt,
               transactionReference: payment.transactionReference,
+              invoice:             payment.invoice ?? null,
               transactions:        payment.transactions.map((t) => ({
                 id:                      t.id,
                 amount:                  Number(t.amount),
@@ -135,6 +139,8 @@ export async function getMyReservations() {
         // lib/appointments/payment-followup so both lists agree.
         awaitingPayment: isAwaitingPayment(appt, payment),
         awaitingPaymentChoice: isAwaitingPaymentChoice(appt, payment),
+
+        review: appt.review,
 
         cancellationRequest: appt.cancellationRequests[0]
           ? {

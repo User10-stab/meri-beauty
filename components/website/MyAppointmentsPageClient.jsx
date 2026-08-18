@@ -113,6 +113,22 @@ function DateBlock({ date, accent }) {
 function PaymentFollowUp({ appointment }) {
   const [redirecting, setRedirecting] = useState(false);
 
+  // A manually-confirmed request sits at PENDING with no Payment row until
+  // staff accept it — there is nothing to pay for yet, and offering a pay
+  // button would be taking money for a booking the salon has not agreed to.
+  // Say that plainly instead, so the wait doesn't read as a missing action.
+  if (appointment.status === "PENDING") {
+    return (
+      <div className="mt-3 flex items-start gap-2 rounded-xl border border-ink/8 bg-cream px-3 py-2.5 text-[12px] text-ink/60">
+        <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold" strokeWidth={1.75} />
+        <p>
+          En attente de validation par le salon. Dès que votre rendez-vous sera accepté, le
+          paiement s&apos;affichera ici — inutile d&apos;attendre l&apos;e-mail.
+        </p>
+      </div>
+    );
+  }
+
   if (!appointment.awaitingPayment && !appointment.awaitingPaymentChoice) return null;
 
   // Staff accepted the request but no Payment row exists yet — the customer

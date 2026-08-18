@@ -76,10 +76,15 @@ async function validateMultiSlotAvailability(drafts, appointments) {
   for (const appt of appointments) {
     const draft = drafts[appt.draftIndex];
     const staffServiceId = draft?.staffService?.id;
-    const date = new Date(appt.date);
+    const date = appt.date ? new Date(appt.date) : null;
     const time = appt.time;
 
-    const ok = await validateSlotAvailability(staffServiceId, date, time);
+    if (!date || Number.isNaN(date.getTime())) {
+      toast.error(t("dateTime.selectDateTime"));
+      return false;
+    }
+
+    const ok = await validateSlotAvailability(staffServiceId, date, time, unavailableMessage, t);
     if (!ok) return false;
   }
   return true;
@@ -1007,7 +1012,10 @@ export default function DateTimeStep({ data, updateData, nextStep }) {
     // Build the appointments list from the proposal so we can re-validate
     // each individual slot before advancing.
     const appointments = selectedProposal.appointments
-      ? selectedProposal.appointments
+      ? selectedProposal.appointments.map((appointment) => ({
+          ...appointment,
+          date: appointment.date ?? selectedProposal.date,
+        }))
       : [{ draftIndex: 0, date: selectedProposal.date, time: selectedProposal.time }];
 
     setValidating(true);

@@ -35,6 +35,23 @@ test('automatic single appointment with deposit disabled allows a salon-only flo
   assert.equal(decision.requiresOptionalDepositPrompt, false);
 });
 
+test('ONLINE_ONLY ignores deposit settings and requires the full amount', () => {
+  const decision = getReservationPaymentDecision({
+    appointmentCount: 1,
+    confirmationMode: 'AUTOMATIC',
+    allowedPaymentMethods: 'ONLINE_ONLY',
+    depositEnabled: true,
+    depositPercentage: 30,
+    totalAmount: 100,
+  });
+
+  assert.equal(decision.depositRequired, false);
+  assert.equal(decision.depositAmount, 0);
+  assert.equal(decision.paymentIntent, 'FULL_ONLINE');
+  assert.equal(decision.totalAmount, 100);
+  assert.equal(decision.requiresOnlinePaymentNow, true);
+});
+
 test('manual confirmation defers payment until staff acceptance', () => {
   const decision = getReservationPaymentDecision({
     appointmentCount: 1,

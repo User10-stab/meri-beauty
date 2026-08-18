@@ -10,7 +10,7 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8");
 // missed appointment was "Annuler" (rejectAppointment), which always issues
 // a full automatic refund and treats an absence identically to a
 // business-initiated cancellation.
-describe("marking an appointment as a no-show never touches Payment", () => {
+describe("marking an appointment as a no-show never refunds Payment", () => {
   const actions = source("actions/appointment/manage-appointment.js");
   const schema = source("prisma/schema.prisma");
 
@@ -22,10 +22,14 @@ describe("marking an appointment as a no-show never touches Payment", () => {
     );
     expect(fnBody).toContain('where: { id: appointmentId, status: "CONFIRMED" }');
     expect(fnBody).toContain('status: "NO_SHOW"');
-    // The whole point: no refund, no payment mutation, no Stripe call.
+    // The whole point: no refund, no Stripe call, ever, in either direction.
+    // (H14 fix: the forfeited deposit IS finally, non-refundably realized
+    // revenue at this point, so the function now does mark Payment PAID and
+    // issue an invoice for it — see the tx.payment.update below — but that's
+    // settlement/invoicing, never a refund.)
     expect(fnBody).not.toContain("stripe.refunds.create");
-    expect(fnBody).not.toContain("tx.payment.update");
-    expect(fnBody).not.toContain("prisma.payment.update");
+    expect(fnBody).toContain("tx.payment.update");
+    expect(fnBody).toContain('status: "PAID"');
   });
 
   test("has its own notification type, not misrepresented as a cancellation", () => {

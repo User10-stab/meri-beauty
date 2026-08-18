@@ -29,10 +29,18 @@ describe("deposit forfeiture defaults to withholding the deposit in full", () =>
     expect(actions).toContain("forfeitPercentage > 0");
   });
 
-  test("does not withhold a deposit when the assigned staff member cancels", () => {
-    expect(actions).toContain("const cancelledByAssignedStaff = authCheck.userRole === ROLES.STAFF");
-    expect(actions).toContain("!isAdminRole(session?.user?.role) && !cancelledByAssignedStaff");
-    expect(actions).toContain("!cancelledByAssignedStaff");
+  test("the assigned staff member cannot cancel a paid appointment (and so cannot bypass the forfeit) — only admin/owner can", () => {
+    // A staff exemption here previously let the same late cancellation
+    // refund 100% when staff clicked cancel but forfeit the deposit when
+    // admin clicked cancel — directly contradicting the "reste acquis sauf
+    // annulation exceptionnelle approuvée par l'administration" promise
+    // above. The refund-authorization gate must not carve out an exception
+    // for staff, and the forfeit computation must not either — only
+    // waiveDepositForfeit (an explicit admin decision) may skip it.
+    expect(actions).not.toContain("cancelledByAssignedStaff");
+    const gateIdx = actions.indexOf("Cancelling an unpaid request is routine appointment management");
+    const gateSnippet = actions.slice(gateIdx, gateIdx + 800);
+    expect(gateSnippet).toContain("if (!isAdminRole(session?.user?.role)) {");
   });
 
   test("forfeiture is computed before pinning the refund, so the pinned/refunded amount already excludes it", () => {

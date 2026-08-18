@@ -19,7 +19,7 @@ import {
   UserX,
   Loader2,
 } from "lucide-react";
-import { confirmAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
 import { getStaffColor } from "./staffColors";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ export function AppointmentDrawer({
     setIsPending(true);
     setFeedback(null);
     try {
-      const result = await confirmAppointment(appointment.id);
+      const result = await acceptAppointment(appointment.id);
       if (result.success) {
         setFeedback({ type: "success", message: result.message ?? t("success.appointmentConfirmed") });
         onAppointmentUpdated();

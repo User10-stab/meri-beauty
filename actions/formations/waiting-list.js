@@ -3,6 +3,8 @@
 import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
+import { auth } from "@/auth";
+import { isCheckoutAuthorized } from "@/lib/resume-checkout-token";
 import {
   welcomeWithCredentialsEmail,
   formationWaitingListJoinConfirmationEmail,
@@ -83,14 +85,14 @@ export async function joinFormationWaitingList({ sessionId, customerInfo: submit
 
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
-    let user = await prisma.user.findUnique({ where: { email } });
+    let user = await prisma.user.findFirst({ where: { email, isDeleted: false } });
 
     let temporaryPassword = null;
     let isNewUser = false;
 
     if (!user) {
       if (phone) {
-        const phoneExists = await prisma.user.findUnique({ where: { phone } });
+        const phoneExists = await prisma.user.findFirst({ where: { phone, isDeleted: false } });
         if (phoneExists) {
           return {
             success: false,
@@ -227,8 +229,16 @@ export async function validateFormationWaitingListPriority(waitingListEntryId) {
   }
 }
 
-/** Mark a waiting list entry as converted after a successful reservation. */
-export async function convertFormationWaitingListEntry(waitingListEntryId, reservationId) {
+/**
+ * Mark a waiting list entry as converted after a successful reservation.
+ *
+ * Public "use server" endpoint with no session for a guest booking — see
+ * convertWaitingListEntry's comment (lib/workshops equivalent) for why a
+ * bare id pair isn't proof. checkoutToken is the signed capability
+ * createFormationReservation minted to authorize Stripe checkout on this
+ * exact reservation.
+ */
+export async function convertFormationWaitingListEntry(waitingListEntryId, reservationId, checkoutToken) {
   try {
     const entry = await prisma.waitingListEntry.findUnique({
       where: { id: waitingListEntryId },
@@ -241,6 +251,18 @@ export async function convertFormationWaitingListEntry(waitingListEntryId, reser
       select: { sessionId: true, customerId: true },
     });
     if (!reservation || reservation.sessionId !== entry.formationSessionId || reservation.customerId !== entry.customerId) {
+      return { success: false };
+    }
+
+    const authSession = await auth();
+    if (
+      !isCheckoutAuthorized(reservation, {
+        resumeType: "FORMATION",
+        resumeId: reservationId,
+        checkoutToken,
+        sessionUserId: authSession?.user?.id,
+      })
+    ) {
       return { success: false };
     }
 

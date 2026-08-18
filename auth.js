@@ -4,10 +4,11 @@ import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { authConfig } from "./auth.config";
 import { ROLES, canAccessDashboard, isAdminRole } from "@/lib/authorization";
+import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 
 async function getStaffOnboardingState(userId) {
-  const staff = await prisma.staff.findUnique({
-    where: { userId },
+  const staff = await prisma.staff.findFirst({
+    where: { userId, isDeleted: false },
     select: {
       id: true,
       setupCompleted: true,
@@ -152,8 +153,27 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const user = await prisma.user.findUnique({
-          where: { email },
+        // loginUser (actions/auth/login.js) only rate-limits its own
+        // wrapper around signIn() — but Auth.js exposes this authorize()
+        // callback directly at /api/auth/callback/credentials, a raw POST
+        // endpoint anyone can hit without ever going through that wrapper.
+        // Gating here, the one place every credentials sign-in funnels
+        // through regardless of entry point, is what actually stops
+        // unlimited brute force. Same namespace/key shape as loginUser's
+        // limiter so both entry points share one bucket.
+        const ip = await getClientIp();
+        const rateLimitKey = hashRateLimitValue(`${email}:${ip}`);
+        if (await consumeSharedRateLimit("login", rateLimitKey, { windowMs: 5 * 60 * 1000, max: 10 })) {
+          return null;
+        }
+
+        const user = await prisma.user.findFirst({
+          // email lost its plain @unique when uniqueness moved to the
+          // active-only partial index (user_active_email_idx), so findUnique
+          // no longer accepts it. Scoping to isDeleted: false matches that
+          // index exactly — at most one row can match, and a soft-deleted
+          // namesake can never be returned in place of the live account.
+          where: { email, isDeleted: false },
           select: {
             id: true,
             email: true,

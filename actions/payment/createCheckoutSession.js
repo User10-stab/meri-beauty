@@ -17,6 +17,8 @@ import {
 } from "@/lib/notifications";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { validateAppointmentSlot } from "@/lib/appointment-scheduling";
+import { sendEmail } from "@/lib/email";
+import { reservationPaymentRequiredEmail } from "@/lib/email-templates";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import {
   TERMS_CONSENT_REQUIRED_MESSAGE,
@@ -337,6 +339,7 @@ export async function createCheckoutSession(reservationData) {
       // A deposit is only meaningful if online payments are accepted.
       depositEnabled: acceptsOnlinePayments ? Boolean(staff.depositEnabled) : false,
       depositPercentage: acceptsOnlinePayments ? Number(staff.depositPercentage ?? 0) : 0,
+      allowedPaymentMethods: staff.allowedPaymentMethods,
       totalAmount: rawTotalAmount,
       paymentMethod: normalizedPaymentMethod,
       discountAmount,
@@ -379,7 +382,7 @@ export async function createCheckoutSession(reservationData) {
     // the entire duration of the read-then-write sequence. Acquiring it outside
     // a transaction (as before) released it immediately, making it ineffective
     // against concurrent duplicate submissions.
-    const { appointment, payment } = await prisma.$transaction(async (tx) => {
+    const { appointment, payment, createdNewPayment } = await prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${lockId}::bigint)`;
 
       // Re-check for an existing PENDING appointment now that the lock is held.
@@ -403,6 +406,7 @@ export async function createCheckoutSession(reservationData) {
         return {
           appointment: existingPendingAppointment,
           payment: existingPendingAppointment.payment,
+          createdNewPayment: false,
         };
       }
 
@@ -456,8 +460,23 @@ export async function createCheckoutSession(reservationData) {
         );
       }
 
-      return { appointment, payment };
+      return { appointment, payment, createdNewPayment: true };
     });
+
+    if (createdNewPayment) {
+      const retryUrl = `${process.env.NEXT_PUBLIC_APP_URL}/reservation/retry-payment?paymentId=${encodeURIComponent(payment.id)}`;
+      await sendEmail({
+        to: customerUser.email,
+        ...reservationPaymentRequiredEmail({
+          customerName: customerUser.fullName,
+          serviceName: staffService.service.name,
+          staffName: staff.user?.fullName ?? "Expert",
+          date: appointment.date,
+          time: appointment.startTime.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" }),
+          retryUrl,
+        }),
+      }).catch((error) => console.error("[createCheckoutSession] payment-required email failed:", error));
+    }
 
     const metadata = {
       appointmentId: appointment.id,
@@ -510,6 +529,9 @@ export async function createCheckoutSession(reservationData) {
           success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/reservation?canceled=true`,
           customer_email: customerInfo.email,
+          payment_intent_data: {
+            metadata,
+          },
           // Metadata is available on the session object in the webhook.
           // The webhook reads these fields to update Payment and Appointment.
           metadata,

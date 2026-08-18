@@ -26,6 +26,11 @@ export default function LocaleSwitcher({ className = "" }) {
     router.refresh();
   }
 
+  // The closed control inherits the navbar's cream-on-dark-green colours, but
+  // the open dropdown is painted by the OS: the options inherited that same
+  // near-white text onto the platform's white popup background, leaving the
+  // list looking blank. The options are the only part not sitting on the dark
+  // header, so they need their own explicit pairing.
   return (
     <label className={`inline-flex items-center gap-1.5 ${className}`}>
       <span className="sr-only">{t("language")}</span>
@@ -33,7 +38,7 @@ export default function LocaleSwitcher({ className = "" }) {
         value={locale}
         onChange={changeLocale}
         aria-label={t("language")}
-        className="rounded-full border border-current/20 bg-transparent px-2 py-1 text-xs font-semibold tracking-wide outline-none"
+        className="rounded-full border border-current/20 bg-transparent px-2 py-1 text-xs font-semibold tracking-wide outline-none [&>option]:bg-cream [&>option]:text-primary"
       >
         {OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>

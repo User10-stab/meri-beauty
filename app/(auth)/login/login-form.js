@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Mail, Lock } from "lucide-react";
@@ -44,7 +45,19 @@ export default function LoginForm() {
   // Thread callbackUrl into the register link so that if the user chooses
   // to sign up instead, the pending rental request (or any other redirect
   // intent) is preserved through the full register → verify → login flow.
-  const registerHref = callbackUrl
+  //
+  // Gated on `mounted` rather than read straight off callbackUrl: Next's
+  // client-side router cache can hydrate this page's Suspense boundary
+  // against a render cached from an earlier visit to /login in the same
+  // tab, so a callbackUrl-derived href can disagree between the server
+  // HTML and the first client pass — React then refuses to patch the
+  // mismatched <Link href> and logs a hydration error. Deferring to after
+  // mount guarantees the first client render always matches the server's
+  // bare "/register" default; the real href with callbackUrl attaches a
+  // moment later, same timing as any other post-hydration client state.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const registerHref = mounted && callbackUrl
     ? `/register?callbackUrl=${encodeURIComponent(callbackUrl)}`
     : "/register";
 
@@ -75,20 +88,9 @@ export default function LoginForm() {
       footerText="Vous n'avez pas encore de compte ?"
       footerLinkHref={registerHref}
       footerLinkText="Créer un compte"
-      extraElements={({ register, isLoading }) => (
+      extraElements={() => (
         <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <input
-              id="rememberMe"
-              type="checkbox"
-              disabled={isLoading}
-              {...register("rememberMe")}
-              className="h-4.5 w-4.5 text-[#2F3A2E] border-zinc-300 rounded focus:ring-[#2F3A2E]/40 dark:bg-zinc-800 dark:border-zinc-700 cursor-pointer"
-            />
-            <label htmlFor="rememberMe" className="ml-2 block text-sm text-zinc-650 dark:text-zinc-400 select-none cursor-pointer">
-              Se souvenir de moi
-            </label>
-          </div>
+          <div />
 
           <div className="text-sm">
             <Link

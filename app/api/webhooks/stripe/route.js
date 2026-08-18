@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import {
   paymentConfirmationEmail,
+  reservationPaymentFailedEmail,
+  staffReservationConfirmedEmail,
   workshopSessionChangeEmail,
   workshopSeatsChangeEmail,
   staffPaymentFailedEmail,
@@ -40,6 +42,7 @@ import {
   getDeploymentId,
   DEPLOYMENT_METADATA_KEY,
 } from "@/lib/stripe-deployment";
+import { roundMoney } from "@/lib/tax-policy";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -119,7 +122,7 @@ export async function POST(req) {
 
   if (event.type === "payment_intent.payment_failed") {
     try {
-      await handlePaymentIntentFailed(event.data.object);
+      await handlePaymentIntentFailed(event.data.object, event.account);
       return NextResponse.json({ received: true });
     } catch (err) {
       captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
@@ -180,6 +183,11 @@ export async function POST(req) {
       kind: failedSession.metadata?.kind ?? "appointment",
       metadata: failedSession.metadata,
     });
+    await notifyAppointmentPaymentFailed({
+      paymentId: failedSession.metadata?.paymentId,
+      appointmentId: failedSession.metadata?.appointmentId,
+      failedSessionId: failedSession.id,
+    });
     return NextResponse.json({ received: true });
   }
 
@@ -187,6 +195,11 @@ export async function POST(req) {
     const expiredSession = event.data.object;
     console.info(`[stripe-webhook] checkout session expired: ${expiredSession.id}`, {
       kind: expiredSession.metadata?.kind ?? "appointment",
+    });
+    await notifyAppointmentPaymentFailed({
+      paymentId: expiredSession.metadata?.paymentId,
+      appointmentId: expiredSession.metadata?.appointmentId,
+      failedSessionId: expiredSession.id,
     });
     return NextResponse.json({ received: true });
   }
@@ -295,7 +308,7 @@ async function handleAccountUpdated(account) {
 // ─── charge.refunded / charge.dispute.created ────────────────────────────────
 
 function round2(n) {
-  return Math.round(n * 100) / 100;
+  return roundMoney(n);
 }
 
 /**
@@ -749,9 +762,16 @@ async function processAppointmentCheckoutSession(session) {
 
     const appointment = existingPayment.appointment;
     const confirmationMode = appointment.staffService?.staff?.reservationConfirmationMode ?? "MANUAL";
-    // Accepted manual requests become confirmed after payment. Other manual
-    // states are preserved so a delayed webhook can never move an appointment
-    // backwards; automatic bookings still confirm immediately.
+    // AUTOMATIC mode confirms as soon as the required online payment clears,
+    // regardless of any remaining salon balance. MANUAL mode still needs
+    // staff review — the payment is recorded but the appointment stays PENDING.
+    // An ACCEPTED appointment reached this webhook through the staff-review
+    // confirmation page, so successful payment completes that acceptance even
+    // when the staff default is MANUAL. New bookings still follow the normal
+    // confirmation-mode rule. Delegated to resolveAppointmentStatusAfterPayment
+    // rather than inlined, so a delayed/duplicate webhook delivery for an
+    // appointment that's already CONFIRMED (or further along) preserves its
+    // current status instead of forcing it back to PENDING.
     const nextAppointmentStatus = resolveAppointmentStatusAfterPayment({
       currentStatus: appointment.status,
       confirmationMode,
@@ -912,11 +932,35 @@ async function processAppointmentCheckoutSession(session) {
     }).catch((err) => console.error("[stripe-webhook] appointment confirmation email failed:", err));
   }
 
+  if (result.nextAppointmentStatus === "CONFIRMED") {
+    const recipients = await getAppointmentEmailRecipients(result.appointment.staffId);
+    const staffName = staffService?.staff?.user?.fullName ?? "votre experte";
+    const serviceName = staffService?.service?.name ?? "votre service";
+    for (const recipient of recipients) {
+      sendEmail({
+        to: recipient.email,
+        ...staffReservationConfirmedEmail({
+          staffName: recipient.fullName,
+          customerName: user?.fullName ?? "Client",
+          serviceName,
+          date: result.appointment.date,
+          time: result.appointment.startTime.toLocaleTimeString("fr-FR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: "Europe/Brussels",
+          }),
+          duration: staffService?.duration,
+          totalAmount: result.totalAmount,
+        }),
+      }).catch((err) => console.error("[stripe-webhook] staff confirmation email failed:", err));
+    }
+  }
+
   return { received: true, processed: true };
 }
 
 /** Stripe Connect `account.updated` — see handleAccountUpdated above; kept as a case in the same dispatcher. */
-async function handlePaymentIntentFailed(paymentIntent) {
+async function handlePaymentIntentFailed(paymentIntent, connectedAccountId = null) {
   const paymentIntentId = paymentIntent?.id || null;
   if (!paymentIntentId) {
     console.warn("[stripe-webhook] payment_intent.payment_failed missing payment intent ID");
@@ -949,6 +993,31 @@ async function handlePaymentIntentFailed(paymentIntent) {
   });
 
   if (!transaction?.payment?.appointment) {
+    const paymentId = paymentIntent?.metadata?.paymentId;
+    const appointmentId = paymentIntent?.metadata?.appointmentId;
+    if (paymentId && appointmentId) {
+      await notifyAppointmentPaymentFailed({ paymentId, appointmentId, failedSessionId: null });
+      return;
+    }
+
+    // Older Checkout Sessions may not have PaymentIntent metadata. Resolve
+    // their session metadata from the connected account when Stripe includes it.
+    if (connectedAccountId) {
+      const sessions = await stripe.checkout.sessions.list(
+        { payment_intent: paymentIntentId, limit: 1 },
+        { stripeAccount: connectedAccountId }
+      );
+      const session = sessions.data?.[0];
+      if (session?.metadata?.paymentId && session?.metadata?.appointmentId) {
+        await notifyAppointmentPaymentFailed({
+          paymentId: session.metadata.paymentId,
+          appointmentId: session.metadata.appointmentId,
+          failedSessionId: session.id,
+        });
+        return;
+      }
+    }
+
     console.warn(`[stripe-webhook] Transaction/appointment not found for payment intent ${paymentIntentId}`);
     return;
   }
@@ -956,19 +1025,11 @@ async function handlePaymentIntentFailed(paymentIntent) {
   const payment = transaction.payment;
   const appointment = payment.appointment;
 
-  // Atomic: payment FAILED + appointment CANCELLED commit together
-  await prisma.$transaction(async (tx) => {
-    await tx.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
-    await tx.appointment.update({
-      where: { id: payment.appointmentId },
-      data: {
-        status: "CANCELLED",
-        cancelledAt: new Date(),
-        cancellationReason: "Paiement Stripe échoué",
-        cancellationSource: "STRIPE",
-      },
-    });
-  });
+  await notifyAppointmentPaymentFailed({
+    paymentId: payment.id,
+    appointmentId: payment.appointmentId,
+    failedSessionId: payment.transactionReference,
+});
 
   // Dashboard notifications (outside transaction - business operation already committed)
   const serviceName = appointment.staffService?.service?.name;
@@ -1021,6 +1082,48 @@ async function handlePaymentIntentFailed(paymentIntent) {
   });
 }
 
+async function notifyAppointmentPaymentFailed({ paymentId, appointmentId, failedSessionId = null }) {
+  if (!paymentId || !appointmentId) return;
+
+  const payment = await prisma.payment.findUnique({
+    where: { id: paymentId },
+    include: {
+      appointment: {
+        include: {
+          user: { select: { fullName: true, email: true } },
+          staffService: {
+            include: {
+              service: { select: { name: true } },
+              staff: { include: { user: { select: { fullName: true } } } },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!payment?.appointment || payment.appointment.id !== appointmentId) return;
+
+  const changed = await prisma.payment.updateMany({
+    where: { id: payment.id, status: "PENDING" },
+    data: { status: "FAILED", ...(failedSessionId ? { transactionReference: failedSessionId } : {}) },
+  });
+  if (changed.count !== 1) return;
+
+  const appointment = payment.appointment;
+  const retryUrl = `${process.env.NEXT_PUBLIC_APP_URL}/reservation/retry-payment?paymentId=${encodeURIComponent(payment.id)}`;
+  await sendEmail({
+    to: appointment.user.email,
+    ...reservationPaymentFailedEmail({
+      customerName: appointment.user.fullName,
+      serviceName: appointment.staffService.service.name,
+      staffName: appointment.staffService.staff?.user?.fullName ?? "Expert",
+      date: appointment.date,
+      time: appointment.startTime.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" }),
+      retryUrl,
+    }),
+  }).catch((error) => console.error("[stripe-webhook] payment-failed email failed:", error));
+}
+
 // ─── checkout.session.completed (workshops/events, formations) ───────────────
 // The actual confirm-the-reservation logic lives in
 // lib/workshops/fulfill-workshop-reservation-payment.js and
@@ -1040,7 +1143,17 @@ async function applyWorkshopSessionChangeFee(session, meta) {
 
   const reservation = await prisma.workshopReservation.findUnique({
     where: { id: reservationId },
-    include: { session: { include: { workshop: true } }, customer: true, payment: true },
+    include: {
+      session: { include: { workshop: true } },
+      customer: {
+        include: {
+          billingProfile: {
+            select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+          },
+        },
+      },
+      payment: { include: { invoice: { select: { id: true } } } },
+    },
   });
 
   if (!reservation) {
@@ -1103,6 +1216,26 @@ async function applyWorkshopSessionChangeFee(session, meta) {
           paidAt: new Date(),
         },
       });
+
+      // Real collected revenue needs a legal document. Guarded on the
+      // Payment row not already carrying one — Invoice.paymentId is @unique,
+      // and a second session-change fee against the same reservation (its
+      // Payment row is 1:1 and reused across fee events) would otherwise
+      // collide. See the flagged edge case in the audit report: this guard
+      // silently skips invoicing a legitimate second fee rather than
+      // resolving where that revenue's invoice should go.
+      if (!reservation.payment.invoice) {
+        await issueInvoice(tx, {
+          paymentId: reservation.payment.id,
+          source: "WORKSHOP",
+          totalInclVat: changeFeeAmount,
+          customer: buildInvoiceCustomer(reservation.customer),
+          lines: buildServiceInvoiceLines({
+            description: `Frais de changement de séance — ${reservation.session.workshop.title}`,
+            totalAmount: changeFeeAmount,
+          }),
+        });
+      }
     }
     return true;
   });
@@ -1152,7 +1285,17 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
 
   const reservation = await prisma.workshopReservation.findUnique({
     where: { id: reservationId },
-    include: { session: { include: { workshop: true } }, customer: true, payment: true },
+    include: {
+      session: { include: { workshop: true } },
+      customer: {
+        include: {
+          billingProfile: {
+            select: { companyLegalName: true, companyRegistrationNo: true, billingContactName: true, purchaseOrderReference: true },
+          },
+        },
+      },
+      payment: { include: { invoice: { select: { id: true } } } },
+    },
   });
 
   if (!reservation) {
@@ -1239,6 +1382,46 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
           paidAt: new Date(),
         },
       });
+
+      // A seat increase raises what the reservation is actually worth —
+      // keep the linked Payment row's totals in step, or settleReservation
+      // (which computes the final balance/invoice purely from
+      // Payment.totalAmount/remainingAmount, not WorkshopReservation.totalPrice)
+      // would under-bill and under-invoice the customer at final settlement.
+      // The deposit already paid is untouched (no additional deposit is
+      // collected for added seats — only this flat fee, handled separately
+      // above); remainingAmount is recomputed from the new total minus what's
+      // actually been paid, not by adding the delta, so this can't compound
+      // rounding drift if it ever ran twice.
+      if (isIncrease && newTotalPrice) {
+        await tx.payment.update({
+          where: { id: reservation.payment.id },
+          data: {
+            totalAmount: Number(newTotalPrice),
+            remainingAmount: Number(newTotalPrice) - Number(reservation.payment.paidAmount),
+          },
+        });
+      }
+
+      // Real collected revenue needs a legal document. Guarded on the
+      // Payment row not already carrying one — Invoice.paymentId is @unique,
+      // and a second seats-change fee against the same reservation (its
+      // Payment row is 1:1 and reused across fee events) would otherwise
+      // collide. See the flagged edge case in the audit report: this guard
+      // silently skips invoicing a legitimate second fee rather than
+      // resolving where that revenue's invoice should go.
+      if (!reservation.payment.invoice) {
+        await issueInvoice(tx, {
+          paymentId: reservation.payment.id,
+          source: "WORKSHOP",
+          totalInclVat: changeFeeAmount,
+          customer: buildInvoiceCustomer(reservation.customer),
+          lines: buildServiceInvoiceLines({
+            description: `Frais de changement de nombre de places — ${reservation.session.workshop.title}`,
+            totalAmount: changeFeeAmount,
+          }),
+        });
+      }
     }
     return { claimed: true };
   });

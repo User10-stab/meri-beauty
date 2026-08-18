@@ -60,15 +60,35 @@ describe("reservation settlement — collecting the on-site balance", () => {
   });
 });
 
-describe("reservation no-show never moves money", () => {
+// A no-show is exactly the case where the deposit is kept — H14: that kept
+// deposit is real, non-refundable revenue and Belgian law requires an
+// invoice for it, same as settleReservation's own final-balance invoice.
+// Still never refunds and never calls Stripe — only the invoicing gap is
+// closed.
+describe("reservation no-show never refunds, but does invoice the kept deposit", () => {
   const lib = source("lib/reservations/settle-reservation.js");
   const noShowFn = lib.slice(lib.indexOf("export async function markReservationNoShow"), lib.length);
 
-  test("transitions CONFIRMED -> NO_SHOW and touches no Payment or Stripe", () => {
+  test("transitions CONFIRMED -> NO_SHOW and never touches Stripe or issues a credit note", () => {
     expect(noShowFn).toContain('data: { status: "NO_SHOW" }');
     expect(noShowFn).not.toContain("stripe");
-    expect(noShowFn).not.toContain("payment.update");
     expect(noShowFn).not.toContain("issueCreditNote");
+  });
+
+  test("invoices the forfeited deposit and marks the Payment PAID", () => {
+    expect(noShowFn).toContain("issueInvoice(tx");
+    expect(noShowFn).toContain('tx.payment.update({ where: { id: payment.id }, data: { status: "PAID" } })');
+  });
+
+  test("invoices the forfeited deposit only inside the claiming transaction, after the claim succeeds", () => {
+    const claimIdx = noShowFn.indexOf('data: { status: "NO_SHOW" }');
+    const invoiceIdx = noShowFn.indexOf("issueInvoice(tx");
+    expect(claimIdx).toBeGreaterThan(-1);
+    expect(invoiceIdx).toBeGreaterThan(claimIdx);
+  });
+
+  test("skips invoicing when there's nothing paid or an invoice already exists", () => {
+    expect(noShowFn).toContain("Number(payment.paidAmount) > 0.01 && !payment.invoice");
   });
 });
 

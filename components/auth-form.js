@@ -119,7 +119,14 @@ export default function AuthForm({
         )}
 
         {/* Form Body */}
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit(handleFormSubmit)}>
+        {/* method="post": onSubmit's preventDefault() normally intercepts this
+            before it does anything, but if the button is clicked before React
+            finishes hydrating (a real race on first load), the browser falls
+            through to its native default submission. Without an explicit
+            method that default is GET, which puts every field — including a
+            password — into the URL query string, browser history, and access
+            logs. POST keeps that same fallback from ever leaking credentials. */}
+        <form method="post" className="mt-8 space-y-6" onSubmit={handleSubmit(handleFormSubmit)}>
           <div className="space-y-4">
             {fields.map((field) => {
               const Icon = field.icon;

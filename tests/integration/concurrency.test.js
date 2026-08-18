@@ -64,12 +64,16 @@ describe("real concurrency: two requests racing the same last unit of stock", ()
     // Pre-verified so createOrderFromCart's resolveOrCreateCustomer finds an
     // existing, already-confirmed user instead of creating a new one and
     // sending a real verification email — keeps this test to exactly the
-    // stock-locking logic under test.
+    // stock-locking logic under test. An address is included too — a real
+    // registered account always has one (mandatory at registration), and
+    // resolveOrCreateCustomer now requires it on file for any existing user
+    // whose checkoutInput below doesn't supply one (Belgian invoicing rule).
+    const address = { addressLine1: "Rue Test 1", addressCity: "Bruxelles", addressPostalCode: "1000", addressCountry: "BE" };
     user1 = await prisma.user.create({
-      data: { fullName: "Race Customer One", email: `${tag}-1@example.test`, phone: uniquePhone(), password: "x", role: "CUSTOMER", emailVerified: true },
+      data: { fullName: "Race Customer One", email: `${tag}-1@example.test`, phone: uniquePhone(), password: "x", role: "CUSTOMER", emailVerified: true, ...address },
     });
     user2 = await prisma.user.create({
-      data: { fullName: "Race Customer Two", email: `${tag}-2@example.test`, phone: uniquePhone(), password: "x", role: "CUSTOMER", emailVerified: true },
+      data: { fullName: "Race Customer Two", email: `${tag}-2@example.test`, phone: uniquePhone(), password: "x", role: "CUSTOMER", emailVerified: true, ...address },
     });
 
     // Two independent guest carts (no userId) — each represents a different

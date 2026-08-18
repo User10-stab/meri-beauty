@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
-import { buildAppointmentWindow, findConflictingAppointment } from "@/lib/appointment-scheduling";
+import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
 import { staffReservationModifiedEmail } from "@/lib/email-templates";
 import {
   createNotificationsBulk,

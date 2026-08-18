@@ -6,6 +6,7 @@ import {
   buildAvailabilityForDate,
   parseLocalDateString,
   formatLocalDateKey,
+  filterFutureReservationWindows,
 } from "@/lib/slot-availability";
 
 /**
@@ -58,6 +59,7 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
     // which service was booked, so we must consider all their appointments.
     const startOfDay = parseLocalDateString(date);
     const endOfDay   = parseLocalDateString(date);
+    endOfDay.setDate(endOfDay.getDate() + 1);
     endOfDay.setHours(23, 59, 59, 999);
 
     const existingAppointments = await prisma.appointment.findMany({
@@ -85,6 +87,10 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
       salon,
       existingAppointments,
     });
+    availability.reservationWindows = filterFutureReservationWindows(
+      availability.reservationWindows,
+      selectedDate
+    );
 
     return {
       success: true,
@@ -149,6 +155,8 @@ export async function getMonthAvailability(staffServiceId, monthDate, excludeApp
     const startOfMonth = new Date(year, month, 1);          // local midnight 1st
     const endOfMonth   = new Date(year, month + 1, 0);      // local midnight last day
     endOfMonth.setHours(23, 59, 59, 999);
+    const queryEndOfMonth = new Date(endOfMonth);
+    queryEndOfMonth.setDate(queryEndOfMonth.getDate() + 1);
 
     const salon = await prisma.salon.findUnique({
       where: { id: "main-salon" },
@@ -160,7 +168,7 @@ export async function getMonthAvailability(staffServiceId, monthDate, excludeApp
         staffService: {
           staffId: staffService.staff.id,
         },
-        date: { gte: startOfMonth, lte: endOfMonth },
+        date: { gte: startOfMonth, lte: queryEndOfMonth },
         status: { in: ACTIVE_APPOINTMENT_STATUSES },
         isDeleted: false,
         ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),
@@ -181,12 +189,12 @@ export async function getMonthAvailability(staffServiceId, monthDate, excludeApp
       // Filter pre-loaded appointments to this exact calendar day using local
       // year/month/day comparison — avoids re-querying and UTC drift.
       const dayAppointments = existingAppointments.filter((appt) => {
-        const d = new Date(appt.date);
-        return (
-          d.getFullYear() === cursor.getFullYear() &&
-          d.getMonth()    === cursor.getMonth()    &&
-          d.getDate()     === cursor.getDate()
-        );
+        const start = new Date(appt.startTime ?? appt.date);
+        const dayStart = new Date(cursor);
+        const dayEnd = new Date(cursor);
+        dayEnd.setDate(dayEnd.getDate() + 1);
+        dayEnd.setHours(23, 59, 59, 999);
+        return start >= dayStart && start <= dayEnd;
       });
 
       const availability = buildAvailabilityForDate({

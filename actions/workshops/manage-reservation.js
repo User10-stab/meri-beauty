@@ -9,7 +9,7 @@ import { workshopCancellationEmail } from "@/lib/email-templates";
 import { isAdminRole } from "@/lib/authorization";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-workshop-reservation";
-import { issueCreditNote } from "@/lib/invoicing";
+import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
 
@@ -62,7 +62,7 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       where: { id: reservationId },
       include: {
         session: { include: { workshop: true } },
-        customer: true,
+        customer: { include: { billingProfile: true } },
         payment: { include: { invoice: true } },
       },
     });
@@ -190,6 +190,33 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
           await markRefundFailed(prisma, payment.id, err);
         }
       }
+    } else if (
+      !refundDeposit &&
+      reservation.payment &&
+      Number(reservation.payment.paidAmount) > 0.01 &&
+      !reservation.payment.invoice
+    ) {
+      // Deposit kept, not refunded — this is now final, non-refundable
+      // revenue, and Belgian law requires an invoice for it just as much as
+      // for a normally-settled reservation (see settleReservation's own
+      // issueInvoice call). Never invoiced at collection time (see
+      // lib/reservations/settle-reservation.js's doc comment), so this is
+      // the only point where that invoice gets issued for a forfeited
+      // deposit.
+      const payment = reservation.payment;
+      await prisma.$transaction(async (tx) => {
+        await issueInvoice(tx, {
+          paymentId: payment.id,
+          source: "WORKSHOP",
+          totalInclVat: Number(payment.paidAmount),
+          customer: buildInvoiceCustomer(reservation.customer),
+          lines: buildServiceInvoiceLines({
+            description: `Annulation — acompte non remboursable — ${reservation.session.workshop.title}`,
+            totalAmount: Number(payment.paidAmount),
+          }),
+        });
+        await tx.payment.update({ where: { id: payment.id }, data: { status: "PAID" } });
+      });
     }
 
     notifyAllInWaitingList(reservation.sessionId).catch((err) =>

@@ -6,7 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { Mail, Loader2, Sparkles, AlertCircle, Check, ArrowLeft, RefreshCcw } from "lucide-react";
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
-import { resendVerificationEmail } from "@/actions/auth/verify-email";
+import { resendVerificationEmail, verifyEmail } from "@/actions/auth/verify-email";
 import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-verification";
 import { normalizeCallbackUrl } from "@/lib/safe-callback-url";
 
@@ -20,12 +20,29 @@ export default function VerifyEmailForm({
   resumeId,
   resumeToken,
   defaultEmail = "",
+  verificationToken = "",
 }) {
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [serverSuccess, setServerSuccess] = useState(null);
   const [retryingPayment, setRetryingPayment] = useState(false);
   const [retryError, setRetryError] = useState(null);
+  const [verifyingEmail, setVerifyingEmail] = useState(false);
+  const [verificationResult, setVerificationResult] = useState(null);
+
+  const effectiveSuccess = verificationResult?.success ?? success;
+  const effectiveMessage = verificationResult?.message ?? message;
+  const effectiveRedirectUrl =
+    verificationResult?.success && verificationResult?.resumeSuccess && verificationResult?.resumeUrl
+      ? verificationResult.resumeUrl
+      : redirectUrl;
+  const effectivePaymentFailed =
+    paymentFailed ||
+    Boolean(verificationResult?.success && verificationResult?.resumeType && !verificationResult?.resumeSuccess);
+  const effectivePaymentFailedMessage = verificationResult?.resumeMessage ?? paymentFailedMessage;
+  const effectiveResumeType = verificationResult?.resumeType ?? resumeType;
+  const effectiveResumeId = verificationResult?.resumeId ?? resumeId;
+  const effectiveResumeToken = verificationResult?.resumeToken ?? resumeToken;
 
   // If the user arrived here mid-rental-request flow, the return URL was
   // stored in localStorage by BecomePartner before redirecting to auth.
@@ -48,23 +65,36 @@ export default function VerifyEmailForm({
   // Stripe/success URL ready — leave immediately rather than making the
   // person click anything.
   useEffect(() => {
-    if (redirectUrl) window.location.href = redirectUrl;
-  }, [redirectUrl]);
+    if (effectiveRedirectUrl) window.location.href = effectiveRedirectUrl;
+  }, [effectiveRedirectUrl]);
 
   async function handleRetryPayment() {
-    if (!resumeToken) {
+    if (!effectiveResumeToken) {
       setRetryError("Ce lien de reprise a expiré. Veuillez vous connecter pour finaliser votre commande.");
       return;
     }
     setRetryingPayment(true);
     setRetryError(null);
-    const result = await retryCheckoutSession({ resumeType, resumeId, resumeToken });
+    const result = await retryCheckoutSession({
+      resumeType: effectiveResumeType,
+      resumeId: effectiveResumeId,
+      resumeToken: effectiveResumeToken,
+    });
     if (result.success && result.url) {
       window.location.href = result.url;
       return;
     }
     setRetryError(result.message || "Le paiement n'a pas pu démarrer. Veuillez réessayer.");
     setRetryingPayment(false);
+  }
+
+  async function handleVerifyEmail() {
+    if (!verificationToken) return;
+    setVerifyingEmail(true);
+    setServerError(null);
+    const result = await verifyEmail(verificationToken);
+    setVerificationResult(result);
+    setVerifyingEmail(false);
   }
 
   const {
@@ -116,10 +146,42 @@ export default function VerifyEmailForm({
     }
   };
 
+  if (verificationToken && !verificationResult) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
+        <div className="max-w-md w-full space-y-6 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+            <Mail className="h-6 w-6" />
+          </div>
+          <h2 className="text-2xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">
+            Confirmer votre e-mail
+          </h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+            Cliquez sur le bouton ci-dessous pour activer votre compte. Le lien n&apos;est plus consommé au simple chargement de cette page.
+          </p>
+          <button
+            type="button"
+            onClick={handleVerifyEmail}
+            disabled={verifyingEmail}
+            className="w-full inline-flex justify-center items-center gap-2 py-3.5 px-4 text-sm font-semibold rounded-2xl text-white bg-[#2F3A2E] hover:bg-[#3d4d3c] transition-all shadow-md active:scale-[0.98] disabled:opacity-70"
+          >
+            {verifyingEmail ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Confirmation...
+              </>
+            ) : (
+              "Confirmer mon adresse e-mail"
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Checkout-issued token, verified, and already has somewhere to go —
   // the useEffect above is navigating away; this just covers the instant
   // before that happens so the screen isn't blank.
-  if (redirectUrl) {
+  if (effectiveRedirectUrl) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
         <div className="max-w-md w-full space-y-6 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 text-center">
@@ -134,7 +196,7 @@ export default function VerifyEmailForm({
   // Checkout-issued token verified successfully, but starting payment
   // failed (e.g. a Stripe hiccup) — the account is real and credentialed
   // either way, so this offers a manual retry instead of a dead end.
-  if (paymentFailed) {
+  if (effectivePaymentFailed) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
         <div className="max-w-md w-full space-y-6 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 text-center">
@@ -144,7 +206,7 @@ export default function VerifyEmailForm({
           <h2 className="text-xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">Email confirmé</h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
             Vos identifiants viennent de vous être envoyés par email. En revanche, le paiement n&apos;a pas pu démarrer
-            {paymentFailedMessage ? ` (${paymentFailedMessage})` : ""}.
+            {effectivePaymentFailedMessage ? ` (${effectivePaymentFailedMessage})` : ""}.
           </p>
           {retryError && (
             <div className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-300 text-sm text-left">
@@ -171,7 +233,7 @@ export default function VerifyEmailForm({
     );
   }
 
-  if (success && message) {
+  if (effectiveSuccess && effectiveMessage) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
         <div className="max-w-md w-full space-y-8 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 text-center">
@@ -182,7 +244,7 @@ export default function VerifyEmailForm({
             Adresse e-mail confirmée
           </h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
-            {message}
+            {effectiveMessage}
           </p>
           <div className="pt-2">
             <Link
@@ -197,7 +259,7 @@ export default function VerifyEmailForm({
     );
   }
 
-  if (!success && message) {
+  if (!effectiveSuccess && effectiveMessage) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
         <div className="max-w-md w-full space-y-8 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30">
@@ -209,7 +271,7 @@ export default function VerifyEmailForm({
               Échec de la vérification
             </h2>
             <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
-              {message}
+              {effectiveMessage}
             </p>
           </div>
 

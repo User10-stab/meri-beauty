@@ -7,10 +7,12 @@ import bcrypt from "bcrypt";
 import { sendEmail } from "@/lib/email";
 import {
   reservationReceivedEmail,
-  paymentConfirmationEmail,
+  reservationConfirmedEmail,
+  reservationCreatedAutomaticEmail,
   welcomeWithCredentialsEmail,
   multiReservationConfirmationEmail,
-  staffReservationCreatedEmail,
+  staffReservationConfirmedEmail,
+  staffMultipleReservationsConfirmedEmail,
 } from "@/lib/email-templates";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { generateAutologinToken } from "@/lib/autologin";
@@ -48,6 +50,19 @@ class SessionExpiredError extends Error {
   constructor() {
     super("Session expired");
     this.name = "SessionExpiredError";
+  }
+}
+
+/**
+ * Thrown by resolveOrCreateCustomer's P2002 fallback when the unique-index
+ * collision is on phone rather than email — see the comment above that
+ * fallback for why this can no longer be resolved by taking over the
+ * conflicting account.
+ */
+class PhoneAlreadyRegisteredError extends Error {
+  constructor() {
+    super("Phone already registered to another account");
+    this.name = "PhoneAlreadyRegisteredError";
   }
 }
 
@@ -139,54 +154,27 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
     return { user, isNewUser: true, temporaryPassword };
   } catch (createError) {
     // P2002 = unique constraint violation — another request already
-    // created this user between our findFirst and this create.
+    // created this user between our findFirst and this create. The unique
+    // indexes backing email/phone are active-only (partial indexes, see
+    // migration 20260817153631_active_only_uniqueness), so a collision here
+    // can only be against an ACTIVE user — never a soft-deleted one. The old
+    // fallback re-queried without an isDeleted filter anyway and, if it
+    // happened to land on a soft-deleted namesake, "revived" that account by
+    // overwriting its password and forcing emailVerified: true with no proof
+    // the caller actually owns that email — an account-takeover path. It
+    // also force-verified whatever active user it matched, same problem.
+    // The only safe outcome of a real active-row collision is: the email is
+    // ours (same person double-submitting, e.g. a retried request) — reuse
+    // that account as-is, without touching its verification state — or the
+    // phone belongs to someone else's account under a different email, which
+    // we can only refuse.
     if (createError?.code === "P2002") {
-      let existingUser = await prisma.user.findFirst({
-        where: {
-          OR: [
-            { email: customerInfo.email.trim().toLowerCase() },
-            ...(customerInfo.phone ? [{ phone: customerInfo.phone.trim() }] : []),
-          ],
-        },
+      const existingUser = await prisma.user.findFirst({
+        where: { email: customerInfo.email.trim().toLowerCase(), isDeleted: false },
       });
 
       if (!existingUser) {
-        // Truly unexpected — propagate so the outer catch handles it
-        throw createError;
-      }
-
-      if (existingUser.isDeleted) {
-        const temporaryPassword = generateTemporaryPassword();
-        const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
-
-        user = await prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            fullName: customerInfo.fullName.trim(),
-            email: customerInfo.email.trim().toLowerCase(),
-            phone: customerInfo.phone.trim(),
-            password: hashedPassword,
-            role: "CUSTOMER",
-            emailVerified: true,
-            isActive: true,
-            isDeleted: false,
-            deletedAt: null,
-            ...buildNewsletterConsentUpdate(customerInfo.newsletterSubscribed ?? false, "appointment_booking"),
-            ...buildTermsAcceptanceUpdate(),
-          },
-        });
-
-        return { user, isNewUser: true, temporaryPassword };
-      }
-
-      if (!existingUser.emailVerified || !existingUser.isActive) {
-        existingUser = await prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            emailVerified: true,
-            isActive: true,
-          },
-        });
+        throw new PhoneAlreadyRegisteredError();
       }
 
       return { user: existingUser, isNewUser: false, temporaryPassword: null };
@@ -232,8 +220,8 @@ async function sendWelcomeEmailIfNew({ user, isNewUser, temporaryPassword }, log
  */
 export async function checkEmailExists(email) {
   if (!email) return { exists: false };
-  const user = await prisma.user.findUnique({
-    where: { email: email.trim().toLowerCase() },
+  const user = await prisma.user.findFirst({
+    where: { email: email.trim().toLowerCase(), isDeleted: false },
     select: { id: true },
   });
   return { exists: Boolean(user) };
@@ -352,6 +340,13 @@ export async function createReservation(data) {
           message: "Votre session a expiré. Veuillez vous reconnecter et réessayer.",
         };
       }
+      if (err instanceof PhoneAlreadyRegisteredError) {
+        return {
+          success: false,
+          field: "phone",
+          message: "Ce numéro de téléphone est déjà associé à un autre compte. Connectez-vous ou utilisez un autre numéro.",
+        };
+      }
       throw err;
     }
 
@@ -446,23 +441,23 @@ export async function createReservation(data) {
       const payment = null;
       const totalAmount = rawTotalAmount;
 
-      // 8. Send emails: manual-mode → reservationReceivedEmail; automatic → paymentConfirmationEmail (ON_SITE)
-      // We reuse the existing code below by continuing with effectiveIsManualMode.
-      // (We keep the rest of the function unchanged, aside from using these locals.)
-
-      // Send email to assigned staff member and admin/owner users
-      const emailRecipients = await getAppointmentEmailRecipients(staffService.staff?.id);
-      for (const recipient of emailRecipients) {
-        await sendEmail({
-          to: recipient.email,
-          ...staffReservationCreatedEmail({
-            staffName: recipient.fullName,
-            customerName: user.fullName,
-            serviceName,
-            date: appointmentDate,
-            time,
-          }),
-        }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+      // Send a staff appointment email only once the appointment is confirmed.
+      if (appointmentStatus === "CONFIRMED") {
+        const emailRecipients = await getAppointmentEmailRecipients(staffService.staff?.id);
+        for (const recipient of emailRecipients) {
+          await sendEmail({
+            to: recipient.email,
+            ...staffReservationConfirmedEmail({
+              staffName: recipient.fullName,
+              customerName: user.fullName,
+              serviceName,
+              date: appointmentDate,
+              time,
+              duration: staffService.duration,
+              totalAmount: rawTotalAmount,
+            }),
+          }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+        }
       }
 
       if (effectiveIsManualMode) {
@@ -474,20 +469,19 @@ export async function createReservation(data) {
             staffName,
             date: appointmentDate,
             time,
+            duration: staffService.duration,
+            totalAmount: rawTotalAmount,
           }),
         }).catch((err) => console.error("[createReservation] reservation received email failed:", err));
       } else {
         await sendEmail({
           to: user.email,
-          ...paymentConfirmationEmail({
+          ...reservationCreatedAutomaticEmail({
             customerName: user.fullName,
             serviceName,
             staffName,
             date: appointmentDate,
             time,
-            paidAmount: 0,
-            totalAmount,
-            paymentMethod: "ON_SITE",
           }),
         }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
       }
@@ -517,6 +511,7 @@ export async function createReservation(data) {
       confirmationMode,
       depositEnabled: Boolean(staffService.staff?.depositEnabled),
       depositPercentage: Number(staffService.staff?.depositPercentage ?? 0),
+      allowedPaymentMethods: staffService.staff?.allowedPaymentMethods,
       totalAmount: rawTotalAmount,
       paymentMethod,
       discountAmount,
@@ -600,9 +595,9 @@ export async function createReservation(data) {
     }
 
     // ── 8. Send emails (fire-and-forget — never block the reservation) ───────
-    // 8a. Reservation confirmation — sent to all customers
-    if (effectiveIsManualMode) {
-      // Manual mode: "reservation received, pending staff review" email
+    // 8a. A pending appointment gets a pending-request email. A confirmed
+    // appointment gets the simple reservation confirmation email.
+    if (appointmentStatus !== "CONFIRMED") {
       await sendEmail({
         to: user.email,
         ...reservationReceivedEmail({
@@ -614,37 +609,34 @@ export async function createReservation(data) {
         }),
       }).catch((err) => console.error("[createReservation] reservation received email failed:", err));
     } else {
-      // Automatic mode, cash/no-deposit path: appointment is confirmed immediately.
-      // No online payment was taken, so we send a payment confirmation showing €0
-      // paid and the full amount remaining (to be paid at the salon).
       await sendEmail({
         to: user.email,
-        ...paymentConfirmationEmail({
+        ...reservationCreatedAutomaticEmail({
           customerName: user.fullName,
           serviceName,
           staffName,
           date: appointmentDate,
           time,
-          paidAmount: 0,
-          totalAmount,
-          paymentMethod: "ON_SITE",
         }),
       }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
     }
 
-    // 8b. Send email to assigned staff member and admin/owner users
-    const emailRecipients = await getAppointmentEmailRecipients(staffService.staffId);
-    for (const recipient of emailRecipients) {
-      await sendEmail({
-        to: recipient.email,
-        ...staffReservationCreatedEmail({
-          staffName: recipient.fullName,
-          customerName: user.fullName,
-          serviceName,
-          date: appointmentDate,
-          time,
-        }),
-      }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+    // 8b. Staff is notified only for a confirmed appointment. Pending
+    // requests remain visible through the existing dashboard notification.
+    if (appointmentStatus === "CONFIRMED") {
+      const emailRecipients = await getAppointmentEmailRecipients(staffService.staffId);
+      for (const recipient of emailRecipients) {
+        await sendEmail({
+          to: recipient.email,
+          ...staffReservationConfirmedEmail({
+            staffName: recipient.fullName,
+            customerName: user.fullName,
+            serviceName,
+            date: appointmentDate,
+            time,
+          }),
+        }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+      }
     }
 
     // 8c. Welcome email with credentials — only for brand-new accounts
@@ -806,15 +798,6 @@ export async function confirmPayment(paymentId, transactionReference = null) {
       }
     });
 
-    // NOTE: `paymentConfirmationEmail` is imported but was never sent anywhere
-    // in the original file. If a payment-confirmation email is expected here,
-    // wire it up, e.g.:
-    //
-    // sendEmail({
-    //   to: payment.appointment... (needs a user relation/email available),
-    //   ...paymentConfirmationEmail({ ... }),
-    // }).catch((err) => console.error("[confirmPayment] confirmation email failed:", err));
-
     return { success: true, message: "Paiement confirmé" };
   } catch (error) {
     console.error("[confirmPayment]", error);
@@ -898,6 +881,32 @@ export async function createMultipleReservations(data) {
       buildAppointmentWindow(date, time, staffServices[i].duration)
     );
 
+    // ── 3b. Check drafts against each other for same-staff overlaps ───────
+    // findConflictingAppointment (below) only checks each draft against
+    // appointments that already exist in the DB — two drafts in this same
+    // batch booked with the same staff at overlapping times are invisible to
+    // each other there, since neither exists yet when both checks run in
+    // parallel. Without this, the second insert in the transaction below
+    // hits the DB's overlap exclusion constraint directly and surfaces as a
+    // raw, unhandled error instead of a clean validation message.
+    for (let i = 0; i < appointments.length; i++) {
+      for (let j = i + 1; j < appointments.length; j++) {
+        if (staffServices[i].staffId !== staffServices[j].staffId) continue;
+        if (timeWindows[i].appointmentDate.getTime() !== timeWindows[j].appointmentDate.getTime()) continue;
+        const occupiedEndI = new Date(timeWindows[i].endTime);
+        occupiedEndI.setMinutes(occupiedEndI.getMinutes() + Number(staffServices[i].margin ?? 0));
+        const occupiedEndJ = new Date(timeWindows[j].endTime);
+        occupiedEndJ.setMinutes(occupiedEndJ.getMinutes() + Number(staffServices[j].margin ?? 0));
+        const overlap = timeWindows[i].startTime < occupiedEndJ && timeWindows[j].startTime < occupiedEndI;
+        if (overlap) {
+          return {
+            success: false,
+            message: `Les rendez-vous ${i + 1} et ${j + 1} se chevauchent avec le même membre du personnel. Veuillez choisir des horaires différents.`,
+          };
+        }
+      }
+    }
+
     // ── 4. Check slot availability for every appointment ──────────────────
     const conflicts = await Promise.all(
       appointments.map(({ staffServiceId }, i) => {
@@ -941,8 +950,25 @@ export async function createMultipleReservations(data) {
           message: "Votre session a expiré. Veuillez vous reconnecter et réessayer.",
         };
       }
+      if (err instanceof PhoneAlreadyRegisteredError) {
+        return {
+          success: false,
+          field: "phone",
+          message: "Ce numéro de téléphone est déjà associé à un autre compte. Connectez-vous ou utilisez un autre numéro.",
+        };
+      }
       throw err;
     }
+
+    // A multi-appointment booking never goes through PaymentStep — there's no
+    // deposit and no online-payment step for it (see getReservationPaymentDecision's
+    // appointmentCount !== 1 branch, the single source of truth for this rule).
+    // Every leg lands PENDING regardless of the staff member's own
+    // reservationConfirmationMode, same as CASH_ONLY/MANUAL single bookings —
+    // it's confirmed later from the staff dashboard, never auto-confirmed here.
+    const multiAppointmentStatus = getReservationPaymentDecision({
+      appointmentCount: appointments.length,
+    }).appointmentStatusBeforePayment;
 
     // ── 6. Create all appointments atomically ─────────────────────────────
     const createdAppointments = await prisma.$transaction(async (tx) => {
@@ -959,7 +985,7 @@ export async function createMultipleReservations(data) {
             date: appointmentDate,
             startTime,
             endTime,
-            status: "PENDING",
+            status: multiAppointmentStatus,
             notes: notes || null,
           },
         });
@@ -1020,30 +1046,38 @@ export async function createMultipleReservations(data) {
         })),
         totalDepositPaid: 0,
         totalAmount,
+        isPending: multiAppointmentStatus === "PENDING",
       }),
     }).catch((err) => console.error("[createMultipleReservations] confirmation email failed:", err));
 
-    // 7b. Send email to staff members and admin/owner users for each appointment
-    for (let i = 0; i < createdAppointments.length; i++) {
-      const appt = createdAppointments[i];
-      const staffId = staffServices[i].staff?.id;
-      const serviceName = staffServices[i].service?.name ?? "—";
-      const time = appointments[i].time;
-      const appointmentDate = timeWindows[i].appointmentDate;
-
-      const emailRecipients = await getAppointmentEmailRecipients(staffId);
-      for (const recipient of emailRecipients) {
-        await sendEmail({
-          to: recipient.email,
-          ...staffReservationCreatedEmail({
-            staffName: recipient.fullName,
-            customerName: user.fullName,
-            serviceName,
-            date: appointmentDate,
-            time,
-          }),
-        }).catch((err) => console.error("[createMultipleReservations] dashboard email failed:", err));
+    // 7b. Send one consolidated email to each staff/dashboard recipient.
+    const staffAppointments = appointments.map(({ time }, i) => ({
+      serviceName: staffServices[i].service?.name ?? "—",
+      date: timeWindows[i].appointmentDate,
+      time,
+      duration: staffServices[i].duration,
+      amount: Number(staffServices[i].price ?? 0),
+      staffId: staffServices[i].staff?.id,
+    }));
+    const recipientsByEmail = new Map();
+    for (const appointment of staffAppointments) {
+      const recipients = await getAppointmentEmailRecipients(appointment.staffId);
+      for (const recipient of recipients) {
+        if (!recipientsByEmail.has(recipient.email)) {
+          recipientsByEmail.set(recipient.email, { fullName: recipient.fullName });
+        }
       }
+    }
+    for (const [email, recipient] of recipientsByEmail) {
+      await sendEmail({
+        to: email,
+        ...staffMultipleReservationsConfirmedEmail({
+          staffName: recipient.fullName,
+          customerName: user.fullName,
+          appointments: staffAppointments,
+          totalAmount,
+        }),
+      }).catch((err) => console.error("[createMultipleReservations] consolidated staff email failed:", err));
     }
 
     // 7c. Welcome email for brand-new accounts

@@ -1,31 +1,56 @@
-import Link from "next/link";
-import { getAcceptedAppointmentPaymentDetails } from "@/actions/payment/accepted-appointment-payment";
-import AcceptedAppointmentPaymentClient from "@/components/reservation/AcceptedAppointmentPaymentClient";
+import { redirect, notFound } from "next/navigation";
+import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
+import ConfirmAcceptedAppointmentClient from "@/components/appointment/ConfirmAcceptedAppointmentClient";
 
-export const metadata = {
-  title: "Finaliser le rendez-vous – Meri Beauty",
-  description: "Choisissez comment finaliser votre rendez-vous accepté.",
-};
+export const dynamic = "force-dynamic";
 
 export default async function AcceptedAppointmentPaymentPage({ params }) {
+  const session = await auth();
   const { id } = await params;
-  const result = await getAcceptedAppointmentPaymentDetails(id);
+  if (!session?.user?.id) redirect(`/login?callbackUrl=${encodeURIComponent(`/appointment/${id}/payment`)}`);
 
-  if (!result.success) {
-    const loginHref = `/login?callbackUrl=${encodeURIComponent(`/appointment/${id}/payment`)}`;
-    return (
-      <section className="mx-auto max-w-xl px-4 py-20 text-center">
-        <h1 className="text-3xl font-semibold text-[#2F3A2E]">Finaliser le rendez-vous</h1>
-        <p className="mt-4 text-gray-600">{result.message}</p>
-        <Link
-          href={result.code === "AUTH_REQUIRED" ? loginHref : "/mes-reservations"}
-          className="mt-8 inline-flex rounded-xl bg-[#2F3A2E] px-6 py-3 font-semibold text-white"
-        >
-          {result.code === "AUTH_REQUIRED" ? "Se connecter" : "Mes rendez-vous"}
-        </Link>
-      </section>
-    );
-  }
+  const appointment = await prisma.appointment.findUnique({
+    where: { id, isDeleted: false },
+    select: {
+      id: true,
+      userId: true,
+      status: true,
+      date: true,
+      startTime: true,
+      staffService: {
+        select: {
+          price: true,
+          service: { select: { name: true } },
+          staff: {
+            select: {
+              depositEnabled: true,
+              depositPercentage: true,
+              allowedPaymentMethods: true,
+              user: { select: { fullName: true } },
+            },
+          },
+        },
+      },
+    },
+  });
 
-  return <AcceptedAppointmentPaymentClient appointment={result.data} />;
+  if (!appointment || appointment.userId !== session.user.id) notFound();
+
+  return (
+    <ConfirmAcceptedAppointmentClient
+      appointment={{
+        ...appointment,
+        price: Number(appointment.staffService.price),
+        depositPercentage: Number(appointment.staffService.staff?.depositPercentage ?? 0),
+        staffName: appointment.staffService.staff?.user?.fullName ?? "Expert",
+        serviceName: appointment.staffService.service.name,
+        staffService: {
+          ...appointment.staffService,
+          depositEnabled: appointment.staffService.staff?.depositEnabled ?? false,
+          allowedPaymentMethods: appointment.staffService.staff?.allowedPaymentMethods ?? "BOTH",
+        },
+      }}
+    />
+  );
 }

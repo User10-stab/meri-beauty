@@ -7,9 +7,12 @@ async function main() {
   // ==========================
   // Create Admin
   // ==========================
-  const existingAdmin = await prisma.user.findUnique({
+  // email is no longer globally @unique; active-only uniqueness is enforced
+  // by a partial index, so Prisma cannot use findUnique({ email }).
+  const existingAdmin = await prisma.user.findFirst({
     where: {
       email: "admin@meribeauty.com",
+      isDeleted: false,
     },
   });
 

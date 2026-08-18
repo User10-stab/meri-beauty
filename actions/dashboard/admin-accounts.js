@@ -148,7 +148,13 @@ export async function deactivateAdminAccount(targetId) {
   const remainingCheck = await assertAnotherActiveAdminRemains(targetId);
   if (remainingCheck.error) return { success: false, message: remainingCheck.error };
 
-  await prisma.user.update({ where: { id: targetId }, data: { isActive: false } });
+  await prisma.user.update({
+    where: { id: targetId },
+    // Auth.js compares the JWT's sessionVersion against the DB on every
+    // session refresh. Without this bump, a deactivated admin could keep
+    // using their existing JWT until the normal revalidation window elapsed.
+    data: { isActive: false, sessionVersion: { increment: 1 } },
+  });
   revalidatePath(REVALIDATE_PATH);
   return { success: true, message: `Le compte de ${targetCheck.target.fullName} a été désactivé.` };
 }
@@ -175,7 +181,7 @@ export async function deleteAdminAccount(targetId) {
 
   await prisma.user.update({
     where: { id: targetId },
-    data: { isActive: false, isDeleted: true, deletedAt: new Date() },
+    data: { isActive: false, isDeleted: true, deletedAt: new Date(), sessionVersion: { increment: 1 } },
   });
   revalidatePath(REVALIDATE_PATH);
   return { success: true, message: `Le compte de ${targetCheck.target.fullName} a été supprimé. Il peut être restauré à tout moment.` };

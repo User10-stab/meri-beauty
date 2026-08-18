@@ -77,7 +77,6 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
       const result = await checkEmailExists(email);
       if (result.exists) {
         setEmailStatus("exists");
-        setFormData((prev) => ({ ...prev, phone: result.phone || prev.phone }));
       }
     } catch {
       // Non-critical — silently ignore, user can still proceed

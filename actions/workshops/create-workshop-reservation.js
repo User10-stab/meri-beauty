@@ -6,7 +6,6 @@ import { stripe } from "@/lib/stripe";
 import { auth } from "@/auth";
 import { createResumeCheckoutToken, isCheckoutAuthorized } from "@/lib/resume-checkout-token";
 import bcrypt from "bcrypt";
-import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/lib/promo-codes";
@@ -175,12 +174,17 @@ export async function checkWorkshopSessionAvailability(sessionId) {
 
     const takenSeats = reserved._sum.seatsCount ?? 0;
     const capacity = session.capacity ?? session.workshop.capacity;
+    if (!Number.isInteger(capacity) || capacity < 1) {
+      return { success: false, message: "Capacité de session invalide." };
+    }
     const available = capacity - takenSeats;
 
-    // If spots are available, notify everyone on the waiting list
-    if (available > 0) {
-      notifyAllInWaitingList(sessionId).catch(() => {});
-    }
+    // This is a plain read, called on every /reservation-atelier page load —
+    // it used to mass-email the entire waiting list (and re-mark everyone
+    // NOTIFIED) any time available > 0, regardless of whether a seat had
+    // actually just freed up. Notifying belongs on the real seat-freeing
+    // events instead (cancellation, refund, session change — see
+    // notifyAllInWaitingList's call sites), same as formations already do.
 
     return {
       success: true,
@@ -206,9 +210,11 @@ export async function createWorkshopReservation(data) {
     let { sessionId, activityId, seatsCount, customerInfo, isPriority, waitingListEntryId, paymentMethod, promoCode } = data;
     const isFullPayment = paymentMethod === "FULL";
 
-    if (!sessionId || !activityId || !seatsCount || !customerInfo?.email) {
+    const parsedSeatsCount = Number(seatsCount);
+    if (!sessionId || !activityId || !customerInfo?.email || !Number.isInteger(parsedSeatsCount) || parsedSeatsCount < 1) {
       return { success: false, message: "Données manquantes." };
     }
+    seatsCount = parsedSeatsCount;
 
     // The booking form's CGV checkbox was client-side only. This action is a
     // public POST endpoint, so the consent has to be re-established here —
@@ -314,11 +320,11 @@ export async function createWorkshopReservation(data) {
         vatValidationAddress: viesResult.address ?? null,
       };
     }
-    let user = await prisma.user.findUnique({ where: { email } });
+    let user = await prisma.user.findFirst({ where: { email, isDeleted: false } });
 
     if (!user) {
       if (phone) {
-        const phoneExists = await prisma.user.findUnique({ where: { phone } });
+        const phoneExists = await prisma.user.findFirst({ where: { phone, isDeleted: false } });
         if (phoneExists) {
           return {
             success: false,
@@ -358,7 +364,8 @@ export async function createWorkshopReservation(data) {
     await recordTermsAcceptance(prisma, user.id);
 
     // Calculate pricing
-    const depositPct = activity.depositPercentage ?? 50;
+    const rawDepositPct = Number(activity.depositPercentage ?? 50);
+    const depositPct = Number.isFinite(rawDepositPct) ? Math.min(100, Math.max(0, rawDepositPct)) : 0;
     const unitPrice = Number(activity.price);
     const totalPrice = unitPrice * seatsCount;
 
@@ -432,6 +439,9 @@ export async function createWorkshopReservation(data) {
 
           const takenSeats = reserved._sum.seatsCount ?? 0;
           const capacity = session.capacity ?? activity.capacity;
+          if (!Number.isInteger(capacity) || capacity < 1) {
+            throw new Error("INVALID_SESSION_CAPACITY");
+          }
           const available = capacity - takenSeats;
 
           if (seatsCount > available) {
@@ -491,6 +501,10 @@ export async function createWorkshopReservation(data) {
           captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
           return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
         }
+        if (err.message === "INVALID_SESSION_CAPACITY") {
+          captureWarning("Workshop session has invalid capacity during checkout", { area: "stock-capacity", sessionId });
+          return { success: false, message: "Capacité de session invalide. Contactez l'équipe Meri Beauty." };
+        }
         throw err;
       }
     }
@@ -516,16 +530,20 @@ export async function createWorkshopReservation(data) {
       return { success: true, requiresEmailVerification: true, email };
     }
 
-    const checkoutResult = await createWorkshopReservationCheckoutSession(
-      reservation.id,
-      createResumeCheckoutToken({ resumeType: "WORKSHOP", resumeId: reservation.id, email }),
-    );
+    // Also handed back to the client below so it can prove authorization on
+    // this reservation to convertWaitingListEntry — that action is a public
+    // "use server" endpoint with no session for a guest booking, so a bare
+    // waitingListEntryId/reservationId pair proves nothing on its own (see
+    // isCheckoutAuthorized's doc comment).
+    const checkoutToken = createResumeCheckoutToken({ resumeType: "WORKSHOP", resumeId: reservation.id, email });
+    const checkoutResult = await createWorkshopReservationCheckoutSession(reservation.id, checkoutToken);
     if (!checkoutResult.success) return checkoutResult;
 
     return {
       success: true,
       url: checkoutResult.url,
       reservationId: reservation.id,
+      checkoutToken,
       temporaryPassword: null,
       isNewUser: false,
       email,

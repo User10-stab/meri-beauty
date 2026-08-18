@@ -25,7 +25,7 @@ export async function getSameDaySchedule({ drafts, date, maxProposals = DEFAULT_
 
     const staffServiceIds = drafts.map((d) => d.staffService.id);
 
-    const [salon, staffServices, allAppointments] = await Promise.all([
+    const [salon, staffServices] = await Promise.all([
       prisma.salon.findUnique({ where: { id: "main-salon" }, include: { closures: true, workingDays: true } }),
       prisma.staffService.findMany({
         where: { id: { in: staffServiceIds } },
@@ -40,25 +40,27 @@ export async function getSameDaySchedule({ drafts, date, maxProposals = DEFAULT_
           },
         },
       }),
-      prisma.appointment.findMany({
-        where: {
-          staffService: {
-            staffId: { in: staffServices.map(ss => ss.staffId) },
-          },
-          date: { gte: selectedDate, lte: endOfDay },
-          status: { in: ACTIVE_APPOINTMENT_STATUSES },
-          isDeleted: false,
-        },
-        include: {
-          staffService: {
-            select: {
-              id: true,
-              margin: true,
-            },
-          },
-        },
-      }),
     ]);
+
+    const allAppointments = await prisma.appointment.findMany({
+      where: {
+        staffService: {
+          staffId: { in: staffServices.map((ss) => ss.staffId) },
+        },
+        date: { gte: selectedDate, lte: endOfDay },
+        status: { in: ACTIVE_APPOINTMENT_STATUSES },
+        isDeleted: false,
+      },
+      include: {
+        staffService: {
+          select: {
+            id: true,
+            staffId: true,
+            margin: true,
+          },
+        },
+      },
+    });
 
     const ssById = Object.fromEntries(staffServices.map((ss) => [ss.id, ss]));
     const apptsByStaffId = staffServices.reduce((acc, ss) => {

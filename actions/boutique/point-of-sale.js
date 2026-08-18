@@ -694,6 +694,8 @@ export async function cancelPointOfSaleCheckout(orderId) {
     });
     if (claim.count === 0) return false;
     for (const item of order.items) {
+      // POS ad-hoc service lines (variantId null) carry no stock to adjust.
+      if (!item.variantId) continue;
       await tx.productVariant.update({
         where: { id: item.variantId },
         data: { reservedQuantity: { decrement: item.quantity } },

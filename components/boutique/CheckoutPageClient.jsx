@@ -40,7 +40,17 @@ export function CheckoutPageClient({ cart, customerSession }) {
 
   const [fulfilmentMode, setFulfilmentMode] = useState(null);
   const [customerInfo, setCustomerInfo] = useState(
-    customerSession ?? { fullName: "", email: "", phone: "", newsletterSubscribed: false }
+    customerSession ?? {
+      fullName: "",
+      email: "",
+      phone: "",
+      newsletterSubscribed: false,
+      addressLine1: "",
+      addressLine2: "",
+      addressCity: "",
+      addressPostalCode: "",
+      addressCountry: "BE",
+    }
   );
   const [pickupPoint, setPickupPoint] = useState(null);
   const [notes, setNotes] = useState("");
@@ -147,6 +157,10 @@ export function CheckoutPageClient({ cart, customerSession }) {
         toast.error(
           "Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même »."
         );
+        return;
+      }
+      if (!customerInfo.addressLine1.trim() || !customerInfo.addressCity.trim() || !customerInfo.addressPostalCode.trim()) {
+        toast.error("Veuillez indiquer votre adresse de facturation — elle est obligatoire pour la facture.");
         return;
       }
     }
@@ -369,6 +383,69 @@ export function CheckoutPageClient({ cart, customerSession }) {
                   className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
                   required
                 />
+
+                {/* Billing address — mandatory for every invoice (Belgian legal
+                    requirement). Not marked required at the HTML level since a
+                    returning customer whose account already has an address on
+                    file doesn't need to resubmit it — resolveOrCreateCustomer
+                    enforces the actual requirement server-side. */}
+                <div className="space-y-3 border-t border-neutral-100 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
+                    Adresse de facturation
+                  </p>
+                  <input
+                    type="text"
+                    name="addressLine1"
+                    value={customerInfo.addressLine1}
+                    onChange={handleCustomerChange}
+                    autoComplete="address-line1"
+                    placeholder="Rue et numéro"
+                    className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+                  />
+                  <input
+                    type="text"
+                    name="addressLine2"
+                    value={customerInfo.addressLine2}
+                    onChange={handleCustomerChange}
+                    autoComplete="address-line2"
+                    placeholder="Boîte, étage, complément (optionnel)"
+                    className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+                  />
+                  <div className="grid grid-cols-3 gap-3">
+                    <input
+                      type="text"
+                      name="addressPostalCode"
+                      value={customerInfo.addressPostalCode}
+                      onChange={handleCustomerChange}
+                      autoComplete="postal-code"
+                      placeholder="Code postal"
+                      className="col-span-1 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      name="addressCity"
+                      value={customerInfo.addressCity}
+                      onChange={handleCustomerChange}
+                      autoComplete="address-level2"
+                      placeholder="Ville"
+                      className="col-span-2 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+                    />
+                  </div>
+                  <select
+                    name="addressCountry"
+                    value={customerInfo.addressCountry}
+                    onChange={handleCustomerChange}
+                    autoComplete="country"
+                    className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+                  >
+                    <option value="BE">Belgique</option>
+                    <option value="FR">France</option>
+                    <option value="LU">Luxembourg</option>
+                    <option value="NL">Pays-Bas</option>
+                    <option value="DE">Allemagne</option>
+                  </select>
+                </div>
+
                 <label className="flex cursor-pointer items-start gap-3">
                   <input
                     type="checkbox"

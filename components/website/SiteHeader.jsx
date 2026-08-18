@@ -231,7 +231,7 @@ export default function Navbar() {
                         Mes commandes
                       </a>
                       <a
-                        href="/appointments"
+                        href="/mes-reservations"
                         onClick={() => setMenuOpen(false)}
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                         role="menuitem"

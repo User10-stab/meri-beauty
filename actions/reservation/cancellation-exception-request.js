@@ -22,7 +22,6 @@ const reviewSchema = z.object({
 
 function refreshAppointmentViews() {
   revalidatePath("/mes-reservations");
-  revalidatePath("/appointments");
   revalidatePath("/dashboard/appointments");
   revalidatePath("/dashboard/appointments/exceptions");
 }

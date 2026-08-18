@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import {
   paymentConfirmationEmail,
-  reservationPaymentFailedEmail,
+  reservationConfirmedEmail,
+  reservationPaymentRequiredEmail,
   staffReservationConfirmedEmail,
   workshopSessionChangeEmail,
   workshopSeatsChangeEmail,
@@ -123,6 +124,20 @@ export async function POST(req) {
   if (event.type === "payment_intent.payment_failed") {
     try {
       await handlePaymentIntentFailed(event.data.object, event.account);
+      return NextResponse.json({ received: true });
+    } catch (err) {
+      captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
+      return NextResponse.json({ error: "Processing failed" }, { status: 500 });
+    }
+  }
+
+  // Connect direct charges can deliver payment_intent.succeeded even when
+  // checkout.session.completed was missed by a local listener or endpoint.
+  // Resolve the session on the connected account and run the same idempotent
+  // settlement path, so a retry can recover a FAILED Payment row.
+  if (event.type === "payment_intent.succeeded") {
+    try {
+      await handlePaymentIntentSucceeded(event.data.object, event.account);
       return NextResponse.json({ received: true });
     } catch (err) {
       captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
@@ -860,7 +875,7 @@ async function processAppointmentCheckoutSession(session) {
       nextAppointmentStatus,
       invoice,
     };
-  });
+  }, { timeout: 15000 });
 
   if (result?.reason === "appointment-cancelled") {
     console.warn(`[stripe-webhook] Appointment ${appointmentId} cancelled during payment processing, refunding: ${checkoutSessionId}`);
@@ -914,18 +929,31 @@ async function processAppointmentCheckoutSession(session) {
         })
       : null;
 
+    const customerEmailTemplate = result.nextAppointmentStatus === "CONFIRMED"
+      ? reservationConfirmedEmail({
+          customerName: user.fullName,
+          serviceName,
+          staffName,
+          date: result.appointment.date,
+          time: result.appointment.startTime.toTimeString().slice(0, 5),
+          paidAmount: result.nextPaidAmount,
+          totalAmount: result.totalAmount,
+          paymentMethod: "Carte bancaire",
+        })
+      : paymentConfirmationEmail({
+          customerName: user.fullName,
+          serviceName,
+          staffName,
+          date: result.appointment.date,
+          time: result.appointment.startTime.toTimeString().slice(0, 5),
+          paidAmount: result.nextPaidAmount,
+          totalAmount: result.totalAmount,
+          paymentMethod: "Carte bancaire",
+        });
+
     sendEmail({
       to: user.email,
-      ...paymentConfirmationEmail({
-        customerName: user.fullName,
-        serviceName,
-        staffName,
-        date: result.appointment.date,
-        time: result.appointment.startTime.toTimeString().slice(0, 5),
-        paidAmount: result.nextPaidAmount,
-        totalAmount: result.totalAmount,
-        paymentMethod: "Carte bancaire",
-      }),
+      ...customerEmailTemplate,
       ...(invoicePdf
         ? { attachments: [{ filename: `facture-${result.invoice.number}.pdf`, content: invoicePdf }] }
         : {}),
@@ -1082,6 +1110,26 @@ async function handlePaymentIntentFailed(paymentIntent, connectedAccountId = nul
   });
 }
 
+async function handlePaymentIntentSucceeded(paymentIntent, connectedAccountId = null) {
+  const paymentIntentId = paymentIntent?.id || null;
+  if (!paymentIntentId || !connectedAccountId) {
+    console.warn("[stripe-webhook] payment_intent.succeeded missing payment intent or connected account");
+    return;
+  }
+
+  const sessions = await stripe.checkout.sessions.list(
+    { payment_intent: paymentIntentId, limit: 1 },
+    { stripeAccount: connectedAccountId }
+  );
+  const session = sessions.data?.[0];
+
+  if (!session?.metadata?.appointmentId || !session?.metadata?.paymentId) {
+    return;
+  }
+
+  await processAppointmentCheckoutSession(session);
+}
+
 async function notifyAppointmentPaymentFailed({ paymentId, appointmentId, failedSessionId = null }) {
   if (!paymentId || !appointmentId) return;
 
@@ -1113,7 +1161,7 @@ async function notifyAppointmentPaymentFailed({ paymentId, appointmentId, failed
   const retryUrl = `${process.env.NEXT_PUBLIC_APP_URL}/reservation/retry-payment?paymentId=${encodeURIComponent(payment.id)}`;
   await sendEmail({
     to: appointment.user.email,
-    ...reservationPaymentFailedEmail({
+    ...reservationPaymentRequiredEmail({
       customerName: appointment.user.fullName,
       serviceName: appointment.staffService.service.name,
       staffName: appointment.staffService.staff?.user?.fullName ?? "Expert",
@@ -1121,7 +1169,7 @@ async function notifyAppointmentPaymentFailed({ paymentId, appointmentId, failed
       time: appointment.startTime.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" }),
       retryUrl,
     }),
-  }).catch((error) => console.error("[stripe-webhook] payment-failed email failed:", error));
+  }).catch((error) => console.error("[stripe-webhook] payment-required email failed:", error));
 }
 
 // ─── checkout.session.completed (workshops/events, formations) ───────────────

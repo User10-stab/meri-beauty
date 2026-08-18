@@ -18,7 +18,6 @@ import {
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { validateAppointmentSlot } from "@/lib/appointment-scheduling";
 import { sendEmail } from "@/lib/email";
-import { reservationPaymentRequiredEmail } from "@/lib/email-templates";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import {
   TERMS_CONSENT_REQUIRED_MESSAGE,
@@ -462,21 +461,6 @@ export async function createCheckoutSession(reservationData) {
 
       return { appointment, payment, createdNewPayment: true };
     });
-
-    if (createdNewPayment) {
-      const retryUrl = `${process.env.NEXT_PUBLIC_APP_URL}/reservation/retry-payment?paymentId=${encodeURIComponent(payment.id)}`;
-      await sendEmail({
-        to: customerUser.email,
-        ...reservationPaymentRequiredEmail({
-          customerName: customerUser.fullName,
-          serviceName: staffService.service.name,
-          staffName: staff.user?.fullName ?? "Expert",
-          date: appointment.date,
-          time: appointment.startTime.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" }),
-          retryUrl,
-        }),
-      }).catch((error) => console.error("[createCheckoutSession] payment-required email failed:", error));
-    }
 
     const metadata = {
       appointmentId: appointment.id,

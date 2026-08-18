@@ -5,6 +5,25 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
+describe("reservation payment retry email is failure-only", () => {
+  test("the initial checkout action does not send the retry email", () => {
+    const checkout = source("actions/payment/createCheckoutSession.js");
+    expect(checkout).not.toContain("reservationPaymentRequiredEmail");
+  });
+
+  test("the webhook sends the retry email only after marking the payment FAILED", () => {
+    const webhook = source("app/api/webhooks/stripe/route.js");
+    const failureHandler = webhook.slice(webhook.indexOf("async function notifyAppointmentPaymentFailed"));
+    const failedUpdate = failureHandler.indexOf('data: { status: "FAILED"');
+    const retryEmail = failureHandler.indexOf("reservationPaymentRequiredEmail");
+
+    expect(failedUpdate).toBeGreaterThan(-1);
+    expect(retryEmail).toBeGreaterThan(failedUpdate);
+    expect(failureHandler).toContain("where: { id: payment.id, status: \"PENDING\" }");
+    expect(failureHandler).not.toContain("reservationPaymentFailedEmail");
+  });
+});
+
 // A guest whose 15-minute verification link expired clicks "renvoyer" — the
 // one action that exists precisely because the first link died. The resend
 // used to mint a bare token, so they verified their address and the order or

@@ -56,6 +56,19 @@ describe("accepted appointment lifecycle", () => {
     expect(webhook).toContain("attachments: [{ filename: `facture-${result.invoice.number}.pdf`");
   });
 
+  test("failed payments can be recovered from a successful Connect PaymentIntent", () => {
+    const retry = source("actions/payment/resume-reservation-payment.js");
+    const webhook = source("app/api/webhooks/stripe/route.js");
+
+    expect(retry).toContain("payment_intent_data: { metadata }");
+    expect(webhook).toContain('event.type === "payment_intent.succeeded"');
+    expect(webhook).toContain("handlePaymentIntentSucceeded(event.data.object, event.account)");
+    expect(webhook).toContain("stripe.checkout.sessions.list");
+    expect(webhook).toContain("await processAppointmentCheckoutSession(session)");
+    expect(webhook).toContain('status: nextPaymentStatus');
+    expect(webhook).toContain('data: { status: nextAppointmentStatus }');
+  });
+
   test("on-site choice records a balance that completion must explicitly collect", () => {
     const payment = source("lib/appointments/accepted-payment.js");
     const manage = source("actions/appointment/manage-appointment.js");

@@ -114,7 +114,7 @@ export async function confirmAcceptedAppointment(appointmentId, paymentMethod) {
         }],
         mode: "payment",
         success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/appointments`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/mes-reservations`,
         customer_email: appointment.user.email,
         payment_intent_data: {
           metadata: {
@@ -161,6 +161,9 @@ async function sendConfirmationSideEffects(appointment) {
       staffName,
       date: appointment.date,
       time,
+      paidAmount: Number(appointment.payment?.paidAmount ?? 0),
+      totalAmount: Number(appointment.payment?.totalAmount ?? 0),
+      paymentMethod: appointment.payment?.paidAmount > 0 ? "Paiement en ligne" : null,
     }),
   }).catch((error) => console.error("[confirmAcceptedAppointment] email failed", error));
 

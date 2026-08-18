@@ -48,6 +48,12 @@ export async function getMyReservations() {
         },
         payment: {
           include: {
+            invoice: {
+              select: {
+                id:     true,
+                number: true,
+              },
+            },
             transactions: {
               where:   { isDeleted: false },
               orderBy: { paidAt: "asc" },
@@ -60,6 +66,13 @@ export async function getMyReservations() {
                 stripeCheckoutSessionId: true,
               },
             },
+          },
+        },
+        review: {
+          select: {
+            id:      true,
+            rating:  true,
+            comment: true,
           },
         },
         cancellationRequests: {
@@ -115,6 +128,9 @@ export async function getMyReservations() {
               remainingAmount:     Number(payment.remainingAmount),
               paidAt:              payment.paidAt,
               transactionReference: payment.transactionReference,
+              invoice:             payment.invoice
+                ? { id: payment.invoice.id, number: payment.invoice.number }
+                : null,
               transactions:        payment.transactions.map((t) => ({
                 id:                      t.id,
                 amount:                  Number(t.amount),
@@ -123,6 +139,15 @@ export async function getMyReservations() {
                 paidAt:                  t.paidAt,
                 stripeCheckoutSessionId: t.stripeCheckoutSessionId,
               })),
+            }
+          : null,
+
+        // Review
+        review: appt.review
+          ? {
+              id:      appt.review.id,
+              rating:  appt.review.rating,
+              comment: appt.review.comment,
             }
           : null,
 

@@ -192,6 +192,7 @@ export async function resumeReservationPayment(paymentId) {
         success_url:   `${process.env.NEXT_PUBLIC_APP_URL}/reservation/success?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url:    `${process.env.NEXT_PUBLIC_APP_URL}/mes-reservations`,
         customer_email: customerEmail,
+        payment_intent_data: { metadata },
         metadata,
       },
       {

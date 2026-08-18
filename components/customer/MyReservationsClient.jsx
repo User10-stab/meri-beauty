@@ -2,15 +2,18 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useLocale, useTranslations } from "next-intl";
 import { resumeReservationPayment } from "@/actions/payment/resume-reservation-payment";
 import { cancelReservation } from "@/actions/reservation/cancel-reservation";
+import { submitCancellationExceptionRequest } from "@/actions/reservation/cancellation-exception-request";
 import {
   isWithinCancellationWindow,
   CANCELLATION_WINDOW_HOURS,
 } from "@/lib/reservationRules";
 import { toIntlLocale } from "@/lib/intl-locale";
+import { AppointmentRescheduleModal } from "@/components/website/AppointmentRescheduleModal";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,6 +40,25 @@ function formatAmount(amount, locale) {
     style: "currency",
     currency: "EUR",
   }).format(amount);
+}
+
+// ─── Invoice link ──────────────────────────────────────────────────────────────
+
+function InvoiceLink({ invoice }) {
+  if (!invoice) return null;
+  return (
+    <a
+      href={`/api/invoices/${invoice.id}/pdf`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 hover:text-[#C8A46A] transition-colors"
+    >
+      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+      </svg>
+      Facture {invoice.number}
+    </a>
+  );
 }
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -73,8 +95,14 @@ function ReservationCard({ reservation, onCancelled }) {
   const t = useTranslations("myReservations");
   const tApptStatus = useTranslations("appointmentStatus");
   const locale = useLocale();
+  const router = useRouter();
   const [loadingPayment, setLoadingPayment] = useState(false);
   const [loadingCancel, setLoadingCancel] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [requestReason, setRequestReason] = useState("");
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [requestSent, setRequestSent] = useState(false);
   // Track local cancelled state so the card updates instantly without a full reload
   const [isCancelled, setIsCancelled] = useState(
     reservation.status === "CANCELLED",
@@ -101,6 +129,9 @@ function ReservationCard({ reservation, onCancelled }) {
 
   // ── 48-hour window check ─────────────────────────────────────────────────
   const blocked = isWithinCancellationWindow(reservation.startTime);
+  const cancellationRequest = reservation.cancellationRequest ?? null;
+  const hasPendingRequest = requestSent || cancellationRequest?.status === "PENDING";
+  const hasRejectedRequest = cancellationRequest?.status === "REJECTED";
 
   // Actions are available for every active appointment state.
   const isActionable =
@@ -145,6 +176,29 @@ function ReservationCard({ reservation, onCancelled }) {
       toast.error(t("genericErrorToast"));
     } finally {
       setLoadingCancel(false);
+    }
+  }
+
+  // ── Exception request ───────────────────────────────────────────────────────
+  async function handleExceptionRequest() {
+    setSubmittingRequest(true);
+    try {
+      const result = await submitCancellationExceptionRequest({
+        appointmentId: reservation.id,
+        reason: requestReason,
+      });
+      if (result.success) {
+        setRequestSent(true);
+        setRequestOpen(false);
+        toast.success(result.message);
+        router.refresh();
+      } else {
+        toast.error(result.message ?? t("genericErrorToast"));
+      }
+    } catch {
+      toast.error(t("genericErrorToast"));
+    } finally {
+      setSubmittingRequest(false);
     }
   }
 
@@ -236,6 +290,27 @@ function ReservationCard({ reservation, onCancelled }) {
                 </div>
               )}
             </div>
+            {reservation.payment.invoice && (
+              <div className="mt-3 pt-3 border-t border-gray-200">
+                <InvoiceLink invoice={reservation.payment.invoice} />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Review display */}
+        {reservation.review && (
+          <div className="rounded-2xl bg-gradient-to-br from-[#C8A46A]/10 to-[#C8A46A]/5 p-4 border border-[#C8A46A]/20">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{t("yourReview")}</span>
+              <div className="flex text-[#C8A46A]">
+                {"★".repeat(reservation.review.rating)}
+                <span className="text-gray-300">{"★".repeat(5 - reservation.review.rating)}</span>
+              </div>
+            </div>
+            {reservation.review.comment && (
+              <p className="text-sm text-gray-700 italic">"{reservation.review.comment}"</p>
+            )}
           </div>
         )}
       </div>
@@ -283,28 +358,90 @@ function ReservationCard({ reservation, onCancelled }) {
         {isActionable && (
           <>
             {blocked ? (
-              /* 48-hour lock notice */
-              <div className="flex items-start gap-3 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
-                <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                </svg>
-                <p className="text-xs text-amber-800 leading-relaxed font-medium">
-                  {t("cancellationLocked", { hours: CANCELLATION_WINDOW_HOURS })}
-                </p>
+              /* 48-hour lock notice with exception request */
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
+                  <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                  </svg>
+                  <p className="text-xs text-amber-800 leading-relaxed font-medium">
+                    {t("cancellationLocked", { hours: CANCELLATION_WINDOW_HOURS })}
+                  </p>
+                </div>
+                {hasPendingRequest ? (
+                  <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+                    <p className="text-xs text-amber-800 font-medium">
+                      Votre demande est en attente d'une décision de l'équipe. Aucun remboursement n'est engagé avant son accord.
+                    </p>
+                  </div>
+                ) : hasRejectedRequest ? (
+                  <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+                    <p className="text-xs text-red-700 font-medium">
+                      Votre demande exceptionnelle a été refusée. Le rendez-vous et l'acompte restent inchangés.
+                      {cancellationRequest.decisionNote ? ` Message de l'équipe : ${cancellationRequest.decisionNote}` : ""}
+                    </p>
+                  </div>
+                ) : requestOpen ? (
+                  <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                    <p className="text-xs text-amber-900">
+                      Après avoir contacté le salon, expliquez votre situation. Cette demande n'annule pas le rendez-vous et ne garantit pas un remboursement.
+                    </p>
+                    <textarea
+                      value={requestReason}
+                      onChange={(event) => setRequestReason(event.target.value)}
+                      maxLength={1000}
+                      rows={3}
+                      placeholder="Ex. maladie soudaine, avec toute information utile pour l'équipe"
+                      className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-amber-500"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRequestOpen(false)}
+                        disabled={submittingRequest}
+                        className="text-xs font-semibold text-gray-600 hover:text-gray-800"
+                      >
+                        Retour
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleExceptionRequest}
+                        disabled={submittingRequest || requestReason.trim().length < 10}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-[#2f3a2e] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60 hover:bg-[#3d4e3b]"
+                      >
+                        {submittingRequest && (
+                          <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                        )}
+                        Envoyer la demande
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setRequestOpen(true)}
+                    className="w-full text-center text-xs font-semibold text-[#2f3a2e] hover:underline"
+                  >
+                    Demander un examen exceptionnel
+                  </button>
+                )}
               </div>
             ) : (
               /* Modify + Cancel row */
               <div className="grid grid-cols-2 gap-3">
-                {/* Modify — links to the reservation booking flow pre-filled */}
-                <Link
-                  href={`/reservation?modify=${reservation.id}`}
+                {/* Modify — opens reschedule modal */}
+                <button
+                  onClick={() => setModalOpen(true)}
                   className="flex items-center justify-center gap-2 rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-bold text-gray-700 transition-all hover:border-[#2f3a2e] hover:text-[#2f3a2e] hover:shadow-md"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
                   </svg>
                   {t("modify")}
-                </Link>
+                </button>
 
                 {/* Cancel */}
                 <button
@@ -354,6 +491,18 @@ function ReservationCard({ reservation, onCancelled }) {
             {t("secureStripe")}
           </p>
         </div>
+      )}
+
+      {/* Reschedule modal */}
+      {modalOpen && (
+        <AppointmentRescheduleModal
+          appointment={reservation}
+          onClose={() => setModalOpen(false)}
+          onRescheduled={() => {
+            setModalOpen(false);
+            router.refresh();
+          }}
+        />
       )}
     </div>
   );

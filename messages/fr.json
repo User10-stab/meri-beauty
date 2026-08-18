@@ -2126,6 +2126,8 @@
     "cancelledToast": "Réservation annulée.",
     "cancelFailedToast": "Impossible d'annuler cette réservation.",
     "sessionFailedToast": "Impossible de créer la session de paiement. Veuillez réessayer.",
+    "genericErrorToast": "Une erreur est survenue. Veuillez réessayer.",
+    "yourReview": "Votre avis",
     "genericErrorToast": "Une erreur est survenue. Veuillez réessayer."
   },
   "reservationSuccess": {

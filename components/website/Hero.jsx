@@ -27,9 +27,14 @@ export default async function Hero() {
       {/* ══════════════════════════════════════
           HERO SECTION
       ══════════════════════════════════════ */}
+      {/* `isolate` makes this section its own stacking context, which the
+          full-bleed background below depends on. Without it the -z-10
+          background is a negative-z child of the root context, and the
+          painting order puts it *behind* the `bg-white` that (public)/layout
+          sets on <main> — the photo loads, then gets covered in white. */}
       <section
         id="accueil"
-        className="relative flex w-full flex-col"
+        className="relative isolate flex w-full flex-col"
         style={{ minHeight: "92vh" }}
       >
         {/* Full-bleed background */}
@@ -107,10 +112,15 @@ export default async function Hero() {
           OPENING HOURS FLOATING CARD
           Vertically centered on the right side
           of the hero section.
+
+          top-1/2 pairs with the -50% shift below to centre the card. Without
+          it the element fell back to its static position — the bottom of the
+          hero — and the transform then lifted it by half its own height,
+          leaving it hanging off the hero's lower edge rather than centred.
       ══════════════════════════════════════ */}
      <aside
   aria-label="Opening hours"
-  className="absolute right-6 z-20 hidden w-[330px] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25 sm:right-10 lg:right-14 lg:block xl:right-20"
+  className="absolute right-6 top-1/2 z-20 hidden w-[330px] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25 sm:right-10 lg:right-14 lg:block xl:right-20"
   style={{
     transform: "translateY(-50%)",
   }}

@@ -6,12 +6,11 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
 // Deposit forfeiture on a late cancellation defaults to 100% — the deposit
-// is kept in full on a late cancellation, matching what customers are told
-// (MyAppointmentsPageClient.jsx / MyReservationsClient.jsx: "L'acompte reste
-// acquis... sauf annulation exceptionnelle approuvée par l'administration")
-// and the same non-refundable-by-default policy already applied to
-// ateliers/formations deposits. The only way back to a full refund is an
-// admin approving a cancellation-exception request, which passes
+// is kept in full on a late cancellation, matching the policy customers see
+// on /mes-reservations (components/customer/MyReservationsClient.jsx) once
+// the 48h lock bites, and the same non-refundable-by-default policy already
+// applied to ateliers/formations deposits. The only way back to a full
+// refund is an admin approving a cancellation-exception request, which passes
 // waiveDepositForfeit: true — see
 // actions/appointment/manage-appointment.js's rejectAppointment.
 describe("deposit forfeiture defaults to withholding the deposit in full", () => {
@@ -39,7 +38,14 @@ describe("deposit forfeiture defaults to withholding the deposit in full", () =>
     // waiveDepositForfeit (an explicit admin decision) may skip it.
     expect(actions).not.toContain("cancelledByAssignedStaff");
     const gateIdx = actions.indexOf("Cancelling an unpaid request is routine appointment management");
-    const gateSnippet = actions.slice(gateIdx, gateIdx + 800);
+    expect(gateIdx).toBeGreaterThan(-1);
+    // Anchored to the end of the wasPaid block rather than a fixed character
+    // count: the gate sits directly under a long policy comment, and a
+    // window measured in characters silently truncated the match mid-string
+    // the moment that comment grew.
+    const blockEnd = actions.indexOf("STALE_CANCELLATION_GUARD_DAYS", gateIdx);
+    expect(blockEnd).toBeGreaterThan(gateIdx);
+    const gateSnippet = actions.slice(gateIdx, blockEnd);
     expect(gateSnippet).toContain("if (!isAdminRole(session?.user?.role)) {");
   });
 

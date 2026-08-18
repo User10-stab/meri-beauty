@@ -5,6 +5,7 @@ import {
   useRef,
   useEffect,
   useCallback,
+  useId,
   useTransition,
 } from "react";
 import {
@@ -257,6 +258,7 @@ export function ServiceMultiSelect({ services: initialServices, value = [], onCh
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const containerRef = useRef(null);
+  const listboxId = useId();
 
   // Close on outside click
   useEffect(() => {
@@ -322,6 +324,8 @@ export function ServiceMultiSelect({ services: initialServices, value = [], onCh
     return acc;
   }, {});
 
+  const hasOptions = Object.keys(grouped).length > 0;
+
   const selectedServices = value
     .map((id) => services.find((s) => s.id === id))
     .filter(Boolean);
@@ -330,12 +334,24 @@ export function ServiceMultiSelect({ services: initialServices, value = [], onCh
     <div ref={containerRef} className="relative">
 
       {/* ── Trigger ───────────────────────────────────────────────── */}
-      <button
-        type="button"
+      {/* A div rather than a button: each selected service carries its own
+          "remove" control, and a <button> cannot legally contain another
+          <button> — React reports it as a hydration error. role=combobox
+          plus key handling keeps it operable from the keyboard. */}
+      <div
+        role="combobox"
+        tabIndex={0}
         onClick={() => setOpen((p) => !p)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault(); // Space would otherwise scroll the dialog
+            setOpen((p) => !p);
+          }
+        }}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className={`flex min-h-[38px] w-full flex-wrap items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 ${
+        aria-controls={open ? listboxId : undefined}
+        className={`flex min-h-[38px] w-full cursor-pointer flex-wrap items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 ${
           error
             ? "border-red-300"
             : open
@@ -357,6 +373,7 @@ export function ServiceMultiSelect({ services: initialServices, value = [], onCh
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); removeTag(s.id); }}
+                onKeyDown={(e) => e.stopPropagation()} // don't reopen the list on Enter/Space
                 aria-label={`Retirer ${s.name}`}
                 className="ml-0.5 text-indigo-400 hover:text-indigo-700"
               >
@@ -369,7 +386,7 @@ export function ServiceMultiSelect({ services: initialServices, value = [], onCh
           size={14}
           className={`ml-auto flex-shrink-0 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`}
         />
-      </button>
+      </div>
 
       {/* ── Dropdown ──────────────────────────────────────────────── */}
       {open && (
@@ -409,10 +426,17 @@ export function ServiceMultiSelect({ services: initialServices, value = [], onCh
             />
           )}
 
-          {/* Service list */}
+          {/* Service list. The listbox role is only applied when there are
+              options to list — the empty state is a message and a button,
+              neither of which is a valid listbox child. */}
           {!showCreate && (
-            <div className="max-h-52 overflow-y-auto">
-              {Object.keys(grouped).length === 0 ? (
+            <div
+              {...(hasOptions
+                ? { id: listboxId, role: "listbox", "aria-multiselectable": "true", "aria-label": "Services" }
+                : {})}
+              className="max-h-52 overflow-y-auto"
+            >
+              {!hasOptions ? (
                 <div className="flex flex-col items-center gap-2 py-6 text-center">
                   <Package size={20} className="text-gray-300" />
                   <p className="text-sm text-gray-400">
@@ -428,7 +452,7 @@ export function ServiceMultiSelect({ services: initialServices, value = [], onCh
                 </div>
               ) : (
                 Object.entries(grouped).map(([catName, items]) => (
-                  <div key={catName}>
+                  <div key={catName} role="group" aria-label={catName}>
                     {/* Category header */}
                     <p className="sticky top-0 bg-gray-50 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-400">
                       {catName}

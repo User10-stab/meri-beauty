@@ -2,6 +2,10 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  isAwaitingPayment,
+  isAwaitingPaymentChoice,
+} from "@/lib/appointments/payment-followup";
 
 /**
  * Returns all reservations for the authenticated customer, including
@@ -164,10 +168,7 @@ export async function getMyReservations() {
           appt.status !== "CANCELLED" &&
           appt.status !== "COMPLETED",
 
-        // Manual requests do not have a Payment row until the customer makes
-        // a choice after staff acceptance. Keep the route discoverable even
-        // if the acceptance email is missed.
-        awaitingPaymentChoice: appt.status === "ACCEPTED" && payment === null,
+        review: appt.review,
 
         cancellationRequest: appt.cancellationRequests[0]
           ? {

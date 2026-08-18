@@ -417,7 +417,11 @@ export async function createCheckoutSession(reservationData) {
           date: appointmentDate,
           startTime,
           endTime,
-          status: "PENDING", // webhook sets CONFIRMED after Stripe confirms payment
+          // On an AUTOMATIC booking the webhook promotes this to CONFIRMED
+          // once Stripe confirms payment. A MANUAL one stays PENDING even
+          // after paying — the customer pays up front, but only staff
+          // acceptance confirms the slot (resolveAppointmentStatusAfterPayment).
+          status: "PENDING",
           notes: notes || null,
         },
       });

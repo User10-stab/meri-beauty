@@ -139,6 +139,21 @@ export async function createConnectAccount(staffId) {
     };
   } catch (error) {
     console.error("[createConnectAccount]", error);
+
+    // Stripe refuses account creation outright until the platform account has
+    // signed up for Connect. That is a one-off dashboard action by the salon
+    // owner, not something the staff member can fix — say so, instead of
+    // showing them a generic failure they can only retry forever.
+    const stripeMessage = error?.raw?.message ?? error?.message ?? "";
+    if (stripeMessage.includes("signed up for Connect")) {
+      return {
+        success: false,
+        message:
+          "Stripe Connect n'est pas encore activé sur le compte du salon. " +
+          "L'administrateur doit l'activer sur dashboard.stripe.com/connect avant que le staff puisse connecter un compte.",
+      };
+    }
+
     return {
       success: false,
       message: "Erreur lors de la création du compte Stripe Connect.",

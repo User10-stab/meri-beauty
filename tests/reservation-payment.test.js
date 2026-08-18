@@ -52,7 +52,7 @@ test('ONLINE_ONLY ignores deposit settings and requires the full amount', () => 
   assert.equal(decision.requiresOnlinePaymentNow, true);
 });
 
-test('manual confirmation defers payment until staff acceptance', () => {
+test('manual confirmation takes the deposit up front, before staff decide', () => {
   const decision = getReservationPaymentDecision({
     appointmentCount: 1,
     confirmationMode: 'MANUAL',
@@ -61,9 +61,36 @@ test('manual confirmation defers payment until staff acceptance', () => {
     totalAmount: 80,
   });
 
-  assert.equal(decision.requiresPaymentStep, false);
+  assert.equal(decision.requiresPaymentStep, true);
   assert.equal(decision.isManualMode, true);
-  assert.equal(decision.paymentIntent, 'NONE');
+  assert.equal(decision.paymentIntent, 'DEPOSIT_ONLINE');
+  assert.equal(decision.paymentType, 'DEPOSIT');
+  assert.equal(decision.depositAmount, 16);
+  assert.equal(decision.requiresOnlinePaymentNow, true);
+  assert.equal(decision.shouldCreatePaymentRecord, true);
+
+  // Paying does not confirm the slot — staff acceptance does.
+  assert.equal(decision.appointmentStatusBeforePayment, 'PENDING');
+  assert.equal(decision.appointmentStatusAfterPayment, 'PENDING');
+
+  // No "pay at the salon" escape hatch, or the money never moves up front.
+  assert.equal(decision.salonPaymentAvailable, false);
+});
+
+test('manual confirmation without a deposit takes the full amount up front', () => {
+  const decision = getReservationPaymentDecision({
+    appointmentCount: 1,
+    confirmationMode: 'MANUAL',
+    depositEnabled: false,
+    totalAmount: 80,
+  });
+
+  assert.equal(decision.requiresPaymentStep, true);
+  assert.equal(decision.paymentIntent, 'FULL_ONLINE');
+  assert.equal(decision.paymentType, 'ONLINE');
+  assert.equal(decision.totalAmount, 80);
+  assert.equal(decision.requiresOnlinePaymentNow, true);
+  assert.equal(decision.salonPaymentAvailable, false);
 });
 
 test('multiple appointments skip the payment step entirely', () => {

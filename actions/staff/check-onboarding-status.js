@@ -49,6 +49,15 @@ export async function checkOnboardingStatus() {
   return {
     isStaff: true,
     setupCompleted,
+    // Which specific steps are still missing. The onboarding modal used to
+    // show a fixed list with no state, so a staff member who had filled in
+    // their photo and bio still saw "Profil" unticked with nothing telling
+    // them the actual gate is "at least one language".
+    steps: [
+      { key: "languages", label: "Profil — au moins une langue parlée", done: hasLanguages },
+      { key: "contract", label: "Contrat", done: hasContract },
+      { key: "workingHours", label: "Horaires de travail", done: hasWorkingHours },
+    ],
     hasServices: staff._count.staffServices > 0,
     stripeConnected,
     stripeRequired,

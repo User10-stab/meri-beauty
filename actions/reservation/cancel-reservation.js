@@ -5,7 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { issueCreditNote } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
-import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
+import {
+  isWithinCancellationWindow,
+  requiresAdminApprovalToCancel,
+  CANCELLATION_WINDOW_HOURS,
+} from "@/lib/reservationRules";
 import { sendEmail } from "@/lib/email";
 import { staffReservationCancelledEmail } from "@/lib/email-templates";
 import {
@@ -76,15 +80,28 @@ export async function cancelReservation(appointmentId) {
       return { success: false, message: "Les réservations terminées ne peuvent pas être annulées." };
     }
 
-    // 48-hour window check — enforce server-side regardless of what the UI shows
-    if (isWithinCancellationWindow(appointment.startTime)) {
+    const payment = appointment.payment;
+
+    // Server-side enforcement, regardless of what the UI shows, of both
+    // gates that take self-cancellation off the table: the 48h window, and
+    // — 18 Aug 2026 — a still-PENDING request that already took a payment.
+    // Under pay-first the customer pays before staff decide; without the
+    // second gate they could pay, then cancel their own undecided request a
+    // moment later and get an automatic refund, which is exactly what
+    // paying up front was meant to prevent. See
+    // requiresAdminApprovalToCancel's doc comment for the full reasoning —
+    // a staff DECLINE of the same request is unaffected, that always
+    // refunds in full via rejectAppointment.
+    if (requiresAdminApprovalToCancel(appointment, payment)) {
+      const withinWindow = isWithinCancellationWindow(appointment.startTime);
       return {
         success: false,
-        message: `Les réservations ne peuvent pas être annulées moins de ${CANCELLATION_WINDOW_HOURS} heures avant le rendez-vous.`,
+        message: withinWindow
+          ? `Les réservations ne peuvent pas être annulées moins de ${CANCELLATION_WINDOW_HOURS} heures avant le rendez-vous.`
+          : "Un paiement a déjà été effectué pour cette demande en attente de confirmation. Envoyez une demande exceptionnelle pour qu'un administrateur examine un remboursement.",
       };
     }
 
-    const payment = appointment.payment;
     const wasPaid = Boolean(payment) && ["PAID", "PARTIALLY_PAID"].includes(payment.status);
 
     // Cap against what's actually still outstanding — a prior partial refund

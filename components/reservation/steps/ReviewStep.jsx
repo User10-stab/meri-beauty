@@ -171,7 +171,7 @@ function CustomerCard({ data, customerSession }) {
 
 // ─── Payment preview cards ────────────────────────────────────────────────────
 
-function AutomaticPaymentPreview({ paymentDecision }) {
+function AutomaticPaymentPreview({ paymentDecision, isManualMode = false }) {
   const t = useTranslations("reservationSteps");
   const { totalAmount, depositRequired, depositAmount, depositPercentage } = paymentDecision;
   const remainingAmount = totalAmount - depositAmount;
@@ -240,19 +240,26 @@ function AutomaticPaymentPreview({ paymentDecision }) {
             </span>
           </div>
         </div>
+
+        {/* A manually-confirmed request still takes payment now (pay-first,
+            18 Aug 2026) — but staff still have to accept it. Say so beside
+            the amount, not just in a passing toast after paying. */}
+        {isManualMode && (
+          <div className="mt-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-800">
+            <p className="font-medium">{t("review.pendingConfirmation")}</p>
+            <p className="mt-1">{t("review.manualPayFirstDesc")}</p>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// No promo-code field here: a MANUAL-mode request has no Payment row (and no
-// online charge) until staff accepts it, and acceptance
-// (actions/appointment/manage-appointment.js#acceptAppointment) rebuilds the
-// price from scratch off the raw StaffService price for its own separate
-// payment link — there's nowhere downstream a discount applied at this step
-// would actually survive to. Promo codes for appointments only apply to the
-// AUTOMATIC/pay-now path (PaymentStep.jsx), where Payment is created
-// immediately with the discount already baked in.
+// The CASH_ONLY case: no online payment exists at all, so there is nothing
+// to preview — just tell the customer their request is on its way and
+// they'll hear back by email. Deposit/full-online MANUAL bookings go through
+// AutomaticPaymentPreview instead (see its isManualMode banner), since they
+// now pay before staff decide, same as an AUTOMATIC booking.
 function ManualModeNotice() {
   const t = useTranslations("reservationSteps");
   return (
@@ -511,9 +518,16 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
         {isMultiDraft && (
           <MultiAppointmentNotice totalAmount={totalAmount} />
         )}
-        {!isMultiDraft && isManualMode && <ManualModeNotice />}
-        {!isMultiDraft && !isManualMode && (
-          <AutomaticPaymentPreview paymentDecision={paymentDecision} />
+        {/* A cash-only staff member's manual request takes no online payment
+            at all, so ManualModeNotice is the only sensible thing to show.
+            Every other case — including a cash-only AUTOMATIC booking, which
+            has no deposit either but is still previewed as "pay at the
+            salon" — gets the price preview; a deposit/full-online manual
+            request now pays up front too, same as automatic, so it gets the
+            same preview plus its own pending-acceptance notice inside it. */}
+        {!isMultiDraft && isManualMode && !requiresPaymentStep && <ManualModeNotice />}
+        {!isMultiDraft && !(isManualMode && !requiresPaymentStep) && (
+          <AutomaticPaymentPreview paymentDecision={paymentDecision} isManualMode={isManualMode} />
         )}
 
         {/* ── Terms acceptance ─────────────────────────────────── */}

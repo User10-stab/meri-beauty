@@ -83,13 +83,19 @@ export default function PaymentStep({ data, customerSession }) {
     depositRequired,
     depositAmount,
     depositPercentage,
+    salonPaymentAvailable,
   } = computePaymentDecision({ drafts, discountAmount });
 
   const allowedPaymentMethods = draft?.staffService?.staff?.allowedPaymentMethods;
   const acceptsOnlinePayments =
     allowedPaymentMethods === "BOTH" || allowedPaymentMethods === "ONLINE_ONLY";
+  // salonPaymentAvailable, not just the staff setting: a manual request is
+  // paid before staff decide, so "pay at the salon" would let the customer
+  // hold the slot without paying — the one thing pay-first exists to stop.
+  // CASH_ONLY staff keep it, since they take no online payment at all.
   const acceptsCashPayments =
-    allowedPaymentMethods === "BOTH" || allowedPaymentMethods === "CASH_ONLY";
+    salonPaymentAvailable &&
+    (allowedPaymentMethods === "BOTH" || allowedPaymentMethods === "CASH_ONLY");
 
   // The amount the customer will pay online right now, per chosen method —
   // used only to display in UI labels, never sent to the server.

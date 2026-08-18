@@ -2106,7 +2106,8 @@
     "modify": "Modify",
     "cancel": "Cancel",
     "cancelling": "Cancelling…",
-    "cancellationLocked": "Modifications and cancellations are no longer available less than {hours} hours before the appointment.",
+    "cancellationLocked": "Modifications and cancellations are no longer available less than {hours} hours before the appointment. The deposit remains non-refundable, unless the administration approves an exceptional cancellation.",
+    "cancellationLockedPendingPayment": "A payment has already been made for this request while it awaits the salon's decision. It is not refunded automatically if you cancel — send an exceptional request so an administrator can review it.",
     "cancelledNotice": "This reservation has been cancelled.",
     "secureStripe": "Secure payment by Stripe",
     "pendingPayment": "Payment pending",
@@ -2128,7 +2129,9 @@
     "exceptionRequestBack": "Back",
     "exceptionRequestPending": "Your request is awaiting a decision from the team. No refund is issued before their approval.",
     "exceptionRequestRejected": "Your exceptional request was declined. The appointment and the deposit remain unchanged.",
-    "exceptionRequestFailed": "Could not send your request."
+    "exceptionRequestFailed": "Could not send your request.",
+    "pendingApprovalNoticeNoPayment": "Awaiting approval from the salon. Once your appointment is accepted, the payment will appear here — no need to wait for the e-mail.",
+    "pendingApprovalNoticeWithPayment": "Awaiting approval from the salon. Your payment has been received — you'll be notified as soon as the team decides."
   },
   "reservationSuccess": {
     "pollingTitle": "Confirming…",

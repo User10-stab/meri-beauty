@@ -10,7 +10,7 @@ describe("late cancellation exception requests", () => {
   const action = source("actions/reservation/cancellation-exception-request.js");
   const appointmentActions = source("actions/appointment/manage-appointment.js");
   const myReservations = source("actions/reservation/get-my-reservations.js");
-  const customerUi = source("components/website/MyAppointmentsPageClient.jsx");
+  const customerUi = source("components/customer/MyReservationsClient.jsx");
 
   test("stores exactly one review request per appointment", () => {
     expect(schema).toContain("model AppointmentCancellationRequest");
@@ -25,7 +25,10 @@ describe("late cancellation exception requests", () => {
     );
 
     expect(submitFn).toContain('session.user.role !== "CUSTOMER"');
-    expect(submitFn).toContain("isWithinCancellationWindow(appointment.startTime)");
+    // requiresAdminApprovalToCancel covers both gates: the 48h window, and
+    // (18 Aug 2026) a still-PENDING request that already took a pay-first
+    // payment — see lib/reservationRules.js.
+    expect(submitFn).toContain("requiresAdminApprovalToCancel(appointment, appointment.payment)");
     expect(submitFn).toContain("appointmentCancellationRequest.create");
     expect(submitFn).not.toContain("rejectAppointment(");
     expect(submitFn).not.toContain("stripe.refunds.create");

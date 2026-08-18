@@ -12,6 +12,7 @@ import { submitCancellationExceptionRequest } from "@/actions/reservation/cancel
 import { AppointmentRescheduleModal } from "@/components/website/AppointmentRescheduleModal";
 import {
   isWithinCancellationWindow,
+  requiresAdminApprovalToCancel,
   CANCELLATION_WINDOW_HOURS,
 } from "@/lib/reservationRules";
 import { toIntlLocale } from "@/lib/intl-locale";
@@ -131,8 +132,14 @@ function ReservationCard({ reservation, onCancelled }) {
     ? t(paymentStatusConfig.labelKey)
     : reservation.payment?.status;
 
-  // ── 48-hour window check ─────────────────────────────────────────────────
-  const blocked = isWithinCancellationWindow(reservation.startTime);
+  // ── Self-cancellation gate ───────────────────────────────────────────────
+  // True inside the 48h window (unchanged), or — 18 Aug 2026 — for a
+  // still-PENDING request that already took a pay-first payment: the
+  // customer paid before staff decided, so cancelling it themselves must not
+  // be an automatic refund. Either way the only route left is the
+  // exceptional-request form below.
+  const withinWindow = isWithinCancellationWindow(reservation.startTime);
+  const blocked = requiresAdminApprovalToCancel(reservation, reservation.payment);
 
   // Actions are available for every active appointment state.
   const isActionable =
@@ -274,6 +281,22 @@ function ReservationCard({ reservation, onCancelled }) {
 
       {/* ── Footer actions ──────────────────────────────────────────────── */}
       <div className="space-y-3 border-t border-gray-100 bg-gradient-to-b from-gray-50/50 to-white px-6 py-5">
+        {/* A manually-confirmed request sits at PENDING until staff decide.
+            Most now carry a payment taken up front, so this must only cover
+            the genuine "nothing to act on yet" case — never suppress the
+            "Finaliser le paiement" button below by firing whenever an
+            unsettled payment (awaitingPayment) still needs it. */}
+        {effectiveStatus === "PENDING" && !reservation.awaitingPayment && !isCancelled && (
+          <div className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+            <svg className="mt-0.5 h-4 w-4 shrink-0 text-[#C8A46A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <p className="leading-relaxed">
+              {reservation.payment ? t("pendingApprovalNoticeWithPayment") : t("pendingApprovalNoticeNoPayment")}
+            </p>
+          </div>
+        )}
+
         {reservation.awaitingPaymentChoice && !isCancelled && (
           <Link
             href={`/appointment/${reservation.id}/payment`}
@@ -315,15 +338,19 @@ function ReservationCard({ reservation, onCancelled }) {
         {isActionable && (
           <>
             {blocked ? (
-              /* 48-hour lock notice, plus the only route left once it bites:
-                 asking the team to review the cancellation as an exception. */
+              /* Locked for one of two reasons — the 48h window, or a
+                 still-PENDING request that already took a pay-first
+                 payment — plus the only route left once it bites: asking
+                 the team to review the cancellation as an exception. */
               <div className="space-y-3">
                 <div className="flex items-start gap-3 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
                   <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                   </svg>
                   <p className="text-xs text-amber-800 leading-relaxed font-medium">
-                    {t("cancellationLocked", { hours: CANCELLATION_WINDOW_HOURS })}
+                    {withinWindow
+                      ? t("cancellationLocked", { hours: CANCELLATION_WINDOW_HOURS })
+                      : t("cancellationLockedPendingPayment")}
                   </p>
                 </div>
 
@@ -497,56 +524,6 @@ function ReservationCard({ reservation, onCancelled }) {
         </div>
       )}
     </div>
-  );
-}
-
-// ─── Inline SVG micro-icons (avoid extra imports) ─────────────────────────────
-
-function Spinner({ className = "" }) {
-  return (
-    <svg
-      className={`h-4 w-4 animate-spin ${className}`}
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8v8H4z"
-      />
-    </svg>
-  );
-}
-
-function CreditCardIcon() {
-  return (
-    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
-    </svg>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-    </svg>
-  );
-}
-
-function XIcon() {
-  return (
-    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-    </svg>
   );
 }
 

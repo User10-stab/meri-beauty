@@ -18,7 +18,7 @@ export default function robots() {
         "/verify-email",
         "/mon-compte",
         "/profile",
-        "/appointments",
+        "/mes-reservations",
         "/boutique/cart",
         "/boutique/checkout",
         "/reservation-atelier/succes",

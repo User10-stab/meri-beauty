@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getReservationPaymentDecision, computePaymentDecision } from "../../lib/reservation-payment.js";
 import { resolveAppointmentStatusAfterPayment } from "../../lib/appointment-status.js";
+import { requiresAdminApprovalToCancel } from "../../lib/reservationRules.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
@@ -143,5 +144,69 @@ describe("declining a request the salon never accepted refunds in full", () => {
     expect(source("prisma/schema.prisma")).toMatch(
       /depositForfeitPercentage\s+Decimal\s+@default\(100\)/
     );
+  });
+});
+
+// 18 Aug 2026, the other half of the same salon decision: pay-first only
+// works if the customer can't undo it by cancelling their own still-PENDING
+// request the moment after paying. Previously cancelReservation had no
+// concept of "already paid but not yet accepted" — any appointment outside
+// the 48h window refunded automatically on customer self-cancel, deposit or
+// not, decided or not.
+describe("a customer cannot self-refund a paid request the salon hasn't decided on yet", () => {
+  const future = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // far outside the 48h window
+
+  test("a paid PENDING request requires admin approval to cancel, however far away it is", () => {
+    expect(
+      requiresAdminApprovalToCancel({ status: "PENDING", startTime: future }, { status: "PAID" })
+    ).toBe(true);
+    expect(
+      requiresAdminApprovalToCancel({ status: "PENDING", startTime: future }, { status: "PARTIALLY_PAID" })
+    ).toBe(true);
+  });
+
+  test("an unpaid PENDING request (e.g. CASH_ONLY staff) can still self-cancel freely", () => {
+    expect(requiresAdminApprovalToCancel({ status: "PENDING", startTime: future }, null)).toBe(false);
+    expect(
+      requiresAdminApprovalToCancel({ status: "PENDING", startTime: future }, { status: "REFUNDED" })
+    ).toBe(false);
+  });
+
+  test("a paid ACCEPTED/CONFIRMED appointment outside the window is unaffected — unchanged scope", () => {
+    expect(
+      requiresAdminApprovalToCancel({ status: "ACCEPTED", startTime: future }, { status: "PAID" })
+    ).toBe(false);
+    expect(
+      requiresAdminApprovalToCancel({ status: "CONFIRMED", startTime: future }, { status: "PAID" })
+    ).toBe(false);
+  });
+
+  test("the 48h window still blocks regardless of payment or status", () => {
+    const soon = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    expect(requiresAdminApprovalToCancel({ status: "CONFIRMED", startTime: soon }, null)).toBe(true);
+  });
+
+  test("cancelReservation enforces the gate server-side, not just the UI", () => {
+    const src = source("actions/reservation/cancel-reservation.js");
+    expect(src).toContain("requiresAdminApprovalToCancel(appointment, payment)");
+    // Must run before any refund is computed or pinned.
+    const gateIdx = src.indexOf("requiresAdminApprovalToCancel(appointment, payment)");
+    const refundIdx = src.indexOf("const needsRefund =");
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeLessThan(refundIdx);
+  });
+
+  test("the exception-request path accepts this case instead of turning it away", () => {
+    const src = source("actions/reservation/cancellation-exception-request.js");
+    expect(src).toContain("requiresAdminApprovalToCancel(appointment, appointment.payment)");
+    expect(src).toContain("payment: { select: { status: true } }");
+  });
+
+  test("the UI locks the same way it does for the 48h window", () => {
+    const src = source("components/customer/MyReservationsClient.jsx");
+    expect(src).toContain("requiresAdminApprovalToCancel(reservation, reservation.payment)");
+    // handleCancel must actually read the same `blocked` flag, or the
+    // client-side guard and the button's visibility could disagree.
+    expect(src).toMatch(/if \(loadingCancel \|\| blocked\) return;/);
   });
 });

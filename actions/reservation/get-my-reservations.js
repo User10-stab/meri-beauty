@@ -135,8 +135,9 @@ export async function getMyReservations() {
           : null,
 
         // Derived convenience flags used by the UI to offer "Complete
-        // payment" / "Choose how to pay". Shared with /appointments via
-        // lib/appointments/payment-followup so both lists agree.
+        // payment" / "Choose how to pay". Rules live in
+        // lib/appointments/payment-followup so this stays in sync with any
+        // other caller of the same helper.
         awaitingPayment: isAwaitingPayment(appt, payment),
         awaitingPaymentChoice: isAwaitingPaymentChoice(appt, payment),
 

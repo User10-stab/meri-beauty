@@ -10,9 +10,14 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
 // 18 Aug 2026: a customer with an unpaid booking had no way to finish paying
-// from /appointments — the page the site header actually links to. The resume
-// flow existed, but only on /mes-reservations, so the confirmation e-mail was
-// the sole route back to Stripe.
+// from /appointments — the page the site header actually links to at the
+// time. The resume flow existed, but only on /mes-reservations, so the
+// confirmation e-mail was the sole route back to Stripe.
+//
+// /appointments has since been retired in favour of /mes-reservations (the
+// stronger design), once every feature it had — exception request,
+// reschedule, invoice PDF, reviews — was ported over. This file now tests
+// /mes-reservations alone.
 describe("an unpaid appointment can be settled from the appointments list", () => {
   const confirmed = { status: "CONFIRMED" };
 
@@ -40,35 +45,28 @@ describe("an unpaid appointment can be settled from the appointments list", () =
     expect(isAwaitingPaymentChoice(confirmed, null)).toBe(false);
   });
 
-  test("both customer lists derive the flags from the same helper", () => {
-    for (const path of [
-      "actions/customer/get-my-appointments.js",
-      "actions/reservation/get-my-reservations.js",
-    ]) {
-      const src = source(path);
-      expect(src).toContain("@/lib/appointments/payment-followup");
-      expect(src).toContain("awaitingPayment: isAwaitingPayment(");
-      expect(src).toContain("awaitingPaymentChoice: isAwaitingPaymentChoice(");
-    }
+  test("the reservations list derives its flags from the shared helper", () => {
+    const src = source("actions/reservation/get-my-reservations.js");
+    expect(src).toContain("@/lib/appointments/payment-followup");
+    expect(src).toContain("awaitingPayment: isAwaitingPayment(");
+    expect(src).toContain("awaitingPaymentChoice: isAwaitingPaymentChoice(");
   });
 
-  test("/appointments selects the payment fields the resume action needs", () => {
-    const loader = source("actions/customer/get-my-appointments.js");
+  test("/mes-reservations selects the payment fields the resume action needs", () => {
+    const loader = source("actions/reservation/get-my-reservations.js");
     // payment.id is what resumeReservationPayment is called with; without it
     // the button cannot be wired at all.
-    expect(loader).toMatch(/payment:\s*\{[\s\S]*?id:\s*true/);
-    expect(loader).toMatch(/payment:\s*\{[\s\S]*?status:\s*true/);
-    expect(loader).toMatch(/payment:\s*\{[\s\S]*?paymentType:\s*true/);
+    const mapped = loader.slice(loader.indexOf("payment: payment"), loader.indexOf("review: appt.review"));
+    expect(mapped).toMatch(/id:\s*payment\.id/);
+    expect(mapped).toMatch(/status:\s*payment\.status/);
+    expect(mapped).toMatch(/paymentType:\s*payment\.paymentType/);
   });
 
-  // /mes-reservations is the page the salon wants to keep, so it must not be
-  // the weaker of the two: it previously lacked the exception request,
-  // reschedule, invoice PDF and reviews that /appointments already had.
-  test("both customer pages offer the same feature set", () => {
-    const pages = {
-      "/appointments": source("components/website/MyAppointmentsPageClient.jsx"),
-      "/mes-reservations": source("components/customer/MyReservationsClient.jsx"),
-    };
+  // /mes-reservations is the page the salon settled on, so it must keep every
+  // feature /appointments had before that page was retired: the exception
+  // request, reschedule, invoice PDF and reviews.
+  test("the reservations page still carries every feature ported from /appointments", () => {
+    const src = source("components/customer/MyReservationsClient.jsx");
     const required = [
       "resumeReservationPayment",
       "awaitingPaymentChoice",
@@ -76,12 +74,10 @@ describe("an unpaid appointment can be settled from the appointments list", () =
       "AppointmentRescheduleModal",
       "/api/invoices/",
     ];
-    for (const [name, src] of Object.entries(pages)) {
-      for (const feature of required) {
-        expect(src, `${name} is missing ${feature}`).toContain(feature);
-      }
-      expect(src, `${name} is missing the review display`).toMatch(/review\.rating/);
+    for (const feature of required) {
+      expect(src, `/mes-reservations is missing ${feature}`).toContain(feature);
     }
+    expect(src, "/mes-reservations is missing the review display").toMatch(/review\.rating/);
   });
 
   test("the reservations loader supplies what those features read", () => {
@@ -92,23 +88,27 @@ describe("an unpaid appointment can be settled from the appointments list", () =
     expect(loader).toContain("cancellationRequest:");    // exception request
   });
 
-  test("the payment step is not gated behind the 48h cancellation lock", () => {
-    const client = source("components/website/MyAppointmentsPageClient.jsx");
+  test("the payment button is not gated behind the 48h cancellation lock", () => {
+    const client = source("components/customer/MyReservationsClient.jsx");
 
-    // AppointmentActions returns early when locked; PaymentFollowUp must be
-    // its sibling, not nested inside it, or a booking inside the window
-    // could never be paid.
-    const followUpDef = client.indexOf("function PaymentFollowUp");
-    const actionsDef = client.indexOf("function AppointmentActions");
-    expect(followUpDef).toBeGreaterThan(-1);
-    expect(followUpDef).toBeLessThan(actionsDef);
+    // isActionable's blocked branch (48h lock) must not be an ancestor of the
+    // awaitingPayment button, or a booking inside the window could never be
+    // paid.
+    const buttonIndex = client.indexOf("{reservation.awaitingPayment && !isCancelled && (");
+    const actionableIndex = client.indexOf("{isActionable && (");
+    expect(buttonIndex).toBeGreaterThan(-1);
+    expect(actionableIndex).toBeGreaterThan(-1);
+    expect(buttonIndex).toBeLessThan(actionableIndex);
+  });
 
-    // Rendered in both cards.
-    const renders = client.match(/<PaymentFollowUp appointment=\{appointment\} \/>/g) ?? [];
-    expect(renders.length).toBe(2);
-
-    // The one in the history card must not inherit showActions.
-    expect(client).not.toMatch(/showActions && <PaymentFollowUp/);
+  // 18 Aug 2026: a manually-confirmed request now takes its deposit (or full
+  // amount) up front for every staff member except CASH_ONLY, so a PENDING
+  // appointment usually does carry an unsettled payment — not "nothing to pay
+  // yet". The "waiting on the salon" notice must not swallow that case, or an
+  // abandoned Checkout becomes unrecoverable outside the confirmation e-mail.
+  test("the pending-approval notice yields to the pay button on an unsettled payment", () => {
+    const client = source("components/customer/MyReservationsClient.jsx");
+    expect(client).toContain('effectiveStatus === "PENDING" && !reservation.awaitingPayment && !isCancelled');
   });
 });
 

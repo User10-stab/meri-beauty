@@ -28,7 +28,7 @@ export default function ConfirmAcceptedAppointmentClient({ appointment }) {
       window.location.href = result.url;
       return;
     }
-    router.push("/appointments");
+    router.push("/mes-reservations");
     router.refresh();
   }
 

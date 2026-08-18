@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
-import { isWithinCancellationWindow } from "@/lib/reservationRules";
+import { requiresAdminApprovalToCancel } from "@/lib/reservationRules";
 import { sendEmail } from "@/lib/email";
 import { rejectAppointment } from "@/actions/appointment/manage-appointment";
 
@@ -22,7 +22,6 @@ const reviewSchema = z.object({
 
 function refreshAppointmentViews() {
   revalidatePath("/mes-reservations");
-  revalidatePath("/appointments");
   revalidatePath("/dashboard/appointments");
   revalidatePath("/dashboard/appointments/exceptions");
 }
@@ -88,7 +87,10 @@ export async function submitCancellationExceptionRequest(input) {
 
   const appointment = await prisma.appointment.findUnique({
     where: { id: parsed.data.appointmentId, isDeleted: false },
-    include: { user: { select: { fullName: true, email: true } } },
+    include: {
+      user: { select: { fullName: true, email: true } },
+      payment: { select: { status: true } },
+    },
   });
   if (!appointment || appointment.userId !== session.user.id) {
     return { success: false, message: "Rendez-vous introuvable." };
@@ -96,7 +98,10 @@ export async function submitCancellationExceptionRequest(input) {
   if (!["PENDING", "ACCEPTED", "CONFIRMED"].includes(appointment.status)) {
     return { success: false, message: "Ce rendez-vous ne peut plus faire l'objet d'une demande." };
   }
-  if (!isWithinCancellationWindow(appointment.startTime)) {
+  // Mirrors cancel-reservation.js's gate: this request only makes sense once
+  // self-cancellation is off the table — either the 48h window, or (18 Aug
+  // 2026) a still-PENDING request that already took a pay-first payment.
+  if (!requiresAdminApprovalToCancel(appointment, appointment.payment)) {
     return { success: false, message: "Ce rendez-vous peut encore être annulé directement depuis votre espace." };
   }
 

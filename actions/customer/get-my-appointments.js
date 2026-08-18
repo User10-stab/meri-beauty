@@ -3,6 +3,10 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
+import {
+  isAwaitingPayment,
+  isAwaitingPaymentChoice,
+} from "@/lib/appointments/payment-followup";
 
 /**
  * The logged-in customer's own salon service appointments — distinct from
@@ -26,7 +30,17 @@ export async function getMyAppointments() {
             staff: { select: { id: true, user: { select: { fullName: true } } } },
           },
         },
-        payment: { select: { invoice: { select: { id: true, number: true } } } },
+        // id/status/paymentType drive the payment follow-up actions below;
+        // invoice is what the list already showed.
+        payment: {
+          select: {
+            id: true,
+            status: true,
+            paymentType: true,
+            remainingAmount: true,
+            invoice: { select: { id: true, number: true } },
+          },
+        },
         review: { select: { id: true, rating: true, comment: true } },
       },
     });
@@ -43,6 +57,13 @@ export async function getMyAppointments() {
       staffName: a.staffService.staff?.user?.fullName ?? "—",
       payment: a.payment,
       review: a.review,
+
+      // Same rules as /mes-reservations — a booking left mid-payment must
+      // look the same on both lists. Previously this page offered no way
+      // back to Stripe at all, so the acceptance/payment email was the only
+      // route to finishing a booking.
+      awaitingPayment: isAwaitingPayment(a, a.payment),
+      awaitingPaymentChoice: isAwaitingPaymentChoice(a, a.payment),
     }));
 
     return { success: true, data: serializeDecimalFields(data) };

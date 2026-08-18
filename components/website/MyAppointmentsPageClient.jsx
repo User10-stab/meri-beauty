@@ -3,10 +3,12 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { CalendarDays, Clock, User, FileDown, Sparkles, History, Pencil, XCircle, Loader2, AlertTriangle } from "lucide-react";
+import { CalendarDays, Clock, User, FileDown, Sparkles, History, Pencil, XCircle, Loader2, AlertTriangle, CreditCard } from "lucide-react";
 import { formatDistanceToNowStrict, isFuture } from "date-fns";
 import { fr } from "date-fns/locale";
+import Link from "next/link";
 import { cancelReservation } from "@/actions/reservation/cancel-reservation";
+import { resumeReservationPayment } from "@/actions/payment/resume-reservation-payment";
 import { submitCancellationExceptionRequest } from "@/actions/reservation/cancellation-exception-request";
 import { isWithinCancellationWindow, CANCELLATION_WINDOW_HOURS } from "@/lib/reservationRules";
 import { AppointmentRescheduleModal } from "@/components/website/AppointmentRescheduleModal";
@@ -95,6 +97,72 @@ function DateBlock({ date, accent }) {
       <span className={`text-xl font-bold leading-tight ${accent ? "text-primary" : "text-ink"}`}>
         {formatDay(date)}
       </span>
+    </div>
+  );
+}
+
+/**
+ * The outstanding-payment step for a booking.
+ *
+ * Deliberately separate from AppointmentActions and rendered outside its
+ * cancellation-window branch: being inside the 48h lock stops you changing
+ * or cancelling the appointment, but it must never stop you *paying* for
+ * one. Before this existed the only route back to Stripe was the original
+ * e-mail.
+ */
+function PaymentFollowUp({ appointment }) {
+  const [redirecting, setRedirecting] = useState(false);
+
+  if (!appointment.awaitingPayment && !appointment.awaitingPaymentChoice) return null;
+
+  // Staff accepted the request but no Payment row exists yet — the customer
+  // still has to choose how to pay, which is its own page.
+  if (appointment.awaitingPaymentChoice) {
+    return (
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-100 bg-blue-50/70 px-3 py-2.5">
+        <p className="text-[12px] text-blue-900">
+          Votre rendez-vous est accepté. Choisissez votre mode de paiement pour le confirmer.
+        </p>
+        <Link
+          href={`/appointment/${appointment.id}/payment`}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-primary/90"
+        >
+          <CreditCard className="h-3.5 w-3.5" strokeWidth={1.75} />
+          Choisir mon paiement
+        </Link>
+      </div>
+    );
+  }
+
+  async function handleResume() {
+    setRedirecting(true);
+    const result = await resumeReservationPayment(appointment.payment.id);
+    if (result.success && result.url) {
+      window.location.href = result.url;
+      return;
+    }
+    toast.error(result.message ?? "Paiement indisponible pour le moment.");
+    setRedirecting(false);
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5">
+      <p className="text-[12px] text-amber-900">
+        Le paiement de ce rendez-vous n&apos;a pas été finalisé.
+      </p>
+      <button
+        type="button"
+        onClick={handleResume}
+        disabled={redirecting}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-primary/90 disabled:opacity-60"
+      >
+        {redirecting ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <CreditCard className="h-3.5 w-3.5" strokeWidth={1.75} />
+        )}
+        Finaliser le paiement
+      </button>
     </div>
   );
 }
@@ -282,6 +350,7 @@ function NextAppointmentCard({ appointment }) {
           </div>
         </div>
 
+        <PaymentFollowUp appointment={appointment} />
         <AppointmentActions appointment={appointment} />
       </div>
     </div>
@@ -335,6 +404,9 @@ function AppointmentCard({ appointment, showActions = false }) {
           </div>
         )}
 
+        {/* Not gated on showActions: an unpaid booking needs its payment
+            link wherever it is listed, not only in the upcoming section. */}
+        <PaymentFollowUp appointment={appointment} />
         {showActions && <AppointmentActions appointment={appointment} />}
       </div>
     </div>

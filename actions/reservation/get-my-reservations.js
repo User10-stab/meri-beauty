@@ -2,6 +2,10 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  isAwaitingPayment,
+  isAwaitingPaymentChoice,
+} from "@/lib/appointments/payment-followup";
 
 /**
  * Returns all reservations for the authenticated customer, including
@@ -126,23 +130,11 @@ export async function getMyReservations() {
             }
           : null,
 
-        // Derived convenience flag used by the UI to show "Complete payment"
-        // True only when:
-        //   - there is a payment record
-        //   - the payment is PENDING (not yet paid)
-        //   - the appointment has not been cancelled or completed
-        //   - the payment requires an online payment (ONLINE or DEPOSIT type)
-        awaitingPayment:
-          payment !== null &&
-          ["PENDING", "FAILED"].includes(payment.status) &&
-          (payment.paymentType === "ONLINE" || payment.paymentType === "DEPOSIT") &&
-          appt.status !== "CANCELLED" &&
-          appt.status !== "COMPLETED",
-
-        // Manual requests do not have a Payment row until the customer makes
-        // a choice after staff acceptance. Keep the route discoverable even
-        // if the acceptance email is missed.
-        awaitingPaymentChoice: appt.status === "ACCEPTED" && payment === null,
+        // Derived convenience flags used by the UI to offer "Complete
+        // payment" / "Choose how to pay". Shared with /appointments via
+        // lib/appointments/payment-followup so both lists agree.
+        awaitingPayment: isAwaitingPayment(appt, payment),
+        awaitingPaymentChoice: isAwaitingPaymentChoice(appt, payment),
 
         cancellationRequest: appt.cancellationRequests[0]
           ? {

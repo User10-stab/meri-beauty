@@ -157,41 +157,68 @@ export function getEventHeight(startTimeISO, endTimeISO, slotHeight = 60) {
 
 // ─── Appointment grouping ─────────────────────────────────────────────────────
 
+// Meri Beauty is a single-location, single-timezone (Europe/Brussels)
+// business — "which day" an appointment belongs on must always be judged by
+// Brussels wall-clock time, never by the viewing device's own clock/OS
+// timezone. `appt.date`/`ev.start` are real UTC instants (e.g. a 09:00
+// Brussels appointment is stored as "07:00Z" in summer, "08:00Z" in winter);
+// reading them back with plain getFullYear/getMonth/getDate() re-interprets
+// that instant through *whatever timezone the browser happens to be set to*
+// — correct for a Brussels-based device, silently wrong (by a day, for
+// appointments near midnight, or just by presence in edge cases) on any
+// device set to a different timezone, which is exactly the kind of
+// misconfiguration a staff laptop can have without anyone noticing. The
+// calendar GRID's own day cells (built in calendarUtils' getMonthGrid/
+// getWeekDays below) are pure local calendar arithmetic with no real
+// instant behind them, so they don't need this — only real timestamps do.
+const BRUSSELS_TZ = "Europe/Brussels";
+const brusselsKeyFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: BRUSSELS_TZ });
+
+function brusselsDateKey(date) {
+  return brusselsKeyFormatter.format(date); // "YYYY-MM-DD"
+}
+
+function localDateKey(date) {
+  return (
+    date.getFullYear() +
+    "-" +
+    String(date.getMonth() + 1).padStart(2, "0") +
+    "-" +
+    String(date.getDate()).padStart(2, "0")
+  );
+}
+
 /**
- * Return only appointments whose `date` field falls on `targetDate`.
+ * Return only appointments whose `date` field falls on `targetDate`,
+ * comparing calendar days in Europe/Brussels regardless of the viewer's
+ * device timezone.
  *
  * @param {Array<object>} appointments
  * @param {Date} targetDate
  */
 export function appointmentsForDay(appointments, targetDate) {
-  const y = targetDate.getFullYear();
-  const m = targetDate.getMonth();
-  const d = targetDate.getDate();
+  const targetKey = localDateKey(targetDate);
 
   return appointments.filter((appt) => {
     if (!appt.date) return false;
-    const dt = new Date(appt.date);
-    return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+    return brusselsDateKey(new Date(appt.date)) === targetKey;
   });
 }
 
 /**
  * Return only activity events (ateliers/formations, shaped by
  * getCalendarEvents — { start, end, ... }, no "date" field) whose start
- * falls on `targetDate`.
+ * falls on `targetDate`, compared in Europe/Brussels (see appointmentsForDay).
  *
  * @param {Array<{ start: string }>} events
  * @param {Date} targetDate
  */
 export function activityEventsForDay(events, targetDate) {
-  const y = targetDate.getFullYear();
-  const m = targetDate.getMonth();
-  const d = targetDate.getDate();
+  const targetKey = localDateKey(targetDate);
 
   return events.filter((ev) => {
     if (!ev.start) return false;
-    const dt = new Date(ev.start);
-    return dt.getFullYear() === y && dt.getMonth() === m && dt.getDate() === d;
+    return brusselsDateKey(new Date(ev.start)) === targetKey;
   });
 }
 

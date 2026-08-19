@@ -74,8 +74,13 @@ export async function GET(req, { params }) {
   }
 
   try {
-    const staff = await prisma.staff.findUnique({
-      where: { calendarToken: token },
+    // deleteIndependentStaff soft-deletes (isActive: false, isDeleted: true)
+    // without touching calendarToken — without this filter, a departed
+    // staff member's calendar subscription would keep silently syncing
+    // client names and private notes from every appointment ever booked
+    // against them, indefinitely, with no login or session to revoke.
+    const staff = await prisma.staff.findFirst({
+      where: { calendarToken: token, isActive: true, isDeleted: false },
       select: { user: { select: { fullName: true } } },
     });
     if (!staff) {

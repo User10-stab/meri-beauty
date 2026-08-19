@@ -292,9 +292,6 @@ export function CalendarPageClient({
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={() => fetchAppointments(view, currentDate)}
-        staffList={staff}
-        isAdmin={isAdmin}
-        currentStaffId={currentStaffId}
         defaultDate={view === "day" ? currentDate : null}
       />
     </div>

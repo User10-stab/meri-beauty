@@ -7,7 +7,11 @@ import { sendEmail } from "@/lib/email";
 import { reservationCreatedAutomaticEmail } from "@/lib/email-templates";
 import { hasPermission, DASHBOARD_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
-import { buildAppointmentWindow, findConflictingAppointment } from "@/lib/appointment-scheduling";
+import {
+  buildAppointmentWindow,
+  findConflictingAppointment,
+  validateAppointmentSlot,
+} from "@/lib/appointment-scheduling";
 import {
   createNotificationsBulk,
   buildAppointmentConfirmedNotification,
@@ -15,6 +19,11 @@ import {
 } from "@/lib/notifications";
 import { resolveOrCreateCustomer } from "@/actions/reservation/create-reservation";
 import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
+import { getReservationPaymentDecision } from "@/lib/reservation-payment";
+import { getAvailableSlots as getAvailableSlotsAction } from "@/actions/reservation/get-available-slots";
+
+// Re-export getAvailableSlots for use in the manual appointment modal
+export const getAvailableSlots = getAvailableSlotsAction;
 
 /**
  * Resolves which staff member the caller may act on behalf of.
@@ -31,45 +40,102 @@ async function resolveActingStaffId(session, requestedStaffId) {
 }
 
 /**
- * Lists a staff member's active, bookable services — for the "add manual
- * appointment" form's service picker.
+ * Lists every service that can be booked manually — i.e. that has at least
+ * one active, priced staff assignment. For STAFF callers, restricted to the
+ * services the caller themselves provides.
  *
- * @param {string} staffId
+ * @returns {Promise<{ success: boolean, data: Array<{ id, name, categoryName }>, message?: string }>}
  */
-export async function getStaffServicesForManualBooking(staffId) {
+export async function getServicesForManualBooking() {
   try {
     const session = await auth();
     if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.APPOINTMENTS)) {
       return { success: false, message: "Non autorisé.", data: [] };
     }
-    if (!staffId) return { success: true, data: [] };
+
+    const callerStaffId = isAdminRole(session.user.role) ? null : await getCurrentStaffId();
+
+    const services = await prisma.service.findMany({
+      where: {
+        staffServices: {
+          some: {
+            isActive: true,
+            price: { gt: 0 },
+            duration: { gt: 0 },
+            ...(callerStaffId ? { staffId: callerStaffId } : {}),
+          },
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        category: { select: { id: true, name: true } },
+      },
+      orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
+    });
+
+    return {
+      success: true,
+      data: services.map((s) => ({
+        id: s.id,
+        name: s.name,
+        categoryName: s.category?.name ?? null,
+      })),
+    };
+  } catch (error) {
+    console.error("[getServicesForManualBooking]", error);
+    return { success: false, message: "Impossible de charger les prestations.", data: [] };
+  }
+}
+
+/**
+ * Lists the staff members who provide a given service — each with their own
+ * price and duration for that service. STAFF callers only see themselves.
+ *
+ * @param {string} serviceId
+ * @returns {Promise<{ success: boolean, data: Array<{ staffServiceId, staffId, staffName, price, duration }>, message?: string }>}
+ */
+export async function getStaffForManualBooking(serviceId) {
+  try {
+    const session = await auth();
+    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.APPOINTMENTS)) {
+      return { success: false, message: "Non autorisé.", data: [] };
+    }
+    if (!serviceId) return { success: true, data: [] };
+
+    const callerStaffId = isAdminRole(session.user.role) ? null : await getCurrentStaffId();
 
     const staffServices = await prisma.staffService.findMany({
       where: {
-        staffId,
+        serviceId,
         isActive: true,
+        price: { gt: 0 },
+        duration: { gt: 0 },
+        staff: { isActive: true, isDeleted: false },
+        ...(callerStaffId ? { staffId: callerStaffId } : {}),
       },
       select: {
         id: true,
         price: true,
         duration: true,
-        service: { select: { id: true, name: true } },
+        staff: { select: { id: true, user: { select: { fullName: true } } } },
       },
-      orderBy: { service: { name: "asc" } },
+      orderBy: { staff: { user: { fullName: "asc" } } },
     });
 
     return {
       success: true,
       data: staffServices.map((s) => ({
-        id: s.id,
+        staffServiceId: s.id,
+        staffId: s.staff.id,
+        staffName: s.staff.user?.fullName ?? "Membre du personnel",
         price: Number(s.price),
         duration: s.duration,
-        serviceName: s.service.name,
       })),
     };
   } catch (error) {
-    console.error("[getStaffServicesForManualBooking]", error);
-    return { success: false, message: "Impossible de charger les prestations.", data: [] };
+    console.error("[getStaffForManualBooking]", error);
+    return { success: false, message: "Impossible de charger le personnel.", data: [] };
   }
 }
 
@@ -130,16 +196,15 @@ const manualAppointmentSchema = z.object({
  * Lets staff/admin add an appointment directly from the dashboard calendar —
  * a phone booking or walk-in that never went through the public site.
  *
- * Unlike createReservation (the public flow), this never enforces working
- * hours / closures / time-off: staff creating this themselves is inherently
- * an override of the published schedule (that's the whole point of "fit
- * this client in"). It still refuses a genuine double-booking and a past
- * time slot — those are correctness guarantees, not availability policy.
+ * Unlike the old manual-booking behaviour, this enforces the exact same
+ * availability rules as the public online flow (working hours, closures,
+ * time-off, contract dates, double-booking) — the UI only offers slots that
+ * pass those rules, and this action re-validates them server-side so a slot
+ * can't slip through if it was taken in the meantime.
  *
- * Always creates the appointment as CONFIRMED with no Payment row, same
- * shape as a CASH_ONLY public booking — payment is recorded later, the same
- * way it already is for any on-site appointment, via completeAppointment()
- * once the visit actually happens.
+ * Always creates the appointment as CONFIRMED (manual reservations are always
+ * confirmed regardless of staff's reservationConfirmationMode). Payment rules
+ * respect the staff's configuration (deposit, online payment, cash payment).
  *
  * @param {{
  *   staffId: string,
@@ -177,7 +242,16 @@ export async function createManualAppointment(input) {
       where: { id: staffServiceId },
       include: {
         service: { select: { id: true, name: true } },
-        staff: { select: { id: true, user: { select: { fullName: true } } } },
+        staff: {
+          select: {
+            id: true,
+            user: { select: { fullName: true } },
+            reservationConfirmationMode: true,
+            depositEnabled: true,
+            depositPercentage: true,
+            allowedPaymentMethods: true,
+          },
+        },
       },
     });
 
@@ -185,15 +259,37 @@ export async function createManualAppointment(input) {
       return { success: false, message: "Prestation introuvable pour ce membre du personnel." };
     }
 
+    // ── Resolve payment decision for manual reservation ─────────────────────
+    // Manual reservations are always CONFIRMED but payment rules still apply
+    const paymentDecision = getReservationPaymentDecision({
+      appointmentCount: 1,
+      confirmationMode: staffService.staff?.reservationConfirmationMode ?? "MANUAL",
+      depositEnabled: Boolean(staffService.staff?.depositEnabled),
+      depositPercentage: Number(staffService.staff?.depositPercentage ?? 0),
+      allowedPaymentMethods: staffService.staff?.allowedPaymentMethods ?? "BOTH",
+      totalAmount: Number(staffService.price),
+      isManualReservation: true,
+    });
+
     const { appointmentDate, startTime, endTime } = buildAppointmentWindow(date, time, staffService.duration);
 
     if (startTime.getTime() < Date.now()) {
       return { success: false, message: "Ce créneau est déjà passé. Veuillez choisir un horaire à venir." };
     }
 
+    // findConflictingAppointment only rules out collision with another
+    // appointment — it says nothing about closures, staff time off, working
+    // hours, or contract dates. Re-validate against the same rules the manual
+    // booking form itself uses to offer slots, so the final check is identical
+    // to the online flow and a slot taken in the meantime can't slip through.
     const conflict = await findConflictingAppointment(staffServiceId, appointmentDate, startTime, endTime);
     if (conflict) {
-      return { success: false, message: "Ce créneau est déjà occupé par un autre rendez-vous." };
+      return { success: false, message: "Ce créneau vient d'être réservé. Veuillez sélectionner un autre horaire." };
+    }
+
+    const slotCheck = await validateAppointmentSlot(staffServiceId, appointmentDate, startTime, time);
+    if (!slotCheck.valid) {
+      return { success: false, message: slotCheck.message };
     }
 
     // ── Resolve the customer ─────────────────────────────────────────────
@@ -234,7 +330,7 @@ export async function createManualAppointment(input) {
         date: appointmentDate,
         startTime,
         endTime,
-        status: "CONFIRMED",
+        status: paymentDecision.appointmentStatusBeforePayment,
         notes: notes || null,
       },
     });

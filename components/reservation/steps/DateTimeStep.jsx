@@ -337,6 +337,38 @@ function LoadingState() {
   );
 }
 
+/**
+ * Compact time-slot button: shows the start time prominently and the end
+ * time as a small hint — much shorter than the "HH:MM → HH:MM" label so the
+ * slot grid stays readable. Selection uses the same value (startTime) and the
+ * same business rules as before.
+ */
+function TimeSlotButton({ window, selected, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`flex flex-col items-center justify-center rounded-lg border px-1 py-2 text-center transition-all ${
+        selected
+          ? "border-[#C8A46A] bg-[#C8A46A] text-white shadow-sm"
+          : "border-2 border-gray-200 bg-white text-[#2F3A2E] hover:border-[#C8A46A] hover:bg-[#C8A46A]/5"
+      }`}
+    >
+      <span className="text-sm font-bold leading-tight tabular-nums">
+        {window.startTime}
+      </span>
+      <span
+        className={`text-[10px] font-medium leading-tight tabular-nums ${
+          selected ? "text-white/80" : "text-gray-400"
+        }`}
+      >
+        → {window.endTime}
+      </span>
+    </button>
+  );
+}
+
 function EmptyState({ message }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-gray-400">
@@ -592,19 +624,12 @@ function AppointmentDateCard({
             ) : (
               <div className="grid max-h-48 grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4">
                 {availableWindows.map((window) => (
-                  <button
+                  <TimeSlotButton
                     key={window.startTime}
-                    type="button"
-                    onClick={() => onTimeSelect(window.startTime)}
-                    className={`rounded-lg px-2 py-2.5 text-xs font-medium transition-all ${
-                      selectedTime === window.startTime
-                        ? "bg-[#C8A46A] text-white"
-                        : "border-2 border-gray-200 bg-white text-[#2F3A2E] hover:border-[#C8A46A]"
-                    }`}
-                  >
-                    <Clock size={13} className="mx-auto mb-1" />
-                    {window.label}
-                  </button>
+                    window={window}
+                    selected={selectedTime === window.startTime}
+                    onSelect={() => onTimeSelect(window.startTime)}
+                  />
                 ))}
               </div>
             )}
@@ -724,19 +749,12 @@ function SingleDraftView({ draft, selectedDate, selectedTime, onDateSelect, onTi
         ) : (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
             {availableWindows.map((window) => (
-              <button
+              <TimeSlotButton
                 key={window.startTime}
-                type="button"
-                onClick={() => onTimeSelect(window.startTime)}
-                className={`rounded-lg px-2 py-2.5 text-xs font-medium transition-all ${
-                  selectedTime === window.startTime
-                    ? "bg-[#C8A46A] text-white"
-                    : "border-2 border-gray-200 bg-white text-[#2F3A2E] hover:border-[#C8A46A]"
-                }`}
-              >
-                <Clock size={13} className="mx-auto mb-1" />
-                {window.label}
-              </button>
+                window={window}
+                selected={selectedTime === window.startTime}
+                onSelect={() => onTimeSelect(window.startTime)}
+              />
             ))}
           </div>
         )}

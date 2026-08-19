@@ -14,6 +14,7 @@ const STATUS_LABEL = {
   CONFIRMED: "Confirmé",
   COMPLETED: "Terminé",
   CANCELLED: "Annulé",
+  REJECTED: "Refusé",
   NO_SHOW: "Absence",
 };
 
@@ -23,6 +24,7 @@ const STATUS_STYLE = {
   CONFIRMED: "bg-emerald-50 text-emerald-700 border-emerald-200",
   COMPLETED: "bg-gray-50 text-gray-600 border-gray-200",
   CANCELLED: "bg-red-50 text-red-600 border-red-200",
+  REJECTED: "bg-red-50 text-red-600 border-red-200",
   NO_SHOW: "bg-red-50 text-red-600 border-red-200",
 };
 
@@ -260,12 +262,12 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[a.status]}`}>
                       {STATUS_LABEL[a.status]}
                     </span>
-                    {a.status === "CANCELLED" && (
+                    {a.status === "CANCELLED" || a.status === "REJECTED" ? (
                       <div className="mt-1 max-w-48 text-xs text-gray-400">
                         <div>{a.cancelledBy?.fullName ?? a.cancellationSource ?? "Système"}</div>
                         {a.cancellationReason && <div className="truncate" title={a.cancellationReason}>{a.cancellationReason}</div>}
                       </div>
-                    )}
+                    ) : null}
                   </TableCell>
                   <TableCell>
                     {a.review ? (
@@ -372,7 +374,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
       <ConfirmDialog
         open={!!toReject}
         title="Refuser ce rendez-vous ?"
-        message={toReject ? `Le rendez-vous de ${toReject.customer?.fullName} sera annulé.` : ""}
+        message={toReject ? `Le rendez-vous de ${toReject.customer?.fullName} sera ${toReject.status === "PENDING" ? "refusé" : "annulé"}.` : ""}
         confirmLabel="Refuser"
         danger
         loading={isPending}

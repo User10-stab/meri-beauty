@@ -12,6 +12,7 @@ import {
   welcomeWithCredentialsEmail,
   multiReservationConfirmationEmail,
   staffReservationConfirmedEmail,
+  staffReservationRequestedEmail,
   staffMultipleReservationsConfirmedEmail,
 } from "@/lib/email-templates";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
@@ -427,7 +428,8 @@ export async function createReservation(data) {
       const payment = null;
       const totalAmount = rawTotalAmount;
 
-      // Send a staff appointment email only once the appointment is confirmed.
+      // Notify staff on every new booking — a pending request gets the
+      // "awaiting confirmation" email, a confirmed one the standard notice.
       if (appointmentStatus === "CONFIRMED") {
         const emailRecipients = await getAppointmentEmailRecipients(staffService.staff?.id);
         for (const recipient of emailRecipients) {
@@ -443,6 +445,20 @@ export async function createReservation(data) {
               totalAmount: rawTotalAmount,
             }),
           }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+        }
+      } else {
+        const emailRecipients = await getAppointmentEmailRecipients(staffService.staff?.id);
+        for (const recipient of emailRecipients) {
+          await sendEmail({
+            to: recipient.email,
+            ...staffReservationRequestedEmail({
+              staffName: recipient.fullName,
+              customerName: user.fullName,
+              serviceName,
+              date: appointmentDate,
+              time,
+            }),
+          }).catch((err) => console.error("[createReservation] staff request email failed:", err));
         }
       }
 
@@ -607,8 +623,8 @@ export async function createReservation(data) {
       }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
     }
 
-    // 8b. Staff is notified only for a confirmed appointment. Pending
-    // requests remain visible through the existing dashboard notification.
+    // 8b. Notify staff on every new booking — a pending request gets the
+    // "awaiting confirmation" email, a confirmed one the standard notice.
     if (appointmentStatus === "CONFIRMED") {
       const emailRecipients = await getAppointmentEmailRecipients(staffService.staffId);
       for (const recipient of emailRecipients) {
@@ -622,6 +638,20 @@ export async function createReservation(data) {
             time,
           }),
         }).catch((err) => console.error("[createReservation] dashboard email failed:", err));
+      }
+    } else {
+      const emailRecipients = await getAppointmentEmailRecipients(staffService.staffId);
+      for (const recipient of emailRecipients) {
+        await sendEmail({
+          to: recipient.email,
+          ...staffReservationRequestedEmail({
+            staffName: recipient.fullName,
+            customerName: user.fullName,
+            serviceName,
+            date: appointmentDate,
+            time,
+          }),
+        }).catch((err) => console.error("[createReservation] staff request email failed:", err));
       }
     }
 
@@ -1071,6 +1101,7 @@ export async function createMultipleReservations(data) {
           customerName: user.fullName,
           appointments: staffAppointments,
           totalAmount,
+          isPending: multiAppointmentStatus === "PENDING",
         }),
       }).catch((err) => console.error("[createMultipleReservations] consolidated staff email failed:", err));
     }

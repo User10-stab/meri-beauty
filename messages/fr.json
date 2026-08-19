@@ -1967,6 +1967,7 @@
     "confirmed": "Confirmé",
     "completed": "Complété",
     "cancelled": "Annulé",
+    "rejected": "Refusé",
     "noShow": "Absent"
   },
   "acceptedAppointmentPayment": {
@@ -2126,6 +2127,7 @@
     "cancellationLocked": "Les modifications et annulations ne sont plus disponibles moins de {hours} heures avant le rendez-vous. L'acompte reste acquis, sauf annulation exceptionnelle approuvée par l'administration.",
     "cancellationLockedPendingPayment": "Un paiement a déjà été effectué pour cette demande en attente de confirmation du salon. Il n'est pas remboursé automatiquement en cas d'annulation — envoyez une demande exceptionnelle pour qu'un administrateur l'examine.",
     "cancelledNotice": "Cette réservation a été annulée.",
+    "rejectedNotice": "Votre demande de rendez-vous a été refusée par le salon.",
     "secureStripe": "Paiement sécurisé par Stripe",
     "pendingPayment": "Paiement en attente",
     "myAppointments": "Mes rendez-vous",
@@ -2154,6 +2156,7 @@
   "reservationSuccess": {
     "pollingTitle": "Confirmation en cours…",
     "pollingDescription": "Nous attendons la confirmation de votre paiement. Merci de patienter.",
+    "redirectingTitle": "Redirection vers l'accueil…",
     "timeoutTitle": "Paiement en cours de traitement",
     "timeoutDescription": "Votre paiement a bien été reçu mais la confirmation prend un peu plus de temps que prévu. Vous recevrez un email de confirmation dès que le traitement sera finalisé.",
     "backHome": "Retour à l'accueil",
@@ -2164,6 +2167,8 @@
     "confirmedDescription": "Votre paiement a été reçu et votre rendez-vous est confirmé.",
     "receivedTitle": "Paiement reçu",
     "receivedDescription": "Votre paiement a bien été reçu. Votre réservation est en attente de confirmation par notre équipe.",
+    "toastConfirmed": "Paiement reçu — votre rendez-vous est confirmé.",
+    "toastReceived": "Paiement reçu. Votre réservation est en attente de confirmation.",
     "awaitingApproval": "En attente d'approbation",
     "awaitingApprovalDescription": "Notre équipe va examiner votre demande et vous enverra un email de confirmation dès que votre rendez-vous sera approuvé.",
     "detailsSection": "Détails du rendez-vous",

@@ -32,6 +32,11 @@ const STATUS_CONFIG = {
     className: "bg-red-50 text-red-700 border border-red-100",
     dot: "bg-red-500",
   },
+  REJECTED: {
+    label: "Refusé",
+    className: "bg-red-50 text-red-700 border border-red-100",
+    dot: "bg-red-500",
+  },
   COMPLETED: {
     label: "Terminé",
     className: "bg-gray-50 text-gray-600 border border-gray-100",

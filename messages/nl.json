@@ -1967,6 +1967,7 @@
     "confirmed": "Bevestigd",
     "completed": "Voltooid",
     "cancelled": "Geannuleerd",
+    "rejected": "Geweigerd",
     "noShow": "Niet verschenen"
   },
   "acceptedAppointmentPayment": {
@@ -2117,6 +2118,7 @@
     "cancellationLocked": "Wijzigingen en annuleringen zijn niet meer beschikbaar minder dan {hours} uur voor de afspraak. Het voorschot blijft verworven, tenzij de administratie een uitzonderlijke annulering goedkeurt.",
     "cancellationLockedPendingPayment": "Er is al een betaling gedaan voor deze aanvraag terwijl deze wacht op de beslissing van de salon. Deze wordt niet automatisch terugbetaald bij annulering — stuur een uitzonderlijke aanvraag zodat een beheerder dit kan beoordelen.",
     "cancelledNotice": "Deze reservering is geannuleerd.",
+    "rejectedNotice": "Uw afspraakverzoek is geweigerd door de salon.",
     "secureStripe": "Veilige betaling via Stripe",
     "pendingPayment": "Betaling in afwachting",
     "myAppointments": "Mijn afspraken",
@@ -2144,6 +2146,7 @@
   "reservationSuccess": {
     "pollingTitle": "Bevestigen…",
     "pollingDescription": "We wachten op de bevestiging van uw betaling. Bedankt voor uw geduld.",
+    "redirectingTitle": "Doorverwijzen naar de homepage…",
     "timeoutTitle": "Betaling wordt verwerkt",
     "timeoutDescription": "Uw betaling is ontvangen, maar de bevestiging duurt iets langer dan verwacht. U ontvangt een bevestigingsmail zodra de verwerking is voltooid.",
     "backHome": "Terug naar home",
@@ -2154,6 +2157,8 @@
     "confirmedDescription": "Uw betaling is ontvangen en uw afspraak is bevestigd.",
     "receivedTitle": "Betaling ontvangen",
     "receivedDescription": "Uw betaling is ontvangen. Uw reservering wacht op bevestiging door ons team.",
+    "toastConfirmed": "Betaling ontvangen — uw afspraak is bevestigd.",
+    "toastReceived": "Betaling ontvangen. Uw reservering wacht op bevestiging.",
     "awaitingApproval": "Wachten op goedkeuring",
     "awaitingApprovalDescription": "Ons team zal uw aanvraag beoordelen en u een bevestigingsmail sturen zodra uw afspraak is goedgekeurd.",
     "detailsSection": "Afspraakgegevens",

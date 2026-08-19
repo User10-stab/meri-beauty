@@ -55,8 +55,6 @@ export async function GET(req) {
     {
       status: healthy ? "ok" : "degraded",
       database: databaseUp ? "up" : "down",
-      timezone: process.env.TZ ?? null,
-      now: new Date().toISOString(),
       scheduler: {
         running: heartbeat.running,
         startedAt: heartbeat.startedAt ? new Date(heartbeat.startedAt).toISOString() : null,

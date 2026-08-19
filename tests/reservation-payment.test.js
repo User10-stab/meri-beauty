@@ -52,7 +52,7 @@ test('ONLINE_ONLY ignores deposit settings and requires the full amount', () => 
   assert.equal(decision.requiresOnlinePaymentNow, true);
 });
 
-test('manual confirmation takes the deposit up front, before staff decide', () => {
+test('manual confirmation defers all payment until staff acceptance', () => {
   const decision = getReservationPaymentDecision({
     appointmentCount: 1,
     confirmationMode: 'MANUAL',
@@ -61,36 +61,36 @@ test('manual confirmation takes the deposit up front, before staff decide', () =
     totalAmount: 80,
   });
 
-  assert.equal(decision.requiresPaymentStep, true);
+  assert.equal(decision.requiresPaymentStep, false);
   assert.equal(decision.isManualMode, true);
-  assert.equal(decision.paymentIntent, 'DEPOSIT_ONLINE');
-  assert.equal(decision.paymentType, 'DEPOSIT');
-  assert.equal(decision.depositAmount, 16);
-  assert.equal(decision.requiresOnlinePaymentNow, true);
-  assert.equal(decision.shouldCreatePaymentRecord, true);
-
-  // Paying does not confirm the slot — staff acceptance does.
-  assert.equal(decision.appointmentStatusBeforePayment, 'PENDING');
-  assert.equal(decision.appointmentStatusAfterPayment, 'PENDING');
-
-  // No "pay at the salon" escape hatch, or the money never moves up front.
+  assert.equal(decision.paymentIntent, 'NONE');
+  assert.equal(decision.paymentType, 'ON_SITE');
+  assert.equal(decision.depositAmount, 0);
+  assert.equal(decision.requiresOnlinePaymentNow, false);
+  assert.equal(decision.shouldCreatePaymentRecord, false);
   assert.equal(decision.salonPaymentAvailable, false);
+
+  // No money moves up front — the request waits for staff, payment waits
+  // for the confirmation step after acceptance.
+  assert.equal(decision.appointmentStatusBeforePayment, 'PENDING');
 });
 
-test('manual confirmation without a deposit takes the full amount up front', () => {
+test('manual confirmation with CASH_ONLY staff still defers but keeps the on-site option', () => {
   const decision = getReservationPaymentDecision({
     appointmentCount: 1,
     confirmationMode: 'MANUAL',
-    depositEnabled: false,
+    allowedPaymentMethods: 'CASH_ONLY',
+    depositEnabled: true,
+    depositPercentage: 20,
     totalAmount: 80,
   });
 
-  assert.equal(decision.requiresPaymentStep, true);
-  assert.equal(decision.paymentIntent, 'FULL_ONLINE');
-  assert.equal(decision.paymentType, 'ONLINE');
-  assert.equal(decision.totalAmount, 80);
-  assert.equal(decision.requiresOnlinePaymentNow, true);
-  assert.equal(decision.salonPaymentAvailable, false);
+  assert.equal(decision.requiresPaymentStep, false);
+  assert.equal(decision.requiresOnlinePaymentNow, false);
+  assert.equal(decision.shouldCreatePaymentRecord, false);
+  assert.equal(decision.paymentIntent, 'NONE');
+  // Cash-only clients pay in person, so the on-site flag stays on.
+  assert.equal(decision.salonPaymentAvailable, true);
 });
 
 test('multiple appointments skip the payment step entirely', () => {

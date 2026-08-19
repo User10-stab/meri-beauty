@@ -531,7 +531,7 @@ export function AppointmentDrawer({
               </>
             )}
 
-            {(appointment.status === "COMPLETED" || appointment.status === "CANCELLED" || appointment.status === "NO_SHOW") && (
+            {(appointment.status === "COMPLETED" || appointment.status === "CANCELLED" || appointment.status === "REJECTED" || appointment.status === "NO_SHOW") && (
               <p className="w-full text-center text-xs text-gray-400">{t("appointmentDetails.cannotModify")}</p>
             )}
           </div>

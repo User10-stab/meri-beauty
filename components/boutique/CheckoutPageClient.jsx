@@ -12,6 +12,7 @@ import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { MondialRelayPicker } from "@/components/boutique/MondialRelayPicker";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
+import { resolveGoodsVatPolicy, calculateVatTotals, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 
 const MODES = [
   {
@@ -122,6 +123,59 @@ export function CheckoutPageClient({ cart, customerSession }) {
 
   const discountAmount = appliedPromo?.discountAmount ?? 0;
   const total = Math.max(0, cart.subtotal + shippingCost - discountAmount);
+
+  // Live VAT-treatment preview — same resolveGoodsVatPolicy the server calls
+  // in createOrderFromCart, run here purely for display. It never sets the
+  // actual charge: createOrderFromCart re-resolves it server-side from the
+  // real submitted order, so a stale/spoofed client value here can't affect
+  // what's billed. Wrapped in try/catch because resolveGoodsVatPolicy throws
+  // on destinations it can't classify (non-EU, export not yet confirmed) —
+  // fall back to the always-correct default (Belgian domestic 21%) rather
+  // than let a preview computation break checkout.
+  const vatPreview = useMemo(() => {
+    const destinationCountry = fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint?.countryCode ?? "BE" : "BE";
+    try {
+      return {
+        ...resolveGoodsVatPolicy({
+          fulfilmentMode: fulfilmentMode ?? "PICKUP_PREPAID",
+          destinationCountry,
+          customer: isAuthenticated ? customerSession : null,
+        }),
+        destinationCountry,
+      };
+    } catch {
+      return { vatTreatment: "DOMESTIC", vatRate: BELGIUM_VAT_RATE, destinationCountry };
+    }
+  }, [fulfilmentMode, pickupPoint?.countryCode, isAuthenticated, customerSession]);
+
+  const vatTotals = calculateVatTotals(total, vatPreview.vatRate);
+
+  // Only meaningful for a company account — a private customer never sees
+  // VAT-treatment noise, and a guest has nowhere to enter a VAT number yet
+  // (that lives on the account, validated via VIES at /profile — see
+  // lib/vat-validation.js — not duplicated here as a throwaway checkout field).
+  const vatNote = useMemo(() => {
+    if (vatPreview.vatTreatment === "EU_REVERSE_CHARGE") {
+      return {
+        tone: "good",
+        text: "TVA à 0% applicable — autoliquidation intracommunautaire (votre numéro de TVA correspond au pays de livraison). Le montant sera recalculé sans TVA à l'étape de paiement.",
+      };
+    }
+    if (!isAuthenticated || !customerSession?.isCompany) return null;
+    if (!customerSession.vatNumber) {
+      return { tone: "info", text: "Ajoutez votre numéro de TVA dans vos paramètres de compte pour une éventuelle exonération sur les livraisons hors Belgique." };
+    }
+    if (fulfilmentMode !== "SHIPPING_PREPAID") {
+      return { tone: "info", text: "Le retrait en boutique reste une vente domestique — la TVA à 21% s'applique même avec un numéro de TVA valide. Seule une livraison hors de Belgique peut en être exonérée." };
+    }
+    if (vatPreview.destinationCountry === "BE") {
+      return { tone: "info", text: "Livraison en Belgique — vente domestique, TVA à 21%. Choisissez un point relais dans un autre pays de l'UE pour une éventuelle exonération." };
+    }
+    return {
+      tone: "info",
+      text: "Votre numéro de TVA ne correspond pas au pays de livraison, ou n'a pas été revalidé récemment — revérifiez-le dans vos paramètres de compte pour une éventuelle exonération.",
+    };
+  }, [vatPreview, isAuthenticated, customerSession, fulfilmentMode]);
 
   function handleCustomerChange(e) {
     const { name, value, type, checked } = e.target;
@@ -520,7 +574,28 @@ export function CheckoutPageClient({ cart, customerSession }) {
               <span>Total</span>
               <span>{quoteRequired ? "—" : `€${total.toFixed(2)}`}</span>
             </div>
+            {!quoteRequired && (
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>dont TVA ({vatPreview.vatRate}%)</span>
+                <span>€{vatTotals.vatAmount.toFixed(2)}</span>
+              </div>
+            )}
           </div>
+
+          {vatNote && (
+            <div
+              className={`mt-4 flex items-start gap-2.5 border p-3 text-xs ${
+                vatNote.tone === "good" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-neutral-200 bg-neutral-50 text-neutral-600"
+              }`}
+            >
+              {vatNote.tone === "good" ? (
+                <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-emerald-600" />
+              ) : (
+                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-neutral-400" />
+              )}
+              <p>{vatNote.text}</p>
+            </div>
+          )}
 
           {quoteRequired && (
             quoteRequest.sent ? (

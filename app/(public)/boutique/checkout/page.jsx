@@ -27,7 +27,10 @@ export default async function CheckoutPage() {
   if (session?.user?.role === "CUSTOMER") {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { id: true, fullName: true, email: true, phone: true },
+      // isCompany/vatNumber/vatValidatedAt feed CheckoutPageClient's live VAT
+      // preview (see resolveGoodsVatPolicy) — display only, the real
+      // computation still happens server-side in createOrderFromCart.
+      select: { id: true, fullName: true, email: true, phone: true, isCompany: true, vatNumber: true, vatValidatedAt: true },
     });
     if (user) customerSession = user;
   }

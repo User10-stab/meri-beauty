@@ -48,3 +48,32 @@ describe("marking an appointment as a no-show never refunds Payment", () => {
     expect(list).toContain("handleNoShow");
   });
 });
+
+// rejectAppointment's status list includes NO_SHOW (to let staff close out
+// the calendar entry afterward), but its forfeit block used to only trigger
+// for payment.paymentType === "DEPOSIT" — a FULL_ONLINE no-show fell through
+// that check and got refunded in full, silently undoing the "never refunds"
+// guarantee markAppointmentNoShow just made above.
+describe("cancelling an already-recorded no-show never refunds it either", () => {
+  const actions = source("actions/appointment/manage-appointment.js");
+
+  test("rejectAppointment forfeits the full remaining amount for a NO_SHOW, regardless of paymentType", () => {
+    expect(actions).toContain('const isNoShowClosure = appointment.status === "NO_SHOW"');
+
+    const rejectStart = actions.indexOf("export async function rejectAppointment");
+    const forfeitIdx = actions.indexOf("let forfeitAmount = 0", rejectStart);
+    const noShowBranchIdx = actions.indexOf("if (wasPaid && isNoShowClosure)", forfeitIdx);
+    const needsRefundIdx = actions.indexOf("const needsRefund =", forfeitIdx);
+
+    expect(forfeitIdx).toBeGreaterThan(rejectStart);
+    expect(noShowBranchIdx).toBeGreaterThan(forfeitIdx);
+    expect(noShowBranchIdx).toBeLessThan(needsRefundIdx);
+
+    // It must run before, and independently of, the DEPOSIT-only branch —
+    // not be gated by payment.paymentType === "DEPOSIT" itself.
+    const branchBody = actions.slice(noShowBranchIdx, actions.indexOf("} else if (", noShowBranchIdx));
+    expect(branchBody).not.toContain('paymentType === "DEPOSIT"');
+    expect(branchBody).toContain("forfeitAmount = remaining");
+    expect(branchBody).toContain("remaining = 0");
+  });
+});

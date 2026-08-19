@@ -180,7 +180,14 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
         allowMultipleSessions: formation.allowMultipleSessions ?? false,
         depositPercentage: formation.depositPercentage ?? 50,
       });
-      if (formation.allowMultipleSessions && formation.sessions?.length > 0) {
+      // Load existing sessions whenever there are any — not only when
+      // allowMultipleSessions was already on. A single-session formation
+      // still has one real FormationSession row; if the toggle gets flipped
+      // on during this edit and that row isn't in the editable list, the
+      // server sees it as "removed" and deletes it, which can crash if it
+      // already has bookings (see updateFormation's guard for the other
+      // half of this fix).
+      if (formation.sessions?.length > 0) {
         setSessions(
           formation.sessions.map((s) => ({
             id: s.id,

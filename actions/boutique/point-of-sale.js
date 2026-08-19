@@ -387,7 +387,13 @@ export async function completePointOfSaleSale(input) {
       // blocks the sale if none is (see actions/dashboard/cash-sessions.js),
       // just leaves it unassigned for manual reconciliation.
       const openCashSession =
-        method === "CASH" ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } }) : null;
+        method === "CASH"
+          ? await tx.cashSession.findFirst({
+              where: { closedAt: null },
+              orderBy: { openedAt: "desc" }, // matches getCurrentCashSession's tie-break — without it, findFirst's row order is unspecified
+              select: { id: true },
+            })
+          : null;
       await tx.transaction.create({
         data: {
           paymentId: payment.id,

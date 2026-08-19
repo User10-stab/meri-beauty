@@ -34,38 +34,12 @@ import {
   recordTermsAcceptance,
 } from "@/lib/terms-consent";
 import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
+import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
   ? `${process.env.NEXT_PUBLIC_APP_URL}/login`
   : "https://meribeauty.com/login";
-
-// ─── Errors ───────────────────────────────────────────────────────────────────
-
-/**
- * Thrown by resolveOrCreateCustomer when an authenticated userId no longer
- * matches a live user (expired/deleted session). Callers catch this and
- * translate it into the appropriate user-facing message.
- */
-class SessionExpiredError extends Error {
-  constructor() {
-    super("Session expired");
-    this.name = "SessionExpiredError";
-  }
-}
-
-/**
- * Thrown by resolveOrCreateCustomer's P2002 fallback when the unique-index
- * collision is on phone rather than email — see the comment above that
- * fallback for why this can no longer be resolved by taking over the
- * conflicting account.
- */
-class PhoneAlreadyRegisteredError extends Error {
-  constructor() {
-    super("Phone already registered to another account");
-    this.name = "PhoneAlreadyRegisteredError";
-  }
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,7 +77,7 @@ function generateTemporaryPassword() {
  *   account).
  * @returns {Promise<{ user: object, isNewUser: boolean, temporaryPassword: string|null }>}
  */
-async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
+export async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   if (authenticatedUserId) {
     const user = await prisma.user.findUnique({
       where: { id: authenticatedUserId, isDeleted: false },
@@ -299,6 +273,18 @@ export async function createReservation(data) {
       return {
         success: false,
         message: "Service non disponible. Ce service a peut-être été supprimé. Veuillez réessayer ultérieurement.",
+      };
+    }
+
+    // A staffService created via "assign to me" starts at price 0 / duration 0
+    // ("to be configured later") but isActive: true — nothing else in the
+    // listing/booking path filters that out, so without this guard it's
+    // publicly bookable as a free, instant appointment the moment working
+    // hours exist for that staff member.
+    if (Number(staffService.price) <= 0 || Number(staffService.duration) <= 0) {
+      return {
+        success: false,
+        message: "Service non disponible. Ce service n'a pas encore été configuré par le professionnel.",
       };
     }
 
@@ -903,6 +889,15 @@ export async function createMultipleReservations(data) {
       return {
         success: false,
         message: "Un ou plusieurs services sont introuvables. Veuillez recommencer votre réservation.",
+      };
+    }
+
+    // Same "not yet configured" guard as createReservation above.
+    const unconfigured = staffServices.findIndex((ss) => Number(ss.price) <= 0 || Number(ss.duration) <= 0);
+    if (unconfigured !== -1) {
+      return {
+        success: false,
+        message: "Un ou plusieurs services n'ont pas encore été configurés par le professionnel.",
       };
     }
 

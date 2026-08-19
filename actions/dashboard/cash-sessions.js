@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
@@ -66,15 +67,33 @@ export async function openCashSession(openingFloat) {
     return { success: false, message: "Le fond de caisse doit être un montant positif ou nul." };
   }
 
-  const existing = await prisma.cashSession.findFirst({ where: { closedAt: null } });
-  if (existing) {
+  // Check-then-create on its own is a race: two concurrent calls (a
+  // double-click, or two staff opening the till around the same moment)
+  // can both read "no open session" before either commits, and both create
+  // one — leaving two simultaneously-open sessions with no deterministic
+  // way to say which CASH sales belong to which. The advisory lock
+  // serializes this exactly like the refund-reconciliation code does for
+  // its own "read then decide" step.
+  const session = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext('cash-session-open'))`);
+
+    const existing = await tx.cashSession.findFirst({ where: { closedAt: null } });
+    if (existing) {
+      throw new Error("CASH_SESSION_ALREADY_OPEN");
+    }
+
+    return tx.cashSession.create({
+      data: { openedById: guard.session.user.id, openingFloat: Math.round(amount * 100) / 100 },
+      include: SESSION_INCLUDE,
+    });
+  }).catch((err) => {
+    if (err.message === "CASH_SESSION_ALREADY_OPEN") return null;
+    throw err;
+  });
+
+  if (!session) {
     return { success: false, message: "Une session de caisse est déjà ouverte. Fermez-la avant d'en ouvrir une nouvelle." };
   }
-
-  const session = await prisma.cashSession.create({
-    data: { openedById: guard.session.user.id, openingFloat: Math.round(amount * 100) / 100 },
-    include: SESSION_INCLUDE,
-  });
 
   revalidatePath("/dashboard/caisse");
   return { success: true, data: serializeCashSession(session) };

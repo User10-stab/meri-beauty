@@ -194,23 +194,75 @@ export async function updateFormation(input) {
       }
     }
 
+    for (const s of sessions) {
+      if (s.animatorId) {
+        const animExists = await prisma.animator.findUnique({ where: { id: s.animatorId } });
+        if (!animExists) {
+          return { success: false, message: "L'animateur d'une session est introuvable." };
+        }
+      }
+    }
+
     const existingIds = existingFormation.sessions.map((s) => s.id);
     const incomingIds = sessions.filter((s) => s.id).map((s) => s.id);
     const idsToDelete = existingIds.filter((eid) => !incomingIds.includes(eid));
 
+    // A session the form no longer lists reads as "removed" — but if it
+    // already has bookings, deleting it cascades into deleting those
+    // FormationReservation rows, which crashes: their Payment row (if any)
+    // has ON DELETE SET NULL on formationReservationId, and nulling that out
+    // leaves the Payment with no polymorphic source at all, violating the
+    // Payment_exactly_one_source CHECK constraint. Block it with a real
+    // message instead of letting Postgres throw.
     if (idsToDelete.length > 0) {
-      await prisma.formationSession.deleteMany({ where: { id: { in: idsToDelete } } });
+      const toDelete = await prisma.formationSession.findMany({
+        where: { id: { in: idsToDelete } },
+        select: { id: true, _count: { select: { reservations: true } } },
+      });
+      const withBookings = toDelete.filter((s) => s._count.reservations > 0);
+      if (withBookings.length > 0) {
+        return {
+          success: false,
+          message:
+            withBookings.length === 1
+              ? "Impossible de retirer une session qui a déjà des réservations. Annulez d'abord ces réservations, ou laissez la session dans le formulaire."
+              : "Impossible de retirer des sessions qui ont déjà des réservations. Annulez d'abord ces réservations, ou laissez-les dans le formulaire.",
+        };
+      }
     }
 
-    const updated = await prisma.formation.update({
-      where: { id },
-      data: {
-        ...rest,
-        animatorId: animatorId || null,
-        sessions: {
-          create: sessions
-            .filter((s) => !s.id)
-            .map((s) => ({
+    const updated = await prisma.$transaction(async (tx) => {
+      if (idsToDelete.length > 0) {
+        await tx.formationSession.deleteMany({ where: { id: { in: idsToDelete } } });
+      }
+
+      const result = await tx.formation.update({
+        where: { id },
+        data: {
+          ...rest,
+          animatorId: animatorId || null,
+          sessions: {
+            create: sessions
+              .filter((s) => !s.id)
+              .map((s) => ({
+                startDate: new Date(s.startDate),
+                endDate: s.endDate ? new Date(s.endDate) : null,
+                capacity: s.capacity,
+                animatorId: s.animatorId || null,
+                registrationDeadline: s.registrationDeadline
+                  ? new Date(s.registrationDeadline)
+                  : null,
+              })),
+          },
+        },
+        include: { sessions: true },
+      });
+
+      for (const s of sessions) {
+        if (s.id && incomingIds.includes(s.id)) {
+          await tx.formationSession.update({
+            where: { id: s.id },
+            data: {
               startDate: new Date(s.startDate),
               endDate: s.endDate ? new Date(s.endDate) : null,
               capacity: s.capacity,
@@ -218,28 +270,13 @@ export async function updateFormation(input) {
               registrationDeadline: s.registrationDeadline
                 ? new Date(s.registrationDeadline)
                 : null,
-            })),
-        },
-      },
-      include: { sessions: true },
-    });
-
-    for (const s of sessions) {
-      if (s.id && incomingIds.includes(s.id)) {
-        await prisma.formationSession.update({
-          where: { id: s.id },
-          data: {
-            startDate: new Date(s.startDate),
-            endDate: s.endDate ? new Date(s.endDate) : null,
-            capacity: s.capacity,
-            animatorId: s.animatorId || null,
-            registrationDeadline: s.registrationDeadline
-              ? new Date(s.registrationDeadline)
-              : null,
-          },
-        });
+            },
+          });
+        }
       }
-    }
+
+      return result;
+    });
 
     revalidatePath("/dashboard/formations");
     return {

@@ -57,8 +57,24 @@ describe("cash-session wiring", () => {
   });
 
   test("POS attaches CASH sales to whichever session is open, without ever blocking the sale", () => {
-    expect(pos).toContain("cashSession.findFirst({ where: { closedAt: null }");
+    expect(pos).toContain("cashSession.findFirst({");
+    expect(pos).toContain("where: { closedAt: null }");
     expect(pos).toContain("cashSessionId: openCashSession?.id ?? null");
+  });
+
+  // getCurrentCashSession already orders by openedAt desc — without the same
+  // tie-break here, findFirst's row order is unspecified and a sale could
+  // silently attach to a different "open" session than the dashboard shows,
+  // especially if openCashSession's own race guard (below) is ever bypassed.
+  test("POS breaks ties on the same openedAt-desc order as getCurrentCashSession", () => {
+    expect(pos).toContain('orderBy: { openedAt: "desc" }');
+  });
+
+  // Check-then-create on its own is a race: two concurrent opens could both
+  // read "no open session" before either commits. The advisory lock
+  // serializes it the same way refund reconciliation does elsewhere.
+  test("opening a session is serialized against a concurrent open via an advisory lock", () => {
+    expect(actions).toContain("pg_advisory_xact_lock(hashtext('cash-session-open'))");
   });
 
   test("CashSession is modeled with the expected/counted/variance breakdown", () => {

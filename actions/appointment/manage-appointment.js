@@ -6,7 +6,8 @@ import { stripe } from "@/lib/stripe";
 import { ROLES, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
-import { reservationAcceptedEmail } from "@/lib/email-templates";
+import { createAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
+import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
@@ -150,7 +151,19 @@ export async function acceptAppointment(appointmentId) {
     }
 
     // The page reuses the shared payment decision engine server-side.
-    const paymentUrl = `${process.env.NEXT_PUBLIC_APP_URL}/appointment/${appointmentId}/payment`;
+    // The link carries a dedicated, appointment-scoped confirmation token
+    // (not a login/session token, and never the customer's email): it is
+    // only ever delivered inside this email to the customer's own address,
+    // so possession of it proves ownership of this one appointment. It is
+    // verified server-side by the payment page, which authorizes the
+    // confirmation action for that appointment without any login. Validity
+    // is a week: the customer may open the email days after acceptance and
+    // must still be able to confirm.
+    const confirmToken = createAppointmentConfirmToken({
+      appointmentId,
+      email: appointment.user.email,
+    });
+    const paymentUrl = `${process.env.NEXT_PUBLIC_APP_URL}/appointment/${appointmentId}/payment?confirm=${encodeURIComponent(confirmToken)}`;
 
     // Send one focused acceptance email; payment choices belong to the linked flow.
     const staff = appointment.staffService?.staff;
@@ -192,9 +205,15 @@ export async function acceptAppointment(appointmentId) {
  *
  * @param {string} appointmentId
  * @param {string} reason - Optional reason for rejection
+ * @param {{
+ *   waiveDepositForfeit?: boolean,
+ *   forceManualRejection?: boolean,
+ * }} [options] - forceManualRejection marks a PENDING request as refused even
+ *   if the staff member's current mode isn't MANUAL. Normally the server
+ *   derives it: PENDING + MANUAL staff => REJECTED, everything else => CANCELLED.
  * @returns {Promise<{ success: boolean, message?: string }>}
  */
-export async function rejectAppointment(appointmentId, reason = null, { waiveDepositForfeit = false } = {}) {
+export async function rejectAppointment(appointmentId, reason = null, { waiveDepositForfeit = false, forceManualRejection = false } = {}) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -234,7 +253,12 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
         staffService: {
           include: {
             service: { select: { name: true } },
-            staff: { include: { user: { select: { fullName: true } } } },
+            staff: {
+              select: {
+                reservationConfirmationMode: true,
+                user: { select: { fullName: true } },
+              },
+            },
           },
         },
         payment: { include: { invoice: true } },
@@ -244,6 +268,19 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
     if (!appointment) {
       return { success: false, message: "Rendez-vous introuvable" };
     }
+
+    // A PENDING request on a MANUAL staff member is a request the salon is
+    // turning down before ever accepting it — record it as REJECTED (its own
+    // terminal status, with the dedicated rejection email) rather than
+    // CANCELLED, which is for real bookings being withdrawn. Callers can
+    // still force the flag, but the server derives it so the dashboard's
+    // plain reject action maps to the right status without knowing about
+    // confirmation modes.
+    const isManualRejection =
+      forceManualRejection === true ||
+      (appointment.status === "PENDING" &&
+        String(appointment.staffService?.staff?.reservationConfirmationMode ?? "MANUAL").toUpperCase() ===
+          "MANUAL");
 
     const payment = appointment.payment;
     const wasPaid = Boolean(payment) && ["PAID", "PARTIALLY_PAID"].includes(payment.status);
@@ -313,12 +350,13 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
     // no longer lets assigned staff through, so there's no separate
     // staff-exemption to apply here.
     //
-    // Declining a request the salon never accepted is the exception. Under
-    // pay-first, a MANUAL booking is paid while still PENDING, so a staff
-    // member turning it down would otherwise pocket the whole deposit for a
-    // slot they refused — the forfeit exists to cover a late *customer*
-    // cancellation, not a salon decision. A still-PENDING request has never
-    // been committed to by anyone, so it always refunds in full.
+    // Declining a request the salon never accepted is the exception. A
+    // PENDING appointment can carry a payment (an automatic pay-now booking
+    // mid-settlement), and a staff member turning it down must never pocket
+    // the forfeit for a slot they refused — the forfeit exists to cover a
+    // late *customer* cancellation, not a salon decision. A still-PENDING
+    // request has never been committed to by anyone, so it always refunds in
+    // full.
     const isDeclineOfUnacceptedRequest = appointment.status === "PENDING";
 
     let forfeitAmount = 0;
@@ -351,7 +389,7 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       const claim = await tx.appointment.updateMany({
         where: { id: appointmentId, status: { in: ["PENDING", "ACCEPTED", "CONFIRMED", "COMPLETED", "NO_SHOW"] } },
         data: {
-          status: "CANCELLED",
+          status: isManualRejection ? "REJECTED" : "CANCELLED",
           cancelledAt: new Date(),
           cancelledByUserId: authCheck.userId,
           cancellationReason: cancellationReasonWithForfeit,
@@ -470,20 +508,39 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
         : " Le remboursement apparaîtra sur votre compte sous quelques jours."
       : "";
 
-    sendEmail({
-      to: appointment.user.email,
-      subject: "Rendez-vous annulé – Meri Beauty",
-      text:
-        `Bonjour ${appointment.user.fullName},\n\n` +
-        `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a été annulé.${refundNote}` +
-        (reason ? ` Raison : ${reason}` : "") +
-        `\n\nL'équipe Meri Beauty`,
-      html:
-        `<p>Bonjour ${appointment.user.fullName},</p>` +
-        `<p>Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a été annulé.${refundNote}` +
-        (reason ? ` Raison : ${reason}` : "") +
-        `</p><p>L'équipe Meri Beauty</p>`,
-    }).catch((err) => console.error("[rejectAppointment] cancellation email failed:", err));
+    // Use the proper email template based on whether this is a manual rejection or a cancellation
+    if (isManualRejection) {
+      sendEmail({
+        to: appointment.user.email,
+        ...reservationRejectedEmail({
+          customerName: appointment.user.fullName,
+          serviceName: appointment.staffService.service.name,
+          staffName: appointment.staffService.staff?.user?.fullName || "Expert",
+          date: appointment.date,
+          time: appointment.startTime.toLocaleTimeString("fr-FR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: "Europe/Brussels",
+          }),
+          reason: reason || null,
+        }),
+      }).catch((err) => console.error("[rejectAppointment] rejection email failed:", err));
+    } else {
+      sendEmail({
+        to: appointment.user.email,
+        subject: "Rendez-vous annulé – Meri Beauty",
+        text:
+          `Bonjour ${appointment.user.fullName},\n\n` +
+          `Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a été annulé.${refundNote}` +
+          (reason ? ` Raison : ${reason}` : "") +
+          `\n\nL'équipe Meri Beauty`,
+        html:
+          `<p>Bonjour ${appointment.user.fullName},</p>` +
+          `<p>Votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a été annulé.${refundNote}` +
+          (reason ? ` Raison : ${reason}` : "") +
+          `</p><p>L'équipe Meri Beauty</p>`,
+      }).catch((err) => console.error("[rejectAppointment] cancellation email failed:", err));
+    }
 
     if (refundFailed) {
       const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
@@ -499,11 +556,13 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
 
     return {
       success: true,
-      message: wasPaid
-        ? refundFailed
-          ? "Rendez-vous annulé. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
-          : "Rendez-vous annulé — le client sera remboursé."
-        : "Rendez-vous annulé",
+      message: isManualRejection
+        ? "Demande de rendez-vous refusée"
+        : wasPaid
+          ? refundFailed
+            ? "Rendez-vous annulé. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
+            : "Rendez-vous annulé — le client sera remboursé."
+          : "Rendez-vous annulé",
       refundFailed,
     };
   } catch (error) {

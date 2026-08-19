@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
+import { verifyAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import { sendEmail } from "@/lib/email";
 import { reservationConfirmedEmail, staffReservationConfirmedEmail } from "@/lib/email-templates";
 import {
@@ -19,11 +20,26 @@ function getPaymentMethod(value) {
   return null;
 }
 
-export async function confirmAcceptedAppointment(appointmentId, paymentMethod) {
+/**
+ * Confirms an ACCEPTED appointment with the customer's chosen payment method.
+ *
+ * Authorization (either is sufficient):
+ *   • the caller is signed in as the appointment's own owner, OR
+ *   • the caller presents the dedicated appointment-confirmation token minted
+ *     at acceptance time and delivered inside the acceptance email — this is
+ *     what lets a guest confirm straight from the email link with no login.
+ *     The token is stateless and cryptographically bound to this exact
+ *     appointment (see lib/appointment-confirm-token.js), so it authorizes
+ *     nothing else and grants no account access.
+ *
+ * @param {string} appointmentId
+ * @param {"online"|"cash"} paymentMethod
+ * @param {string|null} [confirmToken]
+ */
+export async function confirmAcceptedAppointment(appointmentId, paymentMethod, confirmToken = null) {
   try {
     const session = await auth();
     const normalizedMethod = getPaymentMethod(paymentMethod);
-    if (!session?.user?.id) return { success: false, message: "Authentification requise." };
     if (!appointmentId || !normalizedMethod) return { success: false, message: "Choix de confirmation invalide." };
 
     const appointment = await prisma.appointment.findUnique({
@@ -42,7 +58,16 @@ export async function confirmAcceptedAppointment(appointmentId, paymentMethod) {
       },
     });
 
-    if (!appointment || appointment.userId !== session.user.id) {
+    if (!appointment) {
+      return { success: false, message: "Rendez-vous introuvable." };
+    }
+
+    const isOwner = session?.user?.id != null && appointment.userId === session.user.id;
+    const verifiedToken =
+      confirmToken && verifyAppointmentConfirmToken(confirmToken, { appointmentId: appointment.id });
+    const tokenAuthorized = verifiedToken?.ok && verifiedToken.email === appointment.user.email;
+
+    if (!isOwner && !tokenAuthorized) {
       return { success: false, message: "Rendez-vous introuvable." };
     }
     if (appointment.status !== "ACCEPTED") {

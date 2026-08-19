@@ -155,18 +155,15 @@ export async function getMyReservations() {
             }
           : null,
 
-        // Derived convenience flag used by the UI to show "Complete payment"
-        // True only when:
-        //   - there is a payment record
-        //   - the payment is PENDING (not yet paid)
-        //   - the appointment has not been cancelled or completed
-        //   - the payment requires an online payment (ONLINE or DEPOSIT type)
-        awaitingPayment:
-          payment !== null &&
-          ["PENDING", "FAILED"].includes(payment.status) &&
-          (payment.paymentType === "ONLINE" || payment.paymentType === "DEPOSIT") &&
-          appt.status !== "CANCELLED" &&
-          appt.status !== "COMPLETED",
+        // Derived convenience flags used by the UI.
+        // awaitingPayment: an online payment was started but never settled —
+        // show "Complete payment" to resume the Checkout Session.
+        // awaitingPaymentChoice: staff accepted a manual request and the
+        // customer hasn't chosen how to pay yet (no Payment row exists) —
+        // show a link to the confirmation/payment page. Both rules live in
+        // lib/appointments/payment-followup.js.
+        awaitingPayment: isAwaitingPayment(appt, payment),
+        awaitingPaymentChoice: isAwaitingPaymentChoice(appt, payment),
 
         review: appt.review,
 

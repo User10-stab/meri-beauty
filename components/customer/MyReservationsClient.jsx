@@ -71,6 +71,7 @@ const APPOINTMENT_STATUS_CONFIG = {
   CONFIRMED: { labelKey: "confirmed", className: "bg-emerald-100 text-emerald-800" },
   COMPLETED: { labelKey: "completed", className: "bg-gray-100 text-gray-600" },
   CANCELLED: { labelKey: "cancelled", className: "bg-red-100 text-red-700" },
+  REJECTED: { labelKey: "rejected", className: "bg-red-100 text-red-700" },
   NO_SHOW: { labelKey: "noShow", className: "bg-orange-100 text-orange-700" },
 };
 
@@ -161,6 +162,7 @@ function ReservationCard({ reservation, onCancelled }) {
   const isActionable =
     !isCancelled &&
     effectiveStatus !== "COMPLETED" &&
+    effectiveStatus !== "REJECTED" &&
     effectiveStatus !== "NO_SHOW" &&
     effectiveStatus !== "CANCELLED";
 
@@ -341,11 +343,11 @@ function ReservationCard({ reservation, onCancelled }) {
 
       {/* ── Footer actions ──────────────────────────────────────────────── */}
       <div className="space-y-3 border-t border-gray-100 bg-gradient-to-b from-gray-50/50 to-white px-6 py-5">
-        {/* A manually-confirmed request sits at PENDING until staff decide.
-            Most now carry a payment taken up front, so this must only cover
-            the genuine "nothing to act on yet" case — never suppress the
-            "Finaliser le paiement" button below by firing whenever an
-            unsettled payment (awaitingPayment) still needs it. */}
+        {/* A manually-confirmed request sits at PENDING until staff decide
+            and no payment was taken up front — genuine "nothing to act on
+            yet" case. Never suppress the "Finaliser le paiement" button by
+            firing whenever an unsettled payment (awaitingPayment) still
+            needs it. */}
         {effectiveStatus === "PENDING" && !reservation.awaitingPayment && !isCancelled && (
           <div className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
             <svg className="mt-0.5 h-4 w-4 shrink-0 text-[#C8A46A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -516,6 +518,15 @@ function ReservationCard({ reservation, onCancelled }) {
           <div className="rounded-xl border-2 border-gray-200 bg-gray-100 px-4 py-3 text-center">
             <p className="text-xs font-bold text-gray-500 uppercase tracking-wide">
               {t("cancelledNotice")}
+            </p>
+          </div>
+        )}
+
+        {/* Request refused notice */}
+        {effectiveStatus === "REJECTED" && !isCancelled && (
+          <div className="rounded-xl border-2 border-red-100 bg-red-50 px-4 py-3 text-center">
+            <p className="text-xs font-bold text-red-600 uppercase tracking-wide">
+              {t("rejectedNotice")}
             </p>
           </div>
         )}

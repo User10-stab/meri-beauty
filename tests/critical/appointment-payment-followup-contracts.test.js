@@ -101,11 +101,13 @@ describe("an unpaid appointment can be settled from the appointments list", () =
     expect(buttonIndex).toBeLessThan(actionableIndex);
   });
 
-  // 18 Aug 2026: a manually-confirmed request now takes its deposit (or full
-  // amount) up front for every staff member except CASH_ONLY, so a PENDING
-  // appointment usually does carry an unsettled payment — not "nothing to pay
-  // yet". The "waiting on the salon" notice must not swallow that case, or an
-  // abandoned Checkout becomes unrecoverable outside the confirmation e-mail.
+  // A manually-confirmed request is created PENDING with no payment up front
+  // (the pay-first experiment was reverted 18 Aug 2026), so a PENDING
+  // appointment usually has "nothing to pay yet". But an AUTOMATIC booking or
+  // a resumed online payment can still carry an unsettled payment while
+  // PENDING — the "waiting on the salon" notice must not swallow that case,
+  // or an abandoned Checkout becomes unrecoverable outside the confirmation
+  // e-mail.
   test("the pending-approval notice yields to the pay button on an unsettled payment", () => {
     const client = source("components/customer/MyReservationsClient.jsx");
     expect(client).toContain('effectiveStatus === "PENDING" && !reservation.awaitingPayment && !isCancelled');

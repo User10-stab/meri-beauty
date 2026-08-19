@@ -1959,6 +1959,7 @@
     "confirmed": "Confirmed",
     "completed": "Completed",
     "cancelled": "Cancelled",
+    "rejected": "Rejected",
     "noShow": "No-show"
   },
   "acceptedAppointmentPayment": {
@@ -2109,6 +2110,7 @@
     "cancellationLocked": "Modifications and cancellations are no longer available less than {hours} hours before the appointment. The deposit remains non-refundable, unless the administration approves an exceptional cancellation.",
     "cancellationLockedPendingPayment": "A payment has already been made for this request while it awaits the salon's decision. It is not refunded automatically if you cancel — send an exceptional request so an administrator can review it.",
     "cancelledNotice": "This reservation has been cancelled.",
+    "rejectedNotice": "Your appointment request has been declined by the salon.",
     "secureStripe": "Secure payment by Stripe",
     "pendingPayment": "Payment pending",
     "myAppointments": "My appointments",
@@ -2136,6 +2138,7 @@
   "reservationSuccess": {
     "pollingTitle": "Confirming…",
     "pollingDescription": "We are waiting for your payment confirmation. Thank you for your patience.",
+    "redirectingTitle": "Redirecting to home…",
     "timeoutTitle": "Payment being processed",
     "timeoutDescription": "Your payment has been received, but confirmation is taking a little longer than expected. You will receive a confirmation email once processing is complete.",
     "backHome": "Back to home",
@@ -2146,6 +2149,8 @@
     "confirmedDescription": "Your payment has been received and your appointment is confirmed.",
     "receivedTitle": "Payment received",
     "receivedDescription": "Your payment has been received. Your reservation is awaiting confirmation by our team.",
+    "toastConfirmed": "Payment received — your appointment is confirmed.",
+    "toastReceived": "Payment received. Your reservation is awaiting confirmation.",
     "awaitingApproval": "Awaiting approval",
     "awaitingApprovalDescription": "Our team will review your request and send you a confirmation email as soon as your appointment is approved.",
     "detailsSection": "Appointment details",

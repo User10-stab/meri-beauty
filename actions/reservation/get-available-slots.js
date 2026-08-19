@@ -54,12 +54,12 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
       include: { closures: true, workingDays: true },
     });
 
-    // Query ALL existing appointments for this staff member on the selected day.
-    // A staff member cannot perform two services simultaneously, regardless of
-    // which service was booked, so we must consider all their appointments.
+    // Query ALL existing appointments for this staff member overlapping the
+    // selected day. A staff member cannot perform two services simultaneously,
+    // regardless of which service was booked, so we must consider all their
+    // appointments.
     const startOfDay = parseLocalDateString(date);
-    const endOfDay   = parseLocalDateString(date);
-    endOfDay.setDate(endOfDay.getDate() + 1);
+    const endOfDay = parseLocalDateString(date);
     endOfDay.setHours(23, 59, 59, 999);
 
     const existingAppointments = await prisma.appointment.findMany({
@@ -67,7 +67,14 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
         staffService: {
           staffId: staffService.staff.id,
         },
-        date: { gte: startOfDay, lte: endOfDay },
+        // Overlap on startTime/endTime, not a match on the `date` anchor —
+        // `date` is always the appointment's *start* day, so an appointment
+        // that runs past midnight (date=Aug 20, endTime=01:00 on Aug 21)
+        // would never surface when checking Aug 21's availability even
+        // though it's still genuinely occupying that staff member early
+        // that morning. Same pattern as getCalendarEvents' interval query.
+        startTime: { lte: endOfDay },
+        endTime: { gte: startOfDay },
         status: { in: ACTIVE_APPOINTMENT_STATUSES },
         isDeleted: false,
         ...(excludeAppointmentId ? { id: { not: excludeAppointmentId } } : {}),

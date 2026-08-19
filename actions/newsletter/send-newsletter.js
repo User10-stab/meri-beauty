@@ -77,19 +77,16 @@ export async function sendNewsletter(newsletterId) {
       };
     }
 
-    // ── 3. Create recipient records ────────────────────────────────────────
+    // ── 3. Send emails (non-blocking — fire and forget) ─────────────────────
+    // We send emails asynchronously without awaiting them all to avoid timeout.
+    // Recipient rows are created only once a send has actually resolved
+    // (SENT or FAILED) — they used to be pre-created as "SENT" up front,
+    // before any email had even been attempted, so a crash/restart mid-flight
+    // (a PM2 deploy, say) left every not-yet-processed recipient falsely
+    // marked delivered with no way to tell a real send from one that was
+    // silently dropped. A recipient with no row at all after this run means
+    // "never confirmed either way" — honest, and re-sendable.
     const salonName = newsletter.salon.name;
-
-    await prisma.newsletterRecipient.createMany({
-      data: subscribedUsers.map((user) => ({
-        newsletterId: newsletter.id,
-        userId: user.id,
-        status: "SENT",
-      })),
-    });
-
-    // ── 4. Send emails (non-blocking — fire and forget) ────────────────────
-    // We send emails asynchronously without awaiting them all to avoid timeout
     const baseUrl = getAppBaseUrl();
     const emailPromises = subscribedUsers.map((user) => {
       const { subject, text, html } = newsletterEmail({
@@ -105,23 +102,26 @@ export async function sendNewsletter(newsletterId) {
         subject,
         text,
         html,
-      }).catch((err) => {
-        console.error(`[sendNewsletter] Failed to send to ${user.email}:`, err.message);
-        // Mark recipient as FAILED
-        return prisma.newsletterRecipient.updateMany({
-          where: {
-            newsletterId: newsletter.id,
-            userId: user.id,
-          },
-          data: { status: "FAILED" },
+      })
+        .catch((err) => ({ success: false, error: err?.message ?? String(err) }))
+        .then((result) => {
+          // sendEmail reports provider failures by resolving { success: false }
+          // rather than rejecting (see its own doc comment) — a plain .then()
+          // would run on that path too and mark a failed send as SENT. Branch
+          // on the result instead of the promise's settle state.
+          if (!result?.success) {
+            console.error(`[sendNewsletter] Failed to send to ${user.email}:`, result?.error);
+          }
+          return prisma.newsletterRecipient.create({
+            data: { newsletterId: newsletter.id, userId: user.id, status: result?.success ? "SENT" : "FAILED" },
+          });
         });
-      });
     });
 
     // Fire and forget — don't await all sends to avoid timeout
     Promise.allSettled(emailPromises).catch(() => {});
 
-    // ── 5. Update newsletter status ────────────────────────────────────────
+    // ── 4. Update newsletter status ────────────────────────────────────────
     await prisma.newsletter.update({
       where: { id: newsletter.id },
       data: {

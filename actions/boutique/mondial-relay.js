@@ -64,6 +64,22 @@ export async function generateShippingLabel(orderId) {
   if (order.fulfilmentMode !== "SHIPPING_PREPAID") {
     return { success: false, message: "Cette commande n'est pas à expédier." };
   }
+  // A real label costs real postage — refuse to buy one for an order that
+  // hasn't actually been paid (PENDING_PAYMENT), or that's no longer
+  // fulfillable (CANCELLED/EXPIRED/SHIPPED/COMPLETED). PAID/PROCESSING are
+  // the only states between "money collected" and "already shipped".
+  if (!["PAID", "PROCESSING"].includes(order.status)) {
+    return { success: false, message: "Cette commande n'est pas payée ou n'est plus dans un état permettant de générer une étiquette." };
+  }
+  // Idempotency: a second call would buy and pay for a second real label,
+  // and overwrite the first trackingCode with no way to reconcile which
+  // label actually got used.
+  if (order.trackingCode) {
+    return {
+      success: false,
+      message: `Une étiquette a déjà été générée pour cette commande (n° de suivi : ${order.trackingCode}).`,
+    };
+  }
   if (!order.pickupPointId) {
     return {
       success: false,
@@ -123,10 +139,23 @@ export async function generateShippingLabel(orderId) {
     return { success: false, message: result.message || "Échec de la génération de l'étiquette Mondial Relay." };
   }
 
-  await prisma.order.update({
-    where: { id: orderId },
+  // Atomic, re-checking trackingCode is still unset — the label was already
+  // bought from Mondial Relay above regardless, but this stops a second
+  // concurrent click from silently overwriting the tracking code of the
+  // first (already-paid-for, possibly already-printed) label.
+  const claim = await prisma.order.updateMany({
+    where: { id: orderId, trackingCode: null },
     data: { trackingCode: result.shipmentNumber },
   });
+  if (claim.count === 0) {
+    console.error(
+      `[generateShippingLabel] order ${orderId} got a trackingCode concurrently — label ${result.shipmentNumber} was purchased but not saved, reconcile manually.`
+    );
+    return {
+      success: false,
+      message: "Une étiquette a été achetée mais une autre était déjà en cours d'enregistrement pour cette commande — contactez le support pour réconcilier.",
+    };
+  }
 
   return {
     success: true,

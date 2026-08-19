@@ -324,16 +324,26 @@ export async function requestReturn(input) {
       });
       const freshClaimed = claimedQuantities(freshOrder);
 
+      // freshClaimed only accounts for *prior* return requests — two entries
+      // for the same orderItemId within THIS submission would each be
+      // checked against the same pre-existing remaining count independently
+      // (e.g. two lines of 3 against 5 available, each individually "fits")
+      // and together over-claim the item. Track what this submission itself
+      // has already claimed as it validates each line.
+      const claimedInThisRequest = new Map();
+
       for (const requested of items) {
         const orderItem = freshOrder.items.find((i) => i.id === requested.orderItemId);
         if (!orderItem) return { returnRequest: null, validationError: "Article introuvable sur cette commande." };
-        const remaining = orderItem.quantity - (freshClaimed.get(orderItem.id) ?? 0);
+        const alreadyClaimed = (freshClaimed.get(orderItem.id) ?? 0) + (claimedInThisRequest.get(orderItem.id) ?? 0);
+        const remaining = orderItem.quantity - alreadyClaimed;
         if (requested.quantity > remaining) {
           return {
             returnRequest: null,
             validationError: `Quantité invalide pour "${orderItem.productName}" — ${remaining} disponible(s) au retour.`,
           };
         }
+        claimedInThisRequest.set(orderItem.id, (claimedInThisRequest.get(orderItem.id) ?? 0) + requested.quantity);
       }
 
       const created = await tx.returnRequest.create({

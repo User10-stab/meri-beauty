@@ -1,6 +1,6 @@
 import { Suspense } from "react";
-import { requireRole } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS, isAdminRole } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { getProducts } from "@/actions/boutique/products";
 import { getBrands } from "@/actions/boutique/brands";
 import { ProductsPageClient } from "@/components/dashboard/boutique/ProductsPageClient";
@@ -17,7 +17,7 @@ export async function generateMetadata() {
 }
 
 export default async function ProductsPage() {
-  const { user } = await requireRole(DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK);
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.BOUTIQUE_STOCK);
   const isAdmin = isAdminRole(user.role);
   const t = await getTranslations("dashboardBoutique.products");
 

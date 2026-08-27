@@ -1,6 +1,7 @@
 "use client";
 
-import { Euro, UserPlus, TicketPercent, PackageX } from "lucide-react";
+import { Euro, UserPlus, TicketPercent, PackageX, Banknote, Landmark, Info, Download, FileSpreadsheet } from "lucide-react";
+import { PERIOD_LABELS } from "@/lib/reports-filters";
 
 const SOURCE_COLORS = {
   boutique: "#2f3a2e",
@@ -40,6 +41,67 @@ function formatEuro(value) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(value);
 }
 
+function escapeCsv(value) {
+  const text = String(value ?? "");
+  return /[;"\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function csvRow(values) {
+  return values.map(escapeCsv).join(";");
+}
+
+/**
+ * The report data is already filtered and freshly rendered by the server.
+ * Exporting this exact payload avoids a second, potentially differently
+ * authorized query and ensures that the spreadsheet matches the figures the
+ * manager has on screen.
+ */
+function downloadReportCsv(data) {
+  const period = PERIOD_LABELS[data.filters.months] ?? `${data.filters.months} mois`;
+  const scope = data.filters.staffName ? `Praticienne : ${data.filters.staffName}` : "Tout le salon";
+  const rows = [
+    ["Rapport Meri Beauty"],
+    ["Période", period],
+    ["Périmètre", scope],
+    ["Exporté le", new Date().toLocaleString("fr-BE")],
+    [],
+    ["Synthèse", "Montant (€)"],
+    ["Chiffre d'affaires", data.totalRevenue],
+    ["Espèces encaissées", data.cashCollected],
+    ["Banque (carte + en ligne)", data.bankCollected],
+    [],
+    ["Mois", "Boutique (€)", "Rendez-vous (€)", "Ateliers (€)", "Formations (€)", "Total (€)"],
+    ...data.revenueByMonth.map((month) => [
+      month.label,
+      month.boutique,
+      month.appointments,
+      month.workshops,
+      month.formations,
+      month.boutique + month.appointments + month.workshops + month.formations,
+    ]),
+    [],
+    ["Moyen de paiement", "Rapprochement", "Net (€)", "Remboursé (€)"],
+    ...data.collectionByMethod.map((row) => [row.label, row.settlement === "cash" ? "Liquide" : "Banque", row.net, row.refunded]),
+  ];
+
+  if (data.topProducts.length > 0) {
+    rows.push([], ["Meilleure vente", "Quantité vendue"]);
+    rows.push(...data.topProducts.map((product) => [product.name, product.quantity]));
+  }
+
+  // A UTF-8 BOM makes accented French labels open correctly in Excel.
+  const csv = `\uFEFF${rows.map(csvRow).join("\r\n")}\r\n`;
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `rapport-meri-beauty-${data.filters.months}-mois${data.filters.staffId ? "-praticienne" : ""}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function ReportsPageClient({ data }) {
   const maxMonthTotal = Math.max(
     1,
@@ -48,19 +110,116 @@ export function ReportsPageClient({ data }) {
   const maxSourceValue = Math.max(1, ...data.revenueBySource.map((s) => s.value));
   const maxProductQty = Math.max(1, ...data.topProducts.map((p) => p.quantity));
   const maxCustomerCount = Math.max(1, ...data.newCustomersByMonth.map((m) => m.count));
+  const maxMethodValue = Math.max(1, ...data.collectionByMethod.map((row) => Math.max(row.net, 0)));
+  const collectedTotal = data.cashCollected + data.bankCollected;
+  const periodLabel = (PERIOD_LABELS[data.filters.months] ?? `${data.filters.months} mois`).toLowerCase();
+  const excelParams = new URLSearchParams({ months: String(data.filters.months) });
+  if (data.filters.staffId) excelParams.set("staffId", data.filters.staffId);
 
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap justify-end gap-2">
+        <a
+          href={`/api/reports/export?${excelParams.toString()}`}
+          className="inline-flex items-center gap-2 rounded-[7px] bg-[#217346] px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#185c37]"
+        >
+          <FileSpreadsheet className="h-4 w-4" strokeWidth={2} />
+          Exporter Excel (.xlsx)
+        </a>
+        <button
+          type="button"
+          onClick={() => downloadReportCsv(data)}
+          className="inline-flex items-center gap-2 rounded-[7px] border border-stroke bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6"
+        >
+          <Download className="h-4 w-4" strokeWidth={2} />
+          Exporter le rapport CSV
+        </button>
+      </div>
+
+      {data.staffScoped && (
+        <div className="flex items-start gap-2 rounded-[10px] border border-stroke bg-gray-50 px-4 py-3 text-xs text-gray-600 dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6">
+          <Info className="mt-0.5 h-4 w-4 flex-shrink-0" strokeWidth={2} />
+          <span>
+            Rapport limité à <strong>{data.filters.staffName}</strong> : rendez-vous et ventes en caisse
+            enregistrées par cette personne. Les ateliers et formations sont animés par le répertoire
+            animateurs, sans lien avec le personnel — ils sont donc exclus, tout comme les nouveaux
+            clients, les retours et les codes promo, qui ne s’attribuent pas à une praticienne.
+          </span>
+        </div>
+      )}
+
       {/* ── Summary cards ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={<Euro size={20} />} label="Chiffre d'affaires (6 mois)" value={formatEuro(data.totalRevenue)} />
-        <StatCard icon={<UserPlus size={20} />} label="Nouveaux clients (6 mois)" value={data.totalNewCustomers} />
-        <StatCard
-          icon={<TicketPercent size={20} />}
-          label="Codes promo utilisés"
-          value={`${data.promoCode.uses} · ${formatEuro(data.promoCode.totalDiscount)}`}
-        />
-        <StatCard icon={<PackageX size={20} />} label="Retours (6 mois)" value={data.returnsCount} />
+        <StatCard icon={<Euro size={20} />} label={`Chiffre d'affaires · ${periodLabel}`} value={formatEuro(data.totalRevenue)} />
+        {/* Liquide vs banque: what has to be in the drawer at close, against
+            what has to turn up on a bank statement. Summed from the
+            Transaction ledger, not from Payment — see getReportsData. */}
+        <StatCard icon={<Banknote size={20} />} label={`Espèces encaissées · ${periodLabel}`} value={formatEuro(data.cashCollected)} />
+        <StatCard icon={<Landmark size={20} />} label={`Banque (carte + en ligne) · ${periodLabel}`} value={formatEuro(data.bankCollected)} />
+        {data.staffScoped ? (
+          <StatCard
+            icon={<UserPlus size={20} />}
+            label="Rendez-vous sur la période"
+            value={data.appointmentStatusCounts.reduce((sum, row) => sum + row.count, 0)}
+          />
+        ) : (
+          <StatCard icon={<UserPlus size={20} />} label={`Nouveaux clients · ${periodLabel}`} value={data.totalNewCustomers} />
+        )}
+      </div>
+
+      {/* Cards that cannot honestly be attributed to one practitioner are
+          hidden rather than shown salon-wide beside filtered figures. */}
+      {!data.staffScoped && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <StatCard
+            icon={<TicketPercent size={20} />}
+            label="Codes promo utilisés"
+            value={`${data.promoCode.uses} · ${formatEuro(data.promoCode.totalDiscount)}`}
+          />
+          <StatCard icon={<PackageX size={20} />} label={`Retours · ${periodLabel}`} value={data.returnsCount} />
+        </div>
+      )}
+
+      {/* ── Cash vs bank breakdown ─────────────────────────────────── */}
+      <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-bold text-dark dark:text-white">Encaissements par moyen de paiement</h2>
+          <span className="text-sm font-bold text-dark dark:text-white">{formatEuro(collectedTotal)}</span>
+        </div>
+        <p className="mb-5 text-xs text-gray-500 dark:text-dark-6">
+          Net des remboursements, issu du journal des transactions. Ce total peut différer légèrement du chiffre
+          d’affaires ci-dessus : celui-ci mesure ce qui a été gagné, celui-là par quel canal l’argent est arrivé.
+        </p>
+        <ul className="space-y-4">
+          {data.collectionByMethod.map((row) => (
+            <li key={row.method}>
+              <div className="mb-1.5 flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2 font-medium text-dark dark:text-white">
+                  {row.settlement === "cash" ? <Banknote size={15} /> : <Landmark size={15} />}
+                  {row.label}
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500 dark:bg-dark-3 dark:text-dark-6">
+                    {row.settlement === "cash" ? "Liquide" : "Banque"}
+                  </span>
+                </span>
+                <span className="text-gray-500 dark:text-dark-6">
+                  {formatEuro(row.net)}
+                  {row.refunded > 0 && (
+                    <span className="ml-2 text-xs text-red-500">−{formatEuro(row.refunded)} remboursé</span>
+                  )}
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-dark-3">
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${(Math.max(row.net, 0) / maxMethodValue) * 100}%`,
+                    backgroundColor: row.settlement === "cash" ? "#2f3a2e" : "#b89664",
+                  }}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
@@ -157,7 +316,10 @@ export function ReportsPageClient({ data }) {
         </div>
 
         {/* ── New customers per month ──────────────────────────────────────── */}
-        <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+        {/* Hidden under a staff filter: a new customer belongs to the salon,
+            not to whoever served them first, so getReportsData returns nothing
+            here and an all-zero chart would read as "nobody signed up". */}
+        <div className={`rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card ${data.staffScoped ? "hidden" : ""}`}>
           <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">Nouveaux clients</h2>
           <div className="flex h-36 gap-2">
             {data.newCustomersByMonth.map((m) => (

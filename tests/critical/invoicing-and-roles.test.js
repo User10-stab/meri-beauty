@@ -44,7 +44,7 @@ describe("invoice and credit-note issuance", () => {
       paymentId: "pay-1",
       source: "ORDER",
       totalInclVat: 121,
-      customer: { fullName: "Client", email: "client@example.test" },
+      customer: { fullName: "Client", email: "client@example.test", address: "Rue Test 1, 1000 Bruxelles" },
       lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
     });
 
@@ -62,7 +62,7 @@ describe("invoice and credit-note issuance", () => {
       paymentId: "pay-1",
       source: "ORDER",
       totalInclVat: 121,
-      customer: { fullName: "Client", email: "client@example.test" },
+      customer: { fullName: "Client", email: "client@example.test", address: "Rue Test 1, 1000 Bruxelles" },
       lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
     })).rejects.toThrow("SELLER_LEGAL_DATA_INCOMPLETE");
     expect(tx.invoice.create).not.toHaveBeenCalled();
@@ -77,6 +77,7 @@ describe("invoice and credit-note issuance", () => {
       customer: {
         fullName: "Jane Doe",
         email: "jane@example.test",
+        address: "Rue Test 1, 1000 Bruxelles",
         isCompany: true,
         legalName: "Doe Consulting SRL",
         companyRegistrationNo: "0123.456.789",
@@ -98,7 +99,7 @@ describe("invoice and credit-note issuance", () => {
       paymentId: "pay-1",
       source: "ORDER",
       totalInclVat: 121,
-      customer: { fullName: "Jane Doe", email: "jane@example.test", isCompany: true },
+      customer: { fullName: "Jane Doe", email: "jane@example.test", address: "Rue Test 1, 1000 Bruxelles", isCompany: true },
       lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
     });
 

@@ -14,6 +14,8 @@ import {
   buildTermsAcceptanceUpdate,
   recordTermsAcceptance,
 } from "@/lib/terms-consent";
+import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
+import { hasReusableVatValidation } from "@/lib/tax-policy";
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
@@ -55,7 +57,7 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
       return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
     }
 
-    const customerValidation = validateCustomerIdentity(customerInfo);
+    const customerValidation = validateCustomerIdentity(customerInfo, { requirePhone: true });
     if (!customerValidation.success) {
       return { success: false, field: customerValidation.field, message: customerValidation.message };
     }
@@ -81,7 +83,41 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
     // Resolve or create user
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
+    const vatNumber = customerInfo.vatNumber?.trim() ? normalizeVatNumber(customerInfo.vatNumber) : null;
+    let vatValidation = null;
     let user = await prisma.user.findFirst({ where: { email, isDeleted: false } });
+
+    if (vatNumber) {
+      if (!isValidVatFormat(vatNumber)) {
+        return {
+          success: false,
+          message: "Numéro de TVA UE invalide. Ajoutez le préfixe pays (BE, FR, DE, NL…).",
+          field: "vatNumber",
+        };
+      }
+      if (!hasReusableVatValidation(user, vatNumber)) {
+        const viesResult = await verifyVatWithVies(vatNumber);
+        if (!viesResult.success) {
+          return {
+            success: false,
+            message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
+            field: "vatNumber",
+          };
+        }
+        if (!viesResult.valid) {
+          return {
+            success: false,
+            message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
+            field: "vatNumber",
+          };
+        }
+        vatValidation = {
+          vatValidatedAt: new Date(),
+          vatValidationName: viesResult.name ?? null,
+          vatValidationAddress: viesResult.address ?? null,
+        };
+      }
+    }
 
     let temporaryPassword = null;
     let isNewUser = false;
@@ -106,8 +142,11 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
           fullName: customerInfo.fullName,
           email,
           password: hashedPassword,
-          phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          phone,
           role: "CUSTOMER",
+          isCompany: Boolean(vatNumber),
+          vatNumber,
+          ...(vatValidation ?? {}),
           ...buildTermsAcceptanceUpdate(),
         },
       });
@@ -123,6 +162,11 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
         loginUrl,
       });
       sendEmail({ to: email, ...emailTemplate }).catch(() => {});
+    } else if (vatNumber && !hasReusableVatValidation(user, vatNumber)) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { isCompany: true, vatNumber, ...(vatValidation ?? {}) },
+      });
     }
 
     // Returning customer, or an account predating consent tracking.

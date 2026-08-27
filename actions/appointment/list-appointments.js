@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { ROLES, isAdminRole } from "@/lib/authorization";
+import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 
 /**
@@ -14,6 +14,9 @@ import { getCurrentStaffId } from "@/lib/route-protection";
 export async function getAllAppointments({ status, staffId, search } = {}) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié.", data: [] };
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
+    return { success: false, message: "Accès non autorisé.", data: [] };
+  }
 
   let staffScopeId = null;
   if (session.user.role === ROLES.STAFF) {

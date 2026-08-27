@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { updateSalonSchema } from "@/lib/validations/salon";
+import { verifyVatWithVies } from "@/lib/vat-validation";
 
 export async function updateSalon(input) {
   const session = await auth();
@@ -22,6 +23,20 @@ export async function updateSalon(input) {
         Object.entries(fe).map(([k, v]) => [k, v?.[0] ?? null]),
       ),
     };
+  }
+
+  if (parsed.data.vatNumber) {
+    const viesResult = await verifyVatWithVies(parsed.data.vatNumber);
+    if (!viesResult.success) {
+      return { success: false, message: viesResult.message || "Impossible de vérifier ce numéro auprès de VIES. Réessayez." };
+    }
+    if (!viesResult.valid) {
+      return {
+        success: false,
+        message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
+        errors: { vatNumber: "Numéro non reconnu par VIES." },
+      };
+    }
   }
 
   try {

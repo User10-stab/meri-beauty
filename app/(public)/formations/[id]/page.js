@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { applyVatRate, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 import { notFound } from "next/navigation";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
+import { ActivityPriceTag, ActivityDepositNote } from "@/components/activities/ActivityPrice";
 import { getAppBaseUrl } from "@/lib/site-url";
 
 const SITE_URL = getAppBaseUrl();
@@ -38,7 +40,7 @@ function buildCourseSchema(formation) {
     },
     offers: {
       "@type": "Offer",
-      price: String(formation.price ?? 0),
+      price: String(applyVatRate(Number(formation.price ?? 0), BELGIUM_VAT_RATE)),
       priceCurrency: "EUR",
       category: "paid",
       url: `${SITE_URL}/formations/${formation.id}`,
@@ -136,12 +138,6 @@ export default async function FormationDetailPage({ params }) {
 
   const isPrivate = formation.type === "PRIVATE";
   const depositPct = formation.depositPercentage ?? 50;
-  const depositAmount = (formation.price * depositPct) / 100;
-  const balanceAmount = formation.price - depositAmount;
-
-  const priceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(formation.price);
-  const depositFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(depositAmount);
-  const balanceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(balanceAmount);
 
   const courseSchema = buildCourseSchema(formation);
 
@@ -283,14 +279,7 @@ export default async function FormationDetailPage({ params }) {
                             </div>
 
                             <div className="flex flex-col items-end gap-2">
-                              {depositPct > 0 && formation.price > 0 && (
-                                <p className="text-right text-xs leading-snug text-ink/50">
-                                  Vous ne réglez aujourd&apos;hui que{" "}
-                                  <strong className="text-gold">{depositFormatted}</strong>.
-                                  <br />
-                                  Le solde de <strong className="text-ink/70">{balanceFormatted}</strong> sera à payer sur place.
-                                </p>
-                              )}
+                              <ActivityDepositNote netPrice={formation.price} depositPct={depositPct} />
                               {avail === 0 ? (
                                 <span className="inline-flex shrink-0 cursor-not-allowed items-center gap-2 rounded-full bg-gray-200 px-5 py-2.5 text-[13px] font-semibold text-gray-500">
                                   Complet
@@ -339,7 +328,7 @@ export default async function FormationDetailPage({ params }) {
                   <li className="flex items-start gap-3">
                     <EuroIcon className="mt-0.5" />
                     <div>
-                      <p className="text-sm font-semibold text-ink">{priceFormatted}</p>
+                      <ActivityPriceTag netPrice={formation.price} className="text-sm font-semibold text-ink" />
                       <p className="text-xs text-ink/45">
                         Tarif {depositPct > 0 && `(dont ${depositPct}% d'acompte à la réservation)`}
                       </p>

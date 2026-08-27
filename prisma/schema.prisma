@@ -366,7 +366,8 @@ model Activity {
   title                 String
   description           String?
   cover                 String?
-  price                 Decimal        @db.Decimal(10, 2)
+  // Net (hors TVA) — see ProductVariant.price.
+  price                 Decimal        @db.Decimal(10, 4)
   duration              Int
   language              String?
   capacity              Int
@@ -436,6 +437,20 @@ model WorkshopReservation {
   participants      String?
   notes             String?
   reminderSentAt    DateTime?
+
+  // Check-in ticket. Only issued once the reservation is CONFIRMED — i.e.
+  // once money has actually moved — so a scan is proof of payment, not proof
+  // of booking. Prefixed by domain ("A-") so one scanner can route a code to
+  // the right lookup instead of answering "introuvable" when an atelier code
+  // is scanned at the boutique till. See lib/activities/check-in-code.js.
+  checkInCode    String?   @unique
+  // Partial check-in: a 4-seat reservation whose holders arrive separately
+  // must not be burned by the first scan.
+  checkedInSeats Int       @default(0)
+  checkedInAt    DateTime?
+  checkedInById  String?
+  checkedInBy    User?     @relation("WorkshopReservationCheckedInBy", fields: [checkedInById], references: [id])
+
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
 
@@ -516,7 +531,8 @@ model Formation {
   title                 String
   description           String?
   cover                 String?
-  price                 Decimal         @db.Decimal(10, 2)
+  // Net (hors TVA) — see ProductVariant.price.
+  price                 Decimal         @db.Decimal(10, 4)
   duration              Int
   language              String?
   capacity              Int // PRIVATE: always 1 (enforced in Zod); PUBLIC: admin-set, no ceiling
@@ -582,6 +598,14 @@ model FormationReservation {
   cancelledByUserId String?
   cancelledBy       User?                      @relation("FormationReservationCancelledBy", fields: [cancelledByUserId], references: [id])
   reminderSentAt    DateTime?
+
+  // Same check-in ticket as WorkshopReservation, prefixed "F-".
+  checkInCode    String?   @unique
+  checkedInSeats Int       @default(0)
+  checkedInAt    DateTime?
+  checkedInById  String?
+  checkedInBy    User?     @relation("FormationReservationCheckedInBy", fields: [checkedInById], references: [id])
+
   createdAt         DateTime                   @default(now())
   updatedAt         DateTime                   @updatedAt
 
@@ -736,6 +760,9 @@ model User {
   cancelledReservations          WorkshopReservation[]  @relation("ReservationCancelledBy")
   formationReservations          FormationReservation[]
   cancelledFormationReservations FormationReservation[] @relation("FormationReservationCancelledBy")
+  checkedInWorkshopReservations  WorkshopReservation[]  @relation("WorkshopReservationCheckedInBy")
+  checkedInFormationReservations FormationReservation[] @relation("FormationReservationCheckedInBy")
+  checkedInAppointments          Appointment[]          @relation("AppointmentCheckedInBy")
   cancelledAppointments          Appointment[]          @relation("AppointmentCancelledBy")
   createdFormations              Formation[]            @relation("FormationCreatedBy")
   stockMovements                 InventoryMovement[]    @relation("StockMovementBy")
@@ -961,9 +988,14 @@ model ProductVariant {
   barcode     String? @unique // EAN/UPC; null until an internal code is generated
   weightGrams Int     @default(0) // Weight in grams for shipping cost calculation
 
-  price        Decimal  @db.Decimal(10, 2) // selling price, TVA included
+  // Stored NET (hors TVA). 4 decimals, not 2: the migration that converted
+  // the old VAT-inclusive prices divides by 1.21, and at 2 decimals that
+  // round-trip shifts 17 % of prices by a cent. VAT is added by
+  // applyVatRate() at the single point the applicable rate is known.
+  price        Decimal  @db.Decimal(10, 4)
   costPrice    Decimal  @db.Decimal(10, 2) // supplier cost — "prix initial"
-  comparePrice Decimal? @db.Decimal(10, 2) // struck-through price — "prix barré"
+  // Struck-through price — "prix barré". Net, like price above.
+  comparePrice Decimal? @db.Decimal(10, 4)
 
   // Available to sell = stockQuantity - reservedQuantity.
   // Reservation is NOT an InventoryMovement: it does not change stock on hand,
@@ -1320,6 +1352,9 @@ model Staff {
   isDeleted         Boolean   @default(false)
   deletedAt         DateTime?
   vatNumber         String?   
+  // Dashboard modules explicitly granted by an OWNER/ADMIN. Kept as stable
+  // string capability keys so new permissions can be added without a DB enum migration.
+  dashboardPermissions String[] @default(["APPOINTMENTS", "SERVICES", "CUSTOMERS", "FORMATIONS", "FORMATION_RESERVATIONS", "WORKSHOP_RESERVATIONS", "NEWSLETTER"])
   // Reservation Settings
   reservationConfirmationMode ReservationConfirmationMode @default(MANUAL)
   depositEnabled              Boolean                     @default(false)
@@ -1440,6 +1475,17 @@ model Appointment {
   // the same appointment on every cron tick until it starts.
   reminder24hSentAt DateTime?
   reminder2hSentAt  DateTime?
+
+  // Check-in ticket, same mechanism as WorkshopReservation/FormationReservation
+  // (see lib/activities/check-in-code.js), prefixed "R-". Only minted once the
+  // appointment reaches CONFIRMED, so holding one is evidence a deposit (or
+  // the full price) was actually taken. Unlike a reservation there is no
+  // seats concept — one appointment is one person, so check-in is a single
+  // timestamp rather than a counter.
+  checkInCode   String?   @unique
+  checkedInAt   DateTime?
+  checkedInById String?
+  checkedInBy   User?     @relation("AppointmentCheckedInBy", fields: [checkedInById], references: [id])
 
   @@index([staffServiceId, startTime]) // conflict checks + calendar
   @@index([staffId, startTime]) // cross-service overlap checks
@@ -1717,6 +1763,13 @@ model Invoice {
   vatTreatment    VatTreatment @default(DOMESTIC)
   taxNote         String?
 
+  // Set once this invoice has been created as an order in Billit
+  // (POST /v1/orders — see lib/billit.js). Billit's own dashboard is where
+  // staff finish the actual Peppol/e-mail dispatch, so these two fields only
+  // ever record "was it handed to Billit", never a delivery outcome.
+  billitOrderId String?
+  billitSentAt  DateTime?
+
   lines       InvoiceLine[]
   creditNotes CreditNote[]
 
@@ -1733,6 +1786,19 @@ model InvoiceLine {
   quantity    Int
   unitPrice   Decimal @db.Decimal(10, 2)
   lineTotal   Decimal @db.Decimal(10, 2)
+
+  // Article 226(8) of directive 2006/112/CE requires the unit price
+  // EXCLUDING VAT on every line. unitPrice above is VAT-inclusive (it is the
+  // amount actually charged), so the net twin is stored rather than left to
+  // whoever renders the document to divide.
+  //
+  // 4 decimals on the unit, 2 on the line total, and deliberately so: the
+  // catalogue is stored net at 4 decimals, so 21.4463 -> 25.95 -> 21.4463
+  // round-trips exactly and the printed unit price is the price that was
+  // actually set. The line total is a money figure instead, allocated by
+  // issueInvoice so the lines sum to Invoice.subtotalExclVat to the cent.
+  unitPriceExclVat Decimal @default(0) @db.Decimal(10, 4)
+  lineTotalExclVat Decimal @default(0) @db.Decimal(10, 2)
 }
 
 // CREDIT NOTE
@@ -1930,13 +1996,10 @@ model Newsletter {
   salonId String
   salon   Salon  @relation(fields: [salonId], references: [id], onDelete: Cascade)
 
-  // Attribution only, not an audience filter (client decision, 10 Aug 2026):
-  // any STAFF member can author and send a newsletter, and it still goes to
-  // every newsletter-subscribed customer of the salon, same audience as an
-  // OWNER/ADMIN-authored one. Null = created by OWNER/ADMIN; non-null =
-  // that staff member authored it. See actions/newsletter/*.js — a STAFF
-  // author may only edit/delete/send their OWN still-DRAFT newsletters,
-  // OWNER/ADMIN may act on any.
+  // Null = created by OWNER/ADMIN; non-null = that staff member authored it.
+  // STAFF may only edit/delete/send their own drafts, and sendNewsletter
+  // limits their audience to opted-in customers linked to their confirmed or
+  // completed appointments/formations. OWNER/ADMIN retain the salon-wide audience.
   createdByStaffId String?
   createdByStaff   Staff?  @relation(fields: [createdByStaffId], references: [id])
 

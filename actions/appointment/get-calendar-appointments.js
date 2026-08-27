@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole, ROLES } from "@/lib/authorization";
+import { isAdminRole, ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 
 /**
@@ -20,6 +20,10 @@ export async function getCalendarAppointments({ from, to }) {
 
     if (!session?.user) {
       return { success: false, message: "Authentification requise" };
+    }
+
+    if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
+      return { success: false, message: "Permissions insuffisantes" };
     }
 
     const { role } = session.user;

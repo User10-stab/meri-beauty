@@ -20,6 +20,7 @@ import {
   buildRentalRequestSubmittedNotification,
   getRentalRequestNotificationRecipients,
 } from "@/lib/notifications";
+import { verifyVatWithVies } from "@/lib/vat-validation";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 // Admin/owner only — see the matching note in [id]/route.js. Any STAFF
@@ -138,42 +139,36 @@ export async function POST(request) {
   const { rentalType, startDate, endDate, commissionType, specialty, vatNumber, message } =
     validationResult.data;
 
+  let vatValidation = null;
+  if (vatNumber) {
+    const viesResult = await verifyVatWithVies(vatNumber);
+    if (!viesResult.success) {
+      return badRequest(viesResult.message || "Impossible de vérifier ce numéro auprès de VIES. Réessayez.");
+    }
+    if (!viesResult.valid) {
+      return badRequest("Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.");
+    }
+    vatValidation = {
+      vatValidatedAt: new Date(),
+      vatValidationName: viesResult.name ?? null,
+      vatValidationAddress: viesResult.address ?? null,
+    };
+  }
+
   // ── Create rental request ────────────────────────────────────────────────
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // Update the account's VAT number, and drop the verification proof
-      // whenever the number actually changes.
-      //
-      // This used to write `vatNumber` on its own. User.vatNumber is paired
-      // with vatValidatedAt / vatValidationName / vatValidationAddress, set
-      // by the VIES lookup at signup — and lib/tax-policy.js#hasRecentVatValidation
-      // reads vatValidatedAt to decide whether a sale qualifies for
-      // reverse-charge. Replacing the number while leaving the old timestamp
-      // in place made a never-verified number look verified, on real invoices.
-      // No malice needed: correcting a typo here was enough to inherit the
-      // previous number's verification.
-      //
-      // Clearing rather than re-verifying is deliberate — this endpoint is a
-      // lead form, and a VIES outage must not cost Marie a rental enquiry.
-      // The number is format-checked by the schema; re-verification belongs
-      // where the contract is signed.
+      // The rental form is also a VAT entry point, so VIES proof and the
+      // number are always written together.
       if (vatNumber && session.user.id) {
-        const current = await tx.user.findUnique({
+        await tx.user.update({
           where: { id: session.user.id },
-          select: { vatNumber: true },
+          data: {
+            isCompany: true,
+            vatNumber,
+            ...vatValidation,
+          },
         });
-
-        if (current?.vatNumber !== vatNumber) {
-          await tx.user.update({
-            where: { id: session.user.id },
-            data: {
-              vatNumber,
-              vatValidatedAt: null,
-              vatValidationName: null,
-              vatValidationAddress: null,
-            },
-          });
-        }
       }
 
       const rentalRequest = await tx.rentalRequest.create({

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isAdminRole, hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 
 const sessionSchema = z.object({
@@ -55,7 +55,7 @@ const updateActivitySchema = activitySchema.extend({
 async function requireActivityAccess(activityId, { requireOwnerForEdit = false } = {}) {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.WORKSHOPS)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.WORKSHOPS))) {
     return { error: "Non autorisé." };
   }
   if (isAdminRole(session.user.role)) return { session };

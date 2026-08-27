@@ -2,20 +2,19 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
 import { newsletterEmail } from "@/lib/email-templates";
 import { buildUnsubscribeUrl } from "@/lib/newsletter-consent";
 import { getAppBaseUrl } from "@/lib/site-url";
 import { revalidatePath } from "next/cache";
+import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
 
 /**
- * Sends a draft newsletter to all subscribed customers of the salon —
- * every OWNER/ADMIN/STAFF-authored newsletter reaches the same salon-wide
- * audience (client decision, 10 Aug 2026 — createdByStaffId is attribution
- * only, not an audience filter). A STAFF author may only send their own
- * drafts; OWNER/ADMIN may send any.
+ * OWNER/ADMIN sends to all opted-in salon customers. STAFF sends only to
+ * opted-in customers linked to their confirmed/completed appointments or
+ * formations, and may only send their own drafts.
  * Creates NewsletterRecipient records for each recipient.
  *
  * @param {string} newsletterId
@@ -23,7 +22,7 @@ import { revalidatePath } from "next/cache";
  */
 export async function sendNewsletter(newsletterId) {
   const session = await auth();
-  if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.NEWSLETTER)) {
+  if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.NEWSLETTER))) {
     return { success: false, message: "Permissions insuffisantes" };
   }
 
@@ -49,8 +48,9 @@ export async function sendNewsletter(newsletterId) {
       };
     }
 
+    let currentStaffId = null;
     if (session.user.role === "STAFF") {
-      const currentStaffId = await getCurrentStaffId();
+      currentStaffId = await getCurrentStaffId();
       if (newsletter.createdByStaffId !== currentStaffId) {
         return { success: false, message: "Vous ne pouvez envoyer que vos propres newsletters." };
       }
@@ -62,6 +62,15 @@ export async function sendNewsletter(newsletterId) {
         newsletterSubscribed: true,
         isDeleted: false,
         role: "CUSTOMER",
+        ...(currentStaffId
+          ? {
+              OR: staffCustomerRelationshipFilters({
+                staffId: currentStaffId,
+                staffUserId: session.user.id,
+                marketingEligibleOnly: true,
+              }),
+            }
+          : {}),
       },
       select: {
         id: true,

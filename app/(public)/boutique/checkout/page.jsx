@@ -30,7 +30,27 @@ export default async function CheckoutPage() {
       // isCompany/vatNumber/vatValidatedAt feed CheckoutPageClient's live VAT
       // preview (see resolveGoodsVatPolicy) — display only, the real
       // computation still happens server-side in createOrderFromCart.
-      select: { id: true, fullName: true, email: true, phone: true, isCompany: true, vatNumber: true, vatValidatedAt: true },
+      //
+      // The address fields let the client tell "already on file" apart from
+      // "never entered" for a signed-in customer — without them here, the
+      // page could not require the billing address from an account that
+      // still lacks one, and createOrderFromCart's server-side ADDRESS_REQUIRED
+      // check would be the only thing standing between checkout and a Stripe
+      // charge for an order that can never be invoiced.
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        isCompany: true,
+        vatNumber: true,
+        vatValidatedAt: true,
+        addressLine1: true,
+        addressLine2: true,
+        addressCity: true,
+        addressPostalCode: true,
+        addressCountry: true,
+      },
     });
     if (user) customerSession = user;
   }

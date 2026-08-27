@@ -1,6 +1,6 @@
 import { Suspense } from "react";
-import { requireRole } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getActivities } from "@/actions/workshops/get-activities";
 import { getAnimators } from "@/actions/workshops/get-animators";
 import { WorkshopsPageClient } from "@/components/dashboard/workshops/WorkshopsPageClient";
@@ -13,7 +13,7 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function WorkshopAnimatorsPage() {
-  const { user } = await requireRole(DASHBOARD_PERMISSIONS.WORKSHOPS);
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.WORKSHOPS);
 
   const [activitiesResult, animatorsResult] = await Promise.all([
     getActivities(),

@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { getDashboardPermissions, STAFF_PERMISSIONS } from "@/lib/authorization";
 
 const RESULT_LIMIT = 5;
 
@@ -22,10 +22,10 @@ export async function globalDashboardSearch(query) {
   const q = (query ?? "").trim();
   if (q.length < 2) return { success: true, results: [] };
 
-  const role = session.user.role;
+  const permissions = await getDashboardPermissions(session.user);
   const results = [];
 
-  if (hasPermission(role, DASHBOARD_PERMISSIONS.CUSTOMERS)) {
+  if (permissions.includes(STAFF_PERMISSIONS.CUSTOMERS)) {
     const customers = await prisma.user.findMany({
       where: {
         role: "CUSTOMER",
@@ -49,7 +49,7 @@ export async function globalDashboardSearch(query) {
     );
   }
 
-  if (hasPermission(role, DASHBOARD_PERMISSIONS.ORDERS)) {
+  if (permissions.includes(STAFF_PERMISSIONS.ORDERS)) {
     const numericQuery = /^\d+$/.test(q) ? Number(q) : null;
     const orders = await prisma.order.findMany({
       where: {
@@ -73,7 +73,7 @@ export async function globalDashboardSearch(query) {
     );
   }
 
-  if (hasPermission(role, DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK)) {
+  if (permissions.includes(STAFF_PERMISSIONS.BOUTIQUE_STOCK)) {
     const variants = await prisma.productVariant.findMany({
       where: {
         isDeleted: false,
@@ -96,7 +96,7 @@ export async function globalDashboardSearch(query) {
     );
   }
 
-  if (hasPermission(role, DASHBOARD_PERMISSIONS.APPOINTMENTS)) {
+  if (permissions.includes(STAFF_PERMISSIONS.APPOINTMENTS)) {
     const appointments = await prisma.appointment.findMany({
       where: {
         isDeleted: false,

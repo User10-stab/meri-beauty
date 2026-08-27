@@ -9,11 +9,22 @@ import bcrypt from "bcrypt";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/lib/promo-codes";
-import { isValidVatFormat, verifyVatWithVies } from "@/lib/vat-validation";
+import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import {
+  buildFormationReservationCreatedNotification,
+  createNotificationsBulk,
+  getActivityNotificationRecipients,
+} from "@/lib/notifications";
+import {
+  hasReusableVatValidation,
+  applyVatRate,
+  resolveServiceVatPolicy,
+} from "@/lib/tax-policy";
 import {
   TERMS_CONSENT_REQUIRED_MESSAGE,
   buildTermsAcceptanceUpdate,
@@ -200,7 +211,7 @@ export async function createFormationReservation(data) {
     let { sessionId, formationId, customerInfo, paymentMethod, isPriority, waitingListEntryId, promoCode } = data;
     const isFullPayment = paymentMethod === "FULL";
 
-    if (!sessionId || !formationId || !customerInfo?.email) {
+    if (!sessionId || !formationId || !customerInfo) {
       return { success: false, message: "Données manquantes." };
     }
 
@@ -211,7 +222,25 @@ export async function createFormationReservation(data) {
       return { success: false, message: TERMS_CONSENT_REQUIRED_MESSAGE };
     }
 
-    const customerValidation = validateCustomerIdentity(customerInfo);
+    const authSession = await auth();
+    let authenticatedUser = null;
+    if (authSession?.user?.id) {
+      authenticatedUser = await prisma.user.findFirst({
+        where: { id: authSession.user.id, isDeleted: false, isActive: true },
+      });
+      if (!authenticatedUser) {
+        return { success: false, message: "Votre session n'est plus valide. Veuillez vous reconnecter." };
+      }
+      const storedPhone = authenticatedUser.phone?.startsWith("temp-") ? "" : (authenticatedUser.phone ?? "");
+      customerInfo = {
+        ...customerInfo,
+        fullName: authenticatedUser.fullName,
+        email: authenticatedUser.email,
+        phone: storedPhone || customerInfo.phone,
+      };
+    }
+
+    const customerValidation = validateCustomerIdentity(customerInfo, { requirePhone: true });
     if (!customerValidation.success) {
       return { success: false, field: customerValidation.field, message: customerValidation.message };
     }
@@ -263,7 +292,8 @@ export async function createFormationReservation(data) {
     // own this email.
     const email = customerInfo.email.trim().toLowerCase();
     const phone = customerInfo.phone?.trim() || "";
-    const vatNumber = customerInfo.vatNumber?.trim() || null;
+    const vatNumber = customerInfo.vatNumber?.trim() ? normalizeVatNumber(customerInfo.vatNumber) : null;
+    let user = authenticatedUser ?? await prisma.user.findFirst({ where: { email, isDeleted: false } });
     // Never persist a VAT number nobody has confirmed is real — it ends up
     // printed on the invoice as the customer's basis for a tax deduction.
     // Same strict gate as the profile-settings save (updateMyVatNumber):
@@ -285,40 +315,55 @@ export async function createFormationReservation(data) {
           field: "vatNumber",
         };
       }
-      const viesResult = await verifyVatWithVies(vatNumber);
-      if (!viesResult.success) {
-        return {
-          success: false,
-          message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
-          field: "vatNumber",
-        };
-      }
-      if (!viesResult.valid) {
-        return {
-          success: false,
-          message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
-          field: "vatNumber",
-        };
-      }
       vatNumberToSave = vatNumber;
-      vatValidation = {
-        vatValidatedAt: new Date(),
-        vatValidationName: viesResult.name ?? null,
-        vatValidationAddress: viesResult.address ?? null,
-      };
-    }
-    let user = await prisma.user.findFirst({ where: { email, isDeleted: false } });
-
-    if (!user) {
-      if (phone) {
-        const phoneExists = await prisma.user.findFirst({ where: { phone, isDeleted: false } });
-        if (phoneExists) {
+      if (!hasReusableVatValidation(user, vatNumber)) {
+        const viesResult = await verifyVatWithVies(vatNumber);
+        if (!viesResult.success) {
           return {
             success: false,
-            message: "Ce numéro de téléphone est déjà associé à un autre compte. Veuillez en utiliser un autre ou vous connecter.",
-            field: "phone",
+            message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
+            field: "vatNumber",
           };
         }
+        if (!viesResult.valid) {
+          return {
+            success: false,
+            message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
+            field: "vatNumber",
+          };
+        }
+        vatValidation = {
+          vatValidatedAt: new Date(),
+          vatValidationName: viesResult.name ?? null,
+          vatValidationAddress: viesResult.address ?? null,
+        };
+      }
+    }
+
+    const needsPhoneBackfill = Boolean(authenticatedUser)
+      && (!authenticatedUser.phone || authenticatedUser.phone.startsWith("temp-"));
+    if (needsPhoneBackfill) {
+      const phoneExists = await prisma.user.findFirst({
+        where: { phone, isDeleted: false, NOT: { id: authenticatedUser.id } },
+      });
+      if (phoneExists) {
+        return {
+          success: false,
+          message: "Ce numéro de téléphone est déjà associé à un autre compte.",
+          field: "phone",
+        };
+      }
+      user = await prisma.user.update({ where: { id: authenticatedUser.id }, data: { phone } });
+    }
+
+    if (!user) {
+      const phoneExists = await prisma.user.findFirst({ where: { phone, isDeleted: false } });
+      if (phoneExists) {
+        return {
+          success: false,
+          message: "Ce numéro de téléphone est déjà associé à un autre compte. Veuillez en utiliser un autre ou vous connecter.",
+          field: "phone",
+        };
       }
 
       // Throwaway placeholder — never shown to anyone. The real, usable
@@ -330,20 +375,21 @@ export async function createFormationReservation(data) {
           fullName: customerInfo.fullName,
           email,
           password: placeholderHash,
-          phone: phone || `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          phone,
           role: "CUSTOMER",
+          isCompany: Boolean(vatNumberToSave),
           vatNumber: vatNumberToSave,
           ...(vatValidation ?? {}),
           ...buildTermsAcceptanceUpdate(),
         },
       });
-    } else if (vatNumberToSave && user.vatNumber !== vatNumberToSave) {
+    } else if (vatNumberToSave && (user.vatNumber !== vatNumberToSave || !user.isCompany || vatValidation)) {
       // B2B customer supplying (or updating) their VAT number for invoicing —
       // never clear it just because a later booking leaves the field blank.
       // The number and its VIES proof are always written together.
       user = await prisma.user.update({
         where: { id: user.id },
-        data: { vatNumber: vatNumberToSave, ...(vatValidation ?? {}) },
+        data: { isCompany: true, vatNumber: vatNumberToSave, ...(vatValidation ?? {}) },
       });
     }
 
@@ -353,7 +399,9 @@ export async function createFormationReservation(data) {
     // Calculate pricing
     const rawDepositPct = Number(formation.depositPercentage ?? 50);
     const depositPct = Number.isFinite(rawDepositPct) ? Math.min(100, Math.max(0, rawDepositPct)) : 0;
-    const unitPrice = Number(formation.price);
+    const vatPolicy = resolveServiceVatPolicy({ customer: user });
+    const catalogueUnitPrice = Number(formation.price);
+    const unitPrice = applyVatRate(catalogueUnitPrice, vatPolicy.vatRate);
     const totalPrice = unitPrice * seatsCount;
 
     // Re-validated here regardless of the client's live preview — never
@@ -436,7 +484,7 @@ export async function createFormationReservation(data) {
             await tx.promoCode.update({ where: { id: promoCodeId }, data: { usedCount: { increment: 1 } } });
           }
 
-          return tx.formationReservation.create({
+          const created = await tx.formationReservation.create({
             data: {
               sessionId,
               customerId: user.id,
@@ -450,6 +498,28 @@ export async function createFormationReservation(data) {
               holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000), // Expiration dans 15 minutes
             },
           });
+
+          const recipientIds = await getActivityNotificationRecipients(
+            session.animatorId,
+            STAFF_PERMISSIONS.FORMATION_RESERVATIONS,
+            { tx }
+          );
+          if (recipientIds.length > 0) {
+            await createNotificationsBulk(
+              recipientIds.map((userId) =>
+                buildFormationReservationCreatedNotification({
+                  userId,
+                  reservationId: created.id,
+                  customerName: user.fullName,
+                  activityTitle: formation.title,
+                  seatsCount,
+                })
+              ),
+              { tx }
+            );
+          }
+
+          return created;
         });
       } catch (err) {
         if (typeof err.message === "string" && err.message.startsWith("SOLD_OUT:")) {

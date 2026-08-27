@@ -3,7 +3,7 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { isAdminRole, ROLES } from "@/lib/authorization";
+import { isAdminRole, ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { reportPublicDataError } from "@/lib/prisma-public-fallback";
 
@@ -28,6 +28,11 @@ export async function getServices() {
         data: [],
         message: "Non authentifié",
       };
+    }
+
+
+    if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
+      return { success: false, data: [], message: "Permissions insuffisantes" };
     }
 
     const userRole = session.user.role;

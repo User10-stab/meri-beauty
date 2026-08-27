@@ -130,7 +130,7 @@ const EMPTY_FORM = {
   duration: "",
   capacity: "",
   language: "Français",
-  animatorId: "",
+  staffUserId: "",
   status: "DRAFT",
   startDate: "",
   endDate: "",
@@ -138,7 +138,7 @@ const EMPTY_FORM = {
   depositPercentage: 50,
 };
 
-export function CreateFormationModal({ open, onClose, onCreated, formation, animators = [] }) {
+export function CreateFormationModal({ open, onClose, onCreated, formation, staffOptions = [], canAssignStaff = false }) {
   const t = useTranslations("dashboardFormations.modal");
   const isEditing = !!formation;
   const [loading, startLoading] = useTransition();
@@ -148,7 +148,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
 
   const isPrivate = form.type === "PRIVATE";
 
-  function addSession(session = { startDate: "", endDate: "", capacity: "", animatorId: "", registrationDeadline: "" }) {
+  function addSession(session = { startDate: "", endDate: "", capacity: "", staffUserId: "", registrationDeadline: "" }) {
     setSessions((prev) => [...prev, session]);
   }
 
@@ -173,7 +173,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
         duration: formation.duration ?? "",
         capacity: formation.capacity ?? "",
         language: formation.language ?? "Français",
-        animatorId: formation.animatorId ?? "",
+        staffUserId: staffOptions.find((staff) => staff.animatorId === formation.animatorId)?.id ?? "",
         status: formation.status ?? "DRAFT",
         startDate: firstSession?.startDate ? new Date(firstSession.startDate).toISOString().slice(0, 16) : "",
         endDate: firstSession?.endDate ? new Date(firstSession.endDate).toISOString().slice(0, 16) : "",
@@ -194,7 +194,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
             startDate: s.startDate ? new Date(s.startDate).toISOString().slice(0, 16) : "",
             endDate: s.endDate ? new Date(s.endDate).toISOString().slice(0, 16) : "",
             capacity: String(s.capacity ?? ""),
-            animatorId: s.animatorId ?? "",
+            staffUserId: staffOptions.find((staff) => staff.animatorId === s.animatorId)?.id ?? "",
             registrationDeadline: s.registrationDeadline
               ? new Date(s.registrationDeadline).toISOString().slice(0, 16)
               : "",
@@ -208,7 +208,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
       setSessions([]);
     }
     setErrors({});
-  }, [open, formation]);
+  }, [open, formation, staffOptions]);
 
   if (!open) return null;
 
@@ -231,7 +231,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
               startDate: s.startDate,
               endDate: s.endDate || null,
               capacity: isPrivate ? 1 : s.capacity === "" ? capacity || 0 : parseInt(s.capacity, 10),
-              animatorId: s.animatorId || null,
+              staffUserId: s.staffUserId || null,
               registrationDeadline: s.registrationDeadline || null,
             }))
           : form.startDate
@@ -240,7 +240,7 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                   startDate: form.startDate,
                   endDate: form.endDate || null,
                   capacity,
-                  animatorId: null,
+                  staffUserId: form.staffUserId || null,
                   registrationDeadline: null,
                 },
               ]
@@ -439,21 +439,23 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
               <FieldError message={errors.language} />
             </ModalField>
 
-            <ModalField label={t("animatorLabel")}>
-              <select
-                value={form.animatorId}
-                onChange={(e) => setForm((prev) => ({ ...prev, animatorId: e.target.value }))}
-                className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-              >
-                <option value="">{t("animatorPlaceholder")}</option>
-                {animators.map((animator) => (
-                  <option key={animator.id} value={animator.id}>
-                    {animator.name}
-                  </option>
-                ))}
-              </select>
-              <FieldError message={errors.animatorId} />
-            </ModalField>
+            {canAssignStaff ? (
+              <ModalField label={t("animatorLabel")}>
+                <select
+                  value={form.staffUserId}
+                  onChange={(e) => setForm((prev) => ({ ...prev, staffUserId: e.target.value }))}
+                  className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                >
+                  <option value="">{t("animatorPlaceholder")}</option>
+                  {staffOptions.map((staff) => (
+                    <option key={staff.id} value={staff.id}>
+                      {staff.name}
+                    </option>
+                  ))}
+                </select>
+                <FieldError message={errors.staffUserId} />
+              </ModalField>
+            ) : null}
           </div>
 
           {/* Status & Options */}
@@ -567,20 +569,22 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, anim
                       </ModalField>
                     </div>
 
-                    <ModalField label={t("sessionAnimatorLabel")}>
-                      <select
-                        value={session.animatorId}
-                        onChange={(e) => updateSession(index, "animatorId", e.target.value)}
-                        className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
-                      >
-                        <option value="">{t("sessionAnimatorPlaceholder")}</option>
-                        {animators.map((animator) => (
-                          <option key={animator.id} value={animator.id}>
-                            {animator.name}
-                          </option>
-                        ))}
-                      </select>
-                    </ModalField>
+                    {canAssignStaff ? (
+                      <ModalField label={t("sessionAnimatorLabel")}>
+                        <select
+                          value={session.staffUserId}
+                          onChange={(e) => updateSession(index, "staffUserId", e.target.value)}
+                          className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 bg-white outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                        >
+                          <option value="">{t("sessionAnimatorPlaceholder")}</option>
+                          {staffOptions.map((staff) => (
+                            <option key={staff.id} value={staff.id}>
+                              {staff.name}
+                            </option>
+                          ))}
+                        </select>
+                      </ModalField>
+                    ) : null}
                   </div>
                 ))}
               </>

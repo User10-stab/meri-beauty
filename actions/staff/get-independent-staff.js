@@ -29,6 +29,7 @@ export async function getIndependentStaff() {
         hireDate: true,
         createdAt: true,
         updatedAt: true,
+        dashboardPermissions: true,
         stripeAccountId: true,
         stripeAccountType: true,
         stripeChargesEnabled: true,
@@ -80,6 +81,7 @@ export async function getIndependentStaff() {
       hireDate: s.hireDate ? s.hireDate.toISOString() : null,
       createdAt: s.createdAt.toISOString(),
       updatedAt: s.updatedAt.toISOString(),
+      dashboardPermissions: s.dashboardPermissions,
       // Stripe Connect data
       stripeAccountId: s.stripeAccountId,
       stripeAccountType: s.stripeAccountType,

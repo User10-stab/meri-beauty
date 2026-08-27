@@ -26,6 +26,8 @@ import { createStaffFromRental } from "@/actions/staff/create-staff-from-rental"
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { LanguageTagInput } from "./LanguageTagInput";
 import { ServiceMultiSelect } from "./ServiceMultiSelect";
+import { StaffPermissionsField } from "./StaffPermissionsField";
+import { DEFAULT_STAFF_PERMISSIONS } from "@/lib/authorization";
 import Button from "@/components/ui/Button";
 
 // ─── Reusable field primitives ────────────────────────────────────────────────
@@ -228,6 +230,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       hireDate:          "",
       vatNumber:         "",
       serviceIds:        [],
+      dashboardPermissions: initialValues.dashboardPermissions ?? [...DEFAULT_STAFF_PERMISSIONS],
       contract: {
         fixedRent: initialValues.contract?.fixedRent ?? "",
         startDate: initialValues.contract?.startDate ?? "",
@@ -493,6 +496,22 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
           </div>
 
           {/* ── Section 4: Contrat (obligatoire, toujours FIXED_RENT) ── */}
+          <div>
+            <SectionTitle icon={Layers}>Autorisations du tableau de bord</SectionTitle>
+            <Controller
+              name="dashboardPermissions"
+              control={control}
+              render={({ field }) => (
+                <StaffPermissionsField
+                  value={field.value ?? []}
+                  onChange={field.onChange}
+                  error={errors.dashboardPermissions?.message}
+                />
+              )}
+            />
+          </div>
+
+          {/* ── Section 5: Contrat (obligatoire, toujours FIXED_RENT) ── */}
           <div>
             <div className="mb-4 flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50">

@@ -69,10 +69,20 @@ describe("staff can add a manual appointment to the calendar", () => {
     expect(action).not.toMatch(/service:\s*\{\s*isActive:\s*true\s*\}/);
   });
 
-  test("it creates the appointment CONFIRMED with no Payment row — same shape as a CASH_ONLY booking", () => {
+  // Used to assert a hardcoded status: "CONFIRMED". That literal is gone on
+  // purpose — the action now derives the status from the shared payment
+  // decision engine (computePaymentDecision -> appointmentStatusBeforePayment)
+  // instead of always confirming, so a staff member whose services require an
+  // online payment no longer gets a confirmed appointment with nothing paid.
+  // Pinning the literal again would re-lock the bug; pin the delegation.
+  test("it derives the status from the shared payment decision, never a hardcoded CONFIRMED", () => {
     const createIdx = action.indexOf("const appointment = await prisma.appointment.create");
     const block = action.slice(createIdx, createIdx + 400);
-    expect(block).toContain('status: "CONFIRMED"');
+    expect(block).toContain("status: paymentDecision.appointmentStatusBeforePayment");
+    expect(block).not.toContain('status: "CONFIRMED"');
+  });
+
+  test("it still creates no Payment row — the money side stays out of manual creation", () => {
     expect(action).not.toContain("prisma.payment.create");
   });
 

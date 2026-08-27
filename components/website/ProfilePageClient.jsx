@@ -488,7 +488,14 @@ function VatNumberCard({ initialVatNumber }) {
 }
 
 function BillingProfileCard({ initialBillingProfile }) {
-  const empty = { companyLegalName: "", companyRegistrationNo: "", companyLegalForm: "", billingContactName: "", purchaseOrderReference: "" };
+  const empty = {
+    companyLegalName: "",
+    companyRegistrationNo: "",
+    companyLegalForm: "",
+    billingContactName: "",
+    purchaseOrderReference: "",
+    peppolParticipantId: "",
+  };
   const initial = { ...empty, ...(initialBillingProfile ?? {}) };
   const [profile, setProfile] = useState(initial);
   const [saved, setSaved] = useState(initial);
@@ -571,6 +578,23 @@ function BillingProfileCard({ initialBillingProfile }) {
               placeholder="Référence bon de commande (optionnel)"
               className="h-10 w-full border border-neutral-200 px-4 text-sm focus:border-gold focus:outline-none"
             />
+
+            <div>
+              <input
+                type="text"
+                value={profile.peppolParticipantId ?? ""}
+                onChange={(e) => update("peppolParticipantId", e.target.value)}
+                placeholder="Identifiant Peppol (optionnel, ex. 9925:BE0823758741)"
+                className="h-10 w-full border border-neutral-200 px-4 text-sm focus:border-gold focus:outline-none"
+              />
+              {errors.peppolParticipantId ? (
+                <p className="mt-1 text-xs text-red-600">{errors.peppolParticipantId}</p>
+              ) : (
+                <p className="mt-1 text-xs text-ink/40">
+                  Pour recevoir vos factures directement sur le réseau Peppol plutôt que par e-mail.
+                </p>
+              )}
+            </div>
 
             <div className="flex justify-end">
               <button

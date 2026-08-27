@@ -1,11 +1,13 @@
 "use server";
 
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
+import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { shippingQuoteRequestOwnerEmail, shippingQuoteRequestConfirmationEmail } from "@/lib/email-templates";
 import { shippingQuoteRequestSchema } from "@/lib/validations/commerce";
 import { calculateShippingCost, calculateTotalWeight, getShippingDetails } from "@/lib/shipping";
+import { applyVatRate, resolveGoodsVatPolicy } from "@/lib/tax-policy";
 
 /**
  * Get current cart shipping calculation for checkout display
@@ -27,15 +29,23 @@ export async function getCartShippingCost() {
       return { success: true, data: { cost: 0, isFree: true, details: null } };
     }
 
+    const session = await auth();
+    const customer = session?.user?.role === "CUSTOMER"
+      ? await prisma.user.findUnique({
+          where: { id: session.user.id },
+          select: { isCompany: true, vatNumber: true, vatValidatedAt: true },
+        })
+      : null;
+    const vatPolicy = resolveGoodsVatPolicy({ customer });
     const subtotal = fullCart.items.reduce(
-      (sum, item) => sum + Number(item.variant.price) * item.quantity,
+      (sum, item) => sum + applyVatRate(item.variant.price, vatPolicy.vatRate) * item.quantity,
       0
     );
     const totalWeight = calculateTotalWeight(fullCart.items);
-    const cost = calculateShippingCost(totalWeight, subtotal);
+    const catalogueCost = calculateShippingCost(totalWeight, subtotal);
 
     // Handle >30kg orders that require manual shipping quote
-    if (cost === "QUOTE_REQUIRED") {
+    if (catalogueCost === "QUOTE_REQUIRED") {
       return {
         success: false,
         message: "Votre commande dépasse 30 kg. Contactez-nous pour un devis de livraison personnalisé.",
@@ -49,14 +59,21 @@ export async function getCartShippingCost() {
     }
 
     const details = getShippingDetails(totalWeight, subtotal);
+    const cost = applyVatRate(catalogueCost, vatPolicy.vatRate);
 
     return {
       success: true,
       data: {
-        cost,
         subtotal,
         totalWeight,
-        ...details
+        ...details,
+        cost,
+        // The carrier grid is already net, so the net figure is the one that
+        // was read from it — not `cost` divided back down. The cart prints an
+        // HT / TVA / TTC breakdown and needs carriage on the same footing as
+        // the goods; deriving it here a second time would round twice.
+        costExclVat: catalogueCost,
+        vatRate: vatPolicy.vatRate,
       }
     };
   } catch (error) {

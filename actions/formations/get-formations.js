@@ -3,19 +3,17 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 
 /**
  * Récupère toutes les formations pour le tableau de bord.
- * Accessible au staff et aux administrateurs — le staff voit toutes les
- * formations (y compris celles créées par d'autres), mais ne peut modifier/
- * supprimer que les siennes (voir requireFormationAccess dans create-formation.js).
+ * OWNER/ADMIN voient tout. Un STAFF ne voit que les formations qu'il a créées.
  */
 export async function getFormations() {
   try {
     const session = await auth();
 
-    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.FORMATIONS)) {
+    if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATIONS))) {
       return {
         success: false,
         data: [],
@@ -24,6 +22,7 @@ export async function getFormations() {
     }
 
     const formations = await prisma.formation.findMany({
+      where: session.user.role === "STAFF" ? { createdById: session.user.id } : {},
       orderBy: { createdAt: "desc" },
       include: {
         animator: true,

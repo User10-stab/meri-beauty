@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Mail, Phone, MapPin, Truck, KeyRound, Download, FileMinus } from "lucide-react";
+import { ArrowLeft, Loader2, Mail, Phone, MapPin, Truck, KeyRound, Download, FileMinus, Printer } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PickupConfirmDialog } from "@/components/dashboard/boutique/PickupConfirmDialog";
@@ -275,10 +275,21 @@ export function OrderDetailClient({ order }) {
             )}
           </div>
 
-          {/* Documents */}
-          {order.invoice && (
-            <div className="space-y-2 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-              <h2 className="mb-1 font-semibold text-gray-800 dark:text-white">Documents</h2>
+          {/* Documents. Not gated on an invoice existing: the receipt is
+              re-rendered on demand from the order, and a walk-in sale has no
+              invoice at all yet still needs its slip reprintable. */}
+          <div className="space-y-2 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+            <h2 className="mb-1 font-semibold text-gray-800 dark:text-white">Documents</h2>
+              <a
+                href={`/api/orders/${order.id}/ticket`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] dark:border-dark-3 dark:text-dark-6"
+              >
+                <span>Reçu / ticket de caisse</span>
+                <Printer size={14} />
+              </a>
+              {order.invoice && (
               <a
                 href={`/api/invoices/${order.invoice.id}/pdf`}
                 target="_blank"
@@ -288,6 +299,7 @@ export function OrderDetailClient({ order }) {
                 <span>Facture {order.invoice.number}</span>
                 <Download size={14} />
               </a>
+              )}
               {order.creditNotes.map((cn) => (
                 <a
                   key={cn.id}
@@ -300,8 +312,7 @@ export function OrderDetailClient({ order }) {
                   <FileMinus size={14} />
                 </a>
               ))}
-            </div>
-          )}
+          </div>
 
           {/* Returns */}
           {order.returnRequests?.length > 0 && (

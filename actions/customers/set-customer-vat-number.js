@@ -4,21 +4,12 @@ import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
-import { isValidVatFormat } from "@/lib/vat-validation";
+import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
 import { writeAuditLog, AUDIT_ACTIONS } from "@/lib/audit-log";
 
 /**
- * Admin override: manually accept a customer's B2B VAT number even when
- * VIES rejected it or was unreachable. Client decision (Marie, form
- * response 10 Aug 2026): the customer self-service flow
- * (updateMyVatNumber, actions/customer/settings.js) hard-blocks on a live
- * VIES confirmation with no way through for a customer whose number is
- * genuinely active but VIES is slow/down or the registration is too recent
- * to show up yet — staff need a way to unblock that from the dashboard.
- *
- * Format/checksum is still enforced (isValidVatFormat) — only the live VIES
- * lookup is skipped. Every use is written to the audit log since it's a
- * deliberate bypass of the normal verification step, not routine editing.
+ * Admin customer VAT editing follows the same VIES gate as self-service.
+ * A number is never marked as validated from format alone.
  *
  * @param {string} customerId
  * @param {string} vatNumber - pass "" to clear a previously saved number.
@@ -33,9 +24,20 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
     return { success: false, message: "Client manquant." };
   }
 
-  const trimmed = vatNumber?.trim() || null;
+  const trimmed = vatNumber?.trim() ? normalizeVatNumber(vatNumber) : null;
   if (trimmed && !isValidVatFormat(trimmed)) {
     return { success: false, message: "Numéro de TVA UE invalide. Ajoutez le préfixe pays (BE, FR, DE, NL…)." };
+  }
+
+  let viesResult = null;
+  if (trimmed) {
+    viesResult = await verifyVatWithVies(trimmed);
+    if (!viesResult.success) {
+      return { success: false, message: viesResult.message || "Impossible de vérifier ce numéro auprès de VIES. Réessayez." };
+    }
+    if (!viesResult.valid) {
+      return { success: false, message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES." };
+    }
   }
 
   try {
@@ -49,11 +51,11 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
       await tx.user.update({
         where: { id: customerId },
         data: {
+          isCompany: trimmed ? true : undefined,
           vatNumber: trimmed,
-          // Manual overrides are never sufficient for an automatic 0% sale.
-          vatValidatedAt: null,
-          vatValidationName: null,
-          vatValidationAddress: null,
+          vatValidatedAt: trimmed ? new Date() : null,
+          vatValidationName: viesResult?.name ?? null,
+          vatValidationAddress: viesResult?.address ?? null,
         },
       });
 
@@ -63,7 +65,7 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
         entityId: customerId,
         before: { vatNumber: existing.vatNumber },
         after: { vatNumber: trimmed },
-        metadata: { verificationSource: "MANUAL_STAFF_OVERRIDE" },
+        metadata: { verificationSource: trimmed ? "VIES" : "CLEARED" },
         actor: session.user,
       });
     });
@@ -72,7 +74,7 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
     return {
       success: true,
       message: trimmed
-        ? "Numéro de TVA enregistré manuellement (vérification VIES contournée)."
+        ? "Numéro de TVA vérifié auprès de VIES et enregistré."
         : "Numéro de TVA supprimé.",
     };
   } catch (error) {

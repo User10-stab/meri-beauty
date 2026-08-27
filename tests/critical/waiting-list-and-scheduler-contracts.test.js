@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const source = (path) => readFileSync(`${root}${path}`, "utf8");
+// Normalized to LF: git is configured with core.autocrlf=true and the repo has
+// no .gitattributes, so a file rewritten by a checkout/merge comes back CRLF
+// in the working tree while the index stays LF. Assertions below match
+// multi-line snippets with \n — without this, they silently stop matching the
+// moment git happens to touch the file, which is exactly how this test broke.
+const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
 
 const WAITING_LISTS = [
   ["actions/workshops/waiting-list.js", "joinWaitingList"],

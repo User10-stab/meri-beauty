@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { DASHBOARD_PERMISSIONS, hasPermission, isAdminRole, ROLES } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, hasDashboardPermission, isAdminRole, ROLES } from "@/lib/authorization";
 import { stockAdjustmentSchema, stockCountSchema } from "@/lib/validations/boutique";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 
@@ -33,7 +33,7 @@ async function requireStaff() {
 async function requireStockAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifie." };
-  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.BOUTIQUE_STOCK))) {
     return { error: "Acces non autorise." };
   }
   return { session };

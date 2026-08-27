@@ -5,14 +5,19 @@ import bcrypt from "bcrypt";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS, isAdminRole } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
 import { renderInvoicePdf, renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
 import { sendEmail } from "@/lib/email";
 import { captureError } from "@/lib/monitoring";
-import { BELGIUM_VAT_RATE, calculateVatTotals } from "@/lib/tax-policy";
+import {
+  calculateVatTotals,
+  applyVatRate,
+  BELGIUM_VAT_RATE,
+  resolveGoodsVatPolicy,
+} from "@/lib/tax-policy";
 import { stripe } from "@/lib/stripe";
 import { getAppBaseUrl } from "@/lib/site-url";
 import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
@@ -23,7 +28,7 @@ const POS_CHECKOUT_SECONDS = 31 * 60;
 async function requirePointOfSaleAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.ORDERS)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE))) {
     return { error: "Accès non autorisé." };
   }
   return { session };
@@ -41,6 +46,35 @@ function serializeCustomer(customer) {
     addressPostalCode: customer.addressPostalCode,
     addressCountry: customer.addressCountry,
   };
+}
+
+async function resolvePointOfSaleCustomer(tx, requestedCustomer, include) {
+  // The active-email database constraint is case-insensitive. Resolve with
+  // the same rule so an older account saved as Client@Example.com is not
+  // missed when the till submits client@example.com and then recreated.
+  if (requestedCustomer.id) {
+    const selectedCustomer = await tx.user.findFirst({
+      where: {
+        id: requestedCustomer.id,
+        role: "CUSTOMER",
+        isDeleted: false,
+        email: { equals: requestedCustomer.email, mode: "insensitive" },
+      },
+      include,
+    });
+    if (selectedCustomer) return selectedCustomer;
+  }
+
+  // An email can also belong to an OWNER/ADMIN/STAFF account. Order.userId
+  // accepts any User, so a counter purchase must reuse that active account
+  // rather than fail against the global active-email uniqueness constraint.
+  return tx.user.findFirst({
+    where: {
+      email: { equals: requestedCustomer.email, mode: "insensitive" },
+      isDeleted: false,
+    },
+    include,
+  });
 }
 
 async function createOrRecoverPointOfSaleCheckout(order) {
@@ -156,13 +190,107 @@ export async function getPointOfSaleProductByBarcode(barcode) {
         variantId: variant.id,
         productName: variant.product.name,
         variantName: variant.name,
-        unitPrice: Number(variant.price),
+        // Shelf price: what the cashier reads out and collects. The catalogue
+        // stores net, and completePointOfSaleSale re-reads the variant and
+        // re-applies the rate server-side — this value is for the screen only,
+        // never trusted as the amount charged.
+        unitPrice: applyVatRate(Number(variant.price), BELGIUM_VAT_RATE),
         availableQuantity: Math.max(0, variant.stockQuantity - variant.reservedQuantity),
       },
     };
   } catch (error) {
     console.error("[getPointOfSaleProductByBarcode]", error);
     return { success: false, message: "Impossible de lire ce produit." };
+  }
+}
+
+/**
+ * Name/SKU/barcode search for the counter — the fallback for the (many)
+ * products that have no barcode label on the box.
+ *
+ * Results are VARIANT-level, not product-level: the cart line, the stock
+ * decrement and the invoice line all key on variantId, so "Popits" has to
+ * come back as one row per variant rather than one row needing a second
+ * disambiguating click.
+ *
+ * Same visibility filters as the barcode lookup above (ACTIVE product, live
+ * variant) so the counter can never find and try to sell a draft, and the
+ * same narrow select: costPrice/comparePrice must not travel to the client.
+ */
+export async function searchPointOfSaleProducts(query) {
+  const guard = await requirePointOfSaleAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
+
+  const value = query?.trim();
+  // Mirrors searchPointOfSaleCustomers: one character matches most of the
+  // catalogue and is never a real search.
+  if (!value || value.length < 2) return { success: true, data: [] };
+
+  try {
+    const variants = await prisma.productVariant.findMany({
+      where: {
+        isActive: true,
+        isDeleted: false,
+        product: { isDeleted: false, status: "ACTIVE" },
+        OR: [
+          { product: { name: { contains: value, mode: "insensitive" } } },
+          { name: { contains: value, mode: "insensitive" } },
+          { sku: { contains: value, mode: "insensitive" } },
+          { barcode: { contains: value, mode: "insensitive" } },
+        ],
+      },
+      orderBy: [{ product: { name: "asc" } }, { position: "asc" }],
+      take: 24,
+      select: {
+        id: true,
+        name: true,
+        price: true,
+        stockQuantity: true,
+        reservedQuantity: true,
+        lowStockThreshold: true,
+        product: {
+          select: {
+            name: true,
+            images: {
+              select: { path: true },
+              orderBy: [{ isPrimary: "desc" }, { position: "asc" }],
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+
+    const results = variants.map((variant) => {
+      // Available, not on-hand: stock already reserved for an online order
+      // awaiting pickup is not sellable at the counter. Same formula as
+      // getPointOfSaleProductByBarcode.
+      const availableQuantity = Math.max(0, variant.stockQuantity - variant.reservedQuantity);
+      return {
+        variantId: variant.id,
+        productName: variant.product.name,
+        variantName: variant.name,
+        unitPrice: applyVatRate(Number(variant.price), BELGIUM_VAT_RATE),
+        availableQuantity,
+        isLowStock: availableQuantity > 0 && availableQuantity <= variant.lowStockThreshold,
+        imagePath: variant.product.images[0]?.path ?? null,
+      };
+    });
+
+    // Sellable first, out-of-stock last but still listed — staff need to see
+    // that a product exists and is simply empty, not wonder if they mistyped.
+    // Array#sort is stable, so the name/position ordering above survives.
+    results.sort((a, b) => {
+      const aSellable = a.availableQuantity > 0;
+      const bSellable = b.availableQuantity > 0;
+      if (aSellable === bSellable) return 0;
+      return aSellable ? -1 : 1;
+    });
+
+    return { success: true, data: results };
+  } catch (error) {
+    console.error("[searchPointOfSaleProducts]", error);
+    return { success: false, message: "Impossible de rechercher les produits.", data: [] };
   }
 }
 
@@ -233,9 +361,7 @@ export async function completePointOfSaleSale(input) {
       };
       let customer = null;
       if (!isWalkIn) {
-        customer = requestedCustomer.id
-          ? await tx.user.findFirst({ where: { id: requestedCustomer.id, role: "CUSTOMER", isDeleted: false }, include: billingProfileInclude })
-          : await tx.user.findFirst({ where: { email: requestedCustomer.email, role: "CUSTOMER", isDeleted: false }, include: billingProfileInclude });
+        customer = await resolvePointOfSaleCustomer(tx, requestedCustomer, billingProfileInclude);
 
         // Only require the address when the resolved customer doesn't already
         // have one on file — a returning customer shouldn't have to re-enter
@@ -297,14 +423,23 @@ export async function completePointOfSaleSale(input) {
         saleItems.push({ ...variant, quantity, available });
       }
 
-      const productSubtotal = saleItems.reduce((sum, item) => sum + Number(item.price) * item.quantity, 0);
-      const serviceSubtotal = serviceLines.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+      const posVatPolicy = resolveGoodsVatPolicy({ customer });
+      const pricedSaleItems = saleItems.map((item) => ({
+        ...item,
+        taxUnitPrice: applyVatRate(item.price, posVatPolicy.vatRate),
+      }));
+      const pricedServiceLines = serviceLines.map((item) => ({
+        ...item,
+        taxUnitPrice: applyVatRate(item.unitPrice, posVatPolicy.vatRate),
+      }));
+      const productSubtotal = pricedSaleItems.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
+      const serviceSubtotal = pricedServiceLines.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
       const subtotal = productSubtotal + serviceSubtotal;
       if (method === "CASH" && cashReceived < subtotal) {
         throw new Error("POS_CASH_INSUFFICIENT");
       }
       const changeGiven = method === "CASH" ? Math.round((cashReceived - subtotal) * 100) / 100 : null;
-      const taxTotals = calculateVatTotals(subtotal, BELGIUM_VAT_RATE);
+      const taxTotals = calculateVatTotals(subtotal, posVatPolicy.vatRate);
       const order = await tx.order.create({
         data: {
           userId: customer?.id ?? null,
@@ -316,9 +451,9 @@ export async function completePointOfSaleSale(input) {
           subtotal,
           shippingCost: 0,
           totalAmount: subtotal,
-          taxCountryCode: "BE",
-          vatTreatment: "DOMESTIC",
-          vatRate: BELGIUM_VAT_RATE,
+          taxCountryCode: posVatPolicy.taxCountryCode,
+          vatTreatment: posVatPolicy.vatTreatment,
+          vatRate: posVatPolicy.vatRate,
           totalExclVat: taxTotals.totalExclVat,
           totalVat: taxTotals.vatAmount,
           customerVatNumber: customer?.vatNumber ?? null,
@@ -332,17 +467,17 @@ export async function completePointOfSaleSale(input) {
             : "Vente directe en magasin",
           items: {
             create: [
-              ...saleItems.map((item) => ({
+              ...pricedSaleItems.map((item) => ({
                 variantId: item.id,
                 productName: item.product.name,
                 variantName: item.name,
                 sku: item.sku,
-                unitPrice: item.price,
+                unitPrice: item.taxUnitPrice,
                 quantity: item.quantity,
               })),
-              ...serviceLines.map((item) => ({
+              ...pricedServiceLines.map((item) => ({
                 productName: item.description,
-                unitPrice: item.unitPrice,
+                unitPrice: item.taxUnitPrice,
                 quantity: item.quantity,
               })),
             ],
@@ -422,9 +557,13 @@ export async function completePointOfSaleSale(input) {
             totalInclVat: subtotal,
             customer: buildInvoiceCustomer(customer),
             lines: [
-              ...saleItems.map((item) => ({ description: `${item.product.name} — ${item.name}`, quantity: item.quantity, unitPrice: Number(item.price) })),
-              ...serviceLines.map((item) => ({ description: item.description, quantity: item.quantity, unitPrice: item.unitPrice })),
+              ...pricedSaleItems.map((item) => ({ description: `${item.product.name} — ${item.name}`, quantity: item.quantity, unitPrice: item.taxUnitPrice })),
+              ...pricedServiceLines.map((item) => ({ description: item.description, quantity: item.quantity, unitPrice: item.taxUnitPrice })),
             ],
+            vatRate: posVatPolicy.vatRate,
+            vatTreatment: posVatPolicy.vatTreatment,
+            taxCountryCode: posVatPolicy.taxCountryCode,
+            taxNote: posVatPolicy.taxNote,
           });
 
       for (const item of saleItems) {
@@ -558,6 +697,9 @@ export async function completePointOfSaleSale(input) {
     if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {
       return { success: false, message: "Identité légale du salon incomplète — complétez Réglages > Salon avant d'émettre des factures." };
     }
+    if (error.message === "BUYER_LEGAL_DATA_INCOMPLETE") {
+      return { success: false, message: error.userMessage };
+    }
     if (error.message === "POS_CHECKOUT_RETRY_WINDOW_EXPIRED") {
       return { success: false, message: "Cette tentative QR est trop ancienne. Annulez-la puis recommencez." };
     }
@@ -599,7 +741,16 @@ export async function completePointOfSaleSale(input) {
         }
       }
     }
-    if (error.code === "P2002") return { success: false, message: "Ce client vient d'être créé. Recherchez-le puis réessayez." };
+    if (error.code === "P2002") {
+      const target = String(error.meta?.target ?? "").toLowerCase();
+      if (target.includes("email")) {
+        return { success: false, message: "Cette adresse e-mail appartient déjà à un compte. Recherchez ce client puis réessayez." };
+      }
+      if (target.includes("phone")) {
+        return { success: false, message: "Ce numéro de téléphone appartient déjà à un autre compte." };
+      }
+      return { success: false, message: "Ce client vient d'être créé. Recherchez-le puis réessayez." };
+    }
     console.error("[completePointOfSaleSale]", error);
     captureError(error, { area: "point-of-sale" });
     return { success: false, message: "Impossible d'enregistrer la vente." };

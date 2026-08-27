@@ -53,7 +53,9 @@ describe("accepted appointment lifecycle", () => {
     expect(webhook).toContain('source: "APPOINTMENT"');
     expect(webhook).toContain("buildInvoiceCustomer(appointment.user)");
     expect(webhook).toContain("renderInvoicePdf(result.invoice)");
-    expect(webhook).toContain("attachments: [{ filename: `facture-${result.invoice.number}.pdf`");
+    expect(webhook).toContain("...(invoicePdf ? [{ filename: `facture-${result.invoice.number}.pdf`");
+    expect(webhook).toContain("...(ticket.attachment ? [ticket.attachment] : [])");
+    expect(webhook).toContain("...(emailAttachments.length ? { attachments: emailAttachments } : {})");
   });
 
   test("failed payments can be recovered from a successful Connect PaymentIntent", () => {

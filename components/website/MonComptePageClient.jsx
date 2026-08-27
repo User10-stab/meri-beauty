@@ -156,6 +156,27 @@ function OrderCard({ order }) {
         <span className="text-sm font-bold text-gold">{formatPrice(order.totalAmount)}</span>
       </div>
 
+      {order.pickupQr && order.pickupCode && (
+        <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-gold/20 bg-cream/60 px-4 py-5 text-center sm:flex-row sm:text-left">
+          {/* Generated from the persistent pickup code on each profile visit. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={order.pickupQr}
+            alt={`QR code de retrait de la commande ${order.orderNumber}`}
+            width={160}
+            height={160}
+            className="h-40 w-40 shrink-0 rounded-lg bg-white p-1"
+          />
+          <div>
+            <p className="text-sm font-bold text-ink">Votre QR code de retrait</p>
+            <p className="mt-1 text-xs leading-relaxed text-ink/55">
+              Présentez ce QR code en boutique pour récupérer votre commande.
+            </p>
+            <p className="mt-2 font-mono text-lg font-bold tracking-widest text-ink">{order.pickupCode}</p>
+          </div>
+        </div>
+      )}
+
       {order.fulfilmentMode === "SHIPPING_PREPAID" && order.trackingCode && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-cream px-3 py-2.5 text-xs text-ink/65">
           <span className="inline-flex items-center gap-1.5">
@@ -315,6 +336,58 @@ function ReservationCancellationRequest({ reservation, kind }) {
   );
 }
 
+/**
+ * The customer's entry ticket. Only rendered for CONFIRMED reservations —
+ * getMyOrderHistory nulls the code out for every other status, so there is
+ * nothing to show on a cancelled or already-honoured booking.
+ *
+ * The readable code sits under the QR on purpose: an atelier can run in a
+ * basement with no signal, and staff must still be able to type it in.
+ */
+function CheckInTicket({ reservation, typeLabel }) {
+  if (!reservation.checkInQr || !reservation.checkInCode) return null;
+
+  const seats = reservation.seatsCount;
+  const checkedIn = reservation.checkedInSeats ?? 0;
+  const fullyUsed = checkedIn >= seats;
+  const balanceDue = Number(reservation.balanceDue);
+
+  return (
+    <div className="mt-4 flex flex-col items-center gap-3 rounded-xl border border-gold/20 bg-cream/60 px-4 py-5 text-center sm:flex-row sm:text-left">
+      {/* Regenerated from the persistent code on each visit, never stored. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={reservation.checkInQr}
+        alt={`QR code d'entrée — ${typeLabel}`}
+        width={160}
+        height={160}
+        className={`h-40 w-40 shrink-0 rounded-lg bg-white p-1 ${fullyUsed ? "opacity-40" : ""}`}
+      />
+      <div>
+        <p className="text-sm font-bold text-ink">
+          {fullyUsed ? "Billet déjà utilisé" : "Votre QR code d'entrée"}
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-ink/55">
+          {fullyUsed
+            ? `Vos ${seats} place${seats > 1 ? "s ont" : " a"} été pointée${seats > 1 ? "s" : ""} à l'entrée.`
+            : "Présentez ce QR code à l'entrée. Il est vérifié auprès du salon, une capture d'écran ne le remplace pas."}
+        </p>
+        {!fullyUsed && checkedIn > 0 && (
+          <p className="mt-1 text-xs font-semibold text-gold">
+            {checkedIn} place{checkedIn > 1 ? "s" : ""} sur {seats} déjà pointée{checkedIn > 1 ? "s" : ""}.
+          </p>
+        )}
+        {!fullyUsed && balanceDue > 0 && (
+          <p className="mt-1 text-xs font-semibold text-ink/70">
+            Solde de {formatPrice(balanceDue)} à régler sur place.
+          </p>
+        )}
+        <p className="mt-2 font-mono text-lg font-bold tracking-widest text-ink">{reservation.checkInCode}</p>
+      </div>
+    </div>
+  );
+}
+
 function ReservationCard({ reservation, kind }) {
   const item = kind === "workshop" ? reservation.session.workshop : reservation.session.formation;
   const typeLabel =
@@ -354,6 +427,8 @@ function ReservationCard({ reservation, kind }) {
         </div>
 
         <InvoiceLink invoice={reservation.payment?.invoice} />
+
+        <CheckInTicket reservation={reservation} typeLabel={typeLabel} />
 
         <ReservationCancellationRequest reservation={reservation} kind={kind} />
       </div>

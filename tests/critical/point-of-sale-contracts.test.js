@@ -8,8 +8,9 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8");
 describe("point-of-sale security contracts", () => {
   const pos = source("actions/boutique/point-of-sale.js");
 
-  test("requires the normal staff/admin orders permission", () => {
-    expect(pos).toContain("DASHBOARD_PERMISSIONS.ORDERS");
+  test("requires the dedicated point-of-sale permission", () => {
+    expect(pos).toContain("STAFF_PERMISSIONS.POINT_OF_SALE");
+    expect(pos).toContain("hasDashboardPermission");
     expect(pos).toContain("requirePointOfSaleAccess");
   });
 
@@ -118,11 +119,18 @@ describe("point-of-sale security contracts", () => {
     expect(ui).toContain("updateCustomerAddress");
   });
 
+  test("an existing email is reused case-insensitively instead of creating a duplicate customer", () => {
+    expect(pos).toContain("resolvePointOfSaleCustomer");
+    expect(pos).toContain('email: { equals: requestedCustomer.email, mode: "insensitive" }');
+    expect(pos).toContain("customer = await resolvePointOfSaleCustomer(tx, requestedCustomer, billingProfileInclude)");
+    expect(pos).toContain("Order.userId");
+  });
+
   test("the counter can sell an ad-hoc service line alongside products, with no stock/variant lookup for it", () => {
     expect(pos).toContain('item.type !== "PRODUCT"');
     expect(pos).toContain("serviceLines = items.filter");
     expect(pos).toContain("serviceSubtotal");
-    expect(pos).toContain("...serviceLines.map((item) => ({");
+    expect(pos).toContain("...pricedServiceLines.map((item) => ({");
 
     const validation = source("lib/validations/point-of-sale.js");
     expect(validation).toContain('type: z.literal("PRODUCT")');

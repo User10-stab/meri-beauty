@@ -45,20 +45,18 @@ describe("an unpaid appointment can be settled from the appointments list", () =
     expect(isAwaitingPaymentChoice(confirmed, null)).toBe(false);
   });
 
-  // 18 Aug 2026, later same day: a colleague's "fix some bugs" commit
-  // (b0bbe23) inlined awaitingPayment's logic directly into
-  // get-my-reservations.js instead of calling the shared helper, and
-  // dropped awaitingPaymentChoice entirely — confirmed with the user this
-  // is accepted as-is (Fatiha's version kept as-is, not reconciled). The
-  // helper module itself is untouched and still correct; this test only
-  // checks the inlined awaitingPayment logic actually matches it, since
-  // nothing enforces the two staying in sync anymore.
-  test("the reservations list's inlined awaitingPayment logic still matches the shared helper's rule", () => {
+  // 18 Aug 2026: commit b0bbe23 had inlined awaitingPayment's logic into
+  // get-my-reservations.js instead of calling the shared helper, and this
+  // test existed only to check the duplicate hadn't drifted from the
+  // original. Commit 6a889c5 removed the duplication and made the file call
+  // the helper — so the drift this guarded against can no longer happen.
+  // Assert the delegation itself: that is the stronger guarantee, and it
+  // fails loudly if anyone re-inlines the rule.
+  test("the reservations list delegates to the shared helper instead of re-inlining the rule", () => {
     const src = source("actions/reservation/get-my-reservations.js");
-    expect(src).toContain('["PENDING", "FAILED"].includes(payment.status)');
-    expect(src).toContain('payment.paymentType === "ONLINE" || payment.paymentType === "DEPOSIT"');
-    expect(src).toContain('appt.status !== "CANCELLED"');
-    expect(src).toContain('appt.status !== "COMPLETED"');
+    expect(src).toContain("isAwaitingPayment(appt, payment)");
+    expect(src).toContain("isAwaitingPaymentChoice(appt, payment)");
+    expect(src).toMatch(/import\s*\{[^}]*isAwaitingPayment[^}]*\}\s*from\s*"@\/lib\/appointments\/payment-followup"/);
 
     const helper = source("lib/appointments/payment-followup.js");
     expect(helper).toContain("export function isAwaitingPayment(appointment, payment)");

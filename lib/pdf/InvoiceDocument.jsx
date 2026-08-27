@@ -1,197 +1,161 @@
-import { Document, Page, Text, View, StyleSheet } from "@react-pdf/renderer";
+import { Document, Page, Text, View } from "@react-pdf/renderer";
+import {
+  BuyerBlock,
+  DocumentHeader,
+  LegalFooter,
+  LineItemsTable,
+  SellerBlock,
+  TermsBlock,
+  TotalsBlock,
+  formatDate,
+  money,
+  styles,
+} from "./theme";
 
-const styles = StyleSheet.create({
-  page: { padding: 40, fontSize: 10, fontFamily: "Helvetica", color: "#222" },
-  headerRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 28 },
-  sellerName: { fontSize: 16, fontWeight: 700, marginBottom: 4 },
-  muted: { color: "#666" },
-  docTitle: { fontSize: 18, fontWeight: 700, textAlign: "right", marginBottom: 4 },
-  docMeta: { textAlign: "right", color: "#666" },
-  partiesRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 24 },
-  partyLabel: { color: "#999", fontSize: 8, textTransform: "uppercase", marginBottom: 4, letterSpacing: 0.5 },
-  table: { marginTop: 8 },
-  tableHeaderRow: {
-    flexDirection: "row",
-    borderBottom: "1 solid #222",
-    paddingBottom: 6,
-    marginBottom: 6,
-    fontWeight: 700,
-  },
-  tableRow: { flexDirection: "row", paddingVertical: 5, borderBottom: "0.5 solid #eee" },
-  colDescription: { flex: 4 },
-  colQty: { flex: 1, textAlign: "center" },
-  colUnitPrice: { flex: 1.5, textAlign: "right" },
-  colTotal: { flex: 1.5, textAlign: "right" },
-  totals: { marginTop: 16, alignItems: "flex-end" },
-  totalsRow: { flexDirection: "row", width: 220, justifyContent: "space-between", paddingVertical: 2 },
-  totalsLabel: { color: "#666" },
-  grandTotalRow: {
-    flexDirection: "row",
-    width: 220,
-    justifyContent: "space-between",
-    marginTop: 6,
-    paddingTop: 6,
-    borderTop: "1 solid #222",
-  },
-  grandTotalLabel: { fontWeight: 700 },
-  grandTotalValue: { fontWeight: 700 },
-  taxNote: { marginTop: 18, padding: 8, backgroundColor: "#f5f5f5", color: "#444", fontSize: 9 },
-  footer: { position: "absolute", bottom: 32, left: 40, right: 40, fontSize: 8, color: "#999", textAlign: "center" },
-  creditNoteBanner: {
-    marginBottom: 16,
-    padding: 8,
-    backgroundColor: "#fdf2f2",
-    color: "#a33",
-    fontSize: 9,
-  },
-});
+const REVERSE_CHARGE_FOOTER_NOTE = "Autoliquidation Art 21 § 2 du code TVA belge";
 
-function money(n) {
-  return `${Number(n).toFixed(2)} €`;
+/**
+ * Payment status is only shown when the settlement data actually travelled
+ * with the invoice — an unqualified "payée" printed from an assumption is
+ * the kind of claim a customer would be right to hold us to.
+ */
+function paymentStatus(payment) {
+  if (!payment?.paidAt) return null;
+  return { label: "PAYÉE", tone: "paid" };
 }
 
-function formatDate(d) {
-  return new Date(d).toLocaleDateString("fr-BE", { day: "2-digit", month: "long", year: "numeric", timeZone: "Europe/Brussels" });
+function paymentLine(payment) {
+  if (!payment?.paidAt) return null;
+  const method = payment.transactionReference ? "carte bancaire (Stripe)" : "sur place";
+  return `Réglée le ${formatDate(payment.paidAt)} par ${method}`;
 }
 
-export function InvoiceDocument({ invoice }) {
+export function InvoiceDocument({ invoice, contact = null }) {
+  const payment = invoice.payment ?? null;
+
   return (
-    <Document>
+    <Document
+      title={`Facture ${invoice.number}`}
+      author={invoice.sellerName}
+      subject={`Facture ${invoice.number} — ${invoice.customerName}`}
+    >
       <Page size="A4" style={styles.page}>
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.sellerName}>{invoice.sellerName}</Text>
-            {invoice.sellerAddress && <Text style={styles.muted}>{invoice.sellerAddress}</Text>}
-            {invoice.sellerVatNumber && <Text style={styles.muted}>TVA : {invoice.sellerVatNumber}</Text>}
-          </View>
-          <View>
-            <Text style={styles.docTitle}>FACTURE</Text>
-            <Text style={styles.docMeta}>N° {invoice.number}</Text>
-            <Text style={styles.docMeta}>{formatDate(invoice.issuedAt)}</Text>
-          </View>
+        <DocumentHeader
+          title="FACTURE"
+          number={invoice.number}
+          issuedAt={invoice.issuedAt}
+          status={paymentStatus(payment)}
+        />
+
+        <View style={styles.parties}>
+          <SellerBlock
+            name={invoice.sellerName}
+            address={invoice.sellerAddress}
+            vatNumber={invoice.sellerVatNumber}
+            contact={contact}
+          />
+          <View style={styles.partyGutter} />
+          <BuyerBlock invoice={invoice} />
         </View>
 
-        <View style={styles.partiesRow}>
-          <View>
-            <Text style={styles.partyLabel}>Facturé à</Text>
-            <Text>{invoice.customerType === "B2B" && invoice.customerLegalName ? invoice.customerLegalName : invoice.customerName}</Text>
-            {invoice.customerType === "B2B" && invoice.customerLegalName && invoice.customerContactName && (
-              <Text style={styles.muted}>À l'attention de {invoice.customerContactName}</Text>
-            )}
-            <Text style={styles.muted}>{invoice.customerEmail}</Text>
-            {invoice.customerVatNumber && <Text style={styles.muted}>TVA : {invoice.customerVatNumber}</Text>}
-            {invoice.customerRegistrationNo && <Text style={styles.muted}>N° BCE : {invoice.customerRegistrationNo}</Text>}
-            {invoice.customerAddress && <Text style={styles.muted}>{invoice.customerAddress}</Text>}
-            {invoice.purchaseOrderReference && <Text style={styles.muted}>Réf. bon de commande : {invoice.purchaseOrderReference}</Text>}
-          </View>
+        {/* vatRate is only the fallback divisor for invoices issued before
+            InvoiceLine carried its net twin — newer lines print their own
+            stored figures and ignore it. */}
+        <LineItemsTable lines={invoice.lines} vatRate={invoice.vatRate} />
+
+        <View style={styles.bottom}>
+          <TermsBlock
+            items={[
+              { label: "Règlement", value: paymentLine(payment) ?? "Paiement sécurisé — dû à réception de la facture" },
+              { label: "Devise", value: "Euro (EUR)" },
+              contact?.email ? { label: "Questions sur cette facture", value: contact.email } : null,
+              contact?.website ? { label: "Conditions générales", value: `${contact.website}/conditions-generales` } : null,
+            ].filter(Boolean)}
+          />
+          <TotalsBlock
+            subtotalExclVat={invoice.subtotalExclVat}
+            vatRate={invoice.vatRate}
+            vatAmount={invoice.vatAmount}
+            totalInclVat={invoice.totalInclVat}
+          />
         </View>
 
-        {invoice.customerType === "B2B" && (
-          <Text style={styles.taxNote}>
-            Facture B2B — à saisir manuellement dans le logiciel comptable compatible Peppol (envoi réseau non encore actif).
-          </Text>
-        )}
-
-        <View style={styles.table}>
-          <View style={styles.tableHeaderRow}>
-            <Text style={styles.colDescription}>Description</Text>
-            <Text style={styles.colQty}>Qté</Text>
-            <Text style={styles.colUnitPrice}>Prix unitaire TTC</Text>
-            <Text style={styles.colTotal}>Total TTC</Text>
-          </View>
-          {invoice.lines.map((line) => (
-            <View style={styles.tableRow} key={line.id}>
-              <Text style={styles.colDescription}>{line.description}</Text>
-              <Text style={styles.colQty}>{line.quantity}</Text>
-              <Text style={styles.colUnitPrice}>{money(line.unitPrice)}</Text>
-              <Text style={styles.colTotal}>{money(line.lineTotal)}</Text>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.totals}>
-          <View style={styles.totalsRow}>
-            <Text style={styles.totalsLabel}>Sous-total (hors TVA)</Text>
-            <Text>{money(invoice.subtotalExclVat)}</Text>
-          </View>
-          <View style={styles.totalsRow}>
-            <Text style={styles.totalsLabel}>TVA ({Number(invoice.vatRate)}%)</Text>
-            <Text>{money(invoice.vatAmount)}</Text>
-          </View>
-          <View style={styles.grandTotalRow}>
-            <Text style={styles.grandTotalLabel}>Total TTC</Text>
-            <Text style={styles.grandTotalValue}>{money(invoice.totalInclVat)}</Text>
-          </View>
-        </View>
-
-        {invoice.taxNote && <Text style={styles.taxNote}>{invoice.taxNote}</Text>}
-
-        <Text style={styles.footer}>
-          {invoice.sellerName}
-          {invoice.sellerVatNumber ? ` — TVA ${invoice.sellerVatNumber}` : ""} — Facture n° {invoice.number}
-        </Text>
+        <LegalFooter
+          legalNote={
+            invoice.vatTreatment === "EU_REVERSE_CHARGE"
+              ? REVERSE_CHARGE_FOOTER_NOTE
+              : invoice.taxNote
+          }
+          sellerName={invoice.sellerName}
+          sellerAddress={invoice.sellerAddress}
+          sellerVatNumber={invoice.sellerVatNumber}
+          contact={contact}
+          reference={`Facture ${invoice.number}`}
+        />
       </Page>
     </Document>
   );
 }
 
-export function CreditNoteDocument({ creditNote, invoice }) {
-  return (
-    <Document>
-      <Page size="A4" style={styles.page}>
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.sellerName}>{invoice.sellerName}</Text>
-            {invoice.sellerAddress && <Text style={styles.muted}>{invoice.sellerAddress}</Text>}
-            {invoice.sellerVatNumber && <Text style={styles.muted}>TVA : {invoice.sellerVatNumber}</Text>}
-          </View>
-          <View>
-            <Text style={styles.docTitle}>NOTE DE CRÉDIT</Text>
-            <Text style={styles.docMeta}>N° {creditNote.number}</Text>
-            <Text style={styles.docMeta}>{formatDate(creditNote.issuedAt)}</Text>
-          </View>
-        </View>
+export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
+  const isPartial = Number(creditNote.totalInclVat) < Number(invoice.totalInclVat);
 
-        <Text style={styles.creditNoteBanner}>
-          Se rapporte à la facture n° {invoice.number} du {formatDate(invoice.issuedAt)}
+  return (
+    <Document
+      title={`Note de crédit ${creditNote.number}`}
+      author={invoice.sellerName}
+      subject={`Note de crédit ${creditNote.number} — facture ${invoice.number}`}
+    >
+      <Page size="A4" style={styles.page}>
+        <DocumentHeader
+          title="NOTE DE CRÉDIT"
+          number={creditNote.number}
+          issuedAt={creditNote.issuedAt}
+          status={{ label: isPartial ? "CRÉDIT PARTIEL" : "CRÉDIT TOTAL", tone: "credit" }}
+        />
+
+        <Text style={styles.creditNotice}>
+          Se rapporte à la facture n° {invoice.number} du {formatDate(invoice.issuedAt)} (total {money(invoice.totalInclVat)})
           {creditNote.reason ? ` — Motif : ${creditNote.reason}` : ""}
         </Text>
 
-        <View style={styles.partiesRow}>
-          <View>
-            <Text style={styles.partyLabel}>Émis à l'attention de</Text>
-            <Text>{invoice.customerType === "B2B" && invoice.customerLegalName ? invoice.customerLegalName : invoice.customerName}</Text>
-            {invoice.customerType === "B2B" && invoice.customerLegalName && invoice.customerContactName && (
-              <Text style={styles.muted}>À l'attention de {invoice.customerContactName}</Text>
-            )}
-            <Text style={styles.muted}>{invoice.customerEmail}</Text>
-            {invoice.customerVatNumber && <Text style={styles.muted}>TVA : {invoice.customerVatNumber}</Text>}
-            {invoice.customerRegistrationNo && <Text style={styles.muted}>N° BCE : {invoice.customerRegistrationNo}</Text>}
-            {invoice.customerAddress && <Text style={styles.muted}>{invoice.customerAddress}</Text>}
-          </View>
+        <View style={styles.parties}>
+          <SellerBlock
+            name={invoice.sellerName}
+            address={invoice.sellerAddress}
+            vatNumber={invoice.sellerVatNumber}
+            contact={contact}
+          />
+          <View style={styles.partyGutter} />
+          <BuyerBlock invoice={invoice} title="ÉMISE À L'ATTENTION DE" />
         </View>
 
-        <View style={styles.totals}>
-          <View style={styles.totalsRow}>
-            <Text style={styles.totalsLabel}>Sous-total (hors TVA)</Text>
-            <Text>{money(creditNote.subtotalExclVat)}</Text>
-          </View>
-          <View style={styles.totalsRow}>
-            <Text style={styles.totalsLabel}>TVA ({Number(creditNote.vatRate)}%)</Text>
-            <Text>{money(creditNote.vatAmount)}</Text>
-          </View>
-          <View style={styles.grandTotalRow}>
-            <Text style={styles.grandTotalLabel}>Montant crédité (TTC)</Text>
-            <Text style={styles.grandTotalValue}>{money(creditNote.totalInclVat)}</Text>
-          </View>
+        <View style={styles.bottom}>
+          <TermsBlock
+            items={[
+              { label: "Document corrigé", value: `Facture n° ${invoice.number} du ${formatDate(invoice.issuedAt)}` },
+              { label: "Motif", value: creditNote.reason || "Annulation / retour" },
+              { label: "Devise", value: "Euro (EUR)" },
+              contact?.email ? { label: "Questions sur ce document", value: contact.email } : null,
+            ].filter(Boolean)}
+          />
+          <TotalsBlock
+            subtotalExclVat={creditNote.subtotalExclVat}
+            vatRate={creditNote.vatRate}
+            vatAmount={creditNote.vatAmount}
+            totalInclVat={creditNote.totalInclVat}
+            grandTotalLabel="MONTANT CRÉDITÉ TTC"
+          />
         </View>
 
-        {invoice.taxNote && <Text style={styles.taxNote}>{invoice.taxNote}</Text>}
-
-        <Text style={styles.footer}>
-          {invoice.sellerName}
-          {invoice.sellerVatNumber ? ` — TVA ${invoice.sellerVatNumber}` : ""} — Note de crédit n° {creditNote.number}
-        </Text>
+        <LegalFooter
+          legalNote={invoice.taxNote}
+          sellerName={invoice.sellerName}
+          sellerAddress={invoice.sellerAddress}
+          sellerVatNumber={invoice.sellerVatNumber}
+          contact={contact}
+          reference={`Note de crédit ${creditNote.number}`}
+        />
       </Page>
     </Document>
   );

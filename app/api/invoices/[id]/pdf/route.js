@@ -31,6 +31,11 @@ export async function GET(req, { params }) {
       lines: true,
       payment: {
         select: {
+          // Drives the "PAYÉE / réglée le …" mention on the PDF — selected
+          // here so this route doesn't fall back to the extra lookup in
+          // lib/pdf/render.jsx#resolvePayment.
+          paidAt: true,
+          transactionReference: true,
           appointment: { select: { userId: true } },
           order: { select: { userId: true } },
           workshopReservation: { select: { customerId: true } },

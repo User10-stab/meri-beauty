@@ -14,6 +14,7 @@ import {
 import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
 import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-workshop-reservation-payment";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
+import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
 import {
   issueCreditNote,
   issueInvoice,
@@ -43,7 +44,7 @@ import {
   getDeploymentId,
   DEPLOYMENT_METADATA_KEY,
 } from "@/lib/stripe-deployment";
-import { roundMoney } from "@/lib/tax-policy";
+import { roundMoney, resolveServiceVatPolicy } from "@/lib/tax-policy";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -701,6 +702,8 @@ async function processAppointmentCheckoutSession(session) {
                 fullName: true,
                 email: true,
                 vatNumber: true,
+                vatValidatedAt: true,
+                vatValidationName: true,
                 addressLine1: true,
                 addressLine2: true,
                 addressCity: true,
@@ -825,6 +828,7 @@ async function processAppointmentCheckoutSession(session) {
     // Deposits are invoiced only after the remaining balance is collected.
     let invoice = null;
     if (nextPaymentStatus === "PAID") {
+      const bookingVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
       invoice = await issueInvoice(tx, {
         paymentId,
         source: "APPOINTMENT",
@@ -835,6 +839,10 @@ async function processAppointmentCheckoutSession(session) {
           totalAmount: nextPaidAmount,
           discountAmount: Number(existingPayment.discountAmount ?? 0),
         }),
+        vatRate: bookingVatPolicy.vatRate,
+        vatTreatment: bookingVatPolicy.vatTreatment,
+        taxCountryCode: bookingVatPolicy.taxCountryCode,
+        taxNote: bookingVatPolicy.taxNote,
       });
     }
 
@@ -928,6 +936,13 @@ async function processAppointmentCheckoutSession(session) {
           return null;
         })
       : null;
+    const ticket = result.nextAppointmentStatus === "CONFIRMED"
+      ? await buildAppointmentCheckInEmailAssets(appointmentId)
+      : { checkInCode: null, attachment: null };
+    const emailAttachments = [
+      ...(invoicePdf ? [{ filename: `facture-${result.invoice.number}.pdf`, content: invoicePdf }] : []),
+      ...(ticket.attachment ? [ticket.attachment] : []),
+    ];
 
     const customerEmailTemplate = result.nextAppointmentStatus === "CONFIRMED"
       ? reservationConfirmedEmail({
@@ -939,6 +954,7 @@ async function processAppointmentCheckoutSession(session) {
           paidAmount: result.nextPaidAmount,
           totalAmount: result.totalAmount,
           paymentMethod: "Carte bancaire",
+          checkInCode: ticket.checkInCode,
         })
       : paymentConfirmationEmail({
           customerName: user.fullName,
@@ -954,9 +970,7 @@ async function processAppointmentCheckoutSession(session) {
     sendEmail({
       to: user.email,
       ...customerEmailTemplate,
-      ...(invoicePdf
-        ? { attachments: [{ filename: `facture-${result.invoice.number}.pdf`, content: invoicePdf }] }
-        : {}),
+      ...(emailAttachments.length ? { attachments: emailAttachments } : {}),
     }).catch((err) => console.error("[stripe-webhook] appointment confirmation email failed:", err));
   }
 

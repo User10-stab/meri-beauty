@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { auth } from "@/auth";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCustomers } from "@/actions/customers/get-customers";
 import { CustomersPageClient } from "@/components/dashboard/customers/CustomersPageClient";
 import { getTranslations } from "next-intl/server";
@@ -7,8 +8,8 @@ import { getTranslations } from "next-intl/server";
 export const dynamic = "force-dynamic";
 
 export default async function CustomersPage() {
-  const session = await auth();
-  const userRole = session?.user?.role;
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.CUSTOMERS);
+  const userRole = user.role;
   const t = await getTranslations("dashboard.customers");
 
   const customersResult = await getCustomers();

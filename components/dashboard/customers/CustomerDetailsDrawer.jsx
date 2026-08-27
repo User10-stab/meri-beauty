@@ -106,7 +106,7 @@ export function CustomerDetailsDrawer({ customerId, onClose }) {
             <>
               <div>
                 <SectionTitle>Résumé</SectionTitle>
-                <div className="grid grid-cols-3 divide-x divide-gray-100 rounded-lg border border-gray-100 bg-gray-50">
+                <div className="grid grid-cols-2 divide-x divide-y divide-gray-100 rounded-lg border border-gray-100 bg-gray-50 sm:grid-cols-4 sm:divide-y-0">
                   <div className="px-5 py-3 text-center">
                     <p className="text-xs text-gray-400 mb-0.5">Téléphone</p>
                     <p className="text-sm font-semibold text-gray-800">{detail.phone || "—"}</p>
@@ -116,11 +116,35 @@ export function CustomerDetailsDrawer({ customerId, onClose }) {
                     <p className="text-sm font-semibold text-gray-800">{detail.appointmentsCount}</p>
                   </div>
                   <div className="px-5 py-3 text-center">
+                    <p className="text-xs text-gray-400 mb-0.5">Formations</p>
+                    <p className="text-sm font-semibold text-gray-800">{detail.formationsCount ?? 0}</p>
+                  </div>
+                  <div className="px-5 py-3 text-center">
                     <p className="text-xs text-gray-400 mb-0.5">Inscrit le</p>
                     <p className="text-sm font-semibold text-gray-800">{formatDate(detail.joinedAt)}</p>
                   </div>
                 </div>
               </div>
+
+              {detail.recentFormations?.length > 0 && (
+                <div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <Calendar size={14} className="text-gray-400" />
+                    <h4 className="whitespace-nowrap text-xs font-semibold uppercase tracking-wider text-gray-500">
+                      Dernières formations
+                    </h4>
+                    <div className="flex-1 border-t border-gray-100" />
+                  </div>
+                  <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100">
+                    {detail.recentFormations.map((formation) => (
+                      <li key={formation.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                        <span className="text-gray-700">{formation.title}</span>
+                        <span className="text-gray-400">{formatDate(formation.date)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               <div>
                 <div className="mb-3 flex items-center gap-2">

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isAdminRole, canAccessDashboard, ROLES } from "@/lib/authorization";
+import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS, ROLES } from "@/lib/authorization";
 
 const staffAssignmentSchema = z.object({
   staffId: z.string().min(1, "Le professionnel est obligatoire."),
@@ -119,7 +119,7 @@ export async function createService(input) {
   if (!session?.user) {
     return { success: false, message: "Non authentifié" };
   }
-  if (!canAccessDashboard(session.user.role)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
     return { success: false, message: "Permissions insuffisantes" };
   }
 
@@ -356,6 +356,9 @@ export async function updateService(input) {
     if (!session?.user) {
       return { success: false, message: "Non authentifié" };
     }
+    if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
+      return { success: false, message: "Permissions insuffisantes" };
+    }
 
     // Check if user is admin/owner or if staff member is assigned to this service
     let canEdit = false;
@@ -526,6 +529,9 @@ export async function deleteService(id) {
   if (!session?.user) {
     return { success: false, message: "Non authentifié" };
   }
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
 
   try {
     // Check if user is admin/owner or if staff member is assigned to this service
@@ -608,6 +614,9 @@ export async function getCategories() {
     const session = await auth();
     if (!session?.user) {
       return { success: false, data: [], message: "Non authentifié" };
+    }
+    if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
+      return { success: false, data: [], message: "Permissions insuffisantes" };
     }
 
     // For STAFF users, determine their staff ID to check which services they're already assigned to
@@ -878,6 +887,9 @@ export async function getStaffOptions() {
   if (!session?.user) {
     return { success: false, data: [], message: "Non authentifié" };
   }
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
+    return { success: false, data: [], message: "Permissions insuffisantes" };
+  }
 
   try {
     // For staff: return only their own profile
@@ -920,6 +932,9 @@ export async function getCurrentStaffProfile() {
   const session = await auth();
   if (!session?.user) {
     return { success: false, data: null, message: "Non authentifié" };
+  }
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
+    return { success: false, data: null, message: "Permissions insuffisantes" };
   }
 
   try {

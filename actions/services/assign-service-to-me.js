@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { ROLES } from "@/lib/authorization";
+import { ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 
 /**
  * Allows a STAFF member to add an existing service to their own profile.
@@ -17,6 +17,9 @@ import { ROLES } from "@/lib/authorization";
 export async function assignServiceToMe(serviceId) {
   const session = await auth();
   if (!session?.user || session.user.role !== ROLES.STAFF) {
+    return { success: false, message: "Permissions insuffisantes" };
+  }
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
     return { success: false, message: "Permissions insuffisantes" };
   }
 

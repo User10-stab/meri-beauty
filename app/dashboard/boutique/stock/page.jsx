@@ -1,5 +1,5 @@
-import { requireRole } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getAllVariants } from "@/actions/boutique/stock";
 import { StockPageClient } from "@/components/dashboard/boutique/StockPageClient";
 import { getTranslations } from "next-intl/server";
@@ -14,9 +14,14 @@ export async function generateMetadata() {
   };
 }
 
-export default async function StockPage() {
-  await requireRole(DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK);
+export default async function StockPage({ searchParams }) {
+  await requireDashboardPermission(STAFF_PERMISSIONS.BOUTIQUE_STOCK);
   const t = await getTranslations("dashboardBoutique.stock");
+
+  // The counter's "corriger le stock" shortcut (see PointOfSaleClient's product
+  // search) opens this page in a new tab already filtered to the product that
+  // came up empty, so staff don't retype a name they just searched.
+  const { search: initialSearch = "" } = (await searchParams) ?? {};
 
   const result = await getAllVariants();
   const variants = result.data ?? [];
@@ -46,7 +51,7 @@ export default async function StockPage() {
         </div>
       )}
 
-      <StockPageClient initialVariants={variants} />
+      <StockPageClient initialVariants={variants} initialSearch={initialSearch} />
     </div>
   );
 }

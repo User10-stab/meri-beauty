@@ -22,6 +22,7 @@ import { updateIndependentStaff } from "@/actions/staff/update-independent-staff
 import { updateIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { LanguageTagInput } from "./LanguageTagInput";
 import { ServiceMultiSelect } from "./ServiceMultiSelect";
+import { StaffPermissionsField } from "./StaffPermissionsField";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -257,6 +258,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
       hireDate:          staff.hireDate ? staff.hireDate.slice(0, 10) : "",
       isActive:          staff.isActive,
       serviceIds:        staff.serviceIds ?? [],   // pre-populated from server fetch
+      dashboardPermissions: staff.dashboardPermissions ?? [],
       contract: staff.contract
         ? {
             fixedRent: staff.contract.fixedRent ?? "",
@@ -413,6 +415,22 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
           </p>
         </div>
       )}
+
+      {/* ── Contract ──────────────────────────────────────────────── */}
+      <div>
+        <SectionTitle icon={Layers}>Autorisations du tableau de bord</SectionTitle>
+        <Controller
+          name="dashboardPermissions"
+          control={control}
+          render={({ field }) => (
+            <StaffPermissionsField
+              value={field.value ?? []}
+              onChange={field.onChange}
+              error={errors.dashboardPermissions?.message}
+            />
+          )}
+        />
+      </div>
 
       {/* ── Contract ──────────────────────────────────────────────── */}
       <div>

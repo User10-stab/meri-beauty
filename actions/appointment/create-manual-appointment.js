@@ -5,7 +5,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { reservationCreatedAutomaticEmail } from "@/lib/email-templates";
-import { hasPermission, DASHBOARD_PERMISSIONS, isAdminRole } from "@/lib/authorization";
+import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
+import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import {
   buildAppointmentWindow,
@@ -49,7 +50,7 @@ async function resolveActingStaffId(session, requestedStaffId) {
 export async function getServicesForManualBooking() {
   try {
     const session = await auth();
-    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.APPOINTMENTS)) {
+    if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
       return { success: false, message: "Non autorisé.", data: [] };
     }
 
@@ -98,7 +99,7 @@ export async function getServicesForManualBooking() {
 export async function getStaffForManualBooking(serviceId) {
   try {
     const session = await auth();
-    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.APPOINTMENTS)) {
+    if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
       return { success: false, message: "Non autorisé.", data: [] };
     }
     if (!serviceId) return { success: true, data: [] };
@@ -148,7 +149,7 @@ export async function getStaffForManualBooking(serviceId) {
 export async function searchCustomersForManualBooking(query) {
   try {
     const session = await auth();
-    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.APPOINTMENTS)) {
+    if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
       return { success: false, message: "Non autorisé.", data: [] };
     }
     const trimmed = (query ?? "").trim();
@@ -218,7 +219,7 @@ const manualAppointmentSchema = z.object({
 export async function createManualAppointment(input) {
   try {
     const session = await auth();
-    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.APPOINTMENTS)) {
+    if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
       return { success: false, message: "Non autorisé." };
     }
 
@@ -357,6 +358,7 @@ export async function createManualAppointment(input) {
       );
     }
 
+    const ticket = await buildAppointmentCheckInEmailAssets(appointment.id);
     sendEmail({
       to: user.email,
       ...reservationCreatedAutomaticEmail({
@@ -366,7 +368,9 @@ export async function createManualAppointment(input) {
         date: appointmentDate,
         time,
         totalAmount: Number(staffService.price),
+        checkInCode: ticket.checkInCode,
       }),
+      ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
     }).catch((err) => console.error("[createManualAppointment] confirmation email failed:", err));
 
     return {

@@ -1,5 +1,5 @@
-import { requireRole } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getFormationReservations } from "@/actions/formations/get-reservations";
 import { ReservationsPageClient } from "@/components/dashboard/formations/ReservationsPageClient";
 
@@ -11,7 +11,7 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function FormationReservationsPage() {
-  const { user } = await requireRole(DASHBOARD_PERMISSIONS.FORMATION_RESERVATIONS);
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.FORMATION_RESERVATIONS);
 
   const result = await getFormationReservations();
   const reservations = result.data ?? [];

@@ -1,8 +1,8 @@
 import { Suspense } from "react";
-import { requireRole } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getFormations } from "@/actions/formations/get-formations";
-import { getAnimators } from "@/actions/workshops/get-animators";
+import { getFormationStaffOptions } from "@/actions/formations/get-formation-staff";
 import { FormationsPageClient } from "@/components/dashboard/formations/FormationsPageClient";
 
 export const metadata = {
@@ -13,15 +13,15 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function FormationsPage() {
-  const { user } = await requireRole(DASHBOARD_PERMISSIONS.FORMATIONS);
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.FORMATIONS);
 
-  const [formationsResult, animatorsResult] = await Promise.all([
+  const [formationsResult, staffResult] = await Promise.all([
     getFormations(),
-    getAnimators(),
+    getFormationStaffOptions(),
   ]);
 
   const formations = formationsResult.data ?? [];
-  const animators = animatorsResult.data ?? [];
+  const staffOptions = staffResult.data ?? [];
 
   return (
     <div className="space-y-6">
@@ -53,7 +53,7 @@ export default async function FormationsPage() {
       <Suspense fallback={<FormationsSkeleton />}>
         <FormationsPageClient
           initialFormations={formations}
-          initialAnimators={animators}
+          initialStaffOptions={staffOptions}
           userRole={user.role}
           currentUserId={user.id}
         />

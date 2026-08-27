@@ -1,4 +1,5 @@
-import { requireDashboard } from "@/lib/route-protection";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { listReturnRequests } from "@/actions/boutique/returns";
 import { ReturnsPageClient } from "@/components/dashboard/boutique/ReturnsPageClient";
 import { getTranslations } from "next-intl/server";
@@ -14,7 +15,7 @@ export async function generateMetadata() {
 }
 
 export default async function ReturnsPage() {
-  await requireDashboard(); // OWNER/ADMIN/STAFF — requireOrdersAccess() in the action layer re-checks server-side
+  await requireDashboardPermission(STAFF_PERMISSIONS.RETURNS);
   const t = await getTranslations("dashboardBoutique.returns");
 
   const result = await listReturnRequests();

@@ -3,7 +3,7 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 
 /**
  * Récupère toutes les entrées de liste d'attente pour le tableau de bord.
@@ -13,7 +13,7 @@ export async function getWaitingListEntries() {
   try {
     const session = await auth();
 
-    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS)) {
+    if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS))) {
       return { success: false, data: [], message: "Non autorisé." };
     }
 

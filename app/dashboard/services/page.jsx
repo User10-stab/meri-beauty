@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { auth } from "@/auth";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCategories } from "@/actions/categories/get-categories";
 import { getServices } from "@/actions/services/get-services";
 import { ServicesPageClient } from "@/components/dashboard/services/ServicesPageClient";
@@ -8,8 +9,8 @@ import { getTranslations } from "next-intl/server";
 export const dynamic = "force-dynamic";
 
 export default async function ServicesPage() {
-  const session = await auth();
-  const userRole = session?.user?.role;
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.SERVICES);
+  const userRole = user.role;
   const t = await getTranslations("dashboard.services");
   
   const [categoriesResult, servicesResult] = await Promise.all([

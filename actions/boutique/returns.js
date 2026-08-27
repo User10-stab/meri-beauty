@@ -12,7 +12,7 @@ import {
   returnCompletedEmail,
   returnRejectedEmail,
 } from "@/lib/email-templates";
-import { DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, hasDashboardPermission, isAdminRole } from "@/lib/authorization";
 import {
   lookupOrderForReturnSchema,
   requestReturnSchema,
@@ -100,7 +100,7 @@ const RETURN_CONDITION_LABEL = {
 async function requireOrdersAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.ORDERS)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.RETURNS))) {
     return { error: "Accès non autorisé." };
   }
   return { session };

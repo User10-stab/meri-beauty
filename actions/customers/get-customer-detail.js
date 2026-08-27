@@ -2,8 +2,9 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { ROLES } from "@/lib/authorization";
+import { ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
+import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
 
 const RECENT_LIMIT = 5;
 
@@ -21,12 +22,17 @@ export async function getCustomerDetail(customerId) {
 
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.CUSTOMERS))) {
+    return { success: false, message: "Permissions insuffisantes." };
+  }
 
   const userRole = session.user.role;
   let staffId = null;
+  let staffRelationshipFilters = null;
   if (userRole === ROLES.STAFF) {
     staffId = await getCurrentStaffId();
     if (!staffId) return { success: false, message: "Profil staff introuvable." };
+    staffRelationshipFilters = staffCustomerRelationshipFilters({ staffId, staffUserId: session.user.id });
   }
 
   try {
@@ -35,9 +41,7 @@ export async function getCustomerDetail(customerId) {
         id: customerId,
         role: "CUSTOMER",
         isDeleted: false,
-        ...(staffId
-          ? { appointments: { some: { staffService: { staffId }, isDeleted: false } } }
-          : {}),
+        ...(staffRelationshipFilters ? { OR: staffRelationshipFilters } : {}),
       },
       select: {
         id: true,
@@ -51,13 +55,22 @@ export async function getCustomerDetail(customerId) {
         lastLogin: true,
         createdAt: true,
         newsletterSubscribed: true,
-        _count: { select: { appointments: true } },
+        _count: {
+          select: {
+            appointments: staffRelationshipFilters
+              ? { where: staffRelationshipFilters[0].appointments.some }
+              : true,
+            formationReservations: staffRelationshipFilters
+              ? { where: staffRelationshipFilters[1].formationReservations.some }
+              : true,
+          },
+        },
       },
     });
 
     if (!customer) return { success: false, message: "Client introuvable." };
 
-    const [appointments, orders] = await Promise.all([
+    const [appointments, formations, orders] = await Promise.all([
       prisma.appointment.findMany({
         where: {
           userId: customerId,
@@ -71,6 +84,21 @@ export async function getCustomerDetail(customerId) {
           date: true,
           status: true,
           staffService: { select: { service: { select: { name: true } } } },
+        },
+      }),
+      prisma.formationReservation.findMany({
+        where: {
+          customerId,
+          ...(staffId ? { session: { formation: { createdById: session.user.id } } } : {}),
+          status: { not: "CANCELLED" },
+        },
+        orderBy: { createdAt: "desc" },
+        take: RECENT_LIMIT,
+        select: {
+          id: true,
+          status: true,
+          createdAt: true,
+          session: { select: { startDate: true, formation: { select: { title: true } } } },
         },
       }),
       staffId
@@ -98,11 +126,18 @@ export async function getCustomerDetail(customerId) {
         lastLogin: customer.lastLogin?.toISOString() ?? null,
         joinedAt: customer.createdAt.toISOString(),
         appointmentsCount: customer._count.appointments,
+        formationsCount: customer._count.formationReservations,
         recentAppointments: appointments.map((a) => ({
           id: a.id,
           date: a.date.toISOString(),
           status: a.status,
           serviceName: a.staffService?.service?.name ?? "Service",
+        })),
+        recentFormations: formations.map((reservation) => ({
+          id: reservation.id,
+          status: reservation.status,
+          title: reservation.session.formation.title,
+          date: reservation.session.startDate.toISOString(),
         })),
         recentOrders: orders.map((o) => ({
           id: o.id,

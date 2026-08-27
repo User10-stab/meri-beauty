@@ -2,14 +2,15 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { ROLES } from "@/lib/authorization";
+import { ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
+import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
 
 /**
  * Returns customers based on the current user's role.
  *
  * - OWNER/ADMIN: See all customers
- * - STAFF: See only customers who have at least one appointment with them
+ * - STAFF: See only customers linked to their appointments or formations
  *
  * @returns {{ success: boolean, data: Array<{ id, fullName, nickName, email, phone, avatar, isActive, lastLogin, createdAt }>, totalCount: number, page: number, pageSize: number, message?: string }}
  */
@@ -23,13 +24,17 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
       return { success: false, data: [], totalCount: 0, page: 1, pageSize, message: "Non authentifié" };
     }
 
+    if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.CUSTOMERS))) {
+      return { success: false, data: [], totalCount: 0, page: 1, pageSize, message: "Permissions insuffisantes" };
+    }
+
     const userRole = session.user.role;
     let userWhere = {
       role: "CUSTOMER",
       isDeleted: false,
     };
 
-    // For STAFF, only show customers who have appointments with them
+    let staffRelationshipFilters = null;
     if (userRole === ROLES.STAFF) {
       const staffId = await getCurrentStaffId();
 
@@ -37,28 +42,22 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
         return { success: false, data: [], totalCount: 0, page: 1, pageSize, message: "Profil staff introuvable" };
       }
 
-      userWhere = {
-        ...userWhere,
-        appointments: {
-          some: {
-            staffService: {
-              staffId: staffId,
-            },
-            isDeleted: false,
-          },
-        },
-      };
+      staffRelationshipFilters = staffCustomerRelationshipFilters({
+        staffId,
+        staffUserId: session.user.id,
+      });
+      userWhere.AND = [{ OR: staffRelationshipFilters }];
     }
 
     if (search) {
-      userWhere = {
-        ...userWhere,
-        OR: [
+      userWhere.AND = [
+        ...(userWhere.AND ?? []),
+        { OR: [
           { fullName: { contains: search, mode: "insensitive" } },
           { email: { contains: search, mode: "insensitive" } },
           { phone: { contains: search, mode: "insensitive" } },
-        ],
-      };
+        ] },
+      ];
     }
 
     // Unbounded findMany here used to fetch every customer ever registered
@@ -84,7 +83,12 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
           createdAt: true,
           _count: {
             select: {
-              appointments: true,
+              appointments: staffRelationshipFilters
+                ? { where: staffRelationshipFilters[0].appointments.some }
+                : true,
+              formationReservations: staffRelationshipFilters
+                ? { where: staffRelationshipFilters[1].formationReservations.some }
+                : true,
             },
           },
         },
@@ -103,6 +107,7 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
       lastLogin: c.lastLogin?.toISOString() ?? null,
       joinedAt: c.createdAt.toISOString(),
       appointmentsCount: c._count.appointments,
+      formationsCount: c._count.formationReservations,
     }));
 
     return { success: true, data, totalCount, page, pageSize };

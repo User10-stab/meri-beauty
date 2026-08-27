@@ -1,5 +1,5 @@
-import { requireDashboard, getCurrentStaffId } from "@/lib/route-protection";
-import { isAdminRole } from "@/lib/authorization";
+import { requireDashboardPermission, getCurrentStaffId } from "@/lib/route-protection";
+import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCalendarAppointments } from "@/actions/appointment/get-calendar-appointments";
 import { getStaffForCalendar } from "@/actions/staff/get-staff-for-calendar";
 import { getSalon } from "@/actions/salon/get-salon";
@@ -60,7 +60,7 @@ function deriveSalonHours(workingDays) {
 
 export default async function CalendarPage() {
   // ── Auth guard ─────────────────────────────────────────────────────────
-  const { user } = await requireDashboard();
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.APPOINTMENTS);
   const isAdmin = isAdminRole(user.role);
   const t = await getTranslations();
 

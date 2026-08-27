@@ -2,15 +2,24 @@ import { requireRole } from "@/lib/route-protection";
 import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { getReportsData } from "@/actions/dashboard/get-reports-data";
 import { ReportsPageClient } from "@/components/dashboard/reports/ReportsPageClient";
+import { ReportsFilterBar } from "@/components/dashboard/reports/ReportsFilterBar";
+import { normalizeReportMonths, REPORT_PERIODS } from "@/lib/reports-filters";
 import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
-export default async function ReportsPage() {
+export default async function ReportsPage({ searchParams }) {
   await requireRole(DASHBOARD_PERMISSIONS.REPORTS); // OWNER/ADMIN only — getReportsData() re-checks server-side
   const t = await getTranslations("dashboard.reports");
 
-  const result = await getReportsData();
+  // Filters live in the URL so a report is a shareable link. Both values are
+  // re-validated inside getReportsData — a hand-edited query string must not
+  // widen the window or slip past the staff lookup.
+  const params = await searchParams;
+  const months = normalizeReportMonths(params?.months);
+  const staffId = typeof params?.staffId === "string" && params.staffId ? params.staffId : null;
+
+  const result = await getReportsData({ months, staffId });
 
   return (
     <div className="space-y-6">
@@ -20,6 +29,13 @@ export default async function ReportsPage() {
           {t("subtitle")}
         </p>
       </div>
+
+      <ReportsFilterBar
+        months={months}
+        staffId={staffId}
+        periods={result.data?.filters?.periods ?? REPORT_PERIODS}
+        staffOptions={result.data?.filters?.staffOptions ?? []}
+      />
 
       {!result.success ? (
         <div

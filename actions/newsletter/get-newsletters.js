@@ -2,19 +2,18 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { getCurrentStaffId } from "@/lib/route-protection";
 
 /**
- * Fetches all newsletters for the current salon — every OWNER/ADMIN/STAFF
- * sees the full salon-wide list (not just their own), so nobody drafts
- * duplicate content without realizing someone already covered it.
+ * OWNER/ADMIN see every newsletter. STAFF see only newsletters they authored.
  *
  * @returns {{ success: boolean, data?: Array<object>, message?: string }}
  */
 export async function getNewsletters() {
   try {
     const session = await auth();
-    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.NEWSLETTER)) {
+    if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.NEWSLETTER))) {
       return { success: false, data: [], message: "Permissions insuffisantes" };
     }
 
@@ -30,8 +29,12 @@ export async function getNewsletters() {
       return { success: false, data: [], message: "Salon introuvable" };
     }
 
+    const currentStaffId = session.user.role === "STAFF" ? await getCurrentStaffId() : null;
     const newsletters = await prisma.newsletter.findMany({
-      where: { salonId: salon.id },
+      where: {
+        salonId: salon.id,
+        ...(session.user.role === "STAFF" ? { createdByStaffId: currentStaffId ?? "__missing_staff__" } : {}),
+      },
       orderBy: { createdAt: "desc" },
       include: {
         _count: {

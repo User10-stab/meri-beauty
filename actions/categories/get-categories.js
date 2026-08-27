@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { ROLES } from "@/lib/authorization";
+import { ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 
 /**
  * Returns all categories.
@@ -16,6 +16,10 @@ export async function getCategories() {
 
     if (!session?.user) {
       return { success: false, data: [], message: "Non authentifié" };
+    }
+
+    if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
+      return { success: false, data: [], message: "Permissions insuffisantes" };
     }
 
     // For STAFF users, determine their staff ID to check which services they're already assigned to

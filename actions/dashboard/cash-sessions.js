@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { computeCashVariance } from "@/lib/cash-sessions";
 
 /**
@@ -19,7 +19,7 @@ import { computeCashVariance } from "@/lib/cash-sessions";
 async function requireCashSessionAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.ORDERS)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.CASH_REGISTER))) {
     return { error: "Accès non autorisé." };
   }
   return { session };
@@ -154,19 +154,62 @@ export async function closeCashSession(sessionId, countedCash) {
   return { success: true, data: serializeCashSession(updated) };
 }
 
-export async function listCashSessions({ page = 1, pageSize = 20 } = {}) {
+/**
+ * Till history, optionally windowed.
+ *
+ * `from`/`to` are calendar-day boundaries on openedAt: a till session is a
+ * day's work, so filtering on when it was opened is what anyone reconciling a
+ * month actually means. `to` is treated as inclusive of its whole day.
+ *
+ * The summary is computed over the WHOLE filtered range, not the current page
+ * — a total that changed when you paged would be worse than no total.
+ */
+export async function listCashSessions({ page = 1, pageSize = 20, from = null, to = null } = {}) {
   const guard = await requireCashSessionAccess();
-  if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page, pageSize };
+  if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page, pageSize, summary: null };
 
-  const [totalCount, sessions] = await Promise.all([
-    prisma.cashSession.count(),
+  const openedAt = {};
+  const fromDate = from ? new Date(from) : null;
+  const toDate = to ? new Date(to) : null;
+  if (fromDate && !Number.isNaN(fromDate.getTime())) openedAt.gte = fromDate;
+  if (toDate && !Number.isNaN(toDate.getTime())) {
+    // Inclusive end: someone filtering "to 31 March" means through the 31st,
+    // not up to its midnight, which would drop that whole day's sessions.
+    toDate.setHours(23, 59, 59, 999);
+    openedAt.lte = toDate;
+  }
+  const where = Object.keys(openedAt).length ? { openedAt } : {};
+
+  const [totalCount, sessions, closedAgg, closedCount] = await Promise.all([
+    prisma.cashSession.count({ where }),
     prisma.cashSession.findMany({
+      where,
       orderBy: { openedAt: "desc" },
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: SESSION_INCLUDE,
     }),
+    // Only closed sessions carry expected/counted/variance; an open one has
+    // nulls that would silently read as zeros in a total.
+    prisma.cashSession.aggregate({
+      where: { ...where, closedAt: { not: null } },
+      _sum: { openingFloat: true, expectedCash: true, countedCash: true, variance: true },
+    }),
+    prisma.cashSession.count({ where: { ...where, closedAt: { not: null } } }),
   ]);
 
-  return { success: true, data: sessions.map(serializeCashSession), totalCount, page, pageSize };
+  return {
+    success: true,
+    data: sessions.map(serializeCashSession),
+    totalCount,
+    page,
+    pageSize,
+    summary: {
+      closedCount,
+      openingFloat: Number(closedAgg._sum.openingFloat ?? 0),
+      expectedCash: Number(closedAgg._sum.expectedCash ?? 0),
+      countedCash: Number(closedAgg._sum.countedCash ?? 0),
+      variance: Number(closedAgg._sum.variance ?? 0),
+    },
+  };
 }

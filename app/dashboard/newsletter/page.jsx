@@ -1,6 +1,6 @@
 import { Suspense } from "react";
-import { requireRole, getCurrentStaffId } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission, getCurrentStaffId } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getNewsletters } from "@/actions/newsletter/get-newsletters";
 import { NewsletterPageClient } from "@/components/dashboard/newsletter/NewsletterPageClient";
 import { getTranslations } from "next-intl/server";
@@ -8,7 +8,7 @@ import { getTranslations } from "next-intl/server";
 export const dynamic = "force-dynamic";
 
 export default async function NewsletterPage() {
-  const { user } = await requireRole(DASHBOARD_PERMISSIONS.NEWSLETTER);
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.NEWSLETTER);
   const currentStaffId = await getCurrentStaffId();
   const t = await getTranslations("dashboard.newsletter");
 

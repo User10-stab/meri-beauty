@@ -66,6 +66,13 @@ export function CustomerRow({ row, onView, onEdit, onDelete }) {
 
       {/* Status */}
       <td className="px-4 py-4 align-middle">
+        <span className="inline-flex items-center justify-center rounded-full border border-emerald-100 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
+          {row.formationsCount ?? 0}
+        </span>
+      </td>
+
+      {/* Status */}
+      <td className="px-4 py-4 align-middle">
         <ActiveBadge active={row.isActive} />
       </td>
 

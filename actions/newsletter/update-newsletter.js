@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { revalidatePath } from "next/cache";
 
@@ -18,7 +18,7 @@ import { revalidatePath } from "next/cache";
  */
 export async function updateNewsletter(newsletterId, input) {
   const session = await auth();
-  if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.NEWSLETTER)) {
+  if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.NEWSLETTER))) {
     return { success: false, message: "Permissions insuffisantes" };
   }
 

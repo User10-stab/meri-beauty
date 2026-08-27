@@ -1,4 +1,5 @@
-import { requireDashboard } from "@/lib/route-protection";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getAllAppointments, getStaffFilterOptions } from "@/actions/appointment/list-appointments";
 import { getReviewDashboardData } from "@/actions/review/review-actions";
 import { isAdminRole } from "@/lib/authorization";
@@ -12,7 +13,7 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function AllAppointmentsPage() {
-  const { user } = await requireDashboard();
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.APPOINTMENTS);
 
   const [appointmentsResult, staffResult, reviewsResult] = await Promise.all([
     getAllAppointments(),

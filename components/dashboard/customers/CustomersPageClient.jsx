@@ -15,6 +15,7 @@ const CUSTOMERS_COLUMNS = [
   { key: "email", label: "Email" },
   { key: "phone", label: "Téléphone" },
   { key: "appointmentsCount", label: "Rendez-vous" },
+  { key: "formationsCount", label: "Formations" },
   { key: "isActive", label: "Statut" },
   { key: "joinedAt", label: "Inscrit le" },
   { key: "lastLogin", label: "Dernière connexion" },

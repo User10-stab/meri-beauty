@@ -1,12 +1,13 @@
 import { notFound } from "next/navigation";
-import { requireDashboard } from "@/lib/route-protection";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getOrderById } from "@/actions/boutique/orders";
 import { OrderDetailClient } from "@/components/dashboard/boutique/OrderDetailClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function OrderDetailPage({ params }) {
-  await requireDashboard();
+  await requireDashboardPermission(STAFF_PERMISSIONS.ORDERS);
 
   const { id } = await params;
   const result = await getOrderById(id);

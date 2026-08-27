@@ -4,7 +4,7 @@ import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isAdminRole } from "@/lib/authorization";
+import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import {
   createProductSchema,
   updateProductSchema,
@@ -133,6 +133,10 @@ export async function getProducts({
 } = {}) {
   const session = await auth();
   const canSeeMargin = isAdminRole(session?.user?.role);
+
+  if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.BOUTIQUE_STOCK))) {
+    return { success: false, message: "Accès non autorisé.", data: [], totalCount: 0 };
+  }
 
   try {
     const where = {

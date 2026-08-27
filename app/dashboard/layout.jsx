@@ -1,6 +1,7 @@
 import { DashboardShell } from "@/components/dashboard/Layouts/dashboard-shell";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { getDashboardPermissions } from "@/lib/authorization";
 
 export const metadata = {
   title: {
@@ -17,5 +18,7 @@ export default async function DashboardLayout({ children }) {
     redirect("/login");
   }
 
-  return <DashboardShell user={session.user}>{children}</DashboardShell>;
+  const dashboardPermissions = await getDashboardPermissions(session.user);
+
+  return <DashboardShell user={session.user} dashboardPermissions={dashboardPermissions}>{children}</DashboardShell>;
 }

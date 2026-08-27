@@ -3,11 +3,11 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 
 /**
  * Récupère toutes les réservations de formations pour le tableau de bord.
- * Admin et staff voient toutes les formations, sans filtrage par créateur.
+ * OWNER/ADMIN voient tout; STAFF voit uniquement les réservations de ses formations.
  * Contrairement aux ateliers, il n'y a toujours pas de changement de
  * séance/places pour les formations — seule l'annulation admin existe
  * (actions/formations/manage-reservation.js), en tant qu'outil interne, pas
@@ -17,11 +17,14 @@ export async function getFormationReservations() {
   try {
     const session = await auth();
 
-    if (!session?.user || !hasPermission(session.user.role, DASHBOARD_PERMISSIONS.FORMATION_RESERVATIONS)) {
+    if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS))) {
       return { success: false, data: [], message: "Non autorisé." };
     }
 
     const reservations = await prisma.formationReservation.findMany({
+      where: session.user.role === "STAFF"
+        ? { session: { formation: { createdById: session.user.id } } }
+        : {},
       orderBy: { createdAt: "desc" },
       include: {
         session: { include: { formation: true } },

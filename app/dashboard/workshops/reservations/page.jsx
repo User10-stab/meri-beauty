@@ -1,5 +1,5 @@
-import { requireRole } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getWorkshopReservations } from "@/actions/workshops/get-reservations";
 import { ReservationsPageClient } from "@/components/dashboard/workshops/ReservationsPageClient";
 
@@ -11,7 +11,7 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function WorkshopReservationsPage() {
-  const { user } = await requireRole(DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS);
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS);
 
   const result = await getWorkshopReservations();
   const reservations = result.data ?? [];

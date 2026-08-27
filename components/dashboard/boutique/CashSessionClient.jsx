@@ -29,16 +29,23 @@ function StatCard({ icon, label, value }) {
   );
 }
 
-export function CashSessionClient({ initialCurrent, initialHistory }) {
+export function CashSessionClient({ initialCurrent, initialHistory, initialSummary = null }) {
   const [current, setCurrent] = useState(initialCurrent);
   const [history, setHistory] = useState(initialHistory);
+  const [summary, setSummary] = useState(initialSummary);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [openingFloat, setOpeningFloat] = useState("");
   const [countedCash, setCountedCash] = useState("");
   const [isPending, startTransition] = useTransition();
 
-  async function refreshHistory() {
-    const result = await listCashSessions({ pageSize: 20 });
-    if (result.success) setHistory(result.data);
+  // Always re-reads with the filters currently on screen, so opening or
+  // closing a till does not silently drop the user back to the full history.
+  async function refreshHistory(range = { from, to }) {
+    const result = await listCashSessions({ pageSize: 20, from: range.from || null, to: range.to || null });
+    if (!result.success) return toast.error(result.message);
+    setHistory(result.data);
+    setSummary(result.summary);
   }
 
   function handleOpen() {
@@ -147,9 +154,58 @@ export function CashSessionClient({ initialCurrent, initialHistory }) {
           <History size={18} className="text-[#2f3a2e]" />
           <h2 className="font-semibold text-gray-900 dark:text-white">Historique</h2>
         </div>
+        {/* Windowed on openedAt: a till session is a day's work, so "when was
+            it opened" is what anyone reconciling a month actually means. */}
+        <div className="mb-4 flex flex-wrap items-end gap-3 rounded-[10px] border border-stroke bg-white p-4 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+          <div>
+            <label htmlFor="cash-from" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
+              Du
+            </label>
+            <input
+              id="cash-from"
+              type="date"
+              value={from}
+              onChange={(event) => setFrom(event.target.value)}
+              className="rounded-[7px] border border-stroke bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+          </div>
+          <div>
+            <label htmlFor="cash-to" className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
+              Au
+            </label>
+            <input
+              id="cash-to"
+              type="date"
+              value={to}
+              onChange={(event) => setTo(event.target.value)}
+              className="rounded-[7px] border border-stroke bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => refreshHistory({ from, to })}
+            className="rounded-[7px] bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-opacity-90"
+          >
+            Filtrer
+          </button>
+          {(from || to) && (
+            <button
+              type="button"
+              onClick={() => {
+                setFrom("");
+                setTo("");
+                refreshHistory({ from: "", to: "" });
+              }}
+              className="rounded-[7px] border border-stroke px-4 py-2 text-sm font-semibold text-gray-500 hover:border-primary hover:text-primary dark:border-dark-3 dark:text-dark-6"
+            >
+              Réinitialiser
+            </button>
+          )}
+        </div>
+
         {history.length === 0 ? (
           <div className="rounded-lg border border-dashed border-gray-200 px-5 py-10 text-center text-sm text-gray-500">
-            Aucune session clôturée pour l&apos;instant.
+            {from || to ? "Aucune session sur cette période." : "Aucune session clôturée pour l’instant."}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -159,6 +215,20 @@ export function CashSessionClient({ initialCurrent, initialHistory }) {
                 label="Dernier écart"
                 value={formatEuro(history.find((s) => s.closedAt)?.variance ?? 0)}
               />
+            )}
+            {/* Totals span the whole filtered range, not just this page — a
+                total that moved when you paged would be worse than none. Open
+                sessions are excluded: their expected/counted are still null. */}
+            {summary?.closedCount > 0 && (
+              <>
+                <StatCard icon={<Wallet size={20} />} label={`Sessions clôturées`} value={summary.closedCount} />
+                <StatCard icon={<Wallet size={20} />} label="Espèces comptées" value={formatEuro(summary.countedCash)} />
+                <StatCard
+                  icon={<Wallet size={20} />}
+                  label="Écart cumulé"
+                  value={formatEuro(summary.variance)}
+                />
+              </>
             )}
           </div>
         )}

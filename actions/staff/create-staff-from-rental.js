@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { sendEmail } from "@/lib/email";
+import { verifyVatWithVies } from "@/lib/vat-validation";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
 
@@ -54,6 +55,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
         hireDate:          fe.hireDate?.[0]          ?? null,
         vatNumber:         fe.vatNumber?.[0]         ?? null,
         serviceIds:        fe.serviceIds?.[0]        ?? null,
+        dashboardPermissions: fe.dashboardPermissions?.[0] ?? null,
         contract:          fe["contract"]?.[0]       ?? null,
       },
     };
@@ -70,6 +72,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
     hireDate,
     vatNumber,
     serviceIds,
+    dashboardPermissions,
     contract,
   } = parsed.data;
 
@@ -86,6 +89,16 @@ export async function createStaffFromRental(input, rentalRequestId) {
         message: "Un ou plusieurs services sélectionnés sont introuvables.",
         errors: { serviceIds: "Services introuvables." },
       };
+    }
+  }
+
+  if (vatNumber) {
+    const viesResult = await verifyVatWithVies(vatNumber);
+    if (!viesResult.success) {
+      return { success: false, message: viesResult.message || "Impossible de vérifier ce numéro auprès de VIES. Réessayez.", errors: { vatNumber: "Vérification VIES indisponible." } };
+    }
+    if (!viesResult.valid) {
+      return { success: false, message: "Ce numéro de TVA n'est pas reconnu comme actif par VIES.", errors: { vatNumber: "Numéro non reconnu par VIES." } };
     }
   }
 
@@ -190,6 +203,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
           isActive: true,
           hireDate: hireDate ? new Date(hireDate) : null,
           vatNumber,
+          dashboardPermissions,
         },
       });
 

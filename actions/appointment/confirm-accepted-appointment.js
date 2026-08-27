@@ -8,6 +8,7 @@ import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { verifyAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import { sendEmail } from "@/lib/email";
 import { reservationConfirmedEmail, staffReservationConfirmedEmail } from "@/lib/email-templates";
+import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
 import {
   buildAppointmentConfirmedNotification,
   createNotificationsBulk,
@@ -177,6 +178,7 @@ async function sendConfirmationSideEffects(appointment) {
     minute: "2-digit",
     timeZone: "Europe/Brussels",
   });
+  const ticket = await buildAppointmentCheckInEmailAssets(appointment.id);
 
   await sendEmail({
     to: appointment.user.email,
@@ -189,7 +191,9 @@ async function sendConfirmationSideEffects(appointment) {
       paidAmount: Number(appointment.payment?.paidAmount ?? 0),
       totalAmount: Number(appointment.payment?.totalAmount ?? 0),
       paymentMethod: appointment.payment?.paidAmount > 0 ? "Paiement en ligne" : null,
+      checkInCode: ticket.checkInCode,
     }),
+    ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
   }).catch((error) => console.error("[confirmAcceptedAppointment] email failed", error));
 
   const emailRecipients = await getAppointmentEmailRecipients(appointment.staffId);

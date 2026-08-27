@@ -90,12 +90,30 @@ describe("a VAT number is never stored apart from its verification proof", () =>
     expect(policy).toContain("customer?.vatValidatedAt");
   });
 
-  test("the rental route clears the proof when the number changes", () => {
+  test("the rental route verifies with VIES and stores the proof with the number", () => {
     const route = source("app/api/rental-requests/route.js");
-    expect(route).toContain("current?.vatNumber !== vatNumber");
-    expect(route).toContain("vatValidatedAt: null");
-    expect(route).toContain("vatValidationName: null");
-    expect(route).toContain("vatValidationAddress: null");
+    expect(route).toContain("verifyVatWithVies(vatNumber)");
+    expect(route).toContain("vatValidatedAt: new Date()");
+    expect(route).toContain("vatValidationName: viesResult.name ?? null");
+    expect(route).toContain("vatValidationAddress: viesResult.address ?? null");
+    expect(route).toContain("...vatValidation");
+  });
+
+  test.each([
+    "actions/auth/register.js",
+    "actions/customer/settings.js",
+    "actions/customers/set-customer-vat-number.js",
+    "actions/boutique/orders.js",
+    "actions/formations/create-formation-reservation.js",
+    "actions/formations/waiting-list.js",
+    "actions/workshops/create-workshop-reservation.js",
+    "actions/workshops/waiting-list.js",
+    "actions/salon/update-salon.js",
+    "actions/staff/create-independent-staff.js",
+    "actions/staff/create-staff-from-rental.js",
+    "app/api/rental-requests/route.js",
+  ])("%s performs a server-side VIES lookup before accepting VAT", (file) => {
+    expect(source(file)).toContain("verifyVatWithVies(");
   });
 
   test("the rental route no longer writes the number on its own", () => {
@@ -104,17 +122,46 @@ describe("a VAT number is never stored apart from its verification proof", () =>
   });
 
   test.each([
+    "actions/boutique/orders.js",
     "actions/workshops/create-workshop-reservation.js",
+    "actions/workshops/waiting-list.js",
     "actions/formations/create-formation-reservation.js",
+    "actions/formations/waiting-list.js",
   ])("%s records the VIES result it already paid for", (file) => {
     const content = source(file);
     expect(content).toContain("vatValidatedAt: new Date()");
     expect(content).toContain("vatValidationName: viesResult.name ?? null");
     expect(content).toContain("vatValidationAddress: viesResult.address ?? null");
-    // Both the create and the update path carry it.
-    expect(content.match(/\.\.\.\(vatValidation \?\? \{\}\)/g)).toHaveLength(2);
     // And neither writes the bare number any more.
     expect(content).not.toMatch(/data:\s*\{\s*vatNumber:\s*vatNumberToSave\s*\}/);
+  });
+
+  test("product checkout exposes the same VIES field used by reservations", () => {
+    const checkout = source("components/boutique/CheckoutPageClient.jsx");
+    expect(checkout).toContain("verifyVatNumber(customerInfo.vatNumber)");
+    expect(checkout).toContain("Numéro de TVA (optionnel)");
+    expect(checkout).toContain("Vérifier");
+  });
+
+  test.each([
+    "actions/boutique/orders.js",
+    "actions/workshops/create-workshop-reservation.js",
+    "actions/workshops/waiting-list.js",
+    "actions/formations/create-formation-reservation.js",
+    "actions/formations/waiting-list.js",
+  ])("%s reuses a matching recent VIES proof", (file) => {
+    expect(source(file)).toContain("hasReusableVatValidation(");
+  });
+
+  test.each([
+    "components/boutique/CheckoutPageClient.jsx",
+    "app/(public)/reservation-atelier/page.js",
+    "app/(public)/reservation-formation/page.js",
+  ])("%s hides repeat VAT entry behind the saved 90-day proof", (file) => {
+    const content = source(file);
+    expect(content).toContain("hasSavedVatProof");
+    expect(content).toContain('href="/profile"');
+    expect(content).toContain("90 jours");
   });
 });
 

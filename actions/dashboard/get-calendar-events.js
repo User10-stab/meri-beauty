@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { ROLES, isAdminRole } from "@/lib/authorization";
+import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 
 /**
@@ -18,6 +18,9 @@ import { getCurrentStaffId } from "@/lib/route-protection";
 export async function getCalendarEvents({ from, to }) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié.", data: null };
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
+    return { success: false, message: "Accès non autorisé.", data: null };
+  }
 
   let staffScopeId = null;
   if (session.user.role === ROLES.STAFF) {

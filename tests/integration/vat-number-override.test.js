@@ -1,15 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
 import { testTag } from "./helpers.js";
 
-// Same boundary as the other integration suites: only the NextAuth session
-// and Next's cache invalidation are faked. setCustomerVatNumberManually runs
-// for real against the real (disposable, branched) database — including its
-// own format validation and the audit-log write, but it never calls VIES
-// (that's the whole point: it's the staff bypass for when VIES rejects or
-// can't be reached).
+// The database path is real; the external VIES response is deterministic.
 const authMock = vi.fn();
+const { verifyVatWithViesMock } = vi.hoisted(() => ({ verifyVatWithViesMock: vi.fn() }));
 vi.mock("@/auth", () => ({ auth: authMock }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/lib/vat-validation", async (importOriginal) => ({
+  ...(await importOriginal()),
+  verifyVatWithVies: verifyVatWithViesMock,
+}));
 
 const { prisma } = await import("@/lib/prisma");
 const { setCustomerVatNumberManually } = await import("@/actions/customers/set-customer-vat-number");
@@ -29,6 +29,7 @@ describe("staff manual VAT number override", () => {
   let admin, customer;
 
   beforeAll(async () => {
+    verifyVatWithViesMock.mockResolvedValue({ success: true, valid: true, name: "Meri Company", address: "Bruxelles" });
     admin = await prisma.user.create({
       data: { fullName: `${tag}-admin`, email: `${tag}-admin@example.test`, phone: uniquePhone(), password: "x", role: "ADMIN", emailVerified: true },
     });
@@ -64,7 +65,7 @@ describe("staff manual VAT number override", () => {
     expect(unchanged.vatNumber).toBeNull();
   });
 
-  test("an admin can force-save a valid-format VAT number without any VIES check, and it's audit-logged", async () => {
+  test("an admin can save a VIES-validated VAT number and it is audit-logged", async () => {
     authMock.mockResolvedValue(sessionFor(admin));
 
     const result = await setCustomerVatNumberManually(customer.id, "BE0751854027");
@@ -73,6 +74,9 @@ describe("staff manual VAT number override", () => {
 
     const updated = await prisma.user.findUnique({ where: { id: customer.id } });
     expect(updated.vatNumber).toBe("BE0751854027");
+    expect(updated.vatValidatedAt).toBeInstanceOf(Date);
+    expect(updated.vatValidationName).toBe("Meri Company");
+    expect(verifyVatWithViesMock).toHaveBeenCalledWith("BE0751854027");
 
     const logs = await prisma.auditLog.findMany({ where: { entityType: "User", entityId: customer.id } });
     expect(logs).toHaveLength(1);

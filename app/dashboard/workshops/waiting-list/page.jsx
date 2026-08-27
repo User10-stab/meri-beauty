@@ -1,5 +1,5 @@
-import { requireRole } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getWaitingListEntries } from "@/actions/workshops/get-waiting-list";
 import { WaitingListPageClient } from "@/components/dashboard/workshops/WaitingListPageClient";
 
@@ -11,7 +11,7 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 
 export default async function WorkshopWaitingListPage() {
-  await requireRole(DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS);
+  await requireDashboardPermission(STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS);
 
   const result = await getWaitingListEntries();
   const entries = result.data ?? [];

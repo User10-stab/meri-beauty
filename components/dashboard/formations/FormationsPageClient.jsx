@@ -13,7 +13,7 @@ import { isAdminRole } from "@/lib/authorization";
 import Button from "@/components/ui/Button";
 import { useTranslations } from "next-intl";
 
-export function FormationsPageClient({ initialFormations = [], initialAnimators = [], userRole, currentUserId }) {
+export function FormationsPageClient({ initialFormations = [], initialStaffOptions = [], userRole, currentUserId }) {
   const t = useTranslations("dashboardFormations");
   const router = useRouter();
   const confirm = useConfirm();
@@ -138,7 +138,8 @@ export function FormationsPageClient({ initialFormations = [], initialAnimators 
         onClose={handleModalClose}
         onCreated={() => router.refresh()}
         formation={editingFormation}
-        animators={initialAnimators}
+        staffOptions={initialStaffOptions}
+        canAssignStaff={isAdminRole(userRole)}
       />
     </div>
   );

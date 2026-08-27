@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Banknote, Camera, CameraOff, CreditCard, Loader2, Minus, Plus, ScanLine, Trash2, UserRound, X } from "lucide-react";
+import { Banknote, Camera, CameraOff, CreditCard, ImageOff, Loader2, Minus, PackageSearch, Plus, ScanLine, Search, SlidersHorizontal, Trash2, UserRound, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import QRCode from "qrcode";
 import { toast } from "sonner";
@@ -16,6 +17,7 @@ import {
   getPointOfSaleOrderStatus,
   recoverPointOfSaleCheckout,
   searchPointOfSaleCustomers,
+  searchPointOfSaleProducts,
 } from "@/actions/boutique/point-of-sale";
 
 const emptyAddress = {
@@ -34,9 +36,12 @@ const emptyCustomer = {
   ...emptyAddress,
 };
 
-export function PointOfSaleClient() {
+export function PointOfSaleClient({ canAdjustStock = false }) {
   const router = useRouter();
   const [barcode, setBarcode] = useState("");
+  const [productQuery, setProductQuery] = useState("");
+  const [productResults, setProductResults] = useState([]);
+  const [searchingProducts, setSearchingProducts] = useState(false);
   const [cart, setCart] = useState([]);
   const [serviceDescription, setServiceDescription] = useState("");
   const [servicePrice, setServicePrice] = useState("");
@@ -150,6 +155,37 @@ export function PointOfSaleClient() {
     return () => clearTimeout(timeout);
   }, [customer.email, customer.fullName, customer.id]);
 
+  // Shared by the scanner and the name search — both resolve to the same
+  // {variantId, availableQuantity, …} shape, so the stock ceiling and the
+  // "already in the cart" merge must behave identically whichever way the
+  // line was found.
+  const addProductToCart = useCallback((item) => {
+    if (item.availableQuantity <= 0) {
+      toast.error("Ce produit est en rupture de stock.");
+      return;
+    }
+    setCart((current) => {
+      const present = current.find((entry) => entry.variantId === item.variantId);
+      if (!present) {
+        return [...current, {
+          key: item.variantId,
+          type: "PRODUCT",
+          variantId: item.variantId,
+          productName: item.productName,
+          variantName: item.variantName,
+          unitPrice: item.unitPrice,
+          availableQuantity: item.availableQuantity,
+          quantity: 1,
+        }];
+      }
+      if (present.quantity >= item.availableQuantity) {
+        toast.error("La quantité demandée dépasse le stock disponible.");
+        return current;
+      }
+      return current.map((entry) => (entry.variantId === item.variantId ? { ...entry, quantity: entry.quantity + 1 } : entry));
+    });
+  }, []);
+
   const addBarcode = useCallback(async (scannedCode = barcode) => {
     const code = scannedCode?.trim();
     if (!code) return;
@@ -158,22 +194,38 @@ export function PointOfSaleClient() {
       toast.error(result.message);
       return;
     }
-    const item = result.data;
-    if (item.availableQuantity <= 0) {
-      toast.error("Ce produit est en rupture de stock.");
-      return;
-    }
-    setCart((current) => {
-      const present = current.find((entry) => entry.variantId === item.variantId);
-      if (!present) return [...current, { ...item, key: item.variantId, type: "PRODUCT", quantity: 1 }];
-      if (present.quantity >= item.availableQuantity) {
-        toast.error("La quantité demandée dépasse le stock disponible.");
-        return current;
-      }
-      return current.map((entry) => (entry.variantId === item.variantId ? { ...entry, quantity: entry.quantity + 1 } : entry));
-    });
+    addProductToCart(result.data);
     setBarcode("");
-  }, [barcode]);
+  }, [barcode, addProductToCart]);
+
+  // Debounced so a counter search doesn't fire a query per keystroke. The
+  // request id guards against an earlier, slower response overwriting a
+  // later one.
+  const productSearchRef = useRef(0);
+  useEffect(() => {
+    const value = productQuery.trim();
+    if (value.length < 2) {
+      setProductResults([]);
+      setSearchingProducts(false);
+      return undefined;
+    }
+
+    setSearchingProducts(true);
+    const requestId = ++productSearchRef.current;
+    const timeout = setTimeout(async () => {
+      const result = await searchPointOfSaleProducts(value);
+      if (requestId !== productSearchRef.current) return;
+      setSearchingProducts(false);
+      if (!result.success) {
+        toast.error(result.message);
+        setProductResults([]);
+        return;
+      }
+      setProductResults(result.data);
+    }, 250);
+
+    return () => clearTimeout(timeout);
+  }, [productQuery]);
 
   function addServiceLine() {
     const description = serviceDescription.trim();
@@ -189,6 +241,10 @@ export function PointOfSaleClient() {
         productName: description,
         variantName: "Prestation",
         unitPrice: Math.round(price * 100) / 100,
+        // The cashier quotes a customer-facing price. The server taxes what it
+        // receives, so hand it the net equivalent — unrounded, so re-applying
+        // 21 % lands back on the exact figure typed here.
+        unitPriceExclVat: price / (1 + BELGIUM_VAT_RATE / 100),
         availableQuantity: Infinity,
         quantity: 1,
       },
@@ -315,7 +371,7 @@ export function PointOfSaleClient() {
         customer: isWalkIn ? null : customer,
         items: cart.map((item) =>
           item.type === "SERVICE"
-            ? { type: "SERVICE", description: item.productName, unitPrice: item.unitPrice, quantity: item.quantity }
+            ? { type: "SERVICE", description: item.productName, unitPrice: item.unitPriceExclVat, quantity: item.quantity }
             : { type: "PRODUCT", variantId: item.variantId, quantity: item.quantity }
         ),
         method,
@@ -426,6 +482,131 @@ export function PointOfSaleClient() {
           </button>
         </form>
 
+        <div className="flex flex-col gap-2">
+          <div className="relative">
+            <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              value={productQuery}
+              onChange={(event) => setProductQuery(event.target.value)}
+              placeholder="Sans code-barres : chercher par nom, référence ou variante"
+              autoComplete="off"
+              aria-label="Rechercher un produit par nom"
+              className="h-11 w-full rounded-lg border border-gray-200 pl-10 pr-9 text-sm outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+            {searchingProducts && (
+              <Loader2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400" />
+            )}
+            {!searchingProducts && productQuery && (
+              <button
+                type="button"
+                onClick={() => setProductQuery("")}
+                aria-label="Effacer la recherche"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-gray-400 transition-colors hover:text-gray-600"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+
+          {productQuery.trim().length >= 2 && !searchingProducts && productResults.length === 0 && (
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-gray-200 px-4 py-6 text-sm text-gray-500 dark:border-dark-3">
+              <PackageSearch size={16} className="shrink-0 text-gray-400" />
+              Aucun produit actif ne correspond à « {productQuery.trim()} ».
+            </div>
+          )}
+
+          {productResults.length > 0 && (
+            <ul className="max-h-80 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 dark:divide-dark-3 dark:border-dark-3">
+              {productResults.map((item) => {
+                const inCart = cart.find((entry) => entry.variantId === item.variantId)?.quantity ?? 0;
+                const outOfStock = item.availableQuantity <= 0;
+                const maxedOut = !outOfStock && inCart >= item.availableQuantity;
+                const disabled = outOfStock || maxedOut;
+                return (
+                  <li key={item.variantId}>
+                    <div className="flex items-center gap-3 p-2.5">
+                      <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-100 bg-gray-50 dark:border-dark-3 dark:bg-dark-2">
+                        {item.imagePath ? (
+                          <Image
+                            src={item.imagePath}
+                            alt=""
+                            width={48}
+                            height={48}
+                            className={`h-12 w-12 object-cover ${disabled ? "opacity-40 grayscale" : ""}`}
+                          />
+                        ) : (
+                          <ImageOff size={16} className="text-gray-300" />
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className={`truncate text-sm font-semibold ${disabled ? "text-gray-400 dark:text-dark-6" : "text-gray-900 dark:text-white"}`}>
+                          {item.productName}
+                        </p>
+                        <p className="truncate text-xs text-gray-500">
+                          {item.variantName} · {item.unitPrice.toFixed(2)} €
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {outOfStock ? (
+                            <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-300">
+                              Rupture de stock
+                            </span>
+                          ) : (
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                item.isLowStock
+                                  ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                                  : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                              }`}
+                            >
+                              {item.availableQuantity} en stock
+                            </span>
+                          )}
+                          {inCart > 0 && (
+                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600 dark:bg-dark-3 dark:text-dark-6">
+                              {inCart} au panier
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {outOfStock && canAdjustStock ? (
+                        <a
+                          href={`/dashboard/boutique/stock?search=${encodeURIComponent(item.productName)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Ouvre l'inventaire dans un nouvel onglet — le panier est conservé"
+                          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-[#2f3a2e] px-3 text-xs font-semibold text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/5 dark:border-dark-3 dark:text-white"
+                        >
+                          <SlidersHorizontal size={14} />
+                          Corriger le stock
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => addProductToCart(item)}
+                          title={
+                            outOfStock
+                              ? "Rupture de stock — demandez à un responsable de corriger l'inventaire"
+                              : maxedOut
+                                ? "Tout le stock disponible est déjà au panier"
+                                : undefined
+                          }
+                          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 dark:disabled:bg-dark-3 dark:disabled:text-dark-6"
+                        >
+                          <Plus size={14} />
+                          {maxedOut ? "Max" : "Ajouter"}
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -443,7 +624,7 @@ export function PointOfSaleClient() {
           <input
             value={servicePrice}
             onChange={(event) => setServicePrice(event.target.value)}
-            placeholder="Prix €"
+            placeholder="Prix TTC €"
             inputMode="decimal"
             autoComplete="off"
             className="h-11 w-28 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"

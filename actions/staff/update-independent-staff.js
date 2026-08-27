@@ -46,6 +46,7 @@ export async function updateIndependentStaff(input) {
         hireDate:          fe.hireDate?.[0]          ?? null,
         vatNumber:         fe.vatNumber?.[0]         ?? null,
         serviceIds:        fe.serviceIds?.[0]        ?? null,
+        dashboardPermissions: fe.dashboardPermissions?.[0] ?? null,
         contract:          fe["contract"]?.[0]       ?? null,
       },
     };
@@ -63,6 +64,7 @@ export async function updateIndependentStaff(input) {
     vatNumber,
     isActive,
     serviceIds,
+    dashboardPermissions,
     contract,
   } = parsed.data;
 
@@ -145,6 +147,7 @@ export async function updateIndependentStaff(input) {
           vatNumber:         vatNumber         ?? null,
           isActive,
           hireDate: hireDate ? new Date(hireDate) : null,
+          ...(dashboardPermissions !== undefined ? { dashboardPermissions } : {}),
         },
       });
 

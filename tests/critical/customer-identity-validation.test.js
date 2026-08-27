@@ -32,4 +32,18 @@ describe("customer identity validation", () => {
     }, { requirePhone: true });
     expect(invalid.success).toBe(false);
   });
+
+  it("returns a phone field error when an online checkout omits the phone", () => {
+    const missingPhone = validateCustomerIdentity({
+      fullName: "Marie Dupont",
+      email: "marie@example-beauty.be",
+      phone: "",
+    }, { requirePhone: true });
+
+    expect(missingPhone).toMatchObject({
+      success: false,
+      field: "phone",
+    });
+    expect(missingPhone.message).toContain("téléphone");
+  });
 });

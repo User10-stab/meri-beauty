@@ -1,5 +1,6 @@
 import { Suspense } from "react";
-import { requireDashboard } from "@/lib/route-protection";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getAllAppointments } from "@/actions/appointment/get-all-appointments";
 import { AppointmentsPageClient } from "@/components/dashboard/appointments/AppointmentsPageClient";
 import { getTranslations } from "next-intl/server";
@@ -24,7 +25,7 @@ function countByStatus(appointments, status) {
 
 export default async function AppointmentsPage() {
   // Auth guard — accessible to Admin, Owner and Staff
-  await requireDashboard();
+  await requireDashboardPermission(STAFF_PERMISSIONS.APPOINTMENTS);
 
   const t = await getTranslations();
   const result = await getAllAppointments();

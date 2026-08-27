@@ -3,9 +3,11 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
-import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS, getDashboardPermissions, isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getLowStockVariants } from "@/actions/boutique/stock";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
+import { getCurrentStaffId } from "@/lib/route-protection";
+import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
 
 // Revenue = money that has actually landed, regardless of a later partial/
 // full refund — a refund is its own ledger event, it doesn't erase that the
@@ -37,6 +39,18 @@ export async function getDashboardStats() {
     return { success: false, message: "Accès non autorisé." };
   }
 
+  const isAdmin = isAdminRole(session.user.role);
+  const permissions = await getDashboardPermissions(session.user);
+  const staffId = isAdmin ? null : await getCurrentStaffId();
+  const canSeeAppointments = isAdmin || permissions.includes(STAFF_PERMISSIONS.APPOINTMENTS);
+  const canSeeCustomers = isAdmin || permissions.includes(STAFF_PERMISSIONS.CUSTOMERS);
+  const canSeeStock = isAdmin || permissions.includes(STAFF_PERMISSIONS.BOUTIQUE_STOCK);
+  const canSeeOrders = isAdmin || permissions.includes(STAFF_PERMISSIONS.ORDERS);
+  const appointmentScope = staffId ? { staffService: { staffId } } : {};
+  const customerRelationshipFilters = staffId
+    ? staffCustomerRelationshipFilters({ staffId, staffUserId: session.user.id })
+    : null;
+
   const now = new Date();
   const today = startOfDay(now);
   const tomorrow = new Date(today);
@@ -55,26 +69,33 @@ export async function getDashboardStats() {
       recentOrders,
       revenueLast7Days,
     ] = await Promise.all([
-      prisma.payment.findMany({
+      isAdmin ? prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfMonth } },
         select: { paidAmount: true, transactions: { select: { transactionType: true, amount: true } } },
-      }),
-      prisma.appointment.count({
+      }) : Promise.resolve([]),
+      canSeeAppointments ? prisma.appointment.count({
         where: {
           isDeleted: false,
           date: { gte: today, lt: tomorrow },
           status: { in: [...ACTIVE_APPOINTMENT_STATUSES, "COMPLETED"] },
+          ...appointmentScope,
         },
-      }),
-      prisma.user.count({
-        where: { role: "CUSTOMER", isDeleted: false, createdAt: { gte: startOfMonth } },
-      }),
-      getLowStockVariants(),
-      prisma.appointment.findMany({
+      }) : Promise.resolve(0),
+      canSeeCustomers ? prisma.user.count({
+        where: {
+          role: "CUSTOMER",
+          isDeleted: false,
+          createdAt: { gte: startOfMonth },
+          ...(customerRelationshipFilters ? { OR: customerRelationshipFilters } : {}),
+        },
+      }) : Promise.resolve(0),
+      canSeeStock ? getLowStockVariants() : Promise.resolve({ success: true, data: [] }),
+      canSeeAppointments ? prisma.appointment.findMany({
         where: {
           isDeleted: false,
           status: { in: ACTIVE_APPOINTMENT_STATUSES },
           startTime: { gte: now },
+          ...appointmentScope,
         },
         orderBy: { startTime: "asc" },
         take: 5,
@@ -90,8 +111,8 @@ export async function getDashboardStats() {
             },
           },
         },
-      }),
-      prisma.order.findMany({
+      }) : Promise.resolve([]),
+      canSeeOrders ? prisma.order.findMany({
         orderBy: { createdAt: "desc" },
         take: 5,
         select: {
@@ -102,15 +123,15 @@ export async function getDashboardStats() {
           createdAt: true,
           user: { select: { fullName: true } },
         },
-      }),
-      prisma.payment.findMany({
+      }) : Promise.resolve([]),
+      isAdmin ? prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: sevenDaysAgo } },
         select: {
           paidAmount: true,
           paidAt: true,
           transactions: { select: { transactionType: true, amount: true } },
         },
-      }),
+      }) : Promise.resolve([]),
     ]);
 
     // Bucket the last 7 days' revenue by calendar day so the trend chart

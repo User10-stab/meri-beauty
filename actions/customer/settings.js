@@ -31,6 +31,7 @@ export async function getMySettings() {
           companyLegalForm: true,
           billingContactName: true,
           purchaseOrderReference: true,
+          peppolParticipantId: true,
         },
       },
     },
@@ -73,6 +74,7 @@ export async function updateMyBillingProfile(input) {
     companyLegalForm: parsed.data.companyLegalForm || null,
     billingContactName: parsed.data.billingContactName || null,
     purchaseOrderReference: parsed.data.purchaseOrderReference || null,
+    peppolParticipantId: parsed.data.peppolParticipantId || null,
   };
 
   try {
@@ -136,6 +138,7 @@ export async function updateMyVatNumber(vatNumber) {
       await prisma.user.update({
         where: { id: session.user.id },
         data: {
+          isCompany: true,
           vatNumber: normalized,
           vatValidatedAt: null,
           vatValidationName: null,
@@ -162,6 +165,7 @@ export async function updateMyVatNumber(vatNumber) {
     await prisma.user.update({
       where: { id: session.user.id },
       data: {
+        isCompany: true,
         vatNumber: normalized,
         vatValidatedAt: new Date(),
         vatValidationName: viesResult.name ?? null,
@@ -181,6 +185,37 @@ export async function updateMyVatNumber(vatNumber) {
     console.error("[updateMyVatNumber]", error);
     return { success: false, message: "Une erreur est survenue." };
   }
+}
+
+/** Minimal authenticated checkout profile; avoids exposing the full account. */
+export async function getMyCheckoutProfile() {
+  const session = await auth();
+  if (!session?.user?.id) return { success: false };
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: {
+      fullName: true,
+      email: true,
+      phone: true,
+      isCompany: true,
+      vatNumber: true,
+      vatValidatedAt: true,
+    },
+  });
+  if (!user) return { success: false };
+
+  return {
+    success: true,
+    data: {
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone?.startsWith("temp-") ? "" : (user.phone ?? ""),
+      isCompany: user.isCompany,
+      vatNumber: user.vatNumber ?? "",
+      vatValidatedAt: user.vatValidatedAt,
+    },
+  };
 }
 
 /**

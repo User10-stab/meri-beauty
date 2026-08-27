@@ -35,6 +35,7 @@ import {
 } from "@/lib/terms-consent";
 import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
 import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
+import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -427,6 +428,9 @@ export async function createReservation(data) {
       // Email logic below expects these variables
       const payment = null;
       const totalAmount = rawTotalAmount;
+      const ticket = appointmentStatus === "CONFIRMED"
+        ? await buildAppointmentCheckInEmailAssets(appointment.id)
+        : { checkInCode: null, attachment: null };
 
       // Notify staff on every new booking — a pending request gets the
       // "awaiting confirmation" email, a confirmed one the standard notice.
@@ -484,7 +488,9 @@ export async function createReservation(data) {
             staffName,
             date: appointmentDate,
             time,
+            checkInCode: ticket.checkInCode,
           }),
+          ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
         }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
       }
 
@@ -565,6 +571,9 @@ export async function createReservation(data) {
     const staffName = staffService.staff?.user?.fullName ?? "votre experte";
     const serviceName = staffService.service?.name ?? "votre service";
     const customerName = user.fullName;
+    const ticket = appointmentStatus === "CONFIRMED"
+      ? await buildAppointmentCheckInEmailAssets(appointment.id)
+      : { checkInCode: null, attachment: null };
 
     const recipientUserIds = await getAppointmentNotificationRecipients(staffService.staff?.id);
 
@@ -619,7 +628,9 @@ export async function createReservation(data) {
           staffName,
           date: appointmentDate,
           time,
+          checkInCode: ticket.checkInCode,
         }),
+        ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
       }).catch((err) => console.error("[createReservation] confirmation email failed:", err));
     }
 
@@ -727,7 +738,7 @@ export async function confirmPayment(paymentId, transactionReference = null) {
                 staff: { include: { user: { select: { fullName: true } } } },
               },
             },
-            user: { select: { fullName: true } },
+            user: { select: { fullName: true, email: true } },
           },
         },
       },
@@ -813,6 +824,27 @@ export async function confirmPayment(paymentId, transactionReference = null) {
         );
       }
     });
+
+    const ticket = await buildAppointmentCheckInEmailAssets(payment.appointmentId);
+    await sendEmail({
+      to: payment.appointment.user.email,
+      ...reservationConfirmedEmail({
+        customerName: payment.appointment.user.fullName,
+        serviceName: payment.appointment.staffService?.service?.name ?? "votre service",
+        staffName: payment.appointment.staffService?.staff?.user?.fullName ?? "votre experte",
+        date: payment.appointment.date,
+        time: payment.appointment.startTime.toLocaleTimeString("fr-FR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "Europe/Brussels",
+        }),
+        paidAmount: Number(payment.totalAmount),
+        totalAmount: Number(payment.totalAmount),
+        paymentMethod: "Paiement au salon",
+        checkInCode: ticket.checkInCode,
+      }),
+      ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
+    }).catch((error) => console.error("[confirmPayment] confirmation email failed:", error));
 
     return { success: true, message: "Paiement confirmé" };
   } catch (error) {

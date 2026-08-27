@@ -3,12 +3,13 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
-import { ROLES, isAdminRole } from "@/lib/authorization";
+import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
 import { createAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
+import { resolveServiceVatPolicy } from "@/lib/tax-policy";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { renderInvoicePdf } from "@/lib/pdf/render";
@@ -30,6 +31,10 @@ async function authorizeAppointmentAction(appointmentId) {
 
   if (!session?.user) {
     return { authorized: false, message: "Authentification requise" };
+  }
+
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
+    return { authorized: false, message: "Permission rendez-vous requise" };
   }
 
   const userRole = session.user.role;
@@ -239,6 +244,8 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
             fullName: true,
             email: true,
             vatNumber: true,
+            vatValidatedAt: true,
+            vatValidationName: true,
             addressLine1: true,
             addressLine2: true,
             addressCity: true,
@@ -423,6 +430,7 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       // already have payment.invoice set (deposits aren't invoiced at
       // collection time), but guard on it anyway for idempotency.
       if (forfeitAmount > REFUND_EPSILON && !payment.invoice) {
+        const cancellationFeeVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
         await issueInvoice(tx, {
           paymentId: payment.id,
           source: "APPOINTMENT",
@@ -432,6 +440,10 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
             description: `Frais d'annulation — ${appointment.staffService?.service?.name ?? "Prestation"}`,
             totalAmount: forfeitAmount,
           }),
+          vatRate: cancellationFeeVatPolicy.vatRate,
+          vatTreatment: cancellationFeeVatPolicy.vatTreatment,
+          taxCountryCode: cancellationFeeVatPolicy.taxCountryCode,
+          taxNote: cancellationFeeVatPolicy.taxNote,
         });
       }
 
@@ -622,6 +634,8 @@ export async function markAppointmentNoShow(appointmentId) {
             fullName: true,
             email: true,
             vatNumber: true,
+            vatValidatedAt: true,
+            vatValidationName: true,
             addressLine1: true,
             addressLine2: true,
             addressCity: true,
@@ -680,6 +694,7 @@ export async function markAppointmentNoShow(appointmentId) {
           data: { status: "PAID" },
         });
 
+        const noShowVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
         await issueInvoice(tx, {
           paymentId: noShowPayment.id,
           source: "APPOINTMENT",
@@ -689,6 +704,10 @@ export async function markAppointmentNoShow(appointmentId) {
             description: `Absence — acompte non remboursable — ${appointment.staffService?.service?.name ?? "Prestation"}`,
             totalAmount: Number(noShowPayment.paidAmount),
           }),
+          vatRate: noShowVatPolicy.vatRate,
+          vatTreatment: noShowVatPolicy.vatTreatment,
+          taxCountryCode: noShowVatPolicy.taxCountryCode,
+          taxNote: noShowVatPolicy.taxNote,
         });
       }
 
@@ -755,6 +774,8 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
             fullName: true,
             email: true,
             vatNumber: true,
+            vatValidatedAt: true,
+            vatValidationName: true,
             addressLine1: true,
             addressLine2: true,
             addressCity: true,
@@ -834,6 +855,18 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
           },
         });
 
+        // Attach to whichever till session is open so the counter cash is
+        // reconcilable at close (see lib/cash-sessions.js). Without this, an
+        // appointment balance paid in cash never reached the till total and
+        // showed up as an unexplained surplus at every close — the boutique
+        // paths (completeOrderPickup, the POS sale) and settleReservation all
+        // already did this; only appointments were missing it. Never blocks
+        // the settlement if no session is open: the row is left unassigned.
+        const openCashSession =
+          method === "CASH"
+            ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
+            : null;
+
         await tx.transaction.create({
           data: {
             paymentId: updatedPayment.id,
@@ -841,9 +874,11 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
             method,
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
+            cashSessionId: openCashSession?.id ?? null,
           },
         });
 
+        const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
         invoice = await issueInvoice(tx, {
           paymentId: updatedPayment.id,
           source: "APPOINTMENT",
@@ -854,6 +889,10 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
             totalAmount: Number(updatedPayment.totalAmount),
             discountAmount: Number(updatedPayment.discountAmount),
           }),
+          vatRate: completionVatPolicy.vatRate,
+          vatTreatment: completionVatPolicy.vatTreatment,
+          taxCountryCode: completionVatPolicy.taxCountryCode,
+          taxNote: completionVatPolicy.taxNote,
         });
       }
 
@@ -893,6 +932,9 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
   } catch (error) {
     if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {
       return { success: false, message: "Identité légale du salon incomplète — complétez Réglages > Salon avant d'émettre des factures." };
+    }
+    if (error.message === "BUYER_LEGAL_DATA_INCOMPLETE") {
+      return { success: false, message: error.userMessage };
     }
     console.error("[completeAppointment]", error);
     return { success: false, message: "Erreur lors de la finalisation du rendez-vous." };
@@ -956,8 +998,11 @@ export async function getAppointmentById(appointmentId) {
     const isOwner = appointment.userId === session.user.id;
     let isAssignedStaff = false;
     if (!isOwner && session.user.role === ROLES.STAFF) {
-      const staffId = await getCurrentStaffId();
-      isAssignedStaff = !!staffId && appointment.staffService.staffId === staffId;
+      const hasAppointmentAccess = await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS);
+      if (hasAppointmentAccess) {
+        const staffId = await getCurrentStaffId();
+        isAssignedStaff = !!staffId && appointment.staffService.staffId === staffId;
+      }
     }
     if (!isOwner && !isAdminRole(session.user.role) && !isAssignedStaff) {
       // Same message as "not found" — don't confirm an id belongs to someone else.

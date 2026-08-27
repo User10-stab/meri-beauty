@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useState, useTransition, useMemo, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import { updateCartItemQuantity, removeFromCart } from "@/actions/boutique/cart";
+import { getCartShippingCost } from "@/actions/boutique/shipping";
 import { calculateCartPricing, calculateItemPricing, formatPrice } from "@/lib/pricing";
+import { BELGIUM_VAT_RATE, resolveGoodsVatPolicy, roundMoney } from "@/lib/tax-policy";
 import { useTranslations } from "next-intl";
 
 function notifyCartUpdated(itemCount) {
@@ -16,13 +18,78 @@ function notifyCartUpdated(itemCount) {
   window.dispatchEvent(new CustomEvent("boutique:cart-updated", { detail: { itemCount } }));
 }
 
-export function CartPageClient({ initialCart }) {
+export function CartPageClient({ initialCart, customerSession = null }) {
   const t = useTranslations("boutique");
   const [cart, setCart] = useState(initialCart);
   const [isPending, startTransition] = useTransition();
 
-  // Calculate detailed pricing breakdown for the entire cart
-  const cartPricing = useMemo(() => calculateCartPricing(cart.items), [cart.items]);
+  const vatRate = useMemo(() => {
+    try {
+      return resolveGoodsVatPolicy({
+        fulfilmentMode: "PICKUP_PREPAID",
+        destinationCountry: "BE",
+        customer: customerSession,
+      }).vatRate;
+    } catch {
+      return BELGIUM_VAT_RATE;
+    }
+  }, [customerSession]);
+
+  // Calculate detailed pricing with the same VAT policy used by checkout.
+  const cartPricing = useMemo(() => calculateCartPricing(cart.items, vatRate), [cart.items, vatRate]);
+
+  // Carriage, from the same server action the checkout calls — weightGrams is
+  // not serialised into the cart, so this cannot be computed on the client.
+  // It is an ESTIMATE here and labelled as one: the customer has not chosen
+  // between point-relais delivery and free in-salon pickup yet, so the figure
+  // shown is the worst case of the two.
+  const [shipping, setShipping] = useState({ costExclVat: 0, cost: 0, isFree: true, loading: true, quoteRequired: false });
+
+  useEffect(() => {
+    if (cart.items.length === 0) {
+      setShipping({ costExclVat: 0, cost: 0, isFree: true, loading: false, quoteRequired: false });
+      return;
+    }
+    let cancelled = false;
+    getCartShippingCost()
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.success) {
+          setShipping({ costExclVat: 0, cost: 0, isFree: false, loading: false, quoteRequired: Boolean(result.data?.quoteRequired) });
+          return;
+        }
+        setShipping({
+          costExclVat: Number(result.data.costExclVat) || 0,
+          cost: Number(result.data.cost) || 0,
+          isFree: Boolean(result.data.isFree),
+          untilFree: Number(result.data.untilFree) || 0,
+          loading: false,
+          quoteRequired: false,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setShipping((s) => ({ ...s, loading: false }));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // itemCount rather than the items array: quantity is what moves the
+    // weight tier, and depending on the array itself would refetch on every
+    // optimistic re-render.
+  }, [cart.itemCount]);
+
+  // Carriage is taxed at the same rate as the goods, so the two are summed
+  // before the split rather than shown as separate VAT lines.
+  const totals = useMemo(() => {
+    const shippingNet = shipping.quoteRequired ? 0 : shipping.costExclVat;
+    const shippingVat = roundMoney(shipping.cost - shipping.costExclVat);
+    return {
+      subtotalHT: roundMoney(cartPricing.totalHT),
+      shippingHT: roundMoney(shippingNet),
+      vat: roundMoney(cartPricing.totalVAT + shippingVat),
+      totalTTC: roundMoney(cartPricing.totalTTC + (shipping.quoteRequired ? 0 : shipping.cost)),
+    };
+  }, [cartPricing, shipping]);
 
   function updateQuantity(item, nextQuantity) {
     // Optimistic update — the server re-validates stock and we roll back on failure.
@@ -88,7 +155,7 @@ export function CartPageClient({ initialCart }) {
       <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_320px]">
         <ul className={`divide-y divide-neutral-100 ${isPending ? "opacity-60" : ""}`}>
           {cart.items.map((item) => {
-            const itemPricing = calculateItemPricing(item);
+            const itemPricing = calculateItemPricing(item, vatRate);
             return (
             <li key={item.id} className="flex gap-4 py-6">
               <Link href={`/boutique/${item.variant.product.slug}`} className="relative h-24 w-24 flex-shrink-0 overflow-hidden bg-neutral-50">
@@ -173,21 +240,36 @@ export function CartPageClient({ initialCart }) {
             </div>
           )}
 
-          {/* Before TVA */}
+          {/* The catalogue is stored net, so the breakdown reads in the order
+              the price is actually built: goods HT, carriage HT, the VAT on
+              both, then the amount to pay. */}
           <div className="flex justify-between text-sm text-gray-600">
             <span>{t("subtotalExclVat")}</span>
-            <span className="font-medium text-[#2F3A2E]">{formatPrice(cartPricing.totalHT)}</span>
+            <span className="font-medium text-[#2F3A2E]">{formatPrice(totals.subtotalHT)}</span>
+          </div>
+
+          <div className="mt-1 flex justify-between text-sm text-gray-600">
+            <span>{t("shippingExclVat")}</span>
+            <span className="font-medium text-[#2F3A2E]">
+              {shipping.loading
+                ? "…"
+                : shipping.quoteRequired
+                  ? t("quoteRequired")
+                  : shipping.isFree
+                    ? t("shippingFree")
+                    : formatPrice(totals.shippingHT)}
+            </span>
           </div>
 
           {/* TVA amount */}
-          <div className="flex justify-between text-sm text-gray-600">
-            <span>{t("vat", { rate: 21 })}</span>
-            <span className="font-medium text-[#2F3A2E]">{formatPrice(cartPricing.totalVAT)}</span>
+          <div className="mt-1 flex justify-between text-sm text-gray-600">
+            <span>{t("vat", { rate: vatRate })}</span>
+            <span className="font-medium text-[#2F3A2E]">{formatPrice(totals.vat)}</span>
           </div>
 
           {/* Savings (if applicable) */}
           {cartPricing.hasPromotions && (
-            <div className="flex justify-between text-sm text-green-600">
+            <div className="mt-1 flex justify-between text-sm text-green-600">
               <span>{t("promoDiscount")}</span>
               <span className="font-medium">-{formatPrice(cartPricing.totalSavings)}</span>
             </div>
@@ -196,10 +278,12 @@ export function CartPageClient({ initialCart }) {
           {/* Total */}
           <div className="flex justify-between text-base font-semibold text-[#2F3A2E] mt-3 pt-3 border-t border-neutral-200">
             <span>{t("totalInclVat")}</span>
-            <span>{formatPrice(cartPricing.totalTTC)}</span>
+            <span>{shipping.quoteRequired ? "—" : formatPrice(totals.totalTTC)}</span>
           </div>
 
-          <p className="mt-3 text-xs text-gray-400">{t("shippingNotice")}</p>
+          <p className="mt-3 text-xs text-gray-400">
+            {shipping.quoteRequired ? t("shippingQuoteNotice") : t("shippingEstimateNotice")}
+          </p>
 
           <Link
             href="/boutique/checkout"

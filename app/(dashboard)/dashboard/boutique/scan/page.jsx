@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
-import { validateDashboardAccess, hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { ProductScanClient } from "@/components/boutique/ProductScanClient";
 import { getTranslations } from "next-intl/server";
 
@@ -17,19 +16,7 @@ export async function generateMetadata() {
  * catalogue management (BOUTIQUE) stays admin-only.
  */
 export default async function ScanPage() {
-  const session = await auth();
-
-  // Must be logged in and have dashboard access
-  const validation = validateDashboardAccess(session);
-  if (!validation.valid) {
-    redirect("/login");
-  }
-
-  // ORDERS permission (not BOUTIQUE) — staff can handle counter operations,
-  // but catalogue management stays admin-only
-  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.ORDERS)) {
-    redirect("/dashboard");
-  }
+  await requireDashboardPermission(STAFF_PERMISSIONS.POINT_OF_SALE);
 
   return <ProductScanClient />;
 }

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isAdminRole, hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 
 const sessionSchema = z.object({
@@ -12,7 +12,7 @@ const sessionSchema = z.object({
   startDate: z.string().min(1, "La date de début est obligatoire."),
   endDate: z.string().optional().nullable(),
   capacity: z.coerce.number().int().positive("La capacité doit être d'au moins 1."),
-  animatorId: z.string().optional().nullable(),
+  staffUserId: z.string().optional().nullable(),
   registrationDeadline: z.string().optional().nullable(),
 });
 
@@ -27,7 +27,7 @@ const formationSchema = z.object({
   // PRIVATE is forced to 1 below regardless of what's submitted — PUBLIC has
   // no ceiling (unlike ateliers' max-8), just a positive-int floor.
   capacity: z.coerce.number({ error: "La capacité est invalide." }).int().positive("La capacité doit être d'au moins 1 personne."),
-  animatorId: z.string().optional().nullable(),
+  staffUserId: z.string().optional().nullable(),
   status: z.enum(["DRAFT", "PUBLISHED", "CANCELLED", "ARCHIVED"]).optional().default("DRAFT"),
   allowMultipleSessions: z.boolean().optional().default(false),
   depositPercentage: z.coerce.number().int().min(0).max(100).optional().default(50),
@@ -59,7 +59,7 @@ function enforceCapacityForType(data) {
 async function requireFormationAccess(formationId, { requireOwnerForEdit = false } = {}) {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.FORMATIONS)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATIONS))) {
     return { error: "Non autorisé." };
   }
   if (isAdminRole(session.user.role)) return { session };
@@ -74,6 +74,34 @@ async function requireFormationAccess(formationId, { requireOwnerForEdit = false
     return { error: "Vous ne pouvez modifier que les formations que vous avez créées." };
   }
   return { session };
+}
+
+/**
+ * Formation rows reference Animator for their public profile, while the
+ * dashboard assigns active Staff accounts. Staff callers are always assigned
+ * to themselves; the submitted id is ignored so it cannot be tampered with.
+ */
+async function resolveFormationAnimatorId(session, requestedStaffUserId) {
+  const staffUserId = isAdminRole(session.user.role) ? requestedStaffUserId : session.user.id;
+  if (!staffUserId) return null;
+
+  const staff = await prisma.staff.findFirst({
+    where: {
+      userId: staffUserId,
+      isActive: true,
+      isDeleted: false,
+      user: { role: "STAFF", isActive: true, isDeleted: false },
+    },
+    select: { photo: true, user: { select: { fullName: true, email: true } } },
+  });
+  if (!staff) throw new Error("FORMATION_STAFF_NOT_AVAILABLE");
+
+  const animator = await prisma.animator.upsert({
+    where: { email: staff.user.email },
+    update: { name: staff.user.fullName, ...(staff.photo ? { avatar: staff.photo } : {}) },
+    create: { name: staff.user.fullName, email: staff.user.email, avatar: staff.photo ?? null },
+  });
+  return animator.id;
 }
 
 /**
@@ -99,25 +127,14 @@ export async function createFormation(input) {
       };
     }
 
-    const { animatorId, sessions, startDate, endDate, ...rest } = enforceCapacityForType(parsed.data);
-
-    if (animatorId) {
-      const animatorExists = await prisma.animator.findUnique({ where: { id: animatorId } });
-      if (!animatorExists) {
-        return { success: false, message: "L'animateur sélectionné est introuvable." };
-      }
-    }
-
-    if (sessions.length > 0) {
-      for (const s of sessions) {
-        if (s.animatorId) {
-          const animExists = await prisma.animator.findUnique({ where: { id: s.animatorId } });
-          if (!animExists) {
-            return { success: false, message: `L'animateur de la session est introuvable.` };
-          }
-        }
-      }
-    }
+    const { staffUserId, sessions, startDate, endDate, ...rest } = enforceCapacityForType(parsed.data);
+    const animatorId = await resolveFormationAnimatorId(session, staffUserId);
+    const resolvedSessions = await Promise.all(
+      sessions.map(async (item) => ({
+        ...item,
+        animatorId: await resolveFormationAnimatorId(session, item.staffUserId),
+      }))
+    );
 
     const formation = await prisma.formation.create({
       data: {
@@ -127,7 +144,7 @@ export async function createFormation(input) {
         sessions:
           sessions.length > 0
             ? {
-                create: sessions.map((s) => ({
+                create: resolvedSessions.map((s) => ({
                   startDate: new Date(s.startDate),
                   endDate: s.endDate ? new Date(s.endDate) : null,
                   capacity: s.capacity,
@@ -177,7 +194,7 @@ export async function updateFormation(input) {
       };
     }
 
-    const { id, animatorId, sessions, startDate, endDate, ...rest } = enforceCapacityForType(parsed.data);
+    const { id, staffUserId, sessions, startDate, endDate, ...rest } = enforceCapacityForType(parsed.data);
 
     const existingFormation = await prisma.formation.findUnique({
       where: { id },
@@ -187,24 +204,16 @@ export async function updateFormation(input) {
       return { success: false, message: "Formation introuvable." };
     }
 
-    if (animatorId) {
-      const animatorExists = await prisma.animator.findUnique({ where: { id: animatorId } });
-      if (!animatorExists) {
-        return { success: false, message: "L'animateur sélectionné est introuvable." };
-      }
-    }
-
-    for (const s of sessions) {
-      if (s.animatorId) {
-        const animExists = await prisma.animator.findUnique({ where: { id: s.animatorId } });
-        if (!animExists) {
-          return { success: false, message: "L'animateur d'une session est introuvable." };
-        }
-      }
-    }
+    const animatorId = await resolveFormationAnimatorId(session, staffUserId);
+    const resolvedSessions = await Promise.all(
+      sessions.map(async (item) => ({
+        ...item,
+        animatorId: await resolveFormationAnimatorId(session, item.staffUserId),
+      }))
+    );
 
     const existingIds = existingFormation.sessions.map((s) => s.id);
-    const incomingIds = sessions.filter((s) => s.id).map((s) => s.id);
+    const incomingIds = resolvedSessions.filter((s) => s.id).map((s) => s.id);
     const idsToDelete = existingIds.filter((eid) => !incomingIds.includes(eid));
 
     // A session the form no longer lists reads as "removed" — but if it
@@ -242,7 +251,7 @@ export async function updateFormation(input) {
           ...rest,
           animatorId: animatorId || null,
           sessions: {
-            create: sessions
+            create: resolvedSessions
               .filter((s) => !s.id)
               .map((s) => ({
                 startDate: new Date(s.startDate),
@@ -258,7 +267,7 @@ export async function updateFormation(input) {
         include: { sessions: true },
       });
 
-      for (const s of sessions) {
+      for (const s of resolvedSessions) {
         if (s.id && incomingIds.includes(s.id)) {
           await tx.formationSession.update({
             where: { id: s.id },

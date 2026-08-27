@@ -11,14 +11,14 @@ import { MenuItem } from "./menu-item";
 import { useSidebarContext } from "./sidebar-context";
 import { useTranslations } from "next-intl";
 
-export function Sidebar({ userRole }) {
+export function Sidebar({ userRole, dashboardPermissions = [] }) {
   const t = useTranslations("dashboard");
   const pathname = usePathname();
   const { setIsOpen, isOpen, isMobile, toggleSidebar } = useSidebarContext();
   const [expandedItems, setExpandedItems] = useState([]);
 
   // Get navigation data filtered by user role
-  const NAV_DATA = getNavDataForRole(userRole);
+  const NAV_DATA = getNavDataForRole(userRole, dashboardPermissions);
   const titleKeys = {
     "Tableau de bord": "dashboard", "Rendez-vous": "appointments", "Calendrier": "calendar",
     "Tous les rendez-vous": "allAppointments", "Clients": "customers", "Services": "services",
@@ -60,7 +60,7 @@ export function Sidebar({ userRole }) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname, userRole]);
+  }, [pathname, userRole, dashboardPermissions]);
 
   return (
     <>

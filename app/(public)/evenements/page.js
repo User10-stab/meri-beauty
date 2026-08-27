@@ -3,6 +3,7 @@ import Image from "next/image";
 import { getPublicActivities } from "@/actions/workshops/get-public-activities";
 import { AnimatedCard } from "@/components/website/AnimatedCard";
 import { AnimatedBlock } from "@/components/website/AnimatedBlock";
+import { ActivityPriceTag } from "@/components/activities/ActivityPrice";
 import { getTranslations, getLocale } from "next-intl/server";
 import { toIntlLocale } from "@/lib/intl-locale";
 
@@ -31,9 +32,7 @@ async function ActivityCard({ activity }) {
   const takenSeats = session?.reservations?.reduce((sum, res) => sum + res.seatsCount, 0) ?? 0;
   const capacity = session?.capacity ?? activity.capacity;
   const available = Math.max(0, capacity - takenSeats);
-  const priceFormatted = activity.price > 0
-    ? new Intl.NumberFormat(toIntlLocale(locale), { style: "currency", currency: "EUR" }).format(activity.price)
-    : null;
+  const hasPrice = Number(activity.price) > 0;
 
   return (
     <Link
@@ -65,12 +64,16 @@ async function ActivityCard({ activity }) {
           {isWorkshop ? t("typeWorkshop") : t("typeEvent")}
         </span>
 
-        {priceFormatted && (
+        {hasPrice && (
           <div className="absolute bottom-3 left-3 rounded-lg bg-white/95 px-3 py-1.5 shadow-md backdrop-blur-sm">
             <span className="block text-[9px] font-semibold uppercase leading-none tracking-wide text-ink/45">
               {t("from")}
             </span>
-            <span className="block text-base font-bold leading-tight text-gold">{priceFormatted}</span>
+            <ActivityPriceTag
+              netPrice={activity.price}
+              locale={toIntlLocale(locale)}
+              className="block text-base font-bold leading-tight text-gold"
+            />
           </div>
         )}
 

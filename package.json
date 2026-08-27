@@ -35,6 +35,7 @@
     "date-fns": "^4.4.0",
     "dayjs": "^1.11.21",
     "event-target-shim": "^6.0.2",
+    "exceljs": "^4.4.0",
     "flatpickr": "^4.6.13",
     "framer-motion": "^12.42.2",
     "jsvectormap": "^1.7.0",

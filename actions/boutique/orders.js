@@ -4,11 +4,12 @@ import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { qrPngAttachment } from "@/lib/qrcode";
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { isCheckoutAuthorized, createResumeCheckoutToken } from "@/lib/resume-checkout-token";
 import { sendEmail } from "@/lib/email";
-import { ROLES, DASHBOARD_PERMISSIONS, hasPermission, isAdminRole } from "@/lib/authorization";
+import { ROLES, STAFF_PERMISSIONS, hasDashboardPermission, isAdminRole } from "@/lib/authorization";
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema, closeShippedOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote, buildInvoiceCustomer, isSellerLegalDataComplete } from "@/lib/invoicing";
@@ -22,7 +23,13 @@ import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { captureError, captureWarning } from "@/lib/monitoring";
-import { calculateVatTotals, repriceBelgianGross, resolveGoodsVatPolicy } from "@/lib/tax-policy";
+import { calculateVatTotals, hasReusableVatValidation, applyVatRate, resolveGoodsVatPolicy } from "@/lib/tax-policy";
+import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
+import {
+  buildOrderCreatedNotification,
+  createNotificationsBulk,
+  getSalonAdminNotificationRecipients,
+} from "@/lib/notifications";
 import {
   getOrderPaymentMethod,
   isManualOrderRefund,
@@ -70,7 +77,7 @@ const GUEST_HOLD_RATE_LIMIT_MAX = 5;
 async function requireOrdersAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.ORDERS)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.ORDERS))) {
     return { error: "Accès non autorisé." };
   }
   return { session };
@@ -104,14 +111,6 @@ async function uniquePickupCode() {
  * unproven address outright.
  */
 async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
-  if (authenticatedUserId) {
-    const user = await prisma.user.findUnique({ where: { id: authenticatedUserId, isDeleted: false } });
-    if (user) return { user, isNewUser: false, temporaryPassword: null };
-  }
-
-  const email = customerInfo.email.trim().toLowerCase();
-  const phone = customerInfo.phone?.trim();
-
   // Only required once we know the resolved/about-to-be-created user doesn't
   // already have an address on file — a returning guest shouldn't have to
   // resubmit it. Mirrors completePointOfSaleSale's needsAddress gate.
@@ -124,6 +123,27 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         addressCountry: customerInfo.addressCountry || "BE",
       }
     : null;
+
+  if (authenticatedUserId) {
+    const user = await prisma.user.findUnique({ where: { id: authenticatedUserId, isDeleted: false } });
+    if (user) {
+      // Same rule as a guest: an account reaching checkout with no address on
+      // file (pre-dates the mandatory-address rule, or was never completed in
+      // /mon-compte) must not be allowed to pay for something that can never
+      // be invoiced. issueInvoice's assertBuyerLegalDataComplete would refuse
+      // it anyway — this stops it before Stripe is charged rather than after,
+      // which is what left order cmtbaqxua0003gczkbigl9x23 paid-but-stuck.
+      if (!user.addressLine1) {
+        if (!suppliedAddress) throw new Error("ADDRESS_REQUIRED");
+        const updated = await prisma.user.update({ where: { id: user.id }, data: suppliedAddress });
+        return { user: updated, isNewUser: false, temporaryPassword: null };
+      }
+      return { user, isNewUser: false, temporaryPassword: null };
+    }
+  }
+
+  const email = customerInfo.email.trim().toLowerCase();
+  const phone = customerInfo.phone?.trim();
 
   // The email is the identity the buyer actually typed, so it alone decides
   // which account this is. Treating phone as an equal alternative here handed
@@ -194,6 +214,49 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   }
 
   return { user, isNewUser: true, temporaryPassword: null };
+}
+
+async function saveCheckoutVatNumber(user, rawVatNumber) {
+  const vatNumber = rawVatNumber?.trim() ? normalizeVatNumber(rawVatNumber) : null;
+  if (!vatNumber) return { success: true, user };
+
+  if (!isValidVatFormat(vatNumber)) {
+    return {
+      success: false,
+      message: "Numéro de TVA UE invalide. Ajoutez le préfixe pays (BE, FR, DE, NL…).",
+    };
+  }
+
+  if (hasReusableVatValidation(user, vatNumber)) {
+    return { success: true, user };
+  }
+
+  const viesResult = await verifyVatWithVies(vatNumber);
+  if (!viesResult.success) {
+    return {
+      success: false,
+      message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
+    };
+  }
+  if (!viesResult.valid) {
+    return {
+      success: false,
+      message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
+    };
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      isCompany: true,
+      vatNumber,
+      vatValidatedAt: new Date(),
+      vatValidationName: viesResult.name ?? null,
+      vatValidationAddress: viesResult.address ?? null,
+    },
+  });
+
+  return { success: true, user: updated };
 }
 
 function serializeOrder(order) {
@@ -308,7 +371,10 @@ export async function createOrderFromCart(input) {
       return { success: false, message: "Votre panier est vide." };
     }
 
-    const { user } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    let { user } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    const vatSave = await saveCheckoutVatNumber(user, customerInfo.vatNumber);
+    if (!vatSave.success) return vatSave;
+    user = vatSave.user;
     // Returning customer, or an account created before consent was tracked:
     // record that they accepted the current CGV at this order.
     await recordTermsAcceptance(prisma, user.id);
@@ -405,7 +471,7 @@ export async function createOrderFromCart(input) {
     });
     const pricedItems = fullCart.items.map((item) => ({
       ...item,
-      taxUnitPrice: repriceBelgianGross(item.variant.price, taxPolicy.vatRate),
+      taxUnitPrice: applyVatRate(item.variant.price, taxPolicy.vatRate),
     }));
     const subtotal = pricedItems.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
 
@@ -422,7 +488,7 @@ export async function createOrderFromCart(input) {
           message: "Votre commande dépasse 30 kg. Merci de nous contacter pour un devis de livraison personnalisé."
         };
       }
-      shippingCost = repriceBelgianGross(shippingCost, taxPolicy.vatRate);
+      shippingCost = applyVatRate(shippingCost, taxPolicy.vatRate);
     }
 
     // Re-validated here regardless of the client's live preview — a code
@@ -566,6 +632,23 @@ export async function createOrderFromCart(input) {
         await tx.cart.update({ where: { id: fullCart.id }, data: { status: "CONVERTED" } });
       }
 
+      const adminIds = await getSalonAdminNotificationRecipients({ tx });
+      if (adminIds.length > 0) {
+        await createNotificationsBulk(
+          adminIds.map((userId) =>
+            buildOrderCreatedNotification({
+              userId,
+              orderId: created.id,
+              orderNumber: created.orderNumber,
+              customerName: user.fullName,
+              totalAmount,
+              fulfilmentMode,
+            })
+          ),
+          { tx }
+        );
+      }
+
       return created;
     });
 
@@ -653,7 +736,16 @@ export async function createOrderFromCart(input) {
  * checkout) or later from resumeOrderAfterVerification, once a brand-new
  * guest confirms their email. Fire-and-forget — never blocks the caller.
  */
-function sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAmount) {
+async function sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAmount) {
+  // The QR travels with the e-mail rather than living only in "Mon compte":
+  // most customers never open their account page, and the one moment they
+  // will look for this is on their phone at the counter. The readable code
+  // below stays in the body as the fallback if the attachment is stripped.
+  const qr = await qrPngAttachment(pickupCode, `retrait-${order.orderNumber}.png`).catch((err) => {
+    console.error("[sendPickupConfirmationEmail] QR generation failed:", err);
+    return null;
+  });
+
   return sendEmail({
     to: user.email,
     subject: "Commande confirmée – À retirer en boutique – Meri Beauty",
@@ -667,8 +759,10 @@ function sendPickupConfirmationEmail(user, order, pickupCode, expiresAt, totalAm
       `<p>Bonjour ${user.fullName},</p>` +
       `<p>Votre commande n°${order.orderNumber} (<strong>${totalAmount.toFixed(2)} €</strong>) est confirmée.</p>` +
       `<p>Présentez ce code en boutique pour la récupérer et régler le paiement sur place : <strong>${pickupCode}</strong></p>` +
+      (qr ? `<p>Le QR code correspondant est joint à cet e-mail — présentez-le au comptoir, ou donnez simplement le code ci-dessus.</p>` : "") +
       `<p>Merci de venir la retirer avant le ${expiresAt.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} — passé ce délai, la commande sera annulée.</p>` +
       `<p>L'équipe Meri Beauty</p>`,
+    ...(qr ? { attachments: [qr] } : {}),
   }).catch((err) => console.error("[sendPickupConfirmationEmail] failed:", err));
 }
 
@@ -978,6 +1072,50 @@ export async function markOrderReadyForPickup(orderId) {
 }
 
 /**
+ * Read-only counterpart of completeOrderPickup, for the unified counter
+ * scanner (actions/counter/lookup.js): resolves a bare pickup code to enough
+ * to render PickupConfirmDialog without writing anything yet.
+ */
+export async function lookupOrderByPickupCode(pickupCode) {
+  const guard = await requireOrdersAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { pickupCode },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        fulfilmentMode: true,
+        totalAmount: true,
+        payment: { select: { id: true } },
+        user: { select: { fullName: true } },
+      },
+    });
+    if (!order) return { success: false, message: "Commande introuvable — vérifiez le code." };
+
+    return {
+      success: true,
+      data: {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        hasPayment: Boolean(order.payment),
+        totalAmount: Number(order.totalAmount),
+        readyForPickup:
+          order.fulfilmentMode !== "SHIPPING_PREPAID"
+          && ["PAID", "READY_FOR_PICKUP", "PENDING_PICKUP"].includes(order.status),
+        user: order.user,
+      },
+    };
+  } catch (error) {
+    console.error("[lookupOrderByPickupCode]", error);
+    return { success: false, message: "Impossible de lire cette commande." };
+  }
+}
+
+/**
  * Staff scans the pickup QR / enters the code at the counter. If no Payment
  * exists yet (PICKUP_ON_SITE), `method` is required and payment is collected
  * — and stock is only decremented now, since it was only ever reserved.
@@ -998,6 +1136,8 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
             fullName: true,
             email: true,
             vatNumber: true,
+            vatValidatedAt: true,
+            vatValidationName: true,
             addressLine1: true,
             addressLine2: true,
             addressCity: true,
@@ -1131,6 +1271,14 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
     revalidatePath("/dashboard/boutique/orders");
     return { success: true, message: `Commande n°${order.orderNumber} remise au client.` };
   } catch (error) {
+    if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {
+      return { success: false, message: "Identité légale du salon incomplète — complétez Réglages > Salon avant d'émettre des factures." };
+    }
+    // Actionable at the counter: staff completes the customer record and
+    // retries, instead of reading "impossible de finaliser le retrait".
+    if (error.message === "BUYER_LEGAL_DATA_INCOMPLETE") {
+      return { success: false, message: error.userMessage };
+    }
     console.error("[completeOrderPickup]", error);
     return { success: false, message: "Impossible de finaliser le retrait." };
   }

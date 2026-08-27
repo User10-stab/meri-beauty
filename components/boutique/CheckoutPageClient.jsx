@@ -2,17 +2,19 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Store, Wallet, Truck, Check, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react";
+import Link from "next/link";
+import { Store, Wallet, Truck, Check, Loader2, AlertTriangle, CheckCircle2, BadgeCheck, BadgeX, ShieldQuestion } from "lucide-react";
 import { toast } from "sonner";
 import { createOrderFromCart, createOrderCheckoutSession } from "@/actions/boutique/orders";
 import { getCartShippingCost, requestShippingQuote } from "@/actions/boutique/shipping";
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
+import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { validatePromoCode } from "@/actions/promo-codes";
 import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { MondialRelayPicker } from "@/components/boutique/MondialRelayPicker";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
-import { resolveGoodsVatPolicy, calculateVatTotals, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
+import { resolveGoodsVatPolicy, hasReusableVatValidation, applyVatRate, roundMoney, BELGIUM_VAT_RATE, VAT_LEGAL_NOTES } from "@/lib/tax-policy";
 
 const MODES = [
   {
@@ -38,6 +40,12 @@ const MODES = [
 export function CheckoutPageClient({ cart, customerSession }) {
   const router = useRouter();
   const isAuthenticated = Boolean(customerSession);
+  // A signed-in customer can still reach checkout with no address on file —
+  // an account created before the mandatory-address rule, or never completed
+  // in /mon-compte. Only that case, not "is authenticated", decides whether
+  // the billing address is still required below: a guest always needs it,
+  // a returning customer only needs it once.
+  const hasAddressOnFile = isAuthenticated && Boolean(customerSession.addressLine1);
 
   const [fulfilmentMode, setFulfilmentMode] = useState(null);
   const [customerInfo, setCustomerInfo] = useState(
@@ -51,6 +59,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
       addressCity: "",
       addressPostalCode: "",
       addressCountry: "BE",
+      vatNumber: "",
     }
   );
   const [pickupPoint, setPickupPoint] = useState(null);
@@ -61,6 +70,8 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const [quoteRequest, setQuoteRequest] = useState({ submitting: false, sent: false });
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [vatCheck, setVatCheck] = useState(null);
+  const [savedVatProfile, setSavedVatProfile] = useState(customerSession ?? null);
 
   // null = not checked yet | "exists" = verified account found | "dismissed" = user chose to continue as guest
   const [emailStatus, setEmailStatus] = useState(null);
@@ -81,11 +92,37 @@ export function CheckoutPageClient({ cart, customerSession }) {
     }
   }
 
+  async function handleVerifyVat() {
+    if (!customerInfo.vatNumber?.trim()) {
+      toast.error("Renseignez d'abord un numéro de TVA.");
+      return;
+    }
+
+    setVatCheck({ loading: true });
+    const result = await verifyVatNumber(customerInfo.vatNumber);
+    if (!result.success) {
+      setVatCheck({ error: true, message: result.message });
+      return;
+    }
+
+    setVatCheck({
+      valid: result.valid,
+      message: result.valid
+        ? result.name
+          ? `Actif — enregistré au nom de « ${result.name} ».`
+          : "Actif dans le registre VIES."
+        : "Ce numéro n'est pas reconnu par le registre européen VIES.",
+    });
+    if (result.valid) {
+      setSavedVatProfile({ isCompany: true, vatNumber: customerInfo.vatNumber, vatValidatedAt: new Date().toISOString() });
+    }
+  }
+
   // Fetch real shipping cost from server (weight-based calculation)
   useEffect(() => {
     async function fetchShippingCost() {
       if (fulfilmentMode !== "SHIPPING_PREPAID") {
-        setShippingDetails({ cost: 0, isFree: true, loading: false, quoteRequired: false });
+        setShippingDetails({ cost: 0, costExclVat: 0, isFree: true, loading: false, quoteRequired: false });
         return;
       }
 
@@ -94,6 +131,9 @@ export function CheckoutPageClient({ cart, customerSession }) {
       if (result.success) {
         setShippingDetails({
           cost: result.data.cost,
+          // Read from the carrier grid, which is already net — the summary
+          // shows carriage HT beside the goods HT.
+          costExclVat: result.data.costExclVat,
           isFree: result.data.isFree,
           loading: false,
           quoteRequired: false,
@@ -121,17 +161,12 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const shippingCost = shippingDetails.cost;
   const quoteRequired = fulfilmentMode === "SHIPPING_PREPAID" && shippingDetails.quoteRequired;
 
-  const discountAmount = appliedPromo?.discountAmount ?? 0;
-  const total = Math.max(0, cart.subtotal + shippingCost - discountAmount);
-
   // Live VAT-treatment preview — same resolveGoodsVatPolicy the server calls
   // in createOrderFromCart, run here purely for display. It never sets the
   // actual charge: createOrderFromCart re-resolves it server-side from the
   // real submitted order, so a stale/spoofed client value here can't affect
-  // what's billed. Wrapped in try/catch because resolveGoodsVatPolicy throws
-  // on destinations it can't classify (non-EU, export not yet confirmed) —
-  // fall back to the always-correct default (Belgian domestic 21%) rather
-  // than let a preview computation break checkout.
+  // what's billed. The fallback keeps the preview safely at 21% if malformed
+  // account data ever reaches the page.
   const vatPreview = useMemo(() => {
     const destinationCountry = fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint?.countryCode ?? "BE" : "BE";
     try {
@@ -139,48 +174,82 @@ export function CheckoutPageClient({ cart, customerSession }) {
         ...resolveGoodsVatPolicy({
           fulfilmentMode: fulfilmentMode ?? "PICKUP_PREPAID",
           destinationCountry,
-          customer: isAuthenticated ? customerSession : null,
+          customer: savedVatProfile && savedVatProfile.vatNumber === customerInfo.vatNumber
+            ? savedVatProfile
+            : null,
         }),
         destinationCountry,
       };
     } catch {
       return { vatTreatment: "DOMESTIC", vatRate: BELGIUM_VAT_RATE, destinationCountry };
     }
-  }, [fulfilmentMode, pickupPoint?.countryCode, isAuthenticated, customerSession]);
+  }, [fulfilmentMode, pickupPoint?.countryCode, savedVatProfile, customerInfo.vatNumber]);
 
-  const vatTotals = calculateVatTotals(total, vatPreview.vatRate);
+  const vatSubtotal = useMemo(
+    () => cart.items.reduce(
+      (sum, item) => sum + applyVatRate(item.variant.priceExclVat, vatPreview.vatRate) * item.quantity,
+      0
+    ),
+    [cart.items, vatPreview.vatRate]
+  );
+  const discountAmount = appliedPromo?.discountAmount ?? 0;
+  const total = Math.max(0, vatSubtotal + shippingCost - discountAmount);
 
-  // Only meaningful for a company account — a private customer never sees
-  // VAT-treatment noise, and a guest has nowhere to enter a VAT number yet
-  // (that lives on the account, validated via VIES at /profile — see
-  // lib/vat-validation.js — not duplicated here as a throwaway checkout field).
+  /**
+   * The summary the customer reads, built from the net side.
+   *
+   * The catalogue and the carrier grid are both stored net, so goods HT and
+   * carriage HT are read, not re-derived. Only the promo discount has to be
+   * netted down — PromoCodeField works off the VAT-inclusive subtotal, since
+   * that is the figure a "10 % off" code is meant to apply to.
+   *
+   * VAT is then the difference between that net base and the amount actually
+   * charged, rather than a fifth independently rounded number: computed this
+   * way the four printed lines always reconcile to the cent, which is the
+   * whole point of showing them.
+   */
+  const netTotals = useMemo(() => {
+    const goodsNet = cart.items.reduce(
+      (sum, item) => sum + Number(item.variant.priceExclVat) * item.quantity,
+      0
+    );
+    const shippingNet = Number(shippingDetails.costExclVat) || 0;
+    const discountNet = discountAmount / (1 + vatPreview.vatRate / 100);
+    const subtotalNet = roundMoney(goodsNet + shippingNet - discountNet);
+    return {
+      goodsNet: roundMoney(goodsNet),
+      shippingNet: roundMoney(shippingNet),
+      discountNet: roundMoney(discountNet),
+      subtotalNet,
+      vatAmount: roundMoney(total - subtotalNet),
+    };
+  }, [cart.items, shippingDetails.costExclVat, discountAmount, vatPreview.vatRate, total]);
+  const hasSavedVatProof = isAuthenticated && hasReusableVatValidation(savedVatProfile, customerInfo.vatNumber);
+
   const vatNote = useMemo(() => {
-    if (vatPreview.vatTreatment === "EU_REVERSE_CHARGE") {
+    if (vatPreview.taxNote === VAT_LEGAL_NOTES.FOREIGN_EU_B2B_ZERO) {
       return {
         tone: "good",
-        text: "TVA à 0% applicable — autoliquidation intracommunautaire (votre numéro de TVA correspond au pays de livraison). Le montant sera recalculé sans TVA à l'étape de paiement.",
+        text: "TVA à 0% appliquée — autoliquidation.",
       };
     }
-    if (!isAuthenticated || !customerSession?.isCompany) return null;
-    if (!customerSession.vatNumber) {
-      return { tone: "info", text: "Ajoutez votre numéro de TVA dans vos paramètres de compte pour une éventuelle exonération sur les livraisons hors Belgique." };
-    }
-    if (fulfilmentMode !== "SHIPPING_PREPAID") {
-      return { tone: "info", text: "Le retrait en boutique reste une vente domestique — la TVA à 21% s'applique même avec un numéro de TVA valide. Seule une livraison hors de Belgique peut en être exonérée." };
-    }
-    if (vatPreview.destinationCountry === "BE") {
-      return { tone: "info", text: "Livraison en Belgique — vente domestique, TVA à 21%. Choisissez un point relais dans un autre pays de l'UE pour une éventuelle exonération." };
+    if (!customerInfo.vatNumber?.trim()) {
+      return { tone: "info", text: "Ajoutez un numéro de TVA UE puis vérifiez-le auprès de VIES. Sans validation VIES, la TVA à 21% reste appliquée." };
     }
     return {
       tone: "info",
-      text: "Votre numéro de TVA ne correspond pas au pays de livraison, ou n'a pas été revalidé récemment — revérifiez-le dans vos paramètres de compte pour une éventuelle exonération.",
+      text: "La TVA à 21% reste appliquée. Le taux de 0% exige un numéro de TVA actif, validé par VIES et délivré par un autre pays de l’Union européenne.",
     };
-  }, [vatPreview, isAuthenticated, customerSession, fulfilmentMode]);
+  }, [vatPreview, customerInfo.vatNumber]);
 
   function handleCustomerChange(e) {
     const { name, value, type, checked } = e.target;
     setCustomerInfo((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
     if (name === "email") setEmailStatus(null);
+    if (name === "vatNumber") {
+      setVatCheck(null);
+      setSavedVatProfile(null);
+    }
   }
 
   async function handleSubmit(e) {
@@ -213,6 +282,11 @@ export function CheckoutPageClient({ cart, customerSession }) {
         );
         return;
       }
+    }
+    // Also runs for a signed-in customer whose account has no address yet —
+    // an invoice cannot legally exist without one (art. 226(5)), and this is
+    // the last chance to catch it before the button below charges Stripe.
+    if (!hasAddressOnFile) {
       if (!customerInfo.addressLine1.trim() || !customerInfo.addressCity.trim() || !customerInfo.addressPostalCode.trim()) {
         toast.error("Veuillez indiquer votre adresse de facturation — elle est obligatoire pour la facture.");
         return;
@@ -230,7 +304,24 @@ export function CheckoutPageClient({ cart, customerSession }) {
       const payload = {
         fulfilmentMode,
         customerInfo: isAuthenticated
-          ? { userId: customerSession.id, fullName: customerSession.fullName, email: customerSession.email, phone: customerSession.phone }
+          ? {
+              userId: customerSession.id,
+              // Identity fields come from the trusted session, never from
+              // what the client typed (resolveOrCreateCustomer's IDOR note).
+              // The address is the exception: when hasAddressOnFile is false
+              // there is no server-known value yet, so what was just typed
+              // into the form below is the only source — resolveOrCreateCustomer
+              // persists it onto this same account.
+              fullName: customerSession.fullName,
+              email: customerSession.email,
+              phone: customerSession.phone,
+              vatNumber: customerInfo.vatNumber || "",
+              addressLine1: customerInfo.addressLine1,
+              addressLine2: customerInfo.addressLine2,
+              addressCity: customerInfo.addressCity,
+              addressPostalCode: customerInfo.addressPostalCode,
+              addressCountry: customerInfo.addressCountry,
+            }
           : customerInfo,
         pickupPoint: fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint : null,
         notes: notes || null,
@@ -324,6 +415,52 @@ export function CheckoutPageClient({ cart, customerSession }) {
     }
   }
 
+  const vatField = (
+    <div className="space-y-2">
+      <label className="block text-xs font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
+        Numéro de TVA (optionnel)
+      </label>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          name="vatNumber"
+          value={customerInfo.vatNumber ?? ""}
+          onChange={handleCustomerChange}
+          placeholder="BE0123456789 ou FRXX123456789"
+          className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={handleVerifyVat}
+          disabled={vatCheck?.loading}
+          className="inline-flex shrink-0 items-center gap-1.5 border border-neutral-200 px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-[#C8A46A] hover:text-[#2F3A2E] disabled:opacity-50"
+        >
+          {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
+          Vérifier
+        </button>
+      </div>
+      {vatCheck && !vatCheck.loading && (
+        <p
+          className={`flex items-center gap-1.5 text-xs font-medium ${
+            vatCheck.error ? "text-amber-600" : vatCheck.valid ? "text-emerald-600" : "text-red-600"
+          }`}
+        >
+          {vatCheck.error ? (
+            <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />
+          ) : vatCheck.valid ? (
+            <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <BadgeX className="h-3.5 w-3.5 shrink-0" />
+          )}
+          {vatCheck.message}
+        </p>
+      )}
+      <p className="text-xs text-gray-400">
+        Après validation, ce numéro sera réutilisé pendant 90 jours.
+      </p>
+    </div>
+  );
+
   if (pendingVerificationEmail) {
     return (
       <div className="mx-auto max-w-[600px] px-6 py-20 text-center md:px-10">
@@ -389,6 +526,26 @@ export function CheckoutPageClient({ cart, customerSession }) {
             </section>
           )}
 
+          {isAuthenticated && (
+            <section className="border border-neutral-200 p-6">
+              <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
+                Facturation professionnelle
+              </h2>
+              {hasSavedVatProof ? (
+                <div className="flex items-start gap-3 bg-emerald-50 px-4 py-3 text-emerald-800">
+                  <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-semibold">TVA {customerInfo.vatNumber} vérifiée</p>
+                    <p className="mt-0.5 text-xs text-emerald-700">
+                      La validation VIES est réutilisée pendant 90 jours. Pour changer ce numéro, utilisez votre{" "}
+                      <Link href="/profile" className="underline underline-offset-2">profil</Link>.
+                    </p>
+                  </div>
+                </div>
+              ) : vatField}
+            </section>
+          )}
+
           {/* Customer info */}
           {!isAuthenticated && (
             <section className="border border-neutral-200 p-6">
@@ -437,12 +594,16 @@ export function CheckoutPageClient({ cart, customerSession }) {
                   className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
                   required
                 />
+                {vatField}
 
                 {/* Billing address — mandatory for every invoice (Belgian legal
                     requirement). Not marked required at the HTML level since a
                     returning customer whose account already has an address on
-                    file doesn't need to resubmit it — resolveOrCreateCustomer
-                    enforces the actual requirement server-side. */}
+                    file doesn't need to resubmit it (it arrives pre-filled via
+                    customerSession). The submit handler enforces it above
+                    whenever !hasAddressOnFile, and resolveOrCreateCustomer
+                    enforces the same rule server-side — before Stripe is
+                    charged, not after: see cmtbaqxua0003gczkbigl9x23. */}
                 <div className="space-y-3 border-t border-neutral-100 pt-4">
                   <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
                     Adresse de facturation
@@ -538,28 +699,26 @@ export function CheckoutPageClient({ cart, customerSession }) {
                   {item.variant.product.name} × {item.quantity}
                 </span>
                 <span className="flex-shrink-0 font-medium text-[#2F3A2E]">
-                  €{(item.variant.price * item.quantity).toFixed(2)}
+                  €{(applyVatRate(item.variant.priceExclVat, vatPreview.vatRate) * item.quantity).toFixed(2)}
                 </span>
               </li>
             ))}
           </ul>
           <div className="mt-4">
-            <PromoCodeField subtotal={cart.subtotal} onApplied={setAppliedPromo} />
+            <PromoCodeField subtotal={vatSubtotal} onApplied={setAppliedPromo} />
           </div>
 
+          {/* Read in the order the price is actually built: goods HT,
+              carriage HT, the discount off the net base, the VAT on what
+              remains, then the amount charged. The invoice issued for this
+              order prints the same four figures. */}
           <div className="mt-4 space-y-1.5 border-t border-neutral-100 pt-4 text-sm">
             <div className="flex justify-between text-gray-600">
-              <span>Sous-total</span>
-              <span>€{cart.subtotal.toFixed(2)}</span>
+              <span>Sous-total HT</span>
+              <span>€{netTotals.goodsNet.toFixed(2)}</span>
             </div>
-            {discountAmount > 0 && (
-              <div className="flex justify-between text-emerald-600">
-                <span>Réduction ({appliedPromo.code})</span>
-                <span>-€{discountAmount.toFixed(2)}</span>
-              </div>
-            )}
             <div className="flex justify-between text-gray-600">
-              <span>Livraison</span>
+              <span>Livraison HT</span>
               <span>
                 {fulfilmentMode !== "SHIPPING_PREPAID"
                   ? "—"
@@ -567,19 +726,23 @@ export function CheckoutPageClient({ cart, customerSession }) {
                     ? "Devis requis"
                     : shippingCost === 0
                       ? "Offerte"
-                      : `€${shippingCost.toFixed(2)}`}
+                      : `€${netTotals.shippingNet.toFixed(2)}`}
               </span>
             </div>
-            <div className="flex justify-between border-t border-neutral-100 pt-2 text-base font-semibold text-[#2F3A2E]">
-              <span>Total</span>
-              <span>{quoteRequired ? "—" : `€${total.toFixed(2)}`}</span>
-            </div>
-            {!quoteRequired && (
-              <div className="flex justify-between text-xs text-gray-400">
-                <span>dont TVA ({vatPreview.vatRate}%)</span>
-                <span>€{vatTotals.vatAmount.toFixed(2)}</span>
+            {discountAmount > 0 && (
+              <div className="flex justify-between text-emerald-600">
+                <span>Réduction ({appliedPromo.code})</span>
+                <span>-€{netTotals.discountNet.toFixed(2)}</span>
               </div>
             )}
+            <div className="flex justify-between text-gray-600">
+              <span>TVA ({vatPreview.vatRate}%)</span>
+              <span>{quoteRequired ? "—" : `€${netTotals.vatAmount.toFixed(2)}`}</span>
+            </div>
+            <div className="flex justify-between border-t border-neutral-100 pt-2 text-base font-semibold text-[#2F3A2E]">
+              <span>Total TTC</span>
+              <span>{quoteRequired ? "—" : `€${total.toFixed(2)}`}</span>
+            </div>
           </div>
 
           {vatNote && (

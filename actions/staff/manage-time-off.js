@@ -23,6 +23,21 @@ async function getOwnStaffId() {
   return staff?.id ?? null;
 }
 
+/**
+ * Combine a date string ("YYYY-MM-DD") and time string ("HH:MM")
+ * into a full ISO datetime string.  For full-day absences the time
+ * component is irrelevant, so we default to 00:00 for start and
+ * 23:59:59 for end.
+ */
+function buildDateTime(dateStr, timeStr, isEnd = false) {
+  if (timeStr) {
+    return new Date(`${dateStr}T${timeStr}:00`);
+  }
+  return isEnd
+    ? new Date(`${dateStr}T23:59:59`)
+    : new Date(`${dateStr}T00:00:00`);
+}
+
 export async function createStaffTimeOff(input) {
   const parsed = staffTimeOffSchema.safeParse(input);
 
@@ -34,6 +49,9 @@ export async function createStaffTimeOff(input) {
       errors: {
         startDate: fe.startDate?.[0] ?? null,
         endDate: fe.endDate?.[0] ?? null,
+        startTime: fe.startTime?.[0] ?? null,
+        endTime: fe.endTime?.[0] ?? null,
+        isFullDay: fe.isFullDay?.[0] ?? null,
         reason: fe.reason?.[0] ?? null,
       },
     };
@@ -55,19 +73,21 @@ export async function createStaffTimeOff(input) {
       return { success: false, message: "Profil staff introuvable." };
     }
 
-    const { startDate, endDate, reason } = parsed.data;
+    const { startDate, endDate, isFullDay, startTime, endTime, reason } = parsed.data;
 
     const created = await prisma.timeOff.create({
       data: {
         staffId: staff.id,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+        startDate: buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false),
+        endDate: buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true),
+        isFullDay: isFullDay !== false,
         reason: reason || null,
       },
       select: {
         id: true,
         startDate: true,
         endDate: true,
+        isFullDay: true,
         reason: true,
       },
     });
@@ -76,11 +96,12 @@ export async function createStaffTimeOff(input) {
 
     return {
       success: true,
-      message: "Période d’indisponibilité ajoutée.",
+      message: "Période d'indisponibilité ajoutée.",
       data: {
         id: created.id,
         startDate: created.startDate.toISOString(),
         endDate: created.endDate.toISOString(),
+        isFullDay: created.isFullDay,
         reason: created.reason,
       },
     };
@@ -105,6 +126,9 @@ export async function updateStaffTimeOff(id, input) {
       errors: {
         startDate: fe.startDate?.[0] ?? null,
         endDate: fe.endDate?.[0] ?? null,
+        startTime: fe.startTime?.[0] ?? null,
+        endTime: fe.endTime?.[0] ?? null,
+        isFullDay: fe.isFullDay?.[0] ?? null,
         reason: fe.reason?.[0] ?? null,
       },
     };
@@ -117,16 +141,14 @@ export async function updateStaffTimeOff(id, input) {
       return { success: false, message: "Permissions insuffisantes" };
     }
 
-    const { startDate, endDate, reason } = parsed.data;
+    const { startDate, endDate, isFullDay, startTime, endTime, reason } = parsed.data;
 
-    // Scope the update to staffId as well as id — a staff member can only
-    // ever touch their own time-off rows, never another staff member's by
-    // guessing/reusing an id.
     const { count } = await prisma.timeOff.updateMany({
       where: { id, staffId },
       data: {
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+        startDate: buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false),
+        endDate: buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true),
+        isFullDay: isFullDay !== false,
         reason: reason || null,
       },
     });
@@ -139,8 +161,14 @@ export async function updateStaffTimeOff(id, input) {
 
     return {
       success: true,
-      message: "Période d’indisponibilité modifiée.",
-      data: { id, startDate, endDate, reason: reason || null },
+      message: "Période d'indisponibilité modifiée.",
+      data: {
+        id,
+        startDate: buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false).toISOString(),
+        endDate: buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true).toISOString(),
+        isFullDay: isFullDay !== false,
+        reason: reason || null,
+      },
     };
   } catch (error) {
     console.error("[updateStaffTimeOff]", error);

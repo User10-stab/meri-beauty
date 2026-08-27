@@ -13,7 +13,7 @@ const animatorSchema = z.object({
     z.string().trim().email("L'adresse email est invalide.").nullable().optional()
   ),
   phone: z.preprocess((val) => (val === "" ? null : val), z.string().trim().nullable().optional()),
-  bio: z.preprocess((val) => (val === "" ? null : val), z.string().trim().max(1000, "La biographie ne peut pas dépasser 1000 caractères.").nullable().optional()),
+  bio: z.preprocess((val) => (val === "" ? null : val), z.string().trim().max(500, "La biographie ne peut pas dépasser 500 caractères.").nullable().optional()),
   avatar: z.preprocess((val) => (val === "" ? null : val), z.string().nullable().optional()),
   website: z.preprocess(
     (val) => (val === "" ? null : val),

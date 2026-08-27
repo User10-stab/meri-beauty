@@ -120,6 +120,7 @@ export async function getCalendarEvents({ from, to }) {
       return {
         id: s.id,
         kind: "atelier",
+        animatorId: s.animatorId ?? null,
         title: s.workshop.title,
         subtitle: `${s.workshop.type === "EVENT" ? "Événement" : "Atelier"}${s.animator ? ` · ${s.animator.name}` : ""} · ${seatsTaken}/${s.capacity} places`,
         start: s.startDate.toISOString(),
@@ -133,6 +134,7 @@ export async function getCalendarEvents({ from, to }) {
       return {
         id: s.id,
         kind: "formation",
+        animatorId: s.animatorId ?? null,
         title: s.formation.title,
         subtitle: `${s.formation.type === "PRIVATE" ? "Formation individuelle" : "Formation groupe"}${s.animator ? ` · ${s.animator.name}` : ""} · ${seatsTaken}/${s.capacity} places`,
         start: s.startDate.toISOString(),

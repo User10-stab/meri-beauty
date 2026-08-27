@@ -20,15 +20,27 @@ import { getPaymentStatus } from "@/lib/payment-status";
  * status, amounts, appointment time, and the service/staff public info.
  *
  * @param {string} stripeSessionId
+ * @param {string} paymentId
  * @returns {Promise<{ found: boolean, data: object | null }>}
  */
-export async function getPaymentStatusBySession(stripeSessionId) {
-  if (!stripeSessionId || typeof stripeSessionId !== "string") {
+export async function getPaymentStatusBySession(stripeSessionId, paymentId) {
+  if (!stripeSessionId && !paymentId) {
     return { found: false, data: null };
   }
 
   try {
-    const full = await getPaymentStatus({ stripeSessionId: stripeSessionId.trim() });
+    let full;
+    
+    // Try to find by session ID first (the primary lookup)
+    if (stripeSessionId && typeof stripeSessionId === "string") {
+      full = await getPaymentStatus({ stripeSessionId: stripeSessionId.trim() });
+    }
+    
+    // Fallback to payment ID if session lookup failed
+    if (!full && paymentId && typeof paymentId === "string") {
+      full = await getPaymentStatus({ paymentId: paymentId.trim() });
+    }
+    
     if (!full) return { found: false, data: null };
 
     // Return only the public-safe subset. Notably NOT included:

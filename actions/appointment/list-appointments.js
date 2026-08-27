@@ -41,7 +41,7 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
             }
           : {}),
       },
-      orderBy: { startTime: "desc" },
+      orderBy: { createdAt: "desc" },
       include: {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
         cancelledBy: { select: { id: true, fullName: true, role: true } },
@@ -60,6 +60,7 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
       success: true,
       data: appointments.map((a) => ({
         id: a.id,
+        createdAt: a.createdAt,
         date: a.date,
         startTime: a.startTime,
         endTime: a.endTime,
@@ -70,6 +71,8 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
         cancellationSource: a.cancellationSource,
         cancelledBy: a.cancelledBy,
         customer: a.user,
+        customerName: a.user?.fullName,
+        customerEmail: a.user?.email,
         serviceName: a.staffService.service.name,
         staffId: a.staffService.staff?.id ?? null,
         staffName: a.staffService.staff?.user?.fullName ?? "—",
@@ -82,6 +85,11 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
               remainingAmount: Number(a.payment.remainingAmount),
             }
           : null,
+        paymentStatus: a.payment?.status,
+        paymentType: a.payment?.paymentType,
+        totalAmount: a.payment ? Number(a.payment.totalAmount) : null,
+        paidAmount: a.payment ? Number(a.payment.paidAmount) : null,
+        remainingAmount: a.payment ? Number(a.payment.remainingAmount) : null,
         review: a.review
           ? {
               id: a.review.id,

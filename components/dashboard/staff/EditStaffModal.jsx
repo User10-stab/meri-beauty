@@ -256,6 +256,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
       languages:         staff.languages ?? [],
       yearsOfExperience: staff.yearsOfExperience ?? "",
       hireDate:          staff.hireDate ? staff.hireDate.slice(0, 10) : "",
+      vatNumber:         staff.vatNumber ?? "",
       isActive:          staff.isActive,
       serviceIds:        staff.serviceIds ?? [],   // pre-populated from server fetch
       dashboardPermissions: staff.dashboardPermissions ?? [],
@@ -294,6 +295,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
   return (
     <form id="edit-staff-form" onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
       <input type="hidden" {...register("id")} />
+      <input type="hidden" {...register("vatNumber")} />
 
       {/* ── Photo + identity ──────────────────────────────────────── */}
       <div>

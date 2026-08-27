@@ -11,7 +11,7 @@ import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-ver
 import { createResumeCheckoutToken } from "@/lib/resume-checkout-token";
 
 const BCRYPT_SALT_ROUNDS = 12;
-const TOKEN_EXPIRY_MINUTES = 15;
+const TOKEN_EXPIRY_MINUTES = 24 * 60; // 24 hours instead of 15 minutes
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL

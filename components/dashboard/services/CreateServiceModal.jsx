@@ -576,7 +576,7 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
                         assignment={assignment}
                         onChange={handleAssignmentChange}
                         onRemove={handleRemoveStaff}
-                        canRemove={!isStaff && staffAssignments.length > 1}
+                        canRemove={!isStaff}
                         errors={errors.assignments?.[index]}
                       />
                     );

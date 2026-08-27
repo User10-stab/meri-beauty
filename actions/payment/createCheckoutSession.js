@@ -514,7 +514,7 @@ export async function createCheckoutSession(reservationData) {
             },
           ],
           mode: "payment",
-          success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation/success?session_id={CHECKOUT_SESSION_ID}`,
+          success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation/success?session_id={CHECKOUT_SESSION_ID}&payment_id=${payment.id}`,
           cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/reservation?canceled=true`,
           customer_email: customerInfo.email,
           payment_intent_data: {

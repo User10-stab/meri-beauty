@@ -334,26 +334,36 @@ export async function createService(input) {
  * @returns {{ success: boolean, message: string, service?: object }}
  */
 export async function updateService(input) {
+  console.log("[updateService] Starting update with input:", JSON.stringify(input, null, 2));
+  
   const parsed = updateServiceSchema.safeParse(input);
 
   if (!parsed.success) {
     const errors = parsed.error.flatten().fieldErrors;
+    console.error("[updateService] Validation errors:", JSON.stringify(errors, null, 2));
     return {
       success: false,
-      message: errors.name?.[0] ?? errors.categoryId?.[0] ?? "Données invalides.",
+      message: errors.name?.[0] ?? errors.categoryId?.[0] ?? errors.staffAssignments?.[0] ?? "Données invalides.",
       errors: {
         name: errors.name?.[0] ?? null,
         categoryId: errors.categoryId?.[0] ?? null,
         description: errors.description?.[0] ?? null,
+        staffAssignments: errors.staffAssignments?.[0] ?? null,
       },
     };
   }
+  
+  console.log("[updateService] Validation passed");
 
   const { id, name, categoryId, description, staffAssignments } = parsed.data;
+  console.log("[updateService] Parsed data:", { id, name, categoryId, description, staffAssignments });
 
   try {
     const session = await auth();
+    console.log("[updateService] Session:", session?.user ? { id: session.user.id, role: session.user.role } : null);
+    
     if (!session?.user) {
+      console.error("[updateService] No session found");
       return { success: false, message: "Non authentifié" };
     }
     if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SERVICES))) {
@@ -363,15 +373,20 @@ export async function updateService(input) {
     // Check if user is admin/owner or if staff member is assigned to this service
     let canEdit = false;
     let staffId = null;
+    console.log("[updateService] Checking permissions for role:", session.user.role);
 
     if (isAdminRole(session.user.role)) {
       canEdit = true;
+      console.log("[updateService] User is admin, can edit");
     } else if (session.user.role === ROLES.STAFF) {
+      console.log("[updateService] User is staff, checking assignment");
       // Check if this staff member is assigned to the service
       const staffRecord = await prisma.staff.findUnique({
         where: { userId: session.user.id, isDeleted: false },
         select: { id: true },
       });
+      
+      console.log("[updateService] Staff record:", staffRecord);
       
       if (staffRecord) {
         const assignment = await prisma.staffService.findFirst({
@@ -383,41 +398,53 @@ export async function updateService(input) {
           select: { id: true },
         });
         
+        console.log("[updateService] Staff assignment:", assignment);
+        
         if (assignment) {
           canEdit = true;
           staffId = staffRecord.id;
+          console.log("[updateService] Staff can edit their own assignment");
         }
       }
     }
 
     if (!canEdit) {
+      console.error("[updateService] Permission denied");
       return { success: false, message: "Permissions insuffisantes" };
     }
 
+    console.log("[updateService] Starting database transaction");
     const service = await prisma.$transaction(async (tx) => {
+      console.log("[updateService] Updating service core fields");
       // 1. Update the service core fields (only admin/owner can update core fields)
       const updatedService = await tx.service.update({
         where: { id },
         data: { name, categoryId, description: description ?? null },
         include: { category: { select: { id: true, name: true } } },
       });
+      console.log("[updateService] Service updated:", updatedService.id);
 
       // 2. Sync staff-service assignments
+      console.log("[updateService] Getting existing assignments");
       // Get existing assignments for this service
       const existingAssignments = await tx.staffService.findMany({
         where: { serviceId: id },
         select: { id: true, staffId: true },
       });
+      console.log("[updateService] Existing assignments:", existingAssignments.length);
 
       const createdById = session.user.id;
 
       // If staff member, they can only update their own assignment
       if (staffId && !isAdminRole(session.user.role)) {
+        console.log("[updateService] Staff updating their own assignment");
         // Staff can only update their own staffService record
         const myAssignment = (staffAssignments || []).find(a => a.staffId === staffId);
+        console.log("[updateService] My assignment:", myAssignment);
         
         if (myAssignment) {
           const existing = existingAssignments.find(a => a.staffId === staffId);
+          console.log("[updateService] Existing assignment for staff:", existing);
           if (existing) {
             await tx.staffService.update({
               where: { id: existing.id },
@@ -428,25 +455,32 @@ export async function updateService(input) {
                 photo: myAssignment.photo ?? "",
               },
             });
+            console.log("[updateService] Staff assignment updated");
           }
         }
       } else {
+        console.log("[updateService] Admin/Owner syncing all assignments");
         // Admin/Owner can sync all assignments
         const existingStaffIds = existingAssignments.map((a) => a.staffId);
         const incomingStaffIds = (staffAssignments || []).map((a) => a.staffId);
+        console.log("[updateService] Existing staff IDs:", existingStaffIds);
+        console.log("[updateService] Incoming staff IDs:", incomingStaffIds);
 
         // Remove assignments that are no longer in the list
         const toRemove = existingAssignments.filter((a) => !incomingStaffIds.includes(a.staffId));
+        console.log("[updateService] Assignments to remove:", toRemove.length);
         for (const assignment of toRemove) {
           await tx.staffService.delete({ where: { id: assignment.id } });
         }
 
         // Upsert assignments for incoming staff
+        console.log("[updateService] Processing", (staffAssignments || []).length, "incoming assignments");
         for (const assignment of staffAssignments || []) {
           const existing = existingAssignments.find((a) => a.staffId === assignment.staffId);
 
           if (existing) {
             // Update existing assignment
+            console.log("[updateService] Updating existing assignment for staff:", assignment.staffId);
             await tx.staffService.update({
               where: { id: existing.id },
               data: {
@@ -458,6 +492,7 @@ export async function updateService(input) {
             });
           } else {
             // Create new assignment
+            console.log("[updateService] Creating new assignment for staff:", assignment.staffId);
             const staffExist = await tx.staff.findUnique({
               where: { id: assignment.staffId, isDeleted: false },
               select: { id: true },
@@ -476,6 +511,8 @@ export async function updateService(input) {
                   isActive: true,
                 },
               });
+            } else {
+              console.error("[updateService] Staff not found:", assignment.staffId);
             }
           }
         }
@@ -484,9 +521,11 @@ export async function updateService(input) {
       return updatedService;
     });
 
+    console.log("[updateService] Transaction completed successfully");
     revalidatePath("/dashboard/staff/auto-entrepreneur");
     revalidatePath("/dashboard/services");
 
+    console.log("[updateService] Returning success response");
     return {
       success: true,
       message: `Le service « ${service.name} » a été mis à jour.`,
@@ -498,6 +537,11 @@ export async function updateService(input) {
       },
     };
   } catch (error) {
+    console.error("[updateService] Error occurred:", error);
+    console.error("[updateService] Error code:", error.code);
+    console.error("[updateService] Error message:", error.message);
+    console.error("[updateService] Error stack:", error.stack);
+    
     if (error.code === "P2002") {
       return {
         success: false,
@@ -505,11 +549,24 @@ export async function updateService(input) {
         errors: { name: "Ce nom est déjà utilisé." },
       };
     }
+    
+    if (error.code === "P2025") {
+      return {
+        success: false,
+        message: "Le service ou le professionnel spécifié n'existe pas.",
+      };
+    }
+    
+    if (error.code === "P2003") {
+      return {
+        success: false,
+        message: "Une référence étrangère est invalide (catégorie ou professionnel).",
+      };
+    }
 
-    console.error("[updateService]", error);
     return {
       success: false,
-      message: "Une erreur inattendue s'est produite. Veuillez réessayer.",
+      message: `Une erreur s'est produite: ${error.message || "Veuillez réessayer."}`,
     };
   }
 }

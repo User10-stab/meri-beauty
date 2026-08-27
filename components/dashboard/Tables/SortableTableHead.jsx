@@ -30,7 +30,7 @@ export function SortableTableHead({
   return (
     <th
       className={`
-        h-12 px-4 text-left align-middle font-semibold text-gray-500
+        h-12 px-3 sm:px-4 text-left align-middle font-semibold text-gray-500
         text-sm whitespace-nowrap ${className}
       `}
     >

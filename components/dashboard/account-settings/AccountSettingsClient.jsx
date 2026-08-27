@@ -1085,6 +1085,9 @@ function TimeOffSection({ data, onSuccess }) {
   const todayIso = () => new Date().toISOString().split("T")[0];
   const [startDate, setStartDate] = useState(todayIso);
   const [endDate, setEndDate] = useState(todayIso);
+  const [isFullDay, setIsFullDay] = useState(true);
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("17:00");
   const [reason, setReason] = useState("");
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
@@ -1095,6 +1098,9 @@ function TimeOffSection({ data, onSuccess }) {
     setEditingId(null);
     setStartDate(todayIso());
     setEndDate(todayIso());
+    setIsFullDay(true);
+    setStartTime("09:00");
+    setEndTime("17:00");
     setReason("");
     setErrors({});
   }
@@ -1103,6 +1109,17 @@ function TimeOffSection({ data, onSuccess }) {
     setEditingId(item.id);
     setStartDate(item.startDate.split("T")[0]);
     setEndDate(item.endDate.split("T")[0]);
+    setIsFullDay(item.isFullDay !== false);
+    // Extract time from ISO strings for partial-day
+    if (item.isFullDay === false) {
+      const startDt = new Date(item.startDate);
+      const endDt = new Date(item.endDate);
+      setStartTime(`${String(startDt.getHours()).padStart(2, "0")}:${String(startDt.getMinutes()).padStart(2, "0")}`);
+      setEndTime(`${String(endDt.getHours()).padStart(2, "0")}:${String(endDt.getMinutes()).padStart(2, "0")}`);
+    } else {
+      setStartTime("09:00");
+      setEndTime("17:00");
+    }
     setReason(item.reason ?? "");
     setErrors({});
   }
@@ -1110,9 +1127,17 @@ function TimeOffSection({ data, onSuccess }) {
   function handleSave() {
     setErrors({});
     startTransition(async () => {
+      const payload = {
+        startDate,
+        endDate,
+        isFullDay,
+        startTime: isFullDay ? undefined : startTime,
+        endTime: isFullDay ? undefined : endTime,
+        reason,
+      };
       const res = editingId
-        ? await updateStaffTimeOff(editingId, { startDate, endDate, reason })
-        : await createStaffTimeOff({ startDate, endDate, reason });
+        ? await updateStaffTimeOff(editingId, payload)
+        : await createStaffTimeOff(payload);
 
       if (res.success) {
         toast.success(res.message);
@@ -1170,6 +1195,26 @@ function TimeOffSection({ data, onSuccess }) {
           </div>
         </div>
 
+        <div className="flex items-center gap-3">
+          <Toggle checked={isFullDay} onChange={() => setIsFullDay(!isFullDay)} />
+          <Label>Journée complète</Label>
+        </div>
+
+        {!isFullDay && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label required>Heure de début</Label>
+              <TextInput type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} error={errors.startTime} />
+              <FieldError message={errors.startTime} />
+            </div>
+            <div>
+              <Label required>Heure de fin</Label>
+              <TextInput type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} error={errors.endTime} />
+              <FieldError message={errors.endTime} />
+            </div>
+          </div>
+        )}
+
         <div>
           <Label>Motif</Label>
           <Textarea
@@ -1217,6 +1262,13 @@ function TimeOffSection({ data, onSuccess }) {
                     <p className="font-medium text-gray-900 dark:text-white">
                       {formatDate(item.startDate)} {item.endDate && item.endDate !== item.startDate ? `– ${formatDate(item.endDate)}` : ""}
                     </p>
+                    {item.isFullDay === false && (
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        {new Date(item.startDate).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}
+                        {" – "}
+                        {new Date(item.endDate).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}
+                      </p>
+                    )}
                     {item.reason ? <p className="text-[11px] text-gray-500 dark:text-gray-400">{item.reason}</p> : null}
                   </div>
                   <div className="flex items-center gap-2">

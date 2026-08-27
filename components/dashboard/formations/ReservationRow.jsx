@@ -18,6 +18,28 @@ const STATUS_LABELS = {
   NO_SHOW: "Absent",
 };
 
+const PAYMENT_STATUS_STYLES = {
+  PENDING: "bg-amber-50 text-amber-700 border-amber-200",
+  PAID: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  REFUNDED: "bg-red-50 text-red-700 border-red-200",
+  PARTIALLY_PAID: "bg-blue-50 text-blue-700 border-blue-200",
+  PARTIALLY_REFUNDED: "bg-orange-50 text-orange-700 border-orange-200",
+  FAILED: "bg-red-50 text-red-700 border-red-200",
+  REFUND_PENDING: "bg-amber-50 text-amber-700 border-amber-200",
+  REFUND_FAILED: "bg-red-50 text-red-700 border-red-200",
+};
+
+const PAYMENT_STATUS_LABELS = {
+  PENDING: "En attente",
+  PAID: "Payé",
+  REFUNDED: "Remboursé",
+  PARTIALLY_PAID: "Partiellement payé",
+  PARTIALLY_REFUNDED: "Partiellement remboursé",
+  FAILED: "Échoué",
+  REFUND_PENDING: "Remboursement en attente",
+  REFUND_FAILED: "Remboursement échoué",
+};
+
 function formatSessionDate(date) {
   // Explicit timeZone, not just the server's pinned TZ (instrumentation.js) —
   // without it this renders in Brussels time on the server but the visiting
@@ -40,22 +62,28 @@ export function ReservationRow({ row, onDelete, onSettle, onNoShow }) {
   return (
     <tr className="group border-b border-gray-100 transition-colors hover:bg-gray-50/70">
       {/* Formation */}
-      <td className="px-4 py-4 pl-5 align-middle">
+      <td className="px-3 sm:px-4 py-4 pl-3 sm:pl-5 align-middle min-w-[200px]">
         <span className="block font-medium text-gray-800">{row.session?.formation?.title}</span>
         <span className="text-xs text-gray-400">{formatSessionDate(row.session?.startDate)}</span>
       </td>
 
       {/* Customer */}
-      <td className="px-4 py-4 align-middle">
-        <span className="block text-sm font-medium text-gray-700">{row.customer?.fullName}</span>
-        <span className="text-xs text-gray-400">{row.customer?.email}</span>
+      <td className="px-3 sm:px-4 py-4 align-middle min-w-[180px]">
+        {row.customer ? (
+          <>
+            <span className="block text-sm font-medium text-gray-700">{row.customer.fullName}</span>
+            <span className="text-xs text-gray-400">{row.customer.email}</span>
+          </>
+        ) : (
+          <span className="text-sm text-gray-400 italic">Client non disponible</span>
+        )}
       </td>
 
       {/* Seats */}
-      <td className="px-4 py-4 align-middle text-gray-600">{row.seatsCount} pers.</td>
+      <td className="px-3 sm:px-4 py-4 align-middle text-gray-600 whitespace-nowrap">{row.seatsCount} pers.</td>
 
       {/* Status */}
-      <td className="px-4 py-4 align-middle">
+      <td className="px-3 sm:px-4 py-4 align-middle whitespace-nowrap">
         <span
           className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${
             STATUS_STYLES[row.status] ?? STATUS_STYLES.NO_SHOW
@@ -66,19 +94,33 @@ export function ReservationRow({ row, onDelete, onSettle, onNoShow }) {
       </td>
 
       {/* Payment */}
-      <td className="px-4 py-4 align-middle text-sm">
-        <span className="block text-gray-700">
-          Payé : <span className="font-semibold">{priceFormatted(row.payment?.paidAmount ?? row.depositAmount)}</span>
-        </span>
-        {Number(row.balanceDue) > 0 && (
-          <span className="block text-xs text-amber-600">Solde : {priceFormatted(row.balanceDue)}</span>
-        )}
+      <td className="px-3 sm:px-4 py-4 align-middle text-sm min-w-[160px]">
+        <div className="flex flex-col gap-1">
+          <span className="block text-gray-700">
+            Total : <span className="font-semibold">{priceFormatted(row.payment?.totalAmount ?? row.totalPrice)}</span>
+          </span>
+          <span className="block text-gray-700">
+            Payé : <span className="font-semibold">{priceFormatted(row.payment?.paidAmount ?? row.depositAmount)}</span>
+          </span>
+          {row.payment?.status && (
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${
+                PAYMENT_STATUS_STYLES[row.payment.status] ?? PAYMENT_STATUS_STYLES.PENDING
+              }`}
+            >
+              {PAYMENT_STATUS_LABELS[row.payment.status] ?? row.payment.status}
+            </span>
+          )}
+          {Number(row.balanceDue) > 0 && (
+            <span className="block text-xs text-amber-600">Solde : {priceFormatted(row.balanceDue)}</span>
+          )}
+        </div>
       </td>
 
       {/* Cancel is the only action — admin-only internal tool, no session/seat change flow.
           Same pattern as the atelier row: no client-side status guard, cancelFormationReservation
           itself rejects an already-cancelled reservation and surfaces that as a toast. */}
-      <td className="px-4 py-4 pr-5 align-middle">
+      <td className="px-4 py-4 pr-5 align-middle whitespace-nowrap">
         <div className="flex items-center justify-end gap-2">
           {/* Only a CONFIRMED booking can be settled or marked absent — the
               two ways a formation actually ends once the session has run. */}

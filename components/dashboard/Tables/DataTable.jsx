@@ -30,7 +30,7 @@ function SkeletonRow() {
   return (
     <tr className="border-b border-gray-100">
       {Array.from({ length: 7 }).map((_, i) => (
-        <td key={i} className="px-4 py-4">
+        <td key={i} className="px-3 sm:px-4 py-4">
           <div className="h-4 animate-pulse rounded bg-gray-100" />
         </td>
       ))}
@@ -201,7 +201,7 @@ export function DataTable({
   return (
     <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm h-[62vh]">
       {/* ── Toolbar ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-3 sm:px-5 py-4">
         {title && (
           <h2 className="text-base font-semibold text-gray-800">{title}</h2>
         )}
@@ -213,70 +213,74 @@ export function DataTable({
 
       {/* ── Table ────────────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 overflow-auto">
-        <table className="w-full border-collapse text-sm">
-          {/* sticky header */}
-          <thead className="sticky top-0 z-10 bg-white">
-            <tr className="border-y border-gray-100">
-              {columns.map((col) => (
-                <SortableTableHead
-                  key={col.key}
-                  column={col.key}
-                  label={col.label}
-                  sortKey={sortKey}
-                  sortDir={sortDir}
-                  onSort={handleSort}
-                  className={col.key === "id" ? "pl-5" : ""}
-                />
-              ))}
-              {/* Actions — not sortable */}
-              <th
-                scope="col"
-                className="h-12 px-4 text-right align-middle text-sm font-semibold text-gray-500 pr-5"
-              >
-                Actions
-              </th>
-            </tr>
-          </thead>
+        <div className="overflow-x-auto">
+          <div className="min-w-full inline-block align-middle">
+            <table className="w-full border-collapse text-sm">
+              {/* sticky header */}
+              <thead className="sticky top-0 z-10 bg-white">
+                <tr className="border-y border-gray-100">
+                  {columns.map((col) => (
+                    <SortableTableHead
+                      key={col.key}
+                      column={col.key}
+                      label={col.label}
+                      sortKey={sortKey}
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                      className={col.key === "id" ? "pl-3 sm:pl-5" : ""}
+                    />
+                  ))}
+                  {/* Actions — not sortable */}
+                  <th
+                    scope="col"
+                    className="h-12 px-3 sm:px-4 text-right align-middle text-sm font-semibold text-gray-500 pr-3 sm:pr-5 whitespace-nowrap"
+                  >
+                    Actions
+                  </th>
+                </tr>
+              </thead>
 
-          <tbody>
-            {isLoading ? (
-              Array.from({ length: perPage }).map((_, i) => (
-                <SkeletonRow key={i} />
-              ))
-            ) : pageRows.length === 0 ? (
-              <EmptyStateComponent />
-            ) : (
-              pageRows.map((row) => (
-                CustomRow ? (
-                  <CustomRow
-                    key={row.id || row.fullId}
-                    row={row}
-                    onView={handleView}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    onApprove={handleApprove}
-                    onReject={handleReject}
-                    onSettle={onSettle}
-                    onNoShow={onNoShow}
-                  />
+              <tbody>
+                {isLoading ? (
+                  Array.from({ length: perPage }).map((_, i) => (
+                    <SkeletonRow key={i} />
+                  ))
+                ) : pageRows.length === 0 ? (
+                  <EmptyStateComponent />
                 ) : (
-                  <TableRow
-                    key={row.fullId}
-                    row={row}
-                    onView={handleView}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                  />
-                )
-              ))
-            )}
-          </tbody>
-        </table>
+                  pageRows.map((row) => (
+                    CustomRow ? (
+                      <CustomRow
+                        key={row.id || row.fullId}
+                        row={row}
+                        onView={handleView}
+                        onEdit={handleEdit}
+                        onDelete={handleDelete}
+                        onApprove={handleApprove}
+                        onReject={handleReject}
+                        onSettle={onSettle}
+                        onNoShow={onNoShow}
+                      />
+                    ) : (
+                      <TableRow
+                        key={row.fullId}
+                        row={row}
+                        onView={handleView}
+                        onEdit={handleEdit}
+                        onDelete={handleDelete}
+                      />
+                    )
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       {/* ── Pagination ───────────────────────────────────────────────────── */}
       {!isLoading && (serverPagination ? serverPagination.totalCount > 0 : sorted.length > 0) && (
-        <div className="flex items-center justify-start gap-2 border-t border-gray-100 px-5 py-4">
+        <div className="flex items-center justify-start gap-2 border-t border-gray-100 px-3 sm:px-5 py-4">
           <Pagination
             currentPage={safePage}
             totalPages={totalPages}
@@ -294,7 +298,7 @@ function TableRow({ row, onView, onEdit, onDelete }) {
   return (
     <tr className="group border-b border-gray-100 transition-colors hover:bg-gray-50/70">
       {/* Id */}
-      <td className="px-4 py-4 pl-5 align-middle">
+      <td className="px-3 sm:px-4 py-4 pl-3 sm:pl-5 align-middle">
         <div className="flex items-center gap-1.5">
           <span className="max-w-[140px] truncate font-mono text-xs text-gray-500">
             {row.id}
@@ -317,34 +321,34 @@ function TableRow({ row, onView, onEdit, onDelete }) {
       </td>
 
       {/* Name */}
-      <td className="px-4 py-4 align-middle">
+      <td className="px-3 sm:px-4 py-4 align-middle">
         <span className="font-medium text-gray-800">{row.name}</span>
       </td>
 
       {/* Email */}
-      <td className="px-4 py-4 align-middle">
+      <td className="px-3 sm:px-4 py-4 align-middle">
         <span className="text-indigo-600">{row.email}</span>
       </td>
 
       {/* Email Verified */}
-      <td className="px-4 py-4 align-middle">
+      <td className="px-3 sm:px-4 py-4 align-middle">
         <VerifiedBadge verified={row.emailVerified} />
       </td>
 
       {/* Role */}
-      <td className="px-4 py-4 align-middle">
+      <td className="px-3 sm:px-4 py-4 align-middle">
         <span className="text-gray-700">{row.role}</span>
       </td>
 
       {/* Joined At */}
-      <td className="px-4 py-4 align-middle">
+      <td className="px-3 sm:px-4 py-4 align-middle">
         <span className="whitespace-nowrap text-gray-600">
           {formatDate(row.joinedAt)}
         </span>
       </td>
 
       {/* Actions */}
-      <td className="px-4 py-4 pr-5 align-middle">
+      <td className="px-3 sm:px-4 py-4 pr-3 sm:pr-5 align-middle">
         <RowActions
           row={row}
           onView={onView}

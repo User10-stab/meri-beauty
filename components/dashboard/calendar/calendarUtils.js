@@ -101,10 +101,10 @@ export function parseTime(t) {
 
 /**
  * Build an array of time slot labels between openingTime and closingTime
- * at 30-minute intervals.
+ * at 1-hour intervals (09:00, 10:00, 11:00, …).
  * @param {string} openingTime   "HH:MM"
  * @param {string} closingTime   "HH:MM"
- * @returns {string[]}  e.g. ["09:00", "09:30", "10:00", ...]
+ * @returns {string[]}  e.g. ["09:00", "10:00", "11:00", ...]
  */
 export function buildTimeSlots(openingTime = "09:00", closingTime = "19:00") {
   const slots = [];
@@ -113,7 +113,7 @@ export function buildTimeSlots(openingTime = "09:00", closingTime = "19:00") {
   const startMin = startH * 60 + startM;
   const endMin = endH * 60 + endM;
 
-  for (let m = startMin; m <= endMin; m += 30) {
+  for (let m = startMin; m <= endMin; m += 60) {
     const h = Math.floor(m / 60);
     const min = m % 60;
     slots.push(`${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
@@ -121,41 +121,241 @@ export function buildTimeSlots(openingTime = "09:00", closingTime = "19:00") {
   return slots;
 }
 
+// ─── Staff-based timeline derivation ─────────────────────────────────────────
+
+const JS_TO_WEEKDAY = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+
 /**
- * Given an appointment's startTime ISO string and the grid's opening time,
- * return the top offset in pixels (60px per hour = 1px per minute).
+ * Derive the opening/closing times for a single day based on staff working
+ * hours and any events (formations, ateliers) scheduled that day.
  *
- * @param {string} startTimeISO
- * @param {string} openingTime  "HH:MM"
- * @param {number} slotHeight   px per 30-min slot (default 60)
+ * The salon has no global working hours — each staff member has their own.
+ * This function finds the earliest start and latest end across the relevant
+ * staff, then extends further if events (formations/ateliers) go beyond.
+ *
+ * @param {Date}   date       The calendar date to compute for
+ * @param {Array}  staffList  Staff members with workingHours[]
+ * @param {Array}  events     Activity events (formations, ateliers)
+ * @returns {{ openingTime: string, closingTime: string }}
  */
-export function getTopOffset(startTimeISO, openingTime = "09:00", slotHeight = 60) {
-  if (!startTimeISO) return 0;
-  const dt = new Date(startTimeISO);
-  const apptMinutes = dt.getHours() * 60 + dt.getMinutes();
-  const { hour: oh, minute: om } = parseTime(openingTime);
-  const openMinutes = oh * 60 + om;
-  const delta = apptMinutes - openMinutes;
-  // slotHeight px = 30 min  →  px per minute = slotHeight / 30
-  return Math.max(0, (delta * slotHeight) / 30);
+export function deriveDayTimeline(date, staffList, events = []) {
+  const dayName = JS_TO_WEEKDAY[date.getDay()];
+
+  let earliestMin = Infinity;
+  let latestMin = -Infinity;
+
+  // Check staff working hours for this day
+  for (const staff of staffList) {
+    const wh = (staff.workingHours || []).find((w) => w.day === dayName);
+    if (!wh || wh.isClosed) continue;
+
+    const { hour: sh, minute: sm } = parseTime(wh.startTime);
+    const { hour: eh, minute: em } = parseTime(wh.endTime);
+    const startMin = sh * 60 + sm;
+    const endMin = eh * 60 + em;
+
+    if (startMin < earliestMin) earliestMin = startMin;
+    if (endMin > latestMin) latestMin = endMin;
+  }
+
+  // Also consider events that might extend beyond staff hours
+  const dayKey = localDateKey(date);
+  for (const ev of events) {
+    const raw = ev.startTime || ev.start;
+    if (!raw) continue;
+    // Only consider events on this day
+    if (brusselsDateKey(new Date(raw)) !== dayKey) continue;
+
+    const { hour: eh, minute: em } = getBrusselTimeComponents(raw);
+    const evStartMin = eh * 60 + em;
+    if (evStartMin < earliestMin) earliestMin = evStartMin;
+
+    const endRaw = ev.endTime || ev.end;
+    if (endRaw) {
+      const { hour: eeh, minute: eem } = getBrusselTimeComponents(endRaw);
+      const evEndMin = eeh * 60 + eem;
+      if (evEndMin > latestMin) latestMin = evEndMin;
+    }
+  }
+
+  // Fallback if no staff or events found
+  if (earliestMin === Infinity) earliestMin = 9 * 60; // 09:00
+  if (latestMin === -Infinity) latestMin = 19 * 60; // 19:00
+
+  // Round down opening to nearest 30-min slot
+  const roundedStart = Math.floor(earliestMin / 30) * 30;
+  // Round up closing to nearest 30-min slot
+  const roundedEnd = Math.ceil(latestMin / 30) * 30;
+
+  return {
+    openingTime: fmtTimeSlot(roundedStart),
+    closingTime: fmtTimeSlot(roundedEnd),
+  };
 }
 
 /**
- * Return the appointment height in pixels based on its duration.
+ * Derive the opening/closing times for an entire week by computing
+ * each day's timeline and taking the global min/max.
+ *
+ * @param {Date}   weekDate   Any date within the target week
+ * @param {Array}  staffList  Staff members with workingHours[]
+ * @param {Array}  events     Activity events
+ * @returns {{ openingTime: string, closingTime: string }}
+ */
+export function deriveWeekTimeline(weekDate, staffList, events = []) {
+  const days = getWeekDays(weekDate);
+
+  let globalEarliest = Infinity;
+  let globalLatest = -Infinity;
+
+  for (const day of days) {
+    const { openingTime, closingTime } = deriveDayTimeline(day, staffList, events);
+    const { hour: oh, minute: om } = parseTime(openingTime);
+    const { hour: ch, minute: cm } = parseTime(closingTime);
+    const dayStart = oh * 60 + om;
+    const dayEnd = ch * 60 + cm;
+
+    if (dayStart < globalEarliest) globalEarliest = dayStart;
+    if (dayEnd > globalLatest) globalLatest = dayEnd;
+  }
+
+  // Fallback
+  if (globalEarliest === Infinity) globalEarliest = 9 * 60;
+  if (globalLatest === -Infinity) globalLatest = 19 * 60;
+
+  // Round down opening, round up closing
+  const roundedStart = Math.floor(globalEarliest / 30) * 30;
+  const roundedEnd = Math.ceil(globalLatest / 30) * 30;
+
+  return {
+    openingTime: fmtTimeSlot(roundedStart),
+    closingTime: fmtTimeSlot(roundedEnd),
+  };
+}
+
+/** Format total minutes as "HH:MM". */
+function fmtTimeSlot(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * Convert a UTC ISO timestamp to Brussels local time components.
+ * 
+ * @param {string} isoString - ISO timestamp (e.g. "2026-08-25T07:00:00.000Z")
+ * @returns {{ hour: number, minute: number }}
+ */
+function getBrusselTimeComponents(isoString) {
+  const dt = new Date(isoString);
+  
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Brussels",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  
+  const parts = formatter.formatToParts(dt);
+  let hour = 0, minute = 0;
+  
+  for (const part of parts) {
+    if (part.type === "hour") hour = parseInt(part.value, 10);
+    if (part.type === "minute") minute = parseInt(part.value, 10);
+  }
+  
+  return { hour, minute };
+}
+
+/**
+ * Given an appointment's startTime ISO string and the grid's opening time,
+ * return the top offset in pixels based on the appointment's start time
+ * relative to the opening time.
+ *
+ * Correctly handles timezone conversion to Europe/Brussels.
+ * The calculation is: (minutesFromOpening / 60) × hourHeight
+ * where hourHeight is pixels per 1-hour row.
+ *
+ * @param {string} startTimeISO
+ * @param {string} openingTime  "HH:MM" in Brussels time
+ * @param {number} hourHeight   px per 1-hour slot (default 64)
+ */
+export function getTopOffset(startTimeISO, openingTime = "09:00", hourHeight = 64) {
+  if (!startTimeISO) return 0;
+  
+  const { hour: apptHour, minute: apptMinute } = getBrusselTimeComponents(startTimeISO);
+  const apptMinutes = apptHour * 60 + apptMinute;
+  
+  const { hour: oh, minute: om } = parseTime(openingTime);
+  const openMinutes = oh * 60 + om;
+  
+  const delta = apptMinutes - openMinutes;
+  
+  // 1 hour = hourHeight px  →  px per minute = hourHeight / 60
+  return Math.max(0, (delta * hourHeight) / 60);
+}
+
+/**
+ * Return the event height in pixels based on its real duration.
+ * Duration is computed from the actual UTC instant difference (timezone-correct),
+ * so a 09:00→12:00 Brussels appointment is exactly 3 hours tall regardless of
+ * the viewer's device timezone.
+ *
+ * Height is exact: 1 hour = hourHeight px (e.g. 09:00→12:00 = 3 × hourHeight).
+ * No artificial minimum is applied, so the occupied space always represents
+ * the real duration. A 0/negative duration falls back to a single hour-height.
  *
  * @param {string} startTimeISO
  * @param {string} endTimeISO
- * @param {number} slotHeight   px per 30-min slot (default 60)
+ * @param {number} hourHeight   px per 1-hour slot (default 64)
  */
-export function getEventHeight(startTimeISO, endTimeISO, slotHeight = 60) {
-  if (!startTimeISO || !endTimeISO) return slotHeight; // default 30 min
+export function getEventHeight(startTimeISO, endTimeISO, hourHeight = 64) {
+  if (!startTimeISO || !endTimeISO) return hourHeight; // fallback: 1 hour
   const start = new Date(startTimeISO);
   const end = new Date(endTimeISO);
   const durationMin = (end - start) / 60000;
-  return Math.max(slotHeight / 2, (durationMin * slotHeight) / 30);
+  if (durationMin <= 0) return hourHeight;
+  return (durationMin * hourHeight) / 60;
+}
+
+/**
+ * Minutes-since-midnight of an ISO instant interpreted in Europe/Brussels.
+ * Use this (NOT Date.getHours()*60 + Date.getMinutes()) for overlap/column
+ * math so it stays consistent with getTopOffset/getEventHeight, which are
+ * also Brussels-based. Returns null when the instant is missing.
+ */
+export function getBrusselsMinutesOfDay(isoString) {
+  if (!isoString) return null;
+  const { hour, minute } = getBrusselTimeComponents(isoString);
+  return hour * 60 + minute;
 }
 
 // ─── Appointment grouping ─────────────────────────────────────────────────────
+
+/**
+ * TIMEZONE STRATEGY FOR MERI BEAUTY CALENDAR
+ * ============================================
+ * 
+ * Meri Beauty is a single-location, single-timezone (Europe/Brussels) business.
+ * All calendar logic must judge "which day" an appointment belongs on using
+ * Brussels wall-clock time, NEVER the viewing device's timezone.
+ * 
+ * Background:
+ * - `appt.date` and `appt.startTime`/`appt.endTime` are stored as UTC ISO strings
+ * - Example: A 09:00 Brussels appointment is stored as "07:00Z" (summer) or "08:00Z" (winter)
+ * - Using plain Date methods like getFullYear/getMonth/getDate() re-interprets the UTC
+ *   instant through the device's local timezone — correct for Brussels devices, but wrong
+ *   (off by a day for appointments near midnight) on devices set to other timezones.
+ * 
+ * Solution:
+ * - Use brusselsDateKey() to compare UTC timestamps in Brussels timezone
+ * - Use localDateKey() for grid cells (pure calendar math with no UTC instant)
+ * - All appointment/event filtering uses brusselsDateKey() for accuracy
+ * - All closure date checking uses brusselsDateKey() for consistency
+ * 
+ * Grid cells (weeks, months, days) are pure calendar arithmetic with no real instant,
+ * so they use localDateKey() which is device-timezone agnostic.
+ */
 
 // Meri Beauty is a single-location, single-timezone (Europe/Brussels)
 // business — "which day" an appointment belongs on must always be judged by
@@ -268,4 +468,97 @@ export function isSameDay(a, b) {
 
 export function isToday(date) {
   return isSameDay(date, new Date());
+}
+
+// ─── Staff / TimeOff helpers ──────────────────────────────────────────────────
+
+/**
+ * Return the working-hours record for a staff member on a given day.
+ *
+ * @param {Array<{ day: string, startTime: string, endTime: string, isClosed: boolean }>} workingHours
+ * @param {Date} date
+ * @returns {{ startTime: string, endTime: string } | null}  null when staff is closed
+ */
+export function getStaffWorkingHoursForDay(workingHours, date) {
+  const dayName = JS_TO_WEEKDAY[date.getDay()];
+  const wh = (workingHours || []).find((w) => w.day === dayName);
+  if (!wh || wh.isClosed) return null;
+  return { startTime: wh.startTime, endTime: wh.endTime };
+}
+
+/**
+ * Return time-offs that overlap a given calendar day.
+ *
+ * @param {Array<{ id: string, startDate: string, endDate: string, isFullDay: boolean, reason: string | null }>} timeOffs
+ * @param {Date} targetDate
+ * @returns {Array<object>}
+ */
+export function timeOffsForDay(timeOffs, targetDate) {
+  if (!timeOffs || timeOffs.length === 0) return [];
+  const targetKey = localDateKey(targetDate);
+  return timeOffs.filter((to) => {
+    const startKey = brusselsDateKey(new Date(to.startDate));
+    const endKey = brusselsDateKey(new Date(to.endDate));
+    return targetKey >= startKey && targetKey <= endKey;
+  });
+}
+
+/**
+ * Compute the availability status text for a staff member on a specific day.
+ *
+ * @param {object}  staffMember  – { workingHours[], timeOffs[] }
+ * @param {Date}    date
+ * @returns {{ label: string, kind: "open" | "closed" | "unavailable" }}
+ */
+export function getStaffAvailabilityStatus(staffMember, date) {
+  const wh = getStaffWorkingHoursForDay(staffMember.workingHours || [], date);
+  if (!wh) {
+    return { label: "Fermé", kind: "closed" };
+  }
+
+  const dayTimeOffs = timeOffsForDay(staffMember.timeOffs || [], date);
+  const hasFullDayOff = dayTimeOffs.some((to) => to.isFullDay !== false);
+  if (hasFullDayOff) {
+    return { label: "Indisponible", kind: "unavailable" };
+  }
+
+  return { label: "Disponible", kind: "open" };
+}
+
+/**
+ * Build the displayed time range string for a staff member on a day.
+ *
+ * @param {object} staffMember
+ * @param {Date}   date
+ * @returns {string}  e.g. "09:00 – 18:00" or "Fermé"
+ */
+export function staffWorkingHoursLabel(staffMember, date) {
+  const wh = getStaffWorkingHoursForDay(staffMember.workingHours || [], date);
+  if (!wh) return "Fermé";
+  return `${wh.startTime} – ${wh.endTime}`;
+}
+
+/**
+ * Check if a date falls within a salon closure period.
+ * Handles full-day closures (endDate omitted) and partial closures (date range).
+ * Uses Brussels timezone for accurate date comparison.
+ *
+ * @param {Date} date - The date to check
+ * @param {Array<{ startDate: string, endDate?: string }>} closures - Salon closures from getSalon()
+ * @returns {boolean} - True if the date is a closure day
+ */
+export function isClosureDay(date, closures = []) {
+  if (!closures || closures.length === 0) return false;
+  
+  const dateKey = localDateKey(date);
+  
+  return closures.some((closure) => {
+    // Parse closure dates in Brussels timezone to match appointment comparison logic
+    const startKey = brusselsDateKey(new Date(closure.startDate));
+    const endKey = closure.endDate
+      ? brusselsDateKey(new Date(closure.endDate))
+      : startKey; // Full-day closure if endDate is missing
+    
+    return dateKey >= startKey && dateKey <= endKey;
+  });
 }

@@ -373,9 +373,15 @@ export function StaffServiceCreateForm({ open, onClose, onCreated }) {
                   value={form.description}
                   onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
                   disabled={!isReadyForDetails}
+                  maxLength={500}
                   className="w-full rounded-lg border border-gray-200 pl-8 pr-3 py-2 text-sm text-gray-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 min-h-[90px] resize-none disabled:opacity-50"
                   placeholder="Description du service…"
                 />
+                <div className="flex justify-end mt-1">
+                  <span className={`text-xs ${form.description.length > 500 ? 'text-red-600' : 'text-gray-400'}`}>
+                    {form.description.length}/500
+                  </span>
+                </div>
               </div>
               <FieldError message={errors.description} />
             </ModalField>

@@ -22,7 +22,7 @@ const ALL_NAV_DATA = [
         items: [
           {
             title: "Calendrier",
-            url: "/dashboard/calendar",
+            url: "/dashboard/calendrier",
           },
           {
             title: "Tous les rendez-vous",

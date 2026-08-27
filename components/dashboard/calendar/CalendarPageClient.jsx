@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { Plus } from "lucide-react";
 import { CalendarToolbar } from "./CalendarToolbar";
@@ -21,6 +21,8 @@ import {
   formatDayFull,
   getWeekDays,
   getMonthGrid,
+  deriveWeekTimeline,
+  deriveDayTimeline,
 } from "./calendarUtils";
 
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
@@ -64,14 +66,14 @@ function CalendarSkeleton() {
 
 /**
  * Main calendar page client — orchestrates views, navigation, and filters.
+ * Timeline (opening/closing times) is computed dynamically from staff
+ * working hours, not from global salon hours.
  *
  * @param {{
  *   initialAppointments: Array<object>,
  *   initialActivityEvents: Array<object>,
  *   staff: Array<object>,
- *   openingTime: string,
- *   closingTime: string,
- *   workingDays: Array<{ day: string, isOpen: boolean }>,
+ *   closures: Array<{ startDate: string, endDate: string }>,
  *   isAdmin: boolean,
  * }} props
  */
@@ -79,11 +81,8 @@ export function CalendarPageClient({
   initialAppointments,
   initialActivityEvents = [],
   staff,
-  openingTime = "09:00",
-  closingTime = "19:00",
-  workingDays = [],
+  closures = [],
   isAdmin,
-  currentStaffId = null,
 }) {
   // ── Translations ─────────────────────────────────────────────────────────
   const t = useTranslations();
@@ -99,6 +98,28 @@ export function CalendarPageClient({
   const [createOpen, setCreateOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
+  // ── Compute timeline from staff working hours ────────────────────────────
+  // The salon has no global working hours — each staff member has their own.
+  // We derive the visible timeline from the earliest/latest staff hours
+  // for the currently displayed staff and days.
+  const relevantStaff = useMemo(() => {
+    if (selectedStaffId !== null) {
+      return staff.filter((s) => s.id === selectedStaffId);
+    }
+    return staff;
+  }, [staff, selectedStaffId]);
+
+  const timeline = useMemo(() => {
+    if (view === "day") {
+      return deriveDayTimeline(currentDate, relevantStaff, activityEvents);
+    }
+    // week and month use the week's timeline
+    return deriveWeekTimeline(currentDate, relevantStaff, activityEvents);
+  }, [view, currentDate, relevantStaff, activityEvents]);
+
+  const openingTime = timeline.openingTime;
+  const closingTime = timeline.closingTime;
+
   // ── Date range for current view ──────────────────────────────────────────
   function getRange(v, d) {
     if (v === "day") return dayRange(d);
@@ -107,9 +128,6 @@ export function CalendarPageClient({
   }
 
   // ── Fetch appointments + activity events for the current period ─────────
-  // Ateliers/formations (getCalendarEvents) are only fetched for admins —
-  // the action itself returns an empty list for STAFF, since Animator
-  // (workshop/formation trainers) is a separate, unlinked directory.
   const fetchAppointments = useCallback(
     (v, d) => {
       startTransition(async () => {
@@ -139,6 +157,30 @@ export function CalendarPageClient({
     selectedStaffId === null
       ? appointments
       : appointments.filter((a) => a.staffId === selectedStaffId);
+
+  // ── Filtered activity events (formations, ateliers) ─────────────────────
+  const visibleActivityEvents = useMemo(() => {
+    if (selectedStaffId === null) {
+      return activityEvents; // Show all for admin "all staff" view
+    }
+    // For specific staff: only show formations linked to this staff member
+    // via animatorId. Exclude events and ateliers entirely.
+    return activityEvents.filter(
+      (ev) => ev.kind === "formation" && ev.animatorId === selectedStaffId,
+    );
+  }, [activityEvents, selectedStaffId]);
+
+  // ── Filtered time-offs (only when a specific staff is selected) ────────
+  const visibleTimeOffs = useMemo(() => {
+    if (!isAdmin) {
+      // Staff users always see their own time-offs (staff array has only them)
+      const me = staff[0];
+      return me?.timeOffs ?? [];
+    }
+    if (selectedStaffId === null) return []; // Hide time-offs in admin "all staff" view
+    const member = staff.find((s) => s.id === selectedStaffId);
+    return member?.timeOffs ?? [];
+  }, [staff, selectedStaffId, isAdmin]);
 
   // ── Toolbar period label ─────────────────────────────────────────────────
   function getPeriodLabel() {
@@ -185,11 +227,7 @@ export function CalendarPageClient({
 
   function handleAppointmentUpdated() {
     fetchAppointments(view, currentDate);
-    // Keep drawer open to show success feedback
   }
-
-  // ── Responsive: mobile agenda list ───────────────────────────────────────
-  // (Agenda view renders on screens < md)
 
   return (
     <div className="flex flex-col gap-4">
@@ -235,11 +273,13 @@ export function CalendarPageClient({
               <WeekView
                 currentDate={currentDate}
                 appointments={visibleAppointments}
-                activityEvents={activityEvents}
+                activityEvents={visibleActivityEvents}
+                timeOffs={visibleTimeOffs}
+                staff={relevantStaff}
                 showActivityLane={isAdmin}
                 openingTime={openingTime}
                 closingTime={closingTime}
-                workingDays={workingDays}
+                closures={closures}
                 onAppointmentClick={handleAppointmentClick}
                 onDayClick={handleDayClick}
               />
@@ -248,11 +288,13 @@ export function CalendarPageClient({
               <DayView
                 currentDate={currentDate}
                 appointments={visibleAppointments}
-                activityEvents={activityEvents}
+                activityEvents={visibleActivityEvents}
+                timeOffs={visibleTimeOffs}
+                staff={relevantStaff}
                 showActivityLane={isAdmin}
                 openingTime={openingTime}
                 closingTime={closingTime}
-                workingDays={workingDays}
+                closures={closures}
                 onAppointmentClick={handleAppointmentClick}
               />
             )}
@@ -260,6 +302,11 @@ export function CalendarPageClient({
               <MonthView
                 currentDate={currentDate}
                 appointments={visibleAppointments}
+                activityEvents={visibleActivityEvents}
+                timeOffs={visibleTimeOffs}
+                staff={relevantStaff}
+                showActivityLane={isAdmin}
+                closures={closures}
                 onDayClick={handleDayClick}
                 onAppointmentClick={handleAppointmentClick}
               />

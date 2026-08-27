@@ -13,7 +13,7 @@ import { generateSecurePassword } from "@/lib/generate-password";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 
 const BCRYPT_SALT_ROUNDS = 12;
-const VERIFICATION_TOKEN_EXPIRY_MINUTES = 15;
+const VERIFICATION_TOKEN_EXPIRY_MINUTES = 24 * 60; // 24 hours instead of 15 minutes
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
 
 function buildWelcomeEmail({ fullName, email, password, loginUrl }) {

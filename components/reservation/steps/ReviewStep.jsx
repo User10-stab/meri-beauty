@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useState } from "react";
 import { createReservation } from "@/actions/reservation/create-reservation";
 import { computePaymentDecision } from "@/lib/reservation-payment";
+import { formatLocalDateKey } from "@/lib/slot-availability";
 import { toast } from "sonner";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -394,7 +395,7 @@ export default function ReviewStep({ data, nextStep, customerSession }) {
         );
         const result = await createReservation({
           staffServiceId,
-          date:         data.date,
+          date:         formatLocalDateKey(data.date),
           time:         data.time,
           customerInfo,
           paymentMethod: null,
@@ -591,16 +592,17 @@ function buildMultiDraftInputs(data) {
       // Multi-day entries carry their own `date`; same-day entries don't and
       // fall back to the shared top-level `proposal.date`.
       const appt = proposal.appointments.find((a) => a.draftIndex === i);
+      const dateToUse = appt?.date ?? proposal.date;
       return {
         staffServiceId: draft.staffService.id,
-        date:           new Date(appt?.date ?? proposal.date),
+        date:           formatLocalDateKey(dateToUse),
         time:           appt?.time ?? data.time,
       };
     }
     // Multi-day manual selection
     return {
       staffServiceId: draft.staffService.id,
-      date:           data.perDraftDates?.[i] ?? data.date,
+      date:           formatLocalDateKey(data.perDraftDates?.[i] ?? data.date),
       time:           data.perDraftTimes?.[i] ?? data.time,
     };
   });

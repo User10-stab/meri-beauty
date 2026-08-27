@@ -81,6 +81,7 @@ export async function getStaffSettings() {
           id: item.id,
           startDate: item.startDate.toISOString(),
           endDate: item.endDate.toISOString(),
+          isFullDay: item.isFullDay,
           reason: item.reason,
         })),
       },

@@ -1865,9 +1865,10 @@ model TimeOff {
   staffId String
   staff   Staff  @relation(fields: [staffId], references: [id])
 
-  startDate DateTime
-  endDate   DateTime
-  reason    String?
+  startDate  DateTime
+  endDate    DateTime
+  isFullDay  Boolean @default(false)
+  reason     String?
 }
 
 // REVIEW

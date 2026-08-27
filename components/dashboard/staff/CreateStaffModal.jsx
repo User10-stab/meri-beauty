@@ -214,6 +214,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
     handleSubmit,
     control,
     setValue,
+    watch,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(createIndependentStaffSchema),
@@ -412,6 +413,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                   id="bio"
                   rows={3}
                   placeholder="Courte présentation du professionnel..."
+                  maxLength={500}
                   {...register("bio")}
                   className={`w-full resize-none rounded-lg border px-3 py-2.5 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:ring-2 ${
                     errors.bio
@@ -419,6 +421,11 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                       : "border-gray-200 focus:border-indigo-400 focus:ring-indigo-100"
                   }`}
                 />
+                <div className="flex justify-end mt-1">
+                  <span className={`text-xs ${watch("bio")?.length > 500 ? 'text-red-600' : 'text-gray-400'}`}>
+                    {watch("bio")?.length || 0}/500
+                  </span>
+                </div>
                 <FieldError message={errors.bio?.message} />
               </div>
 

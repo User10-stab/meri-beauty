@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, useEffect } from "react";
 import { toast } from "sonner";
-import { Search, Loader2, CalendarX, Star } from "lucide-react";
+import { Search, Loader2, CalendarX } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
@@ -10,7 +10,7 @@ import { acceptAppointment, rejectAppointment, completeAppointment, markAppointm
 
 const STATUS_LABEL = {
   PENDING: "En attente",
-  ACCEPTED: "Accepté — choix client",
+  ACCEPTED: "Accepté",
   CONFIRMED: "Confirmé",
   COMPLETED: "Terminé",
   CANCELLED: "Annulé",
@@ -28,24 +28,30 @@ const STATUS_STYLE = {
   NO_SHOW: "bg-red-50 text-red-600 border-red-200",
 };
 
+const PAYMENT_STATUS_LABEL = {
+  PENDING: "Paiement en attente",
+  PAID: "Payé",
+  PARTIALLY_PAID: "Acompte payé",
+  REFUNDED: "Remboursé",
+  PARTIALLY_REFUNDED: "Partiellement remboursé",
+  REFUND_PENDING: "Remboursement en cours",
+  FAILED: "Paiement échoué",
+};
+
+const PAYMENT_STATUS_STYLE = {
+  PENDING: "bg-amber-50 text-amber-700 border-amber-200",
+  PAID: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  PARTIALLY_PAID: "bg-blue-50 text-blue-700 border-blue-200",
+  REFUNDED: "bg-gray-50 text-gray-600 border-gray-200",
+  PARTIALLY_REFUNDED: "bg-gray-50 text-gray-600 border-gray-200",
+  REFUND_PENDING: "bg-amber-50 text-amber-700 border-amber-200",
+  FAILED: "bg-red-50 text-red-600 border-red-200",
+};
+
 function formatDateTime(date, startTime) {
   const d = new Date(date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" });
   const t = new Date(startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" });
   return `${d} · ${t}`;
-}
-
-function RatingStars({ rating }) {
-  return (
-    <div className="flex items-center gap-0.5">
-      {Array.from({ length: 5 }, (_, index) => (
-        <Star
-          key={index}
-          size={14}
-          className={index < rating ? "fill-amber-400 text-amber-400" : "text-gray-300"}
-        />
-      ))}
-    </div>
-  );
 }
 
 export function AppointmentsPageClient({ initialAppointments, staffOptions, showStaffFilter }) {
@@ -63,7 +69,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return appointments.filter((a) => {
+    const result = appointments.filter((a) => {
       if (q) {
         const hay = `${a.customer?.fullName} ${a.customer?.email} ${a.serviceName}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -72,7 +78,18 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
       if (staffFilter && a.staffId !== staffFilter) return false;
       return true;
     });
+    
+    // Sort by createdAt descending (newest first)
+    return result.sort((a, b) => {
+      const dateA = new Date(a.createdAt || 0).getTime();
+      const dateB = new Date(b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
   }, [appointments, search, statusFilter, staffFilter]);
+
+  useEffect(() => {
+    console.log(appointments);
+  }, [appointments]);
 
   function refetch(next) {
     const params = {
@@ -193,7 +210,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
-
+      
         {showStaffFilter && (
           <select
             value={staffFilter}
@@ -227,18 +244,24 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                 <TableHead>Service</TableHead>
                 <TableHead>Experte</TableHead>
                 <TableHead>Date</TableHead>
-                <TableHead>Paiement</TableHead>
+                <TableHead>Montant payé</TableHead>
+                <TableHead>Statut du paiement</TableHead>
                 <TableHead>Statut</TableHead>
-                <TableHead>Avis</TableHead>
-                <TableHead className="pr-6 text-right">Actions</TableHead>
+                <TableHead className="pr-6 text-left">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((a) => (
                 <TableRow key={a.id}>
                   <TableCell className="pl-6">
-                    <div className="font-medium text-gray-800 dark:text-white">{a.customer?.fullName}</div>
-                    <div className="text-xs text-gray-400">{a.customer?.email}</div>
+                    {a.customerName ? (
+                      <>
+                        <div className="font-medium text-gray-800 dark:text-white">{a.customerName}</div>
+                        <div className="text-xs text-gray-400">{a.customerEmail}</div>
+                      </>
+                    ) : (
+                      <div className="text-sm text-gray-400 italic">Client non disponible</div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <span className="text-gray-600 dark:text-dark-6">{a.serviceName}</span>
@@ -250,9 +273,20 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     <span className="text-gray-600 dark:text-dark-6">{formatDateTime(a.date, a.startTime)}</span>
                   </TableCell>
                   <TableCell>
-                    {a.payment ? (
-                      <span className="text-gray-500">
-                        €{a.payment.paidAmount.toFixed(2)} / €{a.payment.totalAmount.toFixed(2)}
+                    {a.paidAmount ? (
+                      <div className="flex flex-col gap-1">
+                        <span className="text-gray-700">
+                          {a.paidAmount.toFixed(2)} €
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {a.paymentStatus ? (
+                      <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${PAYMENT_STATUS_STYLE[a.paymentStatus] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
+                        {PAYMENT_STATUS_LABEL[a.paymentStatus] ?? a.paymentStatus}
                       </span>
                     ) : (
                       <span className="text-gray-300">—</span>
@@ -269,21 +303,9 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                       </div>
                     ) : null}
                   </TableCell>
-                  <TableCell>
-                    {a.review ? (
-                      <div className="space-y-1">
-                        <RatingStars rating={a.review.rating} />
-                        <p className="text-xs text-gray-400">Avis envoyé</p>
-                      </div>
-                    ) : a.status === "COMPLETED" ? (
-                      <span className="text-xs text-gray-400">En attente d'avis</span>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="pr-6 text-right">
+                  <TableCell className="pr-6 text-left">
                     {a.status === "PENDING" ? (
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-start gap-2">
                         <button
                           type="button"
                           onClick={() => handleConfirm(a.id)}
@@ -305,8 +327,8 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         </button>
                       </div>
                     ) : a.status === "ACCEPTED" ? (
-                      <div className="flex items-center justify-end gap-2">
-                        <span className="text-xs text-blue-600">En attente du choix du client</span>
+                      <div className="flex items-center justify-start gap-2">
+                        <span className="text-xs text-blue-600">En attente la confirmation du client</span>
                         <button
                           type="button"
                           onClick={() => {
@@ -320,7 +342,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         </button>
                       </div>
                     ) : a.status === "CONFIRMED" ? (
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-start gap-2">
                         <button
                           type="button"
                           onClick={() => {

@@ -236,10 +236,10 @@ function ExpertCard({ stylist, delay, t }) {
             {stylist.experience} {t("expertsYears")}
           </p>
         </div>
-        <button className="group/btn mt-1 inline-flex w-full items-center justify-center gap-2 rounded-full border border-gold/30 py-2.5 text-[12px] font-semibold text-gold transition-all duration-200 hover:bg-gold hover:text-white hover:shadow-md hover:shadow-gold/20">
+        {/* <button className="group/btn mt-1 inline-flex w-full items-center justify-center gap-2 rounded-full border border-gold/30 py-2.5 text-[12px] font-semibold text-gold transition-all duration-200 hover:bg-gold hover:text-white hover:shadow-md hover:shadow-gold/20">
           {t("expertsProfile")}
           <ArrowIcon className="h-3.5 w-3.5 transition-transform duration-200 group-hover/btn:translate-x-1" />
-        </button>
+        </button> */}
       </div>
     </article>
   );

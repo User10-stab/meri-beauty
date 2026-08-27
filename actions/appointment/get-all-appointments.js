@@ -80,6 +80,10 @@ export async function getAllAppointments() {
             id: true,
             depositAmount: true,
             status: true,
+            paymentType: true,
+            totalAmount: true,
+            paidAmount: true,
+            remainingAmount: true,
           },
         },
       },
@@ -108,8 +112,18 @@ export async function getAllAppointments() {
       cancelledBy: appt.cancelledBy ?? null,
       // Payment
       paymentStatus: appt.payment?.status ?? null,
+      paymentType: appt.payment?.paymentType ?? null,
       depositAmount: appt.payment?.depositAmount
         ? Number(appt.payment.depositAmount)
+        : null,
+      totalAmount: appt.payment?.totalAmount
+        ? Number(appt.payment.totalAmount)
+        : null,
+      paidAmount: appt.payment?.paidAmount
+        ? Number(appt.payment.paidAmount)
+        : null,
+      remainingAmount: appt.payment?.remainingAmount
+        ? Number(appt.payment.remainingAmount)
         : null,
       // Meta
       createdAt: appt.createdAt?.toISOString() ?? null,

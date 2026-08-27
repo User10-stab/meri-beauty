@@ -8,11 +8,11 @@ export const metadata = {
 };
 
 const SERVICES = [
-  "Coiffure",
+  "Dépose de gel",
   "Soins visage",
   "Manucure",
   "Massage bien-être",
-  "Maquillage",
+  "Nail art",
   "Rituels corps",
 ];
 

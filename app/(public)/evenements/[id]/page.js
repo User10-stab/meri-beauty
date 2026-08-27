@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { applyVatRate, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 import { notFound } from "next/navigation";
 import { getPublicActivityById } from "@/actions/workshops/get-public-activities";
+import { ActivityPriceTag, ActivityDepositNote } from "@/components/activities/ActivityPrice";
 import { getAppBaseUrl } from "@/lib/site-url";
 
 const SITE_URL = getAppBaseUrl();
@@ -34,7 +36,7 @@ function buildEventSchema(activity) {
     const seatsLeft = Math.max(cap - taken, 0);
     return {
       "@type": "Offer",
-      price: String(activity.price ?? 0),
+      price: String(applyVatRate(Number(activity.price ?? 0), BELGIUM_VAT_RATE)),
       priceCurrency: "EUR",
       availability: cap > 0 && seatsLeft === 0 ? "https://schema.org/SoldOut" : "https://schema.org/InStock",
       url: `${SITE_URL}/reservation-atelier?activity=${activity.id}&session=${session.id}`,
@@ -142,24 +144,6 @@ export default async function EvenementDetailPage({ params }) {
   }
 
   const depositPct = activity.depositPercentage ?? 50;
-  const depositAmount = (activity.price * depositPct) / 100;
-  const balanceAmount = activity.price - depositAmount;
-
-  const priceFormatted = new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-  }).format(activity.price);
-
-  const depositFormatted = new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-  }).format(depositAmount);
-
-  const balanceFormatted = new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-  }).format(balanceAmount);
-
   const isWorkshop = activity.type === "WORKSHOP";
 
   const eventSchemas = buildEventSchema(activity);
@@ -317,16 +301,7 @@ export default async function EvenementDetailPage({ params }) {
                           </div>
 
                           <div className="flex flex-col items-end gap-2">
-                            {depositPct > 0 && activity.price > 0 && (
-                              <p className="text-right text-xs leading-snug text-ink/50">
-                                Vous ne réglez aujourd&apos;hui que{" "}
-                                <strong className="text-gold">{depositFormatted}</strong>.
-                                <br />
-                                Le solde de{" "}
-                                <strong className="text-ink/70">{balanceFormatted}</strong>{" "}
-                                sera à payer sur place.
-                              </p>
-                            )}
+                            <ActivityDepositNote netPrice={activity.price} depositPct={depositPct} />
                             {(() => {
                               const taken = session.reservations?.reduce((sum, r) => sum + r.seatsCount, 0) ?? 0;
                               const cap = session.capacity ?? activity.capacity;
@@ -383,7 +358,7 @@ export default async function EvenementDetailPage({ params }) {
                   <li className="flex items-start gap-3">
                     <EuroIcon className="mt-0.5" />
                     <div>
-                      <p className="text-sm font-semibold text-ink">{priceFormatted}</p>
+                      <ActivityPriceTag netPrice={activity.price} className="text-sm font-semibold text-ink" />
                       <p className="text-xs text-ink/45">
                         Tarif {depositPct > 0 && `(dont ${depositPct}% d'acompte à la réservation)`}
                       </p>

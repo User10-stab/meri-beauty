@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPublicAnimatorById } from "@/actions/workshops/get-public-animators";
+import { ActivityPriceTag } from "@/components/activities/ActivityPrice";
 
 export async function generateMetadata({ params }) {
   const { id } = await params;
@@ -193,10 +194,8 @@ export default async function AnimatorDetailPage({ params }) {
                               {formatDate(session.startDate)}
                             </span>
                           )}
-                          {activity.price > 0 && (
-                            <span className="font-semibold text-gold">
-                              {new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(activity.price)}
-                            </span>
+                          {Number(activity.price) > 0 && (
+                            <ActivityPriceTag netPrice={activity.price} className="font-semibold text-gold" />
                           )}
                         </div>
                       </div>

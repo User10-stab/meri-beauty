@@ -1,113 +1,95 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateVatTotals,
-  EU_STANDARD_VAT_RATES,
-  repriceBelgianGross,
+  hasReusableVatValidation,
+  applyVatRate,
+  resolveForeignEuVatPolicy,
   resolveGoodsVatPolicy,
+  resolveServiceVatPolicy,
   VAT_LEGAL_NOTES,
 } from "@/lib/tax-policy";
 
-const now = new Date("2026-08-11T12:00:00.000Z");
+const now = new Date("2026-08-24T12:00:00.000Z");
 const frenchCompany = {
   isCompany: true,
   vatNumber: "FR40303265045",
-  vatValidatedAt: new Date("2026-08-01T12:00:00.000Z"),
+  vatValidatedAt: new Date("2026-08-20T12:00:00.000Z"),
 };
 
-describe("physical goods VAT policy", () => {
-  it("uses the corrected country dataset as the source of EU standard rates", () => {
-    expect(EU_STANDARD_VAT_RATES.EE).toBe(24);
-    expect(EU_STANDARD_VAT_RATES.RO).toBe(21);
-    expect(EU_STANDARD_VAT_RATES.FR).toBe(20);
+describe("customer VAT policy", () => {
+  it("reuses a VIES proof for the same VAT number for 90 days", () => {
+    expect(hasReusableVatValidation(frenchCompany, "FR 40 303 265 045", now)).toBe(true);
+    expect(hasReusableVatValidation(frenchCompany, "DE136695976", now)).toBe(false);
+    expect(hasReusableVatValidation(
+      { ...frenchCompany, vatValidatedAt: new Date("2026-05-25T11:59:59.000Z") },
+      frenchCompany.vatNumber,
+      now
+    )).toBe(false);
   });
 
-  it("always taxes POS and pickup transactions in Belgium", () => {
-    const policy = resolveGoodsVatPolicy({
-      fulfilmentMode: "PICKUP_ON_SITE",
-      destinationCountry: "FR",
-      customer: frenchCompany,
-      ossEnabled: true,
-      now,
-    });
-    expect(policy).toMatchObject({ taxCountryCode: "BE", vatTreatment: "DOMESTIC", vatRate: 21 });
-    expect(policy.taxNote).toBeNull();
-  });
+  it("applies 0% to a recently VIES-validated company from another EU country", () => {
+    const policy = resolveForeignEuVatPolicy({ customer: frenchCompany, now });
 
-  it("keeps Belgian VAT for EU B2C sales while OSS is disabled", () => {
-    const policy = resolveGoodsVatPolicy({
-      fulfilmentMode: "SHIPPING_PREPAID",
-      destinationCountry: "FR",
-      customer: { isCompany: false },
-      ossEnabled: false,
-      now,
-    });
-    expect(policy).toMatchObject({ taxCountryCode: "BE", vatTreatment: "DOMESTIC", vatRate: 21 });
-  });
-
-  it("uses destination VAT for EU B2C sales when OSS is enabled", () => {
-    const policy = resolveGoodsVatPolicy({
-      fulfilmentMode: "SHIPPING_PREPAID",
-      destinationCountry: "FR",
-      customer: { isCompany: false },
-      ossEnabled: true,
-      now,
-    });
-    expect(policy).toMatchObject({ taxCountryCode: "FR", vatTreatment: "EU_DISTANCE_SALE", vatRate: 20 });
-    expect(repriceBelgianGross(121, policy.vatRate)).toBe(120);
-  });
-
-  it("applies 0% only to a recently VIES-validated EU company in the delivery country", () => {
-    const policy = resolveGoodsVatPolicy({
-      fulfilmentMode: "SHIPPING_PREPAID",
-      destinationCountry: "FR",
-      customer: frenchCompany,
-      ossEnabled: false,
-      now,
-    });
     expect(policy).toMatchObject({
       taxCountryCode: "FR",
       vatTreatment: "EU_REVERSE_CHARGE",
       vatRate: 0,
       customerVatNumber: frenchCompany.vatNumber,
     });
-    expect(policy.taxNote).toBe(VAT_LEGAL_NOTES.INTRA_COMMUNITY_GOODS);
-    expect(repriceBelgianGross(121, policy.vatRate)).toBe(100);
+    expect(policy.taxNote).toBe(VAT_LEGAL_NOTES.FOREIGN_EU_B2B_ZERO);
+    expect(policy.taxNote).not.toMatch(/test|non fiscal/i);
   });
 
-  it("keeps the legally distinct B2B service reverse-charge wording available to invoice callers", () => {
-    expect(VAT_LEGAL_NOTES.CROSS_BORDER_B2B_SERVICES).toBe(
-      "Autoliquidation — article 21, § 2 du Code TVA belge et article 196 de la directive 2006/112/CE."
-    );
-  });
-
-  it("does not grant 0% when VIES confirmation is stale", () => {
-    const policy = resolveGoodsVatPolicy({
-      fulfilmentMode: "SHIPPING_PREPAID",
-      destinationCountry: "FR",
-      customer: { ...frenchCompany, vatValidatedAt: new Date("2025-01-01T00:00:00.000Z") },
-      ossEnabled: false,
+  it("uses the same 0% rule for products, pickup, appointments, formations and workshops", () => {
+    expect(resolveGoodsVatPolicy({
+      fulfilmentMode: "PICKUP_ON_SITE",
+      destinationCountry: "BE",
+      customer: frenchCompany,
       now,
-    });
-    expect(policy).toMatchObject({ vatTreatment: "DOMESTIC", vatRate: 21 });
+    }).vatRate).toBe(0);
+    expect(resolveServiceVatPolicy({ customer: frenchCompany, now }).vatRate).toBe(0);
   });
 
-  it("blocks a non-EU zero-rate until export evidence is confirmed", () => {
-    expect(() => resolveGoodsVatPolicy({
+  it("keeps 21% for a VIES-validated Belgian company", () => {
+    const belgianCompany = {
+      isCompany: true,
+      vatNumber: "BE0123456749",
+      vatValidatedAt: new Date("2026-08-20T12:00:00.000Z"),
+    };
+
+    expect(resolveGoodsVatPolicy({ customer: belgianCompany, now })).toMatchObject({
+      taxCountryCode: "BE",
+      vatTreatment: "DOMESTIC",
+      vatRate: 21,
+    });
+    expect(resolveServiceVatPolicy({ customer: belgianCompany, now }).vatRate).toBe(21);
+  });
+
+  it("keeps 21% for customers outside the EU", () => {
+    const swissCustomer = {
+      isCompany: true,
+      vatNumber: "CHE123456789",
+      vatValidatedAt: new Date("2026-08-20T12:00:00.000Z"),
+    };
+
+    expect(resolveGoodsVatPolicy({
       fulfilmentMode: "SHIPPING_PREPAID",
       destinationCountry: "CH",
-      customer: { isCompany: false },
-      exportConfirmed: false,
+      customer: swissCustomer,
       now,
-    })).toThrow("EXPORT_REQUIRES_MANUAL_REVIEW");
+    }).vatRate).toBe(21);
+    expect(resolveServiceVatPolicy({ customer: swissCustomer, now }).vatRate).toBe(21);
+  });
 
-    const policy = resolveGoodsVatPolicy({
-      fulfilmentMode: "SHIPPING_PREPAID",
-      destinationCountry: "CH",
-      customer: { isCompany: false },
-      exportConfirmed: true,
-      now,
-    });
-    expect(policy).toMatchObject({ taxCountryCode: "CH", vatTreatment: "EXPORT", vatRate: 0 });
+  it.each([
+    ["missing VIES proof", { ...frenchCompany, vatValidatedAt: null }],
+    ["stale VIES proof", { ...frenchCompany, vatValidatedAt: new Date("2025-01-01T00:00:00.000Z") }],
+    ["invalid VAT format", { ...frenchCompany, vatNumber: "FRINVALID" }],
+    ["non-company account", { ...frenchCompany, isCompany: false }],
+    ["no VAT number", { isCompany: true, vatNumber: null, vatValidatedAt: null }],
+  ])("keeps 21% with %s", (_label, customer) => {
+    expect(resolveGoodsVatPolicy({ customer, now }).vatRate).toBe(21);
+    expect(resolveServiceVatPolicy({ customer, now }).vatRate).toBe(21);
   });
 });
 
@@ -116,7 +98,13 @@ describe("VAT amount snapshots", () => {
     expect(calculateVatTotals(121, 21)).toEqual({ totalInclVat: 121, totalExclVat: 100, vatAmount: 21 });
   });
 
-  it("keeps a reverse-charge total fully exclusive of VAT", () => {
+  it("applies the rate to a net catalogue price", () => {
+    // Catalogue prices are stored net, so 0% charges the net price as-is and
+    // 21% adds the tax. This used to divide by 1.21 first, back when the
+    // catalogue stored VAT-inclusive amounts.
+    expect(applyVatRate(100, 0)).toBe(100);
+    expect(applyVatRate(100, 21)).toBe(121);
+    expect(applyVatRate(21.4463, 21)).toBe(25.95);
     expect(calculateVatTotals(100, 0)).toEqual({ totalInclVat: 100, totalExclVat: 100, vatAmount: 0 });
   });
 });

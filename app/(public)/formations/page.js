@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getPublicFormations } from "@/actions/formations/get-public-formations";
 import { AnimatedCard } from "@/components/website/AnimatedCard";
+import { ActivityPriceTag } from "@/components/activities/ActivityPrice";
 import { getLocale, getTranslations } from "next-intl/server";
 
 export const metadata = {
@@ -59,9 +60,7 @@ function FormationCard({ formation, t, locale }) {
   const takenSeats = session?.reservations?.reduce((sum, res) => sum + res.seatsCount, 0) ?? 0;
   const capacity = session?.capacity ?? formation.capacity;
   const available = Math.max(0, capacity - takenSeats);
-  const priceFormatted = formation.price > 0
-    ? new Intl.NumberFormat(locale, { style: "currency", currency: "EUR" }).format(formation.price)
-    : null;
+  const hasPrice = Number(formation.price) > 0;
 
   return (
     <Link
@@ -90,12 +89,16 @@ function FormationCard({ formation, t, locale }) {
           {isPrivate ? t("privateType") : t("groupType")}
         </span>
 
-        {priceFormatted && (
+        {hasPrice && (
           <div className="absolute bottom-3 left-3 rounded-lg bg-white/95 px-3 py-1.5 shadow-md backdrop-blur-sm">
             <span className="block text-[9px] font-semibold uppercase leading-none tracking-wide text-ink/45">
               {t("from")}
             </span>
-            <span className="block text-base font-bold leading-tight text-gold">{priceFormatted}</span>
+            <ActivityPriceTag
+              netPrice={formation.price}
+              locale={locale}
+              className="block text-base font-bold leading-tight text-gold"
+            />
           </div>
         )}
 

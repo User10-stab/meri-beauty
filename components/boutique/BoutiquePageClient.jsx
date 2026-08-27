@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { getStorefrontProducts } from "@/actions/boutique/storefront";
 import { ProductCard } from "@/components/boutique/ProductCard";
@@ -13,12 +13,12 @@ const SORT_OPTIONS = [
   { value: "name", labelKey: "sortName" },
 ];
 
-export function BoutiquePageClient({ initialProducts, categories, brands }) {
+export function BoutiquePageClient({ initialProducts, categories }) {
   const t = useTranslations("boutique");
   const [products, setProducts] = useState(initialProducts);
   const [search, setSearch] = useState("");
   const [categorySlug, setCategorySlug] = useState(null);
-  const [brandId, setBrandId] = useState(null);
+  const [subcategorySlug, setSubcategorySlug] = useState(null);
   const [sort, setSort] = useState("newest");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -28,24 +28,11 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
     [categories, categorySlug]
   );
 
-  // Categories are brand-scoped — the same name (e.g. "Non classé", "Accessoires")
-  // legitimately recurs under several brands, so group by brand here instead of
-  // showing one flat list where duplicate names can't be told apart.
-  const categoriesByBrand = useMemo(() => {
-    const groups = new Map();
-    for (const cat of categories) {
-      const key = cat.brand?.id ?? "unknown";
-      if (!groups.has(key)) groups.set(key, { brand: cat.brand, categories: [] });
-      groups.get(key).categories.push(cat);
-    }
-    return [...groups.values()];
-  }, [categories]);
-
   function refetch(next) {
     const params = {
       search: next.search ?? search,
       categorySlug: next.categorySlug !== undefined ? next.categorySlug : categorySlug,
-      brandId: next.brandId !== undefined ? next.brandId : brandId,
+      subcategorySlug: next.subcategorySlug !== undefined ? next.subcategorySlug : subcategorySlug,
       sort: next.sort ?? sort,
     };
     startTransition(async () => {
@@ -62,13 +49,15 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
   function selectCategory(slug) {
     const next = slug === categorySlug ? null : slug;
     setCategorySlug(next);
-    refetch({ categorySlug: next });
+    setSubcategorySlug(null);
+    refetch({ categorySlug: next, subcategorySlug: null });
   }
 
-  function selectBrand(id) {
-    const next = id === brandId ? null : id;
-    setBrandId(next);
-    refetch({ brandId: next });
+  function selectSubcategory(catSlug, subSlug) {
+    const next = subSlug === subcategorySlug ? null : subSlug;
+    setCategorySlug(catSlug);
+    setSubcategorySlug(next);
+    refetch({ categorySlug: catSlug, subcategorySlug: next });
   }
 
   function changeSort(value) {
@@ -79,7 +68,7 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
   function clearFilters() {
     setSearch("");
     setCategorySlug(null);
-    setBrandId(null);
+    setSubcategorySlug(null);
     setSort("newest");
     startTransition(async () => {
       const result = await getStorefrontProducts({});
@@ -87,7 +76,61 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
     });
   }
 
-  const hasActiveFilters = Boolean(search || categorySlug || brandId);
+  const hasActiveFilters = Boolean(search || categorySlug || subcategorySlug);
+
+  const filtersPanel = (
+    <div className="space-y-8">
+      {hasActiveFilters && (
+        <button
+          type="button"
+          onClick={clearFilters}
+          className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-[#C8A46A] hover:text-[#B8945A]"
+        >
+          <X size={13} />
+          {t("resetFilters")}
+        </button>
+      )}
+
+      <div>
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
+          {t("categories")}
+        </h3>
+        <ul className="space-y-1.5">
+          {categories.map((cat) => (
+            <li key={cat.id}>
+              <button
+                type="button"
+                onClick={() => selectCategory(cat.slug)}
+                className={`text-left text-sm transition-colors ${
+                  categorySlug === cat.slug ? "font-semibold text-[#C8A46A]" : "text-gray-600 hover:text-[#2F3A2E]"
+                }`}
+              >
+                {cat.name}
+              </button>
+              {activeCategory?.id === cat.id && cat.subcategories.length > 0 && (
+                <ul className="ml-3 mt-1.5 space-y-1 border-l border-neutral-200 pl-3">
+                  {cat.subcategories.map((sub) => (
+                    <li key={sub.id}>
+                      <button
+                        type="button"
+                        onClick={() => selectSubcategory(cat.slug, sub.slug)}
+                        className={`text-left text-sm transition-colors ${
+                          subcategorySlug === sub.slug ? "font-semibold text-[#C8A46A]" : "text-gray-500 hover:text-[#2F3A2E]"
+                        }`}
+                      >
+                        {sub.name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+          {categories.length === 0 && <li className="text-sm text-gray-400">{t("emptyCategories")}</li>}
+        </ul>
+      </div>
+    </div>
+  );
 
   return (
     <div className="w-full bg-white">
@@ -120,11 +163,12 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setFiltersOpen((v) => !v)}
+              onClick={() => setFiltersOpen(true)}
               className="flex items-center gap-2 border border-neutral-200 px-4 py-2.5 text-sm font-medium text-[#2F3A2E] lg:hidden"
             >
               <SlidersHorizontal size={15} />
               {t("filters")}
+              {hasActiveFilters && <span className="h-1.5 w-1.5 rounded-full bg-[#C8A46A]" />}
             </button>
             <select
               value={sort}
@@ -141,79 +185,38 @@ export function BoutiquePageClient({ initialProducts, categories, brands }) {
         </div>
 
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-[240px_1fr]">
-          {/* Filters sidebar */}
-          <aside className={`${filtersOpen ? "block" : "hidden"} lg:block`}>
-            <div className="space-y-8 lg:sticky lg:top-24">
-              {hasActiveFilters && (
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                  className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-[#C8A46A] hover:text-[#B8945A]"
-                >
-                  <X size={13} />
-                  {t("resetFilters")}
-                </button>
-              )}
+          {/* Filters sidebar — desktop */}
+          <aside className="hidden lg:block">
+            <div className="lg:sticky lg:top-24">{filtersPanel}</div>
+          </aside>
 
-              <div>
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
-                  {t("categories")}
-                </h3>
-                <ul className="space-y-4">
-                  {categoriesByBrand.map((group) => (
-                    <li key={group.brand?.id ?? "unknown"}>
-                      <p className="mb-1.5 text-xs font-semibold text-[#2F3A2E]">{group.brand?.name ?? t("otherCategory")}</p>
-                      <ul className="space-y-1.5 border-l border-neutral-200 pl-3">
-                        {group.categories.map((cat) => (
-                          <li key={cat.id}>
-                            <button
-                              type="button"
-                              onClick={() => selectCategory(cat.slug)}
-                              className={`text-left text-sm transition-colors ${
-                                categorySlug === cat.slug ? "font-semibold text-[#C8A46A]" : "text-gray-600 hover:text-[#2F3A2E]"
-                              }`}
-                            >
-                              {cat.name}
-                            </button>
-                            {activeCategory?.id === cat.id && cat.subcategories.length > 0 && (
-                              <ul className="ml-3 mt-1.5 space-y-1 border-l border-neutral-200 pl-3">
-                                {cat.subcategories.map((sub) => (
-                                  <li key={sub.id} className="text-sm text-gray-500">
-                                    {sub.name}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    </li>
-                  ))}
-                  {categories.length === 0 && <li className="text-sm text-gray-400">{t("emptyCategories")}</li>}
-                </ul>
-              </div>
-
-              <div>
-                <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">{t("brands")}</h3>
-                <ul className="space-y-1.5">
-                  {brands.map((brand) => (
-                    <li key={brand.id}>
-                      <button
-                        type="button"
-                        onClick={() => selectBrand(brand.id)}
-                        className={`text-left text-sm transition-colors ${
-                          brandId === brand.id ? "font-semibold text-[#C8A46A]" : "text-gray-600 hover:text-[#2F3A2E]"
-                        }`}
-                      >
-                        {brand.name}
-                      </button>
-                    </li>
-                  ))}
-                  {brands.length === 0 && <li className="text-sm text-gray-400">{t("emptyBrands")}</li>}
-                </ul>
+          {/* Filters drawer — mobile/tablet */}
+          {filtersOpen && (
+            <div className="fixed inset-0 z-50 lg:hidden">
+              <button
+                type="button"
+                aria-label={t("resetFilters")}
+                onClick={() => setFiltersOpen(false)}
+                className="absolute inset-0 bg-black/40"
+              />
+              <div className="absolute inset-y-0 left-0 flex w-[85%] max-w-sm flex-col bg-white shadow-xl">
+                <div className="flex items-center justify-between border-b border-neutral-200 px-5 py-4">
+                  <span className="text-sm font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
+                    {t("filters")}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setFiltersOpen(false)}
+                    className="text-gray-400 hover:text-[#2F3A2E]"
+                    aria-label="Close"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-5 py-6">{filtersPanel}</div>
               </div>
             </div>
-          </aside>
+          )}
 
           {/* Product grid */}
           <div className={isPending ? "opacity-50 transition-opacity" : "transition-opacity"}>

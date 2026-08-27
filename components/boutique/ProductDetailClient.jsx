@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { addToCart } from "@/actions/boutique/cart";
 import { useTranslations } from "next-intl";
+import { ProductPrice } from "@/components/boutique/ProductPrice";
 
 /** Collapsible block for the long-form copy that sits under the buy box.
  *  The description used to render above the add-to-cart button, so a product
@@ -187,16 +188,16 @@ export function ProductDetailClient({ product, initialVariantId }) {
 
           {/* ── Buy box ── */}
           <div>
-            {product.brand && (
-              <p className="text-xs font-medium uppercase tracking-[0.2em] text-gray-400">{product.brand.name}</p>
-            )}
-            <h1 className="font-display mt-2 text-3xl leading-tight text-[#2F3A2E] md:text-4xl">{product.name}</h1>
+            <h1 className="font-display text-3xl leading-tight text-[#2F3A2E] md:text-4xl">{product.name}</h1>
 
-            <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-2xl font-semibold text-[#2F3A2E]">€{(variant?.price ?? 0).toFixed(2)}</span>
-              {variant?.comparePrice != null && (
-                <span className="text-base text-gray-400 line-through">€{variant.comparePrice.toFixed(2)}</span>
-              )}
+            <div className="mt-4">
+              <ProductPrice
+                priceIncl={variant?.price ?? 0}
+                priceExcl={variant?.priceExclVat ?? null}
+                compareIncl={variant?.comparePrice ?? null}
+                compareExcl={variant?.comparePriceExclVat ?? null}
+                size="lg"
+              />
             </div>
 
             {hasMultipleVariants && (
@@ -326,7 +327,7 @@ export function ProductDetailClient({ product, initialVariantId }) {
         <div className="mx-auto flex max-w-[1400px] items-center gap-4">
           <div className="min-w-0">
             <p className="truncate text-xs text-gray-500">{product.name}</p>
-            <p className="text-sm font-semibold text-[#2F3A2E]">€{(variant?.price ?? 0).toFixed(2)}</p>
+            <ProductPrice priceIncl={variant?.price ?? 0} priceExcl={variant?.priceExclVat ?? null} size="compact" />
           </div>
           {addToCartButton}
         </div>

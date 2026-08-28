@@ -68,6 +68,7 @@ export function InvoiceDocument({ invoice, contact = null }) {
             items={[
               { label: "Règlement", value: paymentLine(payment) ?? "Paiement sécurisé — dû à réception de la facture" },
               { label: "Devise", value: "Euro (EUR)" },
+              contact?.rib ? { label: "Compte bancaire (RIB)", value: contact.rib } : null,
               contact?.email ? { label: "Questions sur cette facture", value: contact.email } : null,
               contact?.website ? { label: "Conditions générales", value: `${contact.website}/conditions-generales` } : null,
             ].filter(Boolean)}
@@ -136,6 +137,7 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
               { label: "Document corrigé", value: `Facture n° ${invoice.number} du ${formatDate(invoice.issuedAt)}` },
               { label: "Motif", value: creditNote.reason || "Annulation / retour" },
               { label: "Devise", value: "Euro (EUR)" },
+              contact?.rib ? { label: "Compte bancaire (RIB)", value: contact.rib } : null,
               contact?.email ? { label: "Questions sur ce document", value: contact.email } : null,
             ].filter(Boolean)}
           />

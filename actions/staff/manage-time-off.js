@@ -28,11 +28,16 @@ async function getOwnStaffId() {
  * into a full ISO datetime string.  For full-day absences the time
  * component is irrelevant, so we default to 00:00 for start and
  * 23:59:59 for end.
+ * 
+ * For partial-day absences, the timeStr is used exactly as provided
+ * (appending :00 seconds).
  */
 function buildDateTime(dateStr, timeStr, isEnd = false) {
   if (timeStr) {
+    // Partial-day: use the provided time as-is
     return new Date(`${dateStr}T${timeStr}:00`);
   }
+  // Full-day: default to midnight boundaries
   return isEnd
     ? new Date(`${dateStr}T23:59:59`)
     : new Date(`${dateStr}T00:00:00`);
@@ -80,7 +85,7 @@ export async function createStaffTimeOff(input) {
         staffId: staff.id,
         startDate: buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false),
         endDate: buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true),
-        isFullDay: isFullDay !== false,
+        isFullDay: isFullDay,
         reason: reason || null,
       },
       select: {
@@ -148,7 +153,7 @@ export async function updateStaffTimeOff(id, input) {
       data: {
         startDate: buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false),
         endDate: buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true),
-        isFullDay: isFullDay !== false,
+        isFullDay: isFullDay,
         reason: reason || null,
       },
     });
@@ -166,7 +171,7 @@ export async function updateStaffTimeOff(id, input) {
         id,
         startDate: buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false).toISOString(),
         endDate: buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true).toISOString(),
-        isFullDay: isFullDay !== false,
+        isFullDay: isFullDay,
         reason: reason || null,
       },
     };

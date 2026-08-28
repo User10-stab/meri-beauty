@@ -30,6 +30,8 @@ import {
   AlertTriangle,
   Ban,
   RotateCcw,
+  CreditCard,
+  Key,
 } from "lucide-react";
 import { updateSalon } from "@/actions/salon/update-salon";
 import { updateWorkingDays } from "@/actions/salon/update-working-days";
@@ -180,6 +182,8 @@ function BusinessInfoSection({ salon, onSuccess }) {
       instagram: salon?.instagram ?? "",
       facebook: salon?.facebook ?? "",
       tiktok: salon?.tiktok ?? "",
+      rib: salon?.rib ?? "",
+      billitApiKey: salon?.billitApiKey ?? "",
     },
   });
 
@@ -336,6 +340,44 @@ function BusinessInfoSection({ salon, onSuccess }) {
                 {...register("tiktok")}
               />
               <FieldError message={errors.tiktok?.message} />
+            </div>
+          </div>
+        </div>
+
+        {/* Banking & Billing integrations */}
+        <div className="mt-8 border-t border-stroke pt-6 dark:border-dark-3">
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-dark-5">
+            Intégrations & Paiement
+          </h3>
+          <p className="mb-4 text-xs text-gray-500 dark:text-dark-6">
+            Ces informations sont affichées sur les factures et utilisées pour les intégrations de paiement.
+          </p>
+          <div className="grid grid-cols-1 gap-x-8 gap-y-5 lg:grid-cols-2">
+            <div>
+              <Label icon={CreditCard}>RIB / Compte bancaire</Label>
+              <TextInput
+                id="rib"
+                placeholder="BE60 0000 0000 0000 (BICXXX)"
+                error={errors.rib}
+                {...register("rib")}
+              />
+              <FieldError message={errors.rib?.message} />
+              <p className="mt-1 text-xs text-gray-400 dark:text-dark-5">
+                Affiché sur les factures émises. Laissez vide pour ne pas l&apos;afficher.
+              </p>
+            </div>
+            <div>
+              <Label icon={Key}>Clé API Billit (keybellit)</Label>
+              <TextInput
+                id="billitApiKey"
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                error={errors.billitApiKey}
+                {...register("billitApiKey")}
+              />
+              <FieldError message={errors.billitApiKey?.message} />
+              <p className="mt-1 text-xs text-gray-400 dark:text-dark-5">
+                Remplace la variable d&apos;environnement <code className="rounded bg-gray-100 px-1 dark:bg-dark-3">BILLIT_API_KEY</code> si renseignée.
+              </p>
             </div>
           </div>
         </div>

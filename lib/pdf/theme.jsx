@@ -241,7 +241,7 @@ export function PartyRow({ label, value, strong = false }) {
  * identity that was in force on the issue date. `contact` (phone/email/site)
  * is the one live part: it is presentational, not a legal mention.
  */
-export function SellerBlock({ name, address, vatNumber, registrationNo, contact }) {
+export function SellerBlock({ name, address, vatNumber, registrationNo, rib, contact }) {
   return (
     <View style={styles.partyColumn}>
       <Text style={styles.sectionTitle}>VENDEUR</Text>
@@ -249,6 +249,7 @@ export function SellerBlock({ name, address, vatNumber, registrationNo, contact 
       <PartyRow label="Adresse" value={address} />
       <PartyRow label="TVA" value={vatNumber} />
       <PartyRow label="N° BCE" value={registrationNo} />
+      <PartyRow label="Compte bancaire (RIB)" value={rib} />
       <PartyRow label="Téléphone" value={contact?.phone} />
       <PartyRow label="Email" value={contact?.email} />
       <PartyRow label="Site web" value={contact?.website} />
@@ -290,7 +291,7 @@ export function BuyerBlock({ invoice, title = "ACHETEUR" }) {
  * `??` fallbacks cover invoices issued before those columns existed and
  * still print a coherent document.
  */
-export function LineItemsTable({ lines, vatRate = null, title = "DÉTAIL DES PRESTATIONS" }) {
+export function LineItemsTable({ lines, vatRate = null, title = "DÉTAIL" }) {
   const divisor = vatRate == null ? null : 1 + Number(vatRate) / 100;
   const netOf = (gross) => (divisor ? Number(gross) / divisor : Number(gross));
 
@@ -362,7 +363,7 @@ export function TotalsBlock({ subtotalExclVat, vatRate, vatAmount, totalInclVat,
  * readable on whichever sheet the reader is holding, and multi-page
  * documents need "page x / y" to be provably complete.
  */
-export function LegalFooter({ legalNote, sellerName, sellerAddress, sellerVatNumber, contact, reference }) {
+export function LegalFooter({ legalNote, sellerName, sellerAddress, sellerVatNumber, rib, contact, reference }) {
   const identity = [sellerName, sellerAddress, sellerVatNumber ? `TVA ${sellerVatNumber}` : null]
     .filter(Boolean)
     .join(" — ");
@@ -373,6 +374,7 @@ export function LegalFooter({ legalNote, sellerName, sellerAddress, sellerVatNum
       <View style={styles.footerRule} />
       {legalNote ? <Text style={styles.footerLegal}>{legalNote}</Text> : null}
       <Text style={styles.footerLine}>{identity}</Text>
+      {rib ? <Text style={styles.footerLine}>RIB : {rib}</Text> : null}
       {contactLine ? <Text style={styles.footerLine}>{contactLine}</Text> : null}
       <Text style={styles.footerReference}>{reference}</Text>
     </View>

@@ -49,7 +49,7 @@ describe("invoice and credit-note issuance", () => {
     });
 
     expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(invoice.number).toMatch(/^\d{4}-000007$/);
+    expect(invoice.number).toMatch(/^F-\d{4}-000007$/);
     expect(invoice.subtotalExclVat).toBe(100);
     expect(invoice.vatAmount).toBe(21);
     expect(invoice.totalInclVat).toBe(121);

@@ -52,18 +52,18 @@ export default async function Hero() {
         </div>
 
         {/* Hero content — flex-1 so marquee is pushed to the bottom */}
-        <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col items-start justify-center px-6 py-28 pr-6 md:px-10 lg:px-14 lg:py-36 lg:pr-[380px]">
+        <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col items-start justify-center px-4 py-16 pr-4 sm:px-6 sm:py-20 md:px-10 md:py-28 lg:px-14 lg:py-36 lg:pr-[380px]">
 
           {/* Eyebrow */}
-          <div className="mb-7 inline-flex items-center gap-3">
-            <span className="h-px w-12 bg-gold" />
-            <span className="text-[13px] font-semibold uppercase tracking-[0.22em] text-gold">
+          <div className="mb-5 inline-flex items-center gap-2 sm:mb-7 sm:gap-3">
+            <span className="h-px w-8 sm:w-12 bg-gold" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold sm:text-[13px]">
               Salon de beauté &amp; bien-être
             </span>
           </div>
 
           {/* Headline */}
-          <h1 className="w-full text-[2.55rem] font-bold leading-[1.05] tracking-tight text-white sm:text-[4.2rem] lg:text-[5.5rem]">
+          <h1 className="w-full text-[1.75rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[2.5rem] md:text-[3.5rem] lg:text-[5.5rem]">
             Votre Beauté,{" "}
             <em className="block font-light text-gold/90 not-italic">
               Révélée Avec Justesse.
@@ -71,23 +71,23 @@ export default async function Hero() {
           </h1>
 
           {/* Sub-copy */}
-          <p className="mt-8 max-w-xl text-[17px] leading-relaxed text-white/70 sm:text-[18px] lg:text-[19px]">
+          <p className="mt-5 max-w-xl text-[14px] leading-relaxed text-white/70 sm:mt-6 sm:text-[16px] md:mt-8 md:text-[17px] lg:text-[19px]">
             Chez Meri Beauty, chaque rituel est pensé sur-mesure — des mains
             expertes, des produits nobles et un cadre conçu pour ralentir le temps.
           </p>
 
           {/* CTAs */}
-          <div className="mt-10 flex w-full flex-col items-stretch gap-4 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="mt-6 flex w-full flex-col items-stretch gap-3 sm:mt-8 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-4">
             <a
               href="/reservation"
-              className="group inline-flex items-center justify-center gap-3 rounded-full bg-gold px-6 py-4 text-[15px] font-semibold text-white shadow-lg transition-all duration-300 hover:bg-gold/90 hover:shadow-xl hover:shadow-gold/20 sm:px-9"
+              className="group inline-flex items-center justify-center gap-3 rounded-full bg-gold px-5 py-3 text-[13px] font-semibold text-white shadow-lg transition-all duration-300 hover:bg-gold/90 hover:shadow-xl hover:shadow-gold/20 sm:px-8 sm:py-4 sm:text-[15px] lg:px-9"
             >
               Réserver un rendez-vous
               <ArrowIcon className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
             </a>
             <a
               href="#concept"
-              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/30 px-6 py-4 text-[15px] font-semibold text-white backdrop-blur-sm transition-all duration-300 hover:border-white/60 hover:bg-white/10 sm:px-9"
+              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/30 px-5 py-3 text-[13px] font-semibold text-white backdrop-blur-sm transition-all duration-300 hover:border-white/60 hover:bg-white/10 sm:px-8 sm:py-4 sm:text-[15px] lg:px-9"
             >
               Découvrir le concept
             </a>
@@ -120,7 +120,7 @@ export default async function Hero() {
       ══════════════════════════════════════ */}
      <aside
   aria-label="Opening hours"
-  className="absolute right-6 top-1/2 z-20 hidden w-[330px] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25 sm:right-10 lg:right-14 lg:block xl:right-20"
+  className="absolute right-4 top-1/2 z-20 hidden w-[280px] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25 sm:right-6 sm:w-[300px] md:right-8 md:w-[320px] lg:right-14 lg:block lg:w-[330px] xl:right-20"
   style={{
     transform: "translateY(-50%)",
   }}

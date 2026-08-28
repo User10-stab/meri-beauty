@@ -19,7 +19,7 @@ const sessionSchema = z.object({
 const formationSchema = z.object({
   type: z.enum(["PRIVATE", "PUBLIC"], { error: "Le type de formation est obligatoire." }),
   title: z.string().trim().min(2, "Le titre doit contenir au moins 2 caractères.").max(100, "Le titre ne peut pas dépasser 100 caractères."),
-  description: z.string().trim().max(500, "La description ne peut pas dépasser 500 caractères.").optional().nullable(),
+  description: z.string().trim().optional().nullable(),
   cover: z.string().optional().nullable(),
   price: z.coerce.number({ error: "Le prix est invalide." }).nonnegative("Le prix ne peut pas être négatif."),
   duration: z.coerce.number({ error: "La durée est invalide." }).int().positive("La durée doit être supérieure à 0 minutes."),

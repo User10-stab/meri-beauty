@@ -46,7 +46,7 @@ const KINDS = {
 const submitSchema = z.object({
   kind: z.enum(["WORKSHOP", "FORMATION"]),
   reservationId: z.string().min(1),
-  reason: z.string().trim().min(10, "Expliquez brièvement votre situation.").max(1000),
+  reason: z.string().trim().min(10, "Expliquez brièvement votre situation."),
 });
 
 const reviewSchema = z.object({

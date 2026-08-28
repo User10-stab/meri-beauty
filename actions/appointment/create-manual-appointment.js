@@ -182,7 +182,7 @@ const manualAppointmentSchema = z.object({
   staffServiceId: z.string().min(1, "La prestation est obligatoire."),
   date: z.string().min(1, "La date est obligatoire."),
   time: z.string().min(1, "L'heure est obligatoire."),
-  notes: z.string().trim().max(1000).optional().nullable(),
+  notes: z.string().trim().optional().nullable(),
   customer: z.union([
     z.object({ userId: z.string().min(1) }),
     z.object({

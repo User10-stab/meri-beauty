@@ -12,7 +12,7 @@ export const STAFF_PALETTE = [
   { bg: "#FCE7F3", border: "#F9A8D4", text: "#9D174D", dot: "#DB2777" }, // pink
   { bg: "#FEF3C7", border: "#FDE68A", text: "#92400E", dot: "#D97706" }, // amber
   { bg: "#CFFAFE", border: "#A5F3FC", text: "#164E63", dot: "#0891B2" }, // cyan
-  { bg: "#FEE2E2", border: "#FECACA", text: "#991B1B", dot: "#DC2626" }, // red
+  { bg: "#EDE9FE", border: "#C4B5FD", text: "#5B21B6", dot: "#8B5CF6" }, // violet (was red)
   { bg: "#F3F4F6", border: "#E5E7EB", text: "#374151", dot: "#6B7280" }, // gray
   { bg: "#ECFDF5", border: "#BBF7D0", text: "#14532D", dot: "#16A34A" }, // green
   { bg: "#FDF4FF", border: "#F0ABFC", text: "#701A75", dot: "#A21CAF" }, // fuchsia

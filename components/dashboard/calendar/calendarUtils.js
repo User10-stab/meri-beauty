@@ -302,8 +302,8 @@ export function getTopOffset(startTimeISO, openingTime = "09:00", hourHeight = 6
  * the viewer's device timezone.
  *
  * Height is exact: 1 hour = hourHeight px (e.g. 09:00→12:00 = 3 × hourHeight).
- * No artificial minimum is applied, so the occupied space always represents
- * the real duration. A 0/negative duration falls back to a single hour-height.
+ * If start and end times are the same or duration is invalid, returns a minimum
+ * height of 1 hour to ensure visibility.
  *
  * @param {string} startTimeISO
  * @param {string} endTimeISO
@@ -314,7 +314,10 @@ export function getEventHeight(startTimeISO, endTimeISO, hourHeight = 64) {
   const start = new Date(startTimeISO);
   const end = new Date(endTimeISO);
   const durationMin = (end - start) / 60000;
+  
+  // If duration is 0 or negative (same time or invalid), return minimum height (1 hour)
   if (durationMin <= 0) return hourHeight;
+  
   return (durationMin * hourHeight) / 60;
 }
 

@@ -290,7 +290,7 @@ export function BuyerBlock({ invoice, title = "ACHETEUR" }) {
  * `??` fallbacks cover invoices issued before those columns existed and
  * still print a coherent document.
  */
-export function LineItemsTable({ lines, vatRate = null, title = "DÉTAIL DES PRESTATIONS" }) {
+export function LineItemsTable({ lines, vatRate = null, title = "DÉTAIL" }) {
   const divisor = vatRate == null ? null : 1 + Number(vatRate) / 100;
   const netOf = (gross) => (divisor ? Number(gross) / divisor : Number(gross));
 

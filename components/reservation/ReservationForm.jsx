@@ -259,17 +259,17 @@ export default function ReservationForm({ customerSession = null }) {
   const canProceed = isStepValid(currentStepDef.id, reservationData);
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-7xl px-3 py-8 sm:px-4 sm:py-12 lg:px-8">
       {/* ── Progress Indicator ─────────────────────────────────── */}
-      <div className="mb-12 overflow-x-auto pb-3">
-        <div className="flex w-max min-w-full items-start justify-between gap-3">
+      <div className="mb-8 sm:mb-12 overflow-x-auto pb-2 sm:pb-3 -mx-3 sm:mx-0 px-3 sm:px-0">
+        <div className="flex w-max min-w-full items-start justify-between gap-1.5 sm:gap-2 md:gap-3">
           {STEPS.map((step, index) => (
-            <div key={step.id} className="flex min-w-16 flex-1 items-start">
-              <div className="flex min-w-12 flex-col items-center">
+            <div key={step.id} className="flex min-w-12 sm:min-w-16 flex-1 items-start">
+              <div className="flex min-w-10 sm:min-w-12 flex-col items-center">
                 <button
                   onClick={() => goToStep(index + 1)}
                   disabled={index + 1 >= currentStep}
-                  className={`flex h-10 w-10 items-center justify-center rounded-full border-2 text-sm font-semibold transition-all ${
+                  className={`flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full border-2 text-xs sm:text-sm font-semibold transition-all ${
                     index + 1 < currentStep
                       ? "border-[#C8A46A] bg-[#C8A46A] text-white"
                       : index + 1 === currentStep
@@ -278,13 +278,13 @@ export default function ReservationForm({ customerSession = null }) {
                   } ${index + 1 < currentStep ? "cursor-pointer hover:scale-110" : "cursor-not-allowed"}`}
                 >
                   {index + 1 < currentStep ? (
-                    <Check size={18} />
+                    <Check size={14} className="sm:w-[18px] sm:h-[18px]" />
                   ) : (
-                    <span>{index + 1}</span>
+                    <span className="text-[10px] sm:text-sm">{index + 1}</span>
                   )}
                 </button>
                 <span
-                  className={`mt-2 text-xs font-medium ${
+                  className={`mt-1 sm:mt-2 text-[7px] sm:text-xs font-medium line-clamp-2 text-center w-12 sm:w-auto ${
                     index + 1 <= currentStep ? "text-[#2F3A2E]" : "text-gray-400"
                   }`}
                 >
@@ -293,7 +293,7 @@ export default function ReservationForm({ customerSession = null }) {
               </div>
               {index < STEPS.length - 1 && (
                 <div
-                  className={`mx-1 mt-5 h-0.5 min-w-4 flex-1 transition-all sm:mx-2 ${
+                  className={`mx-0.5 sm:mx-1 md:mx-2 mt-4 sm:mt-5 h-0.5 min-w-2 sm:min-w-4 flex-1 transition-all ${
                     index + 1 < currentStep ? "bg-[#C8A46A]" : "bg-gray-300"
                   }`}
                 />
@@ -312,7 +312,7 @@ export default function ReservationForm({ customerSession = null }) {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
             transition={{ duration: 0.3 }}
-            className="min-h-[500px]"
+            className="min-h-[400px] sm:min-h-[500px]"
           >
             {isDraftStep ? (
               // AppointmentDraftsStep uses custom action props instead of nextStep/prevStep
@@ -339,35 +339,35 @@ export default function ReservationForm({ customerSession = null }) {
       {/* ── Navigation Buttons ─────────────────────────────────── */}
       {/* Hidden on: last step (payment), draft step (has its own buttons) */}
       {!isLastStep && !isDraftStep && !isDateTimeStep && (
-        <div className="mt-8 flex items-center justify-between">
+        <div className="mt-6 sm:mt-8 flex flex-col-reverse sm:flex-row items-center justify-between gap-3 sm:gap-4">
           <button
             onClick={prevStep}
             disabled={currentStep === 1}
-            className={`inline-flex items-center gap-2 rounded-lg px-6 py-3 text-sm font-semibold transition-all ${
+            className={`w-full sm:w-auto inline-flex items-center justify-center sm:justify-start gap-2 rounded-lg px-4 sm:px-6 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold transition-all ${
               currentStep === 1
                 ? "cursor-not-allowed bg-gray-200 text-gray-400"
                 : "bg-gray-100 text-[#2F3A2E] hover:bg-gray-200"
             }`}
           >
-            <ChevronLeft size={18} />
+            <ChevronLeft size={16} className="sm:w-[18px] sm:h-[18px]" />
             {t("reservationForm.buttons.previous")}
           </button>
 
-          <div className="text-sm text-gray-500">
+          <div className="text-xs sm:text-sm text-gray-500 order-3 sm:order-2">
             {t("reservationForm.stepOf", { current: currentStep, total: STEPS.length })}
           </div>
 
           <button
             onClick={nextStep}
             disabled={isLastStep || !canProceed}
-            className={`inline-flex items-center gap-2 rounded-lg px-6 py-3 text-sm font-semibold transition-all ${
+            className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg px-4 sm:px-6 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold transition-all order-2 sm:order-3 ${
               isLastStep || !canProceed
                 ? "cursor-not-allowed bg-gray-200 text-gray-400"
                 : "bg-[#C8A46A] text-white hover:bg-[#B8945A]"
             }`}
           >
             {t("reservationForm.buttons.next")}
-            <ChevronRight size={18} />
+            <ChevronRight size={16} className="sm:w-[18px] sm:h-[18px]" />
           </button>
         </div>
       )}

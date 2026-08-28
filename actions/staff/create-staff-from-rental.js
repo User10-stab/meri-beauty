@@ -7,6 +7,7 @@ import { isAdminRole } from "@/lib/authorization";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { sendEmail } from "@/lib/email";
 import { verifyVatWithVies } from "@/lib/vat-validation";
+import { createAndSendStaffContractInvoice } from "@/lib/staff-invoice";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
 
@@ -255,11 +256,34 @@ export async function createStaffFromRental(input, rentalRequestId) {
         });
       }
 
-      return newStaff;
+      return { staff: newStaff, contract: newContract, userId };
     });
 
     revalidatePath(REVALIDATE_PATH);
     revalidatePath("/dashboard/rental-requests");
+
+    // Invoice for the new contract — outside transaction so email failure does not roll back staff/contract.
+    // Idempotent per contract; errors are logged but do not fail the overall creation.
+    try {
+      const invoiceUser = await prisma.user.findUnique({
+        where: { email },
+        select: { id: true, fullName: true, email: true, vatNumber: true, isCompany: true, addressLine1: true, addressLine2: true, addressCity: true, addressPostalCode: true, addressCountry: true, vatValidatedAt: true },
+      });
+      const contractForInvoice = await prisma.contract.findFirst({
+        where: { staffId: staff.staff.id },
+        orderBy: { createdAt: "desc" },
+      });
+      // Fallback to the created contract if fetch fails
+      const finalContract = contractForInvoice ?? staff.contract;
+      if (finalContract && invoiceUser) {
+        await createAndSendStaffContractInvoice({
+          contract: finalContract,
+          user: { ...invoiceUser, vatNumber: invoiceUser.vatNumber ?? vatNumber },
+        });
+      }
+    } catch (invoiceErr) {
+      console.error("[createStaffFromRental] staff invoice failed (non-blocking):", invoiceErr);
+    }
 
     sendEmail({
       to: email,

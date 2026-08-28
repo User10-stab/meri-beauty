@@ -298,7 +298,6 @@ function ReservationCancellationRequest({ reservation, kind }) {
           <textarea
             value={reason}
             onChange={(event) => setReason(event.target.value)}
-            maxLength={1000}
             rows={3}
             placeholder="Ex. maladie soudaine, avec toute information utile pour l'équipe"
             className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-ink outline-none focus:border-amber-500"

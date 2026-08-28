@@ -1,10 +1,13 @@
 "use client";
 
 import { getStaffColor } from "./staffColors";
+import { Users } from "lucide-react";
 
 /**
  * Horizontal filter chips for filtering the calendar by staff member.
  * Only rendered for Admin / Owner.
+ * Ultra-clean design with improved active states, better visual hierarchy,
+ * and seamless integration with the calendar aesthetic.
  *
  * @param {{
  *   staff: Array<{ id: string, name: string, photo: string | null }>,
@@ -16,16 +19,21 @@ export function StaffFilterChips({ staff, selectedStaffId, onSelect }) {
   if (!staff || staff.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 overflow-x-auto pb-1">
+    <div className="flex flex-wrap items-center gap-2.5 overflow-x-auto pb-1">
       {/* All Staff chip */}
       <button
         onClick={() => onSelect(null)}
-        className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-all ${
+        className={`group flex items-center gap-2 rounded-xl border px-4 py-2 text-[13px] font-semibold transition-all ${
           selectedStaffId === null
-            ? "border-[#2f3a2e] bg-[#2f3a2e] text-white shadow-sm dark:border-white dark:bg-white dark:text-[#2f3a2e]"
-            : "border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            ? "border-[#303c2f]/80 bg-[#303c2f] text-white shadow-[0_2px_8px_rgba(48,60,47,0.25)] dark:border-[#303c2f] dark:shadow-[0_2px_8px_rgba(48,60,47,0.4)]"
+            : "border-gray-200/80 bg-white text-gray-600 shadow-sm hover:border-[#303c2f]/20 hover:bg-[#303c2f]/5 hover:text-[#303c2f] dark:border-gray-700/80 dark:bg-gray-800/60 dark:text-gray-400 dark:hover:border-[#303c2f]/30 dark:hover:bg-[#303c2f]/10 dark:hover:text-white"
         }`}
       >
+        <Users 
+          size={14} 
+          strokeWidth={2.5} 
+          className={`transition-transform ${selectedStaffId === null ? '' : 'group-hover:scale-110'}`}
+        />
         Tous les employés
       </button>
 
@@ -38,10 +46,10 @@ export function StaffFilterChips({ staff, selectedStaffId, onSelect }) {
           <button
             key={member.id}
             onClick={() => onSelect(member.id)}
-            className={`flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-all ${
+            className={`group flex items-center gap-2.5 rounded-xl border px-4 py-2 text-[13px] font-semibold transition-all ${
               isSelected
-                ? "shadow-sm"
-                : "hover:brightness-95"
+                ? "shadow-[0_2px_8px_rgba(0,0,0,0.1)]"
+                : "shadow-sm hover:shadow-md hover:scale-[1.02]"
             }`}
             style={
               isSelected
@@ -52,29 +60,33 @@ export function StaffFilterChips({ staff, selectedStaffId, onSelect }) {
                   }
                 : {
                     backgroundColor: "white",
-                    borderColor: "#E5E7EB",
-                    color: "#4B5563",
+                    borderColor: "#E5E7EB80",
+                    color: "#6B7280",
                   }
             }
           >
-            {/* Colored dot */}
-            <span
-              className="inline-block h-2.5 w-2.5 flex-shrink-0 rounded-full"
-              style={{ backgroundColor: isSelected ? color.dot : color.dot }}
-              aria-hidden="true"
-            />
-
             {/* Avatar or initials */}
             {member.photo ? (
               <img
                 src={member.photo}
                 alt={member.name}
-                className="h-5 w-5 rounded-full object-cover"
+                className={`h-5 w-5 rounded-full object-cover ring-2 transition-all ${
+                  isSelected 
+                    ? "ring-white/50" 
+                    : "ring-transparent group-hover:ring-gray-200"
+                }`}
               />
             ) : (
               <span
-                className="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold"
-                style={{ backgroundColor: color.bg, color: color.text }}
+                className={`flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-bold ring-2 transition-all ${
+                  isSelected 
+                    ? "ring-white/50" 
+                    : "ring-transparent group-hover:ring-gray-200"
+                }`}
+                style={{ 
+                  backgroundColor: isSelected ? color.dot : color.bg, 
+                  color: isSelected ? "white" : color.text 
+                }}
               >
                 {member.name
                   .split(" ")
@@ -85,7 +97,17 @@ export function StaffFilterChips({ staff, selectedStaffId, onSelect }) {
               </span>
             )}
 
-            {member.name}
+            {/* Name */}
+            <span className="font-semibold">{member.name}</span>
+
+            {/* Colored indicator dot */}
+            {isSelected && (
+              <span
+                className="ml-0.5 h-2 w-2 flex-shrink-0 rounded-full shadow-sm ring-1 ring-white/30"
+                style={{ backgroundColor: color.dot }}
+                aria-hidden="true"
+              />
+            )}
           </button>
         );
       })}

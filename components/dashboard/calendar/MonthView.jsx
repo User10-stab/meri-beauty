@@ -9,8 +9,7 @@ import {
   isToday,
   isClosureDay,
 } from "./calendarUtils";
-import { getStaffColor } from "./staffColors";
-import { Ban } from "lucide-react";
+import { Lock } from "lucide-react";
 
 const MAX_VISIBLE = 3;
 
@@ -51,13 +50,13 @@ export function MonthView({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-dark">
+    <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.03)] dark:border-gray-700/80 dark:bg-gray-dark">
       {/* ── Day-of-week headers ──────────────────────────────────────────── */}
-      <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50/50 dark:border-gray-700 dark:bg-gray-800/30">
+      <div className="grid grid-cols-7 border-b border-gray-100 dark:border-gray-700/50">
         {[1, 2, 3, 4, 5, 6, 0].map((dayIndex) => (
           <div
             key={dayIndex}
-            className="py-4 text-center text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400"
+            className="py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500"
           >
             {getDayName(dayIndex)}
           </div>
@@ -65,7 +64,7 @@ export function MonthView({
       </div>
 
       {/* ── Calendar grid ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-7 divide-x divide-y divide-gray-200 dark:divide-gray-700/50">
+      <div className="grid grid-cols-7 divide-x divide-y divide-gray-100 dark:divide-gray-700/30">
         {grid.map((day, idx) => {
           const inMonth = day.getMonth() === currentMonth;
           const today = isToday(day);
@@ -85,19 +84,19 @@ export function MonthView({
           return (
             <div
               key={idx}
-              className={`relative min-h-[140px] p-2 transition-colors hover:bg-gray-50/60 dark:hover:bg-gray-700/50 ${
-                inMonth ? "" : "bg-gray-50/40 dark:bg-gray-800/20"
-              } ${today ? "bg-emerald-50/40 dark:bg-emerald-900/10" : ""} ${
-                isClosed ? "bg-gray-100/60 dark:bg-gray-800/40" : ""
+              className={`relative min-h-[120px] p-2 transition-colors hover:bg-gray-50/40 dark:hover:bg-gray-700/30 ${
+                inMonth ? "" : "bg-gray-50/20 dark:bg-gray-800/10"
+              } ${today ? "bg-emerald-50/30 dark:bg-emerald-900/5" : ""} ${
+                isClosed ? "bg-gray-50/40 dark:bg-gray-800/20" : ""
               }`}
             >
               {/* Closed-day indicator overlay */}
               {isClosed && (
                 <div
-                  className="pointer-events-none absolute inset-0 z-0 opacity-15 dark:opacity-10"
+                  className="pointer-events-none absolute inset-0 z-0 opacity-10 dark:opacity-5"
                   style={{
                     backgroundImage:
-                      "repeating-linear-gradient(135deg, #6b7280 0px, #6b7280 2px, transparent 2px, transparent 14px)",
+                      "repeating-linear-gradient(135deg, #6b7280 0px, #6b7280 1px, transparent 1px, transparent 12px)",
                   }}
                 />
               )}
@@ -105,13 +104,13 @@ export function MonthView({
               {/* Day number */}
               <button
                 onClick={() => onDayClick(day)}
-                className="flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold transition-colors relative z-10"
+                className="flex h-6 w-6 items-center justify-center rounded-full text-[13px] font-semibold transition-colors relative z-10"
                 style={
                   today
                     ? { backgroundColor: "#10b981", color: "white" }
                     : inMonth
-                    ? { color: "#1f2937" }
-                    : { color: "#9ca3af" }
+                    ? { color: "#374151" }
+                    : { color: "#D1D5DB" }
                 }
               >
                 {day.getDate()}
@@ -120,7 +119,7 @@ export function MonthView({
               {/* Closed label */}
               {isClosed && (
                 <div className="relative z-10 mt-1 inline-block">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                  <span className="text-[9px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                     Fermé
                   </span>
                 </div>
@@ -136,15 +135,16 @@ export function MonthView({
                       return (
                         <div
                           key={`to-${item.id}`}
-                          className="flex w-full items-center gap-1.5 truncate rounded-lg border-2 border-red-400 bg-red-50 px-2 py-1 text-[11px] font-semibold dark:border-red-600 dark:bg-red-900/30 dark:text-red-200 relative z-10"
+                          className="flex w-full items-center gap-1.5 truncate rounded-md border border-dashed px-2 py-1 text-[10px] font-medium relative z-10"
+                          style={{
+                            backgroundColor: "rgba(238,233,249,0.6)",
+                            borderColor: "#C4B5FD",
+                          }}
                           title={`Indisponible — ${item.staffName}${isFullDay ? " — Journée complète" : ""}${item.reason ? ` — ${item.reason}` : ""}`}
                         >
-                          <Ban size={10} className="shrink-0 text-red-500 dark:text-red-400" />
-                          <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-red-600 dark:text-red-400">
-                            {item.staffName}
-                          </span>
-                          <span className="truncate text-red-500/80 dark:text-red-300/70">
-                            {isFullDay ? "Indisponible" : "Partiel"}{item.reason ? ` — ${item.reason}` : ""}
+                          <Lock size={9} className="shrink-0 text-violet-500 dark:text-violet-400" />
+                          <span className="truncate font-semibold text-violet-700 dark:text-violet-300">
+                            Indisponible{item.reason ? ` — ${item.reason}` : ""}
                           </span>
                         </div>
                       );
@@ -152,7 +152,6 @@ export function MonthView({
 
                     // ── Appointment chip ──────────────────────────────────
                     if (item._type === "appointment") {
-                      const color = getStaffColor(item.staffId);
                       const timeLabel = item.startTime
                         ? new Date(item.startTime).toLocaleTimeString("fr-FR", {
                             hour: "2-digit",
@@ -168,18 +167,13 @@ export function MonthView({
                             e.stopPropagation();
                             onAppointmentClick(item);
                           }}
-                          className="flex w-full items-center gap-1.5 truncate rounded-lg px-2 py-1 text-left text-[11px] font-semibold transition-all hover:shadow-sm border border-2 relative z-10"
-                          style={{
-                            backgroundColor: color.bg,
-                            borderColor: color.border,
-                            color: color.text,
-                          }}
+                          className="flex w-full items-center justify-between gap-1 truncate rounded-md border border-gray-200/60 bg-white px-2 py-1 text-left text-[10px] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all hover:shadow-[0_2px_4px_rgba(0,0,0,0.06)] relative z-10 dark:border-gray-700/60 dark:bg-gray-800"
                           title={`${timeLabel} — ${item.serviceName} — ${item.customerName}`}
                         >
-                          <span className="shrink-0 tabular-nums opacity-80 font-mono text-xs">
-                            {timeLabel}
+                          <span className="truncate font-semibold text-gray-800 dark:text-white">{item.serviceName}</span>
+                          <span className="flex-shrink-0 rounded bg-gray-100 px-1 py-px text-[7px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                            RDV
                           </span>
-                          <span className="truncate">{item.serviceName}</span>
                         </button>
                       );
                     }
@@ -194,29 +188,29 @@ export function MonthView({
                         })
                       : "";
                     const typeLabel = isFormation ? "Formation" : item._type === "atelier" ? "Atelier" : "Événement";
-                    const chipBg = isFormation
-                      ? "bg-blue-50 dark:bg-blue-900/30"
-                      : "bg-amber-50 dark:bg-amber-900/30";
-                    const chipBorder = isFormation
-                      ? "border-blue-400 dark:border-blue-600"
-                      : "border-amber-400 dark:border-amber-600";
-                    const chipText = isFormation
-                      ? "text-blue-800 dark:text-blue-200"
-                      : "text-amber-800 dark:text-amber-200";
 
                     return (
                       <div
                         key={`activity-${item.id}`}
-                        className={`flex w-full items-center gap-1.5 truncate rounded-lg px-2 py-1 text-[11px] font-semibold border-2 relative z-10 ${chipBg} ${chipBorder} ${chipText}`}
+                        className={`flex w-full items-center gap-1.5 truncate rounded-md px-2 py-1 text-[11px] font-medium relative z-10 ${
+                          isFormation
+                            ? "bg-blue-50/80 dark:bg-blue-900/20"
+                            : "bg-amber-50/80 dark:bg-amber-900/20"
+                        }`}
+                        style={{
+                          borderLeft: `2px solid ${isFormation ? "#60A5FA" : "#FBBF24"}`,
+                        }}
                         title={`${typeLabel} — ${item.title} — ${item.subtitle} (${timeLabel})`}
                       >
-                        <span className="shrink-0 text-[9px] font-bold uppercase opacity-70">
+                        <span className={`shrink-0 text-[9px] font-bold uppercase tracking-wide ${
+                          isFormation ? "text-blue-500 dark:text-blue-400" : "text-amber-500 dark:text-amber-400"
+                        }`}>
                           {typeLabel}
                         </span>
-                        <span className="shrink-0 tabular-nums opacity-80 font-mono text-xs">
+                        <span className="shrink-0 tabular-nums text-gray-500 dark:text-gray-400 font-mono text-[10px]">
                           {timeLabel}
                         </span>
-                        <span className="truncate">{item.title}</span>
+                        <span className="truncate text-gray-900 dark:text-white font-semibold">{item.title}</span>
                       </div>
                     );
                   })}
@@ -225,7 +219,7 @@ export function MonthView({
                   {overflow > 0 && (
                     <button
                       onClick={() => onDayClick(day)}
-                      className="w-full rounded-lg px-2 py-1 text-left text-xs font-semibold text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700/60 relative z-10"
+                      className="w-full rounded-md px-2 py-1 text-left text-[11px] font-medium text-gray-500 hover:bg-gray-100/60 dark:text-gray-400 dark:hover:bg-gray-700/40 relative z-10"
                     >
                       +{overflow} de plus
                     </button>
@@ -238,13 +232,15 @@ export function MonthView({
       </div>
 
       {/* ── Legend ────────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-6 border-t border-gray-200 bg-gray-50/30 px-5 py-3 dark:border-gray-700 dark:bg-gray-800/30 text-xs text-gray-600 dark:text-gray-400">
-        <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm" />
+      <div className="flex flex-wrap items-center gap-5 border-t border-gray-100 px-5 py-2.5 dark:border-gray-700/50 text-[11px] text-gray-500 dark:text-gray-400">
+        <div className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-emerald-500" />
           <span className="font-medium">Confirmé</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="h-2.5 w-2.5 rounded border-2 border-red-400 bg-red-50 dark:border-red-600 dark:bg-red-900/30" />
+        <div className="flex items-center gap-1.5">
+          <span className="flex h-3.5 w-3.5 items-center justify-center rounded border border-dashed border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/20">
+            <Lock size={8} className="text-violet-500" />
+          </span>
           <span className="font-medium">Indisponible</span>
         </div>
       </div>

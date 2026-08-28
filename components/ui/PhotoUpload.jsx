@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { X, Loader2, Camera } from "lucide-react";
+import { optimizeImage, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES } from "@/lib/imageOptimization";
 
 /**
  * Reusable photo upload widget (drag-and-drop + click-to-upload).
@@ -27,25 +28,38 @@ export function PhotoUpload({ value, onChange, uploadFolder = "staff", error }) 
   async function handleFile(file) {
     if (!file) return;
 
-    // Client-side type/size guard (mirrors server)
+    // Client-side type guard (mirrors server)
     const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
     if (!ALLOWED.includes(file.type)) {
       toast.error("Format non accepté. Utilisez JPEG, PNG, WebP ou GIF.");
       return;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      toast.error("Le fichier ne doit pas dépasser 20 Mo.");
+    if (file.size > MAX_INPUT_BYTES) {
+      toast.error("Le fichier ne doit pas dépasser 25 Mo.");
       return;
     }
 
-    // Show local preview immediately
-    const objectUrl = URL.createObjectURL(file);
+    // Optimize: resize to 2500 px longest side + WebP ~88 % (skips small/optimized images).
+    let fileToUpload = file;
+    try {
+      fileToUpload = await optimizeImage(file);
+    } catch (err) {
+      toast.error(err?.message ?? "Impossible de traiter l'image. Veuillez réessayer avec une autre image.");
+      return;
+    }
+    if (fileToUpload.size > MAX_OUTPUT_BYTES) {
+      toast.error("L'image reste trop volumineuse après optimisation (>10 Mo). Essayez avec une image plus légère.");
+      return;
+    }
+
+    // Show local preview immediately (use optimized file so preview matches final)
+    const objectUrl = URL.createObjectURL(fileToUpload);
     setPreview(objectUrl);
     setUploading(true);
 
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", fileToUpload);
       fd.append("folder", uploadFolder);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       const data = await res.json();
@@ -83,7 +97,7 @@ export function PhotoUpload({ value, onChange, uploadFolder = "staff", error }) 
   }
 
   return (
-    <div>
+    <div className="flex flex-col items-center">
       <div
         role="button"
         tabIndex={0}
@@ -138,6 +152,9 @@ export function PhotoUpload({ value, onChange, uploadFolder = "staff", error }) 
           aria-hidden="true"
         />
       </div>
+      <p className="mt-1.5 max-w-[112px] text-center text-[11px] leading-tight text-gray-400">
+        Pour une qualité optimale, utilisez une image de moins de 10&nbsp;Mo.
+      </p>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );

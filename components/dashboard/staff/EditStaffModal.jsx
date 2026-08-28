@@ -23,6 +23,7 @@ import { updateIndependentStaffSchema } from "@/lib/validations/independent-staf
 import { LanguageTagInput } from "./LanguageTagInput";
 import { ServiceMultiSelect } from "./ServiceMultiSelect";
 import { StaffPermissionsField } from "./StaffPermissionsField";
+import { optimizeImage, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES } from "@/lib/imageOptimization";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -110,22 +111,24 @@ function PhotoUpload({ value, onChange, error }) {
 
   async function handleFile(file) {
     if (!file) return;
-    if (file){
-          console.log({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-      });
-    }
     const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
     if (!ALLOWED.includes(file.type)) { toast.error("Format non accepté. Utilisez JPEG, PNG, WebP ou GIF."); return; }
-    if (file.size > 20 * 1024 * 1024)  { toast.error("Le fichier ne doit pas dépasser 20 Mo."); return; }
+    if (file.size > MAX_INPUT_BYTES)  { toast.error("Le fichier ne doit pas dépasser 25 Mo."); return; }
 
-    setPreview(URL.createObjectURL(file));
+    let fileToUpload = file;
+    try {
+      fileToUpload = await optimizeImage(file);
+    } catch (err) {
+      toast.error(err?.message ?? "Impossible de traiter l'image. Veuillez réessayer avec une autre image.");
+      return;
+    }
+    if (fileToUpload.size > MAX_OUTPUT_BYTES) { toast.error("L'image reste trop volumineuse après optimisation (>10 Mo). Essayez avec une image plus légère."); return; }
+
+    setPreview(URL.createObjectURL(fileToUpload));
     setUploading(true);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", fileToUpload);
       const res  = await fetch("/api/upload", { method: "POST", body: fd });
       const data = await res.json();
       if (data.success) { onChange(data.url); }
@@ -162,6 +165,9 @@ function PhotoUpload({ value, onChange, error }) {
         )}
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={(e) => handleFile(e.target.files?.[0])} aria-hidden="true" />
       </div>
+      <p className="mt-1.5 max-w-[96px] text-center text-[11px] leading-tight text-gray-400">
+        Pour une qualité optimale, utilisez une image de moins de 10&nbsp;Mo.
+      </p>
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );

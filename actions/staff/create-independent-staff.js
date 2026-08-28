@@ -12,6 +12,7 @@ import { emailVerificationEmail } from "@/lib/email-templates";
 import { generateSecurePassword } from "@/lib/generate-password";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { verifyVatWithVies } from "@/lib/vat-validation";
+import { createAndSendStaffContractInvoice } from "@/lib/staff-invoice";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const VERIFICATION_TOKEN_EXPIRY_MINUTES = 24 * 60; // 24 hours instead of 15 minutes
@@ -148,7 +149,7 @@ export async function createIndependentStaff(input) {
   const hashedPassword = await bcrypt.hash(plainPassword, BCRYPT_SALT_ROUNDS);
 
   try {
-    const staff = await prisma.$transaction(async (tx) => {
+    const { staff, contract: createdContract, user: createdUser } = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
           fullName,
@@ -176,7 +177,7 @@ export async function createIndependentStaff(input) {
         },
       });
 
-      await tx.contract.create({
+      const newContract = await tx.contract.create({
         data: {
           staffId: newStaff.id,
           type: "FIXED_RENT",
@@ -205,7 +206,7 @@ export async function createIndependentStaff(input) {
         });
       }
 
-      return newStaff;
+      return { staff: newStaff, contract: newContract, user };
     });
 
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
@@ -258,6 +259,19 @@ export async function createIndependentStaff(input) {
       text: verificationTemplate.text,
       html: verificationTemplate.html,
     });
+
+    // Generate and send invoice for the staff contract — outside the main
+    // transaction so a failed email does not roll back staff/contract creation.
+    // Idempotent: reuses existing invoice if already present for this contract.
+    // Errors are logged but do not fail the staff creation response.
+    try {
+      await createAndSendStaffContractInvoice({
+        contract: createdContract,
+        user: { ...createdUser, vatNumber },
+      });
+    } catch (invoiceErr) {
+      console.error("[createIndependentStaff] staff invoice failed (non-blocking):", invoiceErr);
+    }
 
     revalidatePath(REVALIDATE_PATH);
 

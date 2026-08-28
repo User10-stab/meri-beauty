@@ -6,6 +6,7 @@ import { X, Loader2, Calendar, Euro, Clock, Users, Globe2, BookOpen, Camera } fr
 import Button from "@/components/ui/Button";
 import { createFormation, updateFormation } from "@/actions/formations/create-formation";
 import { useTranslations } from "next-intl";
+import { optimizeImage, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES } from "@/lib/imageOptimization";
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -41,18 +42,30 @@ function CoverUpload({ value, onChange, error, t }) {
       toast.error(t("errorFormat"));
       return;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      toast.error(t("errorFileSize"));
+    if (file.size > MAX_INPUT_BYTES) {
+      toast.error("Le fichier ne doit pas dépasser 25 Mo.");
       return;
     }
 
-    const objectUrl = URL.createObjectURL(file);
+    let fileToUpload = file;
+    try {
+      fileToUpload = await optimizeImage(file);
+    } catch (err) {
+      toast.error(err?.message ?? "Impossible de traiter l'image. Veuillez réessayer avec une autre image.");
+      return;
+    }
+    if (fileToUpload.size > MAX_OUTPUT_BYTES) {
+      toast.error("L'image reste trop volumineuse après optimisation (>10 Mo). Essayez avec une image plus légère.");
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(fileToUpload);
     setPreview(objectUrl);
     setUploading(true);
 
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", fileToUpload);
       fd.append("folder", "formations");
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       const data = await res.json();
@@ -116,6 +129,7 @@ function CoverUpload({ value, onChange, error, t }) {
           onChange={(e) => handleFile(e.target.files?.[0])}
         />
       </div>
+      <p className="text-xs text-gray-400">Pour une qualité optimale, utilisez une image de moins de 10&nbsp;Mo.</p>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );
@@ -347,7 +361,6 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, staf
             <textarea
               value={form.description}
               onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-              maxLength={500}
               className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100 min-h-[80px] resize-none"
               placeholder={t("descriptionPlaceholder")}
             />

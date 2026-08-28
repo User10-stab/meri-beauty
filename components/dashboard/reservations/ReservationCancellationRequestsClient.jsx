@@ -116,7 +116,6 @@ export function ReservationCancellationRequestsClient({ initialRequests }) {
                   value={notes[request.id] ?? ""}
                   onChange={(event) => setNotes((current) => ({ ...current, [request.id]: event.target.value }))}
                   rows={2}
-                  maxLength={1000}
                   placeholder="Message facultatif pour le client"
                   className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
                 />

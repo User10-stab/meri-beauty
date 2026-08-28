@@ -11,8 +11,11 @@ export const runtime = "nodejs";
 // Disable Next.js body size limit for this route segment
 export const maxDuration = 30;
 
-// Max raw file size: 20 MB (consistent with frontend)
-const MAX_SIZE = 20 * 1024 * 1024;
+// Max final file size after client-side optimization: 10 MB (safety check).
+// The client optimizes up to 25 MB down to ~1-5 MB (2500 px, WebP ~88 %)
+// before uploading; this limit catches anything still oversized or bypassing
+// the client pipeline.
+const MAX_SIZE = 10 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 // The on-disk extension is derived from this map, never from the client's
 // filename/MIME header — both are attacker-controlled and were previously
@@ -62,7 +65,7 @@ export async function POST(request) {
 
     if (file.size > MAX_SIZE) {
       return NextResponse.json(
-        { success: false, message: "Le fichier ne doit pas dépasser 20 Mo." },
+        { success: false, message: "Le fichier ne doit pas dépasser 10 Mo après optimisation. Essayez avec une autre image." },
         { status: 400 }
       );
     }

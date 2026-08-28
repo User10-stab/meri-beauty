@@ -631,6 +631,8 @@ model Salon {
   email     String
   address   String? // freeform, shown on the public site (footer/contact) — not used for invoices
   vatNumber String? // legal TVA/BCE number — printed on every issued invoice
+  rib       String? // bank account number / RIB
+  billitApiKey String? // Billit API Key (keybellit)
 
   // Structured legal identity, required before any invoice can be issued
   // (see lib/invoicing.js#issueInvoice's seller-data gate) — kept separate

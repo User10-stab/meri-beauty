@@ -195,7 +195,7 @@ export default async function AnimatorDetailPage({ params }) {
                             </span>
                           )}
                           {Number(activity.price) > 0 && (
-                            <ActivityPriceTag netPrice={activity.price} className="font-semibold text-gold" />
+                            <ActivityPriceTag priceTtc={activity.price} className="font-semibold text-gold" />
                           )}
                         </div>
                       </div>

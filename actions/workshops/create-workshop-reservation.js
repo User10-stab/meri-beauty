@@ -22,7 +22,7 @@ import {
 } from "@/lib/notifications";
 import {
   hasReusableVatValidation,
-  applyVatRate,
+  repriceTtcCataloguePrice,
   resolveServiceVatPolicy,
 } from "@/lib/tax-policy";
 import {
@@ -418,7 +418,7 @@ export async function createWorkshopReservation(data) {
     const depositPct = Number.isFinite(rawDepositPct) ? Math.min(100, Math.max(0, rawDepositPct)) : 0;
     const vatPolicy = resolveServiceVatPolicy({ customer: user });
     const catalogueUnitPrice = Number(activity.price);
-    const unitPrice = applyVatRate(catalogueUnitPrice, vatPolicy.vatRate);
+    const unitPrice = repriceTtcCataloguePrice(catalogueUnitPrice, vatPolicy.vatRate);
     const totalPrice = unitPrice * seatsCount;
 
     // Re-validated here regardless of the client's live preview — never

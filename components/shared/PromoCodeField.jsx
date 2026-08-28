@@ -77,13 +77,20 @@ export function PromoCodeField({ subtotal, onApplied }) {
             }
           }}
           placeholder={t("placeholder")}
-          className="h-9 flex-1 rounded-lg border border-gray-200 px-3 text-sm uppercase tracking-wide text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
+          // min-w-0 is load-bearing: a flex item defaults to min-width:auto, and
+          // an <input>'s intrinsic width (the default size=20, ~174px) then acts
+          // as a floor it refuses to shrink past. In the narrow booking-recap
+          // sidebar (~229px of content) that pushed the button ~50px outside the
+          // card. size={1} drops the intrinsic floor for browsers that still
+          // measure it; flex-1 supplies the real width.
+          size={1}
+          className="h-9 min-w-0 flex-1 rounded-lg border border-gray-200 px-3 text-sm uppercase tracking-wide text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
         />
         <button
           type="button"
           onClick={handleApply}
           disabled={checking || !input.trim()}
-          className="flex h-9 items-center justify-center rounded-lg border border-gray-200 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-gray-200 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {checking ? <Loader2 size={14} className="animate-spin" /> : t("apply")}
         </button>

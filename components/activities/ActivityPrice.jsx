@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { applyVatRate } from "@/lib/tax-policy";
+import { repriceTtcCataloguePrice } from "@/lib/tax-policy";
 import { getViewerServiceVatPolicy } from "@/actions/vat/viewer-policy";
 
 const DEFAULT_POLICY = { vatRate: 21, isB2B: false, taxNote: null };
@@ -44,14 +44,14 @@ function formatEur(value, locale = "fr-FR") {
 }
 
 /**
- * netPrice is the raw Activity/Formation.price (HT, as stored). Renders the
- * VAT-inclusive price for a consumer, or the net price for a validated
+ * priceTtc is the raw Activity/Formation.price (TTC, as stored). Renders the
+ * stored price for a consumer, or its HT base for a validated
  * foreign-EU B2B viewer — same rule as the boutique's ProductPrice, applied
  * here via resolveServiceVatPolicy instead of resolveGoodsVatPolicy.
  */
-export function ActivityPriceTag({ netPrice, locale = "fr-FR", className = "" }) {
+export function ActivityPriceTag({ priceTtc, locale = "fr-FR", className = "" }) {
   const { vatRate, isB2B } = useViewerServiceVatPolicy();
-  const price = applyVatRate(Number(netPrice), vatRate);
+  const price = repriceTtcCataloguePrice(Number(priceTtc), vatRate);
 
   return (
     <span className={className}>
@@ -66,12 +66,12 @@ export function ActivityPriceTag({ netPrice, locale = "fr-FR", className = "" })
  * Mirrors the `depositPct > 0 && shelfPrice > 0` guard every page already
  * had, just resolved against the viewer's own price instead of a fixed 21%.
  */
-export function ActivityDepositNote({ netPrice, depositPct }) {
+export function ActivityDepositNote({ priceTtc, depositPct }) {
   const { vatRate, isB2B } = useViewerServiceVatPolicy();
 
-  if (!(depositPct > 0) || !(Number(netPrice) > 0)) return null;
+  if (!(depositPct > 0) || !(Number(priceTtc) > 0)) return null;
 
-  const price = applyVatRate(Number(netPrice), vatRate);
+  const price = repriceTtcCataloguePrice(Number(priceTtc), vatRate);
   const depositAmount = (price * depositPct) / 100;
   const balanceAmount = price - depositAmount;
   const suffix = isB2B ? " HT" : "";

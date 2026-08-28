@@ -746,6 +746,7 @@ export async function completeReturnRequest(input) {
             paidAt: new Date(),
             manualReference: originalMethod === "CARD" ? manualRefundReference.trim() : null,
             cashSessionId: openCashSession?.id ?? null,
+            creditNoteId: creditNote.id,
           },
         });
         await tx.payment.update({
@@ -766,6 +767,7 @@ export async function completeReturnRequest(input) {
             refundAttemptedAt: new Date(),
             pendingRefundAmount: totalRefund,
             pendingRefundIdempotencyKey: refundIdempotencyKey,
+            pendingRefundCreditNoteId: creditNote.id,
           },
         });
       }
@@ -836,6 +838,7 @@ export async function completeReturnRequest(input) {
             method: "ONLINE",
             transactionType: "REFUND",
             paidAt: new Date(),
+            creditNoteId: creditNote.id,
           },
         }),
         prisma.payment.update({
@@ -844,6 +847,7 @@ export async function completeReturnRequest(input) {
             status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
             pendingRefundAmount: null,
             pendingRefundIdempotencyKey: null,
+            pendingRefundCreditNoteId: null,
           },
         }),
         prisma.auditLog.create({

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Banknote, Camera, CameraOff, CreditCard, ImageOff, Loader2, Minus, PackageSearch, Plus, ScanLine, Search, SlidersHorizontal, Trash2, UserRound, X } from "lucide-react";
+import { Banknote, Camera, CameraOff, CreditCard, ImageOff, Loader2, Minus, PackageSearch, Plus, ScanLine, Search, ShieldQuestion, SlidersHorizontal, Trash2, UserRound, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import QRCode from "qrcode";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ import {
   searchPointOfSaleCustomers,
   searchPointOfSaleProducts,
 } from "@/actions/boutique/point-of-sale";
+import { verifyVatNumber } from "@/actions/vat/verify-vat";
 
 const emptyAddress = {
   addressLine1: "",
@@ -33,6 +34,8 @@ const emptyCustomer = {
   fullName: "",
   email: "",
   phone: "",
+  vatNumber: "",
+  isCompany: false,
   ...emptyAddress,
 };
 
@@ -49,7 +52,22 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
   // together with CARD_QR (Stripe checkout needs a real customer_email) —
   // enforced again server-side, this is just the matching UI gate.
   const [isWalkIn, setIsWalkIn] = useState(false);
+  // Optional — a client de passage gives no name, so this can never become a
+  // nominative invoice (see the server's own reasoning in point-of-sale.js);
+  // it only decides whether the same ticket PDF handed to the cashier is
+  // also e-mailed.
+  const [walkInEmail, setWalkInEmail] = useState("");
+  // Set once the typed walk-in address turns out to already belong to a
+  // real account — surfaced as a warning instead of silently e-mailing a
+  // ticket to someone who has an actual customer profile to attach it to.
+  const [walkInEmailMatch, setWalkInEmailMatch] = useState(null);
   const [customer, setCustomer] = useState(emptyCustomer);
+  // Only meaningful for a named (non-walk-in) customer without a validated
+  // VAT number: a private buyer gets a simple receipt by default, and this
+  // is the opt-in to get a real numbered invoice instead. A company
+  // customer always gets one — completePointOfSaleSale forces it regardless
+  // of this value, so the checkbox is hidden for them (see below).
+  const [requestInvoice, setRequestInvoice] = useState(false);
   // Whether the *resolved* customer already has a billing address stored.
   // Tracked separately from the form fields on purpose: deriving it from
   // customer.addressLine1 made the address form unmount on the first
@@ -57,6 +75,11 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
   // the server rejected every new-customer sale with POS_ADDRESS_REQUIRED.
   const [addressOnFile, setAddressOnFile] = useState(false);
   const [matches, setMatches] = useState([]);
+  // Live preview only, mirroring the online checkout's own VAT box — the
+  // authoritative VIES check (and the actual save onto the customer) happens
+  // server-side in completePointOfSaleSale regardless of whether this was
+  // clicked. { loading } | { valid, message } | { error, message }
+  const [vatCheck, setVatCheck] = useState(null);
   const [method, setMethod] = useState("CARD_QR");
   const [attemptKey, setAttemptKey] = useState(null);
   const [terminalConfirmOpen, setTerminalConfirmOpen] = useState(false);
@@ -154,6 +177,41 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
     }, 250);
     return () => clearTimeout(timeout);
   }, [customer.email, customer.fullName, customer.id]);
+
+  // A walk-in ticket is anonymous by design — but if the typed address turns
+  // out to already belong to a real account, silently e-mailing it there
+  // would orphan that purchase from the customer's actual profile and order
+  // history. Checked only once the address looks complete (not on every
+  // keystroke), and matched exactly — a search that merely *contains* the
+  // typed string would flag unrelated accounts too (e.g. "ann@x.com" is a
+  // substring of "susann@x.com").
+  useEffect(() => {
+    if (!isWalkIn) {
+      setWalkInEmailMatch(null);
+      return undefined;
+    }
+    const value = walkInEmail.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      setWalkInEmailMatch(null);
+      return undefined;
+    }
+    const timeout = setTimeout(async () => {
+      const result = await searchPointOfSaleCustomers(value);
+      if (!result.success) return;
+      const exact = result.data.find((match) => match.email.toLowerCase() === value.toLowerCase());
+      setWalkInEmailMatch(exact ?? null);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [walkInEmail, isWalkIn]);
+
+  // Switches out of walk-in mode straight onto the matched account, exactly
+  // as if the cashier had searched for and picked them manually.
+  function useMatchedAccountInstead() {
+    if (!walkInEmailMatch) return;
+    toggleWalkIn(false);
+    selectCustomer(walkInEmailMatch);
+    setWalkInEmail("");
+  }
 
   // Shared by the scanner and the name search — both resolve to the same
   // {variantId, availableQuantity, …} shape, so the stock ceiling and the
@@ -302,6 +360,8 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
       fullName: match.fullName,
       email: match.email,
       phone: match.phone ?? "",
+      vatNumber: match.vatNumber ?? "",
+      isCompany: Boolean(match.isCompany),
       addressLine1: match.addressLine1 ?? "",
       addressLine2: match.addressLine2 ?? "",
       addressCity: match.addressCity ?? "",
@@ -309,6 +369,7 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
       addressCountry: match.addressCountry ?? "BE",
     });
     setAddressOnFile(Boolean(match.addressLine1));
+    setVatCheck(null);
     setMatches([]);
   }
 
@@ -317,11 +378,14 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
     // stored address belongs to them, not to whoever is being typed now, so
     // drop it and ask again — otherwise person B gets invoiced at person A's
     // address, and the form never reappears because it still looks filled.
+    // isCompany resets the same way: it describes the matched account, not
+    // whoever is now being typed.
     const wasMatched = Boolean(customer.id);
     if (wasMatched) setAddressOnFile(false);
     setCustomer((current) => ({
       ...current,
       ...(wasMatched ? emptyAddress : null),
+      ...(wasMatched ? { isCompany: false } : null),
       id: null,
       [field]: value,
     }));
@@ -334,12 +398,56 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
     setCustomer((current) => ({ ...current, [field]: value }));
   }
 
+  // A VAT number is the same kind of continuation as an address, not an
+  // identity change: adding one for an existing customer who never had it on
+  // file — or correcting one — shouldn't detach the matched account.
+  function updateCustomerVat(value) {
+    setCustomer((current) => ({ ...current, vatNumber: value }));
+    setVatCheck(null);
+  }
+
+  async function handleVerifyVat() {
+    if (!customer.vatNumber.trim()) {
+      toast.error("Renseignez d'abord un numéro de TVA.");
+      return;
+    }
+    setVatCheck({ loading: true });
+    const result = await verifyVatNumber(customer.vatNumber);
+    if (!result.success) {
+      setVatCheck({ error: true, message: result.message });
+      return;
+    }
+    setVatCheck({
+      valid: result.valid,
+      message: result.valid
+        ? result.name
+          ? `Actif — enregistré au nom de « ${result.name} ».`
+          : "Actif dans le registre VIES."
+        : "Ce numéro n'est pas reconnu par le registre européen VIES.",
+    });
+  }
+
   // A returning customer with an address already on file shouldn't have to
   // re-enter it at every counter sale — only ask when it's genuinely
   // missing (new customer, or an existing one with none saved yet). Mirrors
   // the server's own rule, which also tests the stored record rather than
   // the submitted payload.
   const needsAddress = !addressOnFile;
+
+  // Whether this sale is about to become a company (B2B) sale — either the
+  // matched account already is one, or a VAT number is currently typed and
+  // will be VIES-validated (and thus force isCompany) server-side the
+  // moment the sale is submitted. Mirrors completePointOfSaleSale's own
+  // `customer?.isCompany || requestInvoice` decision closely enough to hide
+  // the optional checkbox exactly when it would be ignored anyway.
+  const willBeB2B = customer.isCompany || Boolean(customer.vatNumber.trim());
+  // A Belgian company must receive its invoice over Peppol, not an
+  // ad-hoc e-mail (2026 mandate) — the till still creates and numbers the
+  // invoice, it just hands the customer a receipt instead and staff send
+  // the real invoice from Opérations afterward. Mirrors
+  // isPeppolMandatoryCustomer in lib/tax-policy.js closely enough for the
+  // till's own copy, without needing a round trip to know it.
+  const willBeBelgianB2B = willBeB2B && customer.vatNumber.trim().toUpperCase().startsWith("BE");
 
   function selectMethod(next) {
     if (next === "CARD_QR" && isWalkIn) return; // blocked while client de passage is active
@@ -369,6 +477,8 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
     startTransition(async () => {
       const result = await completePointOfSaleSale({
         customer: isWalkIn ? null : customer,
+        walkInEmail: isWalkIn ? walkInEmail.trim() : "",
+        requestInvoice: !isWalkIn && requestInvoice,
         items: cart.map((item) =>
           item.type === "SERVICE"
             ? { type: "SERVICE", description: item.productName, unitPrice: item.unitPriceExclVat, quantity: item.quantity }
@@ -405,15 +515,44 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
           const bytes = Uint8Array.from(atob(result.data.ticketPdfBase64), (c) => c.charCodeAt(0));
           const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
           window.open(url, "_blank");
-          toast.success(`Vente n°${result.data.orderNumber} enregistrée. Ticket prêt à imprimer.`);
+          if (result.data.ticketEmailSent === false) {
+            toast.error(`Vente n°${result.data.orderNumber} enregistrée. Ticket prêt à imprimer, mais l'e-mail n'a pas pu être envoyé.`);
+          } else if (result.data.ticketEmailSent === true) {
+            toast.success(`Vente n°${result.data.orderNumber} enregistrée. Ticket prêt à imprimer, et envoyé par e-mail au client.`);
+          } else {
+            toast.success(`Vente n°${result.data.orderNumber} enregistrée. Ticket prêt à imprimer.`);
+          }
         } else {
           toast.error(`Vente n°${result.data.orderNumber} enregistrée, mais le ticket n'a pas pu être généré.`);
         }
         router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
         return;
       }
+      // A named but private (B2C) customer who didn't request an invoice
+      // gets the same compact receipt as a walk-in — printable at the till
+      // and e-mailed, but no invoice number consumed. A Belgian company gets
+      // the same receipt treatment for a different reason: their invoice
+      // was created and numbered, but must go out over Peppol, not e-mail.
+      if (result.data.documentType === "receipt" || result.data.documentType === "invoice_pending_peppol") {
+        if (result.data.ticketPdfBase64) {
+          const bytes = Uint8Array.from(atob(result.data.ticketPdfBase64), (c) => c.charCodeAt(0));
+          const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+          window.open(url, "_blank");
+        }
+        const pendingInvoiceNote =
+          result.data.documentType === "invoice_pending_peppol"
+            ? ` Facture n°${result.data.invoiceNumber} créée — à transmettre via Peppol depuis Opérations.`
+            : "";
+        if (result.data.receiptEmailSent) {
+          toast.success(`Vente n°${result.data.orderNumber} enregistrée. Reçu prêt à imprimer, et envoyé par e-mail au client.${pendingInvoiceNote}`);
+        } else {
+          toast.error(`Vente n°${result.data.orderNumber} enregistrée. Reçu prêt à imprimer, mais l'e-mail n'a pas pu être envoyé.${pendingInvoiceNote}`);
+        }
+        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+        return;
+      }
       if (result.data.receiptEmailSent) {
-        toast.success(`Vente n°${result.data.orderNumber} enregistrée. Le reçu a été envoyé par e-mail.`);
+        toast.success(`Vente n°${result.data.orderNumber} enregistrée. La facture a été envoyée par e-mail.`);
       } else {
         toast.error(`Vente n°${result.data.orderNumber} enregistrée, mais l'e-mail n'a pas pu être envoyé. Vérifiez la configuration e-mail.`);
       }
@@ -665,13 +804,43 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
             onChange={(event) => toggleWalkIn(event.target.checked)}
             className="h-4 w-4 rounded border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e]"
           />
-          Client de passage — pas de compte, ticket simplifié sans nom ni e-mail
+          Client de passage — pas de compte, ticket simplifié sans nom
         </label>
 
         {isWalkIn ? (
-          <p className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs text-gray-500 dark:border-dark-3 dark:bg-dark-2">
-            Aucune identité n&apos;est enregistrée. Un ticket sera généré à la place d&apos;une facture — le paiement par QR n&apos;est pas disponible dans ce mode.
-          </p>
+          <div className="space-y-2 rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-3 dark:bg-dark-2">
+            <p className="text-xs text-gray-500 dark:text-dark-6">
+              Aucune identité n&apos;est enregistrée. Un ticket sera généré à la place d&apos;une facture — le paiement par QR n&apos;est pas disponible dans ce mode.
+            </p>
+            <input
+              value={walkInEmail}
+              onChange={(event) => setWalkInEmail(event.target.value)}
+              placeholder="E-mail du client (facultatif) — pour lui envoyer le ticket"
+              type="email"
+              autoComplete="off"
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-3 dark:text-white"
+            />
+            <p className="text-xs text-gray-400 dark:text-dark-6">
+              Optionnel — sans nom associé, ce n&apos;est jamais une facture nominative, seulement le même ticket envoyé par e-mail en plus du papier.
+            </p>
+            {walkInEmailMatch && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-900/10">
+                <p className="font-semibold">
+                  Un compte existe déjà pour cette adresse ({walkInEmailMatch.fullName}).
+                </p>
+                <p className="mt-0.5 text-amber-700 dark:text-amber-400">
+                  Un ticket anonyme lui serait envoyé sans être rattaché à son profil ni à son historique.
+                </p>
+                <button
+                  type="button"
+                  onClick={useMatchedAccountInstead}
+                  className="mt-1.5 font-semibold underline decoration-amber-400 underline-offset-2 hover:no-underline"
+                >
+                  Utiliser plutôt sa fiche client
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
           <div className="relative space-y-3">
             <input value={customer.fullName} onChange={(event) => updateCustomer("fullName", event.target.value)} placeholder="Nom complet" className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
@@ -687,6 +856,59 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
               </div>
             )}
           </div>
+        )}
+
+        {!isWalkIn && (
+          <div className="space-y-1.5">
+            <p className="text-xs text-gray-500 dark:text-dark-6">
+              Numéro de TVA (facultatif) — pour un client professionnel (B2B). Laissez vide pour un client particulier (B2C).
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={customer.vatNumber}
+                onChange={(event) => updateCustomerVat(event.target.value)}
+                placeholder="BE0123456789 ou FRXX123456789"
+                autoComplete="off"
+                className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 px-3 text-sm uppercase tracking-wide outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={handleVerifyVat}
+                disabled={vatCheck?.loading}
+                className="flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] disabled:opacity-50 dark:border-dark-3 dark:text-dark-6"
+              >
+                {vatCheck?.loading ? <Loader2 size={14} className="animate-spin" /> : <ShieldQuestion size={14} />}
+                Vérifier
+              </button>
+            </div>
+            {vatCheck && !vatCheck.loading && (
+              <p className={`text-xs font-medium ${vatCheck.error || vatCheck.valid === false ? "text-red-600" : "text-emerald-600"}`}>
+                {vatCheck.message}
+              </p>
+            )}
+          </div>
+        )}
+
+        {!isWalkIn && (
+          willBeB2B ? (
+            <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
+              {willBeBelgianB2B
+                ? "Client professionnel belge — une facture sera bien créée et numérotée, mais transmise via Peppol depuis l'onglet Opérations. Le client reçoit un simple reçu à la caisse."
+                : "Client professionnel — une facture sera automatiquement générée et envoyée par e-mail."}
+            </p>
+          ) : (
+            <label className="flex items-start gap-2 text-xs text-gray-600 dark:text-dark-6">
+              <input
+                type="checkbox"
+                checked={requestInvoice}
+                onChange={(event) => setRequestInvoice(event.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e] dark:border-dark-3"
+              />
+              <span>
+                Demander une facture (sinon un simple reçu par e-mail, comme un ticket de caisse, sera envoyé).
+              </span>
+            </label>
+          )
         )}
 
         {!isWalkIn && needsAddress && (

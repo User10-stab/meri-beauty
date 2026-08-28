@@ -103,7 +103,7 @@ describe("a VAT number is never stored apart from its verification proof", () =>
     "actions/auth/register.js",
     "actions/customer/settings.js",
     "actions/customers/set-customer-vat-number.js",
-    "actions/boutique/orders.js",
+    "lib/customer-vat.js",
     "actions/formations/create-formation-reservation.js",
     "actions/formations/waiting-list.js",
     "actions/workshops/create-workshop-reservation.js",
@@ -122,7 +122,7 @@ describe("a VAT number is never stored apart from its verification proof", () =>
   });
 
   test.each([
-    "actions/boutique/orders.js",
+    "lib/customer-vat.js",
     "actions/workshops/create-workshop-reservation.js",
     "actions/workshops/waiting-list.js",
     "actions/formations/create-formation-reservation.js",
@@ -144,13 +144,40 @@ describe("a VAT number is never stored apart from its verification proof", () =>
   });
 
   test.each([
-    "actions/boutique/orders.js",
+    "lib/customer-vat.js",
     "actions/workshops/create-workshop-reservation.js",
     "actions/workshops/waiting-list.js",
     "actions/formations/create-formation-reservation.js",
     "actions/formations/waiting-list.js",
   ])("%s reuses a matching recent VIES proof", (file) => {
     expect(source(file)).toContain("hasReusableVatValidation(");
+  });
+
+  // Checkout's own VAT saving used to duplicate this exact validate+persist
+  // logic; both now delegate to lib/customer-vat.js's single implementation
+  // instead of drifting between two copies. POS shares it for the same
+  // reason: a counter sale's optional B2B field must be verified the same
+  // way, whether the customer already existed or is created on the spot.
+  test.each(["actions/boutique/orders.js", "actions/boutique/point-of-sale.js"])(
+    "%s delegates VAT verification+persistence to the shared helper",
+    (file) => {
+      const content = source(file);
+      expect(content).toContain('import { saveCheckoutVatNumber } from "@/lib/customer-vat"');
+      expect(content).toContain("saveCheckoutVatNumber(");
+      // The old local copy of the VIES-calling logic must not have crept back in.
+      expect(content).not.toContain("verifyVatWithVies(");
+      expect(content).not.toContain("vatValidationName: viesResult");
+    }
+  );
+
+  test("the POS VAT field is optional and available for every payment method", () => {
+    const client = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    expect(client).toContain("facultatif");
+    // Not gated inside any `method === "..."` branch: it lives in the general
+    // customer section, so it is equally reachable for CASH, CARD_QR and
+    // EXTERNAL_TERMINAL.
+    expect(client).toContain('customer.vatNumber');
+    expect(client).toContain("updateCustomerVat");
   });
 
   test.each([

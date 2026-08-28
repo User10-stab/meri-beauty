@@ -1,7 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { applyVatRate, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
+import { cataloguePriceExclVat } from "@/lib/tax-policy";
 
 /**
  * Customer-facing catalogue reads. Deliberately separate from
@@ -12,24 +12,18 @@ import { applyVatRate, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
  * ACTIVE, non-deleted products with at least one active, non-deleted variant.
  */
 
-/**
- * Catalogue prices are stored net; everything a consumer sees must be VAT
- * inclusive (directive 98/6/CE art. 2(a) — the "selling price" is the final
- * price including VAT). The tax is therefore added at this serialization
- * boundary, so no display component has to remember to do it.
- */
-const shopPrice = (value) => applyVatRate(Number(value), BELGIUM_VAT_RATE);
-
 function serializeCard(product) {
-  const prices = product.variants.map((v) => shopPrice(v.price));
-  const compareValues = product.variants.map((v) => (v.comparePrice != null ? shopPrice(v.comparePrice) : null));
+  const prices = product.variants.map((v) => Number(v.price));
+  const compareValues = product.variants.map((v) => (v.comparePrice != null ? Number(v.comparePrice) : null));
   const totalAvailable = product.variants.reduce(
     (sum, v) => sum + Math.max(v.stockQuantity - v.reservedQuantity, 0),
     0
   );
 
-  const netPrices = product.variants.map((v) => Number(v.price));
-  const netCompareValues = product.variants.map((v) => (v.comparePrice != null ? Number(v.comparePrice) : null));
+  const netPrices = product.variants.map((v) => cataloguePriceExclVat(v.price));
+  const netCompareValues = product.variants.map((v) =>
+    v.comparePrice != null ? cataloguePriceExclVat(v.comparePrice) : null
+  );
 
   return {
     id: product.id,
@@ -43,10 +37,8 @@ function serializeCard(product) {
     subcategory: product.subcategory ? { id: product.subcategory.id, name: product.subcategory.name } : null,
     image: product.images[0]?.path ?? null,
     priceFrom: Math.min(...prices),
-    // The raw net catalogue price. Kept alongside the VAT-inclusive figure so
-    // a validated foreign-EU B2B viewer can be shown the price they actually
-    // pay (see actions/vat/viewer-policy.js) without a second round trip to
-    // the DB.
+    // Derived HT twins are kept alongside the stored TTC figures so a
+    // validated foreign-EU B2B viewer can see the price they actually pay.
     priceFromExclVat: Math.min(...netPrices),
     comparePriceFrom: compareValues.some((v) => v != null) ? Math.min(...compareValues.filter((v) => v != null)) : null,
     comparePriceFromExclVat: netCompareValues.some((v) => v != null)
@@ -63,38 +55,52 @@ const activeProductWhere = {
 };
 
 /**
- * Categories/subcategories that actually have active products — for the
- * filter sidebar. Brand is deliberately not surfaced here: brand is an
- * internal catalogue grouping, not something the storefront filters or
- * displays to customers.
+ * Categories/subcategories/brands that actually have active products — for
+ * the filter sidebar. Categories are brand-scoped (a name like "Accessoires"
+ * or "Non classé" legitimately recurs under several different brands), so
+ * each category carries its brand here — the sidebar groups by brand instead
+ * of showing a flat list where the same name appears several times with no
+ * way to tell them apart.
  */
 export async function getStorefrontFilters() {
   try {
-    const categories = await prisma.productCategory.findMany({
-      where: { isActive: true, subcategories: { some: { products: { some: activeProductWhere } } } },
-      orderBy: [{ position: "asc" }, { name: "asc" }],
-      select: {
-        id: true,
-        name: true,
-        slug: true,
-        subcategories: {
-          // "Général" is the auto-created catch-all subcategory for
-          // products that haven't been organized further — an
-          // implementation detail, not a real filter customers should see.
-          // Excluded here (not just in the sidebar component) so every
-          // consumer of this action — breadcrumbs, a category landing
-          // page, an API — gets the same rule for free.
-          where: { isActive: true, name: { not: "Général" }, products: { some: activeProductWhere } },
-          orderBy: [{ position: "asc" }, { name: "asc" }],
-          select: { id: true, name: true, slug: true },
+    const [categories, brands] = await Promise.all([
+      prisma.productCategory.findMany({
+        where: { isActive: true, subcategories: { some: { products: { some: activeProductWhere } } } },
+        orderBy: [{ brand: { name: "asc" } }, { position: "asc" }, { name: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          brand: { select: { id: true, name: true } },
+          subcategories: {
+            // "Général" is the auto-created catch-all subcategory for
+            // products that haven't been organized further — an
+            // implementation detail, not a real filter customers should see.
+            // Excluded here (not just in the sidebar component) so every
+            // consumer of this action — breadcrumbs, a category landing
+            // page, an API — gets the same rule for free.
+            where: { isActive: true, name: { not: "Général" }, products: { some: activeProductWhere } },
+            orderBy: [{ position: "asc" }, { name: "asc" }],
+            select: { id: true, name: true, slug: true },
+          },
         },
-      },
-    });
+      }),
+      prisma.brand.findMany({
+        where: {
+          isActive: true,
+          isDeleted: false,
+          categories: { some: { subcategories: { some: { products: { some: activeProductWhere } } } } },
+        },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true },
+      }),
+    ]);
 
-    return { success: true, data: { categories } };
+    return { success: true, data: { categories, brands } };
   } catch (error) {
     console.error("[getStorefrontFilters]", error);
-    return { success: false, message: "Impossible de charger les filtres.", data: { categories: [] } };
+    return { success: false, message: "Impossible de charger les filtres.", data: { categories: [], brands: [] } };
   }
 }
 
@@ -102,6 +108,7 @@ export async function getStorefrontProducts({
   search,
   categorySlug,
   subcategorySlug,
+  brandId,
   sort = "newest",
 } = {}) {
   try {
@@ -111,6 +118,8 @@ export async function getStorefrontProducts({
         ? { subcategory: { slug: subcategorySlug } }
         : categorySlug
         ? { subcategory: { category: { slug: categorySlug } } }
+        : brandId
+        ? { subcategory: { category: { brandId } } }
         : {}),
       ...(search
         ? {
@@ -189,9 +198,9 @@ export async function getStorefrontProductByBarcode(barcode) {
         productName: variant.product.name,
         variantName: variant.name,
         image: variant.product.images[0]?.path ?? null,
-        price: shopPrice(variant.price),
-        priceExclVat: Number(variant.price),
-        comparePrice: variant.comparePrice != null ? shopPrice(variant.comparePrice) : null,
+        price: Number(variant.price),
+        priceExclVat: cataloguePriceExclVat(variant.price),
+        comparePrice: variant.comparePrice != null ? Number(variant.comparePrice) : null,
         availableQuantity: Math.max(variant.stockQuantity - variant.reservedQuantity, 0),
       },
     };
@@ -253,10 +262,10 @@ export async function getStorefrontProductBySlug(slug) {
           id: v.id,
           name: v.name,
           sku: v.sku,
-          price: shopPrice(v.price),
-          priceExclVat: Number(v.price),
-          comparePrice: v.comparePrice != null ? shopPrice(v.comparePrice) : null,
-          comparePriceExclVat: v.comparePrice != null ? Number(v.comparePrice) : null,
+          price: Number(v.price),
+          priceExclVat: cataloguePriceExclVat(v.price),
+          comparePrice: v.comparePrice != null ? Number(v.comparePrice) : null,
+          comparePriceExclVat: v.comparePrice != null ? cataloguePriceExclVat(v.comparePrice) : null,
           availableQuantity: Math.max(v.stockQuantity - v.reservedQuantity, 0),
         })),
       },

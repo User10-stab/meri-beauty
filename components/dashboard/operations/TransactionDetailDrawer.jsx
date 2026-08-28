@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Receipt, FileText } from "lucide-react";
-import { getTransactionDetail } from "@/actions/dashboard/admin-operations";
+import { toast } from "sonner";
+import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2 } from "lucide-react";
+import { getTransactionDetail, issueCreditNoteForTransaction } from "@/actions/dashboard/admin-operations";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const money = (value) =>
   new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
@@ -90,6 +92,8 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const [detail, setDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [generatingNote, setGeneratingNote] = useState(false);
+  const [confirmingNote, setConfirmingNote] = useState(false);
 
   useEffect(() => {
     if (!transactionId) {
@@ -110,6 +114,21 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
       cancelled = true;
     };
   }, [transactionId]);
+
+  async function handleGenerateCreditNote() {
+    if (!transactionId || generatingNote) return;
+    setGeneratingNote(true);
+    const result = await issueCreditNoteForTransaction(transactionId, "");
+    setGeneratingNote(false);
+    setConfirmingNote(false);
+    if (result.success) {
+      toast.success(result.message);
+      const refreshed = await getTransactionDetail(transactionId);
+      if (refreshed.success) setDetail(refreshed.data);
+    } else {
+      toast.error(result.message);
+    }
+  }
 
   useEffect(() => {
     if (!transactionId) return;
@@ -138,7 +157,11 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const payment = detail?.payment;
   const source = describeSource(payment);
   const invoice = payment?.invoice;
+  const creditNote = detail?.creditNote ?? null;
   const siblings = (payment?.transactions ?? []).filter((t) => !t.isDeleted);
+  const isRefund = detail?.transactionType === "REFUND";
+  const signedMoney = (value, refund) => `${refund ? "−" : ""}${money(value)}`;
+  const canGenerateNote = isRefund && Boolean(invoice) && !creditNote;
 
   return createPortal(
     <div
@@ -153,12 +176,16 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <div
+              className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${
+                isRefund ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"
+              }`}
+            >
               <Receipt size={17} />
             </div>
             <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold leading-tight text-gray-900">
-                {detail ? money(detail.amount) : "Chargement…"}
+              <h2 className={`truncate text-base font-semibold leading-tight ${isRefund ? "text-red-600" : "text-gray-900"}`}>
+                {detail ? signedMoney(detail.amount, isRefund) : "Chargement…"}
               </h2>
               {detail && <span className="text-xs text-gray-400">{dateTime(detail.paidAt)}</span>}
             </div>
@@ -182,7 +209,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
             <>
               <div>
                 <SectionTitle>Transaction</SectionTitle>
-                <Row label="Montant" value={money(detail.amount)} />
+                <Row label="Montant" value={signedMoney(detail.amount, isRefund)} />
                 <Row label="Type" value={detail.transactionType} />
                 <Row label="Méthode" value={detail.method} />
                 <Row label="Payée le" value={dateTime(detail.paidAt)} />
@@ -234,7 +261,9 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                         <span className="text-gray-600">
                           {dateTime(t.paidAt)} · {t.transactionType} · {t.method}
                         </span>
-                        <span className="font-medium text-gray-900">{money(t.amount)}</span>
+                        <span className={`font-medium ${t.transactionType === "REFUND" ? "text-red-600" : "text-gray-900"}`}>
+                          {signedMoney(t.amount, t.transactionType === "REFUND")}
+                        </span>
                       </li>
                     ))}
                   </ul>
@@ -267,7 +296,57 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                   </p>
                 )}
               </div>
+
+              {(creditNote || canGenerateNote) && (
+                <div>
+                  <SectionTitle>Note de crédit</SectionTitle>
+                  {creditNote ? (
+                    <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
+                      <span className="text-gray-600">
+                        {creditNote.number} · {dateTime(creditNote.issuedAt)}
+                        {creditNote.reason && <span className="block text-xs text-gray-400">{creditNote.reason}</span>}
+                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-medium text-red-600">{money(-creditNote.totalInclVat)}</span>
+                        <a
+                          href={`/api/credit-notes/${creditNote.id}/pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                        >
+                          <FileMinus size={12} /> PDF
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
+                      <span className="text-gray-500">Aucune note de crédit pour ce remboursement.</span>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingNote(true)}
+                        disabled={generatingNote}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        {generatingNote ? <Loader2 size={12} className="animate-spin" /> : <FilePlus2 size={12} />} Générer
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
+          )}
+
+          {canGenerateNote && (
+            <ConfirmDialog
+              open={confirmingNote}
+              title="Générer une note de crédit ?"
+              message="Ce document porte un numéro légal, séquentiel et définitif — une fois émis, il ne peut plus être annulé ni modifié."
+              confirmLabel="Générer"
+              cancelLabel="Annuler"
+              loading={generatingNote}
+              onConfirm={handleGenerateCreditNote}
+              onCancel={() => setConfirmingNote(false)}
+            />
           )}
         </div>
       </div>

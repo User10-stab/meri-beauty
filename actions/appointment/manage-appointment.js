@@ -415,8 +415,9 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       });
       if (claim.count === 0) return false;
 
+      let creditNote = null;
       if (wasPaid && payment.invoice && remaining > REFUND_EPSILON) {
-        await issueCreditNote(tx, {
+        creditNote = await issueCreditNote(tx, {
           invoiceId: payment.invoice.id,
           reason: cancellationReasonWithForfeit,
           totalInclVat: remaining,
@@ -451,7 +452,7 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       // — see lib/payments/pin-pending-refund.js's doc comment for why this
       // has to happen before the Stripe call below, not just in its catch.
       if (needsRefund) {
-        await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey);
+        await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey, creditNote?.id ?? null);
       }
 
       const serviceName = appointment.staffService?.service?.name;
@@ -475,10 +476,10 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
         );
       }
 
-      return true;
+      return { claimed: true, creditNoteId: creditNote?.id ?? null };
     });
 
-    if (!claimed) {
+    if (!claimed?.claimed) {
       return { success: true, message: "Ce rendez-vous est déjà annulé." };
     }
 
@@ -507,6 +508,7 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
                 transactionType: "REFUND",
                 paidAt: new Date(),
                 stripePaymentIntentId: stripeSession.payment_intent,
+                creditNoteId: claimed.creditNoteId,
               },
             }),
           ]);

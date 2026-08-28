@@ -11,6 +11,7 @@ import {
   slugify,
 } from "@/lib/validations/boutique";
 import { getOrCreateGeneralSubcategory } from "@/lib/boutique/general-subcategory";
+import { cataloguePriceExclVat } from "@/lib/tax-policy";
 
 /**
  * Product + variant management.
@@ -91,15 +92,16 @@ async function resolveSubcategoryId(categoryId, submittedSubcategoryId) {
 /** Attaches computed profit/margin to a variant without storing them. */
 function withMargin(variant) {
   const price = Number(variant.price);
+  const priceExclVat = cataloguePriceExclVat(price);
   const cost = Number(variant.costPrice);
-  const profit = price - cost;
+  const profit = priceExclVat - cost;
   return {
     ...variant,
     price,
     costPrice: cost,
     comparePrice: variant.comparePrice != null ? Number(variant.comparePrice) : null,
     profit,
-    marginPercent: price > 0 ? Number(((profit / price) * 100).toFixed(1)) : 0,
+    marginPercent: priceExclVat > 0 ? Number(((profit / priceExclVat) * 100).toFixed(1)) : 0,
     availableQuantity: variant.stockQuantity - variant.reservedQuantity,
   };
 }

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { isAdminRole } from "@/lib/authorization";
 import { renderInvoicePdf } from "@/lib/pdf/render";
-import { createBillitOrder, parsePeppolIdentifier } from "@/lib/billit";
+import { createBillitOrder, parsePeppolIdentifier, isBelgianVatNumber } from "@/lib/billit";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 
 /**
@@ -44,6 +44,17 @@ export async function sendInvoiceToBillit(invoiceId) {
       },
     });
     if (!invoice) return { success: false, message: "Facture introuvable." };
+
+    // Billit here is Peppol e-invoicing for Belgian companies — a B2C sale
+    // or a foreign VAT number has nowhere sensible to route on that
+    // network, so both are refused outright rather than creating an order
+    // Billit (or the customer) would never actually be able to use.
+    if (invoice.customerType !== "B2B") {
+      return { success: false, message: "Seules les factures B2B peuvent être envoyées via Billit." };
+    }
+    if (!isBelgianVatNumber(invoice.customerVatNumber)) {
+      return { success: false, message: "Billit est réservé aux clients avec un numéro de TVA belge (BE…)." };
+    }
 
     const buyerUserId =
       invoice.payment?.order?.userId ??

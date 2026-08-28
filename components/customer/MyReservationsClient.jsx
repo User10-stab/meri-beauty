@@ -92,6 +92,55 @@ function StatusBadge({ label, className }) {
   );
 }
 
+// ─── Check-in ticket ──────────────────────────────────────────────────────────
+
+/**
+ * The customer's entry ticket, same visual pattern as the atelier/formation
+ * one on /mon-compte (MonComptePageClient.jsx). getMyReservations already
+ * nulls checkInCode/checkInQr for every status but CONFIRMED, so nothing
+ * needs to be checked here beyond "is there one to show".
+ *
+ * An appointment is always one person — there is no seats/checkedInSeats
+ * split to show, just checkedInAt as a single already-used flag.
+ */
+function CheckInTicket({ reservation }) {
+  if (!reservation.checkInQr || !reservation.checkInCode) return null;
+
+  const alreadyUsed = Boolean(reservation.checkedInAt);
+  const remainingDue = Number(reservation.payment?.remainingAmount ?? 0);
+
+  return (
+    <div className="mt-3 flex flex-col items-center gap-3 rounded-2xl border border-[#C8A46A]/20 bg-[#C8A46A]/5 px-4 py-5 text-center sm:flex-row sm:text-left">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={reservation.checkInQr}
+        alt="QR code d'entrée du rendez-vous"
+        width={160}
+        height={160}
+        className={`h-40 w-40 shrink-0 rounded-lg bg-white p-1 ${alreadyUsed ? "opacity-40" : ""}`}
+      />
+      <div>
+        <p className="text-sm font-bold text-[#2F3A2E]">
+          {alreadyUsed ? "Billet déjà utilisé" : "Votre QR code d'entrée"}
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-gray-500">
+          {alreadyUsed
+            ? "Ce rendez-vous a déjà été pointé à l'accueil."
+            : "Présentez ce QR code à l'accueil. Il est vérifié auprès du salon, une capture d'écran ne le remplace pas."}
+        </p>
+        {!alreadyUsed && remainingDue > 0 && (
+          <p className="mt-1 text-xs font-semibold text-amber-700">
+            Solde de {remainingDue.toFixed(2)} € à régler sur place.
+          </p>
+        )}
+        <p className="mt-2 font-mono text-lg font-bold tracking-widest text-[#2F3A2E]">
+          {reservation.checkInCode}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Single reservation card ──────────────────────────────────────────────────
 
 function ReservationCard({ reservation, onCancelled }) {
@@ -323,6 +372,8 @@ function ReservationCard({ reservation, onCancelled }) {
             )}
           </div>
         )}
+
+        <CheckInTicket reservation={reservation} />
 
         {/* Review display */}
         {reservation.review && (

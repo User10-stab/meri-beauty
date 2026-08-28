@@ -182,8 +182,15 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
     // There is no unique constraint on the table to fall back on — the entry
     // is deliberately soft-statused rather than deleted — so the lock is the
     // guard. Transaction-scoped, so it always releases even if this crashes.
+    //
+    // $executeRaw, not $queryRaw: pg_advisory_xact_lock() returns `void`, and
+    // $queryRaw tries to deserialize the returned column, failing with
+    // "Failed to deserialize column of type 'void'". Every other advisory-lock
+    // call in this codebase uses $executeRaw for that reason. (The cron routes
+    // use $queryRaw only because pg_TRY_advisory_xact_lock returns a boolean
+    // they actually need to read.)
     const { entry, position, alreadyOnList } = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`meri-waiting-list-${sessionId}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`meri-waiting-list-${sessionId}`}))`;
 
       const existing = await tx.waitingListEntry.findFirst({
         where: {

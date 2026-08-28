@@ -7,7 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { shippingQuoteRequestOwnerEmail, shippingQuoteRequestConfirmationEmail } from "@/lib/email-templates";
 import { shippingQuoteRequestSchema } from "@/lib/validations/commerce";
 import { calculateShippingCost, calculateTotalWeight, getShippingDetails } from "@/lib/shipping";
-import { applyVatRate, resolveGoodsVatPolicy } from "@/lib/tax-policy";
+import { applyVatRate, repriceTtcCataloguePrice, resolveGoodsVatPolicy } from "@/lib/tax-policy";
 
 /**
  * Get current cart shipping calculation for checkout display
@@ -38,7 +38,7 @@ export async function getCartShippingCost() {
       : null;
     const vatPolicy = resolveGoodsVatPolicy({ customer });
     const subtotal = fullCart.items.reduce(
-      (sum, item) => sum + applyVatRate(item.variant.price, vatPolicy.vatRate) * item.quantity,
+      (sum, item) => sum + repriceTtcCataloguePrice(item.variant.price, vatPolicy.vatRate) * item.quantity,
       0
     );
     const totalWeight = calculateTotalWeight(fullCart.items);

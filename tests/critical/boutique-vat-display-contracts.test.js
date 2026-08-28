@@ -9,7 +9,7 @@ describe("boutique VAT display matches server charging", () => {
   test("the shipping preview resolves the signed-in customer's VAT policy", () => {
     const shipping = source("actions/boutique/shipping.js");
     expect(shipping).toContain("resolveGoodsVatPolicy({ customer })");
-    expect(shipping).toContain("applyVatRate(item.variant.price, vatPolicy.vatRate)");
+    expect(shipping).toContain("repriceTtcCataloguePrice(item.variant.price, vatPolicy.vatRate)");
     expect(shipping).toContain("applyVatRate(catalogueCost, vatPolicy.vatRate)");
   });
 
@@ -22,7 +22,7 @@ describe("boutique VAT display matches server charging", () => {
     expect(checkout).toContain("vatSubtotal + shippingCost - discountAmount");
   });
 
-  test("the customer sees HT, carriage, VAT and TTC — in that order", () => {
+  test("checkout shows HT, carriage, VAT and TTC — while cart stays delivery-free", () => {
     const checkout = source("components/boutique/CheckoutPageClient.jsx");
     for (const label of ["Sous-total HT", "Livraison HT", "TVA (", "Total TTC"]) {
       expect(checkout, `checkout summary is missing "${label}"`).toContain(label);
@@ -35,7 +35,9 @@ describe("boutique VAT display matches server charging", () => {
     expect(at(">TVA (")).toBeLessThan(at("Total TTC"));
 
     const cart = source("components/boutique/CartPageClient.jsx");
-    expect(cart).toContain('t("shippingExclVat")');
+    expect(cart).not.toContain('t("shippingExclVat")');
+    expect(cart).not.toContain("getCartShippingCost");
+    expect(cart).toContain("totalTTC: roundMoney(cartPricing.totalTTC)");
     expect(cart).toContain('t("vat", { rate: vatRate })');
     expect(cart).toContain('t("totalInclVat")');
   });
@@ -57,9 +59,7 @@ describe("boutique VAT display matches server charging", () => {
       expect(content, `${page} does not render the shared breakdown`).toContain(
         "<ServicePriceBreakdown"
       );
-      // The NET catalogue price, never the repriced gross — passing
-      // `unitPrice` here would tax an already-taxed figure.
-      expect(content).toContain("netUnitPrice={catalogueUnitPrice}");
+      expect(content).toContain("unitPriceInclVat={unitPrice}");
     }
 
     const breakdown = source("components/shared/ServicePriceBreakdown.jsx");

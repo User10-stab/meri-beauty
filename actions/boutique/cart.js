@@ -1,7 +1,7 @@
 "use server";
 
 import { cookies } from "next/headers";
-import { applyVatRate, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
+import { cataloguePriceExclVat } from "@/lib/tax-policy";
 import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
@@ -99,17 +99,13 @@ function serializeCart(cart) {
       id: item.variant.id,
       name: item.variant.name,
       sku: item.variant.sku,
-      // Stored net; the cart shows the consumer their VAT-inclusive price.
-      // priceExclVat is kept so the checkout can reprice at another rate (a
-      // validated intra-Community B2B supply) without re-deriving the net.
-      price: applyVatRate(Number(item.variant.price), BELGIUM_VAT_RATE),
-      priceExclVat: Number(item.variant.price),
-      comparePrice:
-        item.variant.comparePrice != null
-          ? applyVatRate(Number(item.variant.comparePrice), BELGIUM_VAT_RATE)
-          : null,
+      // ProductVariant prices are already TTC. The HT twin is derived only
+      // for the tax breakdown and foreign-EU reverse-charge preview.
+      price: Number(item.variant.price),
+      priceExclVat: cataloguePriceExclVat(item.variant.price),
+      comparePrice: item.variant.comparePrice != null ? Number(item.variant.comparePrice) : null,
       comparePriceExclVat:
-        item.variant.comparePrice != null ? Number(item.variant.comparePrice) : null,
+        item.variant.comparePrice != null ? cataloguePriceExclVat(item.variant.comparePrice) : null,
       stockQuantity: item.variant.stockQuantity,
       reservedQuantity: item.variant.reservedQuantity,
       isActive: item.variant.isActive,

@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { allocateNetLines } from "@/lib/invoicing";
-import { applyVatRate, calculateVatTotals, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
+import { calculateVatTotals, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
@@ -35,19 +35,15 @@ describe("invoice lines carry their VAT-exclusive twin", () => {
     expect(sum(net, "lineTotal")).toBeCloseTo(totals.totalInclVat, 2);
   });
 
-  test("the printed unit price is the catalogue price that was actually set", () => {
-    // 21.4463 HT is what the migration stored for a 25,95 € shelf price. The
-    // invoice must print that back, not 25.95 / 1.21 rounded to 2 decimals.
-    const net = 21.4463;
-    const gross = applyVatRate(net, BELGIUM_VAT_RATE);
-    expect(gross).toBe(25.95);
+  test("the printed unit price accurately extracts HT from stored TTC", () => {
+    const gross = 25.95;
 
     const [line] = allocateNetLines(
       [{ description: "Popits", quantity: 1, unitPrice: gross }],
       BELGIUM_VAT_RATE,
       calculateVatTotals(gross, BELGIUM_VAT_RATE).totalExclVat
     );
-    expect(line.unitPriceExclVat).toBe(net);
+    expect(line.unitPriceExclVat).toBe(21.4463);
   });
 
   test("a 0% reverse-charge invoice invents no VAT", () => {

@@ -51,7 +51,8 @@ describe("refund retry never exceeds the exact pending amount", () => {
   });
 
   test("order cancellation refunds pin the amount and idempotency key before calling Stripe, and clear them on success", () => {
-    expect(orders).toContain("pendingRefundAmount: remaining, pendingRefundIdempotencyKey: refundIdempotencyKey");
+    expect(orders).toContain("pendingRefundAmount: remaining,");
+    expect(orders).toContain("pendingRefundIdempotencyKey: refundIdempotencyKey,");
     expect(orders).toContain("idempotencyKey: refundIdempotencyKey");
     expect(orders).toContain("pendingRefundAmount: null");
     expect(orders).toContain("pendingRefundIdempotencyKey: null");

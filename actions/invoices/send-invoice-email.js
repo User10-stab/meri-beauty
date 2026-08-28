@@ -6,6 +6,7 @@ import { isAdminRole } from "@/lib/authorization";
 import { sendEmail } from "@/lib/email";
 import { renderInvoicePdf } from "@/lib/pdf/render";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
+import { isBelgianVatNumber } from "@/lib/billit";
 
 /**
  * Re-sends an already-issued invoice to the customer it was issued to.
@@ -40,6 +41,17 @@ export async function sendInvoiceByEmail(invoiceId) {
       },
     });
     if (!invoice) return { success: false, message: "Facture introuvable." };
+
+    // A Belgian company invoice must travel over Peppol, never as an ad-hoc
+    // PDF e-mail (Belgium's 2026 structured e-invoicing mandate) — this is
+    // a hard server-side refusal, not just a disabled button, since this
+    // action can be called directly and this rule must hold either way.
+    if (invoice.customerType === "B2B" && isBelgianVatNumber(invoice.customerVatNumber)) {
+      return {
+        success: false,
+        message: `La facture ${invoice.number} est une facture B2B belge — elle doit être transmise via Billit/Peppol, pas par e-mail direct.`,
+      };
+    }
 
     const recipient = invoice.customerEmail?.trim();
     if (!recipient) {

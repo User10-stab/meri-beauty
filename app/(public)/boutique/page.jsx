@@ -21,6 +21,7 @@ export default async function BoutiquePage() {
     <BoutiquePageClient
       initialProducts={productsResult.data ?? []}
       categories={filtersResult.data?.categories ?? []}
+      brands={filtersResult.data?.brands ?? []}
     />
   );
 }

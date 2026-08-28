@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { applyVatRate, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
+import { cataloguePriceExclVat } from "@/lib/tax-policy";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -433,13 +433,11 @@ function Section({ title, action, children }) {
 function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onScanBarcode }) {
   const isExisting = !!variant.id;
   const price = Number(variant.price) || 0;
+  const priceExclVat = cataloguePriceExclVat(price);
   const cost = Number(variant.costPrice) || 0;
-  // Both figures are net, so the margin finally subtracts comparable bases.
-  const margin = price > 0 ? (((price - cost) / price) * 100).toFixed(1) : null;
-  // What the customer will actually be charged in Belgium. Shown live because
-  // the shelf price is the number Marie knows by heart — typing a net price
-  // and seeing the wrong TTC underneath is how a mis-entry gets caught.
-  const shelfPrice = applyVatRate(price, BELGIUM_VAT_RATE);
+  // Selling price is stored TTC while supplier cost is HT. Compare both on an
+  // HT basis so the margin remains meaningful.
+  const margin = priceExclVat > 0 ? (((priceExclVat - cost) / priceExclVat) * 100).toFixed(1) : null;
   const [generatingSku, setGeneratingSku] = useState(false);
 
   async function handleGenerateSku() {
@@ -566,9 +564,9 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
         )}
 
         <Field
-          label="Prix de vente HT (€)"
+          label="Prix de vente TTC (€)"
           required
-          hint={price > 0 ? `Soit ${shelfPrice.toFixed(2)} € TTC en boutique (TVA 21 %)` : "Hors TVA — la TVA est ajoutée à la vente"}
+          hint="Le montant saisi est sauvegardé et affiché tel quel — TVA de 21 % déjà incluse."
         >
           <input
             type="number"
@@ -591,7 +589,10 @@ function VariantRow({ variant, canRemove, onChange, onRemove, onShowLabel, onSca
             className={inputClass}
           />
         </Field>
-        <Field label="Prix barré HT (€)" hint="Optionnel — pour une promotion. Hors TVA, comme le prix de vente.">
+        <Field
+          label="Prix barré TTC (€)"
+          hint="Optionnel — le montant saisi est sauvegardé tel quel, TVA incluse."
+        >
           <input
             type="number"
             min="0"

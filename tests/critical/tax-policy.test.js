@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateVatTotals,
+  cataloguePriceExclVat,
   hasReusableVatValidation,
   applyVatRate,
+  repriceTtcCataloguePrice,
   resolveForeignEuVatPolicy,
   resolveGoodsVatPolicy,
   resolveServiceVatPolicy,
@@ -98,13 +100,15 @@ describe("VAT amount snapshots", () => {
     expect(calculateVatTotals(121, 21)).toEqual({ totalInclVat: 121, totalExclVat: 100, vatAmount: 21 });
   });
 
-  it("applies the rate to a net catalogue price", () => {
-    // Catalogue prices are stored net, so 0% charges the net price as-is and
-    // 21% adds the tax. This used to divide by 1.21 first, back when the
-    // catalogue stored VAT-inclusive amounts.
+  it("keeps a stored TTC catalogue price unchanged for a Belgian sale", () => {
+    expect(cataloguePriceExclVat(121)).toBe(100);
+    expect(repriceTtcCataloguePrice(121, 21)).toBe(121);
+    expect(repriceTtcCataloguePrice(121, 0)).toBe(100);
+  });
+
+  it("still applies VAT normally to genuinely HT amounts", () => {
     expect(applyVatRate(100, 0)).toBe(100);
     expect(applyVatRate(100, 21)).toBe(121);
-    expect(applyVatRate(21.4463, 21)).toBe(25.95);
     expect(calculateVatTotals(100, 0)).toEqual({ totalInclVat: 100, totalExclVat: 100, vatAmount: 0 });
   });
 });

@@ -95,7 +95,7 @@ function FormationCard({ formation, t, locale }) {
               {t("from")}
             </span>
             <ActivityPriceTag
-              netPrice={formation.price}
+              priceTtc={formation.price}
               locale={locale}
               className="block text-base font-bold leading-tight text-gold"
             />

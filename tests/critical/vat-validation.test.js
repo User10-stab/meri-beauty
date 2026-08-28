@@ -31,6 +31,44 @@ const registration = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+
+describe("the VIES dev bypass cannot leak into production", () => {
+  const fetchMustNotRun = () => {
+    throw new Error("VIES was contacted when the bypass should have short-circuited");
+  };
+
+  it("accepts a well-formed but non-existent number when enabled outside production", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VAT_SKIP_VIES_VERIFICATION", "true");
+    vi.stubGlobal("fetch", vi.fn(fetchMustNotRun));
+
+    // Valid Belgian mod-97 checksum, deliberately not a real company.
+    await expect(verifyVatWithVies("BE0912345772")).resolves.toMatchObject({ success: true, valid: true });
+  });
+
+  it("is inert in production even with the flag set, and still calls VIES", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("VAT_SKIP_VIES_VERIFICATION", "true");
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => "<soap:Envelope><valid>false</valid></soap:Envelope>",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(verifyVatWithVies("BE0912345772")).resolves.toMatchObject({ valid: false });
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("still rejects a malformed number — the bypass skips the registry, not the checksum", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("VAT_SKIP_VIES_VERIFICATION", "true");
+    vi.stubGlobal("fetch", vi.fn(fetchMustNotRun));
+
+    // Same digits with a deliberately wrong Belgian check pair.
+    await expect(verifyVatWithVies("BE0912345799")).resolves.toMatchObject({ success: false });
+  });
 });
 
 describe("EU VAT validation", () => {

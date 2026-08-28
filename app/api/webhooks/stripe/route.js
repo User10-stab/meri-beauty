@@ -382,11 +382,14 @@ async function handleChargeRefunded(charge) {
         stripeRefundId,
       });
       if (orderResult.newlyRefunded > 0.01 && payment.invoice) {
-        await issueCreditNote(tx, {
+        const creditNote = await issueCreditNote(tx, {
           invoiceId: payment.invoice.id,
           reason: "Remboursement effectué depuis le Dashboard Stripe",
           totalInclVat: orderResult.newlyRefunded,
         });
+        if (orderResult.transactionId) {
+          await tx.transaction.update({ where: { id: orderResult.transactionId }, data: { creditNoteId: creditNote.id } });
+        }
       }
       return orderResult;
     }
@@ -423,6 +426,14 @@ async function handleChargeRefunded(charge) {
       return { handled: true, newlyRefunded: 0, fullyRefunded, alreadyProcessed: true };
     }
 
+    let creditNote = null;
+    if (lockedPayment.invoice) {
+      creditNote = await issueCreditNote(tx, {
+        invoiceId: lockedPayment.invoice.id,
+        reason: "Remboursement effectué depuis le Dashboard Stripe",
+        totalInclVat: newlyRefunded,
+      });
+    }
     await tx.transaction.create({
       data: {
         paymentId: lockedPayment.id,
@@ -431,19 +442,13 @@ async function handleChargeRefunded(charge) {
         transactionType: "REFUND",
         paidAt: new Date(),
         stripePaymentIntentId,
+        creditNoteId: creditNote?.id ?? null,
       },
     });
     await tx.payment.update({
       where: { id: lockedPayment.id },
       data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
     });
-    if (lockedPayment.invoice) {
-      await issueCreditNote(tx, {
-        invoiceId: lockedPayment.invoice.id,
-        reason: "Remboursement effectué depuis le Dashboard Stripe",
-        totalInclVat: newlyRefunded,
-      });
-    }
 
     reservationReconciliation = await reconcileExceptionalReservationFullRefund(tx, {
       payment: lockedPayment,

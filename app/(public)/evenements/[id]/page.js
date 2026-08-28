@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { applyVatRate, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 import { notFound } from "next/navigation";
 import { getPublicActivityById } from "@/actions/workshops/get-public-activities";
 import { ActivityPriceTag, ActivityDepositNote } from "@/components/activities/ActivityPrice";
@@ -36,7 +35,7 @@ function buildEventSchema(activity) {
     const seatsLeft = Math.max(cap - taken, 0);
     return {
       "@type": "Offer",
-      price: String(applyVatRate(Number(activity.price ?? 0), BELGIUM_VAT_RATE)),
+      price: String(Number(activity.price ?? 0)),
       priceCurrency: "EUR",
       availability: cap > 0 && seatsLeft === 0 ? "https://schema.org/SoldOut" : "https://schema.org/InStock",
       url: `${SITE_URL}/reservation-atelier?activity=${activity.id}&session=${session.id}`,
@@ -301,7 +300,7 @@ export default async function EvenementDetailPage({ params }) {
                           </div>
 
                           <div className="flex flex-col items-end gap-2">
-                            <ActivityDepositNote netPrice={activity.price} depositPct={depositPct} />
+                            <ActivityDepositNote priceTtc={activity.price} depositPct={depositPct} />
                             {(() => {
                               const taken = session.reservations?.reduce((sum, r) => sum + r.seatsCount, 0) ?? 0;
                               const cap = session.capacity ?? activity.capacity;
@@ -358,7 +357,7 @@ export default async function EvenementDetailPage({ params }) {
                   <li className="flex items-start gap-3">
                     <EuroIcon className="mt-0.5" />
                     <div>
-                      <ActivityPriceTag netPrice={activity.price} className="text-sm font-semibold text-ink" />
+                      <ActivityPriceTag priceTtc={activity.price} className="text-sm font-semibold text-ink" />
                       <p className="text-xs text-ink/45">
                         Tarif {depositPct > 0 && `(dont ${depositPct}% d'acompte à la réservation)`}
                       </p>

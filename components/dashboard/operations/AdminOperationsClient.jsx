@@ -69,6 +69,11 @@ function Transactions({ rows, onOpenDetail }) {
         {rows.map((row) => {
           const customer = paymentCustomer(row.payment);
           const invoice = row.payment?.invoice ?? null;
+          // A refund is money leaving, not coming in — Transaction.amount is
+          // always stored as a positive magnitude (the codebase-wide
+          // convention: callers sum REFUND rows and subtract), so the sign
+          // has to be flipped here, at display time, rather than in storage.
+          const isRefund = row.transactionType === "REFUND";
           return (
             <TableRow key={row.id}>
               <TableCell className="pl-6">{date(row.paidAt)}</TableCell>
@@ -88,9 +93,17 @@ function Transactions({ rows, onOpenDetail }) {
                   <span className="text-xs text-gray-400">Pas encore émise</span>
                 )}
               </TableCell>
-              <TableCell className="text-right font-medium">{money(row.amount)}</TableCell>
+              <TableCell className={`text-right font-medium ${isRefund ? "text-red-600" : ""}`}>
+                {isRefund ? "−" : ""}
+                {money(row.amount)}
+              </TableCell>
               <TableCell className="pr-6">
-                <InvoiceRowActions invoice={invoice} onOpenDetail={() => onOpenDetail(row.id)} />
+                <InvoiceRowActions
+                  invoice={invoice}
+                  creditNote={row.creditNote ?? null}
+                  transaction={{ id: row.id, transactionType: row.transactionType, hasInvoice: Boolean(invoice) }}
+                  onOpenDetail={() => onOpenDetail(row.id)}
+                />
               </TableCell>
             </TableRow>
           );

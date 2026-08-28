@@ -177,8 +177,10 @@ export async function joinFormationWaitingList({ sessionId, customerInfo: submit
     // existence check and the position calculation are read-then-write, so
     // two racing submissions otherwise produce a duplicate entry and two
     // people holding the same position number.
+    // $executeRaw, not $queryRaw — pg_advisory_xact_lock() returns `void`,
+    // which $queryRaw cannot deserialize. See the atelier equivalent.
     const { entry, position, alreadyOnList } = await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`meri-waiting-list-formation-${sessionId}`}))`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`meri-waiting-list-formation-${sessionId}`}))`;
 
       const existing = await tx.waitingListEntry.findFirst({
         where: {

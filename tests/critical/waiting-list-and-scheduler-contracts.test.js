@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -28,7 +28,13 @@ describe("joining a waiting list is guarded and recorded like every other entry 
   // told they were "position #3". There is no unique constraint to lean on.
   test.each(WAITING_LISTS)("%s serialises joins per session", (file) => {
     const content = source(file);
-    expect(content).toContain("pg_advisory_xact_lock");
+    // $executeRaw, not $queryRaw. pg_advisory_xact_lock() returns `void`, and
+    // $queryRaw deserializes the result set — so the *only* thing this lock did
+    // was throw "Failed to deserialize column of type 'void'" on every attempt
+    // to join a full session. Asserting the function name alone (as this test
+    // used to) passed happily while the feature was completely broken.
+    expect(content).toContain("tx.$executeRaw`SELECT pg_advisory_xact_lock(");
+    expect(content).not.toContain("tx.$queryRaw`SELECT pg_advisory_xact_lock(");
     expect(content).toContain("prisma.$transaction(async (tx) =>");
     // The whole read-then-write pair must be inside the transaction.
     const txStart = content.indexOf("prisma.$transaction(async (tx) =>");
@@ -84,6 +90,47 @@ describe("the waiting-list screens explain what joining actually does", () => {
     const content = source(page);
     expect(content).toContain("wlSuccess.alreadyOnList");
     expect(content).toContain("Vous étiez déjà sur la liste d'attente");
+  });
+});
+
+describe("advisory locks are taken with the raw helper that can read their result", () => {
+  // pg_advisory_xact_lock() returns `void`; pg_try_advisory_xact_lock() returns
+  // a boolean. $queryRaw deserializes the result set and $executeRaw does not,
+  // so the blocking variant must use $executeRaw or it throws
+  // "Failed to deserialize column of type 'void'" every single time — turning a
+  // concurrency guard into an unconditional 100% failure of the code path it
+  // guards. This is a repo-wide sweep because the mistake is invisible until
+  // the exact path runs.
+  const SEARCH_DIRS = ["actions", "app", "lib", "scripts"];
+
+  function jsFilesIn(dir) {
+    const entries = readdirSync(`${root}${dir}`, { withFileTypes: true });
+    return entries.flatMap((entry) => {
+      const relative = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) return entry.name === "node_modules" ? [] : jsFilesIn(relative);
+      return /\.(js|jsx|mjs|ts|tsx)$/.test(entry.name) ? [relative] : [];
+    });
+  }
+
+  test("no blocking pg_advisory_xact_lock call goes through $queryRaw", () => {
+    const offenders = [];
+    for (const dir of SEARCH_DIRS) {
+      for (const file of jsFilesIn(dir)) {
+        const lines = source(file).split("\n");
+        lines.forEach((line, index) => {
+          // Comments discuss both helpers by name — only real calls count.
+          if (line.trim().startsWith("//") || line.trim().startsWith("*")) return;
+          // The `try` variant returns a boolean and is legitimately read.
+          if (!line.includes("pg_advisory_xact_lock(") || line.includes("pg_try_advisory_xact_lock(")) return;
+          // `$executeRaw(` + `Prisma.sql` puts the helper on the line above.
+          const call = /\$(query|execute)Raw/.test(line)
+            ? line
+            : `${lines.slice(0, index).reverse().find((l) => /\$(query|execute)Raw/.test(l)) ?? ""}`;
+          if (call.includes("$queryRaw")) offenders.push(`${file}:${index + 1}`);
+        });
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
 

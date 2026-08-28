@@ -99,15 +99,17 @@ export async function cancelFormationReservation(reservationId, { reason, refund
         // lib/payments/pin-pending-refund.js's doc comment for why this has
         // to happen before the Stripe call below, not just in its catch.
         const refundIdempotencyKey = buildRefundIdempotencyKey("formation-cancel", payment.id);
+        let creditNoteId = null;
         await prisma.$transaction(async (tx) => {
-          await pinPendingRefund(tx, payment.id, remainingRefund, refundIdempotencyKey);
           if (payment.invoice) {
-            await issueCreditNote(tx, {
+            const creditNote = await issueCreditNote(tx, {
               invoiceId: payment.invoice.id,
               reason: reason.trim(),
               totalInclVat: remainingRefund,
             });
+            creditNoteId = creditNote.id;
           }
+          await pinPendingRefund(tx, payment.id, remainingRefund, refundIdempotencyKey, creditNoteId);
         });
 
         try {
@@ -144,6 +146,7 @@ export async function cancelFormationReservation(reservationId, { reason, refund
                 paidAt: new Date(),
                 stripeCheckoutSessionId: payment.transactionReference,
                 stripePaymentIntentId,
+                creditNoteId,
               },
             }),
           ]);

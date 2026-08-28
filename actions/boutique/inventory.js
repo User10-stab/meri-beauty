@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { cataloguePriceExclVat } from "@/lib/tax-policy";
 import { auth } from "@/auth";
 import { isAdminRole } from "@/lib/authorization";
 
@@ -94,7 +95,9 @@ export async function generateAnnualInventoryReport(year) {
     // Current stock valuation
     for (const variant of variants) {
       const brandName = variant.product.subcategory?.category?.brand?.name || "Sans marque";
-      const currentValue = Number(variant.price) * variant.stockQuantity;
+      // Retail prices are stored TTC; stock value/profit must compare their HT
+      // base with the supplier cost, which is also HT.
+      const currentValue = cataloguePriceExclVat(variant.price) * variant.stockQuantity;
       const costValue = Number(variant.costPrice) * variant.stockQuantity;
 
       if (!stockByBrand[brandName]) {

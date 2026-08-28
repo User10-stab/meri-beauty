@@ -11,8 +11,24 @@ import {
   money,
   styles,
 } from "./theme";
+import { REVERSE_CHARGE_NOTE } from "@/lib/tax-policy";
 
-const REVERSE_CHARGE_FOOTER_NOTE = "Autoliquidation Art 21 § 2 du code TVA belge";
+/**
+ * Printed on the footer of every invoice and credit note — B2C and B2B,
+ * domestic and intra-Community alike — at the client's explicit request
+ * (2026-08-28), who intends to narrow it later.
+ *
+ * This deliberately overrides `invoice.taxNote`. That column is still
+ * snapshotted per transaction and is still only ever set for a genuine
+ * intra-Community supply (lib/tax-policy.js), so the database record of what
+ * actually applied to each sale is unaffected — only what gets rendered
+ * changes. Note that PDFs are rendered on demand, so already-issued invoices
+ * show the mention too the next time they are opened or re-sent.
+ *
+ * To go back to printing it only where it legally applies, restore:
+ *   invoice.vatTreatment === "EU_REVERSE_CHARGE" ? REVERSE_CHARGE_NOTE : invoice.taxNote
+ */
+const FOOTER_LEGAL_NOTE = REVERSE_CHARGE_NOTE;
 
 /**
  * Payment status is only shown when the settlement data actually travelled
@@ -92,11 +108,7 @@ export function InvoiceDocument({ invoice, contact = null }) {
         </View>
 
         <LegalFooter
-          legalNote={
-            invoice.vatTreatment === "EU_REVERSE_CHARGE"
-              ? REVERSE_CHARGE_FOOTER_NOTE
-              : invoice.taxNote
-          }
+          legalNote={FOOTER_LEGAL_NOTE}
           sellerName={invoice.sellerName}
           sellerAddress={invoice.sellerAddress}
           sellerVatNumber={invoice.sellerVatNumber}
@@ -154,16 +166,22 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
             ].filter(Boolean)}
           />
           <TotalsBlock
-            subtotalExclVat={creditNote.subtotalExclVat}
+            // Stored positive (a magnitude, like every other money column in
+            // this codebase) — negated only here, at render time, so the
+            // document itself reads unambiguously as money leaving, not a
+            // second sale.
+            subtotalExclVat={-Number(creditNote.subtotalExclVat)}
             vatRate={creditNote.vatRate}
-            vatAmount={creditNote.vatAmount}
-            totalInclVat={creditNote.totalInclVat}
+            vatAmount={-Number(creditNote.vatAmount)}
+            totalInclVat={-Number(creditNote.totalInclVat)}
             grandTotalLabel="MONTANT CRÉDITÉ TTC"
           />
         </View>
 
+        {/* Same mention as the invoice it corrects — a credit note that
+            contradicted its own parent invoice would be worse than either. */}
         <LegalFooter
-          legalNote={invoice.taxNote}
+          legalNote={FOOTER_LEGAL_NOTE}
           sellerName={invoice.sellerName}
           sellerAddress={invoice.sellerAddress}
           sellerVatNumber={invoice.sellerVatNumber}

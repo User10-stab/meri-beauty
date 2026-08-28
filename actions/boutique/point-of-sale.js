@@ -15,9 +15,11 @@ import { captureError } from "@/lib/monitoring";
 import {
   calculateVatTotals,
   applyVatRate,
-  BELGIUM_VAT_RATE,
+  repriceTtcCataloguePrice,
   resolveGoodsVatPolicy,
+  isPeppolMandatoryCustomer,
 } from "@/lib/tax-policy";
+import { saveCheckoutVatNumber } from "@/lib/customer-vat";
 import { stripe } from "@/lib/stripe";
 import { getAppBaseUrl } from "@/lib/site-url";
 import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
@@ -45,6 +47,12 @@ function serializeCustomer(customer) {
     addressCity: customer.addressCity,
     addressPostalCode: customer.addressPostalCode,
     addressCountry: customer.addressCountry,
+    // Prefills the field on selection — never re-verified against VIES just
+    // by picking a match; only re-typing/changing it at the till does.
+    vatNumber: customer.vatNumber ?? "",
+    // Lets the till UI know a company invoice will be forced regardless of
+    // the "demander une facture" checkbox — see completePointOfSaleSale.
+    isCompany: Boolean(customer.isCompany),
   };
 }
 
@@ -147,7 +155,8 @@ export async function searchPointOfSaleCustomers(query) {
       select: {
         id: true, fullName: true, email: true, phone: true,
         addressLine1: true, addressLine2: true, addressCity: true,
-        addressPostalCode: true, addressCountry: true,
+        addressPostalCode: true, addressCountry: true, vatNumber: true,
+        isCompany: true,
       },
     });
     return { success: true, data: customers.map(serializeCustomer) };
@@ -190,11 +199,11 @@ export async function getPointOfSaleProductByBarcode(barcode) {
         variantId: variant.id,
         productName: variant.product.name,
         variantName: variant.name,
-        // Shelf price: what the cashier reads out and collects. The catalogue
-        // stores net, and completePointOfSaleSale re-reads the variant and
-        // re-applies the rate server-side — this value is for the screen only,
+        // Shelf price: the stored TTC amount the cashier reads out and
+        // collects. completePointOfSaleSale still re-reads the variant and
+        // resolves the buyer's rate server-side, so this display value is
         // never trusted as the amount charged.
-        unitPrice: applyVatRate(Number(variant.price), BELGIUM_VAT_RATE),
+        unitPrice: Number(variant.price),
         availableQuantity: Math.max(0, variant.stockQuantity - variant.reservedQuantity),
       },
     };
@@ -270,7 +279,7 @@ export async function searchPointOfSaleProducts(query) {
         variantId: variant.id,
         productName: variant.product.name,
         variantName: variant.name,
-        unitPrice: applyVatRate(Number(variant.price), BELGIUM_VAT_RATE),
+        unitPrice: Number(variant.price),
         availableQuantity,
         isLowStock: availableQuantity > 0 && availableQuantity <= variant.lowStockThreshold,
         imagePath: variant.product.images[0]?.path ?? null,
@@ -308,7 +317,7 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, items, method, attemptKey, terminalReference, cashReceived } = parsed.data;
+  const { customer: requestedCustomer, walkInEmail, requestInvoice, items, method, attemptKey, terminalReference, cashReceived } = parsed.data;
   if (!attemptKey) {
     return { success: false, message: "Identifiant de tentative de caisse manquant. Rechargez la page." };
   }
@@ -403,6 +412,19 @@ export async function completePointOfSaleSale(input) {
         } else if (needsAddress) {
           customer = await tx.user.update({ where: { id: customer.id }, data: addressData });
         }
+
+        // Optional B2B field, shared with the online checkout's own VAT
+        // box: format-checked already by the schema, verified against VIES
+        // and persisted here — before posVatPolicy is resolved below, so a
+        // number entered on THIS sale is what the invoice actually reflects.
+        // Works identically for a brand-new till customer and an existing
+        // one who never had a VAT number on file; a returning customer's
+        // already-validated number is recognised as reusable and skips VIES.
+        const vatSave = await saveCheckoutVatNumber(tx, customer, requestedCustomer.vatNumber);
+        if (!vatSave.success) {
+          throw Object.assign(new Error("POS_VAT_INVALID"), { userMessage: vatSave.message });
+        }
+        customer = vatSave.user;
       }
 
       const saleItems = [];
@@ -426,7 +448,7 @@ export async function completePointOfSaleSale(input) {
       const posVatPolicy = resolveGoodsVatPolicy({ customer });
       const pricedSaleItems = saleItems.map((item) => ({
         ...item,
-        taxUnitPrice: applyVatRate(item.price, posVatPolicy.vatRate),
+        taxUnitPrice: repriceTtcCataloguePrice(item.price, posVatPolicy.vatRate),
       }));
       const pricedServiceLines = serviceLines.map((item) => ({
         ...item,
@@ -548,8 +570,12 @@ export async function completePointOfSaleSale(input) {
       // A walk-in sale has no customer identity for an Invoice's non-null
       // customerName/customerEmail — a simplified ticket is rendered after
       // the transaction instead (see renderTicketPdf below), from the order
-      // rows just created.
-      const invoice = isWalkIn
+      // rows just created. A named but private (B2C) customer gets the same
+      // simplified receipt by default, unless they asked for a real invoice
+      // — a company customer (isCompany, validated VAT number) always gets
+      // one regardless, since they need it to deduct their own VAT.
+      const wantsInvoice = !isWalkIn && (customer?.isCompany || requestInvoice);
+      const invoice = !wantsInvoice
         ? null
         : await issueInvoice(tx, {
             paymentId: payment.id,
@@ -603,7 +629,13 @@ export async function completePointOfSaleSale(input) {
       });
 
       return { order, invoice, customer };
-    });
+    // A counter sale does a VIES call, a row-locked stock check, invoice
+    // numbering and a per-item stock/audit loop — all sequential DB round
+    // trips. Prisma's 5000ms default interactive-transaction timeout was
+    // measured failing this exact flow (P2028) well before it could finish,
+    // silently rolling back a sale the cashier believed went through. 20s/10s
+    // gives real headroom without masking a genuinely stuck transaction.
+    }, { timeout: 20000, maxWait: 10000 });
 
     if (result.qrPayment) {
       const order = await prisma.order.findUnique({
@@ -625,8 +657,10 @@ export async function completePointOfSaleSale(input) {
     }
 
     if (isWalkIn) {
-      // No email to send it to — the ticket is handed back to the cashier
-      // to print/download instead of being attached to a receipt e-mail.
+      // No identity is registered, so this can never become a nominative
+      // Invoice — but the cashier may still have collected an e-mail just to
+      // send the same ticket PDF a printer would produce. Optional: most
+      // walk-ins still only take the printed ticket.
       const salon = await prisma.salon.findUnique({
         where: { id: "main-salon" },
         select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
@@ -647,6 +681,43 @@ export async function completePointOfSaleSale(input) {
         return null;
       });
 
+      let ticketEmailSent = null;
+      if (walkInEmail && ticketPdf) {
+        const ticketEmail = {
+          to: walkInEmail,
+          subject: `Votre ticket de caisse — Commande n°${result.order.orderNumber} — Meri Beauty`,
+          text: `Bonjour,\n\nMerci pour votre achat en magasin. Votre ticket de caisse pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est joint à cet e-mail.\n\nL'équipe Meri Beauty`,
+          html: `<p>Bonjour,</p><p>Merci pour votre achat en magasin.</p><p>Votre ticket de caisse pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p><p>L'équipe Meri Beauty</p>`,
+          attachments: [{ filename: `ticket-${result.order.orderNumber}.pdf`, content: ticketPdf }],
+        };
+        let ticketEmailResult = await sendEmail(ticketEmail);
+        // One immediate retry, same as the nominative receipt below — the
+        // sale and the ticket already exist regardless of whether this ever
+        // succeeds, so this never blocks or rolls back the payment.
+        if (!ticketEmailResult?.success) ticketEmailResult = await sendEmail(ticketEmail);
+        ticketEmailSent = Boolean(ticketEmailResult?.success);
+        if (!ticketEmailSent) {
+          captureError(new Error(ticketEmailResult?.error || "POS walk-in ticket email failed"), {
+            area: "point-of-sale",
+            orderId: result.order.id,
+            context: "walk-in-ticket-email",
+          });
+        }
+        // Persisted regardless of outcome — posTicketEmailSentAt staying
+        // null on a non-null posTicketEmailTo is itself the record of a
+        // failed send, checkable later without a Sentry event or a console
+        // log still being around. Best-effort: a failure here must not turn
+        // an already-completed, already-paid sale into an error response.
+        await prisma.order
+          .update({
+            where: { id: result.order.id },
+            data: { posTicketEmailTo: walkInEmail, posTicketEmailSentAt: ticketEmailSent ? new Date() : null },
+          })
+          .catch((error) => {
+            captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "walk-in-ticket-email-tracking" });
+          });
+      }
+
       revalidatePath("/dashboard/boutique/orders");
       revalidatePath("/dashboard/boutique/stock");
       return {
@@ -656,6 +727,77 @@ export async function completePointOfSaleSale(input) {
           orderNumber: result.order.orderNumber,
           walkIn: true,
           ticketPdfBase64: ticketPdf ? ticketPdf.toString("base64") : null,
+          ticketEmailSent,
+        },
+      };
+    }
+
+    // A Belgian-registered company must receive its invoice over Peppol, not
+    // as an ad-hoc PDF e-mail (Belgium's 2026 structured e-invoicing
+    // mandate) — the invoice above is still created and numbered for VAT
+    // purposes, it just isn't the document handed to the customer here.
+    // Staff send it over Peppol afterward from Opérations (see
+    // actions/invoices/send-invoice-billit.js). A private customer who asked
+    // for nothing gets the exact same treatment for a different reason: no
+    // invoice was ever created for them.
+    const holdsInvoiceForPeppol = Boolean(result.invoice) && isPeppolMandatoryCustomer(result.customer);
+    if (!result.invoice || holdsInvoiceForPeppol) {
+      const salon = await prisma.salon.findUnique({
+        where: { id: "main-salon" },
+        select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
+      });
+      const receiptPdf = await renderTicketPdf({
+        orderNumber: result.order.orderNumber,
+        issuedAt: result.order.createdAt,
+        sellerName: salon?.legalName || "Meri Beauty",
+        sellerAddress: formatSalonAddress(salon),
+        sellerVatNumber: salon?.vatNumber ?? null,
+        subtotalExclVat: result.order.totalExclVat,
+        vatRate: result.order.vatRate,
+        vatAmount: result.order.totalVat,
+        totalInclVat: result.order.totalAmount,
+        lines: result.order.items.map((item) => ({ description: item.productName, quantity: item.quantity, unitPrice: Number(item.unitPrice) })),
+      }).catch((error) => {
+        captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "receipt-pdf" });
+        return null;
+      });
+
+      const receiptEmail = holdsInvoiceForPeppol
+        ? {
+            to: result.customer.email,
+            subject: `Votre reçu — Commande n°${result.order.orderNumber} — Meri Beauty`,
+            text: `Bonjour ${result.customer.fullName},\n\nMerci pour votre achat en magasin. Votre reçu pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est joint à cet e-mail. Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.\n\nL'équipe Meri Beauty`,
+            html: `<p>Bonjour ${result.customer.fullName},</p><p>Merci pour votre achat en magasin.</p><p>Votre reçu pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p><p>Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.</p><p>L'équipe Meri Beauty</p>`,
+            ...(receiptPdf ? { attachments: [{ filename: `recu-${result.order.orderNumber}.pdf`, content: receiptPdf }] } : {}),
+          }
+        : {
+            to: result.customer.email,
+            subject: `Votre reçu — Commande n°${result.order.orderNumber} — Meri Beauty`,
+            text: `Bonjour ${result.customer.fullName},\n\nMerci pour votre achat en magasin. Votre reçu pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est joint à cet e-mail.\n\nL'équipe Meri Beauty`,
+            html: `<p>Bonjour ${result.customer.fullName},</p><p>Merci pour votre achat en magasin.</p><p>Votre reçu pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p><p>L'équipe Meri Beauty</p>`,
+            ...(receiptPdf ? { attachments: [{ filename: `recu-${result.order.orderNumber}.pdf`, content: receiptPdf }] } : {}),
+          };
+      let receiptEmailResult = await sendEmail(receiptEmail);
+      if (!receiptEmailResult?.success) receiptEmailResult = await sendEmail(receiptEmail);
+      if (!receiptEmailResult?.success) {
+        captureError(new Error(receiptEmailResult?.error || "POS receipt email failed"), {
+          area: "point-of-sale",
+          orderId: result.order.id,
+          context: "receipt-email",
+        });
+      }
+
+      revalidatePath("/dashboard/boutique/orders");
+      revalidatePath("/dashboard/boutique/stock");
+      return {
+        success: true,
+        data: {
+          orderId: result.order.id,
+          orderNumber: result.order.orderNumber,
+          documentType: holdsInvoiceForPeppol ? "invoice_pending_peppol" : "receipt",
+          invoiceNumber: holdsInvoiceForPeppol ? result.invoice.number : null,
+          ticketPdfBase64: receiptPdf ? receiptPdf.toString("base64") : null,
+          receiptEmailSent: Boolean(receiptEmailResult?.success),
         },
       };
     }
@@ -690,6 +832,7 @@ export async function completePointOfSaleSale(input) {
       data: {
         orderId: result.order.id,
         orderNumber: result.order.orderNumber,
+        documentType: "invoice",
         receiptEmailSent: Boolean(emailResult?.success),
       },
     };
@@ -716,6 +859,9 @@ export async function completePointOfSaleSale(input) {
         message: "L'adresse de facturation est obligatoire pour ce client.",
         errors: { addressLine1: "Obligatoire", addressCity: "Obligatoire", addressPostalCode: "Obligatoire" },
       };
+    }
+    if (error.message === "POS_VAT_INVALID") {
+      return { success: false, message: error.userMessage, errors: { vatNumber: error.userMessage } };
     }
     if (error.code === "P2002" && error.meta?.target?.includes?.("posAttemptKey")) {
       const order = await prisma.order.findUnique({

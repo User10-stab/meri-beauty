@@ -70,7 +70,7 @@ async function ActivityCard({ activity }) {
               {t("from")}
             </span>
             <ActivityPriceTag
-              netPrice={activity.price}
+              priceTtc={activity.price}
               locale={toIntlLocale(locale)}
               className="block text-base font-bold leading-tight text-gold"
             />

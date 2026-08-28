@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { applyVatRate, BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 import { notFound } from "next/navigation";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
 import { ActivityPriceTag, ActivityDepositNote } from "@/components/activities/ActivityPrice";
@@ -40,7 +39,7 @@ function buildCourseSchema(formation) {
     },
     offers: {
       "@type": "Offer",
-      price: String(applyVatRate(Number(formation.price ?? 0), BELGIUM_VAT_RATE)),
+      price: String(Number(formation.price ?? 0)),
       priceCurrency: "EUR",
       category: "paid",
       url: `${SITE_URL}/formations/${formation.id}`,
@@ -279,7 +278,7 @@ export default async function FormationDetailPage({ params }) {
                             </div>
 
                             <div className="flex flex-col items-end gap-2">
-                              <ActivityDepositNote netPrice={formation.price} depositPct={depositPct} />
+                              <ActivityDepositNote priceTtc={formation.price} depositPct={depositPct} />
                               {avail === 0 ? (
                                 <span className="inline-flex shrink-0 cursor-not-allowed items-center gap-2 rounded-full bg-gray-200 px-5 py-2.5 text-[13px] font-semibold text-gray-500">
                                   Complet
@@ -328,7 +327,7 @@ export default async function FormationDetailPage({ params }) {
                   <li className="flex items-start gap-3">
                     <EuroIcon className="mt-0.5" />
                     <div>
-                      <ActivityPriceTag netPrice={formation.price} className="text-sm font-semibold text-ink" />
+                      <ActivityPriceTag priceTtc={formation.price} className="text-sm font-semibold text-ink" />
                       <p className="text-xs text-ink/45">
                         Tarif {depositPct > 0 && `(dont ${depositPct}% d'acompte à la réservation)`}
                       </p>

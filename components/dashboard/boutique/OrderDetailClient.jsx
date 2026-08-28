@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Mail, Phone, MapPin, Truck, KeyRound, Download, FileMinus, Printer } from "lucide-react";
+import { ArrowLeft, Loader2, Mail, Phone, MapPin, Truck, KeyRound, Download, FileMinus, Printer, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PickupConfirmDialog } from "@/components/dashboard/boutique/PickupConfirmDialog";
@@ -220,17 +220,52 @@ export function OrderDetailClient({ order }) {
           {/* Customer */}
           <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
             <h2 className="mb-3 font-semibold text-gray-800 dark:text-white">Client</h2>
-            <p className="font-medium text-gray-700 dark:text-dark-6">{order.user?.fullName}</p>
-            <div className="mt-2 space-y-1.5 text-sm text-gray-500">
-              <a href={`mailto:${order.user?.email}`} className="flex items-center gap-2 hover:text-[#2f3a2e]">
-                <Mail size={14} /> {order.user?.email}
-              </a>
-              {order.user?.phone && (
-                <a href={`tel:${order.user.phone}`} className="flex items-center gap-2 hover:text-[#2f3a2e]">
-                  <Phone size={14} /> {order.user.phone}
-                </a>
-              )}
-            </div>
+            {order.user ? (
+              <>
+                <p className="font-medium text-gray-700 dark:text-dark-6">{order.user.fullName}</p>
+                <div className="mt-2 space-y-1.5 text-sm text-gray-500">
+                  <a href={`mailto:${order.user.email}`} className="flex items-center gap-2 hover:text-[#2f3a2e]">
+                    <Mail size={14} /> {order.user.email}
+                  </a>
+                  {order.user.phone && (
+                    <a href={`tel:${order.user.phone}`} className="flex items-center gap-2 hover:text-[#2f3a2e]">
+                      <Phone size={14} /> {order.user.phone}
+                    </a>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="font-medium text-gray-700 dark:text-dark-6">Client de passage</p>
+                <p className="mt-0.5 text-xs text-gray-400 dark:text-dark-6">
+                  Aucun compte — vente anonyme, ticket au lieu d&apos;une facture.
+                </p>
+                {/* Only the walk-in ticket knows whether an e-mail was ever
+                    requested, and whether the send actually succeeded —
+                    otherwise unrecoverable once the cashier's one-shot toast
+                    is gone. */}
+                <div className="mt-3 border-t border-stroke pt-3 text-sm dark:border-dark-3">
+                  {order.posTicketEmailTo ? (
+                    order.posTicketEmailSentAt ? (
+                      <p className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                        <CheckCircle2 size={14} className="shrink-0" />
+                        Ticket envoyé à {order.posTicketEmailTo}
+                      </p>
+                    ) : (
+                      <p className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                        <XCircle size={14} className="shrink-0" />
+                        Échec de l&apos;envoi à {order.posTicketEmailTo}
+                      </p>
+                    )
+                  ) : (
+                    <p className="flex items-center gap-2 text-gray-400 dark:text-dark-6">
+                      <MinusCircle size={14} className="shrink-0" />
+                      Aucun e-mail demandé — ticket papier uniquement
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Fulfilment info */}

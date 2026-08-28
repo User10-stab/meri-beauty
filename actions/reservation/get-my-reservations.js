@@ -6,6 +6,30 @@ import {
   isAwaitingPayment,
   isAwaitingPaymentChoice,
 } from "@/lib/appointments/payment-followup";
+import { CHECK_IN_KINDS, ensureCheckInCode } from "@/lib/activities/check-in-code";
+import { checkInQrDataUrl } from "@/lib/qrcode";
+
+/**
+ * Mints the appointment's check-in code on first read, same lazy pattern as
+ * getMyOrderHistory's attachCheckInQr for ateliers/formations — minting at
+ * payment-confirmation time would put a unique-index collision on the same
+ * rollback path as a captured Stripe charge, and nothing needs the code
+ * before the customer opens this page.
+ */
+async function attachCheckInQr(appt) {
+  if (appt.status !== "CONFIRMED") return { checkInCode: null, checkInQr: null };
+
+  try {
+    const code = appt.checkInCode ?? (await ensureCheckInCode(prisma, CHECK_IN_KINDS.APPOINTMENT, appt.id));
+    if (!code) return { checkInCode: null, checkInQr: null };
+    return { checkInCode: code, checkInQr: await checkInQrDataUrl(code) };
+  } catch (error) {
+    // The rest of the reservation card is worth more than the QR — degrade
+    // to no ticket rather than failing the whole page.
+    console.error("[getMyReservations] check-in QR generation failed:", error);
+    return { checkInCode: null, checkInQr: null };
+  }
+}
 
 /**
  * Returns all reservations for the authenticated customer, including
@@ -94,8 +118,9 @@ export async function getMyReservations() {
       },
     });
 
-    const data = appointments.map((appt) => {
+    const data = await Promise.all(appointments.map(async (appt) => {
       const payment = appt.payment ?? null;
+      const ticket = await attachCheckInQr(appt);
 
       return {
         // Appointment
@@ -104,6 +129,9 @@ export async function getMyReservations() {
         startTime:   appt.startTime,
         endTime:     appt.endTime,
         status:      appt.status,       // PENDING | ACCEPTED | CONFIRMED | COMPLETED | CANCELLED | NO_SHOW
+        checkInCode: ticket.checkInCode,
+        checkInQr:   ticket.checkInQr,
+        checkedInAt: appt.checkedInAt,
         notes:       appt.notes,
 
         // Service & staff
@@ -178,7 +206,7 @@ export async function getMyReservations() {
             }
           : null,
       };
-    });
+    }));
 
     return { success: true, data };
   } catch (error) {

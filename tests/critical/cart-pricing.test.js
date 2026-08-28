@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { calculateCartPricing, calculateItemPricing } from "@/lib/pricing";
 
-// Net catalogue figures, as serializeCart now hands them over: `price` on a
-// serialized item is already VAT-inclusive for display, so the pricing helper
-// reads the net twins instead and applies the rate that actually applies.
+// ProductVariant stores 121/145.20 TTC. serializeCart derives these HT twins
+// so the pricing helper can apply the rate that actually applies.
 const cartItem = {
   quantity: 2,
   variant: {
@@ -13,7 +12,7 @@ const cartItem = {
 };
 
 describe("boutique cart VAT pricing", () => {
-  it("adds 21% to a net catalogue price by default", () => {
+  it("keeps the stored TTC amount as the Belgian customer price", () => {
     expect(calculateItemPricing(cartItem)).toMatchObject({
       unitPrice: 121,
       totalPrice: 242,
@@ -22,7 +21,7 @@ describe("boutique cart VAT pricing", () => {
     });
   });
 
-  it("charges the bare net price for the 0% intra-Community preview", () => {
+  it("charges the extracted HT price for the 0% intra-Community preview", () => {
     expect(calculateItemPricing(cartItem, 0)).toMatchObject({
       unitPrice: 100,
       totalPrice: 200,

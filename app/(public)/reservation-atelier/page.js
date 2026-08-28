@@ -15,7 +15,7 @@ import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
-import { hasReusableVatValidation, applyVatRate, resolveServiceVatPolicy } from "@/lib/tax-policy";
+import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
@@ -204,7 +204,7 @@ function ReservationAtelierContent() {
     customer: hasReusableVatValidation(savedVatProfile, form.vatNumber) ? savedVatProfile : null,
   });
   const catalogueUnitPrice = Number(activity?.price || 0);
-  const unitPrice = applyVatRate(catalogueUnitPrice, vatPolicy.vatRate);
+  const unitPrice = repriceTtcCataloguePrice(catalogueUnitPrice, vatPolicy.vatRate);
   const totalPrice = unitPrice * seats;
   const discountAmount = appliedPromo?.discountAmount ?? 0;
   const discountedTotal = Math.max(0, totalPrice - discountAmount);
@@ -853,7 +853,7 @@ function ReservationAtelierContent() {
                       booking prints. The 0 % reverse-charge case needs no
                       special row any more: the rate is shown either way. */}
                   <ServicePriceBreakdown
-                    netUnitPrice={catalogueUnitPrice}
+                    unitPriceInclVat={unitPrice}
                     seats={seats}
                     vatRate={vatPolicy.vatRate}
                     discountAmount={discountAmount}

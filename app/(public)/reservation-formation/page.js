@@ -19,7 +19,7 @@ import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
-import { hasReusableVatValidation, applyVatRate, resolveServiceVatPolicy } from "@/lib/tax-policy";
+import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
@@ -213,7 +213,7 @@ function ReservationFormationContent() {
     customer: hasReusableVatValidation(savedVatProfile, form.vatNumber) ? savedVatProfile : null,
   });
   const catalogueUnitPrice = Number(formation?.price || 0);
-  const unitPrice = applyVatRate(catalogueUnitPrice, vatPolicy.vatRate);
+  const unitPrice = repriceTtcCataloguePrice(catalogueUnitPrice, vatPolicy.vatRate);
   const totalPrice = unitPrice * seats;
   const discountAmount = appliedPromo?.discountAmount ?? 0;
   const discountedTotal = Math.max(0, totalPrice - discountAmount);
@@ -853,12 +853,12 @@ function ReservationFormationContent() {
                       booking prints. A private formation is priced per
                       session, not per seat, so it labels its own line. */}
                   <ServicePriceBreakdown
-                    netUnitPrice={catalogueUnitPrice}
+                    unitPriceInclVat={unitPrice}
                     seats={seats}
                     vatRate={vatPolicy.vatRate}
                     discountAmount={discountAmount}
                     totalInclVat={discountedTotal}
-                    unitLabel={isPrivate ? `${priceFormatted.format(catalogueUnitPrice)} HT — formation privée` : null}
+                    unitLabel={isPrivate ? "formation privée" : null}
                   />
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-ink/60">{isFullPayment ? "Montant total" : `Acompte (${depositPct}%)`}</span>

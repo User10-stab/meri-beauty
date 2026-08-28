@@ -1,10 +1,12 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { TYPE_FILTERS, STATUS_FILTERS } from "@/lib/dashboard/operation-filters";
+import { issueCreditNote } from "@/lib/invoicing";
 
 const ADMIN_OPERATION_TABS = Object.freeze(["transactions", "orders", "workshops", "formations"]);
 const PAGE_SIZE = 30;
@@ -51,6 +53,11 @@ export async function getAdminOperations(params = {}) {
           skip,
           take: PAGE_SIZE,
           include: {
+            // A refund row links to exactly one credit note (Transaction.
+            // creditNoteId), never to "whichever ones exist on the invoice" —
+            // an invoice can carry several partial refunds over time, and a
+            // blanket list would attach every one of them to every row.
+            creditNote: { select: { id: true, number: true, totalInclVat: true } },
             payment: {
               select: {
                 status: true,
@@ -60,7 +67,9 @@ export async function getAdminOperations(params = {}) {
                 // collected before settlement, an appointment paid in part),
                 // which the UI has to show as "pas encore de facture" rather
                 // than a dead button.
-                invoice: { select: { id: true, number: true, billitSentAt: true } },
+                invoice: {
+                  select: { id: true, number: true, billitSentAt: true, customerType: true, customerVatNumber: true },
+                },
                 order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
                 workshopReservation: { select: { id: true, session: { select: { workshop: { select: { title: true } } } }, customer: { select: { fullName: true, email: true } } } },
                 formationReservation: { select: { id: true, session: { select: { formation: { select: { title: true } } } }, customer: { select: { fullName: true, email: true } } } },
@@ -170,9 +179,23 @@ export async function getTransactionDetail(transactionId) {
       where: { id: transactionId },
       include: {
         cashSession: { select: { id: true, openedAt: true, closedAt: true } },
+        // This row's own credit note, if any — not every credit note ever
+        // issued against the invoice (see getAdminOperations' same choice).
+        creditNote: { select: { id: true, number: true, issuedAt: true, reason: true, totalInclVat: true } },
         payment: {
           include: {
-            invoice: { select: { id: true, number: true, issuedAt: true, subtotalExclVat: true, vatRate: true, vatAmount: true, totalInclVat: true, vatTreatment: true } },
+            invoice: {
+              select: {
+                id: true,
+                number: true,
+                issuedAt: true,
+                subtotalExclVat: true,
+                vatRate: true,
+                vatAmount: true,
+                totalInclVat: true,
+                vatTreatment: true,
+              },
+            },
             // Sibling transactions: a 50 % acompte followed by a balance
             // settled at the counter are two rows against one Payment, and
             // reading either one alone misrepresents what the customer paid.
@@ -192,5 +215,62 @@ export async function getTransactionDetail(transactionId) {
   } catch (error) {
     console.error("[getTransactionDetail]", error);
     return { success: false, message: "Impossible de charger le détail de cette transaction." };
+  }
+}
+
+/**
+ * Manual remediation for a REFUND row that never got a credit note through
+ * the normal cancellation/return flows — a refund issued by hand from the
+ * Stripe Dashboard, or one recorded before Transaction.creditNoteId existed.
+ * Every automatic path already issues one itself; this only ever fills a gap,
+ * never re-issues over an existing link (see the creditNoteId check below).
+ */
+export async function issueCreditNoteForTransaction(transactionId, reason) {
+  const session = await requireAdminOperationsAccess();
+  if (!session) return { success: false, message: "Non autorisé." };
+  if (typeof transactionId !== "string" || !transactionId) {
+    return { success: false, message: "Transaction introuvable." };
+  }
+
+  try {
+    const transaction = await prisma.transaction.findUnique({
+      where: { id: transactionId },
+      select: {
+        id: true,
+        amount: true,
+        transactionType: true,
+        creditNoteId: true,
+        payment: { select: { invoice: { select: { id: true } } } },
+      },
+    });
+    if (!transaction) return { success: false, message: "Transaction introuvable." };
+    if (transaction.transactionType !== "REFUND") {
+      return { success: false, message: "Seule une transaction de remboursement peut avoir une note de crédit." };
+    }
+    if (transaction.creditNoteId) {
+      return { success: false, message: "Cette transaction a déjà une note de crédit associée." };
+    }
+    if (!transaction.payment?.invoice) {
+      return { success: false, message: "Aucune facture n'est associée à ce paiement — impossible d'émettre une note de crédit." };
+    }
+
+    const creditNote = await prisma.$transaction(async (tx) => {
+      const note = await issueCreditNote(tx, {
+        invoiceId: transaction.payment.invoice.id,
+        reason: reason?.trim() || "Note de crédit générée manuellement",
+        totalInclVat: Number(transaction.amount),
+      });
+      await tx.transaction.update({ where: { id: transaction.id }, data: { creditNoteId: note.id } });
+      return note;
+    });
+
+    revalidatePath("/dashboard/operations");
+    return { success: true, message: `Note de crédit ${creditNote.number} générée.`, data: { creditNoteId: creditNote.id, number: creditNote.number } };
+  } catch (error) {
+    if (error.message === "CREDIT_NOTE_EXCEEDS_INVOICE") {
+      return { success: false, message: "Le montant dépasse ce qui reste créditable sur cette facture." };
+    }
+    console.error("[issueCreditNoteForTransaction]", error);
+    return { success: false, message: "Impossible de générer la note de crédit." };
   }
 }

@@ -77,6 +77,18 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const [emailStatus, setEmailStatus] = useState(null);
   const [checkingEmail, setCheckingEmail] = useState(false);
 
+  // Leaving for Stripe happens through window.location, after `submitting`
+  // becomes true. If the customer uses the browser Back button, the browser
+  // may restore this page from its back/forward cache with that React state
+  // intact, leaving the button on "TRAITEMENT…" forever. pageshow fires both
+  // on a normal load and on a cached restore, so the form becomes usable
+  // again without weakening the double-submit guard while a request is live.
+  useEffect(() => {
+    const resetSubmittingAfterNavigation = () => setSubmitting(false);
+    window.addEventListener("pageshow", resetSubmittingAfterNavigation);
+    return () => window.removeEventListener("pageshow", resetSubmittingAfterNavigation);
+  }, []);
+
   async function handleEmailBlur() {
     const email = customerInfo.email.trim();
     if (!email || !email.includes("@")) return;
@@ -198,10 +210,9 @@ export function CheckoutPageClient({ cart, customerSession }) {
   /**
    * The summary the customer reads, built from the net side.
    *
-   * The catalogue and the carrier grid are both stored net, so goods HT and
-   * carriage HT are read, not re-derived. Only the promo discount has to be
-   * netted down — PromoCodeField works off the VAT-inclusive subtotal, since
-   * that is the figure a "10 % off" code is meant to apply to.
+   * Catalogue prices are stored TTC, with derived HT twins carried by the
+   * cart. The carrier grid is genuinely HT. Only the promo discount has to be
+   * netted down because it applies to the customer-facing total.
    *
    * VAT is then the difference between that net base and the amount actually
    * charged, rather than a fifth independently rounded number: computed this

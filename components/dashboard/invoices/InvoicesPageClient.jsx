@@ -133,7 +133,7 @@ export function InvoicesPageClient({ initialInvoices }) {
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
                       >
-                        <FileMinus size={12} /> {cn.number}
+                        <FileMinus size={12} /> {cn.number} · {formatPrice(-cn.totalInclVat)}
                       </a>
                     ))}
                   </div>

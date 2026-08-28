@@ -142,8 +142,9 @@ export async function cancelReservation(appointmentId) {
       });
       if (claim.count === 0) return null;
 
+      let creditNote = null;
       if (wasPaid && payment.invoice && remaining > REFUND_EPSILON) {
-        await issueCreditNote(tx, {
+        creditNote = await issueCreditNote(tx, {
           invoiceId: payment.invoice.id,
           reason: "Réservation annulée par le client",
           totalInclVat: remaining,
@@ -157,13 +158,13 @@ export async function cancelReservation(appointmentId) {
       // change, no pending amount) — invisible to both the retry cron and
       // the reconciliation dashboard.
       if (needsRefund) {
-        await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey);
+        await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey, creditNote?.id ?? null);
       }
 
-      return true;
+      return { claimed: true, creditNoteId: creditNote?.id ?? null };
     });
 
-    if (!claimed) {
+    if (!claimed?.claimed) {
       return { success: false, message: "Cette réservation est déjà annulée." };
     }
 
@@ -237,6 +238,7 @@ export async function cancelReservation(appointmentId) {
                 method: "ONLINE",
                 transactionType: "REFUND",
                 paidAt: new Date(),
+                creditNoteId: claimed.creditNoteId,
               },
             }),
           ]);

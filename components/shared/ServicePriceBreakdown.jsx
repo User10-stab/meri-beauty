@@ -8,11 +8,10 @@ const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" 
  * HT / TVA / TTC breakdown for a booked service — atelier, événement or
  * formation.
  *
- * These prices are stored net exactly like the boutique catalogue (see
- * prisma/migrations/20260824180000_catalogue_prices_net_of_vat), so the net
- * figure is READ from the catalogue rather than back-calculated from the
- * gross. Only the promo discount has to be netted down, because a promo code
- * applies to the VAT-inclusive price the customer was quoted.
+ * Catalogue prices are stored TTC. `unitPriceInclVat` is the actual unit price
+ * after the buyer's VAT policy has been applied (stored TTC for a Belgian
+ * customer, extracted HT for a 0% reverse-charge customer). The HT line is
+ * derived from that charged amount.
  *
  * VAT is then whatever separates that net base from the total actually
  * charged, never a fourth independently rounded number — computed this way
@@ -23,24 +22,24 @@ const eur = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" 
  * drift into describing the same tax the same customer pays differently.
  *
  * @param {{
- *   netUnitPrice: number,   // catalogue price, hors TVA
+ *   unitPriceInclVat: number, // actual unit price charged at the buyer's rate
  *   seats: number,
  *   vatRate: number,
  *   discountAmount?: number, // promo discount, VAT-inclusive
  *   totalInclVat: number,    // what is actually charged, after discount
- *   unitLabel?: string,
+ *   unitLabel?: string, // optional suffix such as "formation privée"
  * }} props
  */
 export function ServicePriceBreakdown({
-  netUnitPrice,
+  unitPriceInclVat,
   seats,
   vatRate,
   discountAmount = 0,
   totalInclVat,
   unitLabel = null,
 }) {
-  const net = Number(netUnitPrice) || 0;
-  if (net <= 0) {
+  const unitPrice = Number(unitPriceInclVat) || 0;
+  if (unitPrice <= 0) {
     return (
       <div className="flex items-center justify-between text-sm">
         <span className="text-ink/60">Gratuit</span>
@@ -49,7 +48,8 @@ export function ServicePriceBreakdown({
     );
   }
 
-  const goodsNet = roundMoney(net * seats);
+  const netUnitPrice = unitPrice / (1 + Number(vatRate) / 100);
+  const goodsNet = roundMoney(netUnitPrice * seats);
   const discountNet = roundMoney(Number(discountAmount) / (1 + Number(vatRate) / 100));
   const subtotalNet = roundMoney(goodsNet - discountNet);
   const vatAmount = roundMoney(Number(totalInclVat) - subtotalNet);
@@ -58,7 +58,9 @@ export function ServicePriceBreakdown({
     <>
       <div className="flex items-center justify-between text-sm">
         <span className="text-ink/60">
-          {unitLabel ?? `${eur.format(net)} HT × ${seats} place${seats > 1 ? "s" : ""}`}
+          {unitLabel
+            ? `${eur.format(netUnitPrice)} HT — ${unitLabel}`
+            : `${eur.format(netUnitPrice)} HT × ${seats} place${seats > 1 ? "s" : ""}`}
         </span>
         <span className="font-medium text-ink">{eur.format(goodsNet)}</span>
       </div>

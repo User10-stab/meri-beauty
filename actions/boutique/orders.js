@@ -23,8 +23,8 @@ import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { captureError, captureWarning } from "@/lib/monitoring";
-import { calculateVatTotals, hasReusableVatValidation, applyVatRate, resolveGoodsVatPolicy } from "@/lib/tax-policy";
-import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
+import { calculateVatTotals, applyVatRate, repriceTtcCataloguePrice, resolveGoodsVatPolicy } from "@/lib/tax-policy";
+import { saveCheckoutVatNumber } from "@/lib/customer-vat";
 import {
   buildOrderCreatedNotification,
   createNotificationsBulk,
@@ -216,49 +216,6 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   return { user, isNewUser: true, temporaryPassword: null };
 }
 
-async function saveCheckoutVatNumber(user, rawVatNumber) {
-  const vatNumber = rawVatNumber?.trim() ? normalizeVatNumber(rawVatNumber) : null;
-  if (!vatNumber) return { success: true, user };
-
-  if (!isValidVatFormat(vatNumber)) {
-    return {
-      success: false,
-      message: "Numéro de TVA UE invalide. Ajoutez le préfixe pays (BE, FR, DE, NL…).",
-    };
-  }
-
-  if (hasReusableVatValidation(user, vatNumber)) {
-    return { success: true, user };
-  }
-
-  const viesResult = await verifyVatWithVies(vatNumber);
-  if (!viesResult.success) {
-    return {
-      success: false,
-      message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
-    };
-  }
-  if (!viesResult.valid) {
-    return {
-      success: false,
-      message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
-    };
-  }
-
-  const updated = await prisma.user.update({
-    where: { id: user.id },
-    data: {
-      isCompany: true,
-      vatNumber,
-      vatValidatedAt: new Date(),
-      vatValidationName: viesResult.name ?? null,
-      vatValidationAddress: viesResult.address ?? null,
-    },
-  });
-
-  return { success: true, user: updated };
-}
-
 function serializeOrder(order) {
   const paymentMethod = getOrderPaymentMethod(order.payment);
   return {
@@ -289,6 +246,8 @@ function serializeOrder(order) {
     cancelledAt: order.cancelledAt,
     cancelReason: order.cancelReason,
     notes: order.notes,
+    posTicketEmailTo: order.posTicketEmailTo,
+    posTicketEmailSentAt: order.posTicketEmailSentAt,
     createdAt: order.createdAt,
     user: order.user
       ? { id: order.user.id, fullName: order.user.fullName, email: order.user.email, phone: order.user.phone }
@@ -327,6 +286,111 @@ function serializeOrder(order) {
       quantity: item.quantity,
     })),
   };
+}
+
+function pendingOrderMatchesCart(order, cart) {
+  if (!order || order.items.length !== cart.items.length) return false;
+  const quantities = new Map(order.items.map((item) => [item.variantId, item.quantity]));
+  return cart.items.every((item) => quantities.get(item.variantId) === item.quantity);
+}
+
+/**
+ * Makes an old Stripe Checkout Session impossible to pay before its local
+ * stock hold is released. A paid session is returned for idempotent
+ * fulfilment; an unverifiable or concurrently-completing session blocks the
+ * retry instead of risking a paid-but-cancelled order.
+ */
+async function preparePendingStripeSessionForRetry(order) {
+  if (!order.stripeCheckoutSessionId) return { safeToCancel: true, paidSession: null };
+
+  let session;
+  try {
+    session = await stripe.checkout.sessions.retrieve(order.stripeCheckoutSessionId);
+  } catch (error) {
+    console.error("[createOrderFromCart] Unable to verify prior Stripe session:", error);
+    return {
+      safeToCancel: false,
+      paidSession: null,
+      message: "Impossible de vérifier la tentative de paiement précédente. Veuillez réessayer dans quelques instants.",
+    };
+  }
+
+  if (session.payment_status === "paid") {
+    return { safeToCancel: false, paidSession: session };
+  }
+  if (session.status === "complete") {
+    return {
+      safeToCancel: false,
+      paidSession: null,
+      message: "Votre paiement précédent est en cours de confirmation. Veuillez patienter quelques instants.",
+    };
+  }
+  if (session.status === "expired") {
+    return { safeToCancel: true, paidSession: null };
+  }
+  if (session.status !== "open") {
+    return {
+      safeToCancel: false,
+      paidSession: null,
+      message: "La tentative de paiement précédente est encore en cours. Veuillez réessayer dans quelques instants.",
+    };
+  }
+
+  try {
+    await stripe.checkout.sessions.expire(session.id);
+    return { safeToCancel: true, paidSession: null };
+  } catch (error) {
+    // Expiry can lose a race with a payment completing. Re-read once: paid is
+    // fulfilled; every other ambiguous state remains blocked and keeps its
+    // stock hold intact.
+    console.error("[createOrderFromCart] Unable to expire prior Stripe session:", error);
+    try {
+      const latest = await stripe.checkout.sessions.retrieve(session.id);
+      if (latest.payment_status === "paid") {
+        return { safeToCancel: false, paidSession: latest };
+      }
+    } catch (refreshError) {
+      console.error("[createOrderFromCart] Unable to refresh prior Stripe session:", refreshError);
+    }
+    return {
+      safeToCancel: false,
+      paidSession: null,
+      message: "La tentative de paiement précédente n'a pas pu être fermée. Veuillez réessayer dans quelques instants.",
+    };
+  }
+}
+
+/** Releases exactly one pending order's hold, serialized by its cart row. */
+async function cancelPendingOrderForRetry(order) {
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM "Cart" WHERE id = ${order.cartId} FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM "Order" WHERE id = ${order.id} FOR UPDATE`;
+
+    const current = await tx.order.findUnique({
+      where: { id: order.id },
+      include: { items: true },
+    });
+    if (!current || current.status !== "PENDING_PAYMENT") return false;
+
+    await tx.order.update({
+      where: { id: current.id },
+      data: {
+        status: "CANCELLED",
+        cancelledAt: new Date(),
+        cancelReason: "Remplacée par une nouvelle tentative de paiement",
+      },
+    });
+
+    for (const item of current.items) {
+      const released = await tx.productVariant.updateMany({
+        where: { id: item.variantId, reservedQuantity: { gte: item.quantity } },
+        data: { reservedQuantity: { decrement: item.quantity } },
+      });
+      if (released.count !== 1) throw new Error("ORDER_HOLD_INCONSISTENT");
+    }
+
+    return true;
+  });
 }
 
 // ─── Checkout ─────────────────────────────────────────────────────────────────
@@ -372,7 +436,7 @@ export async function createOrderFromCart(input) {
     }
 
     let { user } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
-    const vatSave = await saveCheckoutVatNumber(user, customerInfo.vatNumber);
+    const vatSave = await saveCheckoutVatNumber(prisma, user, customerInfo.vatNumber);
     if (!vatSave.success) return vatSave;
     user = vatSave.user;
     // Returning customer, or an account created before consent was tracked:
@@ -386,62 +450,54 @@ export async function createOrderFromCart(input) {
     // still-live first reservation, self-inflicting a false "out of stock"
     // against their own abandoned order. Silently supersede it: release its
     // hold (no email - this isn't a customer-visible cancellation, it's an
-    // implementation detail of retrying the same purchase). Only relevant
-    // once verified — an unverified retry is reused rather than superseded,
-    // by the check inside the order transaction below.
-    if (user.emailVerified) {
-      const supersededOrder = await prisma.order.findFirst({
-        where: { cartId: fullCart.id, status: "PENDING_PAYMENT" },
-        include: { items: true },
-      });
-      if (supersededOrder) {
-        // Our local PENDING_PAYMENT status can be stale: the customer may
-        // have already paid on Stripe's hosted page moments ago, and the
-        // webhook just hasn't landed yet (real-world delay, or the customer
-        // clicked back/retry before the redirect finished). Blindly
-        // cancelling here would silently swallow that payment — the money
-        // is charged, but no Payment row, no stock decrement, no
-        // confirmation ever gets created, because the webhook later finds
-        // the order no longer PENDING_PAYMENT and no-ops. This happened for
-        // real in testing (order #79: paid on Stripe, cancelled here 13
-        // minutes later by a retry, payment never fulfilled). Check with
-        // Stripe directly before assuming abandonment.
-        let alreadyPaidSession = null;
-        if (supersededOrder.stripeCheckoutSessionId) {
-          try {
-            const priorSession = await stripe.checkout.sessions.retrieve(supersededOrder.stripeCheckoutSessionId);
-            if (priorSession.payment_status === "paid") {
-              alreadyPaidSession = priorSession;
-            }
-          } catch (err) {
-            console.error("[createOrderFromCart] Stripe session check failed, proceeding with supersede:", err);
-          }
-        }
+    // implementation detail of retrying the same purchase). Before releasing
+    // anything, expire an open Stripe Session so the old tab can no longer be
+    // paid. A same-cart unverified order that has not reached Stripe is reused
+    // below instead, including its existing hold.
+    const pendingOrder = await prisma.order.findFirst({
+      where: { cartId: fullCart.id, userId: user.id, status: "PENDING_PAYMENT" },
+      include: { items: true },
+      orderBy: { createdAt: "desc" },
+    });
+    const reuseUnverifiedOrder = Boolean(
+      pendingOrder &&
+      !user.emailVerified &&
+      !pendingOrder.stripeCheckoutSessionId &&
+      pendingOrderMatchesCart(pendingOrder, fullCart)
+    );
+    const preflightHeldQuantityCredit = new Map(
+      reuseUnverifiedOrder ? pendingOrder.items.map((item) => [item.variantId, item.quantity]) : []
+    );
 
-        if (alreadyPaidSession) {
-          // Fulfil it now instead of waiting on a webhook that may already
-          // be in flight — fulfillOrderPayment is idempotent (claims via
-          // Payment.transactionReference), so this is safe even if the real
-          // webhook delivery lands moments later too.
-          await fulfillOrderPayment(alreadyPaidSession);
-          return {
-            success: false,
-            message: "Un paiement pour ce panier a déjà été confirmé. Consultez vos commandes — la confirmation arrive sous peu.",
-          };
-        }
+    if (pendingOrder && !reuseUnverifiedOrder) {
+      const priorAttempt = await preparePendingStripeSessionForRetry(pendingOrder);
+      if (priorAttempt.paidSession) {
+        // fulfillOrderPayment is idempotent, including when the webhook is
+        // already finalizing this same session concurrently.
+        await fulfillOrderPayment(priorAttempt.paidSession);
+        return {
+          success: false,
+          message: "Un paiement pour ce panier a déjà été confirmé. Consultez vos commandes — la confirmation arrive sous peu.",
+        };
+      }
+      if (!priorAttempt.safeToCancel) {
+        return { success: false, message: priorAttempt.message };
+      }
 
-        await prisma.$transaction(async (tx) => {
-          for (const item of supersededOrder.items) {
-            await tx.productVariant.update({
-              where: { id: item.variantId },
-              data: { reservedQuantity: { decrement: item.quantity } },
-            });
-          }
-          await tx.order.update({
-            where: { id: supersededOrder.id },
-            data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: "Remplacée par une nouvelle tentative de paiement" },
-          });
-        });
+      const cancelled = await cancelPendingOrderForRetry(pendingOrder);
+      if (!cancelled) {
+        return {
+          success: false,
+          message: "La tentative de paiement précédente vient de changer d'état. Actualisez la page avant de réessayer.",
+        };
+      }
+
+      // fullCart was loaded before the transaction released this reservation,
+      // so its variant.reservedQuantity snapshot still includes those units.
+      // Credit only the hold we have just released during this preflight; the
+      // locked reservation transaction below reads the fresh database values.
+      for (const item of pendingOrder.items) {
+        preflightHeldQuantityCredit.set(item.variantId, item.quantity);
       }
     }
 
@@ -449,7 +505,13 @@ export async function createOrderFromCart(input) {
       if (item.variant.isDeleted || !item.variant.isActive) {
         return { success: false, message: `"${item.variant.product.name}" n'est plus disponible — retirez-le du panier.` };
       }
-      const available = item.variant.stockQuantity - item.variant.reservedQuantity;
+      // An unverified retry reuses its existing order below. Add only that
+      // order's own hold back for this preflight check so it cannot report its
+      // own reserved units as falsely out of stock.
+      const available =
+        item.variant.stockQuantity -
+        item.variant.reservedQuantity +
+        (preflightHeldQuantityCredit.get(item.variantId) ?? 0);
       if (item.quantity > available) {
         return {
           success: false,
@@ -471,7 +533,7 @@ export async function createOrderFromCart(input) {
     });
     const pricedItems = fullCart.items.map((item) => ({
       ...item,
-      taxUnitPrice: applyVatRate(item.variant.price, taxPolicy.vatRate),
+      taxUnitPrice: repriceTtcCataloguePrice(item.variant.price, taxPolicy.vatRate),
     }));
     const subtotal = pricedItems.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
 
@@ -650,7 +712,13 @@ export async function createOrderFromCart(input) {
       }
 
       return created;
-    });
+    // Cart lock, address/customer resolution, per-item stock decrement and
+    // notifications are all sequential DB round trips on the online checkout
+    // path — the same shape proven to exceed Prisma's 5000ms default
+    // interactive-transaction timeout against Neon elsewhere in this
+    // codebase (see lib/orders/fulfill-order-payment.js). 20s/10s gives real
+    // headroom without masking a genuinely stuck transaction.
+    }, { timeout: 20000, maxWait: 10000 });
 
     // Brand-new or still-unverified guest: the stock hold above already
     // exists (same as a verified checkout), but stop short of Stripe / the
@@ -1245,7 +1313,11 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
       });
 
       return { invoice };
-    });
+    // Same shape as lib/orders/fulfill-order-payment.js: payment, invoice
+    // numbering and per-item stock updates are all sequential DB round
+    // trips that can exceed Prisma's 5000ms default timeout against Neon.
+    // 20s/10s gives real headroom.
+    }, { timeout: 20000, maxWait: 10000 });
 
     if (invoice) {
       const invoicePdf = await renderInvoicePdf(invoice).catch((err) => {
@@ -1527,6 +1599,7 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
             paidAt: new Date(),
             manualReference: originalMethod === "CARD" ? manualRefund.reference.trim() : null,
             cashSessionId: openCashSession?.id ?? null,
+            creditNoteId: creditNote?.id ?? null,
           },
         });
         await tx.payment.update({
@@ -1572,7 +1645,12 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
         const refundIdempotencyKey = `cancel-${orderId}-${randomUUID()}`;
         await prisma.payment.update({
           where: { id: order.payment.id },
-          data: { status: "REFUND_PENDING", pendingRefundAmount: remaining, pendingRefundIdempotencyKey: refundIdempotencyKey },
+          data: {
+            status: "REFUND_PENDING",
+            pendingRefundAmount: remaining,
+            pendingRefundIdempotencyKey: refundIdempotencyKey,
+            pendingRefundCreditNoteId: creditNote?.id ?? null,
+          },
         });
         try {
           const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
@@ -1602,6 +1680,7 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
                   paidAt: new Date(),
                   stripeCheckoutSessionId: order.payment.transactionReference,
                   stripePaymentIntentId,
+                  creditNoteId: creditNote?.id ?? null,
                 },
               }),
               prisma.payment.update({
@@ -1610,6 +1689,7 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
                   status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
                   pendingRefundAmount: null,
                   pendingRefundIdempotencyKey: null,
+                  pendingRefundCreditNoteId: null,
                 },
               }),
               prisma.auditLog.create({

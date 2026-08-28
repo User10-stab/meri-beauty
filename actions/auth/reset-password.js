@@ -121,7 +121,12 @@ export async function resetPassword(input) {
       // live for that address today may be reset.
       const claim = await tx.user.updateMany({
         where: { email: matchedToken.email, isDeleted: false },
-        data: { password: hashedPassword, sessionVersion: { increment: 1 } },
+        // Successfully using a reset link mailed to this address is at
+        // least as strong a proof of ownership as clicking the separate
+        // "verify your email" link — without this, an unverified account
+        // could complete a full password reset and still be turned away at
+        // login for the very email it just proved it controls.
+        data: { password: hashedPassword, sessionVersion: { increment: 1 }, emailVerified: true },
       });
       if (claim.count === 0) return false;
 

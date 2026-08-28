@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import { toast } from "sonner";
 import { X, Loader2, ImagePlus, Star, GripHorizontal } from "lucide-react";
+import { optimizeImage, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES } from "@/lib/imageOptimization";
 
 const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 
@@ -20,23 +21,39 @@ export function ProductImages({ value = [], onChange }) {
   const [overIndex, setOverIndex] = useState(null);
 
   async function handleFiles(files) {
-    const list = Array.from(files ?? []).filter((f) => {
+    const typeFiltered = Array.from(files ?? []).filter((f) => {
       if (!ALLOWED.includes(f.type)) {
         toast.error(`${f.name} : format non accepté (JPEG, PNG, WebP ou GIF).`);
         return false;
       }
-      if (f.size > 20 * 1024 * 1024) {
-        toast.error(`${f.name} : dépasse 20 Mo.`);
+      if (f.size > MAX_INPUT_BYTES) {
+        toast.error(`${f.name} : dépasse 25 Mo.`);
         return false;
       }
       return true;
     });
-    if (!list.length) return;
+    if (!typeFiltered.length) return;
+
+    // Optimize each file (resize to 2500 px, WebP ~88 %, skip small/GIF)
+    const optimizedList = [];
+    for (const f of typeFiltered) {
+      try {
+        const optimized = await optimizeImage(f);
+        if (optimized.size > MAX_OUTPUT_BYTES) {
+          toast.error(`${f.name} : reste trop volumineuse après optimisation (>10 Mo).`);
+          continue;
+        }
+        optimizedList.push(optimized);
+      } catch (err) {
+        toast.error(`${f.name} : ${err?.message ?? "Impossible de traiter l'image."}`);
+      }
+    }
+    if (!optimizedList.length) return;
 
     setUploading(true);
     try {
       const uploaded = [];
-      for (const file of list) {
+      for (const file of optimizedList) {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("folder", "products");
@@ -180,6 +197,7 @@ export function ProductImages({ value = [], onChange }) {
         onChange={(e) => handleFiles(e.target.files)}
       />
 
+      <p className="mt-2 text-xs text-gray-400">Pour une qualité optimale, utilisez une image de moins de 10&nbsp;Mo.</p>
       {value.length === 0 ? (
         <p className="mt-2 text-xs text-gray-400">
           Aucune image. La première image ajoutée devient l'image principale — cliquez sur l'étoile pour en choisir une autre.

@@ -3,9 +3,10 @@
 import { ChevronLeft, ChevronRight, Calendar } from "lucide-react";
 
 /**
- * Calendar navigation and view selector toolbar.
- * Redesigned with improved spacing, typography, and visual hierarchy.
- * 
+ * Calendar navigation and view selector toolbar - Admin Calendar optimized.
+ * Ultra-clean minimalist design with improved button hierarchy, better spacing,
+ * and seamless integration with the calendar aesthetic.
+ *
  * @param {{
  *   view: "day" | "week" | "month",
  *   onViewChange: (v: string) => void,
@@ -30,55 +31,57 @@ export function CalendarToolbar({
   ];
 
   return (
-    <div className="flex flex-wrap items-center gap-4 rounded-xl border border-gray-200 bg-white px-5 py-4 shadow-sm dark:border-gray-700 dark:bg-gray-dark">
-      {/* ── Navigation controls ───────────────────────────────────────── */}
-      <div className="flex items-center gap-1">
+    <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-gray-200/80 bg-gradient-to-br from-white to-gray-50/50 px-5 py-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_rgba(0,0,0,0.02)] dark:border-gray-700/80 dark:from-gray-800/40 dark:to-gray-800/20">
+      {/* ── Navigation controls ──────────────────────────────────────────── */}
+      <div className="flex items-center gap-2">
+        {/* Today button with icon */}
         <button
           onClick={onToday}
-          className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-all hover:bg-gray-50 hover:border-gray-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 dark:hover:border-gray-500"
+          className="group flex items-center gap-1.5 rounded-xl border border-gray-200/80 bg-white px-3.5 py-2 text-[13px] font-semibold text-gray-700 shadow-sm transition-all hover:border-[#303c2f]/20 hover:bg-[#303c2f]/5 hover:text-[#303c2f] active:scale-95 dark:border-gray-700/80 dark:bg-gray-800/60 dark:text-gray-300 dark:hover:border-[#303c2f]/30 dark:hover:bg-[#303c2f]/10 dark:hover:text-white"
         >
+          <Calendar size={14} strokeWidth={2.5} className="transition-transform group-hover:scale-110" />
           Aujourd&apos;hui
         </button>
 
-        <div className="ml-1 flex items-center gap-0.5 border-l border-gray-200 pl-1 dark:border-gray-700">
+        {/* Navigation arrows */}
+        <div className="flex items-center gap-1 rounded-xl border border-gray-200/80 bg-white p-1 shadow-sm dark:border-gray-700/80 dark:bg-gray-800/60">
           <button
             onClick={onPrev}
             aria-label="Période précédente"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-all hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 dark:text-gray-400 dark:hover:bg-gray-700"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-all hover:bg-gray-100 hover:text-gray-900 active:scale-95 dark:text-gray-400 dark:hover:bg-gray-700/60 dark:hover:text-white"
           >
-            <ChevronLeft size={20} strokeWidth={2.5} />
+            <ChevronLeft size={18} strokeWidth={2.5} />
           </button>
           <button
             onClick={onNext}
             aria-label="Période suivante"
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-all hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 dark:text-gray-400 dark:hover:bg-gray-700"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-all hover:bg-gray-100 hover:text-gray-900 active:scale-95 dark:text-gray-400 dark:hover:bg-gray-700/60 dark:hover:text-white"
           >
-            <ChevronRight size={20} strokeWidth={2.5} />
+            <ChevronRight size={18} strokeWidth={2.5} />
           </button>
         </div>
-      </div>
 
-      {/* ── Period label ───────────────────────────────────────────────── */}
-      <div className="flex items-center gap-2">
-        <Calendar size={16} className="text-gray-400 dark:text-gray-500" />
-        <span className="min-w-[180px] text-base font-semibold text-gray-800 dark:text-gray-100">
-          {periodLabel}
-        </span>
+        {/* Period label */}
+        <div className="flex items-center rounded-xl border border-gray-200/80 bg-gradient-to-br from-gray-50 to-white px-4 py-2 shadow-sm dark:border-gray-700/80 dark:from-gray-800/40 dark:to-gray-800/20">
+          <span className="text-[14px] font-bold text-gray-800 dark:text-gray-100">
+            {periodLabel}
+          </span>
+        </div>
       </div>
 
       {/* ── Spacer ────────────────────────────────────────────────────── */}
       <div className="flex-1" />
 
       {/* ── View selector ─────────────────────────────────────────────── */}
-      <div className="flex rounded-lg border border-gray-200 bg-gray-50/50 p-1 dark:border-gray-700 dark:bg-gray-800/50 gap-0.5">
+      <div className="flex items-center gap-1 rounded-xl border border-gray-200/80 bg-white p-1 shadow-sm dark:border-gray-700/80 dark:bg-gray-800/60">
         {views.map(({ key, label }) => (
           <button
             key={key}
             onClick={() => onViewChange(key)}
-            className={`rounded-md px-4 py-2 text-sm font-medium transition-all ${
+            className={`relative rounded-lg px-4 py-1.5 text-[13px] font-semibold transition-all ${
               view === key
-                ? "bg-white text-[#2f3a2e] shadow-md border border-gray-200 dark:bg-gray-700 dark:text-white dark:border-gray-600"
-                : "text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white hover:bg-white/50 dark:hover:bg-gray-700/50"
+                ? "bg-[#303c2f] text-white shadow-[0_2px_8px_rgba(48,60,47,0.25)] dark:bg-[#303c2f] dark:shadow-[0_2px_8px_rgba(48,60,47,0.4)]"
+                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-700/60 dark:hover:text-white"
             }`}
           >
             {label}

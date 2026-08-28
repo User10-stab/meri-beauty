@@ -26,7 +26,6 @@ const createServiceSchema = z.object({
   description: z
     .string()
     .trim()
-    .max(500, "La description ne peut pas dépasser 500 caractères.")
     .optional()
     .nullable(),
   staffAssignments: z.array(staffAssignmentSchema).optional().default([]),
@@ -63,7 +62,6 @@ const updateServiceSchema = z.object({
   description: z
     .string()
     .trim()
-    .max(500, "La description ne peut pas dépasser 500 caractères.")
     .optional()
     .nullable(),
   staffAssignments: z.array(staffAssignmentSchema).optional().default([]),
@@ -733,7 +731,6 @@ const createCategorySchema = z.object({
   description: z
     .string()
     .trim()
-    .max(300, "La description ne peut pas dépasser 300 caractères.")
     .optional()
     .nullable(),
 });
@@ -825,7 +822,6 @@ const updateCategorySchema = z.object({
   description: z
     .string()
     .trim()
-    .max(300, "La description ne peut pas dépasser 300 caractères.")
     .optional()
     .nullable(),
 });

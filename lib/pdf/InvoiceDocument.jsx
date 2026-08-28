@@ -46,6 +46,15 @@ function paymentLine(payment) {
   return `Réglée le ${formatDate(payment.paidAt)} par ${method}`;
 }
 
+function dueDateLine(invoice, payment) {
+  // For staff contract invoices (and any invoice with a dueDate), show the
+  // échéance derived from contract start +30d. Once paid, paymentLine takes
+  // precedence so the document doesn't claim both \"payée\" and \"échéance\".
+  if (payment?.paidAt) return null;
+  if (!invoice.dueDate) return null;
+  return `Échéance : ${formatDate(invoice.dueDate)}`;
+}
+
 export function InvoiceDocument({ invoice, contact = null }) {
   const payment = invoice.payment ?? null;
 
@@ -68,6 +77,7 @@ export function InvoiceDocument({ invoice, contact = null }) {
             name={invoice.sellerName}
             address={invoice.sellerAddress}
             vatNumber={invoice.sellerVatNumber}
+            rib={contact?.rib}
             contact={contact}
           />
           <View style={styles.partyGutter} />
@@ -82,8 +92,9 @@ export function InvoiceDocument({ invoice, contact = null }) {
         <View style={styles.bottom}>
           <TermsBlock
             items={[
-              { label: "Règlement", value: paymentLine(payment) ?? "Paiement sécurisé — dû à réception de la facture" },
+              { label: "Règlement", value: paymentLine(payment) ?? dueDateLine(invoice, payment) ?? "Paiement sécurisé — dû à réception de la facture" },
               { label: "Devise", value: "Euro (EUR)" },
+              contact?.rib ? { label: "Compte bancaire (RIB)", value: contact.rib } : null,
               contact?.email ? { label: "Questions sur cette facture", value: contact.email } : null,
               contact?.website ? { label: "Conditions générales", value: `${contact.website}/conditions-generales` } : null,
             ].filter(Boolean)}
@@ -101,6 +112,7 @@ export function InvoiceDocument({ invoice, contact = null }) {
           sellerName={invoice.sellerName}
           sellerAddress={invoice.sellerAddress}
           sellerVatNumber={invoice.sellerVatNumber}
+          rib={contact?.rib}
           contact={contact}
           reference={`Facture ${invoice.number}`}
         />
@@ -136,6 +148,7 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
             name={invoice.sellerName}
             address={invoice.sellerAddress}
             vatNumber={invoice.sellerVatNumber}
+            rib={contact?.rib}
             contact={contact}
           />
           <View style={styles.partyGutter} />
@@ -148,6 +161,7 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
               { label: "Document corrigé", value: `Facture n° ${invoice.number} du ${formatDate(invoice.issuedAt)}` },
               { label: "Motif", value: creditNote.reason || "Annulation / retour" },
               { label: "Devise", value: "Euro (EUR)" },
+              contact?.rib ? { label: "Compte bancaire (RIB)", value: contact.rib } : null,
               contact?.email ? { label: "Questions sur ce document", value: contact.email } : null,
             ].filter(Boolean)}
           />
@@ -171,6 +185,7 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
           sellerName={invoice.sellerName}
           sellerAddress={invoice.sellerAddress}
           sellerVatNumber={invoice.sellerVatNumber}
+          rib={contact?.rib}
           contact={contact}
           reference={`Note de crédit ${creditNote.number}`}
         />

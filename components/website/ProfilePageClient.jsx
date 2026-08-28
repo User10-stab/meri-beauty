@@ -149,9 +149,6 @@ function ReviewModal({ appointment, onClose, onSaved }) {
               placeholder="Partagez votre expérience…"
               className="w-full resize-none border border-neutral-200 px-4 py-3 text-sm focus:border-gold focus:outline-none"
             />
-            <div className="mt-1 text-right text-xs text-neutral-400">
-              {comment.length}/{REVIEW_COMMENT_MAX_LENGTH}
-            </div>
           </Field>
 
           <div className="flex justify-end gap-3 border-t border-neutral-200 pt-5">

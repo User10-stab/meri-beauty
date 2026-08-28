@@ -51,11 +51,11 @@ const CSP = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   poweredByHeader: false,
-  // Raise the multipart body size limit for API routes to 10 MB.
-  // Default is 4 MB; a 8 MB raw file encodes to ~10.5 MB in multipart — this covers it.
+  // Allow ~10 MB final optimized files via API route + Server Actions.
+  // Multipart/full-file encoding can inflate size slightly, so allow 15 MB.
   experimental: {
     serverActions: {
-      bodySizeLimit: "10mb",
+      bodySizeLimit: "15mb",
     },
   },
   async headers() {

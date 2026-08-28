@@ -278,24 +278,24 @@ function ReservationCard({ reservation, onCancelled }) {
   }
 
   return (
-    <div className="group relative overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-sm transition-all hover:shadow-xl hover:border-[#2f3a2e]/30 hover:-translate-y-1">
+    <div className="group relative overflow-hidden rounded-2xl sm:rounded-3xl border border-gray-200 bg-white shadow-sm transition-all hover:shadow-xl hover:border-[#2f3a2e]/30 hover:-translate-y-1">
       {/* Gradient accent line at top */}
-      <div className="h-1.5 w-full bg-gradient-to-r from-[#2f3a2e] via-[#4a5a48] to-[#C8A46A]" />
+      <div className="h-1 sm:h-1.5 w-full bg-gradient-to-r from-[#2f3a2e] via-[#4a5a48] to-[#C8A46A]" />
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <div className="relative p-6 pb-4">
-        <div className="flex items-start justify-between gap-3">
+      <div className="relative p-4 sm:p-6 pb-2 sm:pb-4">
+        <div className="flex items-start justify-between gap-2 sm:gap-3">
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-lg font-bold text-[#2F3A2E] leading-tight">
+            <h3 className="truncate text-base sm:text-lg font-bold text-[#2F3A2E] leading-tight">
               {reservation.service.name}
             </h3>
-            <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-[#2f3a2e] to-[#4a5a48]">
-                <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <div className="mt-1.5 sm:mt-2 flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
+              <div className="flex h-5 w-5 sm:h-6 sm:w-6 items-center justify-center rounded-full bg-gradient-to-br from-[#2f3a2e] to-[#4a5a48] shrink-0">
+                <svg className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
                 </svg>
               </div>
-              <span className="font-medium">{t("withExpert", { name: reservation.staff.fullName })}</span>
+              <span className="font-medium line-clamp-1">{t("withExpert", { name: reservation.staff.fullName })}</span>
             </div>
           </div>
           <StatusBadge label={apptStatusLabel} className={apptStatusConfig.className} />
@@ -338,35 +338,35 @@ function ReservationCard({ reservation, onCancelled }) {
 
         {/* Payment summary with modern design */}
         {reservation.payment && (
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-gray-50 to-white p-5 border border-gray-200">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">{t("payment")}</span>
+          <div className="relative overflow-hidden rounded-lg sm:rounded-2xl bg-gradient-to-br from-gray-50 to-white p-3 sm:p-5 border border-gray-200">
+            <div className="flex items-center justify-between mb-2 sm:mb-3">
+              <span className="text-[9px] sm:text-xs font-bold text-gray-500 uppercase tracking-wider">{t("payment")}</span>
               <StatusBadge label={paymentStatusLabel} className={paymentStatusConfig.className} />
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
+            <div className="space-y-1 sm:space-y-2">
+              <div className="flex items-center justify-between text-xs sm:text-sm">
                 <span className="text-gray-600">{t("total")}</span>
                 <span className="font-bold text-[#2F3A2E]">
                   {formatAmount(reservation.payment.totalAmount, locale)}
                 </span>
               </div>
-              <div className="flex items-center justify-between text-sm">
+              <div className="flex items-center justify-between text-xs sm:text-sm">
                 <span className="text-gray-600">{t("paid")}</span>
                 <span className="font-bold text-emerald-600">
                   {formatAmount(reservation.payment.paidAmount, locale)}
                 </span>
               </div>
               {reservation.payment.remainingAmount > 0 && (
-                <div className="flex items-center justify-between text-sm pt-2 border-t-2 border-gray-200">
+                <div className="flex items-center justify-between text-xs sm:text-sm pt-1.5 sm:pt-2 border-t-2 border-gray-200">
                   <span className="text-gray-700 font-semibold">{t("remainingToPay")}</span>
-                  <span className="font-bold text-amber-600 text-base">
+                  <span className="font-bold text-amber-600 text-sm sm:text-base">
                     {formatAmount(reservation.payment.remainingAmount, locale)}
                   </span>
                 </div>
               )}
             </div>
             {reservation.payment.invoice && (
-              <div className="mt-3 pt-3 border-t border-gray-200">
+              <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-gray-200">
                 <InvoiceLink invoice={reservation.payment.invoice} />
               </div>
             )}
@@ -393,15 +393,15 @@ function ReservationCard({ reservation, onCancelled }) {
       </div>
 
       {/* ── Footer actions ──────────────────────────────────────────────── */}
-      <div className="space-y-3 border-t border-gray-100 bg-gradient-to-b from-gray-50/50 to-white px-6 py-5">
+      <div className="space-y-2 sm:space-y-3 border-t border-gray-100 bg-gradient-to-b from-gray-50/50 to-white px-4 sm:px-6 py-3 sm:py-5">
         {/* A manually-confirmed request sits at PENDING until staff decide
             and no payment was taken up front — genuine "nothing to act on
             yet" case. Never suppress the "Finaliser le paiement" button by
             firing whenever an unsettled payment (awaitingPayment) still
             needs it. */}
         {effectiveStatus === "PENDING" && !reservation.awaitingPayment && !isCancelled && (
-          <div className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
-            <svg className="mt-0.5 h-4 w-4 shrink-0 text-[#C8A46A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <div className="flex items-start gap-2 rounded-lg sm:rounded-xl border border-gray-200 bg-gray-50 px-3 sm:px-4 py-2 sm:py-3 text-[11px] sm:text-xs text-gray-600">
+            <svg className="mt-0.5 h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-[#C8A46A]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <p className="leading-relaxed">
@@ -413,7 +413,7 @@ function ReservationCard({ reservation, onCancelled }) {
         {reservation.awaitingPaymentChoice && !isCancelled && (
           <Link
             href={`/appointment/${reservation.id}/payment`}
-            className="flex w-full items-center justify-center rounded-xl bg-[#2f3a2e] px-4 py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:bg-[#3d4e3b] hover:shadow-xl"
+            className="flex w-full items-center justify-center rounded-lg sm:rounded-xl bg-[#2f3a2e] px-3 sm:px-4 py-2.5 sm:py-3.5 text-xs sm:text-sm font-bold text-white shadow-lg transition-all hover:bg-[#3d4e3b] hover:shadow-xl"
           >
             {t("choosePayment")}
           </Link>
@@ -424,12 +424,12 @@ function ReservationCard({ reservation, onCancelled }) {
           <button
             onClick={handleResumePayment}
             disabled={loadingPayment}
-            className="group/btn relative w-full overflow-hidden rounded-xl bg-[#2f3a2e] px-4 py-3.5 text-sm font-bold text-white shadow-lg transition-all hover:bg-[#3d4e3b] hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
+            className="group/btn relative w-full overflow-hidden rounded-lg sm:rounded-xl bg-[#2f3a2e] px-3 sm:px-4 py-2.5 sm:py-3.5 text-xs sm:text-sm font-bold text-white shadow-lg transition-all hover:bg-[#3d4e3b] hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-60"
           >
-<span className="relative z-10 flex items-center justify-center gap-2">
+            <span className="relative z-10 flex items-center justify-center gap-2">
                   {loadingPayment ? (
                     <>
-                      <svg className="h-5 w-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <svg className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                       </svg>
@@ -437,7 +437,7 @@ function ReservationCard({ reservation, onCancelled }) {
                     </>
                   ) : (
                     <>
-                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <svg className="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
                       </svg>
                       {t("finalizePayment")}
@@ -452,47 +452,46 @@ function ReservationCard({ reservation, onCancelled }) {
           <>
             {blocked ? (
               /* 48-hour lock notice with exception request */
-              <div className="space-y-3">
-                <div className="flex items-start gap-3 rounded-xl border-2 border-amber-200 bg-amber-50 px-4 py-3">
-                  <svg className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <div className="space-y-2 sm:space-y-3">
+                <div className="flex items-start gap-2 sm:gap-3 rounded-lg sm:rounded-xl border-2 border-amber-200 bg-amber-50 px-3 sm:px-4 py-2 sm:py-3">
+                  <svg className="mt-0.5 h-4 w-4 sm:h-5 sm:w-5 shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                   </svg>
-                  <p className="text-xs text-amber-800 leading-relaxed font-medium">
+                  <p className="text-[11px] sm:text-xs text-amber-800 leading-relaxed font-medium">
                     {t("cancellationLocked", { hours: CANCELLATION_WINDOW_HOURS })}
                   </p>
                 </div>
                 {hasPendingRequest ? (
-                  <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
-                    <p className="text-xs text-amber-800 font-medium">
+                  <div className="rounded-lg sm:rounded-xl bg-amber-50 border border-amber-200 px-3 sm:px-4 py-2 sm:py-3">
+                    <p className="text-[11px] sm:text-xs text-amber-800 font-medium">
                       Votre demande est en attente d'une décision de l'équipe. Aucun remboursement n'est engagé avant son accord.
                     </p>
                   </div>
                 ) : hasRejectedRequest ? (
-                  <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
-                    <p className="text-xs text-red-700 font-medium">
+                  <div className="rounded-lg sm:rounded-xl bg-red-50 border border-red-200 px-3 sm:px-4 py-2 sm:py-3">
+                    <p className="text-[11px] sm:text-xs text-red-700 font-medium">
                       Votre demande exceptionnelle a été refusée. Le rendez-vous et l'acompte restent inchangés.
                       {cancellationRequest.decisionNote ? ` Message de l'équipe : ${cancellationRequest.decisionNote}` : ""}
                     </p>
                   </div>
                 ) : requestOpen ? (
-                  <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-                    <p className="text-xs text-amber-900">
+                  <div className="space-y-1.5 sm:space-y-2 rounded-lg sm:rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 sm:p-3">
+                    <p className="text-[11px] sm:text-xs text-amber-900">
                       Après avoir contacté le salon, expliquez votre situation. Cette demande n'annule pas le rendez-vous et ne garantit pas un remboursement.
                     </p>
                     <textarea
                       value={requestReason}
                       onChange={(event) => setRequestReason(event.target.value)}
-                      maxLength={1000}
-                      rows={3}
+                      rows={2}
                       placeholder="Ex. maladie soudaine, avec toute information utile pour l'équipe"
-                      className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none focus:border-amber-500"
+                      className="w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-amber-500"
                     />
                     <div className="flex justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => setRequestOpen(false)}
                         disabled={submittingRequest}
-                        className="text-xs font-semibold text-gray-600 hover:text-gray-800"
+                        className="text-[11px] sm:text-xs font-semibold text-gray-600 hover:text-gray-800"
                       >
                         Retour
                       </button>
@@ -500,10 +499,10 @@ function ReservationCard({ reservation, onCancelled }) {
                         type="button"
                         onClick={handleExceptionRequest}
                         disabled={submittingRequest || requestReason.trim().length < 10}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-[#2f3a2e] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60 hover:bg-[#3d4e3b]"
+                        className="inline-flex items-center gap-1 rounded-full bg-[#2f3a2e] px-2.5 sm:px-3 py-1 sm:py-1.5 text-xs font-semibold text-white disabled:opacity-60 hover:bg-[#3d4e3b]"
                       >
                         {submittingRequest && (
-                          <svg className="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <svg className="h-2.5 w-2.5 animate-spin" fill="none" viewBox="0 0 24 24">
                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                           </svg>
@@ -516,7 +515,7 @@ function ReservationCard({ reservation, onCancelled }) {
                   <button
                     type="button"
                     onClick={() => setRequestOpen(true)}
-                    className="w-full text-center text-xs font-semibold text-[#2f3a2e] hover:underline"
+                    className="w-full text-center text-xs sm:text-sm font-semibold text-[#2f3a2e] hover:underline"
                   >
                     Demander un examen exceptionnel
                   </button>
@@ -524,13 +523,13 @@ function ReservationCard({ reservation, onCancelled }) {
               </div>
             ) : (
               /* Modify + Cancel row */
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
                 {/* Modify — opens reschedule modal */}
                 <button
                   onClick={() => setModalOpen(true)}
-                  className="flex items-center justify-center gap-2 rounded-xl border-2 border-gray-200 bg-white px-4 py-3 text-sm font-bold text-gray-700 transition-all hover:border-[#2f3a2e] hover:text-[#2f3a2e] hover:shadow-md"
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border-2 border-gray-200 bg-white px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-bold text-gray-700 transition-all hover:border-[#2f3a2e] hover:text-[#2f3a2e] hover:shadow-md"
                 >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <svg className="h-3.5 w-3.5 sm:h-4 sm:w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
                   </svg>
                   {t("modify")}
@@ -540,11 +539,11 @@ function ReservationCard({ reservation, onCancelled }) {
                 <button
                   onClick={handleCancel}
                   disabled={loadingCancel}
-                  className="flex items-center justify-center gap-2 rounded-xl border-2 border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-600 transition-all hover:bg-red-100 hover:border-red-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex items-center justify-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border-2 border-red-200 bg-red-50 px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-bold text-red-600 transition-all hover:bg-red-100 hover:border-red-300 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loadingCancel ? (
                     <>
-                      <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <svg className="h-3.5 w-3.5 sm:h-4 sm:w-4 animate-spin" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                       </svg>

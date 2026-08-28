@@ -28,6 +28,7 @@ import { LanguageTagInput } from "./LanguageTagInput";
 import { ServiceMultiSelect } from "./ServiceMultiSelect";
 import { StaffPermissionsField } from "./StaffPermissionsField";
 import { DEFAULT_STAFF_PERMISSIONS } from "@/lib/authorization";
+import { optimizeImage, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES } from "@/lib/imageOptimization";
 import Button from "@/components/ui/Button";
 
 // ─── Reusable field primitives ────────────────────────────────────────────────
@@ -90,25 +91,37 @@ function PhotoUpload({ value, onChange, error }) {
   async function handleFile(file) {
     if (!file) return;
 
-    // Client-side type/size guard (mirrors server)
+    // Client-side type guard (mirrors server)
     const ALLOWED = ["image/jpeg", "image/png", "image/webp", "image/gif"];
     if (!ALLOWED.includes(file.type)) {
       toast.error("Format non accepté. Utilisez JPEG, PNG, WebP ou GIF.");
       return;
     }
-    if (file.size > 20 * 1024 * 1024) {
-      toast.error("Le fichier ne doit pas dépasser 20 Mo.");
+    if (file.size > MAX_INPUT_BYTES) {
+      toast.error("Le fichier ne doit pas dépasser 25 Mo.");
       return;
     }
 
-    // Show local preview immediately
-    const objectUrl = URL.createObjectURL(file);
+    let fileToUpload = file;
+    try {
+      fileToUpload = await optimizeImage(file);
+    } catch (err) {
+      toast.error(err?.message ?? "Impossible de traiter l'image. Veuillez réessayer avec une autre image.");
+      return;
+    }
+    if (fileToUpload.size > MAX_OUTPUT_BYTES) {
+      toast.error("L'image reste trop volumineuse après optimisation (>10 Mo). Essayez avec une image plus légère.");
+      return;
+    }
+
+    // Show local preview immediately (optimized)
+    const objectUrl = URL.createObjectURL(fileToUpload);
     setPreview(objectUrl);
     setUploading(true);
 
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", fileToUpload);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
       const data = await res.json();
 
@@ -200,6 +213,9 @@ function PhotoUpload({ value, onChange, error }) {
           aria-hidden="true"
         />
       </div>
+      <p className="mt-1.5 max-w-[112px] text-center text-[11px] leading-tight text-gray-400">
+        Pour une qualité optimale, utilisez une image de moins de 10&nbsp;Mo.
+      </p>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );
@@ -416,7 +432,6 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                   id="bio"
                   rows={3}
                   placeholder="Courte présentation du professionnel..."
-                  maxLength={500}
                   {...register("bio")}
                   className={`w-full resize-none rounded-lg border px-3 py-2.5 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:ring-2 ${
                     errors.bio

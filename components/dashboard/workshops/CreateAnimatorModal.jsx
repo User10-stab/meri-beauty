@@ -202,7 +202,6 @@ export function CreateAnimatorModal({ open, onClose, onCreated, animator }) {
               <textarea
                 value={form.bio}
                 onChange={(e) => setForm((prev) => ({ ...prev, bio: e.target.value }))}
-                maxLength={500}
                 className="w-full rounded-lg border border-gray-200 pl-8 pr-3 py-2 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100 min-h-[80px] resize-none"
                 placeholder={t("bioPlaceholder")}
               />

@@ -51,7 +51,7 @@ export function CancellationExceptionRequestsClient({ initialRequests }) {
 
             {pending ? (
               <div className="mt-4 space-y-3">
-                <textarea value={notes[request.id] ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [request.id]: event.target.value }))} rows={2} maxLength={1000} placeholder="Message facultatif pour le client" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
+                <textarea value={notes[request.id] ?? ""} onChange={(event) => setNotes((current) => ({ ...current, [request.id]: event.target.value }))} rows={2} placeholder="Message facultatif pour le client" className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white" />
                 <div className="flex flex-wrap justify-end gap-2">
                   <button type="button" disabled={processingId === request.id} onClick={() => decide(request.id, "REJECTED")} className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 disabled:opacity-50"><X size={15} /> Refuser</button>
                   <button type="button" disabled={processingId === request.id} onClick={() => decide(request.id, "APPROVED")} className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">{processingId === request.id ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Accepter et rembourser l&apos;acompte</button>

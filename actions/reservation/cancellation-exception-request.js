@@ -11,7 +11,7 @@ import { rejectAppointment } from "@/actions/appointment/manage-appointment";
 
 const requestSchema = z.object({
   appointmentId: z.string().min(1),
-  reason: z.string().trim().min(10, "Expliquez brièvement votre situation.").max(1000),
+  reason: z.string().trim().min(10, "Expliquez brièvement votre situation."),
 });
 
 const reviewSchema = z.object({

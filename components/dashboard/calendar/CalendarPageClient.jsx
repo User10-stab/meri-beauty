@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import { Plus } from "lucide-react";
+import { getStaffColor } from "./staffColors";
 import { CalendarToolbar } from "./CalendarToolbar";
 import { StaffFilterChips } from "./StaffFilterChips";
 import { WeekView } from "./WeekView";
@@ -29,30 +30,30 @@ import {
 
 function CalendarSkeleton() {
   return (
-    <div className="animate-pulse overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-dark">
+    <div className="animate-pulse overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.03)] dark:border-gray-700/80 dark:bg-gray-dark">
       {/* Header row */}
-      <div className="grid grid-cols-8 border-b border-gray-100">
-        <div className="h-12 border-r border-gray-100" />
+      <div className="grid grid-cols-8 border-b border-gray-100 dark:border-gray-700/50">
+        <div className="h-12 border-r border-gray-100 dark:border-gray-700/50" />
         {Array.from({ length: 7 }).map((_, i) => (
-          <div key={i} className="flex h-12 flex-col items-center justify-center gap-1 border-r border-gray-100 last:border-r-0">
-            <div className="h-2 w-6 rounded bg-gray-100" />
-            <div className="h-5 w-5 rounded-full bg-gray-100" />
+          <div key={i} className="flex h-12 flex-col items-center justify-center gap-1 border-r border-gray-100 last:border-r-0 dark:border-gray-700/50">
+            <div className="h-2 w-6 rounded bg-gray-100 dark:bg-gray-700" />
+            <div className="h-5 w-5 rounded-full bg-gray-100 dark:bg-gray-700" />
           </div>
         ))}
       </div>
       {/* Time rows */}
       {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="grid grid-cols-8 border-b border-gray-100">
-          <div className="border-r border-gray-100 py-4 pr-2 text-right">
-            <div className="ml-auto h-2 w-8 rounded bg-gray-100" />
+        <div key={i} className="grid grid-cols-8 border-b border-gray-100 dark:border-gray-700/50">
+          <div className="border-r border-gray-100 dark:border-gray-700/50 py-4 pr-2 text-right">
+            <div className="ml-auto h-2 w-8 rounded bg-gray-100 dark:bg-gray-700" />
           </div>
           {Array.from({ length: 7 }).map((_, j) => (
-            <div key={j} className="h-16 border-r border-gray-100 last:border-r-0 p-1">
+            <div key={j} className="h-16 border-r border-gray-100 last:border-r-0 dark:border-gray-700/50 p-1">
               {i === 1 && j === 2 && (
-                <div className="h-10 rounded-lg bg-purple-100" />
+                <div className="h-10 rounded-lg bg-violet-50 dark:bg-violet-900/20" />
               )}
               {i === 3 && j === 4 && (
-                <div className="h-12 rounded-lg bg-blue-100" />
+                <div className="h-12 rounded-lg bg-blue-50 dark:bg-blue-900/20" />
               )}
             </div>
           ))}
@@ -232,7 +233,7 @@ export function CalendarPageClient({
   return (
     <div className="flex flex-col gap-4">
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3">
         <div className="flex-1">
           <CalendarToolbar
             view={view}
@@ -246,9 +247,9 @@ export function CalendarPageClient({
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
-          className="flex h-13 items-center gap-1.5 rounded-xl bg-[#2f3a2e] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#3d4e3b]"
+          className="flex h-[38px] items-center gap-1.5 rounded-xl bg-[#303c2f] px-4 text-[13px] font-semibold text-white shadow-[0_1px_2px_rgba(0,0,0,0.1),0_4px_12px_rgba(0,0,0,0.08)] transition-all hover:bg-[#253025] hover:shadow-[0_2px_4px_rgba(0,0,0,0.1),0_8px_16px_rgba(0,0,0,0.1)] dark:bg-[#303c2f] dark:text-white dark:hover:bg-[#253025]"
         >
-          <Plus size={16} />
+          <Plus size={15} strokeWidth={2.5} />
           Nouveau rendez-vous
         </button>
       </div>
@@ -355,8 +356,8 @@ function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
   
   if (appointments.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white py-16 text-center shadow-sm dark:border-gray-700 dark:bg-gray-dark">
-        <p className="text-sm text-gray-400">
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-gray-200/80 bg-white py-16 text-center shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.03)] dark:border-gray-700/80 dark:bg-gray-dark">
+        <p className="text-[13px] text-gray-400 dark:text-gray-500">
           {t("calendarView.noReservations")}
         </p>
       </div>
@@ -385,11 +386,11 @@ function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
         return (
           <div
             key={day}
-            className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-dark"
+            className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.03)] dark:border-gray-700/80 dark:bg-gray-dark"
           >
             {/* Day header */}
-            <div className="border-b border-gray-100 bg-gray-50/60 px-4 py-2.5 dark:border-gray-700 dark:bg-gray-800/30">
-              <p className="text-sm font-semibold capitalize text-gray-700 dark:text-gray-200">
+            <div className="border-b border-gray-100 px-4 py-2.5 dark:border-gray-700/50">
+              <p className="text-[13px] font-semibold capitalize text-gray-700 dark:text-gray-200">
                 {date.toLocaleDateString("fr-FR", {
                   weekday: "long",
                   day: "numeric",
@@ -400,42 +401,51 @@ function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
             </div>
 
             {/* Appointments */}
-            <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
-              {dayAppts.map((appt) => (
-                <button
-                  key={appt.id}
-                  onClick={() => onAppointmentClick(appt)}
-                  className="flex w-full items-start gap-4 px-4 py-3 text-left transition-colors hover:bg-gray-50 dark:hover:bg-gray-800"
-                >
-                  {/* Time */}
-                  <div className="w-12 flex-shrink-0 text-center">
-                    <p className="text-sm font-bold tabular-nums text-gray-700 dark:text-gray-200">
-                      {appt.startTime
-                        ? new Date(appt.startTime).toLocaleTimeString("fr-FR", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            timeZone: "Europe/Brussels",
-                          })
-                        : "—"}
-                    </p>
-                    <p className="text-[10px] text-gray-400">
-                      {appt.duration ? `${appt.duration}min` : ""}
-                    </p>
-                  </div>
+            <div className="divide-y divide-gray-100 dark:divide-gray-700/30">
+              {dayAppts.map((appt) => {
+                const color = getStaffColor(appt.staffId);
+                return (
+                  <button
+                    key={appt.id}
+                    onClick={() => onAppointmentClick(appt)}
+                    className="relative flex w-full items-start gap-4 px-4 py-3 text-left transition-colors hover:bg-gray-50/60 dark:hover:bg-gray-800/50"
+                    style={{
+                      borderLeftWidth: "3px",
+                      borderLeftColor: color.border,
+                    }}
+                  >
+                    {/* Time */}
+                    <div className="w-12 flex-shrink-0 text-center">
+                      <p className="text-[13px] font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+                        {appt.startTime
+                          ? new Date(appt.startTime).toLocaleTimeString("fr-FR", {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                              timeZone: "Europe/Brussels",
+                            })
+                          : "—"}
+                      </p>
+                      <p className="text-[10px] text-gray-400 dark:text-gray-500">
+                        {appt.duration ? `${appt.duration}min` : ""}
+                      </p>
+                    </div>
 
-                  {/* Info */}
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
-                      {appt.serviceName}
-                    </p>
-                    <p className="truncate text-xs text-gray-500">{appt.customerName}</p>
-                    <p className="truncate text-xs text-gray-400">{appt.staffName}</p>
-                  </div>
-
-                  {/* Confirmed dot */}
-                  <span className="mt-1 h-2 w-2 flex-shrink-0 rounded-full bg-emerald-500" />
-                </button>
-              ))}
+                    {/* Info */}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="truncate text-[13px] font-semibold text-gray-800 dark:text-gray-100">
+                          {appt.serviceName}
+                        </p>
+                        <span className="flex-shrink-0 rounded bg-gray-100 px-1.5 py-px text-[8px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                          RDV
+                        </span>
+                      </div>
+                      <p className="truncate text-[12px] text-gray-500 dark:text-gray-400">{appt.customerName}</p>
+                      <p className="truncate text-[11px] text-gray-400 dark:text-gray-500">{appt.staffName}</p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         );

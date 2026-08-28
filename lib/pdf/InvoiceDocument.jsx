@@ -52,6 +52,7 @@ export function InvoiceDocument({ invoice, contact = null }) {
             name={invoice.sellerName}
             address={invoice.sellerAddress}
             vatNumber={invoice.sellerVatNumber}
+            rib={contact?.rib}
             contact={contact}
           />
           <View style={styles.partyGutter} />
@@ -90,6 +91,7 @@ export function InvoiceDocument({ invoice, contact = null }) {
           sellerName={invoice.sellerName}
           sellerAddress={invoice.sellerAddress}
           sellerVatNumber={invoice.sellerVatNumber}
+          rib={contact?.rib}
           contact={contact}
           reference={`Facture ${invoice.number}`}
         />
@@ -125,6 +127,7 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
             name={invoice.sellerName}
             address={invoice.sellerAddress}
             vatNumber={invoice.sellerVatNumber}
+            rib={contact?.rib}
             contact={contact}
           />
           <View style={styles.partyGutter} />
@@ -155,6 +158,7 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
           sellerName={invoice.sellerName}
           sellerAddress={invoice.sellerAddress}
           sellerVatNumber={invoice.sellerVatNumber}
+          rib={contact?.rib}
           contact={contact}
           reference={`Note de crédit ${creditNote.number}`}
         />

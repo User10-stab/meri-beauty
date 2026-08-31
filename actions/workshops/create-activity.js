@@ -195,7 +195,29 @@ export async function updateActivity(input) {
     const incomingIds = sessions.filter((s) => s.id).map((s) => s.id);
     const idsToDelete = existingIds.filter((eid) => !incomingIds.includes(eid));
 
+    // workshop_reservations.sessionId is ON DELETE CASCADE, so deleting a
+    // session silently destroys every booking on it — no error, no trace, and
+    // Payment.workshopReservationId is left dangling (SET NULL), which breaks
+    // any later refund. A session that still holds reservations is therefore
+    // never dropped as a side effect of an edit: the admin has to cancel or
+    // move those bookings first, deliberately.
     if (idsToDelete.length > 0) {
+      const bookedSessions = await prisma.workshopSession.findMany({
+        where: { id: { in: idsToDelete }, reservations: { some: {} } },
+        select: { id: true, startDate: true, _count: { select: { reservations: true } } },
+      });
+
+      if (bookedSessions.length > 0) {
+        const totalReservations = bookedSessions.reduce((sum, s) => sum + s._count.reservations, 0);
+        return {
+          success: false,
+          message:
+            `Impossible de supprimer ${bookedSessions.length > 1 ? "ces séances" : "cette séance"} : ` +
+            `${totalReservations} réservation${totalReservations > 1 ? "s" : ""} y ${totalReservations > 1 ? "sont" : "est"} rattachée${totalReservations > 1 ? "s" : ""}. ` +
+            `Annulez ou déplacez ces réservations avant de modifier les dates.`,
+        };
+      }
+
       await prisma.workshopSession.deleteMany({ where: { id: { in: idsToDelete } } });
     }
 
@@ -267,6 +289,24 @@ export async function deleteActivity(id) {
     const existingActivity = await prisma.activity.findUnique({ where: { id } });
     if (!existingActivity) {
       return { success: false, message: "Activité introuvable." };
+    }
+
+    // Deleting an Activity cascades onto its sessions and, from there, onto
+    // every reservation booked on them — taking real customer bookings and
+    // their payment links with it. Booking history is financial history, so
+    // it is never destroyed as a side effect: an activity that is over gets
+    // archived (Activity.status ARCHIVED) rather than deleted.
+    const reservationCount = await prisma.workshopReservation.count({
+      where: { session: { workshopId: id } },
+    });
+    if (reservationCount > 0) {
+      return {
+        success: false,
+        message:
+          `Impossible de supprimer « ${existingActivity.title} » : ` +
+          `${reservationCount} réservation${reservationCount > 1 ? "s y sont rattachées" : " y est rattachée"}. ` +
+          `Passez son statut à « Archivé » pour la retirer de l'affichage sans perdre l'historique.`,
+      };
     }
 
     await prisma.activity.delete({ where: { id } });

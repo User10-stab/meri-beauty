@@ -251,6 +251,12 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, staf
           : form.startDate
             ? [
                 {
+                  // Same reason the multi-session branch above keeps its id:
+                  // without it updateFormation reads the existing session as
+                  // "removed", which its guard then refuses outright once the
+                  // session has bookings — so editing a booked single-session
+                  // formation would fail instead of just moving its date.
+                  ...(formation?.sessions?.[0]?.id ? { id: formation.sessions[0].id } : {}),
                   startDate: form.startDate,
                   endDate: form.endDate || null,
                   capacity,

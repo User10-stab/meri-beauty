@@ -412,7 +412,12 @@ model WorkshopSession {
 model WorkshopReservation {
   id                String                    @id @default(cuid())
   sessionId         String
-  session           WorkshopSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // Restrict, not Cascade: a booking is financial history (it carries a
+  // Payment, and through it an Invoice). Cascading let an ordinary "save" on
+  // the parent activity wipe real customer bookings silently — see the
+  // 2026-08-31 incident. The database now refuses; the app guards in
+  // updateActivity/deleteActivity turn that refusal into a readable message.
+  session           WorkshopSession           @relation(fields: [sessionId], references: [id], onDelete: Restrict)
   customerId        String
   customer          User                      @relation(fields: [customerId], references: [id])
   payment           Payment?
@@ -576,7 +581,8 @@ model FormationSession {
 model FormationReservation {
   id                String                     @id @default(cuid())
   sessionId         String
-  session           FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // Restrict for the same reason as WorkshopReservation.session above.
+  session           FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Restrict)
   customerId        String
   customer          User                       @relation(fields: [customerId], references: [id])
   payment           Payment?

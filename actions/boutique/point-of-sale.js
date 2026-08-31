@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
-import { renderInvoicePdf, renderTicketPdf } from "@/lib/pdf/render";
+import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
 import { sendEmail } from "@/lib/email";
 import { captureError } from "@/lib/monitoring";
@@ -732,93 +732,53 @@ export async function completePointOfSaleSale(input) {
       };
     }
 
-    // A Belgian-registered company must receive its invoice over Peppol, not
-    // as an ad-hoc PDF e-mail (Belgium's 2026 structured e-invoicing
-    // mandate) — the invoice above is still created and numbered for VAT
-    // purposes, it just isn't the document handed to the customer here.
-    // Staff send it over Peppol afterward from Opérations (see
-    // actions/invoices/send-invoice-billit.js). A private customer who asked
-    // for nothing gets the exact same treatment for a different reason: no
-    // invoice was ever created for them.
+    // The invoice PDF itself is never auto-e-mailed from the till, even for
+    // a valid-VAT customer — only a compact ticket-style receipt goes out
+    // automatically here. An owed invoice is still created and numbered
+    // above (VAT purposes), staff just review and send it afterward from
+    // Opérations: over Peppol for a Belgian company (mandatory — Belgium's
+    // 2026 structured e-invoicing mandate — see
+    // actions/invoices/send-invoice-billit.js), or by e-mail on demand for
+    // anyone else (see actions/invoices/send-invoice-email.js). A private
+    // customer who asked for nothing gets the same receipt for a different
+    // reason: no invoice was ever created for them.
     const holdsInvoiceForPeppol = Boolean(result.invoice) && isPeppolMandatoryCustomer(result.customer);
-    if (!result.invoice || holdsInvoiceForPeppol) {
-      const salon = await prisma.salon.findUnique({
-        where: { id: "main-salon" },
-        select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
-      });
-      const receiptPdf = await renderTicketPdf({
-        orderNumber: result.order.orderNumber,
-        issuedAt: result.order.createdAt,
-        sellerName: salon?.legalName || "Meri Beauty",
-        sellerAddress: formatSalonAddress(salon),
-        sellerVatNumber: salon?.vatNumber ?? null,
-        subtotalExclVat: result.order.totalExclVat,
-        vatRate: result.order.vatRate,
-        vatAmount: result.order.totalVat,
-        totalInclVat: result.order.totalAmount,
-        lines: result.order.items.map((item) => ({ description: item.productName, quantity: item.quantity, unitPrice: Number(item.unitPrice) })),
-      }).catch((error) => {
-        captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "receipt-pdf" });
-        return null;
-      });
-
-      const receiptEmail = holdsInvoiceForPeppol
-        ? {
-            to: result.customer.email,
-            subject: `Votre reçu — Commande n°${result.order.orderNumber} — Meri Beauty`,
-            text: `Bonjour ${result.customer.fullName},\n\nMerci pour votre achat en magasin. Votre reçu pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est joint à cet e-mail. Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.\n\nL'équipe Meri Beauty`,
-            html: `<p>Bonjour ${result.customer.fullName},</p><p>Merci pour votre achat en magasin.</p><p>Votre reçu pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p><p>Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.</p><p>L'équipe Meri Beauty</p>`,
-            ...(receiptPdf ? { attachments: [{ filename: `recu-${result.order.orderNumber}.pdf`, content: receiptPdf }] } : {}),
-          }
-        : {
-            to: result.customer.email,
-            subject: `Votre reçu — Commande n°${result.order.orderNumber} — Meri Beauty`,
-            text: `Bonjour ${result.customer.fullName},\n\nMerci pour votre achat en magasin. Votre reçu pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est joint à cet e-mail.\n\nL'équipe Meri Beauty`,
-            html: `<p>Bonjour ${result.customer.fullName},</p><p>Merci pour votre achat en magasin.</p><p>Votre reçu pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p><p>L'équipe Meri Beauty</p>`,
-            ...(receiptPdf ? { attachments: [{ filename: `recu-${result.order.orderNumber}.pdf`, content: receiptPdf }] } : {}),
-          };
-      let receiptEmailResult = await sendEmail(receiptEmail);
-      if (!receiptEmailResult?.success) receiptEmailResult = await sendEmail(receiptEmail);
-      if (!receiptEmailResult?.success) {
-        captureError(new Error(receiptEmailResult?.error || "POS receipt email failed"), {
-          area: "point-of-sale",
-          orderId: result.order.id,
-          context: "receipt-email",
-        });
-      }
-
-      revalidatePath("/dashboard/boutique/orders");
-      revalidatePath("/dashboard/boutique/stock");
-      return {
-        success: true,
-        data: {
-          orderId: result.order.id,
-          orderNumber: result.order.orderNumber,
-          documentType: holdsInvoiceForPeppol ? "invoice_pending_peppol" : "receipt",
-          invoiceNumber: holdsInvoiceForPeppol ? result.invoice.number : null,
-          ticketPdfBase64: receiptPdf ? receiptPdf.toString("base64") : null,
-          receiptEmailSent: Boolean(receiptEmailResult?.success),
-        },
-      };
-    }
-
-    const invoicePdf = await renderInvoicePdf(result.invoice).catch((error) => {
-      captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "invoice-pdf" });
+    const salon = await prisma.salon.findUnique({
+      where: { id: "main-salon" },
+      select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
+    });
+    const receiptPdf = await renderTicketPdf({
+      orderNumber: result.order.orderNumber,
+      issuedAt: result.order.createdAt,
+      sellerName: salon?.legalName || "Meri Beauty",
+      sellerAddress: formatSalonAddress(salon),
+      sellerVatNumber: salon?.vatNumber ?? null,
+      subtotalExclVat: result.order.totalExclVat,
+      vatRate: result.order.vatRate,
+      vatAmount: result.order.totalVat,
+      totalInclVat: result.order.totalAmount,
+      lines: result.order.items.map((item) => ({ description: item.productName, quantity: item.quantity, unitPrice: Number(item.unitPrice) })),
+    }).catch((error) => {
+      captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "receipt-pdf" });
       return null;
     });
+
+    const pendingInvoiceNote = !result.invoice
+      ? ""
+      : holdsInvoiceForPeppol
+      ? ` Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
+      : ` Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément par e-mail.`;
     const receiptEmail = {
       to: result.customer.email,
-      subject: `Merci pour votre achat — Commande n°${result.order.orderNumber} — Meri Beauty`,
-      text: `Bonjour ${result.customer.fullName},\n\nMerci pour votre achat en magasin. Votre facture pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est jointe à cet e-mail.\n\nL'équipe Meri Beauty`,
-      html: `<p>Bonjour ${result.customer.fullName},</p><p>Merci pour votre achat en magasin.</p><p>Votre facture pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est jointe à cet e-mail.</p><p>L'équipe Meri Beauty</p>`,
-      ...(invoicePdf ? { attachments: [{ filename: `facture-${result.invoice.number}.pdf`, content: invoicePdf }] } : {}),
+      subject: `Votre reçu — Commande n°${result.order.orderNumber} — Meri Beauty`,
+      text: `Bonjour ${result.customer.fullName},\n\nMerci pour votre achat en magasin. Votre reçu pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est joint à cet e-mail.${pendingInvoiceNote}\n\nL'équipe Meri Beauty`,
+      html: `<p>Bonjour ${result.customer.fullName},</p><p>Merci pour votre achat en magasin.</p><p>Votre reçu pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p>${pendingInvoiceNote ? `<p>${pendingInvoiceNote.trim()}</p>` : ""}<p>L'équipe Meri Beauty</p>`,
+      ...(receiptPdf ? { attachments: [{ filename: `recu-${result.order.orderNumber}.pdf`, content: receiptPdf }] } : {}),
     };
-    let emailResult = await sendEmail(receiptEmail);
-    // One immediate retry covers a transient SMTP/API failure without ever
-    // rolling back a real cash/card sale that was already collected.
-    if (!emailResult?.success) emailResult = await sendEmail(receiptEmail);
-    if (!emailResult?.success) {
-      captureError(new Error(emailResult?.error || "POS receipt email failed"), {
+    let receiptEmailResult = await sendEmail(receiptEmail);
+    if (!receiptEmailResult?.success) receiptEmailResult = await sendEmail(receiptEmail);
+    if (!receiptEmailResult?.success) {
+      captureError(new Error(receiptEmailResult?.error || "POS receipt email failed"), {
         area: "point-of-sale",
         orderId: result.order.id,
         context: "receipt-email",
@@ -832,8 +792,10 @@ export async function completePointOfSaleSale(input) {
       data: {
         orderId: result.order.id,
         orderNumber: result.order.orderNumber,
-        documentType: "invoice",
-        receiptEmailSent: Boolean(emailResult?.success),
+        documentType: !result.invoice ? "receipt" : holdsInvoiceForPeppol ? "invoice_pending_peppol" : "invoice_pending_manual_send",
+        invoiceNumber: result.invoice ? result.invoice.number : null,
+        ticketPdfBase64: receiptPdf ? receiptPdf.toString("base64") : null,
+        receiptEmailSent: Boolean(receiptEmailResult?.success),
       },
     };
   } catch (error) {

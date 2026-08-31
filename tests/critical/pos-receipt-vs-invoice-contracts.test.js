@@ -28,7 +28,14 @@ describe("requestInvoice is optional, defaults false, and only matters for a nam
   });
 });
 
-describe("a named private (B2C) customer gets a receipt by default, a company customer always gets an invoice", () => {
+// 31 Aug 2026: the invoice PDF used to be auto-e-mailed straight from the
+// till for a foreign-VAT company or a private customer who checked "demander
+// une facture" — bypassing the staff review that every other invoiced sale
+// already gets (Belgian B2B goes over Peppol instead, chosen manually from
+// Opérations). Now every named-customer sale gets the same compact receipt
+// automatically; an owed invoice is still created and numbered, but only
+// ever leaves the building when staff send it by hand afterward.
+describe("a named customer always gets a receipt at the till; the invoice itself is never auto-e-mailed", () => {
   const posSource = source("actions/boutique/point-of-sale.js");
 
   test("invoice creation is gated on isCompany OR an explicit request — never on isWalkIn alone", () => {
@@ -39,23 +46,23 @@ describe("a named private (B2C) customer gets a receipt by default, a company cu
     expect(posSource).toContain("const invoice = !wantsInvoice");
   });
 
-  test("a receipt-only sale (no invoice) still renders and e-mails a compact ticket-style document", () => {
-    const receiptBranch = posSource.indexOf("if (!result.invoice || holdsInvoiceForPeppol) {");
-    expect(receiptBranch).toBeGreaterThan(-1);
-    const nextBranch = posSource.indexOf("const invoicePdf = await renderInvoicePdf", receiptBranch);
-    expect(nextBranch).toBeGreaterThan(receiptBranch);
-    const block = posSource.slice(receiptBranch, nextBranch);
+  test("the invoice PDF is never rendered or e-mailed from the till", () => {
+    expect(posSource).not.toContain("renderInvoicePdf");
+    expect(posSource).not.toContain('import { renderInvoicePdf');
+  });
+
+  test("every named-customer sale renders and e-mails the same compact ticket-style receipt", () => {
+    const branch = posSource.indexOf("const holdsInvoiceForPeppol = Boolean(result.invoice)");
+    expect(branch).toBeGreaterThan(-1);
+    const block = posSource.slice(branch);
     // Same renderer as the walk-in ticket — no separate template, no
     // invoice numbering touched anywhere in this branch.
     expect(block).toContain("renderTicketPdf(");
     expect(block).toContain("sendEmail(receiptEmail)");
     expect(block).not.toContain("issueInvoice(");
-    expect(block).toContain('documentType: holdsInvoiceForPeppol ? "invoice_pending_peppol" : "receipt"');
-  });
-
-  test("the invoice branch is still reachable and labelled distinctly", () => {
-    const invoiceReturnIdx = posSource.indexOf('documentType: "invoice"');
-    expect(invoiceReturnIdx).toBeGreaterThan(-1);
+    expect(block).toContain(
+      'documentType: !result.invoice ? "receipt" : holdsInvoiceForPeppol ? "invoice_pending_peppol" : "invoice_pending_manual_send"'
+    );
   });
 
   test("a Belgian company's invoice is created and numbered but withheld from the auto e-mail — Peppol delivers it instead", () => {
@@ -67,6 +74,11 @@ describe("a named private (B2C) customer gets a receipt by default, a company cu
     const taxPolicy = source("lib/tax-policy.js");
     expect(taxPolicy).toContain("export function isPeppolMandatoryCustomer(customer)");
     expect(taxPolicy).toContain('getVatCountryCode(customer.vatNumber) === "BE"');
+  });
+
+  test("a non-Peppol invoice (foreign VAT, or a private customer who checked the box) is flagged for manual sending, not e-mailed here", () => {
+    expect(posSource).toContain("invoice_pending_manual_send");
+    expect(posSource).toContain("transmise séparément par e-mail");
   });
 });
 
@@ -90,5 +102,10 @@ describe("the till only shows the invoice checkbox where it would actually matte
 
   test("a receipt-only sale is printable at the till just like a walk-in ticket", () => {
     expect(clientSource).toContain('result.data.documentType === "receipt"');
+  });
+
+  test("every documentType the server can return is handled — none fall through to a dead default", () => {
+    expect(clientSource).toContain('result.data.documentType === "invoice_pending_peppol"');
+    expect(clientSource).toContain('result.data.documentType === "invoice_pending_manual_send"');
   });
 });

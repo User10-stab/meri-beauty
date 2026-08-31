@@ -318,6 +318,23 @@ export async function deleteFormation(id) {
       return { success: false, message: "Formation introuvable." };
     }
 
+    // Same reasoning as updateFormation's session guard, one level up:
+    // deleting a Formation cascades through its sessions onto every
+    // reservation booked on them. Booking history is financial history —
+    // archive the formation instead of destroying it.
+    const reservationCount = await prisma.formationReservation.count({
+      where: { session: { formationId: id } },
+    });
+    if (reservationCount > 0) {
+      return {
+        success: false,
+        message:
+          `Impossible de supprimer « ${existingFormation.title} » : ` +
+          `${reservationCount} réservation${reservationCount > 1 ? "s y sont rattachées" : " y est rattachée"}. ` +
+          `Passez son statut à « Archivé » pour la retirer de l'affichage sans perdre l'historique.`,
+      };
+    }
+
     await prisma.formation.delete({ where: { id } });
 
     revalidatePath("/dashboard/formations");

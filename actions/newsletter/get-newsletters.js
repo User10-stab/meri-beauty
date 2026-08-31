@@ -17,11 +17,11 @@ export async function getNewsletters() {
       return { success: false, data: [], message: "Permissions insuffisantes" };
     }
 
-    // Get the salon associated with this admin user
-    // We assume the first salon (single-salon setup for now)
+    // The salon is a singleton looked up by its fixed id. findUnique returns
+    // at most one row and rejects orderBy outright ("Unknown argument
+    // `orderBy`"), which threw on every call and broke this page.
     const salon = await prisma.salon.findUnique({
       where: { id: "main-salon" },
-      orderBy: { createdAt: "asc" },
       select: { id: true },
     });
 

@@ -1,3 +1,5 @@
+import * as Sentry from "@sentry/nextjs";
+
 /**
  * Next.js instrumentation hook. Runs once when the server process boots
  * (both `next start` and `next dev`), in the Node.js runtime — the right
@@ -22,11 +24,38 @@ export async function register() {
   process.env.TZ = process.env.TZ || "Europe/Brussels";
 
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Sentry server init was accidentally dropped (with the background-jobs
+    // start below) when this file was rewritten — restore it before anything
+    // else so boot-time errors are captured too.
+    try {
+      await import("./sentry.server.config");
+    } catch (err) {
+      console.error("[instrumentation] sentry.server.config failed on boot:", err);
+    }
+
     try {
       const { refreshSalonBranding } = await import("@/lib/email-templates");
       await refreshSalonBranding();
     } catch (err) {
       console.error("[instrumentation] refreshSalonBranding failed on boot:", err);
     }
+
+    // In-process scheduler (reminders, expiry, refund retries) — read by
+    // /api/health's heartbeat. Each step is guarded so one failure can't
+    // silently keep the jobs from starting.
+    try {
+      const { startBackgroundJobs } = await import("@/lib/background-jobs");
+      startBackgroundJobs();
+    } catch (err) {
+      console.error("[instrumentation] startBackgroundJobs failed on boot:", err);
+    }
+  }
+
+  if (process.env.NEXT_RUNTIME === "edge") {
+    await import("./sentry.edge.config");
   }
 }
+
+// Catches errors Next.js's own request pipeline surfaces (render, route
+// handler, Server Action, proxy) that never reach a try/catch of ours.
+export const onRequestError = Sentry.captureRequestError;

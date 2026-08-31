@@ -7,6 +7,7 @@ import { expireStaleWorkshopHolds } from "@/lib/workshops/expire-stale-holds";
 import { expireStaleFormationHolds } from "@/lib/formations/expire-stale-holds";
 import { retryFailedRefunds } from "@/lib/payments/retry-failed-refunds";
 import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds";
+import { reconcileMissedCheckouts } from "@/lib/payments/reconcile-missed-checkouts";
 import { isValidCronSecret } from "@/lib/cron-auth";
 import { captureCriticalError } from "@/lib/monitoring";
 
@@ -38,6 +39,7 @@ const JOBS = [
   ["expireStaleFormationHolds", expireStaleFormationHolds],
   ["retryFailedRefunds", retryFailedRefunds],
   ["reconcileMissedRefunds", reconcileMissedRefunds],
+  ["reconcileMissedCheckouts", reconcileMissedCheckouts],
 ];
 
 export async function GET(req) {
@@ -96,6 +98,8 @@ export async function GET(req) {
         refundsNeedingManualReconciliation: results.retryFailedRefunds?.needsManualReconciliation ?? null,
         missedRefundsChecked: results.reconcileMissedRefunds?.checked ?? null,
         missedRefundsRecovered: results.reconcileMissedRefunds?.reconciled ?? null,
+        missedCheckoutsChecked: results.reconcileMissedCheckouts?.checked ?? null,
+        missedCheckoutsRecovered: results.reconcileMissedCheckouts?.reconciled ?? null,
         failedJobs: settled
           .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
           .filter(Boolean),

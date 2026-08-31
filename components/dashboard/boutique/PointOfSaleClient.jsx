@@ -528,12 +528,17 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
         router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
         return;
       }
-      // A named but private (B2C) customer who didn't request an invoice
-      // gets the same compact receipt as a walk-in — printable at the till
-      // and e-mailed, but no invoice number consumed. A Belgian company gets
-      // the same receipt treatment for a different reason: their invoice
-      // was created and numbered, but must go out over Peppol, not e-mail.
-      if (result.data.documentType === "receipt" || result.data.documentType === "invoice_pending_peppol") {
+      // Every named-customer sale now gets the same compact receipt,
+      // printable at the till and e-mailed — the invoice PDF itself is never
+      // auto-sent, even for a valid-VAT customer. When one was created and
+      // numbered (owed for VAT purposes), staff review and send it
+      // afterward from Opérations instead: over Peppol for a Belgian
+      // company, or by e-mail on demand for anyone else.
+      if (
+        result.data.documentType === "receipt" ||
+        result.data.documentType === "invoice_pending_peppol" ||
+        result.data.documentType === "invoice_pending_manual_send"
+      ) {
         if (result.data.ticketPdfBase64) {
           const bytes = Uint8Array.from(atob(result.data.ticketPdfBase64), (c) => c.charCodeAt(0));
           const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
@@ -542,6 +547,8 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
         const pendingInvoiceNote =
           result.data.documentType === "invoice_pending_peppol"
             ? ` Facture n°${result.data.invoiceNumber} créée — à transmettre via Peppol depuis Opérations.`
+            : result.data.documentType === "invoice_pending_manual_send"
+            ? ` Facture n°${result.data.invoiceNumber} créée — à envoyer manuellement depuis Opérations.`
             : "";
         if (result.data.receiptEmailSent) {
           toast.success(`Vente n°${result.data.orderNumber} enregistrée. Reçu prêt à imprimer, et envoyé par e-mail au client.${pendingInvoiceNote}`);
@@ -550,11 +557,6 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
         }
         router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
         return;
-      }
-      if (result.data.receiptEmailSent) {
-        toast.success(`Vente n°${result.data.orderNumber} enregistrée. La facture a été envoyée par e-mail.`);
-      } else {
-        toast.error(`Vente n°${result.data.orderNumber} enregistrée, mais l'e-mail n'a pas pu être envoyé. Vérifiez la configuration e-mail.`);
       }
       router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
     });

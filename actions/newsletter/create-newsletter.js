@@ -44,9 +44,9 @@ export async function createNewsletter(input) {
   }
 
   // ── 2. Get the salon ─────────────────────────────────────────────────────
+  // findUnique rejects orderBy — see the same fix in get-newsletters.js.
   const salon = await prisma.salon.findUnique({
     where: { id: "main-salon" },
-    orderBy: { createdAt: "asc" },
     select: { id: true },
   });
 

@@ -255,6 +255,12 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
           : form.startDate
             ? [
                 {
+                  // Carry the existing session's id when editing a
+                  // single-session activity. Without it the server sees no
+                  // incoming id, treats the current session as removed and
+                  // deletes it — which cascades onto every reservation booked
+                  // on that session (see updateActivity).
+                  ...(activity?.sessions?.[0]?.id ? { id: activity.sessions[0].id } : {}),
                   startDate: form.startDate,
                   endDate: form.endDate || null,
                   capacity: parseInt(form.capacity, 10) || 0,

@@ -271,6 +271,14 @@ function serializeOrder(order) {
       issuedAt: cn.issuedAt,
       totalInclVat: Number(cn.totalInclVat),
     })),
+    // The transaction a "Générer une note de crédit" button on this page
+    // would act on — an order's payment is always a single FINAL_PAYMENT
+    // (see fulfillOrderPayment/completePointOfSaleSale), never a deposit.
+    // Null once every such transaction already has one, so the UI can tell
+    // "not generated yet" from "nothing left to generate".
+    creditableTransactionId: order.payment?.invoice
+      ? order.payment.transactions?.find((t) => t.transactionType === "FINAL_PAYMENT" && !t.creditNoteId)?.id ?? null
+      : null,
     returnRequests: (order.returnRequests ?? []).map((rr) => ({
       id: rr.id,
       status: rr.status,

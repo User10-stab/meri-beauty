@@ -52,8 +52,16 @@ describe("point-of-sale security contracts", () => {
   test("sends a transactional receipt without marketing consent", () => {
     expect(pos).toContain("newsletterSubscribed: false");
     expect(pos).toContain("Merci pour votre achat");
-    expect(pos).toContain("renderInvoicePdf");
+    expect(pos).toContain("renderTicketPdf");
     expect(pos).toContain("receiptEmailSent");
+  });
+
+  // 31 Aug 2026: the invoice PDF used to be attached and e-mailed directly
+  // from the till for a valid-VAT customer — see
+  // tests/critical/pos-receipt-vs-invoice-contracts.test.js for the full
+  // contract. It must never come back here.
+  test("never auto-e-mails the invoice PDF itself from the till", () => {
+    expect(pos).not.toContain("renderInvoicePdf");
   });
 
   test("the counter UI supports ZXing camera scanning", () => {

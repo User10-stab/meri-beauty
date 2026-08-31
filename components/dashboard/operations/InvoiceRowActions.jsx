@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { Download, Mail, Send, Eye, Loader2, FileMinus, FilePlus2 } from "lucide-react";
+import { Download, Mail, Send, Eye, Loader2, FileMinus, FilePlus2, Receipt } from "lucide-react";
 import { sendInvoiceByEmail } from "@/actions/invoices/send-invoice-email";
 import { sendInvoiceToBillit } from "@/actions/invoices/send-invoice-billit";
 import { issueCreditNoteForTransaction } from "@/actions/dashboard/admin-operations";
@@ -24,28 +24,28 @@ const money = (value) =>
  * and a row whose buttons simply vanish reads as a rendering bug. The title
  * says why instead.
  *
- * @param {{ invoice: {id: string, number: string, billitSentAt?: string|Date|null, customerType?: string, customerVatNumber?: string|null}|null, creditNote?: {id: string, number: string, totalInclVat: number}|null, transaction?: {id: string, transactionType: string, hasInvoice: boolean}, onOpenDetail?: () => void }} props
+ * @param {{ invoice: {id: string, number: string, billitSentAt?: string|Date|null, customerType?: string, customerVatNumber?: string|null}|null, creditNote?: {id: string, number: string, totalInclVat: number}|null, transaction?: {id: string, transactionType: string, hasInvoice: boolean}, orderId?: string|null, onOpenDetail?: () => void }} props
  */
-export function InvoiceRowActions({ invoice, creditNote = null, transaction = null, onOpenDetail }) {
+export function InvoiceRowActions({ invoice, creditNote = null, transaction = null, orderId = null, onOpenDetail }) {
   const [sending, setSending] = useState(false);
   const [sendingBillit, setSendingBillit] = useState(false);
   const [confirmingBillit, setConfirmingBillit] = useState(false);
   const [generatingNote, setGeneratingNote] = useState(false);
   const [confirmingNote, setConfirmingNote] = useState(false);
-  const [noteReason, setNoteReason] = useState("");
 
-  // A credit note only ever corrects a refund, and only when there's an
-  // invoice to correct — offering this on a DEPOSIT/FINAL_PAYMENT row, or one
-  // with no invoice, would have nothing legitimate to credit against.
-  const canGenerateNote = Boolean(transaction) && transaction.transactionType === "REFUND" && transaction.hasInvoice && !creditNote;
+  // A credit note only ever corrects an invoice, so any transaction row that
+  // already carries one is eligible — a refund, but also a deposit or final
+  // payment staff need to correct by hand (a price adjustment, a partial
+  // discount granted after the fact). One row, one credit note: once it has
+  // one, the button gives way to the download link above.
+  const canGenerateNote = Boolean(transaction) && transaction.hasInvoice && !creditNote;
 
   async function handleGenerateCreditNote() {
     if (!transaction || generatingNote) return;
     setGeneratingNote(true);
-    const result = await issueCreditNoteForTransaction(transaction.id, noteReason);
+    const result = await issueCreditNoteForTransaction(transaction.id);
     setGeneratingNote(false);
     setConfirmingNote(false);
-    setNoteReason("");
     if (result.success) toast.success(result.message);
     else toast.error(result.message);
   }
@@ -115,6 +115,29 @@ export function InvoiceRowActions({ invoice, creditNote = null, transaction = nu
         </span>
       )}
 
+      {/* The reçu/ticket sent to the customer at the till — re-renders on
+          demand from the order (see app/api/orders/[id]/ticket), so this
+          works even when the sale never got an Invoice at all (a B2C
+          till sale, or one still pending its Peppol facture). Only a
+          boutique Order has this document; an appointment/atelier/formation
+          payment has none, so this stays disabled rather than hidden. */}
+      {orderId ? (
+        <a
+          href={`/api/orders/${orderId}/ticket`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={BUTTON}
+          title="Télécharger le reçu / ticket de caisse déjà envoyé au client"
+          aria-label="Télécharger le reçu / ticket de caisse"
+        >
+          <Receipt size={15} />
+        </a>
+      ) : (
+        <span className={BUTTON} title="Pas de ticket — ce paiement n'est pas une commande boutique" aria-disabled="true">
+          <Receipt size={15} />
+        </span>
+      )}
+
       <button
         type="button"
         onClick={handleSendEmail}
@@ -173,15 +196,16 @@ export function InvoiceRowActions({ invoice, creditNote = null, transaction = nu
         </a>
       )}
 
-      {/* Covers a refund that never got one automatically — done by hand
-          from the Stripe Dashboard, or recorded before this link existed. */}
+      {/* Covers both a refund that never got one automatically (done by hand
+          from the Stripe Dashboard, or recorded before this link existed) and
+          a manual correction on any other invoiced transaction. */}
       {canGenerateNote && (
         <button
           type="button"
           onClick={() => setConfirmingNote(true)}
           disabled={generatingNote}
           className={`${BUTTON} border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700`}
-          title="Générer une note de crédit pour ce remboursement"
+          title="Générer une note de crédit pour cette transaction"
           aria-label="Générer une note de crédit"
         >
           {generatingNote ? <Loader2 size={15} className="animate-spin" /> : <FilePlus2 size={15} />}
@@ -197,23 +221,8 @@ export function InvoiceRowActions({ invoice, creditNote = null, transaction = nu
           cancelLabel="Annuler"
           loading={generatingNote}
           onConfirm={handleGenerateCreditNote}
-          onCancel={() => {
-            setConfirmingNote(false);
-            setNoteReason("");
-          }}
-        >
-          <label htmlFor="credit-note-reason" className="block text-xs font-medium text-gray-600">
-            Motif (facultatif)
-          </label>
-          <textarea
-            id="credit-note-reason"
-            value={noteReason}
-            onChange={(e) => setNoteReason(e.target.value)}
-            rows={2}
-            className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#2f3a2e]"
-            placeholder="Remboursement effectué manuellement le…"
-          />
-        </ConfirmDialog>
+          onCancel={() => setConfirmingNote(false)}
+        />
       )}
     </div>
   );

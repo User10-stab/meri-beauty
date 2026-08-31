@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   DEPLOYMENT_METADATA_KEY,
@@ -17,20 +18,57 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8");
 // production database, and hit fulfill-order-payment's "order gone → refund"
 // branch. Locally the order showed PAID + invoiced; on Stripe it showed fully
 // refunded.
+//
+// P0 (31 Aug 2026): the same failure one layer down. The stamp was the host
+// alone, and every developer's machine stamps "localhost:3000" — so two
+// people running the app locally against the same Stripe test key were
+// indistinguishable to this guard and each processed the other's payments. A
+// real workshop deposit (10,50 €, session cs_test_a1shSr…) was captured and
+// refunded ~2s later by the other machine's "reservation gone → refund"
+// branch, while our database showed the booking CONFIRMED with a valid ticket.
+// A loopback host identifies a machine, not a deployment: it has to carry one.
 describe("Checkout Sessions are isolated per deployment", () => {
-  const original = process.env.NEXT_PUBLIC_APP_URL;
+  const originalUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const originalId = process.env.STRIPE_DEPLOYMENT_ID;
   beforeEach(() => {
     process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    delete process.env.STRIPE_DEPLOYMENT_ID;
   });
   afterEach(() => {
-    process.env.NEXT_PUBLIC_APP_URL = original;
+    process.env.NEXT_PUBLIC_APP_URL = originalUrl;
+    if (originalId === undefined) delete process.env.STRIPE_DEPLOYMENT_ID;
+    else process.env.STRIPE_DEPLOYMENT_ID = originalId;
   });
 
   test("sessions are stamped with this deployment's host, preserving existing metadata", () => {
     const stamped = withDeploymentStamp({ kind: "order", orderId: "abc" });
     expect(stamped.kind).toBe("order");
     expect(stamped.orderId).toBe("abc");
-    expect(stamped[DEPLOYMENT_METADATA_KEY]).toBe("localhost:3000");
+    expect(stamped[DEPLOYMENT_METADATA_KEY]).toBe(`localhost:3000@${hostname().toLowerCase()}`);
+  });
+
+  test("a non-loopback deployment keeps the bare host — production's stamp is unchanged", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://meribeautystudio.com";
+    expect(getDeploymentId()).toBe("meribeautystudio.com");
+  });
+
+  test("two developers on localhost:3000 are not the same deployment", () => {
+    // What actually happened: identical URL, identical port, different
+    // machine, different database. The stamp has to separate them.
+    const theirs = { metadata: { kind: "workshop", [DEPLOYMENT_METADATA_KEY]: "localhost:3000@some-other-laptop" } };
+    expect(isForeignCheckoutSession(theirs)).toBe(true);
+  });
+
+  test("a bare loopback stamp belongs to no machine in particular, so it is foreign", () => {
+    const preFix = { metadata: { kind: "workshop", [DEPLOYMENT_METADATA_KEY]: "localhost:3000" } };
+    expect(isForeignCheckoutSession(preFix)).toBe(true);
+  });
+
+  test("STRIPE_DEPLOYMENT_ID overrides, for two instances on one machine", () => {
+    process.env.STRIPE_DEPLOYMENT_ID = "dev-b";
+    expect(getDeploymentId()).toBe("dev-b");
+    expect(isForeignCheckoutSession({ metadata: { [DEPLOYMENT_METADATA_KEY]: "dev-a" } })).toBe(true);
+    expect(isForeignCheckoutSession({ metadata: { [DEPLOYMENT_METADATA_KEY]: "dev-b" } })).toBe(false);
   });
 
   test("a session stamped by another deployment is recognised as foreign", () => {
@@ -81,5 +119,20 @@ describe("Checkout Sessions are isolated per deployment", () => {
     expect(guardAt).toBeGreaterThan(-1);
     expect(dispatchAt).toBeGreaterThan(-1);
     expect(guardAt).toBeLessThan(dispatchAt);
+  });
+
+  // Belt and braces: the route guard is one line, and every refundSession
+  // call site is reached from "we have no record of this payment" — the exact
+  // shape a foreign payment takes. The money call itself must also refuse.
+  test("refundSession refuses a foreign session even if the route guard is bypassed", () => {
+    const lib = source("lib/stripe-refund-session.js");
+    const guardAt = lib.indexOf("isForeignCheckoutSession(session)");
+    const refundAt = lib.indexOf("stripe.refunds.create");
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(refundAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(refundAt);
+    // It must return, not throw — throwing makes the webhook 500 and Stripe
+    // redeliver the same foreign event forever.
+    expect(lib.slice(guardAt, refundAt)).toContain("return;");
   });
 });

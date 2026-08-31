@@ -95,7 +95,7 @@ export async function GET(request) {
  * {
  *   rentalType: string,
  *   startDate: string (ISO date),
- *   endDate: string (ISO date),
+ *   desiredPace?: "1_day_per_week" | "2_days_per_week" | "3_days_per_week" | "full_week",
  *   commissionType: "PERCENTAGE" | "FIXED" | "HYBRID",
  *   message?: string
  * }
@@ -136,7 +136,7 @@ export async function POST(request) {
     return badRequest("Validation échouée.", errors);
   }
 
-  const { rentalType, startDate, endDate, commissionType, specialty, vatNumber, message } =
+  const { rentalType, startDate, desiredPace, commissionType, specialty, vatNumber, message } =
     validationResult.data;
 
   let vatValidation = null;
@@ -182,7 +182,7 @@ export async function POST(request) {
             : undefined,
           rentalType,
           startDate: new Date(startDate),
-          endDate: endDate ? new Date(endDate) : null,
+          desiredPace: desiredPace || null,
           commissionType,
           specialty,
           // vatNumber is NOT a field on RentalRequest — it only exists on
@@ -235,11 +235,20 @@ export async function POST(request) {
 
     for (const admin of admins) {
       if (admin.email) {
+        const paceLabels = {
+          "1_day_per_week": "1 jour par semaine",
+          "2_days_per_week": "2 jours par semaine",
+          "3_days_per_week": "3 jours par semaine",
+          "full_week": "Toute la semaine",
+        };
+        const paceLabel = result.rentalRequest.desiredPace
+          ? paceLabels[result.rentalRequest.desiredPace] || result.rentalRequest.desiredPace
+          : null;
         await sendEmail({
           to: admin.email,
           subject: "Nouvelle demande de location – Meri Beauty",
-          text: `Bonjour,\n\nUne nouvelle demande de location a été soumise.\n\nType: ${result.rentalRequest.rentalType}\nDate de début: ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}\n${result.rentalRequest.endDate ? `Date de fin: ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}\n` : ""}Type de commission: ${result.rentalRequest.commissionType}\n\nMessage: ${result.rentalRequest.message || "Aucun message"}\n\nVeuillez consulter le tableau de bord pour traiter cette demande.\n\nL'équipe Meri Beauty`,
-          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p><p><strong>Type:</strong> ${escapeHtml(result.rentalRequest.rentalType)}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${result.rentalRequest.endDate ? `<br><strong>Date de fin:</strong> ${new Date(result.rentalRequest.endDate).toLocaleDateString("fr-FR")}` : ""}<br><strong>Type de commission:</strong> ${escapeHtml(result.rentalRequest.commissionType)}</p><p><strong>Message:</strong> ${escapeHtml(result.rentalRequest.message || "Aucun message")}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
+          text: `Bonjour,\n\nUne nouvelle demande de location a été soumise.\n\nType: ${result.rentalRequest.rentalType}\nDate de début: ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}\n${paceLabel ? `Rythme souhaité: ${paceLabel}\n` : ""}Type de commission: ${result.rentalRequest.commissionType}\n\nMessage: ${result.rentalRequest.message || "Aucun message"}\n\nVeuillez consulter le tableau de bord pour traiter cette demande.\n\nL'équipe Meri Beauty`,
+          html: `<p>Bonjour,</p><p>Une nouvelle demande de location a été soumise.</p><p><strong>Type:</strong> ${escapeHtml(result.rentalRequest.rentalType)}<br><strong>Date de début:</strong> ${new Date(result.rentalRequest.startDate).toLocaleDateString("fr-FR")}${paceLabel ? `<br><strong>Rythme souhaité:</strong> ${escapeHtml(paceLabel)}` : ""}<br><strong>Type de commission:</strong> ${escapeHtml(result.rentalRequest.commissionType)}</p><p><strong>Message:</strong> ${escapeHtml(result.rentalRequest.message || "Aucun message")}</p><p>Veuillez consulter le tableau de bord pour traiter cette demande.</p><p>L'équipe Meri Beauty</p>`,
         }).catch((err) => console.error("[POST /api/rental-requests] admin email failed:", err));
       }
     }

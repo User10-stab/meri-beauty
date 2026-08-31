@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
 import { isValidVatFormat } from "@/lib/vat-validation";
+import { useTranslations } from "next-intl";
 
 
 function useInView(threshold = 0.1) {
@@ -66,22 +67,14 @@ function formatDateInputValue(date) {
   return `${year}-${month}-${day}`;
 }
 
-const BENEFITS = [
-  "Fauteuil ou cabine privative",
-  "Flexibilité des contrats",
-  "Clientèle existante",
-  "Ambiance premium & conviviale",
-];
-
 export default function BecomePartner() {
+  const t = useTranslations("becomePartner");
   const [sectionRef, sectionInView] = useInView();
   const todayDate = formatDateInputValue(new Date());
 
   const [formData, setFormData] = useState({
-    locationType: "chair",
     startDate: "",
-    endDate: "",
-    commissionType: "percentage",
+    desiredPace: "",
     specialty: "",
     vatNumber: "",
     message: "",
@@ -140,7 +133,7 @@ export default function BecomePartner() {
       setSubmitStatus({ type: null, message: "" });
 
       try {
-        const rentalType = pendingData.locationType === "chair" ? "Fauteuil" : "Cabine privative";
+        const rentalType = "Cabine";
 
         const requestData = {
           rentalType,
@@ -151,8 +144,8 @@ export default function BecomePartner() {
           message: pendingData.message || undefined,
         };
 
-        if (pendingData.endDate) {
-          requestData.endDate = pendingData.endDate;
+        if (pendingData.desiredPace) {
+          requestData.desiredPace = pendingData.desiredPace;
         }
 
         const response = await fetch("/api/rental-requests", {
@@ -167,7 +160,7 @@ export default function BecomePartner() {
           result = text ? JSON.parse(text) : null;
         } catch (err) {
           console.error("Invalid JSON response from /api/rental-requests:", text);
-          throw new Error("Réponse du serveur invalide. Veuillez réessayer.");
+          throw new Error(t("invalidServerResponse"));
         }
 
         if (!response.ok) {
@@ -177,20 +170,20 @@ export default function BecomePartner() {
               .join("\n");
             throw new Error(errorMessages);
           }
-          throw new Error(result?.message || `Erreur serveur (${response.status}).`);
+          throw new Error(result?.message || t("serverError", { status: response.status }));
         }
 
         if (result?.success) {
-          toast.success("Votre demande a été envoyée avec succès ! Nous vous contacterons sous 48h.");
+          toast.success(t("requestSent"));
           router.push("/");
         } else {
-          throw new Error(result.message || "Erreur lors de l'envoi de la demande.");
+          throw new Error(result.message || t("sendError"));
         }
       } catch (error) {
         console.error("Error submitting rental request:", error);
         setSubmitStatus({
           type: "error",
-          message: error.message || "Une erreur est survenue. Veuillez réessayer.",
+          message: error.message || t("genericError"),
         });
       } finally {
         setLoading(false);
@@ -217,12 +210,12 @@ export default function BecomePartner() {
     }
 
     if (!formData.startDate) {
-      setSubmitStatus({ type: "error", message: "Veuillez renseigner la date de début." });
+      setSubmitStatus({ type: "error", message: t("startDateRequired") });
       return;
     }
 
     if (formData.startDate < todayDate) {
-      setSubmitStatus({ type: "error", message: "La date de début ne peut pas être dans le passé." });
+      setSubmitStatus({ type: "error", message: t("startDateInPast") });
       return;
     }
 
@@ -231,7 +224,7 @@ export default function BecomePartner() {
     // missing. Checked here too so a typo shows an explanation instead of a
     // bare 422 from the API.
     if (!formData.vatNumber?.trim()) {
-      setSubmitStatus({ type: "error", message: "Veuillez renseigner votre numéro de TVA." });
+      setSubmitStatus({ type: "error", message: t("startDateRequired") });
       return;
     }
     if (!isValidVatFormat(formData.vatNumber)) {
@@ -243,17 +236,11 @@ export default function BecomePartner() {
       return;
     }
 
-    // Only validate endDate if it's provided
-    if (formData.endDate && new Date(formData.endDate) <= new Date(formData.startDate)) {
-      setSubmitStatus({ type: "error", message: "La date de fin doit être postérieure à la date de début." });
-      return;
-    }
-
     setLoading(true);
     setSubmitStatus({ type: null, message: "" });
 
     try {
-      const rentalType = formData.locationType === "chair" ? "Fauteuil" : "Cabine privative";
+      const rentalType = "Cabine";
 
       const requestData = {
         rentalType,
@@ -264,9 +251,9 @@ export default function BecomePartner() {
         message: formData.message || undefined,
       };
 
-      // Only include endDate if the user provided one
-      if (formData.endDate) {
-        requestData.endDate = formData.endDate;
+      // Only include desiredPace if the user provided one
+      if (formData.desiredPace) {
+        requestData.desiredPace = formData.desiredPace;
       }
 
       const response = await fetch("/api/rental-requests", {
@@ -283,7 +270,7 @@ export default function BecomePartner() {
         result = text ? JSON.parse(text) : null;
       } catch (err) {
         console.error("Invalid JSON response from /api/rental-requests:", text);
-        throw new Error("Réponse du serveur invalide. Veuillez réessayer.");
+        throw new Error(t("invalidServerResponse"));
       }
 
       if (!response.ok) {
@@ -293,21 +280,21 @@ export default function BecomePartner() {
             .join("\n");
           throw new Error(errorMessages);
         }
-        throw new Error(result?.message || `Erreur serveur (${response.status}).`);
+        throw new Error(result?.message || t("serverError", { status: response.status }));
       }
 
       if (result?.success) {
         // Show success toast and redirect to home page
-        toast.success("Votre demande a été envoyée avec succès ! Nous vous contacterons sous 48h.");
+        toast.success(t("requestSent"));
         router.push("/");
       } else {
-        throw new Error(result.message || "Erreur lors de l'envoi de la demande.");
+        throw new Error(result.message || t("sendError"));
       }
     } catch (error) {
       console.error("Error submitting rental request:", error);
       setSubmitStatus({ 
         type: "error", 
-        message: error.message || "Une erreur est survenue. Veuillez réessayer." 
+        message: error.message || t("genericError") 
       });
     } finally {
       setLoading(false);
@@ -318,22 +305,18 @@ export default function BecomePartner() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSpecialtyChange = (e) => {
-    setFormData({ ...formData, specialty: e.target.value });
-  };
-
   return (
     <section
       ref={sectionRef}
       id="rejoindre"
       className="relative w-full overflow-hidden"
-      style={{ minHeight: "520px" }}
+      style={{ minHeight: "90vh" }}
     >
       {/* ── Full-bleed salon background image ── */}
       <div className="absolute inset-0">
         <Image
-          src="/Images/salone.webp"
-          alt="Intérieur du salon MeriBeauty"
+          src="/Images/DemandLocation.webp"
+          alt={t("imageAlt")}
           fill
           className="object-cover object-center"
           priority={false}
@@ -346,41 +329,44 @@ export default function BecomePartner() {
           Mid   = salon photo shows through (≈20%)
           Right = white form card (≈40%)
       ══════════════════════════════════════════ */}
-      <div className="relative flex w-full flex-col items-stretch lg:min-h-[660px] lg:flex-row">
+      <div className="relative flex w-full flex-col items-stretch lg:min-h-[90vh] lg:flex-row">
 
         {/* ── LEFT: Dark green content panel ── */}
         <div
           className={`relative z-10 flex w-full flex-col justify-center bg-primary px-6 py-12 sm:px-10 sm:py-16
             transition-all duration-700 ease-out
-            lg:w-[35%] lg:px-14 lg:py-20
-            ${sectionInView ? "opacity-90 translate-x-0" : "opacity-0 -translate-x-8"}`}
+            lg:w-[30%] lg:px-14 lg:py-20
+            ${sectionInView ? "opacity-80 translate-x-0" : "opacity-0 -translate-x-8"}`}
         >
           {/* Eyebrow */}
           <div className="mb-6 inline-flex items-center gap-3">
             <span className="h-px w-7 bg-gold/70" />
             <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold">
-              Rejoignez-nous
+              {t("eyebrow")}
             </span>
           </div>
 
           {/* Heading */}
           <h2 className="mb-5 text-[2rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[2.3rem] lg:text-[3rem]">
-            Louez un espace,{" "}
-            <em className="font-light text-gold/90 not-italic">
-              développez votre talent.
-            </em>
+            {t("heading")}
           </h2>
 
           {/* Body */}
           <p className="mb-8 max-w-[380px] text-[15px] leading-[1.8] text-white/60">
-            Vous êtes coiffeuse, esthéticienne ou professionnelle de la beauté ?
-            Rejoignez MeriBeauty et profitez d'un espace haut de gamme pour faire
-            grandir votre clientèle.
+            {t("body1")} <br />
+            {t("body2")} <br /><br />
+            {t("body3")} <br />
+            {t("body4")}
           </p>
 
           {/* Benefits */}
           <ul className="mb-10 flex flex-col gap-3">
-            {BENEFITS.map((benefit) => (
+            {[
+              t("benefit1"),
+              t("benefit2"),
+              t("benefit3"),
+              t("benefit4"),
+            ].map((benefit) => (
               <li key={benefit} className="flex items-center gap-3">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gold/15">
                   <CheckIcon className="h-3 w-3 text-gold" />
@@ -417,49 +403,21 @@ export default function BecomePartner() {
           <div className="relative z-10 mx-4 my-8 w-full max-w-[450px] bg-white/97 px-6 py-8 shadow-2xl shadow-black/20 sm:mx-6 sm:px-8 sm:py-10 lg:mx-0 lg:mr-0 lg:rounded lg:px-10 lg:py-8">
             {/* Form heading */}
             <h3 className="mb-1 text-[1.35rem] font-bold leading-tight text-ink">
-              Demande de location
+              {t("formTitle")}
             </h3>
             <p className="mb-7 text-[12.5px] leading-relaxed text-ink/45">
-              Notre équipe vous répondra sous 48h.
+              {t("formSubtitle")}
             </p>
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-              {/* Type de location */}
-              <div>
-                <label
-                  htmlFor="locationType"
-                  className="mb-1.5 block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
-                >
-                  Type de location
-                </label>
-                <div className="relative">
-                  <select
-                    id="locationType"
-                    name="locationType"
-                    value={formData.locationType}
-                    onChange={handleChange}
-                    className="w-full appearance-none rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
-                  >
-                    <option value="chair">Fauteuil</option>
-                    <option value="cabin">Cabine privative</option>
-                  </select>
-                  {/* Custom chevron */}
-                  <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-ink/30">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
-                      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
-                </div>
-              </div>
-
-              {/* Date range */}
+              {/* Date range + Desired pace */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
                   <label
                     htmlFor="startDate"
                     className="mb-1.5 block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                   >
-                    Date de début souhaitée
+                    {t("startDateLabel")}
                   </label>
                   <input
                     type="date"
@@ -474,20 +432,24 @@ export default function BecomePartner() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label
-                    htmlFor="endDate"
+                    htmlFor="desiredPace"
                     className=" block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                   >
-                    Date de fin souhaitée
+                    {t("desiredPaceLabel")}
                   </label>
-                  <input
-                    type="date"
-                    id="endDate"
-                    name="endDate"
-                    min={formData.startDate || todayDate}
-                    value={formData.endDate}
+                  <select
+                    id="desiredPace"
+                    name="desiredPace"
+                    value={formData.desiredPace}
                     onChange={handleChange}
                     className=" w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
-                  />
+                  >
+                    <option value="">{t("desiredPacePlaceholder")}</option>
+                    <option value="1_day_per_week">{t("desiredPace1Day")}</option>
+                    <option value="2_days_per_week">{t("desiredPace2Days")}</option>
+                    <option value="3_days_per_week">{t("desiredPace3Days")}</option>
+                    <option value="full_week">{t("desiredPaceFullWeek")}</option>
+                  </select>
                 </div>
               </div>
 
@@ -498,16 +460,16 @@ export default function BecomePartner() {
                     htmlFor="specialty"
                     className="block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                   >
-                    Spécialité
+                    {t("specialtyLabel")}
                   </label>
                   <input
                     type="text"
                     id="specialty"
                     name="specialty"
                     required
-                    placeholder="ex. Coiffure, Esthétique, Onglerie..."
+                    placeholder="ex. Onglerie..."
                     value={formData.specialty}
-                    onChange={handleSpecialtyChange}
+                    onChange={handleChange}
                     className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
                   />
                 </div>
@@ -518,7 +480,7 @@ export default function BecomePartner() {
                     htmlFor="vatNumber"
                     className="block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                   >
-                    Numéro de TVA <span className="text-red-400">*</span>
+                    {t("vatLabel")} <span className="text-red-400">{t("requiredAsterisk")}</span>
                   </label>
                   <input
                     type="text"
@@ -541,13 +503,13 @@ export default function BecomePartner() {
                   htmlFor="message"
                   className="mb-1.5 block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                 >
-                  Votre message (optionnel)
+                  {t("messageLabel")}
                 </label>
                 <textarea
                   id="message"
                   name="message"
                   rows={3}
-                  placeholder="Parlez-nous de vous..."
+                  placeholder="..."
                   value={formData.message}
                   onChange={handleChange}
                   className="w-full resize-none rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink placeholder-ink/30 transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
@@ -573,11 +535,11 @@ export default function BecomePartner() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    Envoi en cours...
+                    {t("loadingText")}
                   </>
                 ) : (
                   <>
-                    Envoyer ma demande
+                    {t("buttonText")}
                     <ArrowIcon className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
                   </>
                 )}

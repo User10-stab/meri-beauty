@@ -1,0 +1,1 @@
+-- No changes needed, column already exists from previous migration

@@ -214,7 +214,6 @@ export function RentalRequestsPageClient({ initialData, services = [] }) {
             // start date silently drifts from what was actually agreed.
             contract: {
               startDate: toDateInputValue(approvingRef.current.startDate),
-              endDate: toDateInputValue(approvingRef.current.endDate),
             },
           }}
         />

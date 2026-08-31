@@ -115,7 +115,7 @@ export function CreateCategoryModal({ open, onClose, onCreated, category }) {
                 value={form.name}
                 onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
                 className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
-                placeholder="ex. Coiffure"
+                placeholder="ex. Manicure"
               />
             </div>
             <FieldError message={errors.name} />

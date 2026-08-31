@@ -2055,7 +2055,7 @@ model RentalRequest {
   user           User?               @relation(fields: [userId], references: [id])
   rentalType     String
   startDate      DateTime
-  endDate        DateTime?
+  desiredPace    String?
   commissionType CommissionType
   status         RentalRequestStatus
   message        String?

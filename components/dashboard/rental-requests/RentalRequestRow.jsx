@@ -80,7 +80,9 @@ export function RentalRequestRow({ row, onView, onApprove, onReject, onDelete })
           {formatDate(row.startDate)}
         </div>
         <div className="text-sm text-gray-500">
-          au {formatDate(row.endDate)}
+          {row.desiredPace
+            ? { "1_day_per_week": "1j/sem", "2_days_per_week": "2j/sem", "3_days_per_week": "3j/sem", "full_week": "Toute la semaine" }[row.desiredPace] || row.desiredPace
+            : "—"}
         </div>
       </td>
 

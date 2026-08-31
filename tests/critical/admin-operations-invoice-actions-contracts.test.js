@@ -27,7 +27,28 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     }
     // Without the customer on the row there is nothing to show next to the
     // amount, and the e-mail button has no visible recipient.
-    expect(actions).toContain("order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } }");
+    expect(actions).toContain("order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true } } } }");
+  });
+
+  test("every transaction customer relation carries its VAT number, not just the order's", () => {
+    const actions = source("actions/dashboard/admin-operations.js");
+    const transactionsBlockIdx = actions.indexOf("if (tab === \"transactions\")");
+    const transactionsBlock = actions.slice(transactionsBlockIdx, actions.indexOf("} else if (tab === \"orders\")", transactionsBlockIdx));
+    // The Opérations ledger needs to tell a private individual apart from a
+    // VAT-registered company across every source a transaction can come
+    // from — a walk-in POS sale, an atelier, a formation, or an appointment —
+    // not just boutique orders.
+    // One occurrence per customer-bearing relation on the row: order.user,
+    // workshopReservation.customer, formationReservation.customer, and
+    // appointment.user.
+    const vatNumberOccurrences = transactionsBlock.split("vatNumber: true").length - 1;
+    expect(vatNumberOccurrences).toBe(4);
+  });
+
+  test("the ledger shows the invoice's frozen VAT number, falling back to the customer's current one", () => {
+    const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
+    expect(client).toContain("invoice?.customerVatNumber ?? customer?.vatNumber ?? null");
+    expect(client).toContain("N° TVA");
   });
 
   test("the detail action is admin-gated like the list it belongs to", () => {

@@ -72,6 +72,17 @@ describe("the credit note PDF shows the credited amount as negative", () => {
     const fn = theme.slice(fnIdx, theme.indexOf("\n}", fnIdx));
     expect(fn).toContain("n < 0");
   });
+
+  test("the header names the invoice it credits instead of a generic title, and drops the status pill and the duplicate notice", () => {
+    const doc = source("lib/pdf/InvoiceDocument.jsx");
+    const fnIdx = doc.indexOf("export function CreditNoteDocument");
+    const fn = doc.slice(fnIdx, doc.indexOf("export function", fnIdx + 1));
+    expect(fn).toContain("title={`Note de crédit sur ${invoice.number}`}");
+    expect(fn).not.toContain("NOTE DE CRÉDIT");
+    expect(fn).not.toContain("CRÉDIT TOTAL");
+    expect(fn).not.toContain("CRÉDIT PARTIEL");
+    expect(fn).not.toContain("Se rapporte à la facture");
+  });
 });
 
 describe("staff can manually generate a credit note for a refund that never got one automatically", () => {
@@ -83,10 +94,13 @@ describe("staff can manually generate a credit note for a refund that never got 
     expect(fn).toContain("requireAdminOperationsAccess()");
   });
 
-  test("it refuses a transaction that isn't a REFUND, one already linked, and one with no invoice", () => {
+  test("it refuses a transaction already linked to a note, and one with no invoice, regardless of type", () => {
     const fnIdx = actions.indexOf("export async function issueCreditNoteForTransaction");
     const fn = actions.slice(fnIdx, actions.length);
-    expect(fn).toContain('transaction.transactionType !== "REFUND"');
+    // Any invoiced transaction is eligible — a deposit or final payment can
+    // need a manual correction just as much as a refund — so the only gates
+    // left are "already linked" and "no invoice to correct against".
+    expect(fn).not.toContain('transaction.transactionType !== "REFUND"');
     expect(fn).toContain("transaction.creditNoteId");
     expect(fn).toContain("!transaction.payment?.invoice");
   });
@@ -100,10 +114,17 @@ describe("staff can manually generate a credit note for a refund that never got 
     expect(fn).toContain("tx.transaction.update({ where: { id: transaction.id }, data: { creditNoteId: note.id } })");
   });
 
-  test("the button only offers to generate one for a REFUND row with an invoice and no existing note", () => {
+  test("the button offers to generate one for any invoiced row with no existing note", () => {
     const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
     expect(rowActions).toContain(
-      'transaction.transactionType === "REFUND" && transaction.hasInvoice && !creditNote'
+      "Boolean(transaction) && transaction.hasInvoice && !creditNote"
     );
+  });
+
+  test("generating a credit note no longer prompts for an optional reason", () => {
+    const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
+    expect(rowActions).not.toContain("noteReason");
+    expect(rowActions).not.toContain("Motif (facultatif)");
+    expect(rowActions).toContain("issueCreditNoteForTransaction(transaction.id)");
   });
 });

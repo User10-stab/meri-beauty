@@ -70,10 +70,10 @@ export async function getAdminOperations(params = {}) {
                 invoice: {
                   select: { id: true, number: true, billitSentAt: true, customerType: true, customerVatNumber: true },
                 },
-                order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true } } } },
-                workshopReservation: { select: { id: true, session: { select: { workshop: { select: { title: true } } } }, customer: { select: { fullName: true, email: true } } } },
-                formationReservation: { select: { id: true, session: { select: { formation: { select: { title: true } } } }, customer: { select: { fullName: true, email: true } } } },
-                appointment: { select: { id: true, date: true, user: { select: { fullName: true, email: true } } } },
+                order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true } } } },
+                workshopReservation: { select: { id: true, session: { select: { workshop: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true } } } },
+                formationReservation: { select: { id: true, session: { select: { formation: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true } } } },
+                appointment: { select: { id: true, date: true, user: { select: { fullName: true, email: true, vatNumber: true } } } },
               },
             },
           },
@@ -244,9 +244,6 @@ export async function issueCreditNoteForTransaction(transactionId, reason) {
       },
     });
     if (!transaction) return { success: false, message: "Transaction introuvable." };
-    if (transaction.transactionType !== "REFUND") {
-      return { success: false, message: "Seule une transaction de remboursement peut avoir une note de crédit." };
-    }
     if (transaction.creditNoteId) {
       return { success: false, message: "Cette transaction a déjà une note de crédit associée." };
     }
@@ -254,19 +251,61 @@ export async function issueCreditNoteForTransaction(transactionId, reason) {
       return { success: false, message: "Aucune facture n'est associée à ce paiement — impossible d'émettre une note de crédit." };
     }
 
-    const creditNote = await prisma.$transaction(async (tx) => {
-      const note = await issueCreditNote(tx, {
+    const result = await prisma.$transaction(async (tx) => {
+      // Serialize two clicks on the same refund. Without this lock, both
+      // requests could observe the missing link before either one creates it.
+      await tx.$queryRaw`SELECT id FROM "Transaction" WHERE id = ${transaction.id} FOR UPDATE`;
+
+      const lockedTransaction = await tx.transaction.findUnique({
+        where: { id: transaction.id },
+        select: {
+          creditNote: { select: { id: true, number: true } },
+        },
+      });
+      if (lockedTransaction?.creditNote) {
+        return { creditNote: lockedTransaction.creditNote, linkedExisting: true };
+      }
+
+      // Historical refunds may already have a legally numbered credit note
+      // on the invoice but no Transaction.creditNoteId (the link did not
+      // exist yet). Reuse the unique exact-amount orphan instead of issuing a
+      // duplicate document that would exceed the invoice's creditable total.
+      const matchingOrphans = await tx.creditNote.findMany({
+        where: {
+          invoiceId: transaction.payment.invoice.id,
+          totalInclVat: transaction.amount,
+          transaction: { is: null },
+        },
+        orderBy: { issuedAt: "asc" },
+        take: 2,
+        select: { id: true, number: true },
+      });
+      if (matchingOrphans.length > 1) {
+        throw new Error("CREDIT_NOTE_LINK_AMBIGUOUS");
+      }
+
+      const linkedExisting = matchingOrphans.length === 1;
+      const note = matchingOrphans[0] ?? await issueCreditNote(tx, {
         invoiceId: transaction.payment.invoice.id,
         reason: reason?.trim() || "Note de crédit générée manuellement",
         totalInclVat: Number(transaction.amount),
       });
       await tx.transaction.update({ where: { id: transaction.id }, data: { creditNoteId: note.id } });
-      return note;
+      return { creditNote: note, linkedExisting };
     });
 
     revalidatePath("/dashboard/operations");
-    return { success: true, message: `Note de crédit ${creditNote.number} générée.`, data: { creditNoteId: creditNote.id, number: creditNote.number } };
+    return {
+      success: true,
+      message: result.linkedExisting
+        ? `La note de crédit ${result.creditNote.number} existait déjà et a été associée à cette opération.`
+        : `Note de crédit ${result.creditNote.number} générée.`,
+      data: { creditNoteId: result.creditNote.id, number: result.creditNote.number },
+    };
   } catch (error) {
+    if (error.message === "CREDIT_NOTE_LINK_AMBIGUOUS") {
+      return { success: false, message: "Plusieurs notes de crédit correspondent à ce remboursement. Vérifiez-les avant de faire l'association." };
+    }
     if (error.message === "CREDIT_NOTE_EXCEEDS_INVOICE") {
       return { success: false, message: "Le montant dépasse ce qui reste créditable sur cette facture." };
     }

@@ -1,4 +1,4 @@
-import { Document, Page, Text, View } from "@react-pdf/renderer";
+import { Document, Page, View } from "@react-pdf/renderer";
 import {
   BuyerBlock,
   DocumentHeader,
@@ -8,7 +8,6 @@ import {
   TermsBlock,
   TotalsBlock,
   formatDate,
-  money,
   styles,
 } from "./theme";
 import { REVERSE_CHARGE_NOTE } from "@/lib/tax-policy";
@@ -122,8 +121,6 @@ export function InvoiceDocument({ invoice, contact = null }) {
 }
 
 export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
-  const isPartial = Number(creditNote.totalInclVat) < Number(invoice.totalInclVat);
-
   return (
     <Document
       title={`Note de crédit ${creditNote.number}`}
@@ -132,16 +129,10 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
     >
       <Page size="A4" style={styles.page}>
         <DocumentHeader
-          title="NOTE DE CRÉDIT"
+          title={`Note de crédit sur ${invoice.number}`}
           number={creditNote.number}
           issuedAt={creditNote.issuedAt}
-          status={{ label: isPartial ? "CRÉDIT PARTIEL" : "CRÉDIT TOTAL", tone: "credit" }}
         />
-
-        <Text style={styles.creditNotice}>
-          Se rapporte à la facture n° {invoice.number} du {formatDate(invoice.issuedAt)} (total {money(invoice.totalInclVat)})
-          {creditNote.reason ? ` — Motif : ${creditNote.reason}` : ""}
-        </Text>
 
         <View style={styles.parties}>
           <SellerBlock

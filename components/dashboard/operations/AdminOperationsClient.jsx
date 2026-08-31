@@ -59,6 +59,7 @@ function Transactions({ rows, onOpenDetail }) {
           <TableHead className="pl-6">Date</TableHead>
           <TableHead>Origine</TableHead>
           <TableHead>Client</TableHead>
+          <TableHead>N° TVA</TableHead>
           <TableHead>Type</TableHead>
           <TableHead>Facture</TableHead>
           <TableHead className="text-right">Montant</TableHead>
@@ -69,6 +70,11 @@ function Transactions({ rows, onOpenDetail }) {
         {rows.map((row) => {
           const customer = paymentCustomer(row.payment);
           const invoice = row.payment?.invoice ?? null;
+          // The invoice freezes the VAT number at issue time (Belgian
+          // invoicing rules require a snapshot, not a live join) — prefer it
+          // once it exists, and fall back to the customer's current profile
+          // for a transaction that hasn't been invoiced yet.
+          const vatNumber = invoice?.customerVatNumber ?? customer?.vatNumber ?? null;
           // A refund is money leaving, not coming in — Transaction.amount is
           // always stored as a positive magnitude (the codebase-wide
           // convention: callers sum REFUND rows and subtract), so the sign
@@ -81,6 +87,13 @@ function Transactions({ rows, onOpenDetail }) {
               <TableCell>
                 {customer?.fullName ?? "—"}
                 <span className="block text-xs text-gray-400">{customer?.email ?? ""}</span>
+              </TableCell>
+              <TableCell>
+                {vatNumber ? (
+                  <span className="font-medium text-gray-700">{vatNumber}</span>
+                ) : (
+                  <span className="text-xs text-gray-400">Particulier</span>
+                )}
               </TableCell>
               <TableCell>
                 <Badge>{STATUS_LABELS[row.transactionType] ?? row.transactionType}</Badge>
@@ -102,6 +115,7 @@ function Transactions({ rows, onOpenDetail }) {
                   invoice={invoice}
                   creditNote={row.creditNote ?? null}
                   transaction={{ id: row.id, transactionType: row.transactionType, hasInvoice: Boolean(invoice) }}
+                  orderId={row.payment?.order?.id ?? null}
                   onOpenDetail={() => onOpenDetail(row.id)}
                 />
               </TableCell>

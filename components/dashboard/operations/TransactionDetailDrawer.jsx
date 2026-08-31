@@ -270,6 +270,21 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 </div>
               )}
 
+              {payment?.order && (
+                <div>
+                  <SectionTitle>Reçu / ticket de caisse</SectionTitle>
+                  <a
+                    href={`/api/orders/${payment.order.id}/ticket`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    <Receipt size={15} />
+                    Ouvrir le reçu déjà envoyé au client
+                  </a>
+                </div>
+              )}
+
               <div>
                 <SectionTitle>Facture</SectionTitle>
                 {invoice ? (

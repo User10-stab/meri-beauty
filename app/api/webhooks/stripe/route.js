@@ -79,20 +79,37 @@ const UNDERPAYMENT_EPSILON = 0.01;
  */
 export async function POST(req) {
   // ── 1. Verify the signature against the raw body ─────────────────────────
+  // Supports multiple comma-separated webhook secrets so that two Stripe
+  // webhook endpoints (e.g. one for Connect events, one for Checkout events)
+  // can both target this route. Each endpoint has its own signing secret;
+  // we try every configured secret until one verifies.
   const signature = req.headers.get("stripe-signature");
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const secrets = (process.env.STRIPE_WEBHOOK_SECRET ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-  if (!webhookSecret) {
+  if (secrets.length === 0) {
     console.error("[stripe-webhook] STRIPE_WEBHOOK_SECRET is not configured");
     return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
   }
 
+  const rawBody = await req.text();
+
   let event;
-  try {
-    const rawBody = await req.text();
-    event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
-  } catch (err) {
-    console.error("[stripe-webhook] Signature verification failed:", err.message);
+  for (const secret of secrets) {
+    try {
+      event = stripe.webhooks.constructEvent(rawBody, signature, secret);
+      break;
+    } catch {
+      // This secret didn't match — try the next one.
+    }
+  }
+
+  if (!event) {
+    console.error(
+      `[stripe-webhook] Signature verification failed for all ${secrets.length} configured secret(s)`
+    );
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 

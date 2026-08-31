@@ -47,11 +47,23 @@ export const styles = StyleSheet.create({
 
   // ─── Header ────────────────────────────────────────────────────────────
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  // The wordmark is a fixed graphic identity — it must never be squeezed to
+  // make room for a long document title (see headerTitleBlock).
+  headerBrand: { flexGrow: 0, flexShrink: 0 },
   wordmark: { fontFamily: SERIF, fontSize: 19, letterSpacing: 3.4, color: COLORS.brand },
   wordmarkRule: { flexDirection: "row", alignItems: "center", justifyContent: "center", marginTop: 7 },
   wordmarkTick: { width: 18, height: 0.75, flexGrow: 0, flexShrink: 0, backgroundColor: COLORS.gold },
   wordmarkTagline: { fontSize: 6, letterSpacing: 2.6, color: COLORS.gold, marginHorizontal: 6 },
+  // 31 Aug 2026: titles used to be one word ("FACTURE"), so this block had no
+  // width at all and simply grew. "Note de crédit sur F-2026-000004" then
+  // overran the wordmark and printed on top of it. Constraining the block
+  // makes a long title wrap onto a second line instead of colliding, and the
+  // left margin guarantees a visible gap even at the maximum width.
+  headerTitleBlock: { flexGrow: 0, flexShrink: 1, maxWidth: 250, marginLeft: 18 },
   docTitle: { fontSize: 19, fontWeight: 700, letterSpacing: 2, lineHeight: 1.15, color: COLORS.brand, textAlign: "right" },
+  // Long titles step down a size so a two-line wrap still fits the header
+  // band without pushing the rule (and the whole document) down the page.
+  docTitleLong: { fontSize: 13, letterSpacing: 1.2 },
   docNumber: { fontSize: 10, fontWeight: 700, textAlign: "right", marginTop: 6 },
   docMeta: { fontSize: 8, color: COLORS.muted, textAlign: "right" },
   rule: { flexDirection: "row", marginTop: 14, marginBottom: 22 },
@@ -181,7 +193,7 @@ export function formatDate(date) {
 
 export function Wordmark() {
   return (
-    <View>
+    <View style={styles.headerBrand}>
       <Text style={styles.wordmark}>MERIBEAUTY</Text>
       <View style={styles.wordmarkRule}>
         <View style={styles.wordmarkTick} />
@@ -204,8 +216,8 @@ export function DocumentHeader({ title, number, issuedAt, status = null }) {
     <View>
       <View style={styles.header}>
         <Wordmark />
-        <View>
-          <Text style={styles.docTitle}>{title}</Text>
+        <View style={styles.headerTitleBlock}>
+          <Text style={[styles.docTitle, title.length > 14 && styles.docTitleLong]}>{title}</Text>
           <Text style={styles.docNumber}>N° {number}</Text>
           <Text style={styles.docMeta}>Émise le {formatDate(issuedAt)}</Text>
           {status && (

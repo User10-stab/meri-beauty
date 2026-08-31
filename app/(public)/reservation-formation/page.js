@@ -21,6 +21,10 @@ import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
 
+// Taken from the signed-in account rather than the form, so this page renders
+// no input for them and a field error on one has nowhere to appear.
+const ACCOUNT_OWNED_FIELDS = ["fullName", "email"];
+
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
     weekday: "long",
@@ -329,9 +333,16 @@ function ReservationFormationContent() {
     } else {
       if (result.field) {
         setFieldErrors({ [result.field]: result.message });
-      } else {
-        setError(result.message || "Erreur lors de la réservation.");
       }
+      // Banner as well as the field error — a signed-in customer has no
+      // name/email input here (both come from the account), so a field error
+      // on one of them rendered nowhere and the click looked like a dead
+      // button. See the same fix in reservation-atelier/page.js.
+      setError(
+        result.field && isAuthed && ACCOUNT_OWNED_FIELDS.includes(result.field)
+          ? `${result.message} Ce champ provient de votre compte : corrigez-le dans votre profil, puis revenez.`
+          : result.message || "Erreur lors de la réservation."
+      );
       setSubmitting(false);
     }
   }

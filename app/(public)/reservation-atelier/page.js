@@ -17,6 +17,12 @@ import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
 
+// Fields the server takes from the signed-in account rather than the form, so
+// this page renders no input for them — a validation error on one of these
+// cannot be shown next to a field and needs the banner plus a pointer to the
+// profile.
+const ACCOUNT_OWNED_FIELDS = ["fullName", "email"];
+
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {
     weekday: "long",
@@ -152,6 +158,11 @@ function ReservationAtelierContent() {
 
       if (availResult.success) {
         setAvailable(availResult.data.available);
+      } else {
+        // Left silent, this stranded `available` at its initial 0, which
+        // disables the submit button — the customer then clicks "Payer
+        // l'acompte" and gets no reaction and no reason at all.
+        setError(availResult.message || "Impossible de vérifier les places disponibles. Rechargez la page.");
       }
 
       // Check priority token if present
@@ -216,6 +227,17 @@ function ReservationAtelierContent() {
 
   const priceFormatted = new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" });
   const maxSeats = Math.min(Math.max(1, available), 10);
+
+  // A disabled submit button swallows the click in silence: the customer
+  // presses "Payer l'acompte", nothing moves, and nothing says why. Name the
+  // reason so the blocker is visible instead of being mistaken for a bug.
+  const submitBlockedReason = submitting
+    ? null
+    : !acceptedTerms
+      ? "Cochez l'acceptation des CGV et de la politique de confidentialité pour continuer."
+      : available <= 0 && !priorityValid
+        ? "Cette séance est complète — aucune place n'est disponible."
+        : null;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -322,9 +344,18 @@ function ReservationAtelierContent() {
     } else {
       if (result.field) {
         setFieldErrors({ [result.field]: result.message });
-      } else {
-        setError(result.message || "Erreur lors de la réservation.");
       }
+      // Always show the banner too, never only the field error. A signed-in
+      // customer has no name/email inputs on this page (they come from the
+      // account), so a field error on one of them had nowhere to render: the
+      // click produced no reaction and no message at all. An account whose
+      // stored name fails validation — "User122" and friends — was stuck here
+      // permanently with no way to find out why.
+      setError(
+        result.field && isAuthed && ACCOUNT_OWNED_FIELDS.includes(result.field)
+          ? `${result.message} Ce champ provient de votre compte : corrigez-le dans votre profil, puis revenez.`
+          : result.message || "Erreur lors de la réservation."
+      );
       setSubmitting(false);
     }
   }
@@ -817,6 +848,12 @@ function ReservationAtelierContent() {
                     `Payer l'acompte de ${priceFormatted.format(depositAmount)}`
                   )}
                 </button>
+              )}
+
+              {!showWaitingListForm && submitBlockedReason && (
+                <p role="status" className="text-center text-xs font-medium text-amber-700">
+                  {submitBlockedReason}
+                </p>
               )}
 
               {!showWaitingListForm && (

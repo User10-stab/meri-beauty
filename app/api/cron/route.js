@@ -100,6 +100,7 @@ export async function GET(req) {
         missedRefundsRecovered: results.reconcileMissedRefunds?.reconciled ?? null,
         missedCheckoutsChecked: results.reconcileMissedCheckouts?.checked ?? null,
         missedCheckoutsRecovered: results.reconcileMissedCheckouts?.reconciled ?? null,
+        missedCheckoutsFlaggedForReview: results.reconcileMissedCheckouts?.flagged ?? null,
         failedJobs: settled
           .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
           .filter(Boolean),

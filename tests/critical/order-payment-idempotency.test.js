@@ -14,7 +14,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/stripe", () => ({ stripe: mocks.stripe }));
 vi.mock("@/lib/email", () => ({ sendEmail: vi.fn() }));
 vi.mock("@/lib/invoicing", () => ({ issueInvoice: vi.fn(), buildInvoiceCustomer: vi.fn() }));
-vi.mock("@/lib/pdf/render", () => ({ renderInvoicePdf: vi.fn() }));
+vi.mock("@/lib/pdf/render", () => ({ renderInvoicePdf: vi.fn(), renderTicketPdf: vi.fn() }));
 vi.mock("@/lib/monitoring", () => ({
   captureCriticalError: mocks.captureCriticalError,
   captureWarning: vi.fn(),

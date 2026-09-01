@@ -139,6 +139,19 @@ enum TransactionType {
   REFUND
 }
 
+// Direction of a non-sale drawer movement. See model CashMovement.
+enum CashMovementType {
+  // Cash paid out of the drawer for a business cost — supplier, transport,
+  // packaging. Shows in the cash book under the "D" series.
+  EXPENSE
+  // Cash put INTO the drawer that is not a sale (owner topping up the float
+  // mid-service so change doesn't run out). "X" series.
+  CASH_IN
+  // Cash taken OUT to the safe or the bank. Also "X" — it is the mirror of
+  // CASH_IN, and the pair reads better in the book under one letter.
+  WITHDRAWAL
+}
+
 enum ContractType {
   PERCENTAGE
   FIXED_RENT
@@ -784,6 +797,9 @@ model User {
   billingProfile                 BillingProfile?
   openedCashSessions             CashSession[]          @relation("CashSessionOpenedBy")
   closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
+  recordedCashMovements          CashMovement[]         @relation("CashMovementRecordedBy")
+  declaredBankDeposits           BankDeposit[]          @relation("BankDepositDeclaredBy")
+  confirmedBankDeposits          BankDeposit[]          @relation("BankDepositConfirmedBy")
   submittedCancellationRequests  AppointmentCancellationRequest[] @relation("CancellationRequestSubmittedBy")
   reviewedCancellationRequests   AppointmentCancellationRequest[] @relation("CancellationRequestReviewedBy")
   submittedReservationCancellationRequests ReservationCancellationRequest[] @relation("ReservationCancellationRequestedBy")
@@ -1844,6 +1860,14 @@ model CreditNote {
   vatAmount       Decimal @db.Decimal(10, 2)
   totalInclVat    Decimal @db.Decimal(10, 2)
 
+  // Set once this credit note has been created as an order in Billit — same
+  // meaning as Invoice.billitOrderId/billitSentAt (see that comment). A
+  // credit note correcting a Belgian B2B invoice falls under the same 2026
+  // structured e-invoicing mandate as the invoice it corrects, so it needs
+  // the same Peppol path, not an ad-hoc PDF e-mail.
+  billitOrderId String?
+  billitSentAt  DateTime?
+
   returnRequest ReturnRequest?
   transaction   Transaction?
 
@@ -1875,8 +1899,129 @@ model CashSession {
   note         String?
 
   transactions Transaction[]
+  movements    CashMovement[]
 
   @@index([closedAt])
+}
+
+// Money that enters or leaves the drawer WITHOUT being a sale or a refund.
+//
+// Until this existed, expected-cash was `openingFloat + cash sales - cash
+// refunds` and nothing else, so the entirely routine act of paying a
+// supplier out of the till (packaging, transport, a delivery fee) produced a
+// closing shortfall that no amount of recounting could ever explain — the
+// money was legitimately gone, but the till had no vocabulary for saying so.
+//
+// `amount` is ALWAYS stored positive; `type` alone carries the direction.
+// Storing signed amounts instead would mean every aggregate has to trust
+// that no row was ever written with the wrong sign, and a single bad sign
+// silently inverts a day's reconciliation.
+model CashMovement {
+  id String @id @default(cuid())
+
+  // Required, unlike Transaction.cashSessionId: a sale must never be blocked
+  // by the till being closed, but a drawer movement is meaningless without a
+  // drawer — recording one with no open session would be recording that
+  // money left a till nobody had opened.
+  cashSessionId String
+  cashSession   CashSession @relation(fields: [cashSessionId], references: [id])
+
+  type   CashMovementType
+  amount Decimal          @db.Decimal(10, 2)
+  label  String
+
+  // Contiguous per-series, per-year number in the cash book ("D0001"/"X0001").
+  // See lib/cash-book/piece-number.js for why the book runs its own series
+  // instead of reusing the order/ticket number.
+  pieceNumber String @unique
+
+  // Separate from createdAt: staff routinely record the morning's expense at
+  // noon, and the cash book must order by when the money actually moved, not
+  // by when someone got round to typing it in. Constrained at write time to
+  // fall inside the session it belongs to.
+  occurredAt   DateTime @default(now())
+  recordedById String
+  recordedBy   User     @relation("CashMovementRecordedBy", fields: [recordedById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  // Set once this withdrawal has been bundled into a bank deposit
+  // declaration — see model BankDeposit. Null means the cash is still
+  // unaccounted for past the till: either sitting in the safe, or in
+  // someone's pocket between the drawer and the bank, with nothing yet
+  // saying otherwise.
+  bankDepositId String?
+  bankDeposit   BankDeposit? @relation(fields: [bankDepositId], references: [id], onDelete: SetNull)
+
+  @@index([cashSessionId, occurredAt])
+  @@index([bankDepositId])
+}
+
+// A withdrawal leaving the drawer (CashMovement WITHDRAWAL) and that cash
+// actually arriving at the bank are two different facts separated by a
+// trip someone has to make — and that gap is exactly where money can go
+// missing without anyone being able to say so. This model is the second
+// fact, deliberately kept separate from the first instead of a field on
+// CashMovement, because one deposit routinely bundles several withdrawals
+// (a week of takings walked to the bank in one trip) and needs its own
+// declared/confirmed lifecycle.
+enum BankDepositStatus {
+  // A staff member says this cash was taken to the bank. Only a claim until
+  // it is matched against the actual statement.
+  DECLARED
+  // Someone has found this exact `reference` on the bank statement. Only a
+  // CONFIRMED deposit counts as cash that has verifiably left the business
+  // for good — see the "espèces en transit" figure.
+  CONFIRMED
+}
+
+model BankDeposit {
+  id String @id @default(cuid())
+
+  // Sum of the linked CashMovement withdrawals — what SHOULD have reached
+  // the bank. Computed server-side from `movements` at declaration time,
+  // never typed in directly: the entire point of this model is that "what
+  // left the till" and "what a human claims was deposited" can never be
+  // made to silently agree just by typing a bigger number.
+  amount Decimal @db.Decimal(10, 2)
+
+  // What the deposit slip / receipt actually says, entered by whoever made
+  // the trip. Mirrors CashSession's countedCash — a real-world figure to
+  // check the computed one against, not the other way around.
+  declaredAmount Decimal @db.Decimal(10, 2)
+
+  // declaredAmount - amount. A nonzero variance here is the alarm this
+  // whole model exists to raise: a bank fee, a miscount, or cash that
+  // simply never arrived. Same sign convention as CashSession.variance.
+  variance Decimal @db.Decimal(10, 2)
+
+  // The bank's own transaction identifier, read off the receipt or the
+  // statement. Unique: two deposits can never legitimately point at the
+  // same bank movement — that would be double-counting one trip to the
+  // bank as two.
+  reference String @unique
+
+  status BankDepositStatus @default(DECLARED)
+  note   String?
+
+  declaredAt   DateTime @default(now())
+  declaredById String
+  declaredBy   User     @relation("BankDepositDeclaredBy", fields: [declaredById], references: [id])
+
+  // Set once someone has actually found this reference on the bank
+  // statement — see BankDepositStatus.CONFIRMED. Nullable/SetNull rather
+  // than required, same reasoning as CashSession.closedBy: the confirming
+  // user's account existing forever is not a precondition for the deposit
+  // record itself to stay valid.
+  confirmedAt   DateTime?
+  confirmedById String?
+  confirmedBy   User?     @relation("BankDepositConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+
+  movements CashMovement[]
+
+  createdAt DateTime @default(now())
+
+  @@index([status])
 }
 
 // TRANSACTION
@@ -1891,6 +2036,15 @@ model Transaction {
   // reconciled manually if no session was open.
   cashSessionId String?
   cashSession   CashSession? @relation(fields: [cashSessionId], references: [id])
+
+  // The cash book's own line number ("V0001", "R0007"...), allocated
+  // exactly where cashSessionId is — a CASH row attached to a till session.
+  // Null for CARD/ONLINE rows and for CASH sales made before this feature
+  // shipped: no bulk backfill was attempted, same reasoning as
+  // checkInCode's own migration. See lib/cash-book/piece-number.js — a
+  // contiguous series kept separate from Order.orderNumber/Invoice.number
+  // because those are shared with, or gapped by, flows outside the till.
+  pieceNumber String? @unique
 
   // Only ever set on a REFUND row — the document that justifies this money
   // leaving. Nullable/SetNull: a CreditNote is never deleted for a refund

@@ -9,9 +9,8 @@ export const runtime = "nodejs";
 
 /**
  * Any dashboard role can fetch any invoice's PDF (they're handling that
- * order/appointment at the counter) — browsing the full ledger is gated
- * separately (DASHBOARD_PERMISSIONS.INVOICES, admin-only) in
- * actions/invoicing.js#listInvoices.
+ * order/appointment at the counter) — browsing the full ledger is
+ * admin-only, in the Opérations dashboard page.
  *
  * A CUSTOMER can only fetch their OWN invoice — ownership is checked across
  * all 4 polymorphic Payment sources (order/appointment/workshopReservation/

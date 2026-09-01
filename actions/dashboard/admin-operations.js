@@ -7,9 +7,20 @@ import { isAdminRole } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { TYPE_FILTERS, STATUS_FILTERS } from "@/lib/dashboard/operation-filters";
 import { issueCreditNote } from "@/lib/invoicing";
+import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 
 const ADMIN_OPERATION_TABS = Object.freeze(["transactions", "orders", "workshops", "formations"]);
 const PAGE_SIZE = 30;
+
+function resolveTransactionCustomer(payment) {
+  return (
+    payment?.order?.user ??
+    payment?.workshopReservation?.customer ??
+    payment?.formationReservation?.customer ??
+    payment?.appointment?.user ??
+    null
+  );
+}
 
 function normalizeParams(params = {}) {
   const tab = ADMIN_OPERATION_TABS.includes(params.tab) ? params.tab : "transactions";
@@ -57,9 +68,10 @@ export async function getAdminOperations(params = {}) {
             // creditNoteId), never to "whichever ones exist on the invoice" —
             // an invoice can carry several partial refunds over time, and a
             // blanket list would attach every one of them to every row.
-            creditNote: { select: { id: true, number: true, totalInclVat: true } },
+            creditNote: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } },
             payment: {
               select: {
+                id: true,
                 status: true,
                 paymentType: true,
                 // The row's invoice drives the download / e-mail actions.
@@ -70,16 +82,26 @@ export async function getAdminOperations(params = {}) {
                 invoice: {
                   select: { id: true, number: true, billitSentAt: true, customerType: true, customerVatNumber: true },
                 },
-                order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true } } } },
-                workshopReservation: { select: { id: true, session: { select: { workshop: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true } } } },
-                formationReservation: { select: { id: true, session: { select: { formation: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true } } } },
-                appointment: { select: { id: true, date: true, user: { select: { fullName: true, email: true, vatNumber: true } } } },
+                order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
+                workshopReservation: { select: { id: true, session: { select: { workshop: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
+                formationReservation: { select: { id: true, session: { select: { formation: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
+                appointment: { select: { id: true, date: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
               },
             },
           },
         }),
       ]);
-      result = { totalCount, data };
+      // "Pas encore émise" only makes sense for a customer who will ever get
+      // one — a particulier never does (hasInvoiceableVatIdentity), no
+      // matter how long the payment stays unsettled. The row needs to tell
+      // those two "no invoice" cases apart.
+      result = {
+        totalCount,
+        data: data.map((row) => ({
+          ...row,
+          customerInvoiceEligible: hasInvoiceableVatIdentity(resolveTransactionCustomer(row.payment)),
+        })),
+      };
     } else if (tab === "orders") {
       const where = status !== "ALL" ? { status } : {};
       const [totalCount, data] = await Promise.all([
@@ -113,13 +135,37 @@ export async function getAdminOperations(params = {}) {
           skip,
           take: PAGE_SIZE,
           include: {
-            customer: { select: { fullName: true, email: true } },
-            payment: { select: { status: true, paidAmount: true, remainingAmount: true } },
+            customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
+            payment: {
+              select: {
+                id: true,
+                status: true,
+                paidAmount: true,
+                remainingAmount: true,
+                // Drives the Facture/Ticket/Note de crédit actions — same
+                // shape as the transactions tab's payment.invoice, plus
+                // every credit note issued against it (a reservation row has
+                // no single transaction to key off, so all of them show).
+                invoice: {
+                  select: {
+                    id: true,
+                    number: true,
+                    billitSentAt: true,
+                    customerType: true,
+                    customerVatNumber: true,
+                    creditNotes: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } },
+                  },
+                },
+              },
+            },
             session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } },
           },
         }),
       ]);
-      result = { totalCount, data };
+      result = {
+        totalCount,
+        data: data.map((row) => ({ ...row, customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer) })),
+      };
     } else {
       const where = {
         ...(status !== "ALL" && { status }),
@@ -133,13 +179,33 @@ export async function getAdminOperations(params = {}) {
           skip,
           take: PAGE_SIZE,
           include: {
-            customer: { select: { fullName: true, email: true } },
-            payment: { select: { status: true, paidAmount: true, remainingAmount: true } },
+            customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
+            payment: {
+              select: {
+                id: true,
+                status: true,
+                paidAmount: true,
+                remainingAmount: true,
+                invoice: {
+                  select: {
+                    id: true,
+                    number: true,
+                    billitSentAt: true,
+                    customerType: true,
+                    customerVatNumber: true,
+                    creditNotes: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } },
+                  },
+                },
+              },
+            },
             session: { select: { startDate: true, formation: { select: { title: true, type: true } } } },
           },
         }),
       ]);
-      result = { totalCount, data };
+      result = {
+        totalCount,
+        data: data.map((row) => ({ ...row, customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer) })),
+      };
     }
 
     return {

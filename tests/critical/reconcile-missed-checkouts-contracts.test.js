@@ -59,7 +59,7 @@ describe("reconcileMissedCheckouts", () => {
     const result = await reconcileMissedCheckouts();
 
     expect(mocks.confirmWorkshopReservationPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_1" }));
-    expect(result).toEqual({ checked: 1, reconciled: 1, failures: [] });
+    expect(result).toEqual({ checked: 1, reconciled: 1, flagged: 0, failures: [] });
   });
 
   it("confirms orders and formations too", async () => {
@@ -72,6 +72,20 @@ describe("reconcileMissedCheckouts", () => {
 
     expect(mocks.fulfillOrderPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_order" }));
     expect(mocks.confirmFormationReservationPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_formation" }));
+  });
+
+  it("counts a flagged-for-review outcome separately from a genuine confirmation — it must never inflate the 'recovered' count", async () => {
+    onePage([session({ id: "cs_orphan", metadata: { kind: "workshop", reservationId: "r1", workshopAction: "deposit" } })]);
+    mocks.confirmWorkshopReservationPayment.mockResolvedValueOnce({
+      received: true,
+      refunded: false,
+      flaggedForReview: true,
+      reason: "reservation deleted",
+    });
+
+    const result = await reconcileMissedCheckouts();
+
+    expect(result).toEqual({ checked: 1, reconciled: 0, flagged: 1, failures: [] });
   });
 
   it("skips a session the webhook already fulfilled", async () => {

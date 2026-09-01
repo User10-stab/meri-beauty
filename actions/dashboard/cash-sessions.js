@@ -1,11 +1,14 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { hasDashboardPermission, canAccessDashboard, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { computeCashVariance } from "@/lib/cash-sessions";
+import { computeSessionCashTotals } from "@/lib/cash-book/session-totals";
+import { sendReservationTicketsForSession } from "@/lib/cash-book/reservation-tickets";
+import { captureError } from "@/lib/monitoring";
 
 /**
  * A daily till open/close boundary. Before this, every CASH POS sale was
@@ -29,6 +32,29 @@ const SESSION_INCLUDE = {
   openedBy: { select: { id: true, fullName: true } },
   closedBy: { select: { id: true, fullName: true } },
 };
+
+/**
+ * "Is any till session open" — deliberately open to any dashboard role
+ * (staff or admin), unlike every other export here (CASH_REGISTER only).
+ * Every counter-money path can now be blocked or warned by this (POS,
+ * Pointage & encaissement settling a RDV/atelier/formation balance in cash),
+ * and whoever holds APPOINTMENTS, WORKSHOP_RESERVATIONS,
+ * FORMATION_RESERVATIONS, ORDERS or POINT_OF_SALE — not necessarily
+ * CASH_REGISTER — needs the answer just as much as whoever can open/close
+ * the till. Exposes only a boolean, nothing about who opened it or for how
+ * much, so gating it any tighter than "is this a real dashboard user" buys
+ * no actual protection while reintroducing the false-"closed" problem this
+ * exists to avoid.
+ */
+export async function isCashSessionOpen() {
+  const authSession = await auth();
+  if (!authSession?.user || !canAccessDashboard(authSession.user.role)) {
+    return { success: false, message: "Non authentifié.", data: false };
+  }
+
+  const session = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+  return { success: true, data: Boolean(session) };
+}
 
 function serializeCashSession(session) {
   return {
@@ -56,6 +82,26 @@ export async function getCurrentCashSession() {
     include: SESSION_INCLUDE,
   });
   return { success: true, data: session ? serializeCashSession(session) : null };
+}
+
+/**
+ * The opening float a fresh "Ouvrir la caisse" form should be pre-filled
+ * with — the previous session's own counted total, same logic
+ * CashSessionClient's lastCountedCash already applies from the full history
+ * it has loaded. Exposed separately so any screen that can open a session
+ * (the till page, or the POS blocking gate below) can pre-fill it without
+ * fetching the whole session history first.
+ */
+export async function getSuggestedOpeningFloat() {
+  const guard = await requireCashSessionAccess();
+  if (guard.error) return { success: false, message: guard.error, data: null };
+
+  const lastClosed = await prisma.cashSession.findFirst({
+    where: { closedAt: { not: null } },
+    orderBy: { closedAt: "desc" },
+    select: { countedCash: true },
+  });
+  return { success: true, data: lastClosed?.countedCash == null ? null : Number(lastClosed.countedCash) };
 }
 
 export async function openCashSession(openingFloat) {
@@ -95,7 +141,7 @@ export async function openCashSession(openingFloat) {
     return { success: false, message: "Une session de caisse est déjà ouverte. Fermez-la avant d'en ouvrir une nouvelle." };
   }
 
-  revalidatePath("/dashboard/caisse");
+  revalidateCaisseRoutes();
   return { success: true, data: serializeCashSession(session) };
 }
 
@@ -112,23 +158,22 @@ export async function closeCashSession(sessionId, countedCash) {
   if (!session) return { success: false, message: "Session de caisse introuvable." };
   if (session.closedAt) return { success: false, message: "Cette session est déjà clôturée." };
 
-  // expected = opening float + CASH sales - CASH refunds recorded against
-  // this session. A refund only ever hits the session it was issued
-  // through, never the one it was originally sold under.
-  const [cashIn, cashOut] = await Promise.all([
-    prisma.transaction.aggregate({
-      where: { cashSessionId: sessionId, method: "CASH", transactionType: { not: "REFUND" }, isDeleted: false },
-      _sum: { amount: true },
-    }),
-    prisma.transaction.aggregate({
-      where: { cashSessionId: sessionId, method: "CASH", transactionType: "REFUND", isDeleted: false },
-      _sum: { amount: true },
-    }),
-  ]);
+  // Shared with the withdrawal guard and the X/Z day report — computing
+  // "expected cash" three different ways is how a report ends up
+  // contradicting the closure it describes. expected = opening float + CASH
+  // sales - CASH refunds +/- non-sale drawer movements (see model
+  // CashMovement).
+  const { cashIn, cashOut, movementsIn, movementsOut } = await computeSessionCashTotals(
+    prisma,
+    sessionId,
+    session.openingFloat
+  );
   const { expectedCash, countedCash: roundedCounted, variance } = computeCashVariance({
     openingFloat: session.openingFloat,
-    cashIn: cashIn._sum.amount ?? 0,
-    cashOut: cashOut._sum.amount ?? 0,
+    cashIn,
+    cashOut,
+    movementsIn,
+    movementsOut,
     counted,
   });
 
@@ -149,8 +194,18 @@ export async function closeCashSession(sessionId, countedCash) {
     return { success: false, message: "Cette session vient d'être clôturée par quelqu'un d'autre." };
   }
 
+  // Ateliers/formations/rendez-vous already got their legal Invoice at
+  // settlement time, but never the compact till-style ticket a customer
+  // actually expects as a receipt — sent once here, in a single batch, now
+  // that the session is definitively closed. Best-effort: a PDF or email
+  // failure must never turn an already-committed till closure into an
+  // error response.
+  await sendReservationTicketsForSession(prisma, sessionId).catch((error) => {
+    captureError(error, { area: "cash-book", context: "close-session-reservation-tickets", sessionId });
+  });
+
   const updated = await prisma.cashSession.findUnique({ where: { id: sessionId }, include: SESSION_INCLUDE });
-  revalidatePath("/dashboard/caisse");
+  revalidateCaisseRoutes();
   return { success: true, data: serializeCashSession(updated) };
 }
 

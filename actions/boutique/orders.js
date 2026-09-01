@@ -3,6 +3,7 @@
 import { randomBytes, randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { revalidatePath } from "next/cache";
+import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { prisma } from "@/lib/prisma";
 import { qrPngAttachment } from "@/lib/qrcode";
 import { auth } from "@/auth";
@@ -13,7 +14,9 @@ import { ROLES, STAFF_PERMISSIONS, hasDashboardPermission, isAdminRole } from "@
 import { checkoutSchema, shipOrderSchema, cancelOrderSchema, closeShippedOrderSchema } from "@/lib/validations/commerce";
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote, buildInvoiceCustomer, isSellerLegalDataComplete } from "@/lib/invoicing";
-import { renderInvoicePdf, renderCreditNotePdf } from "@/lib/pdf/render";
+import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
+import { renderCreditNotePdf, renderTicketPdf } from "@/lib/pdf/render";
+import { formatSalonAddress } from "@/lib/format-address";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
@@ -23,7 +26,7 @@ import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { captureError, captureWarning } from "@/lib/monitoring";
-import { calculateVatTotals, applyVatRate, repriceTtcCataloguePrice, resolveGoodsVatPolicy } from "@/lib/tax-policy";
+import { calculateVatTotals, applyVatRate, repriceTtcCataloguePrice, resolveGoodsVatPolicy, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer } from "@/lib/tax-policy";
 import { saveCheckoutVatNumber } from "@/lib/customer-vat";
 import {
   buildOrderCreatedNotification,
@@ -271,14 +274,6 @@ function serializeOrder(order) {
       issuedAt: cn.issuedAt,
       totalInclVat: Number(cn.totalInclVat),
     })),
-    // The transaction a "Générer une note de crédit" button on this page
-    // would act on — an order's payment is always a single FINAL_PAYMENT
-    // (see fulfillOrderPayment/completePointOfSaleSale), never a deposit.
-    // Null once every such transaction already has one, so the UI can tell
-    // "not generated yet" from "nothing left to generate".
-    creditableTransactionId: order.payment?.invoice
-      ? order.payment.transactions?.find((t) => t.transactionType === "FINAL_PAYMENT" && !t.creditNoteId)?.id ?? null
-      : null,
     returnRequests: (order.returnRequests ?? []).map((rr) => ({
       id: rr.id,
       status: rr.status,
@@ -1101,7 +1096,7 @@ export async function getOrderById(orderId) {
       where: { id: orderId },
       include: {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
-        payment: { include: { invoice: { include: { creditNotes: true } }, transactions: true } },
+        payment: { include: { invoice: { include: { creditNotes: true } } } },
         items: true,
         returnRequests: { include: { items: true }, orderBy: { requestedAt: "desc" } },
       },
@@ -1197,7 +1192,7 @@ export async function lookupOrderByPickupCode(pickupCode) {
  * — and stock is only decremented now, since it was only ever reserved.
  * If a Payment already exists (prepaid), this just records the handover.
  */
-export async function completeOrderPickup({ orderId, pickupCode, method }) {
+export async function completeOrderPickup({ orderId, pickupCode, method, terminalApproved, terminalReference }) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
 
@@ -1240,6 +1235,9 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
     if (needsPayment && !method) {
       return { success: false, message: "Mode de paiement requis pour cette commande non prépayée." };
     }
+    if (needsPayment && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
+      return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket." };
+    }
 
     const { invoice } = await prisma.$transaction(async (tx) => {
       let invoice = null;
@@ -1266,29 +1264,43 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
           method === "CASH"
             ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
             : null;
+        // Cash-book line number, allocated only for the CASH rows that
+        // actually enter the till total — see model Transaction.pieceNumber.
+        const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
 
         await tx.transaction.create({
           data: {
             paymentId: payment.id,
             amount: order.totalAmount,
-            method,
+            method: method === "EXTERNAL_TERMINAL" ? "CARD" : method,
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
             cashSessionId: openCashSession?.id ?? null,
+            pieceNumber,
+            manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
           },
         });
 
-        invoice = await issueInvoice(tx, {
-          paymentId: payment.id,
-          source: "ORDER",
-          totalInclVat: Number(order.totalAmount),
-          customer: buildInvoiceCustomer(order.user, { vatNumberOverride: order.customerVatNumber ?? order.user.vatNumber }),
-          lines: orderInvoiceLines(order),
-          vatRate: Number(order.vatRate),
-          vatTreatment: order.vatTreatment,
-          taxCountryCode: order.taxCountryCode,
-          taxNote: order.taxNote,
-        });
+        // Same rule everywhere: a particulier never gets an invoice, only a
+        // VIES-valid VAT identity does (see settleReservation /
+        // fulfillOrderPayment). No manual "request invoice" option exists at
+        // the counter for this exact reason.
+        const invoiceCustomerUser = order.customerVatNumber
+          ? { ...order.user, vatNumber: order.customerVatNumber }
+          : order.user;
+        if (hasInvoiceableVatIdentity(invoiceCustomerUser)) {
+          invoice = await issueInvoice(tx, {
+            paymentId: payment.id,
+            source: "ORDER",
+            totalInclVat: Number(order.totalAmount),
+            customer: buildInvoiceCustomer(order.user, { vatNumberOverride: order.customerVatNumber ?? order.user.vatNumber }),
+            lines: orderInvoiceLines(order),
+            vatRate: Number(order.vatRate),
+            vatTreatment: order.vatTreatment,
+            taxCountryCode: order.taxCountryCode,
+            taxNote: order.taxNote,
+          });
+        }
 
         for (const item of order.items) {
           const updated = await tx.productVariant.update({
@@ -1327,28 +1339,56 @@ export async function completeOrderPickup({ orderId, pickupCode, method }) {
     // 20s/10s gives real headroom.
     }, { timeout: 20000, maxWait: 10000 });
 
-    if (invoice) {
-      const invoicePdf = await renderInvoicePdf(invoice).catch((err) => {
-        console.error("[completeOrderPickup] invoice PDF render failed:", err);
+    if (needsPayment) {
+      // The invoice PDF is never auto-e-mailed here either, even when one
+      // was created (VIES-valid company) — only a ticket goes out
+      // automatically. Marie sends the real invoice manually from
+      // Opérations afterward. Mirrors fulfillOrderPayment's own split.
+      const salon = await prisma.salon.findUnique({
+        where: { id: "main-salon" },
+        select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
+      });
+      const ticketPdf = await renderTicketPdf({
+        orderNumber: order.orderNumber,
+        issuedAt: new Date(),
+        sellerName: salon?.legalName || "Meri Beauty",
+        sellerAddress: formatSalonAddress(salon),
+        sellerVatNumber: salon?.vatNumber ?? null,
+        subtotalExclVat: order.totalExclVat,
+        vatRate: order.vatRate,
+        vatAmount: order.totalVat,
+        totalInclVat: order.totalAmount,
+        lines: order.items.map((item) => ({ description: item.productName, quantity: item.quantity, unitPrice: Number(item.unitPrice) })),
+      }).catch((err) => {
+        console.error("[completeOrderPickup] ticket PDF render failed:", err);
         return null;
       });
 
+      const holdsInvoiceForPeppol = Boolean(invoice) && isPeppolMandatoryCustomer(order.customerVatNumber ? { ...order.user, vatNumber: order.customerVatNumber } : order.user);
+      const pendingInvoiceNote = !invoice
+        ? ""
+        : holdsInvoiceForPeppol
+        ? ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
+        : ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément par e-mail.`;
+
       sendEmail({
         to: order.user.email,
-        subject: `Facture – Commande n°${order.orderNumber} – Meri Beauty`,
+        subject: `Votre ticket – Commande n°${order.orderNumber} – Meri Beauty`,
         text:
           `Bonjour ${order.user.fullName},\n\n` +
-          `Merci pour votre achat ! Voici votre facture pour la commande n°${order.orderNumber} (${Number(order.totalAmount).toFixed(2)} €).\n\n` +
+          `Merci pour votre achat ! Votre ticket pour la commande n°${order.orderNumber} (${Number(order.totalAmount).toFixed(2)} €) est joint à cet e-mail.${pendingInvoiceNote}\n\n` +
           `L'équipe Meri Beauty`,
         html:
           `<p>Bonjour ${order.user.fullName},</p>` +
-          `<p>Merci pour votre achat ! Voici votre facture pour la commande n°${order.orderNumber} (<strong>${Number(order.totalAmount).toFixed(2)} €</strong>).</p>` +
+          `<p>Merci pour votre achat ! Votre ticket pour la commande n°${order.orderNumber} (<strong>${Number(order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p>` +
+          (pendingInvoiceNote ? `<p>${pendingInvoiceNote.trim()}</p>` : "") +
           `<p>L'équipe Meri Beauty</p>`,
-        ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
-      }).catch((err) => console.error("[completeOrderPickup] receipt email failed:", err));
+        ...(ticketPdf ? { attachments: [{ filename: `ticket-${order.orderNumber}.pdf`, content: ticketPdf }] } : {}),
+      }).catch((err) => console.error("[completeOrderPickup] ticket email failed:", err));
     }
 
     revalidatePath("/dashboard/boutique/orders");
+    if (needsPayment && method === "CASH") revalidateCaisseRoutes();
     return { success: true, message: `Commande n°${order.orderNumber} remise au client.` };
   } catch (error) {
     if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {
@@ -1598,6 +1638,10 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
           originalMethod === "CASH"
             ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
             : null;
+        // A refund stays in the same series as its original sale — it's the
+        // same order, just a sortie line instead of an entrée.
+        const pieceNumber =
+          originalMethod === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
         await tx.transaction.create({
           data: {
             paymentId: order.payment.id,
@@ -1607,6 +1651,7 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
             paidAt: new Date(),
             manualReference: originalMethod === "CARD" ? manualRefund.reference.trim() : null,
             cashSessionId: openCashSession?.id ?? null,
+            pieceNumber,
             creditNoteId: creditNote?.id ?? null,
           },
         });

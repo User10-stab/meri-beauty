@@ -13,10 +13,12 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 // close showed the drawer holding more than expected, with nothing explaining
 // the difference. The three other on-site money paths already did this.
 describe("every on-site payment lands in the open till session", () => {
+  // POS is deliberately excluded here — see "the counter sale uniquely
+  // refuses to run with no till open" below: every other on-site path still
+  // leaves the row unassigned rather than block a payment already promised.
   test.each([
     ["actions/appointment/manage-appointment.js", "appointment balance"],
     ["lib/reservations/settle-reservation.js", "atelier/formation balance"],
-    ["actions/boutique/point-of-sale.js", "counter sale"],
     ["actions/boutique/orders.js", "order pickup"],
     ["actions/boutique/returns.js", "cash refund"],
   ])("%s attaches the open cash session", (file) => {
@@ -40,6 +42,24 @@ describe("every on-site payment lands in the open till session", () => {
     expect(source("actions/appointment/manage-appointment.js")).toContain(
       "cashSessionId: openCashSession?.id ?? null"
     );
+  });
+
+  // 1 Sep 2026: unlike every other on-site path, the counter POS refuses to
+  // ring up anything — any payment method, not just cash — with no till
+  // session open. Checked twice: once before the transaction (fast-path,
+  // avoids doing all the writes just to abort), and again inside it
+  // (authoritative — with staff on multiple terminals, the session can close
+  // in the gap between the two reads).
+  test("the counter sale uniquely refuses to run with no till open, whatever the payment method", () => {
+    const pos = source("actions/boutique/point-of-sale.js");
+    expect(pos).toContain("const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }");
+    expect(pos).toContain("requiresCashSession: true");
+    expect(pos).toContain('if (!openCashSession) throw new Error("POS_CASH_SESSION_CLOSED")');
+    expect(pos).toContain('if (error.message === "POS_CASH_SESSION_CLOSED")');
+    // Only a CASH row belongs to the till total, even though a session is
+    // now required for every method — see the cash-book queries, which all
+    // filter on method: "CASH" alongside cashSessionId.
+    expect(pos).toContain('cashSessionId: method === "CASH" ? openCashSession.id : null');
   });
 });
 
@@ -110,8 +130,14 @@ describe("nothing is marked paid before the money is in hand", () => {
   test("the button is disabled until the cashier ticks that they received it", () => {
     // Nothing in the system can observe a cash handoff or a terminal's
     // "APPROUVÉ" screen — same guard as the POS terminal sale.
-    expect(panel).toContain("disabled={!received || saving}");
+    expect(panel).toContain("disabled={!received || saving || (isExternalTerminal && (!terminalApproved || !terminalReference.trim()))}");
     expect(panel).toContain("J&apos;ai bien reçu {formatPrice(ticket.balanceDue)}");
+  });
+
+  test("the Pointage settlement panel supports an external terminal reference", () => {
+    expect(panel).toContain('"EXTERNAL_TERMINAL"');
+    expect(panel).toContain("Terminal APPROUVÉ");
+    expect(panel).toContain("terminalReference: terminalReference.trim()");
   });
 
   test("a refused settlement surfaces its reason instead of silently succeeding", () => {

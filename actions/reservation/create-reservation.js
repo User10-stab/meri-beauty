@@ -16,6 +16,7 @@ import {
   staffMultipleReservationsConfirmedEmail,
 } from "@/lib/email-templates";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
+import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { generateAutologinToken } from "@/lib/autologin";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { isAdminRole } from "@/lib/authorization";
@@ -36,6 +37,7 @@ import {
 import { buildAppointmentWindow, findConflictingAppointment, validateAppointmentSlot } from "@/lib/appointment-scheduling";
 import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
 import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
+import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -784,6 +786,18 @@ export async function confirmPayment(paymentId, transactionReference = null) {
         },
       });
 
+      // Attach to whichever till session is open so the counter cash is
+      // reconcilable at close (see lib/cash-sessions.js). Never blocks the
+      // confirmation if none is open — the row is simply left unassigned.
+      const openCashSession = await tx.cashSession.findFirst({
+        where: { closedAt: null },
+        orderBy: { openedAt: "desc" },
+        select: { id: true },
+      });
+      // Cash-book line number, allocated only for the CASH rows that
+      // actually enter the till total — see model Transaction.pieceNumber.
+      const pieceNumber = await allocatePieceNumber(tx, PIECE_SERIES.APPOINTMENT);
+
       await tx.transaction.create({
         data: {
           paymentId,
@@ -791,6 +805,8 @@ export async function confirmPayment(paymentId, transactionReference = null) {
           method: "CASH",
           transactionType: "FINAL_PAYMENT",
           paidAt: new Date(),
+          cashSessionId: openCashSession?.id ?? null,
+          pieceNumber,
         },
       });
 
@@ -846,6 +862,7 @@ export async function confirmPayment(paymentId, transactionReference = null) {
       ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
     }).catch((error) => console.error("[confirmPayment] confirmation email failed:", error));
 
+    revalidateCaisseRoutes();
     return { success: true, message: "Paiement confirmé" };
   } catch (error) {
     console.error("[confirmPayment]", error);

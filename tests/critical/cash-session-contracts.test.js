@@ -56,10 +56,15 @@ describe("cash-session wiring", () => {
     expect(actions).toContain("Une session de caisse est déjà ouverte");
   });
 
-  test("POS attaches CASH sales to whichever session is open, without ever blocking the sale", () => {
+  // 1 Sep 2026: this used to never block — a sale with no till open simply
+  // carried cashSessionId: null forever. Now the counter refuses to ring up
+  // anything (any method) without an open session, closing that permanent
+  // gap; see till-settlement-contracts.test.js for the full contract.
+  test("POS attaches CASH sales to whichever session is open, and refuses to sell at all if none is", () => {
     expect(pos).toContain("cashSession.findFirst({");
     expect(pos).toContain("where: { closedAt: null }");
-    expect(pos).toContain("cashSessionId: openCashSession?.id ?? null");
+    expect(pos).toContain('cashSessionId: method === "CASH" ? openCashSession.id : null');
+    expect(pos).toContain('if (!openCashSession) throw new Error("POS_CASH_SESSION_CLOSED")');
   });
 
   // getCurrentCashSession already orders by openedAt desc — without the same

@@ -3,11 +3,13 @@
 import { randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { revalidatePath } from "next/cache";
+import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
+import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
 import { sendEmail } from "@/lib/email";
@@ -17,6 +19,7 @@ import {
   applyVatRate,
   repriceTtcCataloguePrice,
   resolveGoodsVatPolicy,
+  hasInvoiceableVatIdentity,
   isPeppolMandatoryCustomer,
 } from "@/lib/tax-policy";
 import { saveCheckoutVatNumber } from "@/lib/customer-vat";
@@ -50,9 +53,9 @@ function serializeCustomer(customer) {
     // Prefills the field on selection — never re-verified against VIES just
     // by picking a match; only re-typing/changing it at the till does.
     vatNumber: customer.vatNumber ?? "",
-    // Lets the till UI know a company invoice will be forced regardless of
-    // the "demander une facture" checkbox — see completePointOfSaleSale.
     isCompany: Boolean(customer.isCompany),
+    vatInvoiceReady: hasInvoiceableVatIdentity(customer),
+    vatValidationName: customer.vatValidationName ?? null,
   };
 }
 
@@ -156,7 +159,7 @@ export async function searchPointOfSaleCustomers(query) {
         id: true, fullName: true, email: true, phone: true,
         addressLine1: true, addressLine2: true, addressCity: true,
         addressPostalCode: true, addressCountry: true, vatNumber: true,
-        isCompany: true,
+        vatValidatedAt: true, vatValidationName: true, isCompany: true,
       },
     });
     return { success: true, data: customers.map(serializeCustomer) };
@@ -312,12 +315,27 @@ export async function completePointOfSaleSale(input) {
   const guard = await requirePointOfSaleAccess();
   if (guard.error) return { success: false, message: guard.error };
 
+  // Every POS sale — whatever the payment method — must belong to a till
+  // session, not just CASH ones. Before this gate, a card/QR sale rung up
+  // with no session open completed normally and simply carried
+  // cashSessionId: null forever (see Transaction.pieceNumber allocation
+  // below): unrecoverable once made. Blocking here instead of only warning
+  // means staff open the till before ringing up anything, not after.
+  const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+  if (!openCashSessionGate) {
+    return {
+      success: false,
+      message: "Aucune session de caisse n'est ouverte. Ouvrez la caisse avant d'encaisser une vente.",
+      requiresCashSession: true,
+    };
+  }
+
   const parsed = pointOfSaleSaleSchema.safeParse(input);
   if (!parsed.success) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, walkInEmail, requestInvoice, items, method, attemptKey, terminalReference, cashReceived } = parsed.data;
+  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived } = parsed.data;
   if (!attemptKey) {
     return { success: false, message: "Identifiant de tentative de caisse manquant. Rechargez la page." };
   }
@@ -445,6 +463,7 @@ export async function completePointOfSaleSale(input) {
         saleItems.push({ ...variant, quantity, available });
       }
 
+      const shouldCreateInvoice = !isWalkIn && hasInvoiceableVatIdentity(customer);
       const posVatPolicy = resolveGoodsVatPolicy({ customer });
       const pricedSaleItems = saleItems.map((item) => ({
         ...item,
@@ -478,7 +497,7 @@ export async function completePointOfSaleSale(input) {
           vatRate: posVatPolicy.vatRate,
           totalExclVat: taxTotals.totalExclVat,
           totalVat: taxTotals.vatAmount,
-          customerVatNumber: customer?.vatNumber ?? null,
+          customerVatNumber: shouldCreateInvoice ? customer?.vatNumber ?? null : null,
           pickedUpAt: isQrPayment ? null : new Date(),
           pickedUpByStaffId: isQrPayment ? null : guard.session.user.id,
           expiresAt: isQrPayment ? new Date(Date.now() + (POS_CHECKOUT_SECONDS + 4 * 60) * 1000) : null,
@@ -540,17 +559,22 @@ export async function completePointOfSaleSale(input) {
           paidAt: new Date(),
         },
       });
-      // Attached to whichever till session is currently open, if any — never
-      // blocks the sale if none is (see actions/dashboard/cash-sessions.js),
-      // just leaves it unassigned for manual reconciliation.
-      const openCashSession =
-        method === "CASH"
-          ? await tx.cashSession.findFirst({
-              where: { closedAt: null },
-              orderBy: { openedAt: "desc" }, // matches getCurrentCashSession's tie-break — without it, findFirst's row order is unspecified
-              select: { id: true },
-            })
-          : null;
+      // The outer gate (above, before this transaction opened) is only a
+      // fast-path check — with staff on multiple terminals, the session can
+      // close in the gap between that read and this write. Re-checked here,
+      // inside the transaction, as the authoritative guard: a race that
+      // slips past the outer gate must still abort the sale rather than let
+      // it complete with cashSessionId silently left null (see
+      // requiresCashSession handling in the catch block below).
+      const openCashSession = await tx.cashSession.findFirst({
+        where: { closedAt: null },
+        orderBy: { openedAt: "desc" }, // matches getCurrentCashSession's tie-break — without it, findFirst's row order is unspecified
+        select: { id: true },
+      });
+      if (!openCashSession) throw new Error("POS_CASH_SESSION_CLOSED");
+      // Cash-book line number, allocated only for the CASH rows that
+      // actually enter the till total — see model Transaction.pieceNumber.
+      const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
       await tx.transaction.create({
         data: {
           paymentId: payment.id,
@@ -563,19 +587,20 @@ export async function completePointOfSaleSale(input) {
           manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
           cashReceived: method === "CASH" ? cashReceived : null,
           changeGiven: method === "CASH" ? changeGiven : null,
-          cashSessionId: openCashSession?.id ?? null,
+          // Only a CASH row belongs to the till total — see the cash-book
+          // queries (lib/cash-book/*), which all filter on method: "CASH"
+          // alongside cashSessionId. A session is required above regardless
+          // of method, but only CASH actually gets tagged with it.
+          cashSessionId: method === "CASH" ? openCashSession.id : null,
+          pieceNumber,
         },
       });
 
-      // A walk-in sale has no customer identity for an Invoice's non-null
-      // customerName/customerEmail — a simplified ticket is rendered after
-      // the transaction instead (see renderTicketPdf below), from the order
-      // rows just created. A named but private (B2C) customer gets the same
-      // simplified receipt by default, unless they asked for a real invoice
-      // — a company customer (isCompany, validated VAT number) always gets
-      // one regardless, since they need it to deduct their own VAT.
-      const wantsInvoice = !isWalkIn && (customer?.isCompany || requestInvoice);
-      const invoice = !wantsInvoice
+      // A POS invoice is reserved for a customer whose VAT identity is
+      // currently VIES-valid. Everyone else, including particuliers and
+      // company-looking accounts without reusable VIES proof, gets only the
+      // ticket that is rendered and mailed after the transaction.
+      const invoice = !shouldCreateInvoice
         ? null
         : await issueInvoice(tx, {
             paymentId: payment.id,
@@ -720,6 +745,7 @@ export async function completePointOfSaleSale(input) {
 
       revalidatePath("/dashboard/boutique/orders");
       revalidatePath("/dashboard/boutique/stock");
+      if (method === "CASH") revalidateCaisseRoutes();
       return {
         success: true,
         data: {
@@ -787,6 +813,7 @@ export async function completePointOfSaleSale(input) {
 
     revalidatePath("/dashboard/boutique/orders");
     revalidatePath("/dashboard/boutique/stock");
+    if (method === "CASH") revalidateCaisseRoutes();
     return {
       success: true,
       data: {
@@ -814,6 +841,13 @@ export async function completePointOfSaleSale(input) {
     }
     if (error.message === "POS_CASH_INSUFFICIENT") {
       return { success: false, message: "Le montant reçu est inférieur au total de la vente." };
+    }
+    if (error.message === "POS_CASH_SESSION_CLOSED") {
+      return {
+        success: false,
+        message: "La session de caisse vient d'être clôturée. Ouvrez-la à nouveau avant d'encaisser.",
+        requiresCashSession: true,
+      };
     }
     if (error.message === "POS_ADDRESS_REQUIRED") {
       return {

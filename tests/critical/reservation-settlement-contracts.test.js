@@ -32,8 +32,15 @@ describe("reservation settlement — collecting the on-site balance", () => {
   });
 
   test("requires a payment method only when a balance is actually due", () => {
-    expect(lib).toContain('!["CASH", "CARD"].includes(method)');
+    expect(lib).toContain('!["CASH", "CARD", "EXTERNAL_TERMINAL"].includes(method)');
     expect(lib).toContain('payment.status === "PARTIALLY_PAID" && Number(payment.remainingAmount) > 0');
+  });
+
+  test("external terminal settlement requires approval and stores the terminal reference", () => {
+    expect(lib).toContain('method === "EXTERNAL_TERMINAL"');
+    expect(lib).toContain("terminalApproved !== true");
+    expect(lib).toContain("manualReference: method === \"EXTERNAL_TERMINAL\" ? terminalReference.trim() : null");
+    expect(lib).toContain('method: method === "CASH" ? "CASH" : "CARD"');
   });
 
   test("claims the reservation atomically before invoicing, so a double-click can't invoice twice", () => {

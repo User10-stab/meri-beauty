@@ -116,8 +116,12 @@ describe("staff can manually generate a credit note for a refund that never got 
 
   test("the button offers to generate one for any invoiced row with no existing note", () => {
     const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
+    // notes normalizes both the Transactions tab's singular `creditNote` and
+    // the Reservations tab's `creditNotes` list to one array — eligibility
+    // is "this row's own note(s), whichever shape they came in, is empty".
+    expect(rowActions).toContain("const notes = creditNotes ?? (creditNote ? [creditNote] : [])");
     expect(rowActions).toContain(
-      "Boolean(transaction) && transaction.hasInvoice && !creditNote"
+      "Boolean(transaction) && transaction.hasInvoice && notes.length === 0"
     );
   });
 

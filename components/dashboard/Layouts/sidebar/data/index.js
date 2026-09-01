@@ -52,7 +52,6 @@ const ALL_NAV_DATA = [
           { title: "Stock", url: "/dashboard/boutique/stock", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK, permission: STAFF_PERMISSIONS.BOUTIQUE_STOCK },
           { title: "Commandes", url: "/dashboard/boutique/orders", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.ORDERS },
           { title: "Retours", url: "/dashboard/boutique/returns", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.RETURNS },
-          { title: "Factures", url: "/dashboard/invoices", roles: DASHBOARD_PERMISSIONS.INVOICES },
           { title: "Codes promo", url: "/dashboard/promo-codes", roles: DASHBOARD_PERMISSIONS.PROMO_CODES },
           { title: "Compte Stripe", url: "/dashboard/payments" },
           { title: "Réconciliation", url: "/dashboard/payments/reconciliation", roles: DASHBOARD_PERMISSIONS.PAYMENT_RECONCILIATION },

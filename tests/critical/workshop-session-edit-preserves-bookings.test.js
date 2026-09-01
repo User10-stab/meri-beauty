@@ -62,6 +62,31 @@ describe("editing a booked single-session formation stays possible", () => {
   });
 });
 
+// 2 Sep 2026: a second, narrower case of the exact same bug class, found on
+// production formation "Test Marwane" — allowMultipleSessions: false, but 2
+// FormationSession rows (2 bookings), left over from a time the toggle was
+// on. Carrying only formation.sessions[0]'s id (the fix above) still dropped
+// every OTHER existing session from the payload whenever the form was in
+// single-session mode — updateFormation read those as "removed", and its
+// booked-session guard then refused the ENTIRE save. From the dashboard this
+// looked like "I can't even archive this formation", for a reason completely
+// unrelated to what the admin was trying to change.
+describe("editing a single-session-mode formation that still carries extra historical sessions", () => {
+  const modal = source("components/dashboard/formations/CreateFormationModal.jsx");
+
+  test("sessions beyond the first are still loaded into state regardless of the toggle", () => {
+    expect(modal).toContain("if (formation.sessions?.length > 0) {");
+  });
+
+  test("the single-session submit branch appends every other existing session, untouched, instead of dropping them", () => {
+    const branchIdx = modal.indexOf("Single-session mode only ever edits the first session");
+    expect(branchIdx).toBeGreaterThan(-1);
+    const branch = modal.slice(branchIdx, branchIdx + 2200);
+    expect(branch).toContain("...sessions.slice(1).map((s) => ({");
+    expect(branch).toContain("id: s.id,");
+  });
+});
+
 // Deleting the parent is the other route to the same cascade: Activity ->
 // sessions -> reservations. Both delete actions were unguarded, so removing
 // an activity destroyed its bookings just as silently as editing one did.

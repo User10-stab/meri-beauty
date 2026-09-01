@@ -316,22 +316,22 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 <div>
                   <SectionTitle>Note de crédit</SectionTitle>
                   {creditNote ? (
-                    <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
-                      <span className="text-gray-600">
-                        {creditNote.number} · {dateTime(creditNote.issuedAt)}
-                        {creditNote.reason && <span className="block text-xs text-gray-400">{creditNote.reason}</span>}
-                      </span>
-                      <div className="flex items-center gap-3">
+                    <div className="space-y-3 rounded-lg border border-gray-100 px-4 py-3 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600">
+                          {creditNote.number} · {dateTime(creditNote.issuedAt)}
+                          {creditNote.reason && <span className="block text-xs text-gray-400">{creditNote.reason}</span>}
+                        </span>
                         <span className="font-medium text-red-600">{money(-creditNote.totalInclVat)}</span>
-                        <a
-                          href={`/api/credit-notes/${creditNote.id}/pdf`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
-                        >
-                          <FileMinus size={12} /> PDF
-                        </a>
                       </div>
+                      <a
+                        href={`/api/credit-notes/${creditNote.id}/pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
+                      >
+                        <FileMinus size={16} /> Télécharger la note de crédit
+                      </a>
                     </div>
                   ) : (
                     <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">

@@ -40,10 +40,13 @@ describe("a boutique order carries its pickup QR", () => {
     expect(fulfil).toContain("...(emailAttachments.length ? { attachments: emailAttachments } : {})");
   });
 
-  test("it rides alongside the invoice rather than replacing it", () => {
+  test("it rides alongside the ticket rather than replacing it", () => {
+    // 1 Sep 2026: the invoice PDF itself is no longer auto-attached here —
+    // only a ticket goes out automatically, same rule as every other
+    // channel (see pos-receipt-vs-invoice-contracts.test.js).
     const fulfil = source("lib/orders/fulfill-order-payment.js");
     const block = fulfil.slice(fulfil.indexOf("const emailAttachments = ["));
-    expect(block).toContain("invoicePdf ? [{ filename: `facture-${invoice.number}.pdf`");
+    expect(block).toContain("ticketPdf ? [{ filename: `ticket-${order.orderNumber}.pdf`");
     expect(block).toContain("pickupQr ? [pickupQr] : []");
   });
 

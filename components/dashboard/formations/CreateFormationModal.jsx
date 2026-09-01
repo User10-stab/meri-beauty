@@ -248,23 +248,44 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, staf
               staffUserId: s.staffUserId || null,
               registrationDeadline: s.registrationDeadline || null,
             }))
-          : form.startDate
-            ? [
-                {
-                  // Same reason the multi-session branch above keeps its id:
-                  // without it updateFormation reads the existing session as
-                  // "removed", which its guard then refuses outright once the
-                  // session has bookings — so editing a booked single-session
-                  // formation would fail instead of just moving its date.
-                  ...(formation?.sessions?.[0]?.id ? { id: formation.sessions[0].id } : {}),
-                  startDate: form.startDate,
-                  endDate: form.endDate || null,
-                  capacity,
-                  staffUserId: form.staffUserId || null,
-                  registrationDeadline: null,
-                },
-              ]
-            : [],
+          : [
+              // Single-session mode only ever edits the first session through
+              // the form's own date fields — but `sessions` (loaded from every
+              // formation.sessions row regardless of the toggle, see the
+              // effect above) can still hold extra sessions from a time
+              // allowMultipleSessions was on. Dropping them here reads as
+              // "removed" to updateFormation, whose booked-session guard then
+              // refuses the ENTIRE save — including an unrelated edit like
+              // archiving — the moment any of those extra sessions has a
+              // reservation. Passing them through unchanged is what actually
+              // fixes that, rather than just carrying the first session's id.
+              ...(form.startDate
+                ? [
+                    {
+                      // Same reason the multi-session branch above keeps its
+                      // id: without it updateFormation reads the existing
+                      // session as "removed", which its guard then refuses
+                      // outright once the session has bookings — so editing a
+                      // booked single-session formation would fail instead of
+                      // just moving its date.
+                      ...(formation?.sessions?.[0]?.id ? { id: formation.sessions[0].id } : {}),
+                      startDate: form.startDate,
+                      endDate: form.endDate || null,
+                      capacity,
+                      staffUserId: form.staffUserId || null,
+                      registrationDeadline: sessions[0]?.registrationDeadline || null,
+                    },
+                  ]
+                : []),
+              ...sessions.slice(1).map((s) => ({
+                id: s.id,
+                startDate: s.startDate,
+                endDate: s.endDate || null,
+                capacity: isPrivate ? 1 : s.capacity === "" ? capacity || 0 : parseInt(s.capacity, 10),
+                staffUserId: s.staffUserId || null,
+                registrationDeadline: s.registrationDeadline || null,
+              })),
+            ],
       };
 
       const result = isEditing

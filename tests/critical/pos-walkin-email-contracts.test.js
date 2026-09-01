@@ -14,17 +14,15 @@ const baseSale = {
   cashReceived: 10,
 };
 
-describe("the walk-in ticket e-mail is optional and format-checked", () => {
-  test("no e-mail at all is accepted — most walk-ins take only a printed ticket", () => {
+describe("the walk-in ticket e-mail is mandatory and format-checked", () => {
+  test("no e-mail at all is rejected because every POS ticket must be mailed", () => {
     const result = pointOfSaleSaleSchema.safeParse(baseSale);
-    expect(result.success).toBe(true);
-    expect(result.data.walkInEmail).toBe("");
+    expect(result.success).toBe(false);
   });
 
-  test("a blank string is accepted the same way", () => {
+  test("a blank string is rejected the same way", () => {
     const result = pointOfSaleSaleSchema.safeParse({ ...baseSale, walkInEmail: "" });
-    expect(result.success).toBe(true);
-    expect(result.data.walkInEmail).toBe("");
+    expect(result.success).toBe(false);
   });
 
   test("a well-formed e-mail is normalised and kept", () => {
@@ -70,7 +68,7 @@ describe("completePointOfSaleSale wires the walk-in e-mail without creating an i
     expect(successIndex).toBeGreaterThan(walkInBlockStart);
   });
 
-  test("the field only applies to a walk-in — a named customer's own invoice e-mail is unaffected", () => {
+  test("the field only applies to a walk-in — a named customer's own ticket e-mail uses the account address", () => {
     expect(posSource).toContain("walkInEmail && ticketPdf");
   });
 });

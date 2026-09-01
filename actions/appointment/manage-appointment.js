@@ -9,10 +9,13 @@ import { sendEmail } from "@/lib/email";
 import { createAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
-import { resolveServiceVatPolicy } from "@/lib/tax-policy";
+import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
+import { resolveServiceVatPolicy, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer, calculateVatTotals } from "@/lib/tax-policy";
 import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
-import { renderInvoicePdf } from "@/lib/pdf/render";
+import { renderTicketPdf } from "@/lib/pdf/render";
+import { formatSalonAddress } from "@/lib/format-address";
+import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import {
   createNotificationsBulk,
   buildAppointmentCancelledNotification,
@@ -430,7 +433,7 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       // (markAppointmentNoShow). A forfeited deposit will essentially never
       // already have payment.invoice set (deposits aren't invoiced at
       // collection time), but guard on it anyway for idempotency.
-      if (forfeitAmount > REFUND_EPSILON && !payment.invoice) {
+      if (forfeitAmount > REFUND_EPSILON && !payment.invoice && hasInvoiceableVatIdentity(appointment.user)) {
         const cancellationFeeVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
         await issueInvoice(tx, {
           paymentId: payment.id,
@@ -696,21 +699,23 @@ export async function markAppointmentNoShow(appointmentId) {
           data: { status: "PAID" },
         });
 
-        const noShowVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
-        await issueInvoice(tx, {
-          paymentId: noShowPayment.id,
-          source: "APPOINTMENT",
-          totalInclVat: Number(noShowPayment.paidAmount),
-          customer: buildInvoiceCustomer(appointment.user),
-          lines: buildServiceInvoiceLines({
-            description: `Absence — acompte non remboursable — ${appointment.staffService?.service?.name ?? "Prestation"}`,
-            totalAmount: Number(noShowPayment.paidAmount),
-          }),
-          vatRate: noShowVatPolicy.vatRate,
-          vatTreatment: noShowVatPolicy.vatTreatment,
-          taxCountryCode: noShowVatPolicy.taxCountryCode,
-          taxNote: noShowVatPolicy.taxNote,
-        });
+        if (hasInvoiceableVatIdentity(appointment.user)) {
+          const noShowVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
+          await issueInvoice(tx, {
+            paymentId: noShowPayment.id,
+            source: "APPOINTMENT",
+            totalInclVat: Number(noShowPayment.paidAmount),
+            customer: buildInvoiceCustomer(appointment.user),
+            lines: buildServiceInvoiceLines({
+              description: `Absence — acompte non remboursable — ${appointment.staffService?.service?.name ?? "Prestation"}`,
+              totalAmount: Number(noShowPayment.paidAmount),
+            }),
+            vatRate: noShowVatPolicy.vatRate,
+            vatTreatment: noShowVatPolicy.vatTreatment,
+            taxCountryCode: noShowVatPolicy.taxCountryCode,
+            taxNote: noShowVatPolicy.taxNote,
+          });
+        }
       }
 
       const serviceName = appointment.staffService?.service?.name;
@@ -754,10 +759,10 @@ export async function markAppointmentNoShow(appointmentId) {
  * it, since the checkout webhook only invoices fully-paid-online bookings.
  *
  * @param {string} appointmentId
- * @param {{ method?: "CASH" | "CARD" }} [options] - method is required only
+ * @param {{ method?: "CASH" | "CARD" | "EXTERNAL_TERMINAL", terminalApproved?: boolean, terminalReference?: string|null }} [options] - method is required only
  *   when a balance is actually due.
  */
-export async function completeAppointment(appointmentId, { method, paymentConfirmed } = {}) {
+export async function completeAppointment(appointmentId, { method, paymentConfirmed, terminalApproved, terminalReference } = {}) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -814,8 +819,11 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
       (payment.status === "PENDING" && payment.paymentType === "ON_SITE")
     );
 
-    if (hasBalanceDue && !["CASH", "CARD"].includes(method)) {
+    if (hasBalanceDue && !["CASH", "CARD", "EXTERNAL_TERMINAL"].includes(method)) {
       return { success: false, message: "Mode de paiement requis pour encaisser le solde restant." };
+    }
+    if (hasBalanceDue && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
+      return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket.", requiresPaymentConfirmation: true };
     }
     // The system has no way to observe a physical cash handoff or a card
     // terminal's "APPROUVÉ" screen — without this, staff could mark the
@@ -868,34 +876,43 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
           method === "CASH"
             ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
             : null;
+        // Cash-book line number, allocated only for the CASH rows that
+        // actually enter the till total — see model Transaction.pieceNumber.
+        const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.APPOINTMENT) : null;
 
         await tx.transaction.create({
           data: {
             paymentId: updatedPayment.id,
             amount: balance,
-            method,
+            method: method === "CASH" ? "CASH" : "CARD",
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
             cashSessionId: openCashSession?.id ?? null,
+            pieceNumber,
+            manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
           },
         });
 
-        const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
-        invoice = await issueInvoice(tx, {
-          paymentId: updatedPayment.id,
-          source: "APPOINTMENT",
-          totalInclVat: Number(updatedPayment.totalAmount),
-          customer: buildInvoiceCustomer(appointment.user),
-          lines: buildServiceInvoiceLines({
-            description: appointment.staffService.service?.name ?? "Prestation",
-            totalAmount: Number(updatedPayment.totalAmount),
-            discountAmount: Number(updatedPayment.discountAmount),
-          }),
-          vatRate: completionVatPolicy.vatRate,
-          vatTreatment: completionVatPolicy.vatTreatment,
-          taxCountryCode: completionVatPolicy.taxCountryCode,
-          taxNote: completionVatPolicy.taxNote,
-        });
+        // Same rule everywhere: a particulier never gets an invoice, only a
+        // VIES-valid VAT identity does (see settleReservation).
+        if (hasInvoiceableVatIdentity(appointment.user)) {
+          const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
+          invoice = await issueInvoice(tx, {
+            paymentId: updatedPayment.id,
+            source: "APPOINTMENT",
+            totalInclVat: Number(updatedPayment.totalAmount),
+            customer: buildInvoiceCustomer(appointment.user),
+            lines: buildServiceInvoiceLines({
+              description: appointment.staffService.service?.name ?? "Prestation",
+              totalAmount: Number(updatedPayment.totalAmount),
+              discountAmount: Number(updatedPayment.discountAmount),
+            }),
+            vatRate: completionVatPolicy.vatRate,
+            vatTreatment: completionVatPolicy.vatTreatment,
+            taxCountryCode: completionVatPolicy.taxCountryCode,
+            taxNote: completionVatPolicy.taxNote,
+          });
+        }
       }
 
       return { claimed: true, invoice, balance };
@@ -906,25 +923,56 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     }
     const { invoice, balance } = result;
 
-    if (invoice) {
-      const invoicePdf = await renderInvoicePdf(invoice).catch((err) => {
-        console.error("[completeAppointment] invoice PDF render failed:", err);
+    if (balance > 0) {
+      // The invoice PDF is never auto-e-mailed here either, even when one
+      // was created (VIES-valid company) — only a ticket goes out
+      // automatically. Marie sends the real invoice manually from
+      // Opérations. Mirrors settleReservation's own split.
+      const serviceDescription = appointment.staffService.service?.name ?? "Prestation";
+      const salon = await prisma.salon.findUnique({
+        where: { id: "main-salon" },
+        select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
+      });
+      const { vatRate } = resolveServiceVatPolicy({ customer: appointment.user });
+      const { totalExclVat, vatAmount, totalInclVat } = calculateVatTotals(payment.totalAmount, vatRate);
+      const ticketPdf = await renderTicketPdf({
+        orderNumber: invoice?.number ?? appointmentId,
+        issuedAt: new Date(),
+        sellerName: salon?.legalName || "Meri Beauty",
+        sellerAddress: formatSalonAddress(salon),
+        sellerVatNumber: salon?.vatNumber ?? null,
+        subtotalExclVat: totalExclVat,
+        vatRate,
+        vatAmount,
+        totalInclVat,
+        lines: [{ description: serviceDescription, quantity: 1, unitPrice: totalInclVat }],
+      }).catch((err) => {
+        console.error("[completeAppointment] ticket PDF render failed:", err);
         return null;
       });
 
+      const holdsInvoiceForPeppol = Boolean(invoice) && isPeppolMandatoryCustomer(appointment.user);
+      const pendingInvoiceNote = !invoice
+        ? ""
+        : holdsInvoiceForPeppol
+        ? ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
+        : ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément par e-mail.`;
+
       sendEmail({
         to: appointment.user.email,
-        subject: "Facture — solde réglé – Meri Beauty",
+        subject: "Votre ticket — solde réglé – Meri Beauty",
         text:
           `Bonjour ${appointment.user.fullName},\n\n` +
           `Le solde de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
-          `Vous trouverez votre facture en pièce jointe.\n\nL'équipe Meri Beauty`,
+          `Votre ticket est joint à cet e-mail.${pendingInvoiceNote}\n\nL'équipe Meri Beauty`,
         html:
           `<p>Bonjour ${appointment.user.fullName},</p>` +
           `<p>Le solde de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
-          `Vous trouverez votre facture en pièce jointe.</p><p>L'équipe Meri Beauty</p>`,
-        ...(invoicePdf ? { attachments: [{ filename: `facture-${invoice.number}.pdf`, content: invoicePdf }] } : {}),
-      }).catch((err) => console.error("[completeAppointment] receipt email failed:", err));
+          `Votre ticket est joint à cet e-mail.${pendingInvoiceNote ? ` ${pendingInvoiceNote.trim()}` : ""}</p><p>L'équipe Meri Beauty</p>`,
+        ...(ticketPdf ? { attachments: [{ filename: `ticket-${appointmentId}.pdf`, content: ticketPdf }] } : {}),
+      }).catch((err) => console.error("[completeAppointment] ticket email failed:", err));
+
+      if (method === "CASH") revalidateCaisseRoutes();
     }
 
     return {

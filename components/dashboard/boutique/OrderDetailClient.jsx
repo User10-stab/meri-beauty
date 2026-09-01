@@ -4,13 +4,12 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Mail, Phone, MapPin, Truck, KeyRound, Download, FileMinus, FilePlus2, Printer, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { ArrowLeft, Loader2, Mail, Phone, MapPin, Truck, KeyRound, Download, FileMinus, Printer, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PickupConfirmDialog } from "@/components/dashboard/boutique/PickupConfirmDialog";
 import { markOrderReadyForPickup, markOrderShipped, markOrderCompleted, cancelOrder } from "@/actions/boutique/orders";
 import { generateShippingLabel } from "@/actions/boutique/mondial-relay";
-import { issueCreditNoteForTransaction } from "@/actions/dashboard/admin-operations";
 
 const MODE_LABEL = {
   PICKUP_PREPAID: "Retrait en boutique (payé en ligne)",
@@ -64,7 +63,7 @@ function formatDate(d) {
   return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" }) : "—";
 }
 
-export function OrderDetailClient({ order, isAdmin = false }) {
+export function OrderDetailClient({ order }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [pickupDialogOrder, setPickupDialogOrder] = useState(null);
@@ -75,22 +74,6 @@ export function OrderDetailClient({ order, isAdmin = false }) {
   const [generatingLabel, setGeneratingLabel] = useState(false);
   const [closingShipped, setClosingShipped] = useState(false);
   const [collectedAt, setCollectedAt] = useState("");
-  const [confirmingCreditNote, setConfirmingCreditNote] = useState(false);
-  const [generatingCreditNote, setGeneratingCreditNote] = useState(false);
-
-  async function handleGenerateCreditNote() {
-    if (!order.creditableTransactionId || generatingCreditNote) return;
-    setGeneratingCreditNote(true);
-    const result = await issueCreditNoteForTransaction(order.creditableTransactionId);
-    setGeneratingCreditNote(false);
-    setConfirmingCreditNote(false);
-    if (result.success) {
-      toast.success(result.message);
-      router.refresh();
-    } else {
-      toast.error(result.message);
-    }
-  }
 
   function runAction(action, ...args) {
     startTransition(async () => {
@@ -364,23 +347,6 @@ export function OrderDetailClient({ order, isAdmin = false }) {
                   <FileMinus size={14} />
                 </a>
               ))}
-              {/* No credit note yet on an invoiced order — offer to generate
-                  one right here instead of sending staff to Opérations to
-                  find this same transaction. Admin-only server-side (see
-                  issueCreditNoteForTransaction), so hidden rather than shown
-                  disabled for anyone else — a control that can only ever
-                  fail for them isn't useful, and this page isn't admin-only. */}
-              {isAdmin && order.creditableTransactionId && (
-                <button
-                  type="button"
-                  onClick={() => setConfirmingCreditNote(true)}
-                  disabled={generatingCreditNote}
-                  className="flex w-full items-center justify-between rounded-lg border border-red-100 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <span>Générer la note de crédit</span>
-                  {generatingCreditNote ? <Loader2 size={14} className="animate-spin" /> : <FilePlus2 size={14} />}
-                </button>
-              )}
           </div>
 
           {/* Returns */}
@@ -556,16 +522,6 @@ export function OrderDetailClient({ order, isAdmin = false }) {
           </div>
         )}
       </ConfirmDialog>
-
-      <ConfirmDialog
-        open={confirmingCreditNote}
-        title="Générer une note de crédit ?"
-        message="Ce document porte un numéro légal, séquentiel et définitif — une fois émis, il ne peut plus être annulé ni modifié."
-        confirmLabel="Générer"
-        loading={generatingCreditNote}
-        onConfirm={handleGenerateCreditNote}
-        onCancel={() => setConfirmingCreditNote(false)}
-      />
     </div>
   );
 }

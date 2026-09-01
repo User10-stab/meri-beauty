@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Wallet, Lock, LockOpen, History } from "lucide-react";
+import Link from "next/link";
+import { Wallet, Lock, LockOpen, History, BookOpen, Landmark, Calculator } from "lucide-react";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
 import { openCashSession, closeCashSession, listCashSessions } from "@/actions/dashboard/cash-sessions";
+import { CashMovementPanel } from "@/components/dashboard/boutique/CashMovementPanel";
+import { DenominationCounter } from "@/components/dashboard/boutique/DenominationCounter";
 
 function formatEuro(value) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(value);
@@ -13,6 +16,17 @@ function formatEuro(value) {
 function formatDateTime(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" });
+}
+
+// The most recently closed session's countedCash — what the drawer actually
+// held at the last close, which is what the next morning's float should
+// start from. `history` is ordered openedAt desc, and includes the
+// currently open session (if any) at index 0, so the first CLOSED entry is
+// the one that matters here.
+function lastCountedCash(current, history) {
+  if (current) return "";
+  const lastClosed = history.find((s) => s.closedAt && s.countedCash != null);
+  return lastClosed ? String(lastClosed.countedCash) : "";
 }
 
 function StatCard({ icon, label, value }) {
@@ -29,14 +43,20 @@ function StatCard({ icon, label, value }) {
   );
 }
 
-export function CashSessionClient({ initialCurrent, initialHistory, initialSummary = null }) {
+export function CashSessionClient({ initialCurrent, initialHistory, initialSummary = null, initialMovements = [] }) {
   const [current, setCurrent] = useState(initialCurrent);
   const [history, setHistory] = useState(initialHistory);
   const [summary, setSummary] = useState(initialSummary);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [openingFloat, setOpeningFloat] = useState("");
+  // Report automatique: pre-filled with the previous session's own counted
+  // total, same as the physical ledger in the example (each day's opening
+  // balance is the prior day's closing one) — still a plain editable
+  // number, not a computed/locked value, since a real morning float can
+  // legitimately differ (a bill kept aside, a correction).
+  const [openingFloat, setOpeningFloat] = useState(() => lastCountedCash(initialCurrent, initialHistory));
   const [countedCash, setCountedCash] = useState("");
+  const [showDenominationCounter, setShowDenominationCounter] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   // Always re-reads with the filters currently on screen, so opening or
@@ -70,6 +90,11 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
       if (!result.success) return toast.error(result.message);
       setCurrent(null);
       setCountedCash("");
+      setShowDenominationCounter(false);
+      // Carried forward from this exact response rather than waiting on
+      // refreshHistory's round trip — the next float is already known the
+      // instant the close succeeds.
+      setOpeningFloat(String(result.data.countedCash));
       toast.success(
         result.data.variance === 0
           ? "Caisse clôturée — aucun écart."
@@ -81,11 +106,20 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-dark dark:text-white">Clôture de caisse</h1>
-        <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Ouvrez la caisse en début de journée avec le fond de caisse, clôturez-la en fin de service avec le comptage réel.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-bold text-dark dark:text-white">Clôture de caisse</h1>
+          <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
+            Ouvrez la caisse en début de journée avec le fond de caisse, clôturez-la en fin de service avec le comptage réel.
+          </p>
+        </div>
+        <Link
+          href="/dashboard/boutique/caisse/depots"
+          className="inline-flex items-center gap-1 text-sm font-medium text-[#2f3a2e] hover:underline dark:text-white"
+        >
+          <Landmark size={14} />
+          Dépôts bancaires
+        </Link>
       </div>
 
       <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
@@ -109,6 +143,9 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
                   placeholder="0.00"
                   className="h-10 w-40 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
                 />
+                {openingFloat !== "" && (
+                  <p className="mt-1 text-xs text-gray-400">Repris du dernier comptage — modifiable.</p>
+                )}
               </div>
               <Button onClick={handleOpen} disabled={isPending}>
                 <Wallet size={16} />
@@ -118,9 +155,18 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center gap-2">
-              <Lock size={18} className="text-[#2f3a2e]" />
-              <h2 className="font-semibold text-gray-900 dark:text-white">Session ouverte</h2>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Lock size={18} className="text-[#2f3a2e]" />
+                <h2 className="font-semibold text-gray-900 dark:text-white">Session ouverte</h2>
+              </div>
+              <Link
+                href={`/dashboard/boutique/caisse/${current.id}`}
+                className="inline-flex items-center gap-1 text-sm font-medium text-[#2f3a2e] hover:underline dark:text-white"
+              >
+                <BookOpen size={14} />
+                Livre de caisse
+              </Link>
             </div>
             <p className="text-sm text-gray-500 dark:text-dark-6">
               Ouverte le {formatDateTime(current.openedAt)} par {current.openedBy?.fullName ?? "—"} — fond de caisse {formatEuro(current.openingFloat)}.
@@ -140,14 +186,29 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
                   className="h-10 w-40 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
                 />
               </div>
+              <button
+                type="button"
+                onClick={() => setShowDenominationCounter((v) => !v)}
+                className="inline-flex h-10 items-center gap-1 rounded-lg border border-stroke px-3 text-sm font-medium text-gray-600 hover:border-primary hover:text-primary dark:border-dark-3 dark:text-dark-6"
+              >
+                <Calculator size={14} />
+                {showDenominationCounter ? "Masquer le comptage" : "Compter par dénomination"}
+              </button>
               <Button onClick={handleClose} disabled={isPending}>
                 <Lock size={16} />
                 Clôturer la caisse
               </Button>
             </div>
+            {showDenominationCounter && (
+              <div className="border-t border-gray-100 pt-4 dark:border-dark-3">
+                <DenominationCounter onTotalChange={(total) => setCountedCash(String(total))} />
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      {current && <CashMovementPanel initialMovements={initialMovements} />}
 
       <div>
         <div className="mb-3 flex items-center gap-2">
@@ -244,6 +305,7 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
                   <th className="px-4 py-3">Attendu</th>
                   <th className="px-4 py-3">Compté</th>
                   <th className="px-4 py-3">Écart</th>
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-dark-3">
@@ -257,6 +319,15 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
                     <td className="px-4 py-3">{s.countedCash == null ? "—" : formatEuro(s.countedCash)}</td>
                     <td className={`px-4 py-3 font-medium ${s.variance == null ? "" : s.variance === 0 ? "text-emerald-600" : "text-red-600"}`}>
                       {s.variance == null ? "—" : formatEuro(s.variance)}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <Link
+                        href={`/dashboard/boutique/caisse/${s.id}`}
+                        className="inline-flex items-center gap-1 text-sm font-medium text-[#2f3a2e] hover:underline dark:text-white"
+                      >
+                        <BookOpen size={14} />
+                        Livre
+                      </Link>
                     </td>
                   </tr>
                 ))}

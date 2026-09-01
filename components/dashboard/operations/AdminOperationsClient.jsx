@@ -43,6 +43,16 @@ const paymentCustomer = (payment) =>
   payment?.appointment?.user ??
   null;
 
+// "Pas encore émise" implies pending — true for a customer who will get one
+// once the payment settles, false for a particulier, who never does (see
+// hasInvoiceableVatIdentity server-side). Conflating the two read as a
+// standing error: the invoice looked perpetually "about to arrive".
+function InvoiceStatus({ invoice, customerInvoiceEligible }) {
+  if (invoice) return <span className="font-medium text-gray-700">{invoice.number}</span>;
+  if (customerInvoiceEligible) return <span className="text-xs text-gray-400">Pas encore émise</span>;
+  return <span className="text-xs text-gray-400">Aucune (particulier)</span>;
+}
+
 function Badge({ children }) {
   return (
     <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-700">
@@ -100,11 +110,7 @@ function Transactions({ rows, onOpenDetail }) {
                 <span className="mt-1 block text-xs text-gray-400">{row.method}</span>
               </TableCell>
               <TableCell>
-                {invoice ? (
-                  <span className="font-medium text-gray-700">{invoice.number}</span>
-                ) : (
-                  <span className="text-xs text-gray-400">Pas encore émise</span>
-                )}
+                <InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />
               </TableCell>
               <TableCell className={`text-right font-medium ${isRefund ? "text-red-600" : ""}`}>
                 {isRefund ? "−" : ""}
@@ -116,6 +122,7 @@ function Transactions({ rows, onOpenDetail }) {
                   creditNote={row.creditNote ?? null}
                   transaction={{ id: row.id, transactionType: row.transactionType, hasInvoice: Boolean(invoice) }}
                   orderId={row.payment?.order?.id ?? null}
+                  paymentId={row.payment?.id ?? null}
                   onOpenDetail={() => onOpenDetail(row.id)}
                 />
               </TableCell>
@@ -181,12 +188,15 @@ function Reservations({ rows, kind }) {
           <TableHead>Session</TableHead>
           <TableHead>Places</TableHead>
           <TableHead>Statut</TableHead>
-          <TableHead className="pr-6 text-right">Total</TableHead>
+          <TableHead>Facture</TableHead>
+          <TableHead className="text-right">Total</TableHead>
+          <TableHead className="pr-6 text-right">Actions</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((row) => {
           const item = kind === "workshops" ? row.session.workshop : row.session.formation;
+          const invoice = row.payment?.invoice ?? null;
           return (
             <TableRow key={row.id}>
               <TableCell className="pl-6 font-medium">
@@ -207,7 +217,13 @@ function Reservations({ rows, kind }) {
                   {row.payment?.status ?? "Paiement en attente"}
                 </span>
               </TableCell>
-              <TableCell className="pr-6 text-right font-medium">{money(row.totalPrice)}</TableCell>
+              <TableCell>
+                <InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />
+              </TableCell>
+              <TableCell className="text-right font-medium">{money(row.totalPrice)}</TableCell>
+              <TableCell className="pr-6">
+                <InvoiceRowActions invoice={invoice} creditNotes={invoice?.creditNotes ?? []} paymentId={row.payment?.id ?? null} />
+              </TableCell>
             </TableRow>
           );
         })}

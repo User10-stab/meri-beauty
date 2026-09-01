@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { BrowserQRCodeReader } from "@zxing/browser";
+import QrScanner from "qr-scanner";
 import {
   Camera,
   CameraOff,
@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { lookupCounterCode } from "@/actions/counter/lookup";
+import { isCashSessionOpen } from "@/actions/dashboard/cash-sessions";
 import { searchCounterTickets } from "@/actions/boutique/settlements";
 import { lookupActivityCheckInById, confirmActivityCheckIn } from "@/actions/activities/check-in";
 import { completeOrderPickup } from "@/actions/boutique/orders";
@@ -72,37 +73,59 @@ function isToday(value) {
   return new Date(value).toLocaleDateString("fr-BE", opts) === new Date().toLocaleDateString("fr-BE", opts);
 }
 
+// A CASH payment recorded with no till session open is permanently invisible
+// from the Livre de caisse — Transaction.cashSessionId is set once, at
+// payment time, and never backfilled. Checked once per fiche mount, not
+// blocking: staff can still proceed, they're just warned.
+function useCashSessionOpen() {
+  const [open, setOpen] = useState(true); // optimistic until the check resolves
+  useEffect(() => {
+    isCashSessionOpen()
+      .then((result) => setOpen(Boolean(result.success && result.data)))
+      .catch(() => {});
+  }, []);
+  return open;
+}
+
 function CameraScanner({ onDecoded, onClose }) {
   const videoRef = useRef(null);
-  const controlsRef = useRef(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    const reader = new BrowserQRCodeReader();
+    let decoded = false;
 
-    reader
-      .decodeFromConstraints({ video: { facingMode: "environment" } }, videoRef.current, (result, _err, controls) => {
-        controlsRef.current = controls;
-        if (cancelled || !result) return;
-        controls.stop();
-        onDecoded(result.getText());
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        console.error("[CounterPanel] camera init failed:", err);
-        setError("Caméra indisponible. Saisissez le code à la main.");
-      });
+    const scanner = new QrScanner(
+      videoRef.current,
+      (result) => {
+        if (cancelled || decoded) return;
+        decoded = true;
+        scanner.stop();
+        onDecoded(result.data);
+      },
+      {
+        preferredCamera: "environment",
+        highlightScanRegion: true,
+        highlightCodeOutline: true,
+        onDecodeError: () => {}, // fires every frame with nothing in view — not a real error
+      }
+    );
+
+    scanner.start().catch((err) => {
+      if (cancelled) return;
+      console.error("[CounterPanel] camera init failed:", err);
+      setError("Caméra indisponible. Saisissez le code à la main.");
+    });
 
     return () => {
       cancelled = true;
-      controlsRef.current?.stop();
-      controlsRef.current = null;
+      scanner.stop();
+      scanner.destroy();
     };
   }, [onDecoded]);
 
   return (
-    <div className="relative mt-4 overflow-hidden rounded-[10px] border border-stroke bg-black dark:border-dark-3">
+    <div className="relative mt-7 mx-auto w-80 h-70 overflow-hidden rounded-[10px] border border-stroke bg-black dark:border-dark-3">
       <button
         type="button"
         onClick={onClose}
@@ -117,7 +140,7 @@ function CameraScanner({ onDecoded, onClose }) {
           {error}
         </div>
       ) : (
-        <video ref={videoRef} className="aspect-video w-full object-cover" />
+        <video ref={videoRef} className="aspect-square w-full object-cover" muted playsInline />
       )}
     </div>
   );
@@ -186,12 +209,32 @@ function SettleAction({ ticket, onChanged }) {
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState("CARD");
   const [received, setReceived] = useState(false);
+  const [terminalApproved, setTerminalApproved] = useState(false);
+  const [terminalReference, setTerminalReference] = useState("");
   const [saving, setSaving] = useState(false);
+  const isExternalTerminal = method === "EXTERNAL_TERMINAL";
+  const cashSessionOpen = useCashSessionOpen();
+
+  function selectMethod(next) {
+    setMethod(next);
+    if (next !== "EXTERNAL_TERMINAL") {
+      setTerminalApproved(false);
+      setTerminalReference("");
+    }
+  }
 
   async function handleSettle() {
+    if (isExternalTerminal && (!terminalApproved || !terminalReference.trim())) {
+      toast.error("Confirmez le paiement approuvé et indiquez la référence du ticket terminal.");
+      return;
+    }
     setSaving(true);
     const settle = SETTLE_BY_KIND[ticket.kind];
-    const result = await settle(ticket.reservationId, { method, paymentConfirmed: true });
+    const result = await settle(ticket.reservationId, {
+      method,
+      paymentConfirmed: true,
+      ...(isExternalTerminal ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
+    });
     setSaving(false);
 
     if (!result.success) {
@@ -219,20 +262,44 @@ function SettleAction({ ticket, onChanged }) {
       {open && (
         <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-orange-dark/15 pt-3">
           <div className="flex items-center gap-3">
-            {["CASH", "CARD"].map((value) => (
+            {["CASH", "CARD", "EXTERNAL_TERMINAL"].map((value) => (
               <label key={value} className="flex items-center gap-1.5 text-sm">
-                <input type="radio" checked={method === value} onChange={() => setMethod(value)} />
-                {value === "CASH" ? "Espèces" : "Carte"}
+                <input type="radio" checked={method === value} onChange={() => selectMethod(value)} />
+                {value === "CASH" ? "Espèces" : value === "EXTERNAL_TERMINAL" ? "Terminal externe" : "Carte"}
               </label>
             ))}
           </div>
+          {isExternalTerminal && (
+            <div className="flex w-full flex-wrap items-center gap-3 rounded-[10px] border border-orange-dark/15 bg-white/60 p-3 text-orange-dark dark:bg-black/10 dark:text-orange-light">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input
+                  type="checkbox"
+                  checked={terminalApproved}
+                  onChange={(event) => setTerminalApproved(event.target.checked)}
+                />
+                Terminal APPROUVÉ
+              </label>
+              <input
+                value={terminalReference}
+                onChange={(event) => setTerminalReference(event.target.value)}
+                maxLength={100}
+                placeholder="Référence du ticket terminal"
+                className="min-w-[220px] flex-1 rounded-[7px] border border-orange-dark/20 bg-white px-3 py-2 text-sm outline-none focus:border-orange-dark dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              />
+            </div>
+          )}
+          {method === "CASH" && !cashSessionOpen && (
+            <p className="w-full rounded-[10px] border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+              Aucune session de caisse n&apos;est ouverte — cet encaissement en espèces n&apos;apparaîtra jamais dans le Livre de caisse.
+            </p>
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={received} onChange={(event) => setReceived(event.target.checked)} />
             J&apos;ai bien reçu {formatPrice(ticket.balanceDue)}
           </label>
           <button
             type="button"
-            disabled={!received || saving}
+            disabled={!received || saving || (isExternalTerminal && (!terminalApproved || !terminalReference.trim()))}
             onClick={handleSettle}
             className="ml-auto inline-flex items-center gap-2 rounded-[7px] bg-dark px-4 py-2 text-sm font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-dark"
           >
@@ -304,12 +371,34 @@ function TicketFiche({ ticket, onChanged }) {
 /** A boutique pickup order — a different world entirely (Order, not a ticket), routed to the same scan box. */
 function PickupFiche({ order, onSettled }) {
   const [method, setMethod] = useState("CASH");
+  const [terminalApproved, setTerminalApproved] = useState(false);
+  const [terminalReference, setTerminalReference] = useState("");
   const [saving, setSaving] = useState(false);
   const needsPayment = !order.hasPayment;
+  const isExternalTerminal = method === "EXTERNAL_TERMINAL";
+  const cashSessionOpen = useCashSessionOpen();
+
+  function selectMethod(next) {
+    setMethod(next);
+    if (next !== "EXTERNAL_TERMINAL") {
+      setTerminalApproved(false);
+      setTerminalReference("");
+    }
+  }
 
   async function handleConfirm() {
+    if (needsPayment && isExternalTerminal && (!terminalApproved || !terminalReference.trim())) {
+      toast.error("Confirmez le paiement approuvé et indiquez la référence du ticket terminal.");
+      return;
+    }
     setSaving(true);
-    const result = await completeOrderPickup({ orderId: order.id, method: needsPayment ? method : undefined });
+    const result = await completeOrderPickup({
+      orderId: order.id,
+      method: needsPayment ? method : undefined,
+      ...(needsPayment && isExternalTerminal
+        ? { terminalApproved, terminalReference: terminalReference.trim() }
+        : {}),
+    });
     setSaving(false);
 
     if (!result.success) {
@@ -344,13 +433,37 @@ function PickupFiche({ order, onSettled }) {
               À encaisser : {formatPrice(order.totalAmount)}
             </p>
             <div className="flex items-center gap-3">
-              {["CASH", "CARD"].map((value) => (
+              {["CASH", "CARD", "EXTERNAL_TERMINAL"].map((value) => (
                 <label key={value} className="flex items-center gap-1.5 text-sm text-dark dark:text-white">
-                  <input type="radio" checked={method === value} onChange={() => setMethod(value)} />
-                  {value === "CASH" ? "Espèces" : "Carte"}
+                  <input type="radio" checked={method === value} onChange={() => selectMethod(value)} />
+                  {value === "CASH" ? "Espèces" : value === "EXTERNAL_TERMINAL" ? "Terminal externe" : "Carte"}
                 </label>
               ))}
             </div>
+            {isExternalTerminal && (
+              <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-stroke bg-gray-50 p-3 dark:border-dark-3 dark:bg-dark-2">
+                <label className="flex items-center gap-2 text-sm font-medium text-dark dark:text-white">
+                  <input
+                    type="checkbox"
+                    checked={terminalApproved}
+                    onChange={(event) => setTerminalApproved(event.target.checked)}
+                  />
+                  Terminal APPROUVÉ
+                </label>
+                <input
+                  value={terminalReference}
+                  onChange={(event) => setTerminalReference(event.target.value)}
+                  maxLength={100}
+                  placeholder="Référence du ticket terminal"
+                  className="min-w-[220px] flex-1 rounded-[7px] border border-stroke bg-white px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                />
+              </div>
+            )}
+            {method === "CASH" && !cashSessionOpen && (
+              <p className="rounded-[10px] border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                Aucune session de caisse n&apos;est ouverte — cet encaissement en espèces n&apos;apparaîtra jamais dans le Livre de caisse.
+              </p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-gray-500 dark:text-dark-6">Déjà payée — il ne reste qu&apos;à remettre la commande.</p>
@@ -359,7 +472,7 @@ function PickupFiche({ order, onSettled }) {
         {order.readyForPickup && (
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || (needsPayment && isExternalTerminal && (!terminalApproved || !terminalReference.trim()))}
             onClick={handleConfirm}
             className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >

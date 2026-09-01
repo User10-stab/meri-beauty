@@ -14,7 +14,7 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     // The row's own credit note — not every note ever issued against the
     // invoice — lets a refund row link to the exact document that justifies
     // it (see Transaction.creditNoteId).
-    expect(transactionsBlock).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true } }");
+    expect(transactionsBlock).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } }");
 
     // billitSentAt lets the row show whether this invoice was already handed
     // to Billit; customerType/customerVatNumber let it disable the Billit
@@ -26,8 +26,12 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
       expect(invoiceSelect, `invoice select is missing "${field}"`).toContain(field);
     }
     // Without the customer on the row there is nothing to show next to the
-    // amount, and the e-mail button has no visible recipient.
-    expect(actions).toContain("order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true } } } }");
+    // amount, and the e-mail button has no visible recipient. isCompany/
+    // vatValidatedAt drive customerInvoiceEligible, not display — see the
+    // "Aucune (particulier)" vs "Pas encore émise" contract below.
+    expect(actions).toContain(
+      "order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } }"
+    );
   });
 
   test("every transaction customer relation carries its VAT number, not just the order's", () => {

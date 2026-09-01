@@ -121,18 +121,20 @@ describe("Checkout Sessions are isolated per deployment", () => {
     expect(guardAt).toBeLessThan(dispatchAt);
   });
 
-  // Belt and braces: the route guard is one line, and every refundSession
-  // call site is reached from "we have no record of this payment" — the exact
-  // shape a foreign payment takes. The money call itself must also refuse.
-  test("refundSession refuses a foreign session even if the route guard is bypassed", () => {
-    const lib = source("lib/stripe-refund-session.js");
+  // Belt and braces: the route guard is one line, and every
+  // flagPaymentForManualRefund call site is reached from "we have no record
+  // of this payment" — the exact shape a foreign payment takes. This must
+  // also refuse, so our own admins are never notified about a payment that
+  // belongs to a different deployment's database.
+  test("flagPaymentForManualRefund refuses a foreign session even if the route guard is bypassed", () => {
+    const lib = source("lib/payments/flag-payment-for-manual-refund.js");
     const guardAt = lib.indexOf("isForeignCheckoutSession(session)");
-    const refundAt = lib.indexOf("stripe.refunds.create");
+    const notifyAt = lib.indexOf("getSalonAdminNotificationRecipients()");
     expect(guardAt).toBeGreaterThan(-1);
-    expect(refundAt).toBeGreaterThan(-1);
-    expect(guardAt).toBeLessThan(refundAt);
+    expect(notifyAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(notifyAt);
     // It must return, not throw — throwing makes the webhook 500 and Stripe
     // redeliver the same foreign event forever.
-    expect(lib.slice(guardAt, refundAt)).toContain("return;");
+    expect(lib.slice(guardAt, notifyAt)).toContain("return;");
   });
 });

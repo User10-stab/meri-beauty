@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Banknote, Camera, CameraOff, CreditCard, ImageOff, Loader2, Minus, PackageSearch, Plus, ScanLine, Search, ShieldQuestion, SlidersHorizontal, Trash2, UserRound, X } from "lucide-react";
+import { Banknote, Camera, CameraOff, CreditCard, ImageOff, Loader2, Lock, Minus, PackageSearch, Plus, ScanLine, Search, ShieldQuestion, SlidersHorizontal, Trash2, UserRound, Wallet, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import QRCode from "qrcode";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ import {
   searchPointOfSaleProducts,
 } from "@/actions/boutique/point-of-sale";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
+import { isCashSessionOpen, getSuggestedOpeningFloat, openCashSession } from "@/actions/dashboard/cash-sessions";
 
 const emptyAddress = {
   addressLine1: "",
@@ -36,10 +37,12 @@ const emptyCustomer = {
   phone: "",
   vatNumber: "",
   isCompany: false,
+  vatInvoiceReady: false,
+  vatValidationName: null,
   ...emptyAddress,
 };
 
-export function PointOfSaleClient({ canAdjustStock = false }) {
+export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession = false }) {
   const router = useRouter();
   const [barcode, setBarcode] = useState("");
   const [productQuery, setProductQuery] = useState("");
@@ -52,22 +55,12 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
   // together with CARD_QR (Stripe checkout needs a real customer_email) —
   // enforced again server-side, this is just the matching UI gate.
   const [isWalkIn, setIsWalkIn] = useState(false);
-  // Optional — a client de passage gives no name, so this can never become a
-  // nominative invoice (see the server's own reasoning in point-of-sale.js);
-  // it only decides whether the same ticket PDF handed to the cashier is
-  // also e-mailed.
   const [walkInEmail, setWalkInEmail] = useState("");
   // Set once the typed walk-in address turns out to already belong to a
   // real account — surfaced as a warning instead of silently e-mailing a
   // ticket to someone who has an actual customer profile to attach it to.
   const [walkInEmailMatch, setWalkInEmailMatch] = useState(null);
   const [customer, setCustomer] = useState(emptyCustomer);
-  // Only meaningful for a named (non-walk-in) customer without a validated
-  // VAT number: a private buyer gets a simple receipt by default, and this
-  // is the opt-in to get a real numbered invoice instead. A company
-  // customer always gets one — completePointOfSaleSale forces it regardless
-  // of this value, so the checkbox is hidden for them (see below).
-  const [requestInvoice, setRequestInvoice] = useState(false);
   // Whether the *resolved* customer already has a billing address stored.
   // Tracked separately from the form fields on purpose: deriving it from
   // customer.addressLine1 made the address form unmount on the first
@@ -81,6 +74,9 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
   // clicked. { loading } | { valid, message } | { error, message }
   const [vatCheck, setVatCheck] = useState(null);
   const [method, setMethod] = useState("CARD_QR");
+  const [cashSessionOpen, setCashSessionOpen] = useState(true); // optimistic until the first check resolves
+  const [openingFloatInput, setOpeningFloatInput] = useState("");
+  const [openingSessionPending, setOpeningSessionPending] = useState(false);
   const [attemptKey, setAttemptKey] = useState(null);
   const [terminalConfirmOpen, setTerminalConfirmOpen] = useState(false);
   const [terminalApproved, setTerminalApproved] = useState(false);
@@ -100,6 +96,7 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
   const total = useMemo(() => cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0), [cart]);
   const cashReceivedNumber = Number(cashReceived);
   const changeDue = cashReceived !== "" && !Number.isNaN(cashReceivedNumber) ? cashReceivedNumber - total : null;
+  const walkInEmailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkInEmail.trim());
 
   function resetAttempt() {
     const next = crypto.randomUUID();
@@ -123,6 +120,74 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
       }
     }).catch(() => {});
   }, [router]);
+
+  useEffect(() => {
+    // No till session, no sale — completePointOfSaleSale rejects every
+    // method the same way now, not just CASH: a sale rung up with no
+    // session open used to complete normally and carry cashSessionId: null
+    // forever (Transaction.cashSessionId is set once, at sale time, never
+    // backfilled). Checked on mount, then polled every 10s only while
+    // actually blocked — the moment a teammate opens the till from the
+    // Clôture de caisse page, this screen unblocks itself without a reload.
+    let cancelled = false;
+    let interval = null;
+
+    function check() {
+      isCashSessionOpen().then((result) => {
+        if (cancelled) return;
+        const open = Boolean(result.success && result.data);
+        setCashSessionOpen(open);
+        if (open && interval) {
+          clearInterval(interval);
+          interval = null;
+        } else if (!open && !interval) {
+          // Only worth fetching for someone who can actually act on it — a
+          // cashier without CASH_REGISTER sees the "ask a colleague" message
+          // instead and this call would just fail its own permission check.
+          if (canOpenCashSession) {
+            getSuggestedOpeningFloat().then((r) => {
+              if (!cancelled && r.success && r.data != null) setOpeningFloatInput(String(r.data));
+            }).catch(() => {});
+          }
+          interval = setInterval(check, 10000);
+        }
+      }).catch(() => {});
+    }
+    check();
+
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
+  }, [canOpenCashSession]);
+
+  function handleOpenSessionFromPos() {
+    const amount = Number(openingFloatInput);
+    if (!Number.isFinite(amount) || amount < 0) {
+      toast.error("Indiquez un fond de caisse valide.");
+      return;
+    }
+    setOpeningSessionPending(true);
+    openCashSession(amount).then(async (result) => {
+      setOpeningSessionPending(false);
+      if (!result.success) {
+        // With two terminals, a teammate opening the till at the same
+        // moment wins the race (openCashSession's advisory lock allows only
+        // one) — the loser sees "déjà ouverte", not a crash, and should
+        // unblock immediately rather than sit on a dead retry button.
+        const current = await isCashSessionOpen().catch(() => null);
+        if (current?.success && current.data) {
+          setCashSessionOpen(true);
+          toast.success("Caisse déjà ouverte par un collègue.");
+          return;
+        }
+        toast.error(result.message);
+        return;
+      }
+      setCashSessionOpen(true);
+      toast.success("Caisse ouverte.");
+    });
+  }
 
   useEffect(() => {
     if (!qrModal?.checkoutUrl) {
@@ -362,6 +427,8 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
       phone: match.phone ?? "",
       vatNumber: match.vatNumber ?? "",
       isCompany: Boolean(match.isCompany),
+      vatInvoiceReady: Boolean(match.vatInvoiceReady),
+      vatValidationName: match.vatValidationName ?? null,
       addressLine1: match.addressLine1 ?? "",
       addressLine2: match.addressLine2 ?? "",
       addressCity: match.addressCity ?? "",
@@ -385,7 +452,7 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
     setCustomer((current) => ({
       ...current,
       ...(wasMatched ? emptyAddress : null),
-      ...(wasMatched ? { isCompany: false } : null),
+      ...(wasMatched ? { isCompany: false, vatInvoiceReady: false, vatValidationName: null } : null),
       id: null,
       [field]: value,
     }));
@@ -402,7 +469,7 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
   // identity change: adding one for an existing customer who never had it on
   // file — or correcting one — shouldn't detach the matched account.
   function updateCustomerVat(value) {
-    setCustomer((current) => ({ ...current, vatNumber: value }));
+    setCustomer((current) => ({ ...current, vatNumber: value, vatInvoiceReady: false, vatValidationName: null }));
     setVatCheck(null);
   }
 
@@ -434,20 +501,16 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
   // the submitted payload.
   const needsAddress = !addressOnFile;
 
-  // Whether this sale is about to become a company (B2B) sale — either the
-  // matched account already is one, or a VAT number is currently typed and
-  // will be VIES-validated (and thus force isCompany) server-side the
-  // moment the sale is submitted. Mirrors completePointOfSaleSale's own
-  // `customer?.isCompany || requestInvoice` decision closely enough to hide
-  // the optional checkbox exactly when it would be ignored anyway.
-  const willBeB2B = customer.isCompany || Boolean(customer.vatNumber.trim());
+  // Existing VIES proof is reused silently; a newly typed VAT number is
+  // checked again server-side when the sale is submitted.
+  const willHaveVatInvoice = customer.vatInvoiceReady || Boolean(customer.vatNumber.trim());
   // A Belgian company must receive its invoice over Peppol, not an
   // ad-hoc e-mail (2026 mandate) — the till still creates and numbers the
   // invoice, it just hands the customer a receipt instead and staff send
   // the real invoice from Opérations afterward. Mirrors
   // isPeppolMandatoryCustomer in lib/tax-policy.js closely enough for the
   // till's own copy, without needing a round trip to know it.
-  const willBeBelgianB2B = willBeB2B && customer.vatNumber.trim().toUpperCase().startsWith("BE");
+  const willBeBelgianB2B = willHaveVatInvoice && customer.vatNumber.trim().toUpperCase().startsWith("BE");
 
   function selectMethod(next) {
     if (next === "CARD_QR" && isWalkIn) return; // blocked while client de passage is active
@@ -467,6 +530,9 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
   function submitSale() {
     if (!cart.length) return toast.error("Ajoutez au moins un produit ou une prestation.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
+    if (isWalkIn && !walkInEmailReady) {
+      return toast.error("Indiquez l'e-mail du client pour envoyer le ticket.");
+    }
     if (method === "EXTERNAL_TERMINAL" && !terminalConfirmOpen) {
       setTerminalConfirmOpen(true);
       return;
@@ -478,7 +544,6 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
       const result = await completePointOfSaleSale({
         customer: isWalkIn ? null : customer,
         walkInEmail: isWalkIn ? walkInEmail.trim() : "",
-        requestInvoice: !isWalkIn && requestInvoice,
         items: cart.map((item) =>
           item.type === "SERVICE"
             ? { type: "SERVICE", description: item.productName, unitPrice: item.unitPriceExclVat, quantity: item.quantity }
@@ -492,6 +557,7 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
       setTerminalConfirmOpen(false);
       if (!result.success) {
         toast.error(result.message);
+        if (result.requiresCashSession) setCashSessionOpen(false);
         return;
       }
       if (method === "CARD_QR") {
@@ -583,6 +649,58 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
     } finally {
       setIsCancellingQr(false);
     }
+  }
+
+  if (!cashSessionOpen) {
+    return (
+      <div className="mx-auto max-w-md rounded-[10px] border border-stroke bg-white p-8 text-center shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+          <Lock size={22} strokeWidth={1.75} />
+        </div>
+        <h1 className="mt-4 text-lg font-bold text-dark dark:text-white">Caisse fermée</h1>
+        <p className="mt-2 text-sm text-gray-500 dark:text-dark-6">
+          Aucune session de caisse n&apos;est ouverte. Ouvrez-la avant d&apos;encaisser une vente — quel que soit le
+          mode de paiement.
+        </p>
+        {canOpenCashSession ? (
+          <>
+            <div className="mt-5 flex items-end justify-center gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-500" htmlFor="pos-opening-float">Fond de caisse</label>
+                <input
+                  id="pos-opening-float"
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  min="0"
+                  value={openingFloatInput}
+                  onChange={(event) => setOpeningFloatInput(event.target.value)}
+                  placeholder="0.00"
+                  className="h-10 w-32 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                />
+              </div>
+              <Button onClick={handleOpenSessionFromPos} disabled={openingSessionPending}>
+                <Wallet size={16} />
+                {openingSessionPending ? "Ouverture…" : "Ouvrir la caisse"}
+              </Button>
+            </div>
+            {openingFloatInput !== "" && (
+              <p className="mt-2 text-xs text-gray-400">Repris du dernier comptage — modifiable.</p>
+            )}
+          </>
+        ) : (
+          // A staff member with "Caisse" (vente) but not "Clôture de caisse"
+          // (ouverture/fermeture) can never pass CASH_REGISTER's server-side
+          // guard on openCashSession — showing the form anyway would just
+          // fail with a generic "Accès non autorisé". Point them at whoever
+          // holds that permission instead of a dead end.
+          <p className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6">
+            Vous n&apos;avez pas la permission d&apos;ouvrir la caisse. Demandez à un collègue disposant de
+            l&apos;accès « Clôture de caisse » de l&apos;ouvrir.
+          </p>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -812,18 +930,18 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
         {isWalkIn ? (
           <div className="space-y-2 rounded-lg border border-gray-100 bg-gray-50 p-3 dark:border-dark-3 dark:bg-dark-2">
             <p className="text-xs text-gray-500 dark:text-dark-6">
-              Aucune identité n&apos;est enregistrée. Un ticket sera généré à la place d&apos;une facture — le paiement par QR n&apos;est pas disponible dans ce mode.
+              Aucune identité n&apos;est enregistrée. Le ticket sera généré puis envoyé par e-mail — le paiement par QR n&apos;est pas disponible dans ce mode.
             </p>
             <input
               value={walkInEmail}
               onChange={(event) => setWalkInEmail(event.target.value)}
-              placeholder="E-mail du client (facultatif) — pour lui envoyer le ticket"
+              placeholder="E-mail du client — obligatoire pour envoyer le ticket"
               type="email"
               autoComplete="off"
               className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-3 dark:text-white"
             />
             <p className="text-xs text-gray-400 dark:text-dark-6">
-              Optionnel — sans nom associé, ce n&apos;est jamais une facture nominative, seulement le même ticket envoyé par e-mail en plus du papier.
+              Sans nom associé, ce n&apos;est jamais une facture nominative: seulement le ticket envoyé par e-mail.
             </p>
             {walkInEmailMatch && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-900/10">
@@ -876,13 +994,18 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
               <button
                 type="button"
                 onClick={handleVerifyVat}
-                disabled={vatCheck?.loading}
+                disabled={customer.vatInvoiceReady || vatCheck?.loading}
                 className="flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] disabled:opacity-50 dark:border-dark-3 dark:text-dark-6"
               >
                 {vatCheck?.loading ? <Loader2 size={14} className="animate-spin" /> : <ShieldQuestion size={14} />}
-                Vérifier
+                {customer.vatInvoiceReady ? "Validée" : "Vérifier"}
               </button>
             </div>
+            {customer.vatInvoiceReady && (
+              <p className="text-xs font-medium text-emerald-600">
+                TVA déjà validée via VIES{customer.vatValidationName ? ` — ${customer.vatValidationName}` : ""}. La facture sera créée, puis envoyée manuellement depuis Opérations.
+              </p>
+            )}
             {vatCheck && !vatCheck.loading && (
               <p className={`text-xs font-medium ${vatCheck.error || vatCheck.valid === false ? "text-red-600" : "text-emerald-600"}`}>
                 {vatCheck.message}
@@ -892,24 +1015,16 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
         )}
 
         {!isWalkIn && (
-          willBeB2B ? (
+          willHaveVatInvoice ? (
             <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
               {willBeBelgianB2B
-                ? "Client professionnel belge — une facture sera bien créée et numérotée, mais transmise via Peppol depuis l'onglet Opérations. Le client reçoit un simple reçu à la caisse."
-                : "Client professionnel — une facture sera automatiquement générée et envoyée par e-mail."}
+                ? "Client avec TVA belge valide — une facture sera créée et numérotée, puis transmise manuellement via Billit/Peppol depuis Opérations. Le client reçoit toujours son ticket par e-mail."
+                : "Client avec TVA VIES valide — une facture sera créée et numérotée, puis envoyée manuellement depuis Opérations. Le client reçoit toujours son ticket par e-mail."}
             </p>
           ) : (
-            <label className="flex items-start gap-2 text-xs text-gray-600 dark:text-dark-6">
-              <input
-                type="checkbox"
-                checked={requestInvoice}
-                onChange={(event) => setRequestInvoice(event.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e] dark:border-dark-3"
-              />
-              <span>
-                Demander une facture (sinon un simple reçu par e-mail, comme un ticket de caisse, sera envoyé).
-              </span>
-            </label>
+            <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
+              Client particulier — aucune facture ne sera générée. Le ticket sera envoyé automatiquement par e-mail.
+            </p>
           )
         )}
 
@@ -992,6 +1107,7 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
             isPending ||
             !attemptKey ||
             cart.length === 0 ||
+            (isWalkIn && !walkInEmailReady) ||
             (method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
             (!isWalkIn && needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim()))
           }
@@ -1001,8 +1117,8 @@ export function PointOfSaleClient({ canAdjustStock = false }) {
             : method === "CARD_QR"
             ? "Générer le QR de paiement"
             : isWalkIn
-            ? "Encaisser et générer le ticket"
-            : "Encaisser et envoyer le reçu"}
+            ? "Encaisser et envoyer le ticket"
+            : "Encaisser et envoyer le ticket"}
         </Button>
       </aside>
 

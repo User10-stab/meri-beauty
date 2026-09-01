@@ -140,8 +140,7 @@ describe("role and IDOR policy matrix", () => {
     expect(isAdminRole(ROLES.CUSTOMER)).toBe(false);
   });
 
-  test("financial ledgers stay admin-only while operational orders allow staff", () => {
-    expect(hasPermission(ROLES.STAFF, DASHBOARD_PERMISSIONS.INVOICES)).toBe(false);
+  test("operational orders allow staff, unlike ledgers gated by role directly", () => {
     expect(hasPermission(ROLES.STAFF, DASHBOARD_PERMISSIONS.ORDERS)).toBe(true);
     expect(hasPermission(ROLES.CUSTOMER, DASHBOARD_PERMISSIONS.ORDERS)).toBe(false);
   });

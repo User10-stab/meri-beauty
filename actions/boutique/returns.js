@@ -2,6 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
+import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
@@ -22,6 +23,7 @@ import {
 } from "@/lib/validations/commerce";
 import { issueCreditNote } from "@/lib/invoicing";
 import { renderCreditNotePdf } from "@/lib/pdf/render";
+import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import {
   getOrderPaymentMethod,
   isManualOrderRefund,
@@ -37,8 +39,8 @@ import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit
  *
  * Customer side is deliberately account-free: order number + the email on
  * the order is the whole identity check, since there's no customer
- * order-history page yet (see actions/invoicing.js note on scope). Staff
- * side reuses the same ORDERS permission as the rest of order fulfilment —
+ * order-history page yet. Staff side reuses the same ORDERS permission as
+ * the rest of order fulfilment —
  * this is the same day-to-day counter work, not a separate admin area.
  *
  * Withdrawal window: starts at pickup (pickedUpAt, in-store collection) or,
@@ -737,6 +739,10 @@ export async function completeReturnRequest(input) {
           originalMethod === "CASH"
             ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
             : null;
+        // A refund stays in the same series as its original sale — it's the
+        // same order, just a sortie line instead of an entrée.
+        const pieceNumber =
+          originalMethod === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
         await tx.transaction.create({
           data: {
             paymentId: rr.order.payment.id,
@@ -746,6 +752,7 @@ export async function completeReturnRequest(input) {
             paidAt: new Date(),
             manualReference: originalMethod === "CARD" ? manualRefundReference.trim() : null,
             cashSessionId: openCashSession?.id ?? null,
+            pieceNumber,
             creditNoteId: creditNote.id,
           },
         });
@@ -899,6 +906,7 @@ export async function completeReturnRequest(input) {
     }
 
     revalidatePath("/dashboard/boutique/returns");
+    if (originalMethod === "CASH") revalidateCaisseRoutes();
     return {
       success: true,
       message: refundFailed

@@ -121,10 +121,16 @@ export function TicketDocument({ ticket, contact = null }) {
         <Rule />
 
         <Text style={styles.thanks}>Merci de votre visite !</Text>
-        <Text style={styles.notice}>
-          Ce ticket n&apos;est pas une facture nominative. Pour obtenir une facture à votre nom, présentez-vous en
-          boutique avec ce document.
-        </Text>
+        {ticket.invoiceNumber ? (
+          <Text style={styles.notice}>
+            Ce ticket accompagne votre facture n° {ticket.invoiceNumber}, transmise séparément.
+          </Text>
+        ) : (
+          <Text style={styles.notice}>
+            Ce ticket n&apos;est pas une facture nominative. Pour obtenir une facture à votre nom, présentez-vous en
+            boutique avec ce document.
+          </Text>
+        )}
         <Text style={styles.notice}>
           Échange et retour sur présentation de ce ticket, dans les conditions affichées en boutique.
         </Text>

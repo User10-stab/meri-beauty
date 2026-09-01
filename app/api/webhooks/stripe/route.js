@@ -38,7 +38,7 @@ import {
   RESERVATION_REFUND_AUTHORIZATION,
 } from "@/lib/payments/reconcile-reservation-refund";
 import { captureCriticalError } from "@/lib/monitoring";
-import { refundSession } from "@/lib/stripe-refund-session";
+import { flagPaymentForManualRefund } from "@/lib/payments/flag-payment-for-manual-refund";
 import {
   isForeignCheckoutSession,
   getDeploymentId,
@@ -79,20 +79,37 @@ const UNDERPAYMENT_EPSILON = 0.01;
  */
 export async function POST(req) {
   // ── 1. Verify the signature against the raw body ─────────────────────────
+  // Supports multiple comma-separated webhook secrets so that two Stripe
+  // webhook endpoints (e.g. one for Connect events, one for Checkout events)
+  // can both target this route. Each endpoint has its own signing secret;
+  // we try every configured secret until one verifies.
   const signature = req.headers.get("stripe-signature");
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const secrets = (process.env.STRIPE_WEBHOOK_SECRET ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-  if (!webhookSecret) {
+  if (secrets.length === 0) {
     console.error("[stripe-webhook] STRIPE_WEBHOOK_SECRET is not configured");
     return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
   }
 
+  const rawBody = await req.text();
+
   let event;
-  try {
-    const rawBody = await req.text();
-    event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
-  } catch (err) {
-    console.error("[stripe-webhook] Signature verification failed:", err.message);
+  for (const secret of secrets) {
+    try {
+      event = stripe.webhooks.constructEvent(rawBody, signature, secret);
+      break;
+    } catch {
+      // This secret didn't match — try the next one.
+    }
+  }
+
+  if (!event) {
+    console.error(
+      `[stripe-webhook] Signature verification failed for all ${secrets.length} configured secret(s)`
+    );
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -671,9 +688,9 @@ async function processAppointmentCheckoutSession(session) {
   // Without this, the webhook would resurrect the cancelled appointment and
   // charge a customer who explicitly cancelled.
   if (preCheck.appointment.status === "CANCELLED") {
-    console.warn(`[stripe-webhook] Appointment ${preCheck.appointment.id} cancelled before payment cleared, refunding: ${checkoutSessionId}`);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "appointment cancelled" };
+    console.warn(`[stripe-webhook] Appointment ${preCheck.appointment.id} cancelled before payment cleared, flagging for manual refund: ${checkoutSessionId}`);
+    await flagPaymentForManualRefund(session, "rendez-vous annulé avant que le paiement ne soit confirmé");
+    return { received: true, refunded: false, flaggedForReview: true, reason: "appointment cancelled" };
   }
 
   // (b) Amount mismatch / underpayment — refund what was actually charged
@@ -688,8 +705,8 @@ async function processAppointmentCheckoutSession(session) {
     console.error(
       `[stripe-webhook] UNDERPAYMENT for checkout session ${checkoutSessionId}: expected ${expectedAmountCents} cents, received ${amountReceivedCents} cents`
     );
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "underpayment" };
+    await flagPaymentForManualRefund(session, `paiement insuffisant (${amountReceivedCents} centimes reçus, ${expectedAmountCents} attendus)`);
+    return { received: true, refunded: false, flaggedForReview: true, reason: "underpayment" };
   }
 
   const result = await prisma.$transaction(async (tx) => {
@@ -891,26 +908,26 @@ async function processAppointmentCheckoutSession(session) {
   }, { timeout: 15000 });
 
   if (result?.reason === "appointment-cancelled") {
-    console.warn(`[stripe-webhook] Appointment ${appointmentId} cancelled during payment processing, refunding: ${checkoutSessionId}`);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "appointment cancelled" };
+    console.warn(`[stripe-webhook] Appointment ${appointmentId} cancelled during payment processing, flagging for manual refund: ${checkoutSessionId}`);
+    await flagPaymentForManualRefund(session, "rendez-vous annulé pendant le traitement du paiement");
+    return { received: true, refunded: false, flaggedForReview: true, reason: "appointment cancelled" };
   }
 
   if (result?.strayCharge) {
     console.error(
-      `[stripe-webhook] STRAY DUPLICATE CHARGE for appointment ${appointmentId}: session ${checkoutSessionId} settled after payment ${paymentId} was already paid via a different session. Refunding.`
+      `[stripe-webhook] STRAY DUPLICATE CHARGE for appointment ${appointmentId}: session ${checkoutSessionId} settled after payment ${paymentId} was already paid via a different session. Flagging for manual refund.`
     );
-    await refundSession(session);
+    await flagPaymentForManualRefund(session, "double paiement pour le même rendez-vous");
     const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
     if (salon?.email) {
       sendEmail({
         to: salon.email,
-        subject: `⚠️ Double paiement remboursé — rendez-vous n°${appointmentId}`,
-        text: `Un client a payé deux fois le même rendez-vous (session ${checkoutSessionId}, en plus du paiement déjà enregistré). Le second paiement vient d'être automatiquement remboursé via Stripe.`,
-        html: `<p>Un client a payé deux fois le même rendez-vous (session ${checkoutSessionId}, en plus du paiement déjà enregistré). Le second paiement vient d'être automatiquement remboursé via Stripe.</p>`,
+        subject: `⚠️ Double paiement à rembourser — rendez-vous n°${appointmentId}`,
+        text: `Un client a payé deux fois le même rendez-vous (session ${checkoutSessionId}, en plus du paiement déjà enregistré). Le remboursement automatique est désactivé — merci de rembourser ce second paiement manuellement depuis Stripe.`,
+        html: `<p>Un client a payé deux fois le même rendez-vous (session ${checkoutSessionId}, en plus du paiement déjà enregistré). Le remboursement automatique est désactivé — merci de rembourser ce second paiement manuellement depuis Stripe.</p>`,
       }).catch((err) => console.error("[stripe-webhook] stray-charge alert email failed:", err));
     }
-    return { received: true, refunded: true, reason: "stray-duplicate-charge" };
+    return { received: true, refunded: false, flaggedForReview: true, reason: "stray-duplicate-charge" };
   }
 
   if (!result?.processed) {
@@ -1224,18 +1241,18 @@ async function applyWorkshopSessionChangeFee(session, meta) {
   });
 
   if (!reservation) {
-    console.error("[stripe-webhook] WorkshopReservation gone for session change, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "reservation deleted" };
+    console.error("[stripe-webhook] WorkshopReservation gone for session change, flagging for manual refund:", session.id);
+    await flagPaymentForManualRefund(session, "réservation introuvable (frais de changement de session)");
+    return { received: true, refunded: false, flaggedForReview: true, reason: "reservation deleted" };
   }
 
   if (reservation.status === "CANCELLED") {
     // The reservation was cancelled while this fee-payment link was still
     // outstanding — the salon can't honor a session change on a booking
     // that no longer exists, same as the main reservation-confirmation path.
-    console.warn("[stripe-webhook] Reservation cancelled before session-change fee cleared, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "reservation cancelled" };
+    console.warn("[stripe-webhook] Reservation cancelled before session-change fee cleared, flagging for manual refund:", session.id);
+    await flagPaymentForManualRefund(session, "réservation annulée (frais de changement de session)");
+    return { received: true, refunded: false, flaggedForReview: true, reason: "reservation cancelled" };
   }
 
   if (reservation.sessionId === newSessionId) {
@@ -1248,9 +1265,9 @@ async function applyWorkshopSessionChangeFee(session, meta) {
     include: { workshop: true },
   });
   if (!newSession) {
-    console.error("[stripe-webhook] Target session gone for session change, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "target session deleted" };
+    console.error("[stripe-webhook] Target session gone for session change, flagging for manual refund:", session.id);
+    await flagPaymentForManualRefund(session, "session cible introuvable (frais de changement de session)");
+    return { received: true, refunded: false, flaggedForReview: true, reason: "target session deleted" };
   }
 
   const changeFeeAmount = (session.amount_total ?? 0) / 100;
@@ -1366,17 +1383,17 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
   });
 
   if (!reservation) {
-    console.error("[stripe-webhook] WorkshopReservation gone for seats change, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "reservation deleted" };
+    console.error("[stripe-webhook] WorkshopReservation gone for seats change, flagging for manual refund:", session.id);
+    await flagPaymentForManualRefund(session, "réservation introuvable (frais de changement de places)");
+    return { received: true, refunded: false, flaggedForReview: true, reason: "reservation deleted" };
   }
 
   if (reservation.status === "CANCELLED") {
     // The reservation was cancelled while this fee-payment link was still
     // outstanding — same failed-sale safety net as the other webhook paths.
-    console.warn("[stripe-webhook] Reservation cancelled before seats-change fee cleared, refunding:", session.id);
-    await refundSession(session);
-    return { received: true, refunded: true, reason: "reservation cancelled" };
+    console.warn("[stripe-webhook] Reservation cancelled before seats-change fee cleared, flagging for manual refund:", session.id);
+    await flagPaymentForManualRefund(session, "réservation annulée (frais de changement de places)");
+    return { received: true, refunded: false, flaggedForReview: true, reason: "reservation cancelled" };
   }
 
   if (reservation.seatsCount === seats) {
@@ -1498,25 +1515,25 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
     // customer paying the fee — refund it rather than silently dropping the
     // increase, and tell the customer why instead of leaving them guessing
     // why their card was charged then refunded.
-    console.warn(`[stripe-webhook] Seats increase for reservation ${reservation.id} would exceed capacity, refunding:`, session.id);
-    await refundSession(session);
+    console.warn(`[stripe-webhook] Seats increase for reservation ${reservation.id} would exceed capacity, flagging for manual refund:`, session.id);
+    await flagPaymentForManualRefund(session, "places épuisées entre-temps (frais de changement de places)");
     sendEmail({
       to: reservation.customer.email,
       subject: `Places non disponibles — ${reservation.session.workshop.title} — Meri Beauty`,
       text:
         `Bonjour ${reservation.customer.fullName},\n\n` +
         `La session "${reservation.session.workshop.title}" s'est complétée entre-temps : nous ne pouvons pas ajouter la ou les places supplémentaires demandées. ` +
-        `Le paiement correspondant a été intégralement remboursé et votre réservation reste inchangée (${previousSeatsCount} place(s)).\n\n` +
+        `Notre équipe va procéder au remboursement intégral du paiement correspondant sous peu ; votre réservation reste inchangée (${previousSeatsCount} place(s)).\n\n` +
         `N'hésitez pas à nous contacter si vous souhaitez être mis(e) sur liste d'attente.\n\n` +
         `L'équipe Meri Beauty`,
       html:
         `<p>Bonjour ${reservation.customer.fullName},</p>` +
         `<p>La session "${reservation.session.workshop.title}" s'est complétée entre-temps : nous ne pouvons pas ajouter la ou les places supplémentaires demandées. ` +
-        `Le paiement correspondant a été intégralement remboursé et votre réservation reste inchangée (${previousSeatsCount} place(s)).</p>` +
+        `Notre équipe va procéder au remboursement intégral du paiement correspondant sous peu ; votre réservation reste inchangée (${previousSeatsCount} place(s)).</p>` +
         `<p>N'hésitez pas à nous contacter si vous souhaitez être mis(e) sur liste d'attente.</p>` +
         `<p>L'équipe Meri Beauty</p>`,
     }).catch((err) => console.error("[stripe-webhook] seats-capacity-refund email failed:", err));
-    return { received: true, refunded: true, reason: "capacity exceeded" };
+    return { received: true, refunded: false, flaggedForReview: true, reason: "capacity exceeded" };
   }
 
   if (!result.claimed) {

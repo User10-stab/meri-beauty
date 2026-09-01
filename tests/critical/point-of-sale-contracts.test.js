@@ -156,8 +156,8 @@ describe("point-of-sale security contracts", () => {
   test("a walk-in client de passage sale creates no account and issues a ticket instead of an invoice", () => {
     expect(pos).toContain("const isWalkIn = requestedCustomer === null");
     expect(pos).toContain("userId: customer?.id ?? null");
-    expect(pos).toContain("const wantsInvoice = !isWalkIn && (customer?.isCompany || requestInvoice)");
-    expect(pos).toContain("const invoice = !wantsInvoice");
+    expect(pos).toContain("const shouldCreateInvoice = !isWalkIn && hasInvoiceableVatIdentity(customer)");
+    expect(pos).toContain("const invoice = !shouldCreateInvoice");
     expect(pos).toContain("renderTicketPdf(");
 
     const validation = source("lib/validations/point-of-sale.js");

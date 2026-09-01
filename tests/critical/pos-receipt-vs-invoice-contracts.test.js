@@ -14,17 +14,11 @@ const baseSale = {
   cashReceived: 10,
 };
 
-describe("requestInvoice is optional, defaults false, and only matters for a named customer", () => {
-  test("absent defaults to false", () => {
+describe("POS invoices are only for VIES-valid VAT customers", () => {
+  test("the requestInvoice checkbox contract is gone from validation", () => {
     const result = pointOfSaleSaleSchema.safeParse(baseSale);
     expect(result.success).toBe(true);
-    expect(result.data.requestInvoice).toBe(false);
-  });
-
-  test("can be explicitly checked", () => {
-    const result = pointOfSaleSaleSchema.safeParse({ ...baseSale, requestInvoice: true });
-    expect(result.success).toBe(true);
-    expect(result.data.requestInvoice).toBe(true);
+    expect(result.data).not.toHaveProperty("requestInvoice");
   });
 });
 
@@ -38,12 +32,10 @@ describe("requestInvoice is optional, defaults false, and only matters for a nam
 describe("a named customer always gets a receipt at the till; the invoice itself is never auto-e-mailed", () => {
   const posSource = source("actions/boutique/point-of-sale.js");
 
-  test("invoice creation is gated on isCompany OR an explicit request — never on isWalkIn alone", () => {
-    // A B2B customer must always get a real invoice regardless of the
-    // checkbox, since they need it to deduct their own VAT — this is not
-    // something the till can override.
-    expect(posSource).toContain("const wantsInvoice = !isWalkIn && (customer?.isCompany || requestInvoice)");
-    expect(posSource).toContain("const invoice = !wantsInvoice");
+  test("invoice creation is gated on a reusable VIES identity — never on isCompany or a checkbox", () => {
+    expect(posSource).toContain("const shouldCreateInvoice = !isWalkIn && hasInvoiceableVatIdentity(customer)");
+    expect(posSource).toContain("const invoice = !shouldCreateInvoice");
+    expect(posSource).not.toContain("requestInvoice");
   });
 
   test("the invoice PDF is never rendered or e-mailed from the till", () => {
@@ -76,28 +68,39 @@ describe("a named customer always gets a receipt at the till; the invoice itself
     expect(taxPolicy).toContain('getVatCountryCode(customer.vatNumber) === "BE"');
   });
 
-  test("a non-Peppol invoice (foreign VAT, or a private customer who checked the box) is flagged for manual sending, not e-mailed here", () => {
+  test("a non-Peppol invoice is flagged for manual sending, not e-mailed here", () => {
     expect(posSource).toContain("invoice_pending_manual_send");
     expect(posSource).toContain("transmise séparément par e-mail");
   });
+
+  test("a POS Stripe QR payment also sends the ticket, not the invoice PDF, and is VIES-gated like every other channel", () => {
+    const fulfillment = source("lib/orders/fulfill-order-payment.js");
+    // `!isPointOfSale ||` used to make this always true for a plain online
+    // order too, bypassing the VIES gate entirely — fixed 2026-09-01.
+    expect(fulfillment).toContain("const shouldCreateInvoice = hasInvoiceableVatIdentity(invoiceCustomerUser)");
+    expect(fulfillment).toContain("Votre ticket est joint à cet e-mail");
+    expect(fulfillment).toContain("[fulfillOrderPayment] POS ticket email failed");
+  });
 });
 
-describe("the till only shows the invoice checkbox where it would actually matter", () => {
+describe("the till mirrors the VIES-only invoice rule", () => {
   const clientSource = source("components/dashboard/boutique/PointOfSaleClient.jsx");
 
-  test("a company customer (or a currently-typed VAT number) forces the invoice and hides the checkbox", () => {
-    expect(clientSource).toContain(
-      "const willBeB2B = customer.isCompany || Boolean(customer.vatNumber.trim())"
-    );
-    expect(clientSource).toContain("willBeB2B ? (");
+  test("a saved reusable VIES proof is carried into the till and does not ask for another check", () => {
+    expect(clientSource).toContain("vatInvoiceReady: Boolean(match.vatInvoiceReady)");
+    expect(clientSource).toContain('customer.vatInvoiceReady ? "Validée" : "Vérifier"');
+    expect(clientSource).toContain("TVA déjà validée via VIES");
   });
 
-  test("requestInvoice is only ever sent true for a named customer, never for a walk-in", () => {
-    expect(clientSource).toContain("requestInvoice: !isWalkIn && requestInvoice");
+  test("there is no invoice checkbox for a particular customer", () => {
+    expect(clientSource).toContain("Client particulier — aucune facture ne sera générée");
+    expect(clientSource).not.toContain("Demander une facture");
+    expect(clientSource).not.toContain("requestInvoice");
   });
 
-  test("selecting an existing customer carries their isCompany flag into the till form", () => {
-    expect(clientSource).toContain("isCompany: Boolean(match.isCompany)");
+  test("a VIES VAT customer is told the invoice is created but sent manually", () => {
+    expect(clientSource).toContain("const willHaveVatInvoice = customer.vatInvoiceReady || Boolean(customer.vatNumber.trim())");
+    expect(clientSource).toContain("puis envoyée manuellement depuis Opérations");
   });
 
   test("a receipt-only sale is printable at the till just like a walk-in ticket", () => {

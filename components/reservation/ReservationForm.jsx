@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronRight, ChevronLeft, Check } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, Euro, Calendar, User, Sparkles, X } from "lucide-react";
+import { toIntlLocale } from "@/lib/intl-locale";
 import CategoryStep from "./steps/CategoryStep";
 import ServiceStep from "./steps/ServiceStep";
 import StaffStep from "./steps/StaffStep";
@@ -14,75 +15,31 @@ import ReviewStep from "./steps/ReviewStep";
 import PaymentStep from "./steps/PaymentStep";
 import { computePaymentDecision } from "@/lib/reservation-payment";
 
-/**
- * Returns true when the data collected for a given step is complete enough
- * to allow moving forward.  Steps that self-advance on click (Category,
- * Service, Staff) still benefit from this guard so the stepper breadcrumb
- * cannot be used to skip ahead.
- *
- * @param {number}  stepId          — ALL_STEPS id for the step to validate
- * @param {object}  reservationData — current shared state
- * @returns {boolean}
- */
 function isStepValid(stepId, reservationData) {
   switch (stepId) {
-    // ── Step 1 · Category ──────────────────────────────────────────────────
     case 1:
       return Boolean(reservationData.category);
-
-    // ── Step 2 · Service ───────────────────────────────────────────────────
     case 2:
       return Boolean(reservationData.service);
-
-    // ── Step 3 · Staff ─────────────────────────────────────────────────────
     case 3:
       return Boolean(reservationData.staff && reservationData.staffService);
-
-    // ── Step 4 · Appointment drafts summary ────────────────────────────────
-    // The user can only reach this step after committing a draft, so drafts
-    // is always non-empty here; guard anyway for safety.
     case 4:
       return (reservationData.appointmentDrafts ?? []).length > 0;
-
-    // ── Step 5 · Date & Time ───────────────────────────────────────────────
-    // DateTimeStep manages its own confirm buttons and calls nextStep()
-    // internally — the global Suivant button is hidden for this step.
-    // We still need a validity signal for the stepper breadcrumb guard.
     case 5: {
       const drafts = reservationData.appointmentDrafts ?? [];
       const isMulti = drafts.length > 1;
-      if (!isMulti) {
-        // Single draft: need date + time committed to shared state
-        return Boolean(reservationData.date && reservationData.time);
-      }
-      // Multi-draft: a confirmed schedule proposal must be stored
+      if (!isMulti) return Boolean(reservationData.date && reservationData.time);
       return Boolean(reservationData.selectedScheduleProposal);
     }
-
-    // ── Step 6 · Customer information (guest only) ─────────────────────────
-    // CustomerInfoStep validates its own form before calling nextStep().
-    // The global Suivant button is NOT used for this step (it has its own
-    // submit button).  Validity here is used only for the breadcrumb guard.
     case 6: {
       const info = reservationData.customerInfo;
       if (!info) return false;
-      return Boolean(
-        info.fullName?.trim() &&
-        info.email?.trim() &&
-        info.email.includes("@") &&
-        info.phone?.trim()
-      );
+      return Boolean(info.fullName?.trim() && info.email?.trim() && info.email.includes("@") && info.phone?.trim());
     }
-
-    // ── Step 7 · Review / Récapitulatif ────────────────────────────────────
-    // ReviewStep has its own action buttons; the global Suivant is hidden.
     case 7:
       return true;
-
-    // ── Step 8 · Payment ───────────────────────────────────────────────────
     case 8:
       return true;
-
     default:
       return true;
   }
@@ -99,51 +56,167 @@ const ALL_STEPS = [
   { id: 8, name: "reservationForm.step8", component: PaymentStep, paymentStep: true },
 ];
 
-/**
- * @param {{ customerSession: { id: string, email: string, fullName?: string, phone?: string } | null }} props
- */
+// ─── Persistent Summary ───────────────────────────────────────────────
+function SummarySidebar({ data, onEdit }) {
+  const drafts = data.appointmentDrafts ?? [];
+  const hasDrafts = drafts.length > 0;
+  const hasCategory = Boolean(data.category);
+  const hasService = Boolean(data.service);
+  const hasStaff = Boolean(data.staff);
+  const hasDateTime = Boolean(data.date && data.time) || Boolean(data.selectedScheduleProposal);
+  const hasAny = hasDrafts || hasCategory || hasService || hasStaff || hasDateTime;
+  if (!hasAny) return null;
+
+  const totalPrice = drafts.length ? drafts.reduce((s, d) => s + Number(d.price ?? 0), 0) : data.staffService ? Number(data.staffService.price ?? 0) : data.service ? 0 : 0;
+  const totalDuration = drafts.length ? drafts.reduce((s, d) => s + (d.duration ?? 0), 0) : data.staffService?.duration ?? 0;
+
+  return (
+    <div className="rounded-2xl border border-[#ede5d8]/70 bg-white p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2F3A2E] text-white">
+          <Sparkles size={14} />
+        </div>
+        <h3 className="text-sm font-semibold tracking-wide text-[#2F3A2E]">Votre sélection</h3>
+      </div>
+
+      <div className="space-y-4">
+        {/* Drafts or current picks */}
+        {hasDrafts ? (
+          drafts.map((d, i) => (
+            <div key={i} className="rounded-xl border border-[#f0e8d8] bg-[#fdf8f0]/60 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-[#b89664]">Rendez-vous {i + 1}</p>
+              <p className="mt-1 text-sm font-semibold text-[#2F3A2E] leading-tight">{d.service?.name ?? "—"}</p>
+              <p className="text-xs text-[#6f6a64]">{d.category?.name ?? ""}</p>
+              <div className="mt-2 flex items-center gap-2 text-xs text-[#6f6a64]">
+                <span className="inline-flex items-center gap-1"><User size={11} className="text-[#b89664]" />{d.staff?.user?.fullName ?? "—"}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <span className="inline-flex items-center gap-1 text-[#6f6a64]"><Clock size={11} />{d.duration ?? "—"} min</span>
+                <span className="font-semibold text-[#2F3A2E]">€{Number(d.price ?? 0).toFixed(2)}</span>
+              </div>
+            </div>
+          ))
+        ) : (
+          <>
+            {hasCategory && (
+              <div className="flex items-center justify-between rounded-xl bg-[#fdf8f0] px-3 py-2.5">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Catégorie</p>
+                  <p className="text-sm font-medium text-[#2F3A2E]">{data.category.name}</p>
+                </div>
+                <button onClick={() => onEdit(1)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>
+              </div>
+            )}
+            {hasService && (
+              <div className="flex items-center justify-between rounded-xl bg-[#fdf8f0] px-3 py-2.5">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Prestation</p>
+                  <p className="text-sm font-medium text-[#2F3A2E] leading-tight">{data.service.name}</p>
+                </div>
+                <button onClick={() => onEdit(2)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>
+              </div>
+            )}
+            {hasStaff && (
+              <div className="flex items-center justify-between rounded-xl bg-[#fdf8f0] px-3 py-2.5">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Experte</p>
+                  <p className="text-sm font-medium text-[#2F3A2E]">{data.staff?.user?.fullName ?? "—"}</p>
+                </div>
+                <button onClick={() => onEdit(3)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {hasDateTime && (
+          <div className="rounded-xl border border-[#ede5d8] bg-white px-3 py-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Date & Heure</p>
+            {data.selectedScheduleProposal ? (
+              <p className="mt-1 text-sm font-medium text-[#2F3A2E]">Créneau confirmé</p>
+            ) : (
+              <p className="mt-1 text-sm font-medium text-[#2F3A2E]">{data.date ? new Date(data.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" }) : "—"} • {data.time ?? "—"}</p>
+            )}
+            <button onClick={() => onEdit(5)} className="mt-1 text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>
+          </div>
+        )}
+
+        {(totalPrice > 0 || totalDuration > 0) && (
+          <div className="flex items-center justify-between border-t border-[#ede5d8] pt-4">
+            <span className="text-xs font-medium text-[#6f6a64]">Total estimé</span>
+            <span className="text-sm font-bold tracking-tight text-[#2F3A2E]">{totalDuration ? `${totalDuration} min • ` : ""}€{Number(totalPrice).toFixed(2)}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MobileSummary({ data, onEdit }) {
+  const [open, setOpen] = useState(false);
+  const drafts = data.appointmentDrafts ?? [];
+  const count = drafts.length || (data.category ? 1 : 0);
+  if (count === 0) return null;
+  const totalPrice = drafts.length ? drafts.reduce((s, d) => s + Number(d.price ?? 0), 0) : data.staffService ? Number(data.staffService.price ?? 0) : 0;
+  const totalDuration = drafts.length ? drafts.reduce((s, d) => s + (d.duration ?? 0), 0) : data.staffService?.duration ?? 0;
+  const label = drafts.length ? `${drafts.length} rendez-vous • €${totalPrice.toFixed(2)}` : data.service ? `${data.service.name} • €${totalPrice.toFixed(2)}` : data.category ? data.category.name : "Votre sélection";
+  return (
+    <div className="lg:hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center justify-between rounded-2xl border border-[#ede5d8] bg-white px-4 py-3"
+      >
+        <div className="flex items-center gap-3 text-left">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2F3A2E] text-white"><Sparkles size={13} /></div>
+          <div>
+            <p className="text-xs font-semibold text-[#2F3A2E] leading-tight line-clamp-1">{label}</p>
+            <p className="text-[11px] text-[#6f6a64]">{totalDuration ? `${totalDuration} min` : "Détails"}</p>
+          </div>
+        </div>
+        <span className={`flex h-7 w-7 items-center justify-center rounded-full border border-[#ede5d8] bg-[#fdf8f0] text-[#2F3A2E] transition-transform ${open ? "rotate-180" : ""}`}><ChevronRight size={14} className="rotate-90" /></span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+            <div className="mt-3"><SummarySidebar data={data} onEdit={onEdit} /></div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export default function ReservationForm({ customerSession = null }) {
   const t = useTranslations();
   const isAuthenticated = Boolean(customerSession);
 
   const [currentStep, setCurrentStep] = useState(1);
   const [reservationData, setReservationData] = useState({
-    category:          null,
-    service:           null,
-    staff:             null,
-    staffService:      null,
-    // List of appointment drafts accumulated before Date & Time selection.
-    // Each draft: { category, service, staff, staffService, duration, price }
+    category: null,
+    service: null,
+    staff: null,
+    staffService: null,
     appointmentDrafts: [],
-    date:              null,
-    time:              null,
-    // Multi-draft scheduling fields (populated in DateTimeStep)
-    schedulingMode:    "same-day", // "same-day" | "multi-day"
-    sameDayDate:       null,       // Date — used in same-day mode
-    perDraftDates:     {},         // { [draftIndex]: Date } — used in multi-day mode
-    perDraftTimes:     {},         // { [draftIndex]: string } — used in multi-day mode
-    selectedScheduleProposal: null, // chosen auto-proposal from DateTimeStep
-    // Pre-populate from session so create-reservation always has customerInfo
+    date: null,
+    time: null,
+    schedulingMode: "same-day",
+    sameDayDate: null,
+    perDraftDates: {},
+    perDraftTimes: {},
+    selectedScheduleProposal: null,
     customerInfo: isAuthenticated
       ? {
-          fullName:             customerSession.fullName ?? "",
-          email:                customerSession.email    ?? "",
-          phone:                customerSession.phone    ?? "",
+          fullName: customerSession.fullName ?? "",
+          email: customerSession.email ?? "",
+          phone: customerSession.phone ?? "",
           newsletterSubscribed: false,
         }
       : null,
     paymentMethod: null,
-    notes:         "",
+    notes: "",
   });
 
-  // ── Step list — derived from auth state + live payment decision ───────────
-  // Re-evaluated whenever drafts change so PaymentStep is included/excluded
-  // automatically as soon as the customer's draft configuration is known.
   const STEPS = useMemo(() => {
-    const { requiresPaymentStep } = computePaymentDecision({
-      drafts: reservationData.appointmentDrafts,
-    });
-
+    const { requiresPaymentStep } = computePaymentDecision({ drafts: reservationData.appointmentDrafts });
     return ALL_STEPS.filter((s) => {
       if (s.guestOnly && isAuthenticated) return false;
       if (s.paymentStep && !requiresPaymentStep) return false;
@@ -151,226 +224,143 @@ export default function ReservationForm({ customerSession = null }) {
     });
   }, [isAuthenticated, reservationData.appointmentDrafts]);
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  const updateReservationData = (data) => {
-    setReservationData((prev) => ({ ...prev, ...data }));
-  };
-
-  /** Index (1-based) of the AppointmentDraftsStep inside STEPS */
+  const updateReservationData = (data) => setReservationData((prev) => ({ ...prev, ...data }));
   const draftStepNumber = STEPS.findIndex((s) => s.draftStep) + 1;
 
-  // ── Navigation ───────────────────────────────────────────────────────────
-
-  const nextStep = () => {
-    if (currentStep < STEPS.length) setCurrentStep((prev) => prev + 1);
+  const nextStep = () => { if (currentStep < STEPS.length) setCurrentStep((prev) => prev + 1); };
+  const prevStep = () => { if (currentStep > 1) setCurrentStep((prev) => prev - 1); };
+  const goToStep = (step) => { if (step < currentStep) setCurrentStep(step); };
+  const goToStepById = (id) => {
+    const idx = STEPS.findIndex((s) => s.id === id);
+    if (idx !== -1) setCurrentStep(idx + 1);
   };
 
-  const prevStep = () => {
-    if (currentStep > 1) setCurrentStep((prev) => prev - 1);
-  };
-
-  /**
-   * Allow clicking a breadcrumb step only when going backward (or to the
-   * current step).  Forward jumps via the breadcrumb are blocked so the user
-   * cannot skip a step whose validation has not been satisfied yet.
-   */
-  const goToStep = (step) => {
-    if (step < currentStep) setCurrentStep(step);
-    // Equal or forward: do nothing — the user must complete the current step first.
-  };
-
-  // ── Draft-step specific handlers ─────────────────────────────────────────
-
-  /**
-   * Called by StaffStep (via nextStep) just before advancing.
-   * Receives the freshly-selected staffService directly to avoid reading
-   * stale state — category and service are read inside the state updater
-   * callback to guarantee they are also current.
-   *
-   * @param {object} selectedStaffService  — the staffService record chosen in StaffStep
-   */
   const commitDraftAndGoToSummary = (selectedStaffService) => {
     setReservationData((prev) => {
       const newDraft = {
-        category:     prev.category,
-        service:      prev.service,
-        staff:        selectedStaffService.staff,
+        category: prev.category,
+        service: prev.service,
+        staff: selectedStaffService.staff,
         staffService: selectedStaffService,
-        duration:     selectedStaffService?.duration ?? null,
-        price:        selectedStaffService?.price    ?? null,
+        duration: selectedStaffService?.duration ?? null,
+        price: selectedStaffService?.price ?? null,
       };
-      return {
-        ...prev,
-        appointmentDrafts: [...prev.appointmentDrafts, newDraft],
-        // Reset current-selection fields so the next pick starts clean
-        category:     null,
-        service:      null,
-        staff:        null,
-        staffService: null,
-      };
+      return { ...prev, appointmentDrafts: [...prev.appointmentDrafts, newDraft], category: null, service: null, staff: null, staffService: null };
     });
-
-    // Jump to the drafts step
     setCurrentStep(draftStepNumber);
   };
 
-  /**
-   * "Ajouter un autre rendez-vous": keep drafts, go back to Category (step 1).
-   */
-  const handleAddAnother = () => {
-    // category/service/staff are already null (reset in commitDraftAndGoToSummary)
-    setCurrentStep(1);
-  };
-
-  /**
-   * "Continuer vers Date & Heure": advance past the drafts step.
-   */
-  const handleContinueToDates = () => {
-    setCurrentStep(draftStepNumber + 1);
-  };
-
-  /**
-   * Remove a draft by index. If no drafts remain, send the user back to
-   * Category so they are never stuck with an empty list.
-   */
+  const handleAddAnother = () => setCurrentStep(1);
+  const handleContinueToDates = () => setCurrentStep(draftStepNumber + 1);
   const handleRemoveDraft = (index) => {
     setReservationData((prev) => {
       const updated = prev.appointmentDrafts.filter((_, i) => i !== index);
-      if (updated.length === 0) {
-        // Schedule navigation outside the state updater
-        setTimeout(() => setCurrentStep(1), 0);
-      }
+      if (updated.length === 0) setTimeout(() => setCurrentStep(1), 0);
       return { ...prev, appointmentDrafts: updated };
     });
   };
 
-  // ── Render ───────────────────────────────────────────────────────────────
-
-  const currentStepDef  = STEPS[currentStep - 1];
+  const currentStepDef = STEPS[currentStep - 1];
   const CurrentStepComponent = currentStepDef.component;
-  const isLastStep      = currentStep === STEPS.length;
-  const isDraftStep     = currentStepDef.draftStep === true;
-  const isDateTimeStep  = currentStepDef.id === 5;
-  // Staff step is always step 3 (id 3) regardless of guest/auth filtering
-  const isStaffStep     = currentStepDef.id === 3;
-
-  /** Whether the current step's data is valid so Suivant can be clicked */
+  const isLastStep = currentStep === STEPS.length;
+  const isDraftStep = currentStepDef.draftStep === true;
+  const isDateTimeStep = currentStepDef.id === 5;
+  const isStaffStep = currentStepDef.id === 3;
+  const isCategoryStep = currentStepDef.id === 1;
+  const isPaymentStep = currentStepDef.paymentStep === true;
+  const isReviewStep = currentStepDef.id === 7;
+  const isCustomerStep = currentStepDef.id === 6;
   const canProceed = isStepValid(currentStepDef.id, reservationData);
 
+  const hasSummary = reservationData.appointmentDrafts.length > 0 || Boolean(reservationData.category || reservationData.service || reservationData.staff);
+  const showSidebar = hasSummary && !isCategoryStep;
+  const hideGlobalNav = isLastStep || isDraftStep || isDateTimeStep || isCategoryStep || isPaymentStep || isReviewStep || isCustomerStep;
+
+  // Back is available on every step except the very first one
+  const showBack = currentStep > 1;
+
   return (
-    <div className="mx-auto max-w-7xl px-3 py-8 sm:px-4 sm:py-12 lg:px-8">
-      {/* ── Progress Indicator ─────────────────────────────────── */}
-      <div className="mb-8 sm:mb-12 overflow-x-auto pb-2 sm:pb-3 -mx-3 sm:mx-0 px-3 sm:px-0">
-        <div className="flex w-max min-w-full items-start justify-between gap-1.5 sm:gap-2 md:gap-3">
-          {STEPS.map((step, index) => (
-            <div key={step.id} className="flex min-w-12 sm:min-w-16 flex-1 items-start">
-              <div className="flex min-w-10 sm:min-w-12 flex-col items-center">
-                <button
-                  onClick={() => goToStep(index + 1)}
-                  disabled={index + 1 >= currentStep}
-                  className={`flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-full border-2 text-xs sm:text-sm font-semibold transition-all ${
-                    index + 1 < currentStep
-                      ? "border-[#C8A46A] bg-[#C8A46A] text-white"
-                      : index + 1 === currentStep
-                      ? "border-[#C8A46A] bg-white text-[#C8A46A]"
-                      : "border-gray-300 bg-white text-gray-400"
-                  } ${index + 1 < currentStep ? "cursor-pointer hover:scale-110" : "cursor-not-allowed"}`}
-                >
-                  {index + 1 < currentStep ? (
-                    <Check size={14} className="sm:w-[18px] sm:h-[18px]" />
-                  ) : (
-                    <span className="text-[10px] sm:text-sm">{index + 1}</span>
-                  )}
-                </button>
-                <span
-                  className={`mt-1 sm:mt-2 text-[7px] sm:text-xs font-medium line-clamp-2 text-center w-12 sm:w-auto ${
-                    index + 1 <= currentStep ? "text-[#2F3A2E]" : "text-gray-400"
-                  }`}
-                >
-                  {t(step.name)}
-                </span>
+    <div className="relative bg-[#fdf8f0]">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-2 sm:py-4">
+        <div className={`flex flex-col gap-6 lg:flex-row lg:items-start ${showSidebar ? "lg:gap-8" : ""}`}>
+          <div className="min-w-0 flex-1">
+            {showSidebar && (
+              <div className="mb-4">
+                <MobileSummary data={reservationData} onEdit={goToStepById} />
               </div>
-              {index < STEPS.length - 1 && (
-                <div
-                  className={`mx-0.5 sm:mx-1 md:mx-2 mt-4 sm:mt-5 h-0.5 min-w-2 sm:min-w-4 flex-1 transition-all ${
-                    index + 1 < currentStep ? "bg-[#C8A46A]" : "bg-gray-300"
-                  }`}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Step Content ───────────────────────────────────────── */}
-      <div className="overflow-x-hidden">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentStep}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.3 }}
-            className="min-h-[400px] sm:min-h-[500px]"
-          >
-            {isDraftStep ? (
-              // AppointmentDraftsStep uses custom action props instead of nextStep/prevStep
-              <AppointmentDraftsStep
-                data={reservationData}
-                onAddAnother={handleAddAnother}
-                onContinue={handleContinueToDates}
-                onRemoveDraft={handleRemoveDraft}
-              />
-            ) : (
-              <CurrentStepComponent
-                data={reservationData}
-                updateData={updateReservationData}
-                // StaffStep gets a special nextStep that commits the draft first
-                nextStep={isStaffStep ? commitDraftAndGoToSummary : nextStep}
-                prevStep={prevStep}
-                customerSession={customerSession}
-              />
             )}
-          </motion.div>
-        </AnimatePresence>
-      </div>
 
-      {/* ── Navigation Buttons ─────────────────────────────────── */}
-      {/* Hidden on: last step (payment), draft step (has its own buttons) */}
-      {!isLastStep && !isDraftStep && !isDateTimeStep && (
-        <div className="mt-6 sm:mt-8 flex flex-col-reverse sm:flex-row items-center justify-between gap-3 sm:gap-4">
-          <button
-            onClick={prevStep}
-            disabled={currentStep === 1}
-            className={`w-full sm:w-auto inline-flex items-center justify-center sm:justify-start gap-2 rounded-lg px-4 sm:px-6 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold transition-all ${
-              currentStep === 1
-                ? "cursor-not-allowed bg-gray-200 text-gray-400"
-                : "bg-gray-100 text-[#2F3A2E] hover:bg-gray-200"
-            }`}
-          >
-            <ChevronLeft size={16} className="sm:w-[18px] sm:h-[18px]" />
-            {t("reservationForm.buttons.previous")}
-          </button>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={currentStep}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+                className="bg-transparent p-0"
+              >
+                {isDraftStep ? (
+                  <AppointmentDraftsStep data={reservationData} onAddAnother={handleAddAnother} onContinue={handleContinueToDates} onRemoveDraft={handleRemoveDraft} prevStep={prevStep} />
+                ) : (
+                  <CurrentStepComponent
+                    data={reservationData}
+                    updateData={updateReservationData}
+                    nextStep={isStaffStep ? commitDraftAndGoToSummary : nextStep}
+                    prevStep={prevStep}
+                    customerSession={customerSession}
+                    goToStep={goToStepById}
+                  />
+                )}
+              </motion.div>
+            </AnimatePresence>
 
-          <div className="text-xs sm:text-sm text-gray-500 order-3 sm:order-2">
-            {t("reservationForm.stepOf", { current: currentStep, total: STEPS.length })}
+            {/* Bottom navigation — Précédent at bottom on every step except first */}
+            {(showBack || !hideGlobalNav) && (
+              <div className="mt-8 flex items-center justify-between gap-3">
+                <div>
+                  {showBack && (
+                    <button
+                      onClick={prevStep}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-[#ede5d8] bg-white px-5 py-2.5 text-sm font-medium text-[#2F3A2E] hover:border-[#2F3A2E]/20 hover:bg-white transition-colors"
+                    >
+                      <ChevronLeft size={16} className="opacity-60" />
+                      {t("reservationForm.buttons.previous")}
+                    </button>
+                  )}
+                </div>
+                <div>
+                  {!hideGlobalNav && (
+                    <button
+                      onClick={nextStep}
+                      disabled={isLastStep || !canProceed}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-full px-7 py-3 text-sm font-semibold tracking-wide transition-all ${
+                        isLastStep || !canProceed
+                          ? "cursor-not-allowed bg-[#e8ddd0] text-white"
+                          : "bg-[#2F3A2E] text-white hover:bg-[#212a20]"
+                      }`}
+                    >
+                      {t("reservationForm.buttons.next")}
+                      <ChevronRight size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
-          <button
-            onClick={nextStep}
-            disabled={isLastStep || !canProceed}
-            className={`w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-lg px-4 sm:px-6 py-2.5 sm:py-3 text-xs sm:text-sm font-semibold transition-all order-2 sm:order-3 ${
-              isLastStep || !canProceed
-                ? "cursor-not-allowed bg-gray-200 text-gray-400"
-                : "bg-[#C8A46A] text-white hover:bg-[#B8945A]"
-            }`}
-          >
-            {t("reservationForm.buttons.next")}
-            <ChevronRight size={16} className="sm:w-[18px] sm:h-[18px]" />
-          </button>
+          {showSidebar && (
+            <div className="hidden w-full lg:block lg:w-[340px] lg:flex-shrink-0">
+              <div className="sticky top-6">
+                <SummarySidebar data={reservationData} onEdit={goToStepById} />
+                <div className="mt-4 rounded-2xl border border-[#ede5d8]/50 bg-white px-4 py-4 text-center">
+                  <p className="text-xs font-semibold text-[#2F3A2E]">Besoin d&apos;aide ?</p>
+                  <p className="mt-1 text-xs leading-relaxed text-[#6f6a64]">Notre équipe vous aide à choisir la prestation idéale.</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

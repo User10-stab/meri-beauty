@@ -33,6 +33,7 @@ import { createStaffTimeOff, updateStaffTimeOff, deleteStaffTimeOff } from "@/ac
 import { getOrCreateCalendarToken, regenerateCalendarToken } from "@/actions/staff/manage-calendar-token";
 import { updatePaymentSettings } from "@/actions/staff/update-payment-settings";
 import Button from "@/components/ui/Button";
+import { faceCrop } from "@/lib/faceCrop";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -448,8 +449,15 @@ function ProfileSection({ data, onSuccess }) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    let fileToUpload = file;
+    try {
+      fileToUpload = await faceCrop(file);
+    } catch {
+      // Face crop is best-effort
+    }
+
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", fileToUpload);
     formData.append("folder", "staff");
 
     setUploading(true);

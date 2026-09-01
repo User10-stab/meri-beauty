@@ -412,10 +412,10 @@ export default function BecomePartner() {
             <form onSubmit={handleSubmit} className="flex flex-col gap-5">
               {/* Date range + Desired pace */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
+                <div className="flex h-full flex-col gap-1.5">
                   <label
                     htmlFor="startDate"
-                    className="mb-1.5 block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
+                    className="flex-1 mb-1.5 block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                   >
                     {t("startDateLabel")}
                   </label>
@@ -427,13 +427,13 @@ export default function BecomePartner() {
                     min={todayDate}
                     value={formData.startDate}
                     onChange={handleChange}
-                    className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
+                    className="flex-1 w-full max-h-[46px] rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
                   />
                 </div>
-                <div className="flex flex-col gap-1.5">
+                <div className="flex h-full flex-col gap-1.5">
                   <label
                     htmlFor="desiredPace"
-                    className=" block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
+                    className="flex-1 block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                   >
                     {t("desiredPaceLabel")}
                   </label>
@@ -442,7 +442,7 @@ export default function BecomePartner() {
                     name="desiredPace"
                     value={formData.desiredPace}
                     onChange={handleChange}
-                    className=" w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
+                    className="flex-1 w-full max-h-[46px] rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
                   >
                     <option value="">{t("desiredPacePlaceholder")}</option>
                     <option value="1_day_per_week">{t("desiredPace1Day")}</option>
@@ -452,9 +452,7 @@ export default function BecomePartner() {
                   </select>
                 </div>
               </div>
-
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                 {/* Specialty */}
+              {/* Specialty */}
                 <div className="flex flex-col gap-1.5">
                   <label
                     htmlFor="specialty"
@@ -473,7 +471,6 @@ export default function BecomePartner() {
                     className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
                   />
                 </div>
-
                 {/* VAT Number */}
                 <div className="flex flex-col gap-1.5">
                   <label
@@ -493,9 +490,6 @@ export default function BecomePartner() {
                     className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
                   />
                 </div>
-              </div>
-
-             
 
               {/* Message */}
               <div>

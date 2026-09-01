@@ -71,6 +71,7 @@ export function CreateManualAppointmentModal({
   onClose,
   onCreated,
   defaultDate = null,
+  isAdmin = false,
 }) {
   const [loading, startLoading] = useTransition();
   const [services, setServices] = useState([]);
@@ -122,7 +123,8 @@ export function CreateManualAppointmentModal({
   }, [open]);
 
   // Load the staff members providing the selected service (each with their
-  // own price and duration for that service).
+  // own price and duration for that service). For STAFF users the list is
+  // already filtered to themselves, so auto-select without showing the field.
   useEffect(() => {
     if (!serviceId) {
       setStaffOptions([]);
@@ -132,14 +134,18 @@ export function CreateManualAppointmentModal({
     getStaffForManualBooking(serviceId).then((res) => {
       if (res.success) {
         setStaffOptions(res.data);
-        setSelectedStaff(null);
+        if (!isAdmin && res.data.length > 0) {
+          setSelectedStaff(res.data[0]);
+        } else {
+          setSelectedStaff(null);
+        }
       } else {
         toast.error(res.message);
         setStaffOptions([]);
         setSelectedStaff(null);
       }
     });
-  }, [serviceId]);
+  }, [serviceId, isAdmin]);
 
   useEffect(() => {
     if (customerMode !== "search" || query.trim().length < 2) {
@@ -203,10 +209,18 @@ export function CreateManualAppointmentModal({
       return;
     }
 
+    // For STAFF users the staff field is hidden and automatically linked to
+    // the logged-in staff member; the server resolves it via the session.
+    const effectiveStaff = selectedStaff ?? staffOptions[0] ?? null;
+    if (!effectiveStaff) {
+      toast.error("Veuillez sélectionner une prestation.");
+      return;
+    }
+
     startLoading(async () => {
       const result = await createManualAppointment({
-        staffId: selectedStaff.staffId,
-        staffServiceId: selectedStaff.staffServiceId,
+        staffId: effectiveStaff.staffId,
+        staffServiceId: effectiveStaff.staffServiceId,
         date,
         time,
         notes,
@@ -224,7 +238,7 @@ export function CreateManualAppointmentModal({
         toast.error(result.message || "Une erreur est survenue.");
         // If the error is about availability, refresh the slots
         if (result.message?.includes("créneau") || result.message?.includes("disponible")) {
-          getAvailableSlots(selectedStaff.staffServiceId, date).then((res) => {
+          getAvailableSlots(effectiveStaff.staffServiceId, date).then((res) => {
             if (res.success) {
               setAvailableSlots(res.data.reservationWindows || []);
               setAvailabilityReason(res.data.reason);
@@ -279,30 +293,32 @@ export function CreateManualAppointmentModal({
             <FieldError message={errors.serviceId ?? errors.staffServiceId} />
           </ModalField>
 
-          {/* Staff — who does this service, with their own price and duration */}
-          <ModalField label="Membre du personnel" required>
-            <div className="relative">
-              <User size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <select
-                value={selectedStaff?.staffServiceId ?? ""}
-                onChange={(e) =>
-                  setSelectedStaff(staffOptions.find((s) => s.staffServiceId === e.target.value) ?? null)
-                }
-                disabled={!serviceId}
-                className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100 disabled:bg-gray-50 disabled:text-gray-400"
-              >
-                <option value="">
-                  {serviceId ? "Sélectionner…" : "Choisissez d'abord une prestation"}
-                </option>
-                {staffOptions.map((s) => (
-                  <option key={s.staffServiceId} value={s.staffServiceId}>
-                    {s.staffName} — {formatDuration(s.duration)} — {formatPrice(s.price)}
+          {/* Staff — only shown to ADMIN/OWNER; STAFF bookings are auto-linked to themselves */}
+          {isAdmin && (
+            <ModalField label="Membre du personnel" required>
+              <div className="relative">
+                <User size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <select
+                  value={selectedStaff?.staffServiceId ?? ""}
+                  onChange={(e) =>
+                    setSelectedStaff(staffOptions.find((s) => s.staffServiceId === e.target.value) ?? null)
+                  }
+                  disabled={!serviceId}
+                  className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100 disabled:bg-gray-50 disabled:text-gray-400"
+                >
+                  <option value="">
+                    {serviceId ? "Sélectionner…" : "Choisissez d'abord une prestation"}
                   </option>
-                ))}
-              </select>
-            </div>
-            <FieldError message={errors.staffId} />
-          </ModalField>
+                  {staffOptions.map((s) => (
+                    <option key={s.staffServiceId} value={s.staffServiceId}>
+                      {s.staffName} — {formatDuration(s.duration)} — {formatPrice(s.price)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <FieldError message={errors.staffId} />
+            </ModalField>
+          )}
 
           {/* Date / Time */}
           <div className="grid grid-cols-2 gap-3">

@@ -29,6 +29,7 @@ import { ServiceMultiSelect } from "./ServiceMultiSelect";
 import { StaffPermissionsField } from "./StaffPermissionsField";
 import { DEFAULT_STAFF_PERMISSIONS } from "@/lib/authorization";
 import { optimizeImage, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES } from "@/lib/imageOptimization";
+import { faceCrop } from "@/lib/faceCrop";
 import Button from "@/components/ui/Button";
 
 // ─── Reusable field primitives ────────────────────────────────────────────────
@@ -105,6 +106,12 @@ function PhotoUpload({ value, onChange, error }) {
     let fileToUpload = file;
     try {
       fileToUpload = await optimizeImage(file);
+      try {
+        fileToUpload = await faceCrop(fileToUpload);
+      } catch {
+        // Face detection/crop is best-effort — if it fails, upload the
+        // optimised image as-is so the user isn't blocked.
+      }
     } catch (err) {
       toast.error(err?.message ?? "Impossible de traiter l'image. Veuillez réessayer avec une autre image.");
       return;
@@ -246,6 +253,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       yearsOfExperience: "",
       hireDate:          "",
       vatNumber:         "",
+      rythme:            "",
       serviceIds:        [],
       dashboardPermissions: initialValues.dashboardPermissions ?? [...DEFAULT_STAFF_PERMISSIONS],
       contract: {
@@ -477,6 +485,29 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                   />
                   <FieldError message={errors.hireDate?.message} />
                 </div>
+              </div>
+
+              {/* Rythme souhaité */}
+              <div>
+                <Label htmlFor="rythme" icon={Calendar}>
+                  Rythme souhaité
+                </Label>
+                <select
+                  id="rythme"
+                  {...register("rythme")}
+                  className={`w-full rounded-lg border px-3 py-2.5 text-sm text-gray-700 outline-none transition-colors focus:ring-2 ${
+                    errors.rythme
+                      ? "border-red-300 focus:border-red-400 focus:ring-red-100"
+                      : "border-gray-200 focus:border-indigo-400 focus:ring-indigo-100"
+                  }`}
+                >
+                  <option value="">-- Sélectionnez --</option>
+                  <option value="ONE_DAY_PER_WEEK">1 jour par semaine</option>
+                  <option value="TWO_DAYS_PER_WEEK">2 jours par semaine</option>
+                  <option value="THREE_DAYS_PER_WEEK">3 jours par semaine</option>
+                  <option value="FULL_WEEK">Toute la semaine</option>
+                </select>
+                <FieldError message={errors.rythme?.message} />
               </div>
 
               {/* VAT Number */}

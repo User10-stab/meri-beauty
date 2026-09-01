@@ -97,6 +97,7 @@ export async function createIndependentStaff(input) {
         yearsOfExperience: fe.yearsOfExperience?.[0] ?? null,
         hireDate: fe.hireDate?.[0] ?? null,
         vatNumber: fe.vatNumber?.[0] ?? null,
+        rythme: fe.rythme?.[0] ?? null,
         serviceIds: fe.serviceIds?.[0] ?? null,
         dashboardPermissions: fe.dashboardPermissions?.[0] ?? null,
         contract: fe["contract"]?.[0] ?? null,
@@ -114,6 +115,7 @@ export async function createIndependentStaff(input) {
     yearsOfExperience,
     hireDate,
     vatNumber,
+    rythme,
     serviceIds,
     dashboardPermissions,
     contract,
@@ -173,6 +175,7 @@ export async function createIndependentStaff(input) {
           isActive: true,
           hireDate: hireDate ? new Date(hireDate) : null,
           vatNumber,
+          rythme: rythme ?? null,
           dashboardPermissions,
         },
       });

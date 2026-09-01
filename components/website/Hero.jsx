@@ -119,56 +119,75 @@ export default async function Hero() {
       ══════════════════════════════════════ */}
      <aside
   aria-label={t("openingHours")}
-  className="absolute right-4 top-1/2 z-20 hidden w-[280px] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25 sm:right-6 sm:w-[300px] md:right-8 md:w-[320px] lg:right-14 lg:block lg:w-[330px] xl:right-20"
+  className="absolute right-4 top-1/2 z-20 hidden w-[250px] overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25 sm:right-6 sm:w-[270px] md:right-8 md:w-[290px] lg:right-14 lg:block lg:w-[300px] xl:right-20"
   style={{
     transform: "translateY(-50%)",
   }}
 >
   {/* Address */}
-  <div className="bg-gold px-6 py-5">
-    <div className="flex items-start gap-2.5">
-      <MapPinIcon className="mt-0.5 h-4 w-4 shrink-0 text-white/80" />
+  <div className="bg-gold px-5 py-4">
+    <div className="flex items-start gap-2">
+      <MapPinIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-white/80" />
 
-      <p className="whitespace-pre-line text-[14px] font-semibold leading-snug text-white">
+      <p className="whitespace-pre-line text-[12px] font-semibold leading-snug text-white">
         {salon?.data?.address || t("addressUnavailable")}
       </p>
     </div>
   </div>
 
   {/* Card Body */}
-  <div className="px-6 py-6">
-    <div className="mb-6 flex items-center gap-4 justify-between">
-      <h2 className="text-[1.3rem] font-bold uppercase leading-[1.1] tracking-tight text-ink">
+  <div className="px-5 py-5">
+    <div className="mb-5 flex items-center gap-3 justify-between">
+      <h2 className="text-[1.1rem] font-bold uppercase leading-[1.1] tracking-tight text-ink">
         {t("openingHours")}
       </h2>
 
-      <ClockIcon className="mt-0.5 h-9 w-9 text-gold" />
+      <ClockIcon className="mt-0.5 h-7 w-7 text-gold" />
     </div>
 
-    <ul className="flex flex-col gap-4">
-      {workingDays.length > 0 ? (
-        workingDays.map((item) => (
-          <li
-            key={item.label}
-            className="border-b border-black/8 pb-4 last:border-0 last:pb-0"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-black/40">
-              {item.label}
-            </p>
+    {/* Boutique Section */}
+    <div className="mb-4">
+      <h3 className="mb-2.5 text-[12px] font-bold uppercase tracking-[0.12em] text-ink">
+        {t("boutiqueLabel")}
+      </h3>
+      <ul className="flex flex-col gap-3">
+        {workingDays.length > 0 ? (
+          workingDays.map((item) => (
+            <li
+              key={item.label}
+              className="border-b border-black/8 pb-3 last:border-0 last:pb-0"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-black/40">
+                {item.label}
+              </p>
 
-            <p className="mt-1 text-[1.15rem] font-light text-gold">
-              {item.hours}
+              <p className="mt-0.5 text-[1rem] font-light text-gold">
+                {item.hours}
+              </p>
+            </li>
+          ))
+        ) : (
+          <li>
+            <p className="text-sm text-gray-500">
+              {t("openingHoursUnavailable")}
             </p>
           </li>
-        ))
-      ) : (
-        <li>
-          <p className="text-sm text-gray-500">
-            {t("openingHoursUnavailable")}
-          </p>
-        </li>
-      )}
-    </ul>
+        )}
+      </ul>
+    </div>
+
+    {/* Salon Section */}
+    <div className="border-t border-black/8 pt-4">
+      <h3 className="mb-1.5 text-[12px] font-bold uppercase tracking-[0.12em] text-ink">
+        {t("salonLabel")}
+      </h3>
+      <p className="text-[1rem] font-light text-gold">
+        {t("byAppointment")}
+      </p>
+      <p className="mt-0.5 text-[11px] text-black/50">
+        {t("hoursByProvider")}
+      </p>
+    </div>
   </div>
 </aside>
     </div>

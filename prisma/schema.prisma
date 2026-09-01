@@ -27,6 +27,13 @@ enum StaffType {
   INDEPENDENT
 }
 
+enum StaffRythme {
+  ONE_DAY_PER_WEEK    @map("1 jour par semaine")
+  TWO_DAYS_PER_WEEK   @map("2 jours par semaine")
+  THREE_DAYS_PER_WEEK @map("3 jours par semaine")
+  FULL_WEEK           @map("Toute la semaine")
+}
+
 enum AppointmentStatus {
   PENDING
   ACCEPTED
@@ -1360,6 +1367,7 @@ model Staff {
   user   User   @relation(fields: [userId], references: [id])
 
   type              StaffType
+  rythme            StaffRythme?
   languages         String[]
   bio               String?
   isActive          Boolean   @default(true)

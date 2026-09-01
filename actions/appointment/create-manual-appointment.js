@@ -4,7 +4,10 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
-import { reservationCreatedAutomaticEmail } from "@/lib/email-templates";
+import {
+  reservationCreatedAutomaticEmail,
+  staffReservationConfirmedEmail,
+} from "@/lib/email-templates";
 import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
 import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
@@ -17,6 +20,7 @@ import {
   createNotificationsBulk,
   buildAppointmentConfirmedNotification,
   getAppointmentNotificationRecipients,
+  getAppointmentEmailRecipients,
 } from "@/lib/notifications";
 import { resolveOrCreateCustomer } from "@/actions/reservation/create-reservation";
 import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
@@ -178,7 +182,7 @@ export async function searchCustomersForManualBooking(query) {
 }
 
 const manualAppointmentSchema = z.object({
-  staffId: z.string().min(1, "Le membre du personnel est obligatoire."),
+  staffId: z.string().trim().optional().nullable(),
   staffServiceId: z.string().min(1, "La prestation est obligatoire."),
   date: z.string().min(1, "La date est obligatoire."),
   time: z.string().min(1, "L'heure est obligatoire."),
@@ -233,6 +237,15 @@ export async function createManualAppointment(input) {
     }
 
     const { staffServiceId, date, time, notes, customer } = parsed.data;
+
+    // ADMIN/OWNER must explicitly select a staff member; STAFF is auto-linked.
+    if (isAdminRole(session.user.role) && !parsed.data.staffId) {
+      return {
+        success: false,
+        message: "Veuillez corriger les erreurs du formulaire.",
+        errors: { staffId: "Le membre du personnel est obligatoire." },
+      };
+    }
 
     const staffId = await resolveActingStaffId(session, parsed.data.staffId);
     if (!staffId) {
@@ -372,6 +385,24 @@ export async function createManualAppointment(input) {
       }),
       ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
     }).catch((err) => console.error("[createManualAppointment] confirmation email failed:", err));
+
+    // Staff must always receive an email when a reservation is created for them,
+    // whether the manual booking was made by themselves or by an admin.
+    const emailRecipients = await getAppointmentEmailRecipients(staffId);
+    for (const recipient of emailRecipients) {
+      sendEmail({
+        to: recipient.email,
+        ...staffReservationConfirmedEmail({
+          staffName: recipient.fullName,
+          customerName: user.fullName,
+          serviceName,
+          date: appointmentDate,
+          time,
+          duration: staffService.duration,
+          totalAmount: Number(staffService.price),
+        }),
+      }).catch((err) => console.error("[createManualAppointment] staff email failed:", err));
+    }
 
     return {
       success: true,

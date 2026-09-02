@@ -1,20 +1,21 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
-import { isStaffServiceAvailable } from "@/lib/staff-availability";
+import { isStaffServiceBookable } from "@/lib/staff-availability";
 
 /**
  * Returns only categories that have at least one bookable service.
  * A service is bookable if it has at least one StaffService whose
- * staff member passes the availability check.
+ * staff member passes the visibility check (structural conditions only —
+ * a future contract start date does NOT hide the category/service; it
+ * only affects which dates are actually bookable, see getAvailableSlots).
  *
  * This function is for the reservation page only.
  * The dashboard uses getCategories() which returns all categories.
  *
- * @param {Date} [referenceDate] - Optional date to check availability against (defaults to now)
  * @returns {{ success: boolean, data: Array<{ id, name, description, servicesCount }>, message?: string }}
  */
-export async function getBookableCategories(referenceDate) {
+export async function getBookableCategories() {
   try {
     const categories = await prisma.category.findMany({
       orderBy: { name: "asc" },
@@ -53,7 +54,7 @@ export async function getBookableCategories(referenceDate) {
         // Filter to only services that have at least one available staff member
         const bookableServices = category.services.filter((service) => {
           const availableStaffServices = service.staffServices.filter((ss) => {
-            const result = isStaffServiceAvailable(ss, referenceDate);
+            const result = isStaffServiceBookable(ss);
             return result.available;
           });
           return availableStaffServices.length > 0;

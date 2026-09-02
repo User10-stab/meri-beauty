@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS, ROLES } from "@/lib/authorization";
+import { ALL_WEEK_DAYS } from "@/lib/week-days";
 
 const staffAssignmentSchema = z.object({
   staffId: z.string().min(1, "Le professionnel est obligatoire."),
@@ -12,6 +13,12 @@ const staffAssignmentSchema = z.object({
   duration: z.coerce.number({ error: "La durée est invalide." }).int("La durée doit être un nombre entier.").nonnegative("La durée ne peut pas être négative."),
   margin: z.coerce.number().nonnegative("La marge ne peut pas être négative.").optional().nullable(),
   photo: z.string().optional().nullable(),
+  // Days this staff member is allowed to perform THIS service. Defaults to
+  // every day (no restriction) when omitted.
+  availableDays: z
+    .array(z.enum(["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]))
+    .optional()
+    .default(ALL_WEEK_DAYS),
 });
 
 const createServiceSchema = z.object({
@@ -183,6 +190,7 @@ export async function createService(input) {
           duration: incoming.duration,
           margin: incoming.margin ?? null,
           photo: incoming.photo ?? "",
+          availableDays: incoming.availableDays ?? ALL_WEEK_DAYS,
           isActive: true,
         },
         create: {
@@ -193,6 +201,7 @@ export async function createService(input) {
           duration: incoming.duration,
           margin: incoming.margin ?? null,
           photo: incoming.photo ?? "",
+          availableDays: incoming.availableDays ?? ALL_WEEK_DAYS,
           isActive: true,
         },
       });
@@ -251,6 +260,7 @@ export async function createService(input) {
           duration: staffAssignment?.duration ?? 0,
           margin: staffAssignment?.margin ?? null,
           photo: staffAssignment?.photo ?? "",
+          availableDays: staffAssignment?.availableDays ?? ALL_WEEK_DAYS,
           isActive: true,
         });
       }
@@ -276,6 +286,7 @@ export async function createService(input) {
                 duration: assignment.duration ?? 0,
                 margin: assignment.margin ?? null,
                 photo: assignment.photo ?? "",
+                availableDays: assignment.availableDays ?? ALL_WEEK_DAYS,
                 isActive: true,
               });
             }
@@ -451,6 +462,7 @@ export async function updateService(input) {
                 duration: myAssignment.duration ?? 0,
                 margin: myAssignment.margin ?? null,
                 photo: myAssignment.photo ?? "",
+                availableDays: myAssignment.availableDays ?? ALL_WEEK_DAYS,
               },
             });
             console.log("[updateService] Staff assignment updated");
@@ -486,6 +498,7 @@ export async function updateService(input) {
                 duration: assignment.duration || 0,
                 margin: assignment.margin ?? null,
                 photo: assignment.photo ?? "",
+                availableDays: assignment.availableDays ?? ALL_WEEK_DAYS,
               },
             });
           } else {
@@ -506,6 +519,7 @@ export async function updateService(input) {
                   duration: assignment.duration || 0,
                   margin: assignment.margin ?? null,
                   photo: assignment.photo ?? "",
+                  availableDays: assignment.availableDays ?? ALL_WEEK_DAYS,
                   isActive: true,
                 },
               });

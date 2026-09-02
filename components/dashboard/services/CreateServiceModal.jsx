@@ -8,6 +8,7 @@ import { PhotoUpload } from "@/components/ui/PhotoUpload";
 import { createService, updateService, getCategories, getStaffOptions, getCurrentStaffProfile } from "@/actions/services/create-service";
 import { assignServiceToMe } from "@/actions/services/assign-service-to-me";
 import { InlineCategoryCreate } from "@/components/dashboard/services/InlineCategoryCreate";
+import { ALL_WEEK_DAYS } from "@/lib/week-days";
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -26,9 +27,27 @@ function ModalField({ label, children, required = false }) {
   );
 }
 
+const WEEK_DAYS = [
+  { value: "MONDAY", label: "Lun" },
+  { value: "TUESDAY", label: "Mar" },
+  { value: "WEDNESDAY", label: "Mer" },
+  { value: "THURSDAY", label: "Jeu" },
+  { value: "FRIDAY", label: "Ven" },
+  { value: "SATURDAY", label: "Sam" },
+  { value: "SUNDAY", label: "Dim" },
+];
+
 function StaffAssignmentCard({ staff, index, assignment, onChange, onRemove, canRemove, errors }) {
   const handleChange = (field, value) => {
     onChange(index, { ...assignment, [field]: value });
+  };
+
+  const availableDays = assignment.availableDays ?? [];
+  const toggleDay = (day) => {
+    const next = availableDays.includes(day)
+      ? availableDays.filter((d) => d !== day)
+      : [...availableDays, day];
+    handleChange("availableDays", next);
   };
 
   return (
@@ -124,6 +143,32 @@ function StaffAssignmentCard({ staff, index, assignment, onChange, onRemove, can
         </div>
         <FieldError message={errors?.photo} />
       </ModalField>
+
+      {/* Available days — restricts which weekdays this staff member can perform THIS service */}
+      <ModalField label="Jours disponibles pour ce service">
+        <div className="flex flex-wrap gap-1.5">
+          {WEEK_DAYS.map((day) => {
+            const active = availableDays.includes(day.value);
+            return (
+              <button
+                key={day.value}
+                type="button"
+                onClick={() => toggleDay(day.value)}
+                className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  active
+                    ? "border-indigo-400 bg-indigo-100 text-indigo-700"
+                    : "border-gray-200 bg-white text-gray-500 hover:border-indigo-200"
+                }`}
+              >
+                {day.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1 text-xs text-gray-400">
+          Aucune sélection = pas de restriction (horaires habituels du professionnel).
+        </p>
+      </ModalField>
     </div>
   );
 }
@@ -197,7 +242,7 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
       });
       // For staff: auto-add their own assignment so they can set price/duration
       if (isStaff && currentStaffId) {
-        setStaffAssignments([{ staffId: currentStaffId, price: "", duration: "", margin: "", photo: "" }]);
+        setStaffAssignments([{ staffId: currentStaffId, price: "", duration: "", margin: "", photo: "", availableDays: [...ALL_WEEK_DAYS] }]);
       } else {
         setStaffAssignments([]);
       }
@@ -219,6 +264,7 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
       duration: ss.duration ? String(ss.duration) : "",
       margin: ss.margin != null ? String(ss.margin) : "",
       photo: ss.photo ?? "",
+      availableDays: ss.availableDays ?? [],
     }));
     setStaffAssignments(existingAssignments);
 
@@ -251,7 +297,7 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
     if (selectedStaffIds.includes(staffId)) return;
     setStaffAssignments((prev) => [
       ...prev,
-      { staffId, price: "", duration: "", margin: "", photo: "" },
+      { staffId, price: "", duration: "", margin: "", photo: "", availableDays: [...ALL_WEEK_DAYS] },
     ]);
   }
 
@@ -323,6 +369,7 @@ export function CreateServiceModal({ open, onClose, onCreated, service, userRole
         duration: parseInt(a.duration),
         margin: a.margin ? parseFloat(a.margin) : null,
         photo: a.photo || null,
+        availableDays: a.availableDays ?? [],
       })),
     };
 

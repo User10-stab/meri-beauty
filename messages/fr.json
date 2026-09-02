@@ -2347,7 +2347,8 @@
         "salonClosedDay": "Le salon est fermé ce jour",
         "staffNotWorkingDay": "Le membre du personnel ne travaille pas ce jour",
         "staffOnTimeOff": "Le membre du personnel est en congé",
-        "salonClosure": "Le salon est fermé (exception)"
+        "salonClosure": "Le salon est fermé (exception)",
+        "serviceNotOfferedThisDay": "Ce service n'est pas proposé par ce professionnel ce jour-là"
       }
     },
     "review": {

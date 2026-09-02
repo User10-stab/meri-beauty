@@ -1463,6 +1463,10 @@ model StaffService {
   margin   Decimal?
   photo    String
   isActive Boolean  @default(true)
+  // Days of the week this staff member is allowed to perform THIS specific
+  // service. Defaults to every day (no restriction); an explicitly narrowed
+  // list restricts booking availability (see lib/slot-availability.js).
+  availableDays WeekDay[] @default([MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

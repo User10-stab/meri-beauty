@@ -2,20 +2,21 @@
 
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { getAvailableStaffServices } from "@/lib/staff-availability";
+import { getBookableStaffServices } from "@/lib/staff-availability";
 
 /**
  * Returns only services in a given category that have at least one
- * bookable staff member.
+ * bookable staff member (visibility check — a future contract start
+ * date does NOT hide the service; it only affects which dates are
+ * actually bookable, see getAvailableSlots).
  *
  * This function is for the reservation page only.
  * The dashboard uses getServices() which returns all services.
  *
  * @param {string} categoryId - The category to filter by
- * @param {Date}   [referenceDate] - Optional date (defaults to now)
  * @returns {{ success: boolean, data: Array<{ id, name, description, staffServices, priceRange, durationRange, marginRange }>, message?: string }}
  */
-export async function getBookableServices(categoryId, referenceDate) {
+export async function getBookableServices(categoryId) {
   try {
     if (!categoryId) {
       return { success: false, data: [], message: "Catégorie requise." };
@@ -55,9 +56,8 @@ export async function getBookableServices(categoryId, referenceDate) {
     const data = services
       .map((s) => {
         const serialized = serializeDecimalFields(s);
-        const availableStaffServices = getAvailableStaffServices(
-          serialized.staffServices || [],
-          referenceDate
+        const availableStaffServices = getBookableStaffServices(
+          serialized.staffServices || []
         );
 
         // Only include services that have at least one available staff member

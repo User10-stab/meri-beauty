@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "StaffService" ALTER COLUMN "availableDays" SET DEFAULT ARRAY['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']::"WeekDay"[];

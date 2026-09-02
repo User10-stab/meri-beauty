@@ -48,7 +48,7 @@ function getDateKey(date){ if(!date) return null; return `${date.getFullYear()}-
 function isSameDay(a,b){ if(!a||!b) return false; return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();}
 function isDateInPast(date){ if(!date) return true; const today=new Date(); today.setHours(0,0,0,0); return date<today;}
 function formatTimeFromMinutes(m){ const h=Math.floor(m/60); const mi=m%60; return `${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}`;}
-const UNAVAILABLE_REASON_KEYS={"Staff not available":"staffNotAvailable","User deleted":"userDeleted","No working hours configured":"noWorkingHours","No active contract":"noActiveContract","Contract has not started yet":"contractNotStarted","Contract has expired":"contractExpired","Salon closed this day":"salonClosedDay","Staff not working this day":"staffNotWorkingDay","Staff on time off":"staffOnTimeOff","Salon closure":"salonClosure"};
+const UNAVAILABLE_REASON_KEYS={"Staff not available":"staffNotAvailable","User deleted":"userDeleted","No working hours configured":"noWorkingHours","No active contract":"noActiveContract","Contract has not started yet":"contractNotStarted","Contract has expired":"contractExpired","Salon closed this day":"salonClosedDay","Staff not working this day":"staffNotWorkingDay","Staff on time off":"staffOnTimeOff","Salon closure":"salonClosure","Service not offered by this staff member on this day":"serviceNotOfferedThisDay"};
 
 function CalendarWidget({ selectedDate, onDateSelect, disabledDates=new Set(), month, onMonthChange }) {
   const t = useTranslations("reservationSteps");

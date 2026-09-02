@@ -87,6 +87,11 @@ export function ServiceRow({ row, onView, onEdit, onDelete }) {
         {row.marginRange}
       </td>
 
+      {/* Available days */}
+      <td className="px-4 py-4 align-middle text-gray-600">
+        {row.availableDaysRange}
+      </td>
+
       {/* Actions */}
       <td className="px-4 py-4 pr-5 align-middle">
         <RowActions

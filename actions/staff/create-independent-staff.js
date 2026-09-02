@@ -137,6 +137,21 @@ export async function createIndependentStaff(input) {
     }
   }
 
+  // A staff member already active under this email blocks re-creation; a
+  // soft-deleted one does not (see createStaffFromRental for the case where
+  // the Staff row itself must be reactivated instead of duplicated).
+  const existingUser = await prisma.user.findFirst({
+    where: { email },
+    select: { staff: { select: { isDeleted: true } } },
+  });
+  if (existingUser?.staff && !existingUser.staff.isDeleted) {
+    return {
+      success: false,
+      message: "Un membre du personnel avec cette adresse e-mail existe déjà.",
+      errors: { email: "Un membre du personnel avec cette adresse e-mail existe déjà." },
+    };
+  }
+
   if (vatNumber) {
     const viesResult = await verifyVatWithVies(vatNumber);
     if (!viesResult.success) {

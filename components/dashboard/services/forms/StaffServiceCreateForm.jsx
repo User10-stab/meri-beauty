@@ -8,6 +8,17 @@ import Button from "@/components/ui/Button";
 import { PhotoUpload } from "@/components/ui/PhotoUpload";
 import { getCategories, createService, getCurrentStaffProfile } from "@/actions/services/create-service";
 import { InlineCategoryCreate } from "@/components/dashboard/services/InlineCategoryCreate";
+import { ALL_WEEK_DAYS } from "@/lib/week-days";
+
+const WEEK_DAYS = [
+  { value: "MONDAY", label: "Lun" },
+  { value: "TUESDAY", label: "Mar" },
+  { value: "WEDNESDAY", label: "Mer" },
+  { value: "THURSDAY", label: "Jeu" },
+  { value: "FRIDAY", label: "Ven" },
+  { value: "SATURDAY", label: "Sam" },
+  { value: "SUNDAY", label: "Dim" },
+];
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -41,6 +52,7 @@ export function StaffServiceCreateForm({ open, onClose, onCreated }) {
     duration: "",
     margin: "",
     photo: "",
+    availableDays: [...ALL_WEEK_DAYS],
     _staffId: "",
   });
 
@@ -76,6 +88,7 @@ export function StaffServiceCreateForm({ open, onClose, onCreated }) {
       duration: "",
       margin: "",
       photo: "",
+      availableDays: [...ALL_WEEK_DAYS],
     }));
   }, [open]);
 
@@ -124,6 +137,7 @@ export function StaffServiceCreateForm({ open, onClose, onCreated }) {
           duration: parseInt(form.duration, 10),
           margin: form.margin ? parseFloat(form.margin) : null,
           photo: form.photo || "",
+          availableDays: form.availableDays ?? [],
         },
       ],
     };
@@ -363,6 +377,40 @@ export function StaffServiceCreateForm({ open, onClose, onCreated }) {
                   placeholder="Optionnel"
                 />
               </div>
+            </ModalField>
+
+            {/* Available days — restricts which weekdays this staff member can perform THIS service */}
+            <ModalField label="Jours disponibles pour ce service">
+              <div className="flex flex-wrap gap-1.5">
+                {WEEK_DAYS.map((day) => {
+                  const active = form.availableDays.includes(day.value);
+                  return (
+                    <button
+                      key={day.value}
+                      type="button"
+                      disabled={!isReadyForDetails}
+                      onClick={() =>
+                        setForm((p) => ({
+                          ...p,
+                          availableDays: active
+                            ? p.availableDays.filter((d) => d !== day.value)
+                            : [...p.availableDays, day.value],
+                        }))
+                      }
+                      className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                        active
+                          ? "border-indigo-400 bg-indigo-100 text-indigo-700"
+                          : "border-gray-200 bg-white text-gray-500 hover:border-indigo-200"
+                      }`}
+                    >
+                      {day.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1 text-xs text-gray-400">
+                Aucune sélection = pas de restriction (horaires habituels).
+              </p>
             </ModalField>
 
             {/* Description */}

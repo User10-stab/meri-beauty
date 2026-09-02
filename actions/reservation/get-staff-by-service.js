@@ -2,15 +2,17 @@
 
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { getAvailableStaffServices } from "@/lib/staff-availability";
+import { getBookableStaffServices } from "@/lib/staff-availability";
 
 /**
- * Get all staff members who provide a specific service and are currently
- * available for booking.
+ * Get all staff members who provide a specific service and should be
+ * shown on the reservation page.
  *
  * This function fetches the raw staff-service data first, then passes it
- * through the reusable availability helper which applies ALL business rules
- * (active contract, working hours, time off, etc.).
+ * through the reusable visibility helper which applies the structural
+ * business rules (active contract exists, working hours, etc.). A future
+ * contract start date does NOT hide the staff member here \u2014 it only
+ * restricts which dates are actually bookable for them.
  *
  * @param {string} serviceId - The service ID
  * @returns {Promise<{success: boolean, data?: any[], message?: string}>}
@@ -33,7 +35,9 @@ export async function getStaffByService(serviceId) {
         // "Assign to me" creates isActive: true rows with price/duration 0,
         // meant to be configured before going live — exclude those from the
         // public booking list until the staff member sets a real price.
-        price: { gt: 0 },
+        // Kept here as a DB-level pre-filter for performance; the same rule
+        // is re-validated in isStaffServiceBookable (lib/staff-availability.js).
+        price: { gte: 0 },
         duration: { gt: 0 },
         staff: {
           isActive: true,
@@ -85,8 +89,8 @@ export async function getStaffByService(serviceId) {
       },
     });
 
-    // Filter by availability using the reusable helper
-    const availableStaffServices = getAvailableStaffServices(staffServices);
+    // Filter by visibility using the reusable helper
+    const availableStaffServices = getBookableStaffServices(staffServices);
 
     // Calculate average rating for each available staff member — one query
     // for all of them (previously one query per staff member inside the

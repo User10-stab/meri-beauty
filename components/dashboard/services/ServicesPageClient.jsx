@@ -31,6 +31,7 @@ const SERVICES_COLUMNS = [
   { key: "price", label: "Prix" },
   { key: "duration", label: "Durée" },
   { key: "margin", label: "Marge tampon" },
+  { key: "availableDays", label: "Jours" },
 ];
 
 export function ServicesPageClient({ initialCategories, initialServices, userRole }) {

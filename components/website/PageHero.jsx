@@ -15,7 +15,7 @@ export default function PageHero({
 
   return (
     <section className="relative h-[700px] overflow-hidden bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url('${backgroundImage}')` }}>
-      <div className="mx-auto grid h-full w-full items-center lg:grid-cols-3">
+      <div className="mx-auto grid h-full w-full items-center lg:grid-cols-2">
         <div className="relative z-10 flex h-full w-full flex-col items-center bg-[#2F3A2E]/90 px-6 py-24">
           <div className="mx-auto w-3/4 text-center lg:text-left">
             <span className="mb-5 inline-block text-sm font-semibold uppercase tracking-[0.32em] text-[#C8A46A]">
@@ -31,7 +31,7 @@ export default function PageHero({
             </div>
           </div>
         </div>
-        <div className="relative h-full w-full bg-black/20 lg:col-span-2">
+        <div className="relative h-full w-full bg-black/20 lg:col-span-1">
           <div className="absolute inset-y-0 left-0 w-52 bg-gradient-to-r from-[#2F3A2E]/90 via-[#2F3A2E]/80 to-transparent" />
         </div>
       </div>

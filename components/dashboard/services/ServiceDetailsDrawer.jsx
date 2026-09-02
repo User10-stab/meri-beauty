@@ -3,8 +3,9 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X, Users } from "lucide-react";
+import { formatAvailableDays } from "@/lib/week-days";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────
 
 function formatPrice(val) {
   if (val == null) return "—";
@@ -61,6 +62,9 @@ function StaffTable({ staffServices }) {
             <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">
               Marge
             </th>
+            <th className="px-4 py-2.5 text-right text-xs font-semibold uppercase tracking-wider text-gray-400">
+              Jours
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -106,6 +110,11 @@ function StaffTable({ staffServices }) {
                 {/* Margin */}
                 <td className="px-4 py-3 text-right text-gray-600">
                   {formatMargin(ss.margin)}
+                </td>
+
+                {/* Available days — empty means no restriction */}
+                <td className="px-4 py-3 text-right text-gray-500 text-xs">
+                  {formatAvailableDays(ss.availableDays)}
                 </td>
               </tr>
             );

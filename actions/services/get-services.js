@@ -6,6 +6,7 @@ import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { isAdminRole, ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { reportPublicDataError } from "@/lib/prisma-public-fallback";
+import { formatAvailableDays } from "@/lib/week-days";
 
 /**
  * Returns services based on the current user's role.
@@ -113,6 +114,11 @@ export async function getServices() {
         .filter(Boolean)
         .join(", ");
 
+      // Union of every staff member's allowed days for this service — good
+      // enough for a single table cell; per-staff detail is available in
+      // ServiceDetailsDrawer/StaffTable.
+      const availableDaysUnion = serializedStaffServices.flatMap((ss) => ss.availableDays ?? []);
+
       return {
         id: s.id,
         name: s.name,
@@ -132,6 +138,7 @@ export async function getServices() {
         marginRange: margins.length > 0
           ? (minMargin === maxMargin ? `${minMargin} min` : `${minMargin} - ${maxMargin} min`)
           : "—",
+        availableDaysRange: serializedStaffServices.length > 0 ? formatAvailableDays(availableDaysUnion) : "—",
       };
     });
 

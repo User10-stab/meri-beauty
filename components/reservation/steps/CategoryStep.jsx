@@ -71,7 +71,7 @@ export default function CategoryStep({ data, updateData, nextStep }) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: idx * 0.06, duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
               onClick={() => handleSelectCategory(category)}
-              className={`group relative flex min-h-[330px] flex-col items-start overflow-hidden rounded-xl border-2 bg-[#fdf8f0]/80 pl-11 pr-7 pt-10 pb-9 text-left transition-all duration-300 sm:min-h-[350px] ${
+              className={`group relative flex flex-col items-start overflow-hidden rounded-xl border-2 bg-[#fdf8f0]/80 pl-11 pr-7 pt-10 pb-9 text-left transition-all duration-300 ${
                 selected
                   ? "border-[#b89664] bg-white shadow-[0_8px_28px_rgba(47,58,46,0.12)]"
                   : "border-[#ede5d8]/70 shadow-[0_2px_16px_rgba(47,58,46,0.04)] hover:-translate-y-1 hover:border-[#b89664] hover:bg-[#f5ece0] hover:shadow-[0_10px_28px_rgba(47,58,46,0.08)]"
@@ -83,49 +83,37 @@ export default function CategoryStep({ data, updateData, nextStep }) {
 
               <CardBotanicalSprigs index={idx} />
 
-              {/* Icon circle — thin gold dashed like reference */}
-              {/* <div className={`mb-5 flex h-[72px] w-[72px] items-center justify-center rounded-full border border-dashed bg-white shadow-sm transition-colors ${selected ? "border-[#2F3A2E]/30 text-[#2F3A2E]" : "border-[#b89664]/25 text-[#b89664] group-hover:border-[#b89664]/40"}`}>
-                <span className="flex h-14 w-14 items-center justify-center rounded-full border border-[#ede5d8] bg-[#fdf8f0]">
-                  <Icon size={22} strokeWidth={1.5} />
-                </span>
-
-                tracking-[0.18em]
-              </div> */}
-
               <h2 className="mb-2 text-[18px] font-bold uppercase leading-snug text-[#b89664] sm:text-[19px]">{category.name}</h2>
               <div className="mt-4 h-[2px] w-10 bg-[#b89664]/20" />
 
-              {category.description && (
-                <div className="group/desc relative mt-2 h-[6.25rem] w-full">
+              {/* Description area - always present, grows to fill space */}
+              <div className="group/desc relative mt-2 w-full flex-1 flex items-start">
+                {category.description ? (
                   <>
-                    <p className="line-clamp-4 text-left text-[15px] leading-relaxed text-[#232a21]">
+                    <p className="line-clamp-3 text-left text-[15px] leading-relaxed text-[#232a21]">
                       {category.description}
                     </p>
-                    {/* Full description tooltip — elegant dark popover */}
+                    {/* Full description tooltip */}
                     <div className="pointer-events-none invisible absolute left-1/2 top-full z-20 mt-3 w-[min(280px,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-[#ede5d8] bg-[#2F3A2E] px-4 py-3 text-[12.5px] leading-relaxed text-white shadow-xl opacity-0 transition-all duration-200 group-hover/desc:visible group-hover/desc:opacity-100">
                       {category.description}
                       <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-[#2F3A2E] border-l border-t border-[#ede5d8]/20" />
                     </div>
                   </>
-                </div>
-              )}
+                ) : (
+                  <p className="text-[15px] italic leading-relaxed text-[#9a9590]">
+                    Découvrez nos prestations
+                  </p>
+                )}
+              </div>
 
-              {!category.description && (
-                <div aria-hidden="true" className="mt-4 flex h-[6.25rem] w-full flex-col gap-3 pt-1">
-                  <span className="h-px w-full max-w-[13rem] bg-black/15" />
-                  <span className="h-px w-3/4 max-w-[9rem] bg-black/10" />
-                </div>
-              )}
-
-              <div className="mt-auto pt-6">
+              {/* Bottom section - always at the same position using mt-auto */}
+              <div className="mt-auto pt-6 w-full">
                 <div className="flex items-center gap-1.5 text-[13px] text-[#b89664]">
                   <span className="h-1 w-1 rounded-full bg-[#b89664]" />
                   <span className="font-medium tracking-wide">{t("category.servicesCount", { count: category.servicesCount })}</span>
                 </div>
 
-                <span
-                  className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-[#b89664] bg-[#b89664] px-4 py-2 text-[13px] font-medium text-white transition-all hover:bg-[#a38353] hover:shadow-md"
-                >
+                <span className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-[#b89664] bg-[#b89664] px-4 py-2 text-[13px] font-medium text-white transition-all hover:bg-[#a38353] hover:shadow-md">
                   {t("category.chooseServices")}
                   <svg className="h-3 w-3 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                 </span>

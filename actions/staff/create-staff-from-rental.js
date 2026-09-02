@@ -106,8 +106,27 @@ export async function createStaffFromRental(input, rentalRequestId) {
   // ── 3. Check if user already exists ──────────────────────────────────────
   const existingUser = await prisma.user.findFirst({
     where: { email, isDeleted: false },
-    select: { id: true, fullName: true, email: true, phone: true, role: true },
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      phone: true,
+      role: true,
+      staff: { select: { id: true, isDeleted: true } },
+    },
   });
+
+  // Staff.userId is unique — a soft-deleted Staff row for this user can't be
+  // re-inserted, it must be reactivated instead (see below). An active one
+  // blocks creation outright.
+  if (existingUser?.staff && !existingUser.staff.isDeleted) {
+    return {
+      success: false,
+      message: "Un membre du personnel avec cette adresse e-mail existe déjà.",
+      errors: { email: "Un membre du personnel avec cette adresse e-mail existe déjà." },
+    };
+  }
+  const deletedStaffId = existingUser?.staff?.isDeleted ? existingUser.staff.id : null;
 
   // ── 4. Transaction ───────────────────────────────────────────────────────
   try {
@@ -192,21 +211,25 @@ export async function createStaffFromRental(input, rentalRequestId) {
         userId = newUser.id;
       }
 
-      // ── Create Staff record ──────────────────────────────────────────
-      const newStaff = await tx.staff.create({
-        data: {
-          userId,
-          type: "INDEPENDENT",
-          photo: photo ?? null,
-          bio: bio ?? null,
-          languages: languages ?? [],
-          yearsOfExperience: yearsOfExperience ?? null,
-          isActive: true,
-          hireDate: hireDate ? new Date(hireDate) : null,
-          vatNumber,
-          dashboardPermissions,
-        },
-      });
+      // ── Create (or reactivate a soft-deleted) Staff record ────────────
+      const staffData = {
+        type: "INDEPENDENT",
+        photo: photo ?? null,
+        bio: bio ?? null,
+        languages: languages ?? [],
+        yearsOfExperience: yearsOfExperience ?? null,
+        isActive: true,
+        hireDate: hireDate ? new Date(hireDate) : null,
+        vatNumber,
+        dashboardPermissions,
+      };
+
+      const newStaff = deletedStaffId
+        ? await tx.staff.update({
+            where: { id: deletedStaffId },
+            data: { ...staffData, isDeleted: false, deletedAt: null },
+          })
+        : await tx.staff.create({ data: { ...staffData, userId } });
 
       // ── Create Contract (always FIXED_RENT — mandatory for all staff) ──
       const newContract = await tx.contract.create({

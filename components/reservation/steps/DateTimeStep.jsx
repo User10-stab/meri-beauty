@@ -7,35 +7,36 @@ import { hasReservationWindow } from "@/lib/slot-availability";
 import { ChevronLeft, ChevronRight, Calendar, Clock, Euro, CalendarDays, Sparkles, CheckCircle2, Loader2 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
+import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
+import { useLocale, useTranslations } from "next-intl";
+import { toIntlLocale } from "@/lib/intl-locale";
 
-async function validateSlotAvailability(staffServiceId, date, time) {
+async function validateSlotAvailability(staffServiceId, date, time, t) {
   if (!staffServiceId || !date || !time) return false;
   const result = await getAvailableSlots(staffServiceId, date);
-  if (!result.success) { toast.error(result.message || "Impossible de vérifier la disponibilité du créneau."); return false; }
+  if (!result.success) { toast.error(result.message || t("dateTime.checkAvailabilityFailed")); return false; }
   if (!result.data.isWorkingDay) {
-    const msg = UNAVAILABLE_REASON_MESSAGES[result.data.reason] || "Ce jour n'est plus disponible. Veuillez choisir une autre date.";
+    const msg = UNAVAILABLE_REASON_KEYS[result.data.reason] ? t(`dateTime.unavailableReasons.${UNAVAILABLE_REASON_KEYS[result.data.reason]}`) : t("dateTime.dayUnavailable");
     toast.error(msg); return false;
   }
   const ok = hasReservationWindow(result.data.reservationWindows ?? [], time);
-  if (!ok) { toast.error("Ce créneau n'est plus disponible. Veuillez en sélectionner un autre."); return false; }
+  if (!ok) { toast.error(t("dateTime.slotUnavailable")); return false; }
   return true;
 }
 
-async function validateMultiSlotAvailability(drafts, appointments) {
+async function validateMultiSlotAvailability(drafts, appointments, t) {
   for (const appt of appointments) {
     const draft = drafts[appt.draftIndex];
     const staffServiceId = draft?.staffService?.id;
     const date = appt.date ? new Date(appt.date) : null;
     const time = appt.time;
-    if (!date || Number.isNaN(date.getTime())) { toast.error("Veuillez sélectionner une date et une heure"); return false; }
-    const ok = await validateSlotAvailability(staffServiceId, date, time);
+    if (!date || Number.isNaN(date.getTime())) { toast.error(t("dateTime.selectDateTime")); return false; }
+    const ok = await validateSlotAvailability(staffServiceId, date, time, t);
     if (!ok) return false;
   }
   return true;
 }
 
-const MONTHS = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
-const DAYS = ["Dim","Lun","Mar","Mer","Jeu","Ven","Sam"];
 
 function getDaysInMonth(date) {
   const year=date.getFullYear(); const month=date.getMonth();
@@ -47,28 +48,30 @@ function getDateKey(date){ if(!date) return null; return `${date.getFullYear()}-
 function isSameDay(a,b){ if(!a||!b) return false; return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();}
 function isDateInPast(date){ if(!date) return true; const today=new Date(); today.setHours(0,0,0,0); return date<today;}
 function formatTimeFromMinutes(m){ const h=Math.floor(m/60); const mi=m%60; return `${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}`;}
-const UNAVAILABLE_REASON_MESSAGES={"Staff not available":"Le membre du personnel n'est pas disponible","User deleted":"Le compte a été supprimé","No working hours configured":"Aucun horaire de travail configuré","No active contract":"Aucun contrat actif","Contract has not started yet":"Le contrat n'a pas encore commencé","Contract has expired":"Le contrat a expiré","Salon closed this day":"Le salon est fermé ce jour","Staff not working this day":"Le membre du personnel ne travaille pas ce jour","Staff on time off":"Le membre du personnel est en congé","Salon closure":"Le salon est fermé (exception)"};
+const UNAVAILABLE_REASON_KEYS={"Staff not available":"staffNotAvailable","User deleted":"userDeleted","No working hours configured":"noWorkingHours","No active contract":"noActiveContract","Contract has not started yet":"contractNotStarted","Contract has expired":"contractExpired","Salon closed this day":"salonClosedDay","Staff not working this day":"staffNotWorkingDay","Staff on time off":"staffOnTimeOff","Salon closure":"salonClosure"};
 
 function CalendarWidget({ selectedDate, onDateSelect, disabledDates=new Set(), month, onMonthChange }) {
+  const t = useTranslations("reservationSteps");
+  const locale = useLocale();
   const [internalMonth,setInternalMonth]=useState(selectedDate??new Date());
   const currentMonth=month??internalMonth;
   const setCurrentMonth=onMonthChange??setInternalMonth;
   const days=getDaysInMonth(currentMonth);
   const isDisabled=(date)=>{ if(!date) return true; if(isDateInPast(date)) return true; return disabledDates.has(getDateKey(date));};
   return (
-    <div className="mx-auto w-full max-w-[320px] rounded-2xl border border-[#ede5d8]/70 bg-white p-4 shadow-sm">
+    <div className="mx-auto w-full max-w-full rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 p-3 shadow-[0_2px_16px_rgba(47,58,46,0.04)] sm:max-w-[320px] sm:p-4">
       <div className="mb-3 flex items-center justify-between">
-        <button type="button" onClick={()=>setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()-1))} className="rounded-full p-1.5 hover:bg-[#fdf8f0] text-[#2F3A2E] transition-colors" aria-label="Mois précédent"><ChevronLeft size={16} /></button>
-        <span className="text-sm font-semibold tracking-tight text-[#2F3A2E]">{MONTHS[currentMonth.getMonth()]} {currentMonth.getFullYear()}</span>
-        <button type="button" onClick={()=>setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()+1))} className="rounded-full p-1.5 hover:bg-[#fdf8f0] text-[#2F3A2E] transition-colors" aria-label="Mois suivant"><ChevronRight size={16} /></button>
+        <button type="button" onClick={()=>setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()-1))} className="rounded-full p-1.5 hover:bg-[#f5ece0] text-[#2F3A2E] transition-colors" aria-label={t("dateTime.prevMonthAria")}><ChevronLeft size={16} /></button>
+        <span className="text-sm font-semibold tracking-tight text-[#2F3A2E]">{new Intl.DateTimeFormat(toIntlLocale(locale), { month: "long", year: "numeric" }).format(currentMonth)}</span>
+        <button type="button" onClick={()=>setCurrentMonth(new Date(currentMonth.getFullYear(),currentMonth.getMonth()+1))} className="rounded-full p-1.5 hover:bg-[#f5ece0] text-[#2F3A2E] transition-colors" aria-label={t("dateTime.nextMonthAria")}><ChevronRight size={16} /></button>
       </div>
       <div className="grid grid-cols-7 gap-1">
-        {DAYS.map((d)=>(<div key={d} className="pb-1 text-center text-[10px] font-semibold tracking-wide text-[#9a9590]">{d}</div>))}
+        {Array.from({ length: 7 }, (_, index) => new Intl.DateTimeFormat(toIntlLocale(locale), { weekday: "short" }).format(new Date(2023, 0, index + 1)).replace(".", "")).map((day)=>(<div key={day} className="pb-1 text-center text-[10px] font-semibold tracking-wide text-[#9a9590]">{day}</div>))}
         {days.map((day,i)=>(
-          <button key={i} type="button" onClick={()=>day && !isDisabled(day) && onDateSelect(day)} disabled={!day || isDisabled(day)} className={`h-8 w-full rounded-full border text-xs font-medium transition-all ${!day ? "invisible" : isDisabled(day) ? "cursor-not-allowed border-[#ede5d8] bg-[#fdf8f0] text-[#c2b8aa]" : isSameDay(day,selectedDate) ? "border-[#2F3A2E] bg-[#2F3A2E] text-white shadow-sm" : "border-transparent bg-white text-[#2F3A2E] hover:border-[#2F3A2E]/15 hover:bg-[#fdf8f0]"}`}>{day?day.getDate():""}</button>
+          <button key={i} type="button" onClick={()=>day && !isDisabled(day) && onDateSelect(day)} disabled={!day || isDisabled(day)} className={`h-8 w-full rounded-full border text-xs font-medium transition-all ${!day ? "invisible" : isDisabled(day) ? "cursor-not-allowed border-[#ede5d8] bg-[#fdf8f0] text-[#c2b8aa]" : isSameDay(day,selectedDate) ? "border-[#b89664] bg-[#b89664] text-white shadow-sm" : "border-transparent bg-white text-[#2F3A2E] hover:border-[#b89664] hover:bg-[#f5ece0]"}`}>{day?day.getDate():""}</button>
         ))}
       </div>
-      <div className="mt-3 flex items-center gap-1.5 text-[10px] text-[#9a9590]"><span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#fdf8f0] border border-[#ede5d8]" /><span>Dates indisponibles</span><span className="mx-1 h-1 w-1 rounded-full bg-[#ede5d8]" /><span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#2F3A2E]" /><span>Sélectionné</span></div>
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[10px] text-[#9a9590]"><span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#fdf8f0] border border-[#ede5d8]" /><span>{t("dateTime.unavailableDates")}</span><span className="mx-1 h-1 w-1 rounded-full bg-[#ede5d8]" /><span className="inline-flex h-2.5 w-2.5 rounded-full bg-[#b89664]" /><span>{t("dateTime.selected")}</span></div>
     </div>
   );
 }
@@ -78,7 +81,7 @@ function StaffChip({staff}){ const name=staff?.user?.fullName??"—"; return (<d
 function DraftSummary({drafts}){ const totalDuration=drafts.reduce((s,d)=>s+(d.duration??0),0); const totalPrice=drafts.reduce((s,d)=>s+Number(d.price??0),0); return (<div className="rounded-2xl border border-[#ede5d8]/70 bg-white p-5 shadow-sm"><h3 className="mb-4 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9a9590]">Vos rendez-vous ({drafts.length})</h3><div className="space-y-3">{drafts.map((draft,i)=>(<div key={i} className="rounded-xl border border-[#ede5d8]/70 bg-[#fdf8f0]/50 p-3"><p className="text-[10px] font-semibold uppercase tracking-widest text-[#b89664]">Rendez-vous {i+1}</p><p className="mt-1 text-sm font-semibold text-[#2F3A2E]">{draft.service?.name??"—"}</p><div className="mt-1.5"><StaffChip staff={draft.staff} /></div><div className="mt-2 flex items-center justify-between text-xs text-[#6f6a64]"><span className="flex items-center gap-1"><Clock size={12}/>{draft.duration??"—"} min</span><span className="flex items-center gap-1 font-semibold text-[#2F3A2E]"><Euro size={12}/>{Number(draft.price??0).toFixed(2)}</span></div></div>))}</div><div className="mt-4 flex items-center justify-between border-t border-[#ede5d8] pt-3 text-sm font-semibold text-[#2F3A2E]"><span>Total estimé</span><span>€{totalPrice.toFixed(2)} • {totalDuration} min</span></div></div>);}
 function ModeSwitcher({mode,onChange}){ const options=[{id:"same-day",label:"Même jour",sublabel:"Recommandé",description:"Tous vos rendez-vous le même jour",icon:<Calendar size={18}/>},{id:"multi-day",label:"Plusieurs jours",sublabel:null,description:"Chaque rendez-vous à une date différente",icon:<CalendarDays size={18}/>}]; return (<div className="grid grid-cols-2 gap-3">{options.map((opt)=>(<button key={opt.id} type="button" onClick={()=>onChange(opt.id)} className={`relative rounded-2xl border p-4 text-left transition-all ${mode===opt.id?"border-[#2F3A2E] bg-[#2F3A2E]/[0.04] shadow-sm":"border-[#ede5d8]/70 hover:border-[#2F3A2E]/15 bg-white"}`}>{opt.sublabel && (<span className="absolute right-3 top-3 rounded-full bg-[#2F3A2E] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">{opt.sublabel}</span>)}<div className={`mb-2 ${mode===opt.id?"text-[#2F3A2E]":"text-[#9a9590]"}`}>{opt.icon}</div><p className="text-sm font-semibold text-[#2F3A2E]">{opt.label}</p><p className="mt-0.5 text-xs leading-relaxed text-[#6f6a64]">{opt.description}</p></button>))}</div>);}
 function LoadingState(){ return (<div className="flex flex-col items-center justify-center gap-3 py-12 text-[#6f6a64]"><div className="h-10 w-10 animate-spin rounded-full border-2 border-[#ede5d8] border-t-[#2F3A2E]" /><p className="text-sm">Recherche des créneaux les plus proches…</p></div>);}
-function TimeSlotButton({window,selected,onSelect}){ return (<button type="button" onClick={onSelect} aria-pressed={selected} className={`flex flex-col items-center justify-center rounded-xl border px-1 py-2.5 text-center transition-all ${selected?"border-[#2F3A2E] bg-[#2F3A2E] text-white shadow-sm":"border-[#ede5d8]/70 bg-white text-[#2F3A2E] hover:border-[#2F3A2E]/20 hover:bg-[#fdf8f0]"}`}><span className="text-sm font-bold leading-tight tabular-nums">{window.startTime}</span><span className={`text-[10px] font-medium leading-tight tabular-nums ${selected?"text-white/70":"text-[#9a9590]"}`}>→ {window.endTime}</span></button>);}
+function TimeSlotButton({window,selected,onSelect}){ return (<button type="button" onClick={onSelect} aria-pressed={selected} className={`flex flex-col items-center justify-center rounded-xl border px-1 py-2.5 text-center transition-all ${selected?"border-[#b89664] bg-[#b89664] text-white shadow-sm":"border-[#ede5d8]/70 bg-white text-[#2F3A2E] hover:border-[#b89664] hover:bg-[#f5ece0]"}`}><span className="text-sm font-bold leading-tight tabular-nums">{window.startTime}</span><span className={`text-[10px] font-medium leading-tight tabular-nums ${selected?"text-white/70":"text-[#9a9590]"}`}>→ {window.endTime}</span></button>);}
 function EmptyState({message}){ return (<div className="flex flex-col items-center justify-center gap-2 py-10 text-center text-[#9a9590]"><Clock size={28} className="text-[#d9c9a8]" /><p className="text-sm max-w-xs">{message??"Aucun créneau disponible pour le moment."}</p></div>);}
 
 function SingleProposalCard({proposal,drafts,selected,onSelect,index}){
@@ -88,7 +91,8 @@ function SingleProposalCard({proposal,drafts,selected,onSelect,index}){
   const endTime=formatTimeFromMinutes(endMinutes);
   const timeRange=`${proposal.time} → ${endTime}`;
   return (
-    <button type="button" onClick={onSelect} className={`w-full rounded-2xl border p-5 text-left transition-all ${selected?"border-[#2F3A2E] bg-[#fdf8f0] shadow-sm":"border-[#ede5d8]/70 bg-white hover:border-[#2F3A2E]/15"}`}>
+    <button type="button" onClick={onSelect} className={`relative w-full overflow-hidden rounded-xl border-2 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 text-left transition-all ${selected?"border-[#b89664] bg-white shadow-[0_8px_28px_rgba(47,58,46,0.12)]":"border-[#ede5d8]/70 shadow-[0_2px_16px_rgba(47,58,46,0.04)] hover:-translate-y-1 hover:border-[#b89664] hover:bg-[#f5ece0] hover:shadow-[0_10px_28px_rgba(47,58,46,0.08)]"}`}>
+      <CardBotanicalSprigs index={index} />
       <div className="flex items-start justify-between gap-3">
         <div>
           {proposal.recommended?(<span className="mb-2 inline-flex items-center gap-1 rounded-full bg-[#2F3A2E] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white"><Sparkles size={10}/> Recommandé</span>):(<span className="mb-2 inline-block text-xs font-medium text-[#9a9590]">Option {index+1}</span>)}
@@ -102,7 +106,8 @@ function SingleProposalCard({proposal,drafts,selected,onSelect,index}){
 }
 function SameDayProposalCard({proposal,drafts,selected,onSelect,index}){
   return (
-    <button type="button" onClick={onSelect} className={`w-full rounded-2xl border p-5 text-left transition-all ${selected?"border-[#2F3A2E] bg-[#fdf8f0] shadow-sm":"border-[#ede5d8]/70 bg-white hover:border-[#2F3A2E]/15"}`}>
+    <button type="button" onClick={onSelect} className={`relative w-full overflow-hidden rounded-xl border-2 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 text-left transition-all ${selected?"border-[#b89664] bg-white shadow-[0_8px_28px_rgba(47,58,46,0.12)]":"border-[#ede5d8]/70 shadow-[0_2px_16px_rgba(47,58,46,0.04)] hover:-translate-y-1 hover:border-[#b89664] hover:bg-[#f5ece0] hover:shadow-[0_10px_28px_rgba(47,58,46,0.08)]"}`}>
+      <CardBotanicalSprigs index={index} />
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1">
           {proposal.recommended?(<span className="mb-2 inline-flex items-center gap-1 rounded-full bg-[#2F3A2E] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white"><Sparkles size={10}/> Recommandé</span>):(<span className="mb-2 inline-block text-xs font-medium text-[#9a9590]">Option {index+1}</span>)}
@@ -147,7 +152,7 @@ function AppointmentDateCard({index,draft,selectedDate,selectedTime,onDateSelect
 function MultiDayManualView({drafts,perDraftDates,perDraftTimes,onDraftDateSelect,onDraftTimeSelect}){
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-[#ede5d8]/50 bg-white p-5"><h3 className="text-base font-semibold text-[#2F3A2E]">Planifiez chaque rendez-vous</h3><p className="mt-1 text-sm text-[#6f6a64]">Choisissez une date et une heure pour chaque rendez-vous ci-dessous.</p></div>
+      <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]"><CardBotanicalSprigs /><h3 className="text-[15px] font-bold uppercase text-[#b89664]">Planifiez chaque rendez-vous</h3><div className="mt-4 h-px w-10 bg-[#b89664]/20" /><p className="pt-3 text-[14px] leading-relaxed text-[#232a21]">Choisissez une date et une heure pour chaque rendez-vous ci-dessous.</p></div>
       {drafts.map((draft,index)=>(<AppointmentDateCard key={index} index={index} draft={draft} selectedDate={perDraftDates[index]??null} selectedTime={perDraftTimes[index]??null} onDateSelect={(date)=>onDraftDateSelect(index,date)} onTimeSelect={(time)=>onDraftTimeSelect(index,time)} />))}
     </div>
   );
@@ -162,10 +167,11 @@ function SingleDraftView({draft,selectedDate,selectedTime,onDateSelect,onTimeSel
   useEffect(()=>{ if(!staffServiceId) return; getMonthAvailability(staffServiceId,currentMonth).then((r)=>{ if(r.success) setDisabledDates(new Set(r.data.unavailableDates||[]));});},[staffServiceId,currentMonth]);
   useEffect(()=>{ if(!selectedDate||!staffServiceId){ setAvailableWindows([]); return;} setLoadingSlots(true); getAvailableSlots(staffServiceId,selectedDate).then((result)=>{ if(result.success){ setAvailableWindows(result.data.reservationWindows||[]); if(!result.data.isWorkingDay && result.data.reason){ toast.error(UNAVAILABLE_REASON_MESSAGES[result.data.reason]||"Ce jour n'est pas disponible");}} else{ toast.error(result.message||"Erreur lors du chargement"); setAvailableWindows([]);} setLoadingSlots(false);});},[selectedDate,staffServiceId]);
   return (
-    <div className="space-y-5">
-      <div className="rounded-2xl border border-[#ede5d8]/50 bg-white p-5"><h3 className="mb-4 text-sm font-semibold tracking-wide text-[#2F3A2E]">Choisissez une date</h3><CalendarWidget selectedDate={selectedDate} month={currentMonth} onMonthChange={setCurrentMonth} onDateSelect={(date)=>{setCurrentMonth(new Date(date.getFullYear(),date.getMonth(),1)); onDateSelect(date);}} disabledDates={disabledDates}/>{selectedDate && (<div className="mt-4 flex items-center gap-2 rounded-full bg-[#2F3A2E] px-4 py-2 text-xs text-white w-fit"><Calendar size={13} className="text-white/70"/><span className="font-medium">{formatDateLabel(selectedDate)}</span></div>)}</div>
-      <div className="rounded-2xl border border-[#ede5d8]/50 bg-white p-5"><h3 className="mb-4 text-sm font-semibold tracking-wide text-[#2F3A2E]">Créneaux disponibles</h3>{!selectedDate?(<div className="flex h-24 items-center justify-center text-sm text-[#9a9590]">Sélectionnez d&apos;abord une date</div>):loadingSlots?(<div className="flex h-24 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-[#ede5d8] border-t-[#2F3A2E]" /></div>):availableWindows.length===0?(<div className="flex h-24 items-center justify-center text-sm text-[#9a9590]">Aucun créneau disponible ce jour</div>):(<div className="grid grid-cols-3 gap-2 sm:grid-cols-4">{availableWindows.map((window)=>(<TimeSlotButton key={window.startTime} window={window} selected={selectedTime===window.startTime} onSelect={()=>onTimeSelect(window.startTime)} />))}</div>)}</div>
-      {selectedDate && selectedTime && (<button type="button" onClick={onConfirm} disabled={validating} className={`w-full rounded-full px-6 py-3.5 text-sm font-semibold text-white transition-all ${validating?"cursor-not-allowed bg-[#2F3A2E]/60":"bg-[#2F3A2E] hover:bg-[#212a20] shadow-sm"}`}>{validating?(<span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin"/>Vérification en cours…</span>):"Confirmer ce créneau"}</button>)}
+    <div className="relative space-y-5">
+      <CardBotanicalSprigs />
+      <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]"><CardBotanicalSprigs /><h3 className="text-[15px] font-bold uppercase text-[#b89664]">Choisissez une date</h3><div className="mt-4 h-px w-10 bg-[#b89664]/20" /><div className="pt-3"><CalendarWidget selectedDate={selectedDate} month={currentMonth} onMonthChange={setCurrentMonth} onDateSelect={(date)=>{setCurrentMonth(new Date(date.getFullYear(),date.getMonth(),1)); onDateSelect(date);}} disabledDates={disabledDates}/>{selectedDate && (<div className="mt-4 flex w-fit items-center gap-2 rounded-full bg-[#b89664] px-4 py-2 text-xs text-white"><Calendar size={13} className="text-white/70"/><span className="font-medium">{formatDateLabel(selectedDate)}</span></div>)}</div></div>
+      <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]"><CardBotanicalSprigs index={1} /><h3 className="text-[15px] font-bold uppercase text-[#b89664]">Créneaux disponibles</h3><div className="mt-4 h-px w-10 bg-[#b89664]/20" /><div className="pt-3">{!selectedDate?(<div className="flex h-24 items-center justify-center text-sm text-[#9a9590]">Sélectionnez d&apos;abord une date</div>):loadingSlots?(<div className="flex h-24 items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-2 border-[#ede5d8] border-t-[#b89664]" /></div>):availableWindows.length===0?(<div className="flex h-24 items-center justify-center text-sm text-[#9a9590]">Aucun créneau disponible ce jour</div>):(<div className="grid grid-cols-3 gap-2 sm:grid-cols-4">{availableWindows.map((window)=>(<TimeSlotButton key={window.startTime} window={window} selected={selectedTime===window.startTime} onSelect={()=>onTimeSelect(window.startTime)} />))}</div>)}</div></div>
+      {selectedDate && selectedTime && (<button type="button" onClick={onConfirm} disabled={validating} className={`w-full rounded-full px-5 py-2.5 text-[13px] font-medium text-white transition-all ${validating?"cursor-not-allowed bg-[#ede5d8] text-white/70":"bg-[#b89664] hover:bg-[#a38353] hover:shadow-md"}`}>{validating?(<span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin"/>Vérification en cours…</span>):"Confirmer ce créneau"}</button>)}
     </div>
   );
 }
@@ -177,13 +183,15 @@ function AutoProposalView({drafts,selectedIndex,onSelect,onConfirm,validating}){
   if(loading) return <LoadingState/>; if(proposals.length===0) return <EmptyState message={message}/>;
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-[#ede5d8]/50 bg-white p-5"><h3 className="text-base font-semibold text-[#2F3A2E]">Créneaux disponibles</h3><p className="mt-1 mb-5 text-sm text-[#6f6a64]">Nous avons trouvé les prochains créneaux disponibles. Choisissez celui qui vous convient.</p><div className="space-y-3">{resultType==="single" && proposals.map((proposal,i)=>(<SingleProposalCard key={`${proposal.date}-${proposal.time}`} proposal={proposal} drafts={drafts} index={i} selected={selectedIndex===i} onSelect={()=>onSelect(i,proposal)} />))}{resultType==="same-day" && proposals.map((proposal,i)=>(<SameDayProposalCard key={`${proposal.date}-${proposal.startTime}-${i}`} proposal={proposal} drafts={drafts} index={i} selected={selectedIndex===i} onSelect={()=>onSelect(i,proposal)} />))}</div></div>
-      <div className="flex justify-end w-full">{selectedIndex!==null && (<button type="button" onClick={onConfirm} disabled={validating} className={`rounded-full px-6 py-3.5 text-sm font-semibold text-white transition-all ${validating?"cursor-not-allowed bg-[#2F3A2E]/60":"bg-[#2F3A2E] hover:bg-[#212a20] shadow-sm"}`}>{validating?(<span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin"/>Vérification…</span>):"Confirmer cet horaire"}</button>)}</div>
+      <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]"><CardBotanicalSprigs /><h3 className="text-[15px] font-bold uppercase text-[#b89664]">Créneaux disponibles</h3><div className="mt-4 h-px w-10 bg-[#b89664]/20" /><p className="mb-5 pt-3 text-[14px] leading-relaxed text-[#232a21]">Nous avons trouvé les prochains créneaux disponibles. Choisissez celui qui vous convient.</p><div className="space-y-3">{resultType==="single" && proposals.map((proposal,i)=>(<SingleProposalCard key={`${proposal.date}-${proposal.time}`} proposal={proposal} drafts={drafts} index={i} selected={selectedIndex===i} onSelect={()=>onSelect(i,proposal)} />))}{resultType==="same-day" && proposals.map((proposal,i)=>(<SameDayProposalCard key={`${proposal.date}-${proposal.startTime}-${i}`} proposal={proposal} drafts={drafts} index={i} selected={selectedIndex===i} onSelect={()=>onSelect(i,proposal)} />))}</div></div>
+      <div className="flex justify-end w-full">{selectedIndex!==null && (<button type="button" onClick={onConfirm} disabled={validating} className={`rounded-full px-5 py-2.5 text-[13px] font-medium text-white transition-all ${validating?"cursor-not-allowed bg-[#ede5d8] text-white/70":"bg-[#b89664] hover:bg-[#a38353] hover:shadow-md"}`}>{validating?(<span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin"/>Vérification…</span>):"Confirmer cet horaire"}</button>)}</div>
     </div>
   );
 }
 
 export default function DateTimeStep({data,updateData,nextStep}){
+  const t = useTranslations("reservationSteps");
+  const locale = useLocale();
   const drafts=data.appointmentDrafts?.length?data.appointmentDrafts:data.staffService?[{category:data.category,service:data.service,staff:data.staff,staffService:data.staffService,duration:data.staffService?.duration,price:data.staffService?.price}]:[];
   const isMultiDraft=drafts.length>1;
   const [schedulingMode,setSchedulingMode]=useState(data.schedulingMode??"same-day");
@@ -200,20 +208,20 @@ export default function DateTimeStep({data,updateData,nextStep}){
   const handlePerDraftTimeSelect=(index,time)=>{ const updatedTimes={...perDraftTimes,[index]:time}; setPerDraftTimes(updatedTimes); updateData({perDraftTimes:updatedTimes});};
   const handleSingleDateSelect=(date)=>{ setSingleDate(date); setSingleTime(null); updateData({date,time:null});};
   const handleSingleTimeSelect=(time)=>{ setSingleTime(time); updateData({time});};
-  const handleSingleConfirm=async()=>{ if(!singleDate||!singleTime){ toast.error("Veuillez sélectionner une date et une heure"); return;} const draft=drafts[0]; const staffServiceId=draft?.staffService?.id??data.staffService?.id; setValidating(true); const slotOk=await validateSlotAvailability(staffServiceId,singleDate,singleTime); setValidating(false); if(!slotOk){ setSingleTime(null); updateData({time:null}); return;} updateData({date:singleDate,time:singleTime,staffService:draft?.staffService??data.staffService,staff:draft?.staff??data.staff,service:draft?.service??data.service,category:draft?.category??data.category,selectedScheduleProposal:null}); nextStep();};
+  const handleSingleConfirm=async()=>{ if(!singleDate||!singleTime){ toast.error(t("dateTime.selectDateTime")); return;} const draft=drafts[0]; const staffServiceId=draft?.staffService?.id??data.staffService?.id; setValidating(true); const slotOk=await validateSlotAvailability(staffServiceId,singleDate,singleTime,t); setValidating(false); if(!slotOk){ setSingleTime(null); updateData({time:null}); return;} updateData({date:singleDate,time:singleTime,staffService:draft?.staffService??data.staffService,staff:draft?.staff??data.staff,service:draft?.service??data.service,category:draft?.category??data.category,selectedScheduleProposal:null}); nextStep();};
   const handleSelect=(index,proposal)=>{ setSelectedIndex(index); setSelectedProposal(proposal);};
   const applySameDaySelection=(proposal)=>{ updateData({sameDayDate:new Date(proposal.date),selectedScheduleProposal:proposal,schedulingMode:"same-day"});};
   const allMultiDaySelectionsComplete=drafts.length>0 && drafts.every((_,i)=>perDraftDates[i] && perDraftTimes[i]);
 
-  const handleAutoConfirm=async()=>{ if(!selectedProposal){ toast.error("Veuillez sélectionner un créneau"); return;} const appointments=selectedProposal.appointments?selectedProposal.appointments.map((a)=>({...a,date:a.date??selectedProposal.date})): [{draftIndex:0,date:selectedProposal.date,time:selectedProposal.time}]; setValidating(true); const allOk=await validateMultiSlotAvailability(drafts,appointments); setValidating(false); if(!allOk){ setSelectedIndex(null); setSelectedProposal(null); updateData({selectedScheduleProposal:null,sameDayDate:null}); return;} applySameDaySelection(selectedProposal); nextStep();};
-  const handleMultiDayConfirm=async()=>{ if(!allMultiDaySelectionsComplete){ toast.error("Veuillez choisir une date et une heure pour chaque rendez-vous"); return;} const appointments=drafts.map((_,i)=>({draftIndex:i,date:perDraftDates[i].toISOString(),time:perDraftTimes[i]})); setValidating(true); const allOk=await validateMultiSlotAvailability(drafts,appointments); setValidating(false); if(!allOk) return; updateData({schedulingMode:"multi-day",perDraftDates,perDraftTimes,selectedScheduleProposal:{appointments}}); nextStep();};
+  const handleAutoConfirm=async()=>{ if(!selectedProposal){ toast.error(t("dateTime.selectSlot")); return;} const appointments=selectedProposal.appointments?selectedProposal.appointments.map((a)=>({...a,date:a.date??selectedProposal.date})): [{draftIndex:0,date:selectedProposal.date,time:selectedProposal.time}]; setValidating(true); const allOk=await validateMultiSlotAvailability(drafts,appointments,t); setValidating(false); if(!allOk){ setSelectedIndex(null); setSelectedProposal(null); updateData({selectedScheduleProposal:null,sameDayDate:null}); return;} applySameDaySelection(selectedProposal); nextStep();};
+  const handleMultiDayConfirm=async()=>{ if(!allMultiDaySelectionsComplete){ toast.error(t("dateTime.selectEachDateTime")); return;} const appointments=drafts.map((_,i)=>({draftIndex:i,date:perDraftDates[i].toISOString(),time:perDraftTimes[i]})); setValidating(true); const allOk=await validateMultiSlotAvailability(drafts,appointments,t); setValidating(false); if(!allOk) return; updateData({schedulingMode:"multi-day",perDraftDates,perDraftTimes,selectedScheduleProposal:{appointments}}); nextStep();};
 
-  const subtitle=isMultiDraft?`${drafts.length} rendez-vous • ${drafts.map((d)=>d.staff?.user?.fullName).filter(Boolean).join(", ")}`:`${drafts[0]?.staff?.user?.fullName??data.staff?.user?.fullName??""} • ${drafts[0]?.service?.name??data.service?.name??""}`;
+  const subtitle=isMultiDraft?`${t("dateTime.appointmentsCount", { count: drafts.length })} • ${drafts.map((d)=>d.staff?.user?.fullName).filter(Boolean).join(", ")}`:`${drafts[0]?.staff?.user?.fullName??data.staff?.user?.fullName??""} • ${drafts[0]?.service?.name??data.service?.name??""}`;
 
   return (
     <div>
       <div className="mb-6">
-        <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">Choisissez votre créneau</h2>
+        <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">{t("dateTime.title")}</h2>
         <p className="mt-2 text-sm text-[#6f6a64]">{subtitle}</p>
         <div className="mt-3 h-px w-10 bg-[#b89664]/20" />
       </div>

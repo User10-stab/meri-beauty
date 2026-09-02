@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CreditCard, Wallet, Check, Loader2, ShieldCheck, Sparkles } from "lucide-react";
+import { Check, Loader2, ShieldCheck, Sparkles } from "lucide-react";
 import { createReservation } from "@/actions/reservation/create-reservation";
 import { createCheckoutSession } from "@/actions/payment/createCheckoutSession";
 import { computePaymentDecision } from "@/lib/reservation-payment";
@@ -10,26 +10,25 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
+import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
 
-function PaymentOption({ icon, title, description, badge, selected, disabled, onSelect }) {
+function PaymentOption({ title, description, badge, selected, disabled, index, onSelect }) {
   return (
     <button
       type="button"
       onClick={onSelect}
       disabled={disabled}
-      className={`relative w-full rounded-[1.25rem] border p-5 text-left transition-all ${
-        selected ? "border-[#2F3A2E] bg-[#2F3A2E]/[0.03] shadow-sm" : "border-[#ede5d8]/70 bg-white hover:border-[#2F3A2E]/15 hover:bg-[#fdf8f0]/40"
+      className={`relative w-full overflow-hidden rounded-xl border-2 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 text-left transition-all ${
+        selected ? "border-[#b89664] bg-white shadow-[0_8px_28px_rgba(47,58,46,0.12)]" : "border-[#ede5d8]/70 shadow-[0_2px_16px_rgba(47,58,46,0.04)] hover:-translate-y-1 hover:border-[#b89664] hover:bg-[#f5ece0] hover:shadow-[0_10px_28px_rgba(47,58,46,0.08)]"
       } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
     >
-      {badge && (<span className="absolute right-4 top-4 rounded-full bg-[#2F3A2E] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white">{badge}</span>)}
-      <div className="flex items-center gap-4">
-        <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full ${selected ? "bg-[#2F3A2E] text-white" : "bg-[#fdf8f0] text-[#6f6a64] ring-1 ring-[#ede5d8]"}`}>{icon}</div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-[#2F3A2E]">{title}</p>
-          <p className="mt-1 text-xs leading-relaxed text-[#6f6a64]">{description}</p>
-        </div>
-        {selected && <Check size={20} className="flex-shrink-0 text-[#2F3A2E]" />}
-      </div>
+      <CardBotanicalSprigs index={index} />
+      {badge && (<span className={`absolute right-4 rounded-full bg-[#2F3A2E] px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white ${selected ? "top-12" : "top-4"}`}>{badge}</span>)}
+      {selected && <Check size={20} className="absolute right-4 top-4 text-[#2F3A2E]" />}
+      <p className="mb-2 text-[15px] font-bold uppercase text-[#b89664]">{title}</p>
+      <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
+      <p className="mt-2 text-[14px] leading-relaxed text-[#232a21]">{description}</p>
+      <span className="mt-6 inline-flex rounded-full border border-[#b89664] bg-[#b89664] px-4 py-2 text-[12px] font-medium text-white transition-all hover:shadow-md">Choisir ce mode</span>
     </button>
   );
 }
@@ -117,8 +116,10 @@ export default function PaymentStep({ data, customerSession }) {
 
       <div className="space-y-5">
         {/* Amount summary — premium split */}
-        <div className="rounded-[1.4rem] border border-[#2F3A2E]/10 bg-white p-6 text-center shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#9a9590]">{t("payment.totalServicePrice")}</p>
+        <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 text-left shadow-[0_2px_16px_rgba(47,58,46,0.04)]">
+          <CardBotanicalSprigs />
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#b89664]">{t("payment.totalServicePrice")}</p>
+          <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
           {discountAmount > 0 ? (
             <>
               <p className="mt-2 text-lg text-[#9a9590] line-through">€{rawTotal.toFixed(2)}</p>
@@ -148,7 +149,7 @@ export default function PaymentStep({ data, customerSession }) {
         <div className="space-y-3">
           <h3 className="text-sm font-semibold tracking-wide text-[#2F3A2E]">{t("payment.paymentMethod")}</h3>
           <PaymentOption
-            icon={<CreditCard size={20} />}
+            index={0}
             title={t("payment.payOnlineTitle")}
             description={acceptsOnlinePayments ? t("payment.payOnlineDesc") : t("payment.payOnlineUnavailable")}
             badge={t("payment.badgeTotal")}
@@ -157,7 +158,7 @@ export default function PaymentStep({ data, customerSession }) {
             onSelect={() => { if (!acceptsOnlinePayments) return; setPaymentMethod("online"); }}
           />
           <PaymentOption
-            icon={<Wallet size={20} />}
+            index={1}
             title={t("payment.payAtSalonTitle")}
             description={acceptsCashPayments ? salonDescription : t("payment.payAtSalonUnavailable")}
             selected={paymentMethod === "cash"}
@@ -185,12 +186,12 @@ export default function PaymentStep({ data, customerSession }) {
           </div>
         )}
 
-        <label className="flex items-start gap-2.5 rounded-xl border border-[#ede5d8]/50 bg-white px-4 py-3 text-xs leading-relaxed text-[#6f6a64]">
+        <label className="flex items-start gap-2.5 rounded-xl border border-[#ede5d8]/50 bg-[#fdf8f0]/80 px-4 py-3 text-xs leading-relaxed text-[#6f6a64]">
           <input type="checkbox" checked={acceptedTerms} onChange={(e) => setAcceptedTerms(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-[#ede5d8] text-[#2F3A2E] focus:ring-[#2F3A2E]/20" />
           <span>{t.rich("review.acceptTerms", { cgv: (chunks) => (<a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#2F3A2E]">{chunks}</a>), privacy: (chunks) => (<a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#2F3A2E]">{chunks}</a>)})}</span>
         </label>
 
-        <button onClick={handlePayment} disabled={!paymentMethod || processing || !acceptedTerms} className={`w-full rounded-full px-6 py-3.5 text-sm font-semibold text-white shadow-sm transition-all ${!paymentMethod || processing || !acceptedTerms ? "cursor-not-allowed bg-[#ede5d8] text-white/70" : "bg-[#2F3A2E] hover:bg-[#212a20] hover:shadow-md hover:-translate-y-px"}`}>
+        <button onClick={handlePayment} disabled={!paymentMethod || processing || !acceptedTerms} className={`w-full rounded-full px-5 py-2.5 text-[13px] font-medium text-white transition-all ${!paymentMethod || processing || !acceptedTerms ? "cursor-not-allowed bg-[#ede5d8] text-white/70" : "bg-[#b89664] hover:bg-[#a38353] hover:shadow-md hover:-translate-y-px"}`}>
           {processing ? (<span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" />{t("payment.processing")}</span>) : (confirmLabel)}
         </button>
         <p className="flex items-center justify-center gap-1.5 text-center text-[11px] text-[#9a9590]"><ShieldCheck size={12} />{t("payment.secureFooter")}</p>

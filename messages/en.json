@@ -2235,17 +2235,29 @@
     "category": {
       "title": "Choose a category",
       "subtitle": "Select the type of service you need",
+      "loading": "Loading categories…",
+      "empty": "No category available",
+      "emptyHint": "Please come back later or contact us.",
+      "chooseServices": "View services",
       "servicesCount": "{count, plural, one {# service available} other {# services available}}"
     },
     "service": {
       "title": "Select a service",
       "subtitle": "{name} • {count, plural, one {# service available} other {# services available}}",
+      "loading": "Loading services…",
+      "choose": "Choose your service",
+      "chooseHint": "Select the one that suits you.",
+      "signature": "Signature service",
+      "select": "Choose this service",
       "noServices": "No service available for this category",
       "allAdded": "All services in this category have already been added to your reservation."
     },
     "staff": {
       "title": "Choose your expert",
       "subtitle": "{name} • {count, plural, one {# expert available} other {# experts available}}",
+      "loading": "Finding available experts…",
+      "unavailableSoon": "This service will soon be available with other experts.",
+      "select": "Choose this expert",
       "noStaff": "No expert available for this service",
       "reviews": "({count} reviews)"
     },
@@ -2287,6 +2299,7 @@
       "prevMonthAria": "Previous month",
       "nextMonthAria": "Next month",
       "unavailableDates": "Unavailable dates",
+      "selected": "Selected",
       "draftsTitle": "Your appointments ({count})",
       "appointment": "Appointment {index}",
       "totalEstimated": "Estimated total",

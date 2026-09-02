@@ -11,19 +11,22 @@ import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { toIntlLocale } from "@/lib/intl-locale";
+import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
 
 function SectionCard({ title, onEdit, children }) {
   return (
-    <div className="overflow-hidden rounded-[1.4rem] border border-[#ede5d8]/70 bg-white shadow-sm">
-      <div className="flex items-center justify-between bg-[#2F3A2E] px-5 py-3.5">
-        <h3 className="text-sm font-semibold tracking-wide text-white">{title}</h3>
+    <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]">
+      <CardBotanicalSprigs />
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="text-[15px] font-bold uppercase text-[#b89664]">{title}</h3>
         {onEdit && (
-          <button onClick={onEdit} className="inline-flex items-center gap-1 rounded-full bg-white/15 px-3 py-1 text-xs font-medium text-white hover:bg-white/25 transition-colors">
+          <button onClick={onEdit} className="relative z-10 inline-flex items-center gap-1 rounded-full border border-[#b89664] bg-white px-3 py-1 text-xs font-medium text-[#b89664] transition-colors hover:bg-[#f5ece0]">
             <Pencil size={12} /> Modifier
           </button>
         )}
       </div>
-      <div className="p-5">{children}</div>
+      <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
+      <div className="pt-3">{children}</div>
     </div>
   );
 }
@@ -122,9 +125,11 @@ function AutomaticPaymentPreview({ paymentDecision, isManualMode = false }) {
   const { totalAmount, depositRequired, depositAmount, depositPercentage } = paymentDecision;
   const remainingAmount = totalAmount - depositAmount;
   return (
-    <div className="overflow-hidden rounded-[1.4rem] border border-[#2F3A2E]/10 bg-white shadow-sm">
-      <div className="bg-[#2F3A2E] px-5 py-3.5"><h3 className="text-sm font-semibold text-white">{t("review.paymentSummary")}</h3></div>
-      <div className="p-5">
+    <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]">
+      <CardBotanicalSprigs />
+      <h3 className="text-[15px] font-bold uppercase text-[#b89664]">{t("review.paymentSummary")}</h3>
+      <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
+      <div className="pt-3">
         <div className="space-y-3">
           <div className="flex items-center justify-between text-sm"><span className="text-[#6f6a64]">{t("review.servicePrice")}</span><span className="font-semibold text-[#2F3A2E]">€{Number(totalAmount).toFixed(2)}</span></div>
           <div className="border-t border-[#ede5d8]/50" />
@@ -151,9 +156,11 @@ function AutomaticPaymentPreview({ paymentDecision, isManualMode = false }) {
 function ManualModeNotice() {
   const t = useTranslations("reservationSteps");
   return (
-    <div className="overflow-hidden rounded-[1.4rem] border border-amber-200 bg-white shadow-sm">
-      <div className="bg-[#2F3A2E] px-5 py-3.5"><h3 className="text-sm font-semibold text-white">{t("review.manualRequest")}</h3></div>
-      <div className="p-5"><div className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 text-xs text-amber-800 leading-relaxed"><p className="font-semibold">{t("review.pendingConfirmation")}</p><p className="mt-2">{t("review.manualDesc")}</p></div></div>
+    <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]">
+      <CardBotanicalSprigs />
+      <h3 className="text-[15px] font-bold uppercase text-[#b89664]">{t("review.manualRequest")}</h3>
+      <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
+      <div className="pt-3"><div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800"><p className="font-semibold">{t("review.pendingConfirmation")}</p><p className="mt-2">{t("review.manualDesc")}</p></div></div>
     </div>
   );
 }
@@ -161,9 +168,11 @@ function ManualModeNotice() {
 function MultiAppointmentNotice({ totalAmount }) {
   const t = useTranslations("reservationSteps");
   return (
-    <div className="overflow-hidden rounded-[1.4rem] border border-[#ede5d8]/70 bg-white shadow-sm">
-      <div className="bg-[#2F3A2E] px-5 py-3.5"><h3 className="text-sm font-semibold text-white">{t("review.paymentInfo")}</h3></div>
-      <div className="p-5"><div className="rounded-xl bg-[#fdf8f0] border border-[#ede5d8]/50 px-4 py-3 text-xs leading-relaxed text-[#6f6a64]"><p className="font-semibold text-[#2F3A2E]">{t("review.salonPayment")}</p><p className="mt-1">{t("review.salonPaymentDesc")}</p></div><div className="mt-4 flex items-center justify-between text-sm font-semibold text-[#2F3A2E]"><span>{t("review.totalEstimated")}</span><span>€{Number(totalAmount).toFixed(2)}</span></div></div>
+    <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]">
+      <CardBotanicalSprigs index={1} />
+      <h3 className="text-[15px] font-bold uppercase text-[#b89664]">{t("review.paymentInfo")}</h3>
+      <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
+      <div className="pt-3"><div className="rounded-xl border border-[#ede5d8]/50 bg-white px-4 py-3 text-xs leading-relaxed text-[#6f6a64]"><p className="font-semibold text-[#2F3A2E]">{t("review.salonPayment")}</p><p className="mt-1">{t("review.salonPaymentDesc")}</p></div><div className="mt-4 flex items-center justify-between text-sm font-semibold text-[#2F3A2E]"><span>{t("review.totalEstimated")}</span><span>€{Number(totalAmount).toFixed(2)}</span></div></div>
     </div>
   );
 }
@@ -263,7 +272,7 @@ export default function ReviewStep({ data, nextStep, customerSession, goToStep }
           </label>
         )}
 
-        <button onClick={handleContinue} disabled={processing || (!requiresPaymentStep && !acceptedTerms)} className={`w-full rounded-full px-6 py-3.5 text-sm font-semibold text-white shadow-sm transition-all ${processing || (!requiresPaymentStep && !acceptedTerms) ? "cursor-not-allowed bg-[#ede5d8] text-white/70" : "bg-[#2F3A2E] hover:bg-[#212a20] hover:shadow-md hover:-translate-y-px"}`}>{ctaLabel}</button>
+        <button onClick={handleContinue} disabled={processing || (!requiresPaymentStep && !acceptedTerms)} className={`w-full rounded-full px-5 py-2.5 text-[13px] font-medium text-white transition-all ${processing || (!requiresPaymentStep && !acceptedTerms) ? "cursor-not-allowed bg-[#ede5d8] text-white/70" : "bg-[#b89664] hover:bg-[#a38353] hover:shadow-md hover:-translate-y-px"}`}>{ctaLabel}</button>
         <p className="text-center text-[11px] text-[#9a9590]">Paiement sécurisé • Confirmation instantanée</p>
       </div>
     </div>

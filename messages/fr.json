@@ -2236,17 +2236,29 @@
     "category": {
       "title": "Choisissez une catégorie",
       "subtitle": "Sélectionnez le type de service dont vous avez besoin",
+      "loading": "Chargement des univers…",
+      "empty": "Aucune catégorie disponible",
+      "emptyHint": "Revenez plus tard ou contactez-nous.",
+      "chooseServices": "Voir les prestations",
       "servicesCount": "{count, plural, one {# service disponible} other {# services disponibles}}"
     },
     "service": {
       "title": "Sélectionnez un service",
       "subtitle": "{name} • {count, plural, one {# service disponible} other {# services disponibles}}",
+      "loading": "Chargement des prestations…",
+      "choose": "Choisissez votre prestation",
+      "chooseHint": "Sélectionnez celle qui vous correspond.",
+      "signature": "Prestation signature",
+      "select": "Choisir cette prestation",
       "noServices": "Aucun service disponible pour cette catégorie",
       "allAdded": "Tous les services de cette catégorie ont déjà été ajoutés à votre réservation."
     },
     "staff": {
       "title": "Choisissez votre experte",
       "subtitle": "{name} • {count, plural, one {# experte disponible} other {# expertes disponibles}}",
+      "loading": "Recherche des expertes disponibles…",
+      "unavailableSoon": "Cette prestation sera bientôt disponible avec d'autres expertes.",
+      "select": "Choisir cette experte",
       "noStaff": "Aucune experte disponible pour ce service",
       "reviews": "({count} avis)"
     },
@@ -2288,6 +2300,7 @@
       "prevMonthAria": "Mois précédent",
       "nextMonthAria": "Mois suivant",
       "unavailableDates": "Dates indisponibles",
+      "selected": "Sélectionné",
       "draftsTitle": "Vos rendez-vous ({count})",
       "appointment": "Rendez-vous {index}",
       "totalEstimated": "Total estimé",

@@ -316,27 +316,27 @@ export default function ReservationForm({ customerSession = null }) {
 
             {/* Bottom navigation — Précédent at bottom on every step except first */}
             {(showBack || !hideGlobalNav) && (
-              <div className="mt-8 flex items-center justify-between gap-3">
-                <div>
+              <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="w-full sm:w-auto">
                   {showBack && (
                     <button
                       onClick={prevStep}
-                      className="inline-flex items-center gap-1.5 rounded-full border border-[#ede5d8] bg-white px-5 py-2.5 text-sm font-medium text-[#2F3A2E] hover:border-[#2F3A2E]/20 hover:bg-white transition-colors"
+                      className="inline-flex w-full items-center justify-center gap-1.5 rounded-full border border-[#b89664] bg-white px-5 py-2.5 text-sm font-medium text-[#b89664] transition-colors hover:bg-[#f5ece0] sm:w-auto"
                     >
                       <ChevronLeft size={16} className="opacity-60" />
                       {t("reservationForm.buttons.previous")}
                     </button>
                   )}
                 </div>
-                <div>
+                <div className="w-full sm:w-auto">
                   {!hideGlobalNav && (
                     <button
                       onClick={nextStep}
                       disabled={isLastStep || !canProceed}
-                      className={`inline-flex items-center justify-center gap-1.5 rounded-full px-7 py-3 text-sm font-semibold tracking-wide transition-all ${
+                      className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full px-5 py-3 text-sm font-semibold tracking-wide transition-all sm:w-auto sm:px-7 ${
                         isLastStep || !canProceed
                           ? "cursor-not-allowed bg-[#e8ddd0] text-white"
-                          : "bg-[#2F3A2E] text-white hover:bg-[#212a20]"
+                          : "bg-[#b89664] text-white hover:bg-[#a38353]"
                       }`}
                     >
                       {t("reservationForm.buttons.next")}
@@ -348,17 +348,6 @@ export default function ReservationForm({ customerSession = null }) {
             )}
           </div>
 
-          {showSidebar && (
-            <div className="hidden w-full lg:block lg:w-[340px] lg:flex-shrink-0">
-              <div className="sticky top-6">
-                <SummarySidebar data={reservationData} onEdit={goToStepById} />
-                <div className="mt-4 rounded-2xl border border-[#ede5d8]/50 bg-white px-4 py-4 text-center">
-                  <p className="text-xs font-semibold text-[#2F3A2E]">Besoin d&apos;aide ?</p>
-                  <p className="mt-1 text-xs leading-relaxed text-[#6f6a64]">Notre équipe vous aide à choisir la prestation idéale.</p>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

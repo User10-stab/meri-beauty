@@ -2235,17 +2235,29 @@
     "category": {
       "title": "Kies een categorie",
       "subtitle": "Selecteer het type dienst dat u nodig heeft",
+      "loading": "Categorieën laden…",
+      "empty": "Geen categorie beschikbaar",
+      "emptyHint": "Kom later terug of neem contact met ons op.",
+      "chooseServices": "Diensten bekijken",
       "servicesCount": "{count, plural, one {# dienst beschikbaar} other {# diensten beschikbaar}}"
     },
     "service": {
       "title": "Selecteer een dienst",
       "subtitle": "{name} • {count, plural, one {# dienst beschikbaar} other {# diensten beschikbaar}}",
+      "loading": "Diensten laden…",
+      "choose": "Kies uw dienst",
+      "chooseHint": "Selecteer de dienst die bij u past.",
+      "signature": "Kenmerkende dienst",
+      "select": "Kies deze dienst",
       "noServices": "Geen dienst beschikbaar voor deze categorie",
       "allAdded": "Alle diensten in deze categorie zijn al aan uw reservering toegevoegd."
     },
     "staff": {
       "title": "Kies uw expert",
       "subtitle": "{name} • {count, plural, one {# expert beschikbaar} other {# experts beschikbaar}}",
+      "loading": "Beschikbare experts zoeken…",
+      "unavailableSoon": "Deze dienst is binnenkort beschikbaar met andere experts.",
+      "select": "Kies deze expert",
       "noStaff": "Geen expert beschikbaar voor deze dienst",
       "reviews": "({count} beoordelingen)"
     },
@@ -2287,6 +2299,7 @@
       "prevMonthAria": "Vorige maand",
       "nextMonthAria": "Volgende maand",
       "unavailableDates": "Niet beschikbare datums",
+      "selected": "Geselecteerd",
       "draftsTitle": "Uw afspraken ({count})",
       "appointment": "Afspraak {index}",
       "totalEstimated": "Geschat totaal",

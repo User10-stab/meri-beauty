@@ -263,7 +263,7 @@ export default function Footer({ salon }) {
                 alt="MeriBeauty Studio"
                 width={160}
                 height={52}
-                className="mb-6 h-[42px] w-auto brightness-0 invert"
+                className="mb-6 h-[60px] w-auto"
               />
             </Link>
 

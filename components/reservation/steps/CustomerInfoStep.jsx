@@ -8,6 +8,7 @@ import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner
 import { initCustomerVerification } from "@/actions/reservation/init-customer-verification";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { useTranslations } from "next-intl";
+import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
 
 function Field({ label, htmlFor, required, children }) {
   return (
@@ -80,7 +81,8 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
-        <div className="rounded-[1.4rem] border border-[#ede5d8]/70 bg-white p-6 shadow-sm space-y-5">
+        <div className="relative space-y-5 overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]">
+          <CardBotanicalSprigs />
           <Field label={t("customer.fullName")} htmlFor="fullName" required>
             <div className="relative">
               <InputIcon><User size={16} /></InputIcon>
@@ -114,7 +116,8 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
           </label>
         </div>
 
-        <div className="rounded-[1.4rem] border border-[#ede5d8]/70 bg-white p-6 shadow-sm">
+        <div className="relative overflow-hidden rounded-xl border-2 border-[#ede5d8]/70 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 shadow-[0_2px_16px_rgba(47,58,46,0.04)]">
+          <CardBotanicalSprigs index={1} />
           <Field label={t("customer.notes")} htmlFor="notes">
             <div className="relative">
               <div className="pointer-events-none absolute left-3.5 top-3 text-[#9a9590]"><MessageSquare size={16} /></div>
@@ -123,7 +126,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
           </Field>
         </div>
 
-        <button type="submit" disabled={sendingVerification} className={`w-full rounded-full px-6 py-3.5 text-sm font-semibold text-white shadow-sm transition-all ${sendingVerification ? "cursor-not-allowed bg-[#2F3A2E]/60" : "bg-[#2F3A2E] hover:bg-[#212a20] hover:shadow-md hover:-translate-y-px"}`}>
+        <button type="submit" disabled={sendingVerification} className={`w-full rounded-full px-5 py-2.5 text-[13px] font-medium text-white transition-all ${sendingVerification ? "cursor-not-allowed bg-[#ede5d8] text-white/70" : "bg-[#b89664] hover:bg-[#a38353] hover:shadow-md hover:-translate-y-px"}`}>
           {sendingVerification ? (<span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" />{t("customer.sendingVerification")}</span>) : (t("customer.continueToReview"))}
         </button>
         <p className="text-center text-[11px] leading-relaxed text-[#9a9590]">En continuant, vous acceptez nos conditions générales et notre politique de confidentialité.</p>

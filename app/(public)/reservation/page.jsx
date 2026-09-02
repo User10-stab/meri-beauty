@@ -3,6 +3,7 @@ import PageHero from "@/components/website/PageHero";
 import ReservationForm from "@/components/reservation/ReservationForm";
 import { auth } from "@/auth";
 import { getTranslations } from "next-intl/server";
+import { Headset } from "lucide-react";
 
 export default async function Page() {
   const session = await auth();
@@ -26,24 +27,44 @@ export default async function Page() {
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.035]" style={{ backgroundImage: "repeating-linear-gradient(90deg,#b89664 0px,#b89664 1px,transparent 1px,transparent 80px)" }} />
         <div className="relative flex flex-col items-center justify-center px-4 py-12 text-center sm:px-6 sm:py-14">
           <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#b89664]">{t("reservation.servicesEyebrow")}</p>
-          <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E] sm:text-[2rem] md:text-[2.5rem]">{t("reservation.heading")}</h2>
+          <h2 className="font-display text-[1.8rem] font-semibold leading-tight tracking-tight text-[#2F3A2E] sm:text-[2rem] md:text-[3rem]">{t("reservation.heading")}</h2>
           <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
-          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-[#6f6a64] sm:text-[15px]">{t("reservation.subtitle2")}</p>
+          <p className="mt-4 max-w-lg text-sm leading-relaxed text-[#6f6a64] sm:text-[15px]">{t("reservation.subtitle2")}</p>
         </div>
       </div>
 
+       <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-1/2 hidden -translate-x-1/2 items-center gap-3 text-[#b89664]/35 sm:flex">
+          <span className="h-px w-16 bg-current" />
+          <span className="h-2 w-2 rotate-45 border border-current" />
+          <span className="h-px w-16 bg-current" />
+        </div>
+
       {/* Booking flow — premium shell */}
-      <div id="booking" className="bg-[#fdf8f0] pb-8 sm:pb-10">
-        <div className="mx-auto max-w-[1280px] px-0 sm:px-4 lg:px-6">
+      <div id="booking" className="mt-12 relative overflow-hidden bg-[#fdf8f0] pb-12 sm:pb-30">
+        <div aria-hidden="true" className="pointer-events-none absolute left-[-82px] top-20 hidden h-56 w-56 rounded-full border border-[#b89664]/25 lg:block">
+          <div className="absolute inset-5 rounded-full border border-[#b89664]/15" />
+          <div className="absolute inset-11 rounded-full border border-[#b89664]/10" />
+        </div>
+        <div aria-hidden="true" className="pointer-events-none absolute right-8 top-28 hidden h-12 w-12 rotate-45 border border-[#b89664]/30 lg:block">
+          <div className="absolute inset-2 border border-[#b89664]/15" />
+        </div>
+        <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
           <ReservationForm customerSession={customerSession} />
+        </div>
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-1/2 hidden -translate-x-1/2 items-center gap-3 text-[#b89664]/35 sm:flex">
+          <span className="h-px w-16 bg-current" />
+          <span className="h-2 w-2 rotate-45 border border-current" />
+          <span className="h-px w-16 bg-current" />
         </div>
       </div>
 
       {/* Help — premium card */}
-      <div className="w-full mt-20 bg-[#fdf8f0] px-4 pb-10 sm:px-6 sm:pb-12">
-        <div className="mx-auto max-w-3xl rounded-[1.5rem] border border-[#ede5d8]/60 bg-[#fdf8f0] px-6 py-8 text-center shadow-[0_8px_28px_rgba(47,58,46,0.06)] sm:px-8 sm:py-9">
-          <div className="mx-auto mb-3 flex h-8 w-8 items-center justify-center rounded-full bg-[#2F3A2E] text-white">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 2a7 7 0 0 0-7 7c0 3.5 2.5 6.5 7 9 4.5-2.5 7-5.5 7-9a7 7 0 0 0-7-7Z" /><path d="M9 12h6" /></svg>
+      <div className="relative mt-20 w-full overflow-hidden bg-[#fdf8f0] px-4 pb-10 sm:px-6 sm:pb-12">
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-3 left-8 hidden h-20 w-20 border border-[#b89664]/15 lg:block" />
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-[-42px] right-12 hidden h-32 w-32 rounded-full border border-[#b89664]/20 lg:block" />
+        <div className="relative mx-auto max-w-3xl rounded-[1.5rem] border border-[#ede5d8]/60 bg-[#fdf8f0] px-6 py-8 text-center shadow-[0_8px_28px_rgba(47,58,46,0.06)] sm:px-8 sm:py-9">
+          <div className="mx-auto mb-3 flex  items-center justify-center rounded-full text-[#2F3A2E]">
+            <Headset size={25} strokeWidth={1.8} aria-hidden="true" />
           </div>
           <h3 className="font-display text-[17px] font-semibold text-[#2F3A2E] sm:text-lg">{t("reservation.helpTitle")}</h3>
           <p className="mx-auto mt-2.5 max-w-xl text-[13px] leading-relaxed text-[#6f6a64] sm:text-sm">{t("reservation.helpText")}</p>

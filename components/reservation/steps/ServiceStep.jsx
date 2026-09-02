@@ -6,6 +6,7 @@ import { Clock, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslations } from "next-intl";
 import { motion } from "framer-motion";
+import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
 
 export default function ServiceStep({ data, updateData, nextStep }) {
   const t = useTranslations("reservationSteps");
@@ -35,7 +36,7 @@ export default function ServiceStep({ data, updateData, nextStep }) {
     return (
       <div className="flex min-h-[380px] flex-col items-center justify-center gap-4">
         <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#ede5d8] border-t-[#2F3A2E]" />
-        <p className="text-sm text-[#6f6a64]">Chargement des prestations…</p>
+        <p className="text-sm text-[#6f6a64]">{t("service.loading")}</p>
       </div>
     );
   }
@@ -56,14 +57,14 @@ export default function ServiceStep({ data, updateData, nextStep }) {
     <div>
       <div className="mb-6">
         <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#b89664]">{data.category?.name ?? t("category.title")}</p>
-        <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">Choisissez votre prestation</h2>
+        <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">{t("service.choose")}</h2>
         <p className="mt-2 max-w-xl text-[13px] leading-relaxed text-[#6f6a64]">
-          {availableServices.length === 1 ? `${availableServices.length} service disponible` : `${availableServices.length} services disponibles`} — sélectionnez celle qui vous correspond.
+          {t("service.subtitle", { name: data.category?.name ?? "", count: availableServices.length })} {t("service.chooseHint")}
         </p>
         <div className="mt-3 h-px w-10 bg-[#b89664]/20" />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 sm:gap-5 xl:grid-cols-3">
         {availableServices.map((service, idx) => {
           const selected = data.service?.id === service.id;
           return (
@@ -71,43 +72,57 @@ export default function ServiceStep({ data, updateData, nextStep }) {
               key={service.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.04, duration: 0.32 }}
+              transition={{ delay: idx * 0.06, duration: 0.35, ease: [0.4, 0, 0.2, 1] }}
               onClick={() => handleSelectService(service)}
-              className={`group relative flex flex-col rounded-[1.25rem] border bg-white p-5 text-left transition-all duration-300 ${
+              className={`group relative flex flex-col items-start overflow-hidden rounded-xl border-2 bg-[#fdf8f0]/80 pl-11 pr-5 pt-8 pb-10 text-left transition-all duration-300 ${
                 selected
-                  ? "border-[#2F3A2E] shadow-[0_8px_28px_rgba(47,58,46,0.12)]"
-                  : "border-[#ede5d8]/70 shadow-[0_2px_14px_rgba(47,58,46,0.05)] hover:-translate-y-1 hover:border-[#2F3A2E]/15 hover:shadow-[0_10px_28px_rgba(47,58,46,0.08)]"
+                  ? "border-[#b89664] bg-white shadow-[0_8px_28px_rgba(47,58,46,0.12)]"
+                  : "border-[#ede5d8]/70 shadow-[0_2px_16px_rgba(47,58,46,0.04)] hover:-translate-y-1 hover:border-[#b89664] hover:bg-[#f5ece0] hover:shadow-[0_10px_28px_rgba(47,58,46,0.08)]"
               }`}
             >
-              <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#b89664]/20 to-transparent opacity-60" />
-              {selected && <span className="absolute right-4 top-4 flex h-6 w-6 items-center justify-center rounded-full bg-[#2F3A2E] text-white"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M5 13l4 4L19 7" /></svg></span>}
+              {selected && (
+                <span className="absolute right-4 top-4 flex h-6 w-6 items-center justify-center rounded-full bg-[#2F3A2E] text-white">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                </span>
+              )}
 
-              {/* Service name — strongest hierarchy */}
-              <h3 className="pr-7 text-[14px] font-semibold leading-tight tracking-tight text-[#2F3A2E] group-hover:text-[#2F3A2E]">{service.name}</h3>
+              <CardBotanicalSprigs index={idx} />
 
-              {/* Description — truncated, tooltip on hover */}
+              <h3 className="mb-2 text-[15px] font-bold uppercase text-[#b89664]">{service.name}</h3>
+              <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
+
+              {/* Description with tooltip */}
               {service.description ? (
-                <div className="group/desc relative mt-1.5">
-                  <p className="line-clamp-2 text-[12.5px] leading-relaxed text-[#232a21]">{service.description}</p>
-                  <div className="pointer-events-none invisible absolute left-0 top-full z-20 mt-2 w-[300px] max-w-[90vw] rounded-xl border border-[#ede5d8] bg-[#2F3A2E] px-3.5 py-2.5 text-xs leading-relaxed text-white shadow-xl opacity-0 transition-all group-hover/desc:visible group-hover/desc:opacity-100">
+                <div className="group/desc relative mt-2 w-full">
+                  <p className="line-clamp-2 min-h-[2.6em] text-left text-[14px] leading-relaxed text-[#232a21]">
                     {service.description}
+                  </p>
+                  <div className="pointer-events-none invisible absolute left-1/2 top-full z-20 mt-3 w-[min(280px,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-[#ede5d8] bg-[#2F3A2E] px-4 py-3 text-[12.5px] leading-relaxed text-white shadow-xl opacity-0 transition-all duration-200 group-hover/desc:visible group-hover/desc:opacity-100">
+                    {service.description}
+                    <span className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-[#2F3A2E] border-l border-t border-[#ede5d8]/20" />
                   </div>
                 </div>
               ) : (
-                <p className="mt-1.5 text-[12px] italic text-[#9a9590]">Prestation signature MeriBeauty</p>
+                <p className="mt-2 min-h-[2.6em] text-left text-[14px] italic text-[#9a9590]">{t("service.signature")}</p>
               )}
 
-              {/* Duration + Price row — immediate scan */}
-              <div className="mt-4 flex items-center justify-between border-t border-[#f0e8d8] pt-3">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-[#fdf8f0] px-2.5 py-1 text-[11px] font-medium text-[#6f6a64] ring-1 ring-[#ede5d8]">
-                  <Clock size={12} className="text-[#b89664]" />
+              {/* Duration and Price */}
+              <div className="mt-8 flex items-center gap-4 text-[12px] text-[#b89664]">
+                <span className="flex items-center gap-1">
+                  <Clock size={12} />
                   {service.durationRange}
                 </span>
-                <span className="text-[15px] font-bold tracking-tight text-[#2F3A2E]">{service.priceRange}</span>
+                <span className="h-1 w-1 rounded-full bg-[#b89664]" />
+                <span className="font-medium">{service.priceRange}</span>
               </div>
 
-              <span className="mt-3 inline-flex items-center gap-1 text-[11.5px] font-medium text-[#9a9590] transition-all group-hover:gap-1.5 group-hover:text-[#2F3A2E]">
-                Choisir <span aria-hidden="true">→</span>
+              <span className="mt-6 inline-flex items-center gap-1.5 rounded-full border border-[#b89664] bg-[#b89664] px-4 py-2 text-[12px] font-medium text-white transition-all hover:shadow-md">
+                {t("service.select")}
+                <svg className="h-3 w-3 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
               </span>
             </motion.button>
           );

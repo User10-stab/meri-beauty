@@ -33,6 +33,8 @@ import {
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { Prisma } from "@prisma/client";
 import { reconcileStripeProductOrderRefund } from "@/lib/orders/reconcile-stripe-refund";
+import { findLegForStripeRefund, settleRefundLeg } from "@/lib/refunds/settle-leg";
+import { notifyRefundComplete } from "@/lib/refunds/notify-refund-complete";
 import {
   reconcileExceptionalReservationFullRefund,
   RESERVATION_REFUND_AUTHORIZATION,
@@ -369,6 +371,81 @@ async function findPaymentByChargePaymentIntent(paymentIntentId) {
 }
 
 /**
+ * Settles any RefundLeg this charge's refunds belong to.
+ *
+ * This is now the PRIMARY path, not a confirmation of our own call. Confirmed
+ * policy (2026-09-02): this application never issues a Stripe refund itself —
+ * an OWNER/ADMIN refunds by hand in the Stripe dashboard, having been told the
+ * exact amount and payment_intent by the Operations screen. This handler is
+ * where that manual act is reconciled back into the ledger.
+ *
+ * (Deliberately worded without the API call's literal name: the security
+ * contract in tests/critical/security-contracts.test.js asserts this file
+ * cannot refund, by checking the source for that exact string.)
+ *
+ * MUST run before the external-refund reconciliation below, and MUST stop it
+ * from also running. The operation already has its credit note on disk, and
+ * the legacy "someone refunded from the Stripe Dashboard" path would write a
+ * SECOND REFUND transaction and a SECOND credit note for one movement of
+ * money. When no leg matches — a refund with no operation behind it, which is
+ * still perfectly possible — nothing here fires and the old path runs
+ * unchanged.
+ *
+ * Iterates the charge's refunds rather than reading amount_refunded, because
+ * a mixed operation can produce several Stripe refunds against one charge
+ * over time and each settles its own leg with its own amount.
+ *
+ * @returns {Promise<{settledAny: boolean, operationIds: Set<string>}>}
+ */
+async function settleOwnRefundLegs(charge) {
+  const paymentIntentId =
+    typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id ?? null;
+  const refunds = charge.refunds?.data ?? [];
+  const operationIds = new Set();
+  let settledAny = false;
+
+  // A charge with no expanded refunds list still gets one attempt via the
+  // payment_intent, so an older/trimmed payload does not strand a leg. The
+  // amount is then unknown, and settleRefundLeg falls back to the planned
+  // figure rather than inventing one.
+  const candidates =
+    refunds.length > 0
+      ? refunds.map((refund) => ({ id: refund.id, amount: round2((refund.amount ?? 0) / 100) }))
+      : [{ id: null, amount: null }];
+
+  for (const candidate of candidates) {
+    const leg = await findLegForStripeRefund(prisma, { refundId: candidate.id, paymentIntentId });
+    if (!leg) continue;
+
+    const result = await settleRefundLeg({
+      prisma,
+      legId: leg.id,
+      stripe: {
+        refundId: candidate.id ?? leg.stripeRefundId,
+        paymentIntentId,
+        // What the admin actually typed into Stripe. Recorded as-is so an
+        // over- or under-refund shows up instead of being smoothed over.
+        amount: candidate.amount,
+      },
+    });
+    operationIds.add(leg.refundOperationId);
+    // ALREADY_SETTLED still counts as ours — a redelivered webhook must not
+    // fall through to the external-refund path and duplicate the ledger.
+    if (result.settled || result.reason === "ALREADY_SETTLED") settledAny = true;
+  }
+
+  for (const operationId of operationIds) {
+    // No-op unless every leg has landed. This is the single closing e-mail,
+    // and the claim on customerNotifiedAt makes a second delivery silent.
+    await notifyRefundComplete({ prisma, operationId }).catch((error) =>
+      console.error("[stripe-webhook] refund notification failed", error),
+    );
+  }
+
+  return { settledAny, operationIds };
+}
+
+/**
  * Keeps our ledger honest when a refund happens outside our own refund
  * actions — most commonly staff refunding directly from the Stripe
  * Dashboard. Without this, Payment.status stays PAID and there's no
@@ -376,6 +453,16 @@ async function findPaymentByChargePaymentIntent(paymentIntentId) {
  * silently disagree with what Stripe actually did.
  */
 async function handleChargeRefunded(charge) {
+  // Ours first. If this refund belongs to a RefundOperation we opened, it is
+  // fully accounted for and the reconciliation below must not touch it.
+  const own = await settleOwnRefundLegs(charge);
+  if (own.settledAny) {
+    console.info(
+      `[stripe-webhook] charge.refunded settled ${own.operationIds.size} refund operation(s) we initiated`,
+    );
+    return;
+  }
+
   const payment = await findPaymentByChargePaymentIntent(charge.payment_intent);
   if (!payment) {
     // Most likely an appointment (Connect direct charge) — not reachable

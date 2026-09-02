@@ -79,3 +79,6 @@ mailpit.exe
 
 # local AI/dev assistant state
 .claude/
+
+# Local scratch output (rendered PDFs/screenshots from debugging)
+/tmp

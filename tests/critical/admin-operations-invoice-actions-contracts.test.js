@@ -14,7 +14,7 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     // The row's own credit note — not every note ever issued against the
     // invoice — lets a refund row link to the exact document that justifies
     // it (see Transaction.creditNoteId).
-    expect(transactionsBlock).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } }");
+    expect(transactionsBlock).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
 
     // billitSentAt lets the row show whether this invoice was already handed
     // to Billit; customerType/customerVatNumber let it disable the Billit
@@ -22,7 +22,7 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     // only after the click.
     const invoiceSelectIdx = transactionsBlock.indexOf("invoice: {");
     const invoiceSelect = transactionsBlock.slice(invoiceSelectIdx, transactionsBlock.indexOf("},", invoiceSelectIdx));
-    for (const field of ["id: true", "number: true", "billitSentAt: true", "customerType: true", "customerVatNumber: true"]) {
+    for (const field of ["id: true", "number: true", "totalInclVat: true", "emailSentAt: true", "billitSentAt: true", "customerType: true", "customerVatNumber: true", "creditNotes:"]) {
       expect(invoiceSelect, `invoice select is missing "${field}"`).toContain(field);
     }
     // Without the customer on the row there is nothing to show next to the
@@ -84,6 +84,7 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
 
   test("a re-send is written to the audit log", () => {
     const send = source("actions/invoices/send-invoice-email.js");
+    expect(send).toContain("data: { emailSentAt: new Date() }");
     expect(send).toContain("AUDIT_ACTIONS.INVOICE_EMAILED");
     expect(source("lib/audit-log.js")).toContain('INVOICE_EMAILED: "invoice.emailed"');
   });
@@ -110,6 +111,26 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(source("lib/audit-log.js")).toContain('INVOICE_SENT_TO_BILLIT: "invoice.sent_to_billit"');
   });
 
+  test("Operations shows the confirmed e-mail send separately from the Billit handoff", () => {
+    const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
+    expect(client).toContain("invoice.emailSentAt");
+    expect(client).toContain("E-mail envoyé le");
+    expect(client).toContain("Créée dans Billit — à finaliser");
+    expect(client).toContain("Non envoyée");
+  });
+
+  test("a settled deposit is hidden from the overview but remains available in payment details", () => {
+    const actions = source("actions/dashboard/admin-operations.js");
+    const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
+    expect(client).toContain("Total notes de crédit :");
+    expect(client).toContain("reste à créditer");
+    expect(client).not.toContain("Acompte lié au solde ci-dessous");
+    expect(client).not.toContain("Solde de l’acompte ci-dessus");
+    expect(actions).toContain('transactionType: "DEPOSIT"');
+    expect(actions).toContain('transactions: { some: { isDeleted: false, transactionType: "FINAL_PAYMENT" } }');
+    expect(actions).toContain('transactions: { orderBy: { paidAt: "asc" }');
+  });
+
   test("the Billit button opens a re-verify confirmation before calling the real action", () => {
     const actions = source("components/dashboard/operations/InvoiceRowActions.jsx");
     const billitIdx = actions.indexOf('aria-label="Envoyer via Billit"');
@@ -127,22 +148,16 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(actions).toContain("onConfirm={handleSendBillit}");
   });
 
-  test("a Belgian B2B invoice can never be e-mailed directly — Peppol/Billit is the only path", () => {
-    // The server refusal is the one that actually matters — nothing
-    // client-side can be trusted to gate a real send.
+  test("a Belgian B2B invoice can be sent either by e-mail or through Billit/Peppol", () => {
     const send = source("actions/invoices/send-invoice-email.js");
-    expect(send).toContain('import { isBelgianVatNumber } from "@/lib/billit"');
-    expect(send).toContain('invoice.customerType === "B2B" && isBelgianVatNumber(invoice.customerVatNumber)');
+    expect(send).not.toContain("isBelgianVatNumber");
+    expect(send).not.toContain("pas par e-mail direct");
 
-    // The button mirrors the exact same rule and stays disabled rather than
-    // failing only after the click.
     const actions = source("components/dashboard/operations/InvoiceRowActions.jsx");
-    expect(actions).toContain(
-      'const isBelgianB2B = Boolean(invoice) && invoice.customerType === "B2B" && isBelgianVatNumber(invoice.customerVatNumber)'
-    );
     const emailIdx = actions.indexOf('aria-label="Envoyer la facture par e-mail"');
     const emailButton = actions.slice(actions.lastIndexOf("<button", emailIdx), actions.indexOf("</button>", emailIdx));
-    expect(emailButton).toContain("disabled={!invoice || sending || Boolean(emailBlockedReason)}");
+    expect(emailButton).toContain("disabled={!invoice || sending}");
+    expect(emailButton).not.toContain("emailBlockedReason");
   });
 
   test("Billit is refused for a B2C invoice or a non-Belgian VAT number, both client-side and server-side", () => {
@@ -166,7 +181,7 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
   test("row actions degrade to disabled — never hidden — when no invoice exists", () => {
     const actions = source("components/dashboard/operations/InvoiceRowActions.jsx");
     expect(actions).toContain("const noInvoiceReason = invoice ? null :");
-    expect(actions).toContain("disabled={!invoice || sending || Boolean(emailBlockedReason)}");
+    expect(actions).toContain("disabled={!invoice || sending}");
   });
 
   test("the download link points at the existing authorised PDF route", () => {

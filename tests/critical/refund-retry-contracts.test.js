@@ -92,11 +92,13 @@ describe("reservation cancellations pin refunds the same way boutique orders/ret
     expect(failedFn).not.toContain("pendingRefundAmount: null");
   });
 
+  // Only the paths that still refund automatically. As each one is
+  // converted to queueManualRefund it moves to the block below instead —
+  // see tests/critical/refunds-are-manual-contracts.test.js for the policy
+  // this is being migrated towards.
   for (const [name, mod] of [
     ["rejectAppointment (staff/admin)", rejectAppointment],
     ["cancelReservation (customer)", cancelReservation],
-    ["cancelWorkshopReservation", cancelWorkshop],
-    ["cancelFormationReservation", cancelFormation],
   ]) {
     test(`${name} pins the refund and passes an idempotency key to Stripe`, () => {
       expect(mod).toContain("pinPendingRefund(tx");
@@ -105,6 +107,28 @@ describe("reservation cancellations pin refunds the same way boutique orders/ret
       expect(mod).toContain("markRefundFailed(prisma");
     });
   }
+
+  // Converted 2026-09-02: an admin now refunds this by hand in Stripe, so
+  // there is no call to pin, no key to replay and nothing for the retry
+  // cron to pick up. The money is recorded as owed instead of being sent.
+  for (const [name, mod] of [
+    ["cancelWorkshopReservation", cancelWorkshop],
+    ["cancelFormationReservation", cancelFormation],
+  ]) {
+    test(`${name} no longer pins or retries anything`, () => {
+      expect(mod).not.toContain("refunds.create");
+      expect(mod).not.toContain("pinPendingRefund");
+      expect(mod).not.toContain("markRefundFailed");
+      expect(mod).toContain("queueManualRefund(tx");
+      expect(mod).toContain("issueCreditNote(tx");
+    });
+  }
+
+  // The atelier cancellation e-mail takes a `refunded` flag; the formation
+  // one has no such wording at all. Only the former can get this wrong.
+  test("the atelier cancellation e-mail no longer claims a refund happened", () => {
+    expect(cancelWorkshop).toContain("refunded: false");
+  });
 
   test("cancelReservation (customer path) no longer silently drops a failed refund", () => {
     // The old bug: a bare console.error with no durable Payment write at all.

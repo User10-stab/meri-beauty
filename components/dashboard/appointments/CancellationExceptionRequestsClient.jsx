@@ -19,8 +19,9 @@ export function CancellationExceptionRequestsClient({ initialRequests }) {
     const result = await reviewCancellationExceptionRequest({ requestId, decision, decisionNote: notes[requestId] ?? "" });
     setProcessingId(null);
     if (!result.success) return toast.error(result.message);
-    toast.success(result.message);
-    setRequests((current) => current.map((request) => request.id === requestId ? { ...request, status: decision, decisionNote: notes[requestId] ?? "", reviewedAt: new Date().toISOString() } : request));
+    if (result.refundFailed) toast.warning(result.message);
+    else toast.success(result.message);
+    setRequests((current) => current.map((request) => request.id === requestId ? { ...request, status: decision, decisionNote: notes[requestId] ?? "", reviewedAt: new Date().toISOString(), refundFailed: result.refundFailed === true } : request));
   }
 
   if (!requests.length) {
@@ -32,6 +33,9 @@ export function CancellationExceptionRequestsClient({ initialRequests }) {
       {requests.map((request) => {
         const pending = request.status === "PENDING";
         const appointment = request.appointment;
+        const refundFailed =
+          request.status === "APPROVED" &&
+          (request.refundFailed === true || appointment.payment?.status === "REFUND_FAILED");
         return (
           <article key={request.id} className="rounded-xl border border-stroke bg-white p-5 shadow-1 dark:border-dark-3 dark:bg-gray-dark">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -40,8 +44,8 @@ export function CancellationExceptionRequestsClient({ initialRequests }) {
                 <p className="mt-1 text-sm text-gray-500 dark:text-dark-6">Rendez-vous : {formatDate(appointment.startTime)} · {appointment.staffService.staff.user.fullName}</p>
                 <p className="text-sm text-gray-500 dark:text-dark-6">Client : {request.requestedBy.email}{request.requestedBy.phone ? ` · ${request.requestedBy.phone}` : ""}</p>
               </div>
-              <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${pending ? "bg-amber-50 text-amber-700" : request.status === "APPROVED" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
-                {pending ? "À traiter" : request.status === "APPROVED" ? "Acceptée" : "Refusée"}
+              <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${pending ? "bg-amber-50 text-amber-700" : request.status === "APPROVED" && !refundFailed ? "bg-emerald-50 text-emerald-700" : request.status === "REJECTED" ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800"}`}>
+                {pending ? "À traiter" : refundFailed ? "Acceptée · remboursement à relancer" : request.status === "APPROVED" ? "Acceptée" : "Refusée"}
               </span>
             </div>
 
@@ -58,7 +62,14 @@ export function CancellationExceptionRequestsClient({ initialRequests }) {
                 </div>
               </div>
             ) : (
-              <p className="mt-3 text-sm text-gray-500 dark:text-dark-6">Décision : {request.decisionNote || "Aucun message ajouté."}</p>
+              <div className="mt-3 space-y-2 text-sm text-gray-500 dark:text-dark-6">
+                <p>Décision : {request.decisionNote || "Aucun message ajouté."}</p>
+                {refundFailed && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 font-medium text-amber-800">
+                    Le rendez-vous est annulé, mais le remboursement Stripe doit encore être relancé.
+                  </p>
+                )}
+              </div>
             )}
           </article>
         );

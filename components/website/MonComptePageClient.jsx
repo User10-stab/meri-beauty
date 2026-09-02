@@ -232,7 +232,10 @@ function OrderCard({ order }) {
   );
 }
 
-const REQUESTABLE_RESERVATION_STATUSES = new Set(["PENDING_DEPOSIT", "CONFIRMED"]);
+// PENDING_DEPOSIT means no payment has been recorded yet, so there is no
+// refund exception to request. A missed Stripe webhook must be reconciled
+// first instead of letting an admin approve a refund against no local money.
+const REQUESTABLE_RESERVATION_STATUSES = new Set(["CONFIRMED"]);
 
 /**
  * Neither ateliers nor formations allow self-cancellation — the 50% deposit
@@ -281,11 +284,23 @@ function ReservationCancellationRequest({ reservation, kind }) {
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-amber-800">
           Votre demande est en attente d&apos;une décision de l&apos;équipe. Aucun remboursement n&apos;est engagé avant son accord.
         </p>
-      ) : request?.status === "REJECTED" ? (
-        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-red-700">
-          Votre demande exceptionnelle a été refusée. La réservation et l&apos;acompte restent inchangés.
-          {request.decisionNote ? ` Message de l'équipe : ${request.decisionNote}` : ""}
-        </p>
+      ) : request?.status === "REJECTED" && !open ? (
+        <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-red-700">
+          <p>
+            Votre demande exceptionnelle a été refusée. La réservation et l&apos;acompte restent inchangés.
+            {request.decisionNote ? ` Message de l'équipe : ${request.decisionNote}` : ""}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setReason("");
+              setOpen(true);
+            }}
+            className="mt-2 font-semibold text-primary hover:underline"
+          >
+            Envoyer une nouvelle demande
+          </button>
+        </div>
       ) : request?.status === "APPROVED" ? (
         <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700">
           Votre demande a été acceptée — la réservation est annulée et le remboursement est en cours.

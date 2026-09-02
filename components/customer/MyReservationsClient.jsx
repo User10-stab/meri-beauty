@@ -467,12 +467,22 @@ function ReservationCard({ reservation, onCancelled }) {
                       Votre demande est en attente d'une décision de l'équipe. Aucun remboursement n'est engagé avant son accord.
                     </p>
                   </div>
-                ) : hasRejectedRequest ? (
+                ) : hasRejectedRequest && !requestOpen ? (
                   <div className="rounded-lg sm:rounded-xl bg-red-50 border border-red-200 px-3 sm:px-4 py-2 sm:py-3">
                     <p className="text-[11px] sm:text-xs text-red-700 font-medium">
                       Votre demande exceptionnelle a été refusée. Le rendez-vous et l'acompte restent inchangés.
                       {cancellationRequest.decisionNote ? ` Message de l'équipe : ${cancellationRequest.decisionNote}` : ""}
                     </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRequestReason("");
+                        setRequestOpen(true);
+                      }}
+                      className="mt-2 text-[11px] sm:text-xs font-semibold text-[#2f3a2e] hover:underline"
+                    >
+                      Envoyer une nouvelle demande
+                    </button>
                   </div>
                 ) : requestOpen ? (
                   <div className="space-y-1.5 sm:space-y-2 rounded-lg sm:rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 sm:p-3">

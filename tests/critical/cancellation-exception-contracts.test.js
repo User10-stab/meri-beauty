@@ -12,9 +12,10 @@ describe("late cancellation exception requests", () => {
   const myReservations = source("actions/reservation/get-my-reservations.js");
   const customerUi = source("components/customer/MyReservationsClient.jsx");
 
-  test("stores exactly one review request per appointment", () => {
+  test("stores one current review request per appointment", () => {
     expect(schema).toContain("model AppointmentCancellationRequest");
     expect(schema).toContain("appointmentId String @unique");
+    expect(schema).toContain("cancellationRequests AppointmentCancellationRequest[]");
     expect(schema).toContain("enum AppointmentCancellationRequestStatus");
   });
 
@@ -41,10 +42,32 @@ describe("late cancellation exception requests", () => {
     expect(appointmentActions).toContain("!waiveDepositForfeit");
   });
 
+  test("submission and approval require a recorded refundable payment", () => {
+    expect(action).toContain("function refundableRecordedAmount(payment)");
+    expect(action).toContain("refundableRecordedAmount(appointment.payment) <= REFUND_EPSILON");
+    expect(action).toContain("refundableRecordedAmount(request.appointment.payment) <= REFUND_EPSILON");
+  });
+
+  test("Stripe failure is returned and displayed as a refund that must be retried", () => {
+    const adminUi = source("components/dashboard/appointments/CancellationExceptionRequestsClient.jsx");
+    expect(action).toContain("result.refundFailed");
+    expect(action).toContain("le remboursement Stripe a échoué");
+    expect(adminUi).toContain("Acceptée · remboursement à relancer");
+    expect(adminUi).toContain("toast.warning(result.message)");
+  });
+
   test("customer reservations expose pending/rejected request state to the UI", () => {
     expect(myReservations).toContain("cancellationRequests");
     expect(myReservations).toContain("cancellationRequest:");
     expect(customerUi).toContain("hasPendingRequest");
     expect(customerUi).toContain("hasRejectedRequest");
+    expect(customerUi).toContain("Envoyer une nouvelle demande");
+  });
+
+  test("a rejected request is reopened atomically and its previous decision is audited", () => {
+    expect(action).toContain('where: { id: existingRequest.id, status: "REJECTED" }');
+    expect(action).toContain('action: "appointment.cancellation_request.resubmitted"');
+    expect(action).toContain("before: {");
+    expect(action).toContain('status: "PENDING"');
   });
 });

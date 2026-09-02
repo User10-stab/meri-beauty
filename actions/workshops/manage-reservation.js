@@ -10,7 +10,7 @@ import { isAdminRole } from "@/lib/authorization";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-workshop-reservation";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
-import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
+import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
 
 const SESSION_CHANGE_FEE_RATE = 0.1; // 10% of the reservation's total price
@@ -95,26 +95,33 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       return { success: false, message: "Cette réservation est déjà annulée." };
     }
 
-    // Deposits are non-refundable by default — never stripe.refunds.create()
-    // here unless the admin explicitly granted an exception above. The
-    // credit note is issued as soon as that exception is granted (same
-    // decoupled-from-Stripe-success pattern as orders.js/manage-appointment.js
-    // — it's a record of the business decision to credit the customer, not
-    // of the money having actually moved yet), so a failed/retried Stripe
-    // call never leaves it missing.
-    let refundFailed = false;
+    // Deposits are non-refundable by default. When an admin grants an
+    // exception, this no longer moves the money itself — confirmed policy
+    // (2026-09-02): every Stripe refund is performed by hand in the Stripe
+    // dashboard by an OWNER/ADMIN.
+    //
+    // The credit note is still issued here exactly as before. What replaces
+    // the Stripe call is a RefundOperation whose legs carry the precise
+    // amount and payment_intent to refund against; it sits at the top of
+    // /dashboard/operations until someone has actually done it, and the
+    // charge.refunded webhook settles it. Deleting the call without this
+    // would have left the customer credited on paper and never paid — the
+    // exact state scripts/audit-refund-states.mjs found nine times.
+    //
+    // Note this no longer requires payment.transactionReference: a
+    // reservation settled in cash used to fall through here refunding
+    // nothing AND issuing no credit note. Cash now queues a hand-over leg
+    // like any other method.
+    let refundQueued = false;
     const REFUND_EPSILON = 0.01;
-    if (refundDeposit && reservation.payment?.transactionReference) {
+    if (refundDeposit && reservation.payment) {
       const payment = reservation.payment;
 
-      // Cap against what's actually still outstanding — a prior partial
-      // refund (e.g. issued manually from the Stripe Dashboard, reconciled
-      // via the charge.refunded webhook) can already have refunded part of
-      // this payment. Mirrors rejectAppointment's exact pattern — without
-      // it, this over-counts in the ledger (and could double-refund on
-      // Stripe's side if the payment_intent still had a partial balance).
+      // Cap against what is actually still outstanding — a prior partial
+      // refund (issued from the Stripe dashboard, reconciled by the
+      // charge.refunded webhook) can already have returned part of this.
       const priorRefunds = await prisma.transaction.aggregate({
-        where: { paymentId: payment.id, transactionType: "REFUND" },
+        where: { paymentId: payment.id, transactionType: "REFUND", isDeleted: false },
         _sum: { amount: true },
       });
       const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
@@ -123,12 +130,22 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       if (remaining <= REFUND_EPSILON) {
         await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
       } else {
-        // Pinned in the same transaction as the credit note — see
-        // lib/payments/pin-pending-refund.js's doc comment for why this has
-        // to happen before the Stripe call below, not just in its catch.
-        const refundIdempotencyKey = buildRefundIdempotencyKey("workshop-cancel", payment.id);
-        let creditNoteId = null;
         await prisma.$transaction(async (tx) => {
+          const transactions = await tx.transaction.findMany({
+            where: { paymentId: payment.id },
+            select: {
+              id: true,
+              amount: true,
+              method: true,
+              transactionType: true,
+              paidAt: true,
+              isDeleted: true,
+              stripePaymentIntentId: true,
+              stripeCheckoutSessionId: true,
+            },
+          });
+
+          let creditNoteId = null;
           if (payment.invoice) {
             const creditNote = await issueCreditNote(tx, {
               invoiceId: payment.invoice.id,
@@ -137,61 +154,21 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
             });
             creditNoteId = creditNote.id;
           }
-          await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey, creditNoteId);
+
+          const queued = await queueManualRefund(tx, {
+            paymentId: payment.id,
+            source: "WORKSHOP",
+            trigger: "SALON_CANCELLATION",
+            reason: reason || "Annulation atelier — remboursement exceptionnel",
+            amount: remaining,
+            transactions,
+            creditNoteId,
+            invoiceId: payment.invoice?.id ?? null,
+            decidedByUserId: session.user.id,
+            activityType: reservation.session.workshop.type,
+          });
+          refundQueued = Boolean(queued);
         });
-
-        try {
-          const checkoutSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
-          if (checkoutSession.payment_intent) {
-            const stripePaymentIntentId =
-              typeof checkoutSession.payment_intent === "string"
-                ? checkoutSession.payment_intent
-                : checkoutSession.payment_intent.id;
-            await stripe.refunds.create(
-              {
-                payment_intent: stripePaymentIntentId,
-                amount: Math.round(remaining * 100),
-                metadata: { kind: "workshop_admin_exception", reservationId, adminUserId: session.user.id },
-              },
-              { idempotencyKey: refundIdempotencyKey }
-            );
-
-            const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
-            await prisma.$transaction([
-              clearPendingRefund(prisma, payment.id, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED"),
-              prisma.transaction.updateMany({
-                where: {
-                  paymentId: payment.id,
-                  transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
-                  stripePaymentIntentId: null,
-                },
-                data: { stripePaymentIntentId },
-              }),
-              prisma.transaction.create({
-                data: {
-                  paymentId: payment.id,
-                  amount: remaining,
-                  method: "ONLINE",
-                  transactionType: "REFUND",
-                  paidAt: new Date(),
-                  stripeCheckoutSessionId: payment.transactionReference,
-                  stripePaymentIntentId,
-                  creditNoteId,
-                },
-              }),
-            ]);
-          }
-        } catch (err) {
-          // The reservation is already cancelled and the credit note already
-          // issued — that stays. But don't let the customer email below claim
-          // a refund that didn't happen; surface this to staff instead.
-          // pendingRefundAmount/idempotencyKey are left set (not cleared) so
-          // the cron retry job (lib/payments/retry-failed-refunds.js) can
-          // pick it up even if this email is missed.
-          console.error("[cancelWorkshopReservation] REFUND FAILED for", reservationId, err);
-          refundFailed = true;
-          await markRefundFailed(prisma, payment.id, err);
-        }
       }
     } else if (
       !refundDeposit &&
@@ -232,31 +209,25 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
         customerName: reservation.customer.fullName,
         activityTitle: reservation.session.workshop.title,
         sessionDate: formatSessionDate(reservation.session.startDate),
-        refunded: refundDeposit && !refundFailed,
+        // Always false now. The money has NOT moved at this point — an
+        // admin still has to refund it in Stripe or hand it over. Telling
+        // the customer "remboursé" here is exactly the claim the handoff
+        // forbids; lib/refunds/notify-refund-complete.js sends that message
+        // once, after every leg has actually settled.
+        refunded: false,
       }),
     }).catch((err) => console.error("[cancelWorkshopReservation] email failed:", err));
 
-    if (refundFailed) {
-      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
-      if (salon?.email) {
-        sendEmail({
-          to: salon.email,
-          subject: `⚠️ Remboursement Stripe échoué – Réservation atelier n°${reservationId}`,
-          text: `Le remboursement Stripe pour la réservation atelier n°${reservationId} (client : ${reservation.customer.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
-          html: `<p>Le remboursement Stripe pour la réservation atelier n°${reservationId} (client : ${reservation.customer.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
-        }).catch((err) => console.error("[cancelWorkshopReservation] refund-failure alert email failed:", err));
-      }
-    }
-
     revalidatePath("/dashboard/workshops/reservations");
+    revalidatePath("/dashboard/operations");
     return {
       success: true,
       message: refundDeposit
-        ? refundFailed
-          ? "Réservation annulée. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
-          : "Réservation annulée et acompte remboursé."
+        ? refundQueued
+          ? "Réservation annulée. Le remboursement est à effectuer — voir « Remboursements dus » dans Opérations."
+          : "Réservation annulée. Aucun montant restant à rembourser."
         : "Réservation annulée.",
-      refundFailed,
+      refundQueued,
     };
   } catch (error) {
     console.error("[cancelWorkshopReservation]", error);
@@ -521,3 +492,4 @@ export async function markWorkshopReservationNoShow(reservationId) {
   if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
   return result;
 }
+

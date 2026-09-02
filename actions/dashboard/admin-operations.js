@@ -6,7 +6,6 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { TYPE_FILTERS, STATUS_FILTERS } from "@/lib/dashboard/operation-filters";
-import { issueCreditNote } from "@/lib/invoicing";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 
 const ADMIN_OPERATION_TABS = Object.freeze(["transactions", "orders", "workshops", "formations"]);
@@ -55,7 +54,19 @@ export async function getAdminOperations(params = {}) {
       // Transaction has no separate "status" column of its own — the filter
       // slot doubles for transactionType (DEPOSIT/FINAL_PAYMENT/REFUND),
       // which is what actually varies row to row on this tab.
-      const where = { isDeleted: false, ...(status !== "ALL" && { transactionType: status }) };
+      const where = {
+        isDeleted: false,
+        ...(status !== "ALL" && { transactionType: status }),
+        // Once the balance exists, the deposit remains part of the immutable
+        // ledger but no longer needs its own row in the overview. It stays
+        // visible in getTransactionDetail() through payment.transactions.
+        NOT: {
+          transactionType: "DEPOSIT",
+          payment: {
+            transactions: { some: { isDeleted: false, transactionType: "FINAL_PAYMENT" } },
+          },
+        },
+      };
       const [totalCount, data] = await Promise.all([
         prisma.transaction.count({ where }),
         prisma.transaction.findMany({
@@ -68,7 +79,7 @@ export async function getAdminOperations(params = {}) {
             // creditNoteId), never to "whichever ones exist on the invoice" —
             // an invoice can carry several partial refunds over time, and a
             // blanket list would attach every one of them to every row.
-            creditNote: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } },
+            creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
             payment: {
               select: {
                 id: true,
@@ -80,7 +91,22 @@ export async function getAdminOperations(params = {}) {
                 // which the UI has to show as "pas encore de facture" rather
                 // than a dead button.
                 invoice: {
-                  select: { id: true, number: true, billitSentAt: true, customerType: true, customerVatNumber: true },
+                  select: {
+                    id: true,
+                    number: true,
+                    totalInclVat: true,
+                    emailSentAt: true,
+                    billitSentAt: true,
+                    customerType: true,
+                    customerVatNumber: true,
+                    // The invoice is shared by its deposit and final-payment
+                    // rows. Read every partial credit so Operations can show
+                    // the total corrected amount and what remains.
+                    creditNotes: {
+                      orderBy: { issuedAt: "asc" },
+                      select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true },
+                    },
+                  },
                 },
                 order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
                 workshopReservation: { select: { id: true, session: { select: { workshop: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
@@ -150,10 +176,11 @@ export async function getAdminOperations(params = {}) {
                   select: {
                     id: true,
                     number: true,
+                    emailSentAt: true,
                     billitSentAt: true,
                     customerType: true,
                     customerVatNumber: true,
-                    creditNotes: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } },
+                    creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
                   },
                 },
               },
@@ -190,10 +217,11 @@ export async function getAdminOperations(params = {}) {
                   select: {
                     id: true,
                     number: true,
+                    emailSentAt: true,
                     billitSentAt: true,
                     customerType: true,
                     customerVatNumber: true,
-                    creditNotes: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } },
+                    creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
                   },
                 },
               },
@@ -285,97 +313,22 @@ export async function getTransactionDetail(transactionId) {
 }
 
 /**
- * Manual remediation for a REFUND row that never got a credit note through
- * the normal cancellation/return flows — a refund issued by hand from the
- * Stripe Dashboard, or one recorded before Transaction.creditNoteId existed.
- * Every automatic path already issues one itself; this only ever fills a gap,
- * never re-issues over an existing link (see the creditNoteId check below).
+ * `issueCreditNoteForTransaction` used to live here.
+ *
+ * It issued a legally numbered credit note against an invoice and did
+ * nothing else — no cancellation, no refund, no released seat. The audit in
+ * scripts/audit-refund-states.mjs found nine payments left in exactly that
+ * state on the dev database: fully credited on paper, with every euro still
+ * sitting in the account.
+ *
+ * The handoff removes that capability outright ("le bouton ne doit plus
+ * pouvoir créer une note de crédit isolée sans annulation ni
+ * remboursement"). Its two legitimate uses moved to
+ * actions/dashboard/cancel-and-refund.js:
+ *
+ *   - unwinding a sale                     -> cancelAndRefund()
+ *   - documenting an already-made refund   -> issueMissingRefundDocument()
+ *
+ * The second refuses unless a REFUND transaction is already on the ledger,
+ * which is precisely the guard the old action never had.
  */
-export async function issueCreditNoteForTransaction(transactionId, reason) {
-  const session = await requireAdminOperationsAccess();
-  if (!session) return { success: false, message: "Non autorisé." };
-  if (typeof transactionId !== "string" || !transactionId) {
-    return { success: false, message: "Transaction introuvable." };
-  }
-
-  try {
-    const transaction = await prisma.transaction.findUnique({
-      where: { id: transactionId },
-      select: {
-        id: true,
-        amount: true,
-        transactionType: true,
-        creditNoteId: true,
-        payment: { select: { invoice: { select: { id: true } } } },
-      },
-    });
-    if (!transaction) return { success: false, message: "Transaction introuvable." };
-    if (transaction.creditNoteId) {
-      return { success: false, message: "Cette transaction a déjà une note de crédit associée." };
-    }
-    if (!transaction.payment?.invoice) {
-      return { success: false, message: "Aucune facture n'est associée à ce paiement — impossible d'émettre une note de crédit." };
-    }
-
-    const result = await prisma.$transaction(async (tx) => {
-      // Serialize two clicks on the same refund. Without this lock, both
-      // requests could observe the missing link before either one creates it.
-      await tx.$queryRaw`SELECT id FROM "Transaction" WHERE id = ${transaction.id} FOR UPDATE`;
-
-      const lockedTransaction = await tx.transaction.findUnique({
-        where: { id: transaction.id },
-        select: {
-          creditNote: { select: { id: true, number: true } },
-        },
-      });
-      if (lockedTransaction?.creditNote) {
-        return { creditNote: lockedTransaction.creditNote, linkedExisting: true };
-      }
-
-      // Historical refunds may already have a legally numbered credit note
-      // on the invoice but no Transaction.creditNoteId (the link did not
-      // exist yet). Reuse the unique exact-amount orphan instead of issuing a
-      // duplicate document that would exceed the invoice's creditable total.
-      const matchingOrphans = await tx.creditNote.findMany({
-        where: {
-          invoiceId: transaction.payment.invoice.id,
-          totalInclVat: transaction.amount,
-          transaction: { is: null },
-        },
-        orderBy: { issuedAt: "asc" },
-        take: 2,
-        select: { id: true, number: true },
-      });
-      if (matchingOrphans.length > 1) {
-        throw new Error("CREDIT_NOTE_LINK_AMBIGUOUS");
-      }
-
-      const linkedExisting = matchingOrphans.length === 1;
-      const note = matchingOrphans[0] ?? await issueCreditNote(tx, {
-        invoiceId: transaction.payment.invoice.id,
-        reason: reason?.trim() || "Note de crédit générée manuellement",
-        totalInclVat: Number(transaction.amount),
-      });
-      await tx.transaction.update({ where: { id: transaction.id }, data: { creditNoteId: note.id } });
-      return { creditNote: note, linkedExisting };
-    });
-
-    revalidatePath("/dashboard/operations");
-    return {
-      success: true,
-      message: result.linkedExisting
-        ? `La note de crédit ${result.creditNote.number} existait déjà et a été associée à cette opération.`
-        : `Note de crédit ${result.creditNote.number} générée.`,
-      data: { creditNoteId: result.creditNote.id, number: result.creditNote.number },
-    };
-  } catch (error) {
-    if (error.message === "CREDIT_NOTE_LINK_AMBIGUOUS") {
-      return { success: false, message: "Plusieurs notes de crédit correspondent à ce remboursement. Vérifiez-les avant de faire l'association." };
-    }
-    if (error.message === "CREDIT_NOTE_EXCEEDS_INVOICE") {
-      return { success: false, message: "Le montant dépasse ce qui reste créditable sur cette facture." };
-    }
-    console.error("[issueCreditNoteForTransaction]", error);
-    return { success: false, message: "Impossible de générer la note de crédit." };
-  }
-}

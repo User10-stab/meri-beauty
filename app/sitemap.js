@@ -8,6 +8,16 @@ const SITE_URL = getAppBaseUrl();
 // hitting the DB on every single crawler request.
 export const revalidate = 3600;
 
+// Rendered on demand rather than prerendered at build time.
+//
+// Without this, `next build` executes the four queries below, which makes a
+// successful build depend on the database being reachable at that moment.
+// Against a serverless Postgres that scales to zero, a cold start during
+// CI fails the whole build on a route no user ever waits for — which is
+// exactly what happened on 2026-09-02. `revalidate` above still caches the
+// result for an hour, so crawlers do not hit the DB either way.
+export const dynamic = "force-dynamic";
+
 export default async function sitemap() {
   const staticRoutes = [
     { path: "/", changeFrequency: "weekly", priority: 1 },

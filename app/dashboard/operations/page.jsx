@@ -1,6 +1,8 @@
 import { requireAdmin } from "@/lib/route-protection";
 import { getAdminOperations } from "@/actions/dashboard/admin-operations";
+import { getOutstandingRefundLegs } from "@/actions/dashboard/cancel-and-refund";
 import { AdminOperationsClient } from "@/components/dashboard/operations/AdminOperationsClient";
+import { OutstandingRefunds } from "@/components/dashboard/operations/OutstandingRefunds";
 
 export const metadata = {
   title: "Opérations — Dashboard",
@@ -12,7 +14,10 @@ export const dynamic = "force-dynamic";
 export default async function OperationsPage({ searchParams }) {
   await requireAdmin(false);
   const params = await searchParams;
-  const result = await getAdminOperations({ tab: params?.tab, page: params?.page, type: params?.type, status: params?.status });
+  const [result, outstandingRefunds] = await Promise.all([
+    getAdminOperations({ tab: params?.tab, page: params?.page, type: params?.type, status: params?.status }),
+    getOutstandingRefundLegs(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -23,6 +28,10 @@ export default async function OperationsPage({ searchParams }) {
         </p>
       </div>
       {result.message ? <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{result.message}</div> : null}
+      {/* Above the ledger on purpose: money already promised to a customer
+          and not yet handed over is the most time-sensitive thing on this
+          screen, and every one of these blocks a closing e-mail. */}
+      <OutstandingRefunds legs={outstandingRefunds.data} />
       <AdminOperationsClient result={result} />
     </div>
   );

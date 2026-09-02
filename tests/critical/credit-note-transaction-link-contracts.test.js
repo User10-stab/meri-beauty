@@ -8,9 +8,21 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 describe("every REFUND transaction row can be linked to the credit note that funds it", () => {
   test("the schema carries the link both ways", () => {
     const schema = source("prisma/schema.prisma");
-    expect(schema).toContain('creditNoteId String?     @unique');
     expect(schema).toContain('creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id], onDelete: SetNull)');
     expect(schema).toContain("pendingRefundCreditNoteId String?");
+  });
+
+  // One global correction settled by several refund movements is the whole
+  // point of RefundOperation: a 21 € reservation paid 10,50 € online +
+  // 10,50 € in cash produces ONE credit note and TWO REFUND rows. A unique
+  // constraint on Transaction.creditNoteId made that impossible to record,
+  // which is what forced the per-method partial notes it replaced.
+  test("Transaction.creditNoteId is indexed, NOT unique — several refunds share one note", () => {
+    const schema = source("prisma/schema.prisma");
+    const model = schema.slice(schema.indexOf("model Transaction {"), schema.indexOf("// REFUND OPERATION"));
+    expect(model).toContain("creditNoteId String?\n");
+    expect(model).not.toContain("creditNoteId String?     @unique");
+    expect(model).toContain("@@index([creditNoteId])");
   });
 
   test("pinPendingRefund persists the credit note id so an interrupted refund can still link it on retry", () => {
@@ -85,50 +97,65 @@ describe("the credit note PDF shows the credited amount as negative", () => {
   });
 });
 
-describe("staff can manually generate a credit note for a refund that never got one automatically", () => {
-  const actions = source("actions/dashboard/admin-operations.js");
+describe("the isolated credit note is gone — a document is never issued without the refund behind it", () => {
+  const adminOperations = source("actions/dashboard/admin-operations.js");
+  const cancelAndRefund = source("actions/dashboard/cancel-and-refund.js");
+  const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
 
-  test("issueCreditNoteForTransaction is admin-gated", () => {
-    const fnIdx = actions.indexOf("export async function issueCreditNoteForTransaction");
-    const fn = actions.slice(fnIdx, actions.length);
-    expect(fn).toContain("requireAdminOperationsAccess()");
-  });
-
-  test("it refuses a transaction already linked to a note, and one with no invoice, regardless of type", () => {
-    const fnIdx = actions.indexOf("export async function issueCreditNoteForTransaction");
-    const fn = actions.slice(fnIdx, actions.length);
-    // Any invoiced transaction is eligible — a deposit or final payment can
-    // need a manual correction just as much as a refund — so the only gates
-    // left are "already linked" and "no invoice to correct against".
-    expect(fn).not.toContain('transaction.transactionType !== "REFUND"');
-    expect(fn).toContain("transaction.creditNoteId");
-    expect(fn).toContain("!transaction.payment?.invoice");
-  });
-
-  test("the generated credit note is linked back onto the transaction in the same DB transaction", () => {
-    const fnIdx = actions.indexOf("export async function issueCreditNoteForTransaction");
-    const fn = actions.slice(fnIdx, actions.length);
-    const txIdx = fn.indexOf("prisma.$transaction(async (tx)");
-    expect(txIdx).toBeGreaterThan(-1);
-    const txBody = fn.slice(txIdx, fn.indexOf("return creditNote;", txIdx) + 30 || fn.length);
-    expect(fn).toContain("tx.transaction.update({ where: { id: transaction.id }, data: { creditNoteId: note.id } })");
-  });
-
-  test("the button offers to generate one for any invoiced row with no existing note", () => {
-    const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
-    // notes normalizes both the Transactions tab's singular `creditNote` and
-    // the Reservations tab's `creditNotes` list to one array — eligibility
-    // is "this row's own note(s), whichever shape they came in, is empty".
-    expect(rowActions).toContain("const notes = creditNotes ?? (creditNote ? [creditNote] : [])");
-    expect(rowActions).toContain(
-      "Boolean(transaction) && transaction.hasInvoice && notes.length === 0"
+  // The capability the handoff removes outright: "le bouton ne doit plus
+  // pouvoir créer une note de crédit isolée sans annulation ni
+  // remboursement". The dev-database audit found nine payments left exactly
+  // there — credited on paper, every euro still in the account.
+  test("issueCreditNoteForTransaction no longer exists anywhere", () => {
+    expect(adminOperations).not.toContain("export async function issueCreditNoteForTransaction");
+    expect(rowActions).not.toContain("issueCreditNoteForTransaction");
+    expect(source("components/dashboard/operations/TransactionDetailDrawer.jsx")).not.toContain(
+      "issueCreditNoteForTransaction",
     );
   });
 
-  test("generating a credit note no longer prompts for an optional reason", () => {
-    const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
-    expect(rowActions).not.toContain("noteReason");
-    expect(rowActions).not.toContain("Motif (facultatif)");
-    expect(rowActions).toContain("issueCreditNoteForTransaction(transaction.id)");
+  test("the row action is keyed on the payment and opens the cancel-and-refund dialog", () => {
+    expect(rowActions).toContain("CancelAndRefundDialog");
+    // Keyed on paymentId, not on the invoice: a B2C sale has no invoice and
+    // must still be refundable.
+    expect(rowActions).toContain("const canCancelAndRefund = Boolean(paymentId)");
+    expect(rowActions).toContain('transaction?.transactionType !== "DEPOSIT"');
+  });
+
+  test("the dialog states every consequence before the admin commits", () => {
+    const dialog = source("components/dashboard/operations/CancelAndRefundDialog.jsx");
+    expect(dialog).toContain("Annuler et générer la note de crédit");
+    for (const label of [
+      "Élément concerné",
+      "Statut actuel",
+      "Montant total crédité",
+      "Places libérées",
+      "À rembourser dans Stripe (manuellement)",
+      "À rendre en main propre",
+    ]) {
+      expect(dialog, `dialog must state "${label}"`).toContain(label);
+    }
+    // And that nothing has been refunded yet, nor the customer told.
+    expect(dialog).toContain("Cette action ne rembourse rien");
+    // Fragment avoids the apostrophe, which is &apos; in the JSX source.
+    expect(dialog).toContain("une fois tout confirmé");
+  });
+
+  test("the surviving document action refuses unless the money already went back", () => {
+    const fnIdx = cancelAndRefund.indexOf("export async function issueMissingRefundDocument");
+    expect(fnIdx).toBeGreaterThan(-1);
+    const fn = cancelAndRefund.slice(fnIdx);
+    expect(fn).toContain('transaction.transactionType !== "REFUND"');
+    expect(fn).toContain('throw new Error("NOT_A_REFUND")');
+    expect(fn).toContain('throw new Error("ALREADY_DOCUMENTED")');
+    // Never credits more than the refund actually returned, and never more
+    // than the invoice has left to credit.
+    expect(fn).toContain("Math.min(Number(transaction.amount), state.remainingCreditable ?? 0)");
+  });
+
+  test("it locks the invoice so two refund rows cannot each issue a note", () => {
+    const fn = cancelAndRefund.slice(cancelAndRefund.indexOf("export async function issueMissingRefundDocument"));
+    expect(fn).toContain('FROM "Invoice" WHERE id = ');
+    expect(fn).toContain("FOR UPDATE");
   });
 });

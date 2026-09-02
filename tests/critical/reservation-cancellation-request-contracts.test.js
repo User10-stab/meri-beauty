@@ -21,9 +21,9 @@ describe("reservation cancellation requests never cancel or refund on their own"
     );
     expect(submitFn).toContain('session.user.role !== "CUSTOMER"');
     expect(submitFn).not.toContain("stripe");
-    expect(submitFn).not.toContain("refund");
     // Creates only the request row — never mutates the reservation itself.
     expect(submitFn).not.toContain('status: "CANCELLED"');
+    expect(submitFn).not.toContain("config.cancel(");
   });
 
   test("a customer can only request against their own reservation", () => {
@@ -32,6 +32,13 @@ describe("reservation cancellation requests never cancel or refund on their own"
 
   test("only an open reservation can be the subject of a request", () => {
     expect(actions).toContain('["PENDING_DEPOSIT", "CONFIRMED"].includes(reservation.status)');
+  });
+
+  test("submission and approval both require recorded money that is still refundable", () => {
+    expect(actions).toContain("function refundableRecordedAmount(payment)");
+    expect(actions).toContain("Math.min(Number(payment.paidAmount), collected) - refunded");
+    expect(actions).toContain("refundableRecordedAmount(reservation.payment) <= REFUND_EPSILON");
+    expect(actions).toContain("refundableRecordedAmount(reservation?.payment) <= REFUND_EPSILON");
   });
 
   test("reviewing is admin-only", () => {
@@ -51,6 +58,12 @@ describe("reservation cancellation requests never cancel or refund on their own"
     expect(actions).toContain("status: \"PENDING\", reviewedAt: null, reviewedByUserId: null, decisionNote: null");
   });
 
+  test("a Stripe refund failure is returned explicitly instead of claiming success", () => {
+    expect(actions).toContain("result.refundFailed");
+    expect(actions).toContain("le remboursement Stripe a échoué");
+    expect(actions).toContain("refundFailed: result.refundFailed === true");
+  });
+
   test("approval delegates to the existing admin cancel actions instead of reimplementing refunds", () => {
     expect(actions).toContain("cancelWorkshopReservation(id, { reason, refundDeposit: true })");
     expect(actions).toContain("cancelFormationReservation(id, { reason, refundPayment: true })");
@@ -67,7 +80,7 @@ describe("schema backs the request with a real polymorphic table", () => {
     "prisma/migrations/20260812180000_add_reservation_cancellation_requests/migration.sql"
   );
 
-  test("model exists with both optional sources, each unique", () => {
+  test("model keeps one current request per reservation", () => {
     expect(schema).toContain("model ReservationCancellationRequest");
     expect(schema).toMatch(/workshopReservationId\s+String\?\s+@unique/);
     expect(schema).toMatch(/formationReservationId\s+String\?\s+@unique/);
@@ -97,6 +110,16 @@ describe("customer sees the policy and a route out instead of a dead end", () =>
     const history = source("actions/customer/order-history.js");
     const matches = history.match(/cancellationRequest: \{ select: \{ status: true, decisionNote: true \} \}/g);
     expect(matches).toHaveLength(2); // workshops + formations
+  });
+
+  test("a rejected request can be atomically reopened and exposes a new message form", () => {
+    const actions = source("actions/reservations/cancellation-request.js");
+    const client = source("components/website/MonComptePageClient.jsx");
+    expect(actions).toContain('where: { id: existingRequest.id, status: "REJECTED" }');
+    expect(actions).toContain('action: "reservation.cancellation_request.resubmitted"');
+    expect(actions).toContain("before: {");
+    expect(client).toContain('request?.status === "REJECTED" && !open');
+    expect(client).toContain("Envoyer une nouvelle demande");
   });
 
   test("the review queue is reachable from the dashboard sidebar, admin-only", () => {

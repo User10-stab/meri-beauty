@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2 } from "lucide-react";
-import { getTransactionDetail, issueCreditNoteForTransaction } from "@/actions/dashboard/admin-operations";
+import { getTransactionDetail } from "@/actions/dashboard/admin-operations";
+import { issueMissingRefundDocument } from "@/actions/dashboard/cancel-and-refund";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const money = (value) =>
@@ -118,7 +119,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   async function handleGenerateCreditNote() {
     if (!transactionId || generatingNote) return;
     setGeneratingNote(true);
-    const result = await issueCreditNoteForTransaction(transactionId, "");
+    const result = await issueMissingRefundDocument(transactionId);
     setGeneratingNote(false);
     setConfirmingNote(false);
     if (result.success) {
@@ -354,8 +355,8 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
           {canGenerateNote && (
             <ConfirmDialog
               open={confirmingNote}
-              title="Générer une note de crédit ?"
-              message="Ce document porte un numéro légal, séquentiel et définitif — une fois émis, il ne peut plus être annulé ni modifié."
+              title="Émettre la note de crédit manquante ?"
+              message="Ce remboursement a déjà eu lieu mais n'a jamais reçu son document comptable. La note de crédit ne rembourse rien de plus — elle documente l'argent déjà rendu. Elle porte un numéro légal, séquentiel et définitif."
               confirmLabel="Générer"
               cancelLabel="Annuler"
               loading={generatingNote}

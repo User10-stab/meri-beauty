@@ -18,10 +18,12 @@ describe("the Facture column tells a genuinely pending invoice apart from one th
     const fnIdx = client.indexOf("function InvoiceStatus(");
     expect(fnIdx).toBeGreaterThan(-1);
     const fn = client.slice(fnIdx, client.indexOf("\nfunction ", fnIdx + 1));
-    expect(fn).toContain("if (invoice) return");
+    expect(fn).toContain("if (invoice) {");
     expect(fn).toContain("if (customerInvoiceEligible) return");
     expect(fn).toContain("Pas encore émise");
     expect(fn).toContain("Aucune (particulier)");
+    expect(fn).toContain("Total notes de crédit :");
+    expect(fn).toContain("reste à créditer");
   });
 
   test("both the Transactions and Reservations tables render it instead of a bare invoice-or-fallback ternary", () => {

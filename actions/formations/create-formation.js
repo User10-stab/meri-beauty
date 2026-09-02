@@ -54,9 +54,13 @@ function enforceCapacityForType(data) {
 /**
  * Gate for formation mutations: admin/owner may act on any formation; staff
  * may only create (no existing row to own yet) or, when requireOwnerForEdit
- * is set, act on a formation they created themselves.
+ * is set, act on a formation they created themselves. Assigned staff may edit
+ * (but not delete) when allowAssignedForEdit is explicitly enabled.
  */
-async function requireFormationAccess(formationId, { requireOwnerForEdit = false } = {}) {
+async function requireFormationAccess(
+  formationId,
+  { requireOwnerForEdit = false, allowAssignedForEdit = false } = {}
+) {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
   if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATIONS))) {
@@ -65,14 +69,22 @@ async function requireFormationAccess(formationId, { requireOwnerForEdit = false
   if (isAdminRole(session.user.role)) return { session };
   if (!requireOwnerForEdit) return { session };
 
-  const formation = await prisma.formation.findUnique({
-    where: { id: formationId },
+  const formation = await prisma.formation.findFirst({
+    where: {
+      id: formationId,
+      ...(allowAssignedForEdit && session.user.email
+        ? {
+            OR: [
+              { createdById: session.user.id },
+              { animator: { email: session.user.email } },
+              { sessions: { some: { animator: { email: session.user.email } } } },
+            ],
+          }
+        : { createdById: session.user.id }),
+    },
     select: { createdById: true },
   });
   if (!formation) return { error: "Formation introuvable." };
-  if (formation.createdById !== session.user.id) {
-    return { error: "Vous ne pouvez modifier que les formations que vous avez créées." };
-  }
   return { session };
 }
 
@@ -128,6 +140,12 @@ export async function createFormation(input) {
     }
 
     const { staffUserId, sessions, startDate, endDate, ...rest } = enforceCapacityForType(parsed.data);
+    if (rest.status === "PUBLISHED" && sessions.length === 0) {
+      return {
+        success: false,
+        message: "Une formation publiée doit avoir au moins une session planifiée.",
+      };
+    }
     const animatorId = await resolveFormationAnimatorId(session, staffUserId);
     const resolvedSessions = await Promise.all(
       sessions.map(async (item) => ({
@@ -176,7 +194,10 @@ export async function createFormation(input) {
  */
 export async function updateFormation(input) {
   try {
-    const { error } = await requireFormationAccess(input?.id, { requireOwnerForEdit: true });
+    const { session, error } = await requireFormationAccess(input?.id, {
+      requireOwnerForEdit: true,
+      allowAssignedForEdit: true,
+    });
     if (error) {
       return { success: false, message: error };
     }
@@ -195,6 +216,12 @@ export async function updateFormation(input) {
     }
 
     const { id, staffUserId, sessions, startDate, endDate, ...rest } = enforceCapacityForType(parsed.data);
+    if (rest.status === "PUBLISHED" && sessions.length === 0) {
+      return {
+        success: false,
+        message: "Une formation publiée doit avoir au moins une session planifiée.",
+      };
+    }
 
     const existingFormation = await prisma.formation.findUnique({
       where: { id },
@@ -204,15 +231,30 @@ export async function updateFormation(input) {
       return { success: false, message: "Formation introuvable." };
     }
 
-    const animatorId = await resolveFormationAnimatorId(session, staffUserId);
+    const existingIds = existingFormation.sessions.map((s) => s.id);
+    const incomingSessionIds = sessions.filter((s) => s.id).map((s) => s.id);
+    if (incomingSessionIds.some((incomingId) => !existingIds.includes(incomingId))) {
+      return { success: false, message: "Une session de cette formation est introuvable." };
+    }
+
+    // Assigned staff may edit the formation but cannot take over its existing
+    // assignments by saving the form. Existing rows keep their animator;
+    // newly created sessions are assigned to the editing staff member.
+    const isStaffEditor = !isAdminRole(session.user.role);
+    const existingSessionById = new Map(existingFormation.sessions.map((s) => [s.id, s]));
+    const animatorId = isStaffEditor
+      ? existingFormation.animatorId
+      : await resolveFormationAnimatorId(session, staffUserId);
     const resolvedSessions = await Promise.all(
       sessions.map(async (item) => ({
         ...item,
-        animatorId: await resolveFormationAnimatorId(session, item.staffUserId),
+        animatorId:
+          isStaffEditor && item.id
+            ? existingSessionById.get(item.id).animatorId
+            : await resolveFormationAnimatorId(session, item.staffUserId),
       }))
     );
 
-    const existingIds = existingFormation.sessions.map((s) => s.id);
     const incomingIds = resolvedSessions.filter((s) => s.id).map((s) => s.id);
     const idsToDelete = existingIds.filter((eid) => !incomingIds.includes(eid));
 
@@ -318,24 +360,34 @@ export async function deleteFormation(id) {
       return { success: false, message: "Formation introuvable." };
     }
 
-    // Same reasoning as updateFormation's session guard, one level up:
-    // deleting a Formation cascades through its sessions onto every
-    // reservation booked on them. Booking history is financial history —
-    // archive the formation instead of destroying it.
-    const reservationCount = await prisma.formationReservation.count({
+    // Cancelled, unpaid holds are not real bookings and may be removed with a
+    // formation. Active reservations and any reservation linked to a payment
+    // remain protected so deletion cannot erase financial history.
+    const reservations = await prisma.formationReservation.findMany({
       where: { session: { formationId: id } },
+      select: { id: true, status: true, payment: { select: { id: true } } },
     });
-    if (reservationCount > 0) {
+    const protectedReservations = reservations.filter(
+      (reservation) => reservation.status !== "CANCELLED" || reservation.payment
+    );
+    if (protectedReservations.length > 0) {
       return {
         success: false,
         message:
           `Impossible de supprimer « ${existingFormation.title} » : ` +
-          `${reservationCount} réservation${reservationCount > 1 ? "s y sont rattachées" : " y est rattachée"}. ` +
+          `${protectedReservations.length} réservation${protectedReservations.length > 1 ? "s y sont rattachées" : " y est rattachée"}. ` +
           `Passez son statut à « Archivé » pour la retirer de l'affichage sans perdre l'historique.`,
       };
     }
 
-    await prisma.formation.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      if (reservations.length > 0) {
+        await tx.formationReservation.deleteMany({
+          where: { id: { in: reservations.map((reservation) => reservation.id) } },
+        });
+      }
+      await tx.formation.delete({ where: { id } });
+    });
 
     revalidatePath("/dashboard/formations");
     return { success: true, message: "Formation supprimée avec succès !" };

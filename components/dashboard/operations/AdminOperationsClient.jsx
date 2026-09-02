@@ -48,7 +48,28 @@ const paymentCustomer = (payment) =>
 // hasInvoiceableVatIdentity server-side). Conflating the two read as a
 // standing error: the invoice looked perpetually "about to arrive".
 function InvoiceStatus({ invoice, customerInvoiceEligible }) {
-  if (invoice) return <span className="font-medium text-gray-700">{invoice.number}</span>;
+  if (invoice) {
+    const creditNotes = invoice.creditNotes ?? [];
+    const creditedTotal = creditNotes.reduce((total, note) => total + Number(note.totalInclVat ?? 0), 0);
+    const remainingToCredit = Math.max(0, Number(invoice.totalInclVat ?? 0) - creditedTotal);
+    return (
+      <div>
+        <span className="font-medium text-gray-700">{invoice.number}</span>
+        {invoice.emailSentAt ? (
+          <span className="mt-1 block text-xs text-emerald-700">E-mail envoyé le {date(invoice.emailSentAt)}</span>
+        ) : invoice.billitSentAt ? (
+          <span className="mt-1 block text-xs text-blue-700">Créée dans Billit — à finaliser</span>
+        ) : (
+          <span className="mt-1 block text-xs text-amber-700">Non envoyée</span>
+        )}
+        {creditNotes.length > 0 && (
+          <span className="mt-1 block text-xs text-violet-700">
+            Total notes de crédit : {money(creditedTotal)} — reste à créditer : {money(remainingToCredit)}
+          </span>
+        )}
+      </div>
+    );
+  }
   if (customerInvoiceEligible) return <span className="text-xs text-gray-400">Pas encore émise</span>;
   return <span className="text-xs text-gray-400">Aucune (particulier)</span>;
 }
@@ -119,7 +140,7 @@ function Transactions({ rows, onOpenDetail }) {
               <TableCell className="pr-6">
                 <InvoiceRowActions
                   invoice={invoice}
-                  creditNote={row.creditNote ?? null}
+                  creditNotes={invoice?.creditNotes ?? []}
                   transaction={{ id: row.id, transactionType: row.transactionType, hasInvoice: Boolean(invoice) }}
                   orderId={row.payment?.order?.id ?? null}
                   paymentId={row.payment?.id ?? null}

@@ -9,6 +9,16 @@ import { sendEmail } from "@/lib/email";
 import { cancelWorkshopReservation } from "@/actions/workshops/manage-reservation";
 import { cancelFormationReservation } from "@/actions/formations/manage-reservation";
 
+const REFUND_EPSILON = 0.01;
+const PAYMENT_REFUND_EVIDENCE_SELECT = {
+  paidAmount: true,
+  status: true,
+  transactions: {
+    where: { isDeleted: false },
+    select: { amount: true, transactionType: true },
+  },
+};
+
 /**
  * The atelier/formation counterpart of actions/reservation/cancellation-exception-request.js.
  *
@@ -29,7 +39,10 @@ const KINDS = {
     delegate: (client) => client.workshopReservation,
     idField: "workshopReservationId",
     label: "atelier",
-    include: { session: { include: { workshop: { select: { title: true } } } } },
+    include: {
+      session: { include: { workshop: { select: { title: true } } } },
+      payment: { select: PAYMENT_REFUND_EVIDENCE_SELECT },
+    },
     titleOf: (r) => r.session?.workshop?.title ?? "Atelier",
     cancel: (id, reason) => cancelWorkshopReservation(id, { reason, refundDeposit: true }),
   },
@@ -37,7 +50,10 @@ const KINDS = {
     delegate: (client) => client.formationReservation,
     idField: "formationReservationId",
     label: "formation",
-    include: { session: { include: { formation: { select: { title: true } } } } },
+    include: {
+      session: { include: { formation: { select: { title: true } } } },
+      payment: { select: PAYMENT_REFUND_EVIDENCE_SELECT },
+    },
     titleOf: (r) => r.session?.formation?.title ?? "Formation",
     cancel: (id, reason) => cancelFormationReservation(id, { reason, refundPayment: true }),
   },
@@ -69,6 +85,17 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function refundableRecordedAmount(payment) {
+  if (!payment || Number(payment.paidAmount) <= REFUND_EPSILON) return 0;
+  const collected = payment.transactions
+    .filter((transaction) => ["DEPOSIT", "FINAL_PAYMENT"].includes(transaction.transactionType))
+    .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+  const refunded = payment.transactions
+    .filter((transaction) => transaction.transactionType === "REFUND")
+    .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+  return Math.max(0, Math.min(Number(payment.paidAmount), collected) - refunded);
 }
 
 async function requireAdmin() {
@@ -136,15 +163,66 @@ export async function submitReservationCancellationRequest(input) {
   if (!["PENDING_DEPOSIT", "CONFIRMED"].includes(reservation.status)) {
     return { success: false, message: "Cette réservation ne peut plus faire l'objet d'une demande." };
   }
+  if (refundableRecordedAmount(reservation.payment) <= REFUND_EPSILON) {
+    return {
+      success: false,
+      message: "Aucun paiement encaissé n'est enregistré pour cette réservation. Il n'y a donc rien à rembourser.",
+    };
+  }
 
   try {
-    await prisma.reservationCancellationRequest.create({
-      data: {
-        [config.idField]: reservation.id,
-        requestedByUserId: session.user.id,
-        reason: parsed.data.reason,
-      },
+    const existingRequest = await prisma.reservationCancellationRequest.findUnique({
+      where: { [config.idField]: reservation.id },
     });
+
+    if (existingRequest && existingRequest.status !== "REJECTED") {
+      return { success: false, message: "Une demande est déjà enregistrée pour cette réservation. L'équipe vous répondra dès que possible." };
+    }
+
+    if (existingRequest) {
+      await prisma.$transaction(async (tx) => {
+        const reopened = await tx.reservationCancellationRequest.updateMany({
+          where: { id: existingRequest.id, status: "REJECTED" },
+          data: {
+            requestedByUserId: session.user.id,
+            reason: parsed.data.reason,
+            status: "PENDING",
+            reviewedAt: null,
+            reviewedByUserId: null,
+            decisionNote: null,
+            createdAt: new Date(),
+          },
+        });
+        if (!reopened.count) throw new Error("REQUEST_ALREADY_PENDING");
+
+        await tx.auditLog.create({
+          data: {
+            actorId: session.user.id,
+            actorRole: session.user.role,
+            action: "reservation.cancellation_request.resubmitted",
+            entityType: "ReservationCancellationRequest",
+            entityId: existingRequest.id,
+            before: {
+              reason: existingRequest.reason,
+              status: existingRequest.status,
+              decisionNote: existingRequest.decisionNote,
+              reviewedAt: existingRequest.reviewedAt?.toISOString() ?? null,
+              reviewedByUserId: existingRequest.reviewedByUserId,
+              createdAt: existingRequest.createdAt.toISOString(),
+            },
+            after: { reason: parsed.data.reason, status: "PENDING" },
+          },
+        });
+      });
+    } else {
+      await prisma.reservationCancellationRequest.create({
+        data: {
+          [config.idField]: reservation.id,
+          requestedByUserId: session.user.id,
+          reason: parsed.data.reason,
+        },
+      });
+    }
 
     await notifyAdmins({
       reason: parsed.data.reason,
@@ -159,7 +237,7 @@ export async function submitReservationCancellationRequest(input) {
       message: "Votre demande a été transmise à l'équipe. Votre réservation et votre acompte restent inchangés jusqu'à sa décision.",
     };
   } catch (error) {
-    if (error?.code === "P2002") {
+    if (error?.code === "P2002" || error?.message === "REQUEST_ALREADY_PENDING") {
       return { success: false, message: "Une demande est déjà enregistrée pour cette réservation. L'équipe vous répondra dès que possible." };
     }
     console.error("[submitReservationCancellationRequest]", error);
@@ -210,8 +288,8 @@ export async function reviewReservationCancellationRequest(input) {
     where: { id: parsed.data.requestId },
     include: {
       requestedBy: { select: { fullName: true, email: true } },
-      workshopReservation: { select: { id: true } },
-      formationReservation: { select: { id: true } },
+      workshopReservation: { select: { id: true, payment: { select: PAYMENT_REFUND_EVIDENCE_SELECT } } },
+      formationReservation: { select: { id: true, payment: { select: PAYMENT_REFUND_EVIDENCE_SELECT } } },
     },
   });
   if (!request || request.status !== "PENDING") {
@@ -241,6 +319,14 @@ export async function reviewReservationCancellationRequest(input) {
     return { success: true, message: "Demande refusée. Le client a été informé." };
   }
 
+  const reservation = kind === "WORKSHOP" ? request.workshopReservation : request.formationReservation;
+  if (refundableRecordedAmount(reservation?.payment) <= REFUND_EPSILON) {
+    return {
+      success: false,
+      message: "Approbation impossible : aucun paiement encaissé et non remboursé n'est enregistré pour cette réservation.",
+    };
+  }
+
   // Claim before cancelling so two administrators can't both approve and
   // fire two refunds. If the cancellation itself fails, put it back to
   // PENDING so it stays visible for another review rather than silently
@@ -267,6 +353,9 @@ export async function reviewReservationCancellationRequest(input) {
   refreshViews();
   return {
     success: true,
-    message: "Demande approuvée : la réservation est annulée et l'acompte est remboursé.",
+    message: result.refundFailed
+      ? "Demande approuvée et réservation annulée, mais le remboursement Stripe a échoué. Il reste signalé pour relance par l'équipe."
+      : "Demande approuvée : la réservation est annulée et l'acompte est remboursé.",
+    refundFailed: result.refundFailed === true,
   };
 }

@@ -33,25 +33,26 @@ export default async function Page() {
         </div>
       </div>
 
-       <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-1/2 hidden -translate-x-1/2 items-center gap-3 text-[#b89664]/35 sm:flex">
-          <span className="h-px w-16 bg-current" />
-          <span className="h-2 w-2 rotate-45 border border-current" />
-          <span className="h-px w-16 bg-current" />
-        </div>
+      {/* Divider — always between #prestations and #booking */}
+      <div aria-hidden="true" className="pointer-events-none flex items-center justify-center gap-3 py-3 text-[#b89664]/50">
+        <span className="h-px w-16 bg-current" />
+        <span className="h-2 w-2 rotate-45 border border-current" />
+        <span className="h-px w-16 bg-current" />
+      </div>
 
       {/* Booking flow — premium shell */}
       <div id="booking" className="mt-12 relative overflow-hidden bg-[#fdf8f0] pb-12 sm:pb-30">
-        <div aria-hidden="true" className="pointer-events-none absolute left-[-82px] top-20 hidden h-56 w-56 rounded-full border border-[#b89664]/25 lg:block">
-          <div className="absolute inset-5 rounded-full border border-[#b89664]/15" />
-          <div className="absolute inset-11 rounded-full border border-[#b89664]/10" />
+        <div aria-hidden="true" className="pointer-events-none absolute left-[-82px] top-20 hidden h-56 w-56 rounded-full border border-[#b89664]/40 lg:block">
+          <div className="absolute inset-5 rounded-full border border-[#b89664]/30" />
+          <div className="absolute inset-11 rounded-full border border-[#b89664]/20" />
         </div>
-        <div aria-hidden="true" className="pointer-events-none absolute right-8 top-28 hidden h-12 w-12 rotate-45 border border-[#b89664]/30 lg:block">
-          <div className="absolute inset-2 border border-[#b89664]/15" />
+        <div aria-hidden="true" className="pointer-events-none absolute right-8 top-28 hidden h-12 w-12 rotate-45 border border-[#b89664]/45 lg:block">
+          <div className="absolute inset-2 border border-[#b89664]/30" />
         </div>
         <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
           <ReservationForm customerSession={customerSession} />
         </div>
-        <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-1/2 hidden -translate-x-1/2 items-center gap-3 text-[#b89664]/35 sm:flex">
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-1/2 hidden -translate-x-1/2 items-center gap-3 text-[#b89664]/50 sm:flex">
           <span className="h-px w-16 bg-current" />
           <span className="h-2 w-2 rotate-45 border border-current" />
           <span className="h-px w-16 bg-current" />
@@ -60,8 +61,8 @@ export default async function Page() {
 
       {/* Help — premium card */}
       <div className="relative mt-20 w-full overflow-hidden bg-[#fdf8f0] px-4 pb-10 sm:px-6 sm:pb-12">
-        <div aria-hidden="true" className="pointer-events-none absolute bottom-3 left-8 hidden h-20 w-20 border border-[#b89664]/15 lg:block" />
-        <div aria-hidden="true" className="pointer-events-none absolute bottom-[-42px] right-12 hidden h-32 w-32 rounded-full border border-[#b89664]/20 lg:block" />
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-3 left-8 hidden h-20 w-20 border border-[#b89664]/28 lg:block" />
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-[-42px] right-12 hidden h-32 w-32 rounded-full border border-[#b89664]/35 lg:block" />
         <div className="relative mx-auto max-w-3xl rounded-[1.5rem] border border-[#ede5d8]/60 bg-[#fdf8f0] px-6 py-8 text-center shadow-[0_8px_28px_rgba(47,58,46,0.06)] sm:px-8 sm:py-9">
           <div className="mx-auto mb-3 flex  items-center justify-center rounded-full text-[#2F3A2E]">
             <Headset size={25} strokeWidth={1.8} aria-hidden="true" />

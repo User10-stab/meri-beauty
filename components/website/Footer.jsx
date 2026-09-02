@@ -263,7 +263,7 @@ export default function Footer({ salon }) {
                 alt="MeriBeauty Studio"
                 width={160}
                 height={52}
-                className="mb-6 h-[60px] w-auto"
+                className="mb-6 h-[80px] w-auto"
               />
             </Link>
 
@@ -436,7 +436,7 @@ export default function Footer({ salon }) {
           </p>
 
           <div aria-hidden="true" className="hidden items-center text-gold/50 lg:flex">
-            <DividerLeafIcon className="h-3 w-8" />
+            <DividerLeafIcon className="h-8 w-8" />
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-y-1 text-[11.5px] text-white/35">

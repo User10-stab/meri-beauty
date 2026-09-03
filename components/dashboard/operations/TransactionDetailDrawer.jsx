@@ -4,9 +4,12 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2 } from "lucide-react";
-import { getTransactionDetail } from "@/actions/dashboard/admin-operations";
+import { getTransactionDetail, getPaymentDetail } from "@/actions/dashboard/admin-operations";
 import { issueMissingRefundDocument } from "@/actions/dashboard/cancel-and-refund";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+
+const DOC_LINK =
+  "inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50";
 
 const money = (value) =>
   new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
@@ -86,9 +89,14 @@ function describeSource(payment) {
 }
 
 /**
- * @param {{ transactionId: string|null, onClose: () => void }} props
+ * One drawer, two entry points: a Transactions row opens it on its own
+ * transaction; an Ateliers/Formations row only ever has a Payment (see
+ * getPaymentDetail's own doc for why that resolves to a transaction here
+ * too). Both render the exact same shape — one renderer, one include.
+ *
+ * @param {{ transactionId?: string|null, paymentId?: string|null, onClose: () => void }} props
  */
-export function TransactionDetailDrawer({ transactionId, onClose }) {
+export function TransactionDetailDrawer({ transactionId = null, paymentId = null, onClose }) {
   const closeBtnRef = useRef(null);
   const [detail, setDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -96,8 +104,10 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const [generatingNote, setGeneratingNote] = useState(false);
   const [confirmingNote, setConfirmingNote] = useState(false);
 
+  const detailKey = transactionId ?? paymentId;
+
   useEffect(() => {
-    if (!transactionId) {
+    if (!detailKey) {
       setDetail(null);
       setError(null);
       return;
@@ -105,7 +115,8 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     let cancelled = false;
     setIsLoading(true);
     setError(null);
-    getTransactionDetail(transactionId).then((result) => {
+    const request = transactionId ? getTransactionDetail(transactionId) : getPaymentDetail(paymentId);
+    request.then((result) => {
       if (cancelled) return;
       if (result.success) setDetail(result.data);
       else setError(result.message);
@@ -114,9 +125,12 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     return () => {
       cancelled = true;
     };
-  }, [transactionId]);
+  }, [detailKey, transactionId, paymentId]);
 
   async function handleGenerateCreditNote() {
+    // Reserved to the Transactions tab: issueMissingRefundDocument takes a
+    // transactionId, and a reservation row (paymentId only) never has one
+    // of its own to repair — see canGenerateNote/canGenerateB2CReceipt.
     if (!transactionId || generatingNote) return;
     setGeneratingNote(true);
     const result = await issueMissingRefundDocument(transactionId);
@@ -132,28 +146,28 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   }
 
   useEffect(() => {
-    if (!transactionId) return;
+    if (!detailKey) return;
     const id = requestAnimationFrame(() => closeBtnRef.current?.focus());
     return () => cancelAnimationFrame(id);
-  }, [transactionId]);
+  }, [detailKey]);
 
   useEffect(() => {
-    if (!transactionId) return;
+    if (!detailKey) return;
     function handleKey(e) {
       if (e.key === "Escape") onClose();
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [transactionId, onClose]);
+  }, [detailKey, onClose]);
 
   useEffect(() => {
-    document.body.style.overflow = transactionId ? "hidden" : "";
+    document.body.style.overflow = detailKey ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [transactionId]);
+  }, [detailKey]);
 
-  if (!transactionId) return null;
+  if (!detailKey) return null;
 
   const payment = detail?.payment;
   const source = describeSource(payment);
@@ -162,9 +176,13 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const siblings = (payment?.transactions ?? []).filter((t) => !t.isDeleted);
   const isRefund = detail?.transactionType === "REFUND";
   const signedMoney = (value, refund) => `${refund ? "−" : ""}${money(value)}`;
-  const canGenerateNote = isRefund && Boolean(invoice) && !creditNote;
+  // Both write actions stay Transactions-only: issueMissingRefundDocument
+  // takes a transactionId, which a reservation row opened via paymentId
+  // never has of its own.
+  const canGenerateNote = Boolean(transactionId) && isRefund && Boolean(invoice) && !creditNote;
   const refundReceipt = detail?.settledRefundLeg?.refundOperation ?? null;
-  const canGenerateB2CReceipt = isRefund && !invoice && !refundReceipt;
+  const canGenerateB2CReceipt = Boolean(transactionId) && isRefund && !invoice && !refundReceipt;
+  const invoiceCreditNotes = invoice?.creditNotes ?? [];
 
   return createPortal(
     <div
@@ -174,7 +192,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Détail de la transaction"
+        aria-label={transactionId ? "Détail de la transaction" : "Détail du paiement"}
         className="relative flex max-h-[92vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-xl"
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
@@ -273,20 +291,22 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 </div>
               )}
 
-              {payment?.order && (
-                <div>
-                  <SectionTitle>Reçu / ticket de caisse</SectionTitle>
-                  <a
-                    href={`/api/orders/${payment.order.id}/ticket`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
+              <div>
+                <SectionTitle>Reçu / ticket de caisse</SectionTitle>
+                {payment?.order ? (
+                  <a href={`/api/orders/${payment.order.id}/ticket`} target="_blank" rel="noopener noreferrer" className={DOC_LINK}>
                     <Receipt size={15} />
                     Ouvrir le reçu déjà envoyé au client
                   </a>
-                </div>
-              )}
+                ) : payment?.id ? (
+                  <a href={`/api/payments/${payment.id}/ticket`} target="_blank" rel="noopener noreferrer" className={DOC_LINK}>
+                    <Receipt size={15} />
+                    Ouvrir le ticket de caisse
+                  </a>
+                ) : (
+                  <p className="text-sm text-gray-500">Aucun ticket disponible pour ce paiement.</p>
+                )}
+              </div>
 
               <div>
                 <SectionTitle>Facture</SectionTitle>
@@ -302,7 +322,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                       href={`/api/invoices/${invoice.id}/pdf`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="mt-3 inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      className={`mt-3 ${DOC_LINK}`}
                     >
                       <FileText size={15} />
                       Ouvrir la facture PDF
@@ -315,40 +335,53 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 )}
               </div>
 
-              {(creditNote || canGenerateNote) && (
+              {(invoiceCreditNotes.length > 0 || canGenerateNote) && (
                 <div>
-                  <SectionTitle>Note de crédit</SectionTitle>
-                  {creditNote ? (
-                    <div className="space-y-3 rounded-lg border border-gray-100 px-4 py-3 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-600">
-                          {creditNote.number} · {dateTime(creditNote.issuedAt)}
-                          {creditNote.reason && <span className="block text-xs text-gray-400">{creditNote.reason}</span>}
-                        </span>
-                        <span className="font-medium text-red-600">{money(-creditNote.totalInclVat)}</span>
+                  <SectionTitle>Notes de crédit</SectionTitle>
+                  <div className="space-y-3">
+                    {/* Every note ever issued against this invoice, not just
+                        this row's own — the detail box is the one place
+                        every document of a sale can be reached from. The
+                        note this specific refund settled against, if any,
+                        is highlighted. */}
+                    {invoiceCreditNotes.map((note) => (
+                      <div
+                        key={note.id}
+                        className={`space-y-3 rounded-lg border px-4 py-3 text-sm ${
+                          note.id === creditNote?.id ? "border-red-200 bg-red-50/40" : "border-gray-100"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-600">
+                            {note.number} · {dateTime(note.issuedAt)}
+                            {note.reason && <span className="block text-xs text-gray-400">{note.reason}</span>}
+                          </span>
+                          <span className="font-medium text-red-600">{money(-note.totalInclVat)}</span>
+                        </div>
+                        <a
+                          href={`/api/credit-notes/${note.id}/pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
+                        >
+                          <FileMinus size={16} /> Télécharger la note de crédit {note.number}
+                        </a>
                       </div>
-                      <a
-                        href={`/api/credit-notes/${creditNote.id}/pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
-                      >
-                        <FileMinus size={16} /> Télécharger la note de crédit
-                      </a>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
-                      <span className="text-gray-500">Aucune note de crédit pour ce remboursement.</span>
-                      <button
-                        type="button"
-                        onClick={() => setConfirmingNote(true)}
-                        disabled={generatingNote}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
-                      >
-                        {generatingNote ? <Loader2 size={12} className="animate-spin" /> : <FilePlus2 size={12} />} Générer
-                      </button>
-                    </div>
-                  )}
+                    ))}
+                    {canGenerateNote && (
+                      <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
+                        <span className="text-gray-500">Aucune note de crédit pour ce remboursement.</span>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingNote(true)}
+                          disabled={generatingNote}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                        >
+                          {generatingNote ? <Loader2 size={12} className="animate-spin" /> : <FilePlus2 size={12} />} Générer
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

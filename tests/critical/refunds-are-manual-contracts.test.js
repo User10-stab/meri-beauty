@@ -329,20 +329,14 @@ describe("converting a legacy path redirects its refund, never just deletes it",
   });
 });
 
-describe("the not-yet-converted refund paths are still intact", () => {
-  // These still refund automatically. Listed explicitly so that converting
-  // one is a deliberate act with a test to update, not a silent side effect
-  // of editing something nearby. Shrink this list as each is converted.
-  const remainingAutoRefundSites = [
-    "actions/boutique/orders.js",
-    // Deliberately permanent: customer self-cancel outside the 48h window
-    // keeps its automatic refund by explicit decision (2026-09-02).
-    "actions/reservation/cancel-reservation.js",
-  ];
+describe("the remaining automatic refund path is explicit", () => {
+  test("order cancellations are manual-refund operations", () => {
+    const orders = source("actions/boutique/orders.js");
+    expect(orders).not.toContain("stripe.refunds.create");
+    expect(orders).toContain("queueManualRefund(tx");
+  });
 
-  for (const file of remainingAutoRefundSites) {
-    test(`${file} still refunds automatically`, () => {
-      expect(source(file)).toContain("refunds.create");
-    });
-  }
+  test("customer appointment self-cancellation still refunds automatically", () => {
+    expect(source("actions/reservation/cancel-reservation.js")).toContain("refunds.create");
+  });
 });

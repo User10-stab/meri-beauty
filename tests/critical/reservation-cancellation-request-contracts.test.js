@@ -109,7 +109,7 @@ describe("customer sees the policy and a route out instead of a dead end", () =>
   test("an existing request's state is loaded so the card can reflect it", () => {
     const history = source("actions/customer/order-history.js");
     const matches = history.match(/cancellationRequest: \{ select: \{ status: true, decisionNote: true \} \}/g);
-    expect(matches).toHaveLength(2); // workshops + formations
+    expect(matches).toHaveLength(3); // orders + workshops + formations
   });
 
   test("a rejected request can be atomically reopened and exposes a new message form", () => {

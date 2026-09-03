@@ -40,12 +40,11 @@ describe("failed refunds require a fresh explicit admin action", () => {
     expect(returns).toContain("REFUND_ALREADY_PENDING");
   });
 
-  test("order cancellation refunds pin the amount and idempotency key before calling Stripe, and clear them on success", () => {
-    expect(orders).toContain("pendingRefundAmount: remaining,");
-    expect(orders).toContain("pendingRefundIdempotencyKey: refundIdempotencyKey,");
-    expect(orders).toContain("idempotencyKey: refundIdempotencyKey");
-    expect(orders).toContain("pendingRefundAmount: null");
-    expect(orders).toContain("pendingRefundIdempotencyKey: null");
+  test("order cancellation queues the refund without calling Stripe", () => {
+    expect(orders).toContain("queueManualRefund(tx");
+    expect(orders).not.toContain("stripe.refunds.create");
+    expect(orders).not.toContain("pendingRefundAmount: remaining,");
+    expect(orders).toContain("refundQueued");
   });
 
   test("order cancellation refuses to start a second refund while one is already pending on the same payment", () => {

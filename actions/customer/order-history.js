@@ -81,6 +81,7 @@ export async function getMyOrderHistory() {
       include: {
         items: { select: { productName: true, variantName: true, quantity: true, unitPrice: true } },
         payment: invoiceSelect,
+        cancellationRequest: { select: { status: true, decisionNote: true } },
       },
       orderBy: { createdAt: "desc" },
     }),

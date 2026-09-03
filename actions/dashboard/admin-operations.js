@@ -37,6 +37,54 @@ async function requireAdminOperationsAccess() {
 }
 
 /**
+ * Everything the detail box needs about one transaction. Shared verbatim by
+ * getTransactionDetail (Transactions tab) and getPaymentDetail (the
+ * Ateliers/Formations tabs, which only ever hold a paymentId — see that
+ * function's own doc), so the two can never drift into showing different
+ * documents for the same money.
+ */
+const TRANSACTION_DETAIL_INCLUDE = Object.freeze({
+  cashSession: { select: { id: true, openedAt: true, closedAt: true } },
+  // This row's own credit note, if any — not every credit note ever issued
+  // against the invoice (see getAdminOperations' same choice).
+  creditNote: { select: { id: true, number: true, issuedAt: true, reason: true, totalInclVat: true } },
+  settledRefundLeg: {
+    select: { refundOperation: { select: { id: true, refundReceiptNumber: true, status: true } } },
+  },
+  payment: {
+    include: {
+      invoice: {
+        select: {
+          id: true,
+          number: true,
+          issuedAt: true,
+          subtotalExclVat: true,
+          vatRate: true,
+          vatAmount: true,
+          totalInclVat: true,
+          vatTreatment: true,
+          // Every note ever issued against this invoice, not just the
+          // opened row's own — the detail box is the one place every
+          // document of a sale can be downloaded and sent from.
+          creditNotes: {
+            orderBy: { issuedAt: "asc" },
+            select: { id: true, number: true, issuedAt: true, reason: true, totalInclVat: true, emailSentAt: true, billitSentAt: true },
+          },
+        },
+      },
+      // Sibling transactions: a 50 % acompte followed by a balance settled
+      // at the counter are two rows against one Payment, and reading either
+      // one alone misrepresents what the customer paid.
+      transactions: { orderBy: { paidAt: "asc" }, select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true } },
+      order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, user: { select: { fullName: true, email: true } } } },
+      workshopReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
+      formationReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
+      appointment: { select: { id: true, date: true, status: true, user: { select: { fullName: true, email: true } } } },
+    },
+  },
+});
+
+/**
  * Paginated, admin-only operational ledger. Keeping one tab's query per
  * request prevents a growing transaction/order history from slowing the
  * dashboard just because another tab is not currently being viewed.
@@ -98,6 +146,7 @@ export async function getAdminOperations(params = {}) {
                     totalInclVat: true,
                     emailSentAt: true,
                     billitSentAt: true,
+                    customerName: true,
                     customerType: true,
                     customerVatNumber: true,
                     // The invoice is shared by its deposit and final-payment
@@ -198,6 +247,7 @@ export async function getAdminOperations(params = {}) {
                     number: true,
                     emailSentAt: true,
                     billitSentAt: true,
+                    customerName: true,
                     customerType: true,
                     customerVatNumber: true,
                     creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
@@ -239,6 +289,7 @@ export async function getAdminOperations(params = {}) {
                     number: true,
                     emailSentAt: true,
                     billitSentAt: true,
+                    customerName: true,
                     customerType: true,
                     customerVatNumber: true,
                     creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
@@ -291,39 +342,7 @@ export async function getTransactionDetail(transactionId) {
   try {
     const transaction = await prisma.transaction.findUnique({
       where: { id: transactionId },
-      include: {
-        cashSession: { select: { id: true, openedAt: true, closedAt: true } },
-        // This row's own credit note, if any — not every credit note ever
-        // issued against the invoice (see getAdminOperations' same choice).
-        creditNote: { select: { id: true, number: true, issuedAt: true, reason: true, totalInclVat: true } },
-        settledRefundLeg: {
-          select: { refundOperation: { select: { id: true, refundReceiptNumber: true, status: true } } },
-        },
-        payment: {
-          include: {
-            invoice: {
-              select: {
-                id: true,
-                number: true,
-                issuedAt: true,
-                subtotalExclVat: true,
-                vatRate: true,
-                vatAmount: true,
-                totalInclVat: true,
-                vatTreatment: true,
-              },
-            },
-            // Sibling transactions: a 50 % acompte followed by a balance
-            // settled at the counter are two rows against one Payment, and
-            // reading either one alone misrepresents what the customer paid.
-            transactions: { orderBy: { paidAt: "asc" }, select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true } },
-            order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, user: { select: { fullName: true, email: true } } } },
-            workshopReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
-            formationReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
-            appointment: { select: { id: true, date: true, status: true, user: { select: { fullName: true, email: true } } } },
-          },
-        },
-      },
+      include: TRANSACTION_DETAIL_INCLUDE,
     });
 
     if (!transaction) return { success: false, message: "Transaction introuvable." };
@@ -332,6 +351,54 @@ export async function getTransactionDetail(transactionId) {
   } catch (error) {
     console.error("[getTransactionDetail]", error);
     return { success: false, message: "Impossible de charger le détail de cette transaction." };
+  }
+}
+
+/**
+ * The same detail, opened from a row that only carries a Payment.
+ *
+ * A reservation row has no single Transaction to key off: one booking's
+ * Payment can hold an acompte, its balance and any refunds against them.
+ * The drawer is transaction-shaped, so anchor it on the money actually
+ * collected — the latest DEPOSIT/FINAL_PAYMENT — and let its own "toutes
+ * les transactions de ce paiement" section show the rest, refunds included.
+ * One shape, one include, one renderer.
+ */
+export async function getPaymentDetail(paymentId) {
+  if (!(await requireAdminOperationsAccess())) {
+    return { success: false, message: "Non autorisé." };
+  }
+  if (typeof paymentId !== "string" || !paymentId) {
+    return { success: false, message: "Paiement introuvable." };
+  }
+
+  try {
+    const anchor =
+      (await prisma.transaction.findFirst({
+        where: { paymentId, isDeleted: false, transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] } },
+        orderBy: { paidAt: "desc" },
+        select: { id: true },
+      })) ??
+      (await prisma.transaction.findFirst({
+        where: { paymentId, isDeleted: false },
+        orderBy: { paidAt: "desc" },
+        select: { id: true },
+      }));
+
+    if (!anchor) {
+      return { success: false, message: "Aucun paiement encaissé n'est encore enregistré pour cette réservation." };
+    }
+
+    const transaction = await prisma.transaction.findUnique({
+      where: { id: anchor.id },
+      include: TRANSACTION_DETAIL_INCLUDE,
+    });
+    if (!transaction) return { success: false, message: "Transaction introuvable." };
+
+    return { success: true, data: serializeDecimalFields(transaction) };
+  } catch (error) {
+    console.error("[getPaymentDetail]", error);
+    return { success: false, message: "Impossible de charger le détail de ce paiement." };
   }
 }
 

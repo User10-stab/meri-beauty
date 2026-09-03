@@ -22,7 +22,7 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     // only after the click.
     const invoiceSelectIdx = transactionsBlock.indexOf("invoice: {");
     const invoiceSelect = transactionsBlock.slice(invoiceSelectIdx, transactionsBlock.indexOf("},", invoiceSelectIdx));
-    for (const field of ["id: true", "number: true", "totalInclVat: true", "emailSentAt: true", "billitSentAt: true", "customerType: true", "customerVatNumber: true", "creditNotes:"]) {
+    for (const field of ["id: true", "number: true", "totalInclVat: true", "emailSentAt: true", "billitSentAt: true", "customerName: true", "customerType: true", "customerVatNumber: true", "creditNotes:"]) {
       expect(invoiceSelect, `invoice select is missing "${field}"`).toContain(field);
     }
     // Without the customer on the row there is nothing to show next to the
@@ -185,10 +185,11 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
   });
 
   test("the download link points at the existing authorised PDF route", () => {
-    const actions = source("components/dashboard/operations/InvoiceRowActions.jsx");
-    // That route already enforces dashboard-role / owner access; the button
-    // must not reach for some new unguarded path.
-    expect(actions).toContain("href={`/api/invoices/${invoice.id}/pdf`}");
+    // 3 Sep 2026 redesign: downloads moved into the Détail box so the row
+    // strip could collapse to three labelled buttons (Détail/Envoyer/
+    // Rembourser). Same route, same access guard — only its home moved.
+    const drawer = source("components/dashboard/operations/TransactionDetailDrawer.jsx");
+    expect(drawer).toContain("href={`/api/invoices/${invoice.id}/pdf`}");
   });
 
   test("the detail drawer is reachable from the transactions table", () => {
@@ -196,5 +197,14 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(client).toContain("<TransactionDetailDrawer");
     expect(client).toContain("onOpenDetail={() => onOpenDetail(row.id)}");
     expect(client).toContain("<InvoiceRowActions");
+  });
+
+  // 3 Sep 2026: the Ateliers/Formations tabs gained their own Détail box,
+  // opened from a Payment rather than a Transaction (see getPaymentDetail).
+  test("the detail drawer is also reachable from the reservation tabs, keyed on the payment", () => {
+    const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
+    expect(client).toContain("paymentId={detailPaymentId}");
+    expect(client).toContain("<Reservations rows={data} kind={tab} onOpenDetail={setDetailPaymentId} />");
+    expect(client).toContain("onOpenDetail={row.payment?.id ? () => onOpenDetail(row.payment.id) : undefined}");
   });
 });

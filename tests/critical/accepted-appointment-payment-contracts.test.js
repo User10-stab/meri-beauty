@@ -47,13 +47,21 @@ describe("accepted appointment lifecycle", () => {
     expect(payment).toContain('stripeAccount: staff.stripeAccountId');
   });
 
-  test("full Stripe settlement issues an invoice and attaches its PDF", () => {
+  test("full Stripe settlement issues an invoice but attaches only the ticket", () => {
+    // 3 Sep 2026 policy: no fulfilment path auto-attaches an invoice PDF any
+    // more, appointments included — only the ticket goes out automatically.
+    // The invoice is still issued and numbered here for VAT purposes; its
+    // delivery moved to Opérations (see pos-receipt-vs-invoice-contracts.test.js,
+    // which pins the same rule for the till this one now matches).
     const webhook = source("app/api/webhooks/stripe/route.js");
     expect(webhook).toContain("resolveAppointmentStatusAfterPayment");
     expect(webhook).toContain('source: "APPOINTMENT"');
     expect(webhook).toContain("buildInvoiceCustomer(appointment.user)");
-    expect(webhook).toContain("renderInvoicePdf(result.invoice)");
-    expect(webhook).toContain("...(invoicePdf ? [{ filename: `facture-${result.invoice.number}.pdf`");
+    expect(webhook).not.toContain("renderInvoicePdf");
+    expect(webhook).not.toContain("facture-");
+    expect(webhook).toContain("isPeppolMandatoryCustomer");
+    expect(webhook).toContain("const pendingInvoiceNote");
+    expect(webhook).toContain("transmise séparément");
     expect(webhook).toContain("...(ticket.attachment ? [ticket.attachment] : [])");
     expect(webhook).toContain("...(emailAttachments.length ? { attachments: emailAttachments } : {})");
   });

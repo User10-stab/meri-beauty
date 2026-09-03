@@ -44,9 +44,13 @@ describe("the Ateliers/Formations reservation tabs expose facture/ticket/note de
     const fn = client.slice(fnIdx, client.indexOf("\nfunction ", fnIdx + 1));
     expect(fn).toContain("<TableHead>Facture</TableHead>");
     expect(fn).toContain("const invoice = row.payment?.invoice ?? null;");
-    expect(fn).toContain(
-      "<InvoiceRowActions invoice={invoice} creditNotes={invoice?.creditNotes ?? []} paymentId={row.payment?.id ?? null} />"
-    );
+    expect(fn).toContain("<InvoiceRowActions");
+    expect(fn).toContain("invoice={invoice}");
+    expect(fn).toContain("creditNotes={invoice?.creditNotes ?? []}");
+    expect(fn).toContain("paymentId={row.payment?.id ?? null}");
+    // 3 Sep 2026: reservation rows gained their own Détail box, keyed on the
+    // payment (see getPaymentDetail) rather than a Transaction they don't have.
+    expect(fn).toContain("onOpenDetail={row.payment?.id ? () => onOpenDetail(row.payment.id) : undefined}");
   });
 
   test("no transaction is passed on a reservation row — credit-note generation stays a Transactions-tab-only action", () => {
@@ -68,9 +72,15 @@ describe("InvoiceRowActions renders every credit note on a row, not just one", (
     expect(rowActions).toContain("const notes = creditNotes ?? (creditNote ? [creditNote] : [])");
   });
 
-  test("maps over the list to render one download link per note", () => {
+  test("maps over the list to send-and-download every note, not just one", () => {
+    // The row still maps over every note against the invoice (to offer
+    // e-mail/Billit sends for each, inside the Envoyer box). Downloading
+    // one moved into the Détail box — 3 Sep 2026 redesign — where the same
+    // per-note map now lives.
     expect(rowActions).toContain("{notes.map((note) => (");
-    expect(rowActions).toContain("href={`/api/credit-notes/${note.id}/pdf`}");
+    const drawer = source("components/dashboard/operations/TransactionDetailDrawer.jsx");
+    expect(drawer).toContain("{invoiceCreditNotes.map((note) => (");
+    expect(drawer).toContain("href={`/api/credit-notes/${note.id}/pdf`}");
   });
 });
 
@@ -125,13 +135,20 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     expect(lib).toContain("export function describeReservationPayment(payment)");
   });
 
-  test("the row actions key the ticket link on the payment, independent of whether an invoice exists", () => {
+  test("the ticket link is keyed on the payment, independent of whether an invoice exists", () => {
+    // 3 Sep 2026 redesign: the ticket link moved from the row strip into
+    // the Détail box, which now serves both the Transactions tab (opened on
+    // a transactionId) and the reservation tabs (opened on a paymentId) —
+    // see getPaymentDetail. Still keyed on the payment, still never gated
+    // on the invoice existing.
     const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
     expect(rowActions).toContain("paymentId = null");
-    expect(rowActions).toContain("href={`/api/payments/${paymentId}/ticket`}");
+
+    const drawer = source("components/dashboard/operations/TransactionDetailDrawer.jsx");
+    expect(drawer).toContain("href={`/api/payments/${payment.id}/ticket`}");
     // The button must not be gated on `invoice` — that's exactly the bug.
-    const ticketBlockIdx = rowActions.indexOf("orderId ? (");
-    const ticketBlock = rowActions.slice(ticketBlockIdx, rowActions.indexOf("Aucun ticket disponible", ticketBlockIdx));
+    const ticketBlockIdx = drawer.indexOf("payment?.order ? (");
+    const ticketBlock = drawer.slice(ticketBlockIdx, drawer.indexOf("Aucun ticket disponible pour ce paiement", ticketBlockIdx));
     expect(ticketBlock).not.toContain(": invoice ?");
   });
 });

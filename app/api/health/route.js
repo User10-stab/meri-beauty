@@ -6,7 +6,7 @@ import { isValidCronSecret } from "@/lib/cron-auth";
 /**
  * Liveness + scheduler heartbeat.
  *
- * The background jobs (reminders, order/hold expiry, refund retries) run
+ * The background jobs (reminders, order/hold expiry, refund reconciliation) run
  * in-process on a 5-minute interval started from instrumentation.js — there is
  * no external cron on the OVH box, PM2 just keeps the Node process alive. That
  * works, but it was unobservable: if the process came back without the

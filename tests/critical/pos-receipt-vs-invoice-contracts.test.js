@@ -112,3 +112,51 @@ describe("the till mirrors the VIES-only invoice rule", () => {
     expect(clientSource).toContain('result.data.documentType === "invoice_pending_manual_send"');
   });
 });
+
+// 3 Sep 2026, confirmed policy: "No automatic send invoicing no matter what
+// the transaction type — we only send tickets automatically." The till
+// above and the boutique order path already worked this way; the atelier,
+// formation and rendez-vous fulfilment paths still attached facture-<n>.pdf
+// to the confirmation e-mail. The invoice is still issued and numbered —
+// Belgian VAT requires it — only its delivery moved to Opérations.
+describe("no fulfilment path auto-attaches an invoice PDF — tickets only, everywhere", () => {
+  const FULFILMENT_PATHS = [
+    "actions/boutique/point-of-sale.js",
+    "lib/orders/fulfill-order-payment.js",
+    "lib/workshops/fulfill-workshop-reservation-payment.js",
+    "lib/formations/fulfill-formation-reservation-payment.js",
+    "app/api/webhooks/stripe/route.js",
+  ];
+
+  test.each(FULFILMENT_PATHS)("%s renders no invoice PDF and attaches no facture-*.pdf", (file) => {
+    const content = source(file);
+    expect(content, `${file} must not render an invoice PDF`).not.toContain("renderInvoicePdf");
+    expect(content, `${file} must not attach a facture-*.pdf`).not.toContain("facture-");
+  });
+
+  // The order path predates this change and already used its own hand-rolled
+  // Belgian check rather than the shared helper — that is pre-existing and
+  // out of scope here. The three paths this change touched must all reuse
+  // the one helper so the wording can never silently drift between them.
+  test.each([
+    "actions/boutique/point-of-sale.js",
+    "lib/workshops/fulfill-workshop-reservation-payment.js",
+    "lib/formations/fulfill-formation-reservation-payment.js",
+    "app/api/webhooks/stripe/route.js",
+  ])("%s tells the customer the invoice follows separately, using the shared Peppol rule", (file) => {
+    const content = source(file);
+    expect(content).toContain("isPeppolMandatoryCustomer");
+    expect(content).toContain("pendingInvoiceNote");
+    expect(content).toContain("transmise séparément");
+  });
+
+  test("the ticket/QR attachment survives on every reservation fulfilment path", () => {
+    expect(source("lib/workshops/fulfill-workshop-reservation-payment.js")).toContain(
+      "qrPngAttachment(checkInCode, `billet-atelier-${checkInCode}.png`)"
+    );
+    expect(source("lib/formations/fulfill-formation-reservation-payment.js")).toContain(
+      "qrPngAttachment(checkInCode, `billet-formation-${checkInCode}.png`)"
+    );
+    expect(source("app/api/webhooks/stripe/route.js")).toContain("...(ticket.attachment ? [ticket.attachment] : [])");
+  });
+});

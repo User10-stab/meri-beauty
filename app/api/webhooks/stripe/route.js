@@ -21,7 +21,6 @@ import {
   buildInvoiceCustomer,
   buildServiceInvoiceLines,
 } from "@/lib/invoicing";
-import { renderInvoicePdf } from "@/lib/pdf/render";
 import { resolveAppointmentStatusAfterPayment } from "@/lib/appointment-status";
 import {
   createNotificationsBulk,
@@ -46,7 +45,7 @@ import {
   getDeploymentId,
   DEPLOYMENT_METADATA_KEY,
 } from "@/lib/stripe-deployment";
-import { roundMoney, resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
+import { roundMoney, resolveServiceVatPolicy, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer } from "@/lib/tax-policy";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -1089,24 +1088,22 @@ async function processAppointmentCheckoutSession(session) {
     const staffName = staffService?.staff?.user?.fullName ?? "votre experte";
     const serviceName = staffService?.service?.name ?? "votre service";
 
-    const invoicePdf = result.invoice
-      ? await renderInvoicePdf(result.invoice).catch((error) => {
-          captureCriticalError(error, {
-            area: "stripe-webhook",
-            operation: "appointment-invoice-pdf",
-            appointmentId,
-            paymentId,
-          });
-          return null;
-        })
-      : null;
     const ticket = result.nextAppointmentStatus === "CONFIRMED"
       ? await buildAppointmentCheckInEmailAssets(appointmentId)
       : { checkInCode: null, attachment: null };
-    const emailAttachments = [
-      ...(invoicePdf ? [{ filename: `facture-${result.invoice.number}.pdf`, content: invoicePdf }] : []),
-      ...(ticket.attachment ? [ticket.attachment] : []),
-    ];
+    const emailAttachments = [...(ticket.attachment ? [ticket.attachment] : [])];
+
+    // The invoice itself is never auto-attached (3 Sep 2026 policy: only
+    // tickets go out automatically, on every channel). It is still issued
+    // and numbered above for VAT purposes; staff transmit it afterward from
+    // Opérations — over Peppol for a Belgian company (Belgium's 2026
+    // structured e-invoicing mandate), by e-mail for anyone else. Same rule
+    // and same wording as the till (actions/boutique/point-of-sale.js).
+    const pendingInvoiceNote = !result.invoice
+      ? ""
+      : isPeppolMandatoryCustomer(user)
+        ? `Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
+        : `Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément par e-mail.`;
 
     const customerEmailTemplate = result.nextAppointmentStatus === "CONFIRMED"
       ? reservationConfirmedEmail({
@@ -1118,6 +1115,7 @@ async function processAppointmentCheckoutSession(session) {
           paidAmount: result.nextPaidAmount,
           totalAmount: result.totalAmount,
           paymentMethod: "Carte bancaire",
+          pendingInvoiceNote,
           checkInCode: ticket.checkInCode,
         })
       : paymentConfirmationEmail({
@@ -1129,6 +1127,7 @@ async function processAppointmentCheckoutSession(session) {
           paidAmount: result.nextPaidAmount,
           totalAmount: result.totalAmount,
           paymentMethod: "Carte bancaire",
+          pendingInvoiceNote,
         });
 
     sendEmail({

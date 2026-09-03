@@ -200,7 +200,7 @@ function Orders({ rows }) {
   );
 }
 
-function Reservations({ rows, kind }) {
+function Reservations({ rows, kind, onOpenDetail }) {
   return (
     <Table>
       <TableHeader>
@@ -244,7 +244,12 @@ function Reservations({ rows, kind }) {
               </TableCell>
               <TableCell className="text-right font-medium">{money(row.totalPrice)}</TableCell>
               <TableCell className="pr-6">
-                <InvoiceRowActions invoice={invoice} creditNotes={invoice?.creditNotes ?? []} paymentId={row.payment?.id ?? null} />
+                <InvoiceRowActions
+                  invoice={invoice}
+                  creditNotes={invoice?.creditNotes ?? []}
+                  paymentId={row.payment?.id ?? null}
+                  onOpenDetail={row.payment?.id ? () => onOpenDetail(row.payment.id) : undefined}
+                />
               </TableCell>
             </TableRow>
           );
@@ -299,6 +304,9 @@ export function AdminOperationsClient({ result }) {
     status = "ALL",
   } = result ?? {};
   const [detailId, setDetailId] = useState(null);
+  // A reservation row has no Transaction of its own to open the drawer on —
+  // see getPaymentDetail's doc for why that resolves to one anyway.
+  const [detailPaymentId, setDetailPaymentId] = useState(null);
 
   const hasPrevious = page > 1;
   const hasNext = page * pageSize < totalCount;
@@ -365,7 +373,7 @@ export function AdminOperationsClient({ result }) {
         ) : tab === "orders" ? (
           <Orders rows={data} />
         ) : (
-          <Reservations rows={data} kind={tab} />
+          <Reservations rows={data} kind={tab} onOpenDetail={setDetailPaymentId} />
         )}
       </div>
 
@@ -386,7 +394,14 @@ export function AdminOperationsClient({ result }) {
         </Link>
       </div>
 
-      <TransactionDetailDrawer transactionId={detailId} onClose={() => setDetailId(null)} />
+      <TransactionDetailDrawer
+        transactionId={detailId}
+        paymentId={detailPaymentId}
+        onClose={() => {
+          setDetailId(null);
+          setDetailPaymentId(null);
+        }}
+      />
     </div>
   );
 }

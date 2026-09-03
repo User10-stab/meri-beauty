@@ -40,7 +40,7 @@ export async function register() {
       console.error("[instrumentation] refreshSalonBranding failed on boot:", err);
     }
 
-    // In-process scheduler (reminders, expiry, refund retries) — read by
+    // In-process scheduler (reminders, expiry, refund reconciliation) — read by
     // /api/health's heartbeat. Each step is guarded so one failure can't
     // silently keep the jobs from starting.
     try {

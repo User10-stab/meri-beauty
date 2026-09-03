@@ -123,4 +123,16 @@ describe("the operations row exposes both send actions per credit note, gated th
     expect(rowActions).toContain("créée dans Billit — à finaliser");
     expect(rowActions).toContain("non envoyée");
   });
+
+  // 3 Sep 2026: both delivery channels moved off the row strip (which used
+  // to render a bare download link plus two unlabelled 32px icon buttons
+  // per note) into one Envoyer box shared with the invoice, each channel
+  // now a full-width labelled button. Pins the redesign so it cannot
+  // silently regress back to icon-only.
+  test("both sends live behind one labelled Envoyer box, not a strip of unlabelled icons", () => {
+    expect(rowActions).toContain("<SendDocumentsDialog");
+    expect(rowActions).toContain("Envoyer par e-mail");
+    expect(rowActions).toContain("Envoyer via Billit (Peppol)");
+    expect(rowActions).not.toContain("h-8 w-8");
+  });
 });

@@ -8,7 +8,7 @@ import { ArrowLeft, Loader2, Mail, Phone, MapPin, Truck, KeyRound, Download, Fil
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PickupConfirmDialog } from "@/components/dashboard/boutique/PickupConfirmDialog";
-import { markOrderReadyForPickup, markOrderShipped, markOrderCompleted, cancelOrder } from "@/actions/boutique/orders";
+import { markOrderReadyForPickup, markOrderShipped, markOrderCompleted, cancelOrder, reviewOrderCancellationRequest } from "@/actions/boutique/orders";
 import { generateShippingLabel } from "@/actions/boutique/mondial-relay";
 
 const MODE_LABEL = {
@@ -68,8 +68,6 @@ export function OrderDetailClient({ order }) {
   const [isPending, startTransition] = useTransition();
   const [pickupDialogOrder, setPickupDialogOrder] = useState(null);
   const [cancelling, setCancelling] = useState(false);
-  const [manualRefundConfirmed, setManualRefundConfirmed] = useState(false);
-  const [manualRefundReference, setManualRefundReference] = useState("");
   const [trackingCode, setTrackingCode] = useState(order.trackingCode ?? "");
   const [generatingLabel, setGeneratingLabel] = useState(false);
   const [closingShipped, setClosingShipped] = useState(false);
@@ -126,11 +124,7 @@ export function OrderDetailClient({ order }) {
 
   function handleCancel() {
     startTransition(async () => {
-      const result = await cancelOrder({
-        orderId: order.id,
-        manualRefundConfirmed,
-        manualRefundReference: manualRefundReference || undefined,
-      });
+      const result = await cancelOrder({ orderId: order.id });
       if (result.success) {
         toast.success(result.message);
         setCancelling(false);
@@ -138,6 +132,18 @@ export function OrderDetailClient({ order }) {
       } else {
         toast.error(result.message);
         setCancelling(false);
+      }
+    });
+  }
+
+  function handleCancellationRequestDecision(decision) {
+    startTransition(async () => {
+      const result = await reviewOrderCancellationRequest({ requestId: order.cancellationRequest.id, decision });
+      if (result.success) {
+        toast.success(result.message);
+        router.refresh();
+      } else {
+        toast.error(result.message);
       }
     });
   }
@@ -367,6 +373,36 @@ export function OrderDetailClient({ order }) {
             </div>
           )}
 
+          {order.cancellationRequest && (
+            <div className="space-y-3 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+              <h2 className="font-semibold text-gray-800 dark:text-white">Demande d&apos;annulation</h2>
+              <p className="text-sm text-gray-700 dark:text-dark-6">
+                <span className="font-medium">Client : </span>{order.cancellationRequest.requestedBy?.fullName ?? "Client"}
+              </p>
+              <p className="rounded-lg bg-gray-50 p-3 text-sm text-gray-700 dark:bg-dark-2 dark:text-dark-6">{order.cancellationRequest.reason}</p>
+              {order.cancellationRequest.status === "PENDING" ? (
+                <div className="flex gap-2">
+                  <Button className="flex-1" onClick={() => handleCancellationRequestDecision("APPROVED")} disabled={isPending}>
+                    {isPending && <Loader2 size={14} className="animate-spin" />} Approuver
+                  </Button>
+                  <button
+                    type="button"
+                    onClick={() => handleCancellationRequestDecision("REJECTED")}
+                    disabled={isPending}
+                    className="flex-1 rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Refuser
+                  </button>
+                </div>
+              ) : (
+                <p className={`text-sm font-medium ${order.cancellationRequest.status === "APPROVED" ? "text-emerald-700" : "text-red-600"}`}>
+                  {order.cancellationRequest.status === "APPROVED" ? "Demande approuvée" : "Demande refusée"}
+                  {order.cancellationRequest.decisionNote ? ` — ${order.cancellationRequest.decisionNote}` : ""}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
           {(canMarkReady || canCompletePickup || canShip || canCloseShipped || canCancel) && (
             <div className="space-y-3 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
@@ -432,8 +468,6 @@ export function OrderDetailClient({ order }) {
                 <button
                   type="button"
                   onClick={() => {
-                    setManualRefundConfirmed(false);
-                    setManualRefundReference("");
                     setCancelling(true);
                   }}
                   disabled={isPending}
@@ -482,46 +516,16 @@ export function OrderDetailClient({ order }) {
         open={cancelling}
         title="Annuler cette commande ?"
         message={
-          order.payment?.requiresManualRefund
-            ? order.payment.refundInstruction
-            : order.hasPayment
-              ? "Le client a déjà payé en ligne — un remboursement Stripe sera automatiquement déclenché et le stock sera remis en vente."
+          order.hasPayment
+            ? "La commande sera annulée, puis le remboursement sera créé dans Opérations. Aucun argent ne sera envoyé automatiquement."
             : "Le stock réservé sera libéré."
         }
         confirmLabel="Annuler la commande"
         danger
         loading={isPending}
-        confirmDisabled={Boolean(
-          order.payment?.requiresManualRefund &&
-            (!manualRefundConfirmed || (order.payment.paymentMethod === "CARD" && !manualRefundReference.trim()))
-        )}
         onConfirm={handleCancel}
         onCancel={() => setCancelling(false)}
-      >
-        {order.payment?.requiresManualRefund && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            <p><span className="font-semibold">Paiement d'origine : </span>{order.payment.paymentMethodLabel}</p>
-            <label className="mt-3 flex items-start gap-2 font-medium">
-              <input
-                type="checkbox"
-                checked={manualRefundConfirmed}
-                onChange={(event) => setManualRefundConfirmed(event.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-amber-400"
-              />
-              Je confirme que le remboursement a déjà été effectué au client.
-            </label>
-            {order.payment.paymentMethod === "CARD" && (
-              <input
-                value={manualRefundReference}
-                onChange={(event) => setManualRefundReference(event.target.value)}
-                maxLength={100}
-                placeholder="Référence du ticket terminal (obligatoire)"
-                className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#2f3a2e]"
-              />
-            )}
-          </div>
-        )}
-      </ConfirmDialog>
+      />
     </div>
   );
 }

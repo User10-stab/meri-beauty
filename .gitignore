@@ -82,3 +82,11 @@ mailpit.exe
 
 # Local scratch output (rendered PDFs/screenshots from debugging)
 /tmp
+
+# Deployment tarballs built locally for the OVH VPS — build output, and large
+# enough (150 MB+) to bloat the repo permanently if ever committed.
+/.codex-deploy/
+
+# Playwright money-suite HTML report (regenerated on every run; the suite's
+# own artefacts, not source). /test-results is already ignored above.
+/playwright-report-money/

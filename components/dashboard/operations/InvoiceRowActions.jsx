@@ -137,9 +137,9 @@ function CreditNoteActions({ note, invoice }) {
  * and a row whose buttons simply vanish reads as a rendering bug. The title
  * says why instead.
  *
- * @param {{ invoice: {id: string, number: string, billitSentAt?: string|Date|null, customerType?: string, customerVatNumber?: string|null}|null, creditNote?: {id: string, number: string, totalInclVat: number}|null, creditNotes?: Array<{id: string, number: string, totalInclVat: number}>|null, transaction?: {id: string, transactionType: string, hasInvoice: boolean}, orderId?: string|null, paymentId?: string|null, onOpenDetail?: () => void }} props
+ * @param {{ invoice: {id: string, number: string, billitSentAt?: string|Date|null, customerType?: string, customerVatNumber?: string|null}|null, creditNote?: {id: string, number: string, totalInclVat: number}|null, creditNotes?: Array<{id: string, number: string, totalInclVat: number}>|null, transaction?: {id: string, transactionType: string, hasInvoice: boolean}, orderId?: string|null, paymentId?: string|null, remainingRefundable?: number|null, onOpenDetail?: () => void }} props
  */
-export function InvoiceRowActions({ invoice, creditNote = null, creditNotes = null, transaction = null, orderId = null, paymentId = null, onOpenDetail }) {
+export function InvoiceRowActions({ invoice, creditNote = null, creditNotes = null, transaction = null, orderId = null, paymentId = null, remainingRefundable = null, onOpenDetail }) {
   const router = useRouter();
   const [sending, setSending] = useState(false);
   const [sendingBillit, setSendingBillit] = useState(false);
@@ -150,6 +150,8 @@ export function InvoiceRowActions({ invoice, creditNote = null, creditNotes = nu
   // canonical row receives all existing notes for that invoice, while the
   // legacy singular prop remains supported for other callers.
   const notes = creditNotes ?? (creditNote ? [creditNote] : []);
+  const creditNotesTotal = notes.reduce((sum, note) => sum + Number(note.totalInclVat ?? 0), 0);
+  const invoiceFullyCredited = Boolean(invoice) && creditNotesTotal + 0.01 >= Number(invoice.totalInclVat ?? 0);
 
   // The action is keyed on the PAYMENT, not on the invoice — that is the
   // change of meaning. It is no longer "produce a document for this
@@ -157,11 +159,15 @@ export function InvoiceRowActions({ invoice, creditNote = null, creditNotes = nu
   // left nine payments in the dev database credited but never refunded);
   // it is "unwind this sale", which every payment can be the subject of.
   //
-  // Still hidden on a deposit row: once a balance exists, the FINAL_PAYMENT
-  // row is the single entry point for the whole payment, and offering the
-  // same operation twice on one payment invites exactly the double-click
-  // the partial unique index exists to catch.
-  const canCancelAndRefund = Boolean(paymentId) && transaction?.transactionType !== "DEPOSIT";
+  // A REFUND is evidence that money already moved; it must expose only its
+  // document/detail actions, never offer a second cancellation/refund. A
+  // visible DEPOSIT is a payment with no balance row yet, so it remains a
+  // valid entry point for a deposit-only booking.
+  const canCancelAndRefund =
+    Boolean(paymentId) &&
+    ["DEPOSIT", "FINAL_PAYMENT"].includes(transaction?.transactionType) &&
+    !invoiceFullyCredited &&
+    Number(remainingRefundable) > 0.01;
 
   const noInvoiceReason = invoice ? null : "Aucune facture émise pour ce paiement";
 
@@ -321,8 +327,8 @@ export function InvoiceRowActions({ invoice, creditNote = null, creditNotes = nu
           type="button"
           onClick={() => setCancelRefundOpen(true)}
           className={`${BUTTON} border-red-200 text-red-500 hover:bg-red-50 hover:text-red-700`}
-          title="Annuler et générer la note de crédit"
-          aria-label="Annuler et générer la note de crédit"
+          title={`Annuler et rembourser ${Number(remainingRefundable).toLocaleString("fr-BE", { style: "currency", currency: "EUR" })}`}
+          aria-label={`Annuler et rembourser ${Number(remainingRefundable).toLocaleString("fr-BE", { style: "currency", currency: "EUR" })}`}
         >
           <FilePlus2 size={15} />
         </button>

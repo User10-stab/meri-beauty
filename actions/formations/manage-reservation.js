@@ -10,6 +10,8 @@ import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
+import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
+import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 
 function formatSessionDate(date) {
   return new Date(date).toLocaleDateString("fr-FR", {
@@ -95,6 +97,7 @@ export async function cancelFormationReservation(reservationId, { reason, refund
     // a formation settled in cash used to fall through refunding nothing
     // and issuing no credit note at all.
     let refundQueued = false;
+    let queuedRefundAmount = 0;
     if (refundPayment && reservation.payment) {
       const payment = reservation.payment;
       const alreadyRefunded = payment.transactions
@@ -124,8 +127,10 @@ export async function cancelFormationReservation(reservationId, { reason, refund
             creditNoteId,
             invoiceId: payment.invoice?.id ?? null,
             decidedByUserId: session.user.id,
+            customerIsBusiness: isBusinessRefundCustomer(reservation.customer),
           });
           refundQueued = Boolean(queued);
+          if (queued) queuedRefundAmount = remainingRefund;
         });
       }
     } else if (
@@ -143,16 +148,18 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       // deposit.
       const payment = reservation.payment;
       await prisma.$transaction(async (tx) => {
-        await issueInvoice(tx, {
-          paymentId: payment.id,
-          source: "FORMATION",
-          totalInclVat: Number(payment.paidAmount),
-          customer: buildInvoiceCustomer(reservation.customer),
-          lines: buildServiceInvoiceLines({
-            description: `Annulation — acompte non remboursable — ${reservation.session.formation.title}`,
-            totalAmount: Number(payment.paidAmount),
-          }),
-        });
+        if (hasInvoiceableVatIdentity(reservation.customer)) {
+          await issueInvoice(tx, {
+            paymentId: payment.id,
+            source: "FORMATION",
+            totalInclVat: Number(payment.paidAmount),
+            customer: buildInvoiceCustomer(reservation.customer),
+            lines: buildServiceInvoiceLines({
+              description: `Annulation — acompte non remboursable — ${reservation.session.formation.title}`,
+              totalAmount: Number(payment.paidAmount),
+            }),
+          });
+        }
         await tx.payment.update({ where: { id: payment.id }, data: { status: "PAID" } });
       });
     }
@@ -172,6 +179,18 @@ export async function cancelFormationReservation(reservationId, { reason, refund
             sessionDate: formatSessionDate(reservation.session.startDate),
             salonPhone: salon?.phone,
             salonEmail: salon?.email,
+            // Always false: this app does not move money, so it can never
+            // announce a completed refund here. The customer is told one is
+            // coming, and only the charge.refunded webhook (or a confirmed
+            // hand-over) sends the "c'est fait" mail, from
+            // notify-refund-complete.js.
+            refunded: false,
+            refundPending: refundQueued,
+            refundAmount: refundQueued ? queuedRefundAmount : null,
+            // An exceptional approval carries the admin's written reason
+            // through reviewReservationCancellationRequest — the customer
+            // who asked for the exception is the one person entitled to it.
+            decisionNote: reason?.trim() || null,
           }),
         })
       )
@@ -231,4 +250,4 @@ export async function markFormationReservationNoShow(reservationId) {
   if (result.success) revalidatePath(RESERVATION_KINDS.FORMATION.revalidatePath);
   return result;
 }
-
+

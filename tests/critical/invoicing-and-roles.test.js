@@ -20,6 +20,16 @@ const COMPLETE_SALON = {
   countryCode: "BE",
 };
 
+const VALID_B2B_CUSTOMER = {
+  fullName: "Jane Doe",
+  email: "jane@example.test",
+  address: "Rue Test 1, 1000 Bruxelles",
+  isCompany: true,
+  vatNumber: "BE0751854027",
+  vatValidatedAt: new Date(),
+  legalName: "Doe Consulting SRL",
+};
+
 function invoicingTx({ invoiceTotal = 121, invoiceVatRate = 21, credited = 0, salon = COMPLETE_SALON } = {}) {
   return {
     $queryRaw: vi.fn()
@@ -44,7 +54,7 @@ describe("invoice and credit-note issuance", () => {
       paymentId: "pay-1",
       source: "ORDER",
       totalInclVat: 121,
-      customer: { fullName: "Client", email: "client@example.test", address: "Rue Test 1, 1000 Bruxelles" },
+      customer: VALID_B2B_CUSTOMER,
       lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
     });
 
@@ -53,7 +63,7 @@ describe("invoice and credit-note issuance", () => {
     expect(invoice.subtotalExclVat).toBe(100);
     expect(invoice.vatAmount).toBe(21);
     expect(invoice.totalInclVat).toBe(121);
-    expect(invoice.customerType).toBe("B2C");
+    expect(invoice.customerType).toBe("B2B");
   });
 
   test("fails closed when the seller's legal identity is incomplete, rather than emitting a partial document", async () => {
@@ -62,7 +72,7 @@ describe("invoice and credit-note issuance", () => {
       paymentId: "pay-1",
       source: "ORDER",
       totalInclVat: 121,
-      customer: { fullName: "Client", email: "client@example.test", address: "Rue Test 1, 1000 Bruxelles" },
+      customer: VALID_B2B_CUSTOMER,
       lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
     })).rejects.toThrow("SELLER_LEGAL_DATA_INCOMPLETE");
     expect(tx.invoice.create).not.toHaveBeenCalled();
@@ -75,11 +85,7 @@ describe("invoice and credit-note issuance", () => {
       source: "ORDER",
       totalInclVat: 121,
       customer: {
-        fullName: "Jane Doe",
-        email: "jane@example.test",
-        address: "Rue Test 1, 1000 Bruxelles",
-        isCompany: true,
-        legalName: "Doe Consulting SRL",
+        ...VALID_B2B_CUSTOMER,
         companyRegistrationNo: "0123.456.789",
         purchaseOrderReference: "PO-42",
       },
@@ -93,18 +99,18 @@ describe("invoice and credit-note issuance", () => {
     expect(invoice.purchaseOrderReference).toBe("PO-42");
   });
 
-  test("isCompany alone (no BillingProfile legalName yet) stays B2C, not a half-populated B2B invoice", async () => {
+  test("a company flag without reusable VIES validation cannot produce a B2C invoice", async () => {
     const tx = invoicingTx();
-    const invoice = await issueInvoice(tx, {
-      paymentId: "pay-1",
-      source: "ORDER",
-      totalInclVat: 121,
-      customer: { fullName: "Jane Doe", email: "jane@example.test", address: "Rue Test 1, 1000 Bruxelles", isCompany: true },
-      lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
-    });
-
-    expect(invoice.customerType).toBe("B2C");
-    expect(invoice.customerLegalName).toBeNull();
+    await expect(
+      issueInvoice(tx, {
+        paymentId: "pay-1",
+        source: "ORDER",
+        totalInclVat: 121,
+        customer: { fullName: "Jane Doe", email: "jane@example.test", address: "Rue Test 1, 1000 Bruxelles", isCompany: true },
+        lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
+      })
+    ).rejects.toThrow("B2C_INVOICE_NOT_ALLOWED");
+    expect(tx.invoice.create).not.toHaveBeenCalled();
   });
 
   test("a credit note is broken down into HT/TVA/TTC at the original invoice's rate", async () => {

@@ -7,6 +7,8 @@ import { isAdminRole } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { planRefund } from "@/lib/refunds/plan-refund";
 import { issueCreditNote } from "@/lib/invoicing";
+import { allocateRefundReceiptNumber } from "@/lib/refunds/refund-receipt-number";
+import { isBusinessRefundCustomer, refundCustomerFromContext } from "@/lib/refunds/document-policy";
 import {
   loadRefundContext,
   openRefundOperation,
@@ -76,7 +78,7 @@ function currentStatus(context, source) {
  * dialog can explain a refusal instead of letting the admin find out by
  * clicking.
  */
-export async function previewCancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION", reason = "" }) {
+export async function previewCancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION", reason = "", requestedAmount = null }) {
   const session = await requireAdmin();
   if (!session) return { success: false, message: "Non autorisé." };
 
@@ -84,7 +86,11 @@ export async function previewCancelAndRefund({ paymentId, trigger = "SALON_CANCE
   if (!context) return { success: false, message: "Paiement introuvable." };
 
   const source = resolveRefundSource(context);
-  const plan = planRefund({ transactions: context.transactions, invoice: context.invoice });
+  // An ordinary cancellation must always refund the exact remaining amount.
+  // Only an explicitly selected financial correction may choose a partial
+  // amount; client-supplied values cannot turn a normal cancellation into one.
+  const correctionAmount = trigger === "FINANCIAL_CORRECTION" ? requestedAmount : null;
+  const plan = planRefund({ transactions: context.transactions, invoice: context.invoice, requestedAmount: correctionAmount });
 
   const reservation =
     source === "WORKSHOP" ? context.workshopReservation
@@ -156,6 +162,7 @@ export async function previewCancelAndRefund({ paymentId, trigger = "SALON_CANCE
       keepsHistoricalStatus: !willCancel,
       totalCollected: plan.totalCollected,
       alreadyRefunded: plan.totalRefunded,
+      remainingRefundable: plan.remainingRefundable,
       creditedTotal: plan.plannedTotal,
       automaticTotal: plan.automaticTotal,
       manualTotal: plan.manualTotal,
@@ -215,13 +222,14 @@ export async function cancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION
 
   let opened;
   try {
+    const correctionAmount = trigger === "FINANCIAL_CORRECTION" ? requestedAmount : null;
     opened = await openRefundOperation({
       prisma,
       paymentId,
       trigger,
       reason: reason.trim(),
       actor: { id: session.user.id, role: session.user.role },
-      requestedAmount,
+      requestedAmount: correctionAmount,
     });
   } catch (error) {
     if (error instanceof RefundNotAllowedError) return { success: false, message: error.message, code: error.code };
@@ -364,16 +372,76 @@ export async function issueMissingRefundDocument(transactionId) {
           isDeleted: true,
           creditNoteId: true,
           paymentId: true,
+          method: true,
+          paidAt: true,
+          stripePaymentIntentId: true,
+          stripeCheckoutSessionId: true,
+          settledRefundLeg: { select: { id: true } },
         },
       });
       if (!transaction || transaction.isDeleted) throw new Error("TRANSACTION_NOT_FOUND");
       // The whole guard: a document may only be produced for money that has
       // demonstrably already gone back.
       if (transaction.transactionType !== "REFUND") throw new Error("NOT_A_REFUND");
-      if (transaction.creditNoteId) throw new Error("ALREADY_DOCUMENTED");
+      if (transaction.creditNoteId || transaction.settledRefundLeg) throw new Error("ALREADY_DOCUMENTED");
 
       const context = await loadRefundContext(tx, transaction.paymentId);
-      if (!context?.invoice) throw new Error("NO_INVOICE");
+      if (!context) throw new Error("TRANSACTION_NOT_FOUND");
+
+      // A historical B2C refund has no invoice to credit. The refund ledger
+      // row is the proof that money already left; reconstruct one completed
+      // operation around it solely to allocate the numbered receipt and send
+      // the customer document. No Stripe call, cancellation, seat release,
+      // or second REFUND transaction is made here.
+      if (!context.invoice) {
+        if (isBusinessRefundCustomer(refundCustomerFromContext(context))) {
+          throw new Error("B2B_INVOICE_REQUIRED");
+        }
+        const source = resolveRefundSource(context);
+        const original = context.transactions.find(
+          (row) =>
+            !row.isDeleted &&
+            ["DEPOSIT", "FINAL_PAYMENT"].includes(row.transactionType) &&
+            row.method === transaction.method,
+        );
+        const receiptNumber = await allocateRefundReceiptNumber(tx);
+        const operation = await tx.refundOperation.create({
+          data: {
+            paymentId: transaction.paymentId,
+            source,
+            trigger: "CUSTOMER_SELF_CANCELLATION",
+            totalAmount: transaction.amount,
+            reason: "Justificatif créé pour un remboursement B2C déjà effectué",
+            refundReceiptNumber: receiptNumber,
+            decidedByUserId: session.user.id,
+            status: "COMPLETED",
+            itemCancelledAt: transaction.paidAt,
+            legs: {
+              create: {
+                sourceTransactionId: original?.id ?? null,
+                method: transaction.method,
+                amount: transaction.amount,
+                settledAmount: null,
+                status: "SUCCEEDED",
+                stripePaymentIntentId: transaction.stripePaymentIntentId ?? original?.stripePaymentIntentId ?? null,
+                refundTransactionId: transaction.id,
+                confirmedAt: transaction.paidAt,
+              },
+            },
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: session.user.id,
+            actorRole: session.user.role,
+            action: "refund.historical_b2c_receipt_issued",
+            entityType: "RefundOperation",
+            entityId: operation.id,
+            metadata: { transactionId, paymentId: transaction.paymentId, number: receiptNumber },
+          },
+        });
+        return { kind: "REFUND_RECEIPT", operationId: operation.id, number: receiptNumber };
+      }
 
       // Lock the invoice: two refund rows on one payment must not each
       // issue a note concurrently and over-credit it between them.
@@ -403,14 +471,26 @@ export async function issueMissingRefundDocument(transactionId) {
         },
       });
 
-      return note;
+      return { kind: "CREDIT_NOTE", id: note.id, number: note.number };
     });
 
+    const notification =
+      result.kind === "REFUND_RECEIPT"
+        ? await notifyRefundComplete({ prisma, operationId: result.operationId }).catch((error) => {
+            console.error("[issueMissingRefundDocument] B2C receipt notification failed", error);
+            return { sent: false };
+          })
+        : null;
     refreshOperationViews();
     return {
       success: true,
-      message: `Note de crédit ${result.number} émise pour ce remboursement déjà effectué.`,
-      data: { creditNoteId: result.id, number: result.number },
+      message:
+        result.kind === "REFUND_RECEIPT"
+          ? notification?.sent
+            ? `Justificatif ${result.number} créé et envoyé au client pour ce remboursement déjà effectué.`
+            : `Justificatif ${result.number} créé. L'e-mail n'a pas pu être envoyé automatiquement : vérifiez l'adresse du client puis réessayez.`
+          : `Note de crédit ${result.number} émise pour ce remboursement déjà effectué.`,
+      data: { creditNoteId: result.id ?? null, operationId: result.operationId ?? null, number: result.number },
     };
   } catch (error) {
     const messages = {
@@ -418,9 +498,10 @@ export async function issueMissingRefundDocument(transactionId) {
       NOT_A_REFUND:
         "Aucun remboursement n'a été enregistré pour cette transaction — utilisez « Annuler et rembourser » plutôt que d'émettre un document seul.",
       ALREADY_DOCUMENTED: "Ce remboursement possède déjà sa note de crédit.",
-      NO_INVOICE: "Aucune facture n'est associée à ce paiement — un client B2C reçoit un justificatif, pas une note de crédit.",
       LEDGER_INCONSISTENT: "Les montants de ce paiement sont incohérents — réconciliation requise.",
       NOTHING_LEFT_TO_CREDIT: "Cette facture est déjà entièrement créditée.",
+      B2B_INVOICE_REQUIRED:
+        "Client B2B détecté sans facture liée. Corrigez d'abord la facture : ce client doit recevoir une note de crédit, jamais un justificatif B2C.",
       CREDIT_NOTE_EXCEEDS_INVOICE: "Le montant dépasse ce qui reste créditable sur cette facture.",
     };
     if (messages[error.message]) return { success: false, message: messages[error.message] };
@@ -450,7 +531,16 @@ export async function getOutstandingRefundLegs() {
   if (!session) return { success: false, message: "Non autorisé.", data: [] };
 
   const legs = await prisma.refundLeg.findMany({
-    where: { status: { in: ["PENDING", "MANUAL_CONFIRMATION_REQUIRED", "FAILED"] } },
+    where: {
+      OR: [
+        { status: { in: ["PENDING", "MANUAL_CONFIRMATION_REQUIRED", "FAILED"] } },
+        // Settled, but for less than was owed — an admin typed a smaller
+        // figure into Stripe. Real money moved, so the leg is SUCCEEDED and
+        // must stay so, but the remainder is still owed and would otherwise
+        // vanish from every screen.
+        { status: "SUCCEEDED", settledAmount: { not: null } },
+      ],
+    },
     orderBy: { createdAt: "asc" },
     include: {
       // The original payment the admin has to find in Stripe. Selected here
@@ -467,10 +557,36 @@ export async function getOutstandingRefundLegs() {
           createdAt: true,
           creditNote: { select: { number: true } },
           refundReceiptNumber: true,
+          // A rendez-vous is charged as a Stripe Connect DIRECT charge on
+          // the staff member's own account, so it does not exist on the
+          // platform account at all. The worklist's "Ouvrir dans Stripe"
+          // link has to carry that account id or it sends the admin to a
+          // dashboard where the payment simply is not there.
+          payment: {
+            select: {
+              appointment: {
+                select: { staff: { select: { stripeAccountId: true, user: { select: { fullName: true } } } } },
+              },
+            },
+          },
         },
       },
     },
   });
 
-  return { success: true, data: serializeDecimalFields(legs) };
+  return {
+    success: true,
+    data: serializeDecimalFields(
+      legs.map((leg) => {
+        const staff = leg.refundOperation?.payment?.appointment?.staff ?? null;
+        return {
+          ...leg,
+          // Null for every platform charge (boutique, atelier, formation),
+          // which is the normal case; set only for a Connect direct charge.
+          connectedAccountId: staff?.stripeAccountId ?? null,
+          connectedAccountStaffName: staff?.user?.fullName ?? null,
+        };
+      }),
+    ),
+  };
 }

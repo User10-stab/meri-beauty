@@ -25,16 +25,11 @@ describe("every REFUND transaction row can be linked to the credit note that fun
     expect(model).toContain("@@index([creditNoteId])");
   });
 
-  test("pinPendingRefund persists the credit note id so an interrupted refund can still link it on retry", () => {
+  test("pinPendingRefund persists the credit note id so an interrupted refund can still be reconciled", () => {
     const helper = source("lib/payments/pin-pending-refund.js");
     expect(helper).toContain("export function pinPendingRefund(tx, paymentId, amount, idempotencyKey, creditNoteId = null)");
     expect(helper).toContain("pendingRefundCreditNoteId: creditNoteId");
     expect(helper).toContain("pendingRefundCreditNoteId: null"); // cleared in clearPendingRefund
-  });
-
-  test("the retry cron links the credit note it was pinned with, not a fresh guess", () => {
-    const retry = source("lib/payments/retry-failed-refunds.js");
-    expect(retry).toContain("creditNoteId: payment.pendingRefundCreditNoteId");
   });
 
   // Every synchronous call site that both issues a credit note and creates
@@ -118,8 +113,17 @@ describe("the isolated credit note is gone — a document is never issued withou
     expect(rowActions).toContain("CancelAndRefundDialog");
     // Keyed on paymentId, not on the invoice: a B2C sale has no invoice and
     // must still be refundable.
-    expect(rowActions).toContain("const canCancelAndRefund = Boolean(paymentId)");
-    expect(rowActions).toContain('transaction?.transactionType !== "DEPOSIT"');
+    expect(rowActions).toContain("Boolean(paymentId)");
+    // Only a DEPOSIT or FINAL_PAYMENT row is a valid entry point. A REFUND
+    // row is evidence money already moved — offering a second
+    // cancel-and-refund on it would let an admin queue a refund against a
+    // refund. Never DEPOSIT once a balance exists, so the FINAL_PAYMENT row
+    // stays the payment's single entry point.
+    expect(rowActions).toContain('["DEPOSIT", "FINAL_PAYMENT"].includes(transaction?.transactionType)');
+    // An invoice already fully covered by its credit notes has nothing left
+    // to unwind — offering the button again would let an admin credit it
+    // twice.
+    expect(rowActions).toContain("invoiceFullyCredited");
   });
 
   test("the dialog states every consequence before the admin commits", () => {

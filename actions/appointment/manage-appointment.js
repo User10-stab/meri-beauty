@@ -2,7 +2,6 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { stripe } from "@/lib/stripe";
 import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
@@ -11,7 +10,8 @@ import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { resolveServiceVatPolicy, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer, calculateVatTotals } from "@/lib/tax-policy";
-import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
+import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
+import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
@@ -271,7 +271,7 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
             },
           },
         },
-        payment: { include: { invoice: true } },
+        payment: { include: { invoice: true, transactions: true } },
       },
     });
 
@@ -395,8 +395,12 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       }
     }
 
-    const needsRefund = wasPaid && payment.transactionReference && remaining > REFUND_EPSILON;
-    const refundIdempotencyKey = needsRefund ? buildRefundIdempotencyKey("appt-reject", payment.id) : null;
+    // Note this no longer requires payment.transactionReference: a rendez-vous
+    // settled in cash at the counter used to fall through here refunding
+    // nothing AND issuing no credit note (same bug already fixed in
+    // cancelWorkshopReservation/cancelFormationReservation). Cash now queues
+    // a hand-over leg like any other method.
+    const needsRefund = wasPaid && remaining > REFUND_EPSILON;
     const cancellationReasonWithForfeit =
       forfeitAmount > REFUND_EPSILON
         ? `${cancellationReason} (acompte retenu : ${forfeitAmount.toFixed(2)} €)`
@@ -451,11 +455,28 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
         });
       }
 
-      // Pinned in the same transaction that commits the cancellation itself
-      // — see lib/payments/pin-pending-refund.js's doc comment for why this
-      // has to happen before the Stripe call below, not just in its catch.
+      // Confirmed policy (2026-09-02): the application never issues a Stripe
+      // refund itself — every card refund is performed by hand in the
+      // Stripe dashboard by an OWNER/ADMIN. This records what is owed as a
+      // RefundOperation whose legs carry the precise amount and
+      // payment_intent to refund against; it surfaces on
+      // /dashboard/operations until someone has actually done it, and the
+      // charge.refunded webhook settles it.
+      let refundQueued = false;
       if (needsRefund) {
-        await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey, creditNote?.id ?? null);
+        const queued = await queueManualRefund(tx, {
+          paymentId: payment.id,
+          source: "APPOINTMENT",
+          trigger: "SALON_CANCELLATION",
+          reason: cancellationReasonWithForfeit,
+          amount: remaining,
+          transactions: payment.transactions,
+          creditNoteId: creditNote?.id ?? null,
+          invoiceId: payment.invoice?.id ?? null,
+          decidedByUserId: authCheck.userId,
+          customerIsBusiness: isBusinessRefundCustomer(appointment.user),
+        });
+        refundQueued = Boolean(queued);
       }
 
       const serviceName = appointment.staffService?.service?.name;
@@ -479,60 +500,20 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
         );
       }
 
-      return { claimed: true, creditNoteId: creditNote?.id ?? null };
+      return { claimed: true, creditNoteId: creditNote?.id ?? null, refundQueued };
     });
 
     if (!claimed?.claimed) {
       return { success: true, message: "Ce rendez-vous est déjà annulé." };
     }
 
-    // Payment.status / the REFUND ledger row are only written once Stripe
-    // actually confirms the refund — writing them unconditionally beforehand
-    // would tell the customer "refunded" even if the Stripe call below fails.
-    // pendingRefundAmount/idempotencyKey were already pinned inside the
-    // cancellation transaction above.
-    let refundFailed = false;
-    if (needsRefund) {
-      try {
-        const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
-        if (stripeSession.payment_intent) {
-          await stripe.refunds.create(
-            { payment_intent: stripeSession.payment_intent, amount: Math.round(remaining * 100) },
-            { idempotencyKey: refundIdempotencyKey }
-          );
-          const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
-          await prisma.$transaction([
-            clearPendingRefund(prisma, payment.id, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED"),
-            prisma.transaction.create({
-              data: {
-                paymentId: payment.id,
-                amount: remaining,
-                method: "ONLINE",
-                transactionType: "REFUND",
-                paidAt: new Date(),
-                stripePaymentIntentId: stripeSession.payment_intent,
-                creditNoteId: claimed.creditNoteId,
-              },
-            }),
-          ]);
-        }
-      } catch (err) {
-        // The appointment cancellation and credit note are already
-        // committed and stay — surface the refund failure loudly so it can
-        // be retried/handled manually, rather than silently swallowing it.
-        // pendingRefundAmount/idempotencyKey are left set (not cleared) so
-        // the cron retry job (lib/payments/retry-failed-refunds.js) can pick
-        // it up even if this email is missed.
-        console.error("[rejectAppointment] REFUND FAILED for appointment", appointmentId, err);
-        refundFailed = true;
-        await markRefundFailed(prisma, payment.id, err);
-      }
-    }
-
-    const refundNote = wasPaid
-      ? refundFailed
-        ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
-        : " Le remboursement apparaîtra sur votre compte sous quelques jours."
+    // Never "already refunded": nothing here calls Stripe, so the only two
+    // honest states are "there is nothing owed" and "it is queued, waiting
+    // on an admin to pay it back by hand or hand it over" — the customer is
+    // told the money moved only once notify-refund-complete.js actually
+    // confirms that, after settlement.
+    const refundNote = claimed.refundQueued
+      ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
       : "";
 
     // Use the proper email template based on whether this is a manual rejection or a cancellation
@@ -569,28 +550,21 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       }).catch((err) => console.error("[rejectAppointment] cancellation email failed:", err));
     }
 
-    if (refundFailed) {
-      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
-      if (salon?.email) {
-        sendEmail({
-          to: salon.email,
-          subject: `⚠️ Remboursement Stripe échoué – Rendez-vous ${appointment.user.fullName}`,
-          text: `Le remboursement Stripe pour le rendez-vous de ${appointment.user.fullName} (${appointment.user.email}) du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a échoué. Traitement manuel requis dans le dashboard Stripe.`,
-          html: `<p>Le remboursement Stripe pour le rendez-vous de ${appointment.user.fullName} (${appointment.user.email}) du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
-        }).catch((err) => console.error("[rejectAppointment] refund-failure alert email failed:", err));
-      }
-    }
-
     return {
       success: true,
       message: isManualRejection
         ? "Demande de rendez-vous refusée"
         : wasPaid
-          ? refundFailed
-            ? "Rendez-vous annulé. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
-            : "Rendez-vous annulé — le client sera remboursé."
+          ? claimed.refundQueued
+            ? "Rendez-vous annulé. Le remboursement est à effectuer — voir « Remboursements dus » dans Opérations."
+            : "Rendez-vous annulé."
           : "Rendez-vous annulé",
-      refundFailed,
+      // Kept for actions/reservation/cancellation-exception-request.js, which
+      // still reads this field — always false now, since a refund that
+      // cannot be recorded throws inside the transaction above and the whole
+      // cancellation rolls back with it, rather than half-succeeding.
+      refundFailed: false,
+      refundQueued: claimed.refundQueued,
     };
   } catch (error) {
     console.error("[rejectAppointment]", error);

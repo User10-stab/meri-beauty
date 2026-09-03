@@ -26,15 +26,20 @@ const mocks = vi.hoisted(() => {
       $transaction: vi.fn(async (fn) => fn(tx)),
       refundOperation: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
       refundLeg: { findFirst: vi.fn() },
+      salon: { findUnique: vi.fn() },
     },
     sendEmail: vi.fn(async () => ({ success: true })),
     renderCreditNotePdf: vi.fn(async () => Buffer.from("pdf")),
+    renderRefundReceiptPdf: vi.fn(async () => Buffer.from("refund-receipt")),
   };
 });
 
 vi.mock("@/lib/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/email", () => ({ sendEmail: mocks.sendEmail }));
-vi.mock("@/lib/pdf/render", () => ({ renderCreditNotePdf: mocks.renderCreditNotePdf }));
+vi.mock("@/lib/pdf/render", () => ({
+  renderCreditNotePdf: mocks.renderCreditNotePdf,
+  renderRefundReceiptPdf: mocks.renderRefundReceiptPdf,
+}));
 vi.mock("@/lib/email-templates", () => ({
   brandedHtml: (title, body) => `<html>${title}${body}</html>`,
   escapeHtml: (value) => String(value),
@@ -76,6 +81,7 @@ beforeEach(() => {
   mocks.tx.payment.update.mockResolvedValue({});
   mocks.tx.auditLog.create.mockResolvedValue({});
   mocks.sendEmail.mockResolvedValue({ success: true });
+  mocks.prisma.salon.findUnique.mockResolvedValue({ name: "Meri Beauty", address: "Bruxelles", vatNumber: "BE0123456789" });
 });
 
 describe("settleRefundLeg", () => {
@@ -288,5 +294,33 @@ describe("notifyRefundComplete", () => {
 
     expect(mocks.sendEmail.mock.calls[0][0].text).toContain("RB2026-000004");
     expect(mocks.renderCreditNotePdf).not.toHaveBeenCalled();
+    expect(mocks.renderRefundReceiptPdf).toHaveBeenCalledOnce();
+    expect(mocks.sendEmail.mock.calls[0][0].attachments[0].filename).toBe("justificatif-remboursement-RB2026-000004.pdf");
+  });
+
+  it("never sends a B2C refund receipt to a business customer", async () => {
+    mocks.prisma.refundOperation.findUnique.mockResolvedValue(
+      operation({
+        refundReceiptNumber: "RB2026-000005",
+        payment: {
+          workshopReservation: {
+            session: { workshop: { title: "Atelier pro" } },
+            customer: {
+              fullName: "Entreprise Test",
+              email: "finance@example.com",
+              isCompany: true,
+              vatNumber: "BE0751854027",
+              vatValidatedAt: new Date(),
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await notifyRefundComplete({ prisma: mocks.prisma, operationId: "op-1" });
+
+    expect(result).toMatchObject({ sent: false, reason: "B2B_REFUND_RECEIPT_FORBIDDEN" });
+    expect(mocks.renderRefundReceiptPdf).not.toHaveBeenCalled();
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 });

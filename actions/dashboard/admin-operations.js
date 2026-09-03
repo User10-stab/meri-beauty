@@ -7,6 +7,7 @@ import { isAdminRole } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { TYPE_FILTERS, STATUS_FILTERS } from "@/lib/dashboard/operation-filters";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
+import { summarizeRefundState } from "@/lib/refunds/plan-refund";
 
 const ADMIN_OPERATION_TABS = Object.freeze(["transactions", "orders", "workshops", "formations"]);
 const PAGE_SIZE = 30;
@@ -108,6 +109,13 @@ export async function getAdminOperations(params = {}) {
                     },
                   },
                 },
+                // The transaction overview needs the whole payment ledger to
+                // decide whether a new refund is still possible. Looking at a
+                // DEPOSIT row alone would keep the action visible after that
+                // exact amount was already refunded on a sibling REFUND row.
+                transactions: {
+                  select: { amount: true, transactionType: true, isDeleted: true },
+                },
                 order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
                 workshopReservation: { select: { id: true, session: { select: { workshop: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
                 formationReservation: { select: { id: true, session: { select: { formation: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
@@ -123,10 +131,22 @@ export async function getAdminOperations(params = {}) {
       // those two "no invoice" cases apart.
       result = {
         totalCount,
-        data: data.map((row) => ({
-          ...row,
-          customerInvoiceEligible: hasInvoiceableVatIdentity(resolveTransactionCustomer(row.payment)),
-        })),
+        data: data.map((row) => {
+          const refundState = summarizeRefundState({
+            transactions: row.payment?.transactions ?? [],
+            invoice: row.payment?.invoice ?? null,
+          });
+
+          return {
+            ...row,
+            customerInvoiceEligible: hasInvoiceableVatIdentity(resolveTransactionCustomer(row.payment)),
+            refundState: {
+              remainingRefundable: refundState.remainingRefundable,
+              fullyRefunded: refundState.fullyRefunded,
+              inconsistencies: refundState.inconsistencies,
+            },
+          };
+        }),
       };
     } else if (tab === "orders") {
       const where = status !== "ALL" ? { status } : {};
@@ -276,6 +296,9 @@ export async function getTransactionDetail(transactionId) {
         // This row's own credit note, if any — not every credit note ever
         // issued against the invoice (see getAdminOperations' same choice).
         creditNote: { select: { id: true, number: true, issuedAt: true, reason: true, totalInclVat: true } },
+        settledRefundLeg: {
+          select: { refundOperation: { select: { id: true, refundReceiptNumber: true, status: true } } },
+        },
         payment: {
           include: {
             invoice: {

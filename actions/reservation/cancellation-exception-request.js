@@ -296,7 +296,7 @@ export async function reviewCancellationExceptionRequest(input) {
     success: true,
     message: result.refundFailed
       ? "Demande approuvée et rendez-vous annulé, mais le remboursement Stripe a échoué. Il reste signalé pour relance par l'équipe."
-      : "Demande approuvée : le rendez-vous est annulé et l'acompte est remboursé intégralement.",
+      : "Demande approuvée : le rendez-vous est annulé. Le remboursement de l'acompte reste à effectuer.",
     refundFailed: result.refundFailed === true,
   };
 }

@@ -12,6 +12,8 @@ import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-wor
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
+import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
+import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 
 const SESSION_CHANGE_FEE_RATE = 0.1; // 10% of the reservation's total price
 
@@ -113,6 +115,7 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
     // nothing AND issuing no credit note. Cash now queues a hand-over leg
     // like any other method.
     let refundQueued = false;
+    let queuedRefundAmount = 0;
     const REFUND_EPSILON = 0.01;
     if (refundDeposit && reservation.payment) {
       const payment = reservation.payment;
@@ -166,8 +169,10 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
             invoiceId: payment.invoice?.id ?? null,
             decidedByUserId: session.user.id,
             activityType: reservation.session.workshop.type,
+            customerIsBusiness: isBusinessRefundCustomer(reservation.customer),
           });
           refundQueued = Boolean(queued);
+          if (queued) queuedRefundAmount = remaining;
         });
       }
     } else if (
@@ -185,16 +190,18 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       // deposit.
       const payment = reservation.payment;
       await prisma.$transaction(async (tx) => {
-        await issueInvoice(tx, {
-          paymentId: payment.id,
-          source: "WORKSHOP",
-          totalInclVat: Number(payment.paidAmount),
-          customer: buildInvoiceCustomer(reservation.customer),
-          lines: buildServiceInvoiceLines({
-            description: `Annulation — acompte non remboursable — ${reservation.session.workshop.title}`,
-            totalAmount: Number(payment.paidAmount),
-          }),
-        });
+        if (hasInvoiceableVatIdentity(reservation.customer)) {
+          await issueInvoice(tx, {
+            paymentId: payment.id,
+            source: "WORKSHOP",
+            totalInclVat: Number(payment.paidAmount),
+            customer: buildInvoiceCustomer(reservation.customer),
+            lines: buildServiceInvoiceLines({
+              description: `Annulation — acompte non remboursable — ${reservation.session.workshop.title}`,
+              totalAmount: Number(payment.paidAmount),
+            }),
+          });
+        }
         await tx.payment.update({ where: { id: payment.id }, data: { status: "PAID" } });
       });
     }
@@ -209,12 +216,16 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
         customerName: reservation.customer.fullName,
         activityTitle: reservation.session.workshop.title,
         sessionDate: formatSessionDate(reservation.session.startDate),
-        // Always false now. The money has NOT moved at this point — an
-        // admin still has to refund it in Stripe or hand it over. Telling
-        // the customer "remboursé" here is exactly the claim the handoff
-        // forbids; lib/refunds/notify-refund-complete.js sends that message
-        // once, after every leg has actually settled.
+        // Never `refunded: true` here — the money has NOT moved at this
+        // point; an admin still has to refund it in Stripe or hand it over,
+        // and lib/refunds/notify-refund-complete.js announces that later,
+        // once. But `false` alone used to mean "l'acompte n'est pas
+        // remboursable", which told a customer whose refund had just been
+        // approved the exact opposite. Hence the third state.
         refunded: false,
+        refundPending: refundQueued,
+        refundAmount: refundQueued ? queuedRefundAmount : null,
+        decisionNote: reason?.trim() || null,
       }),
     }).catch((err) => console.error("[cancelWorkshopReservation] email failed:", err));
 
@@ -492,4 +503,4 @@ export async function markWorkshopReservationNoShow(reservationId) {
   if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
   return result;
 }
-
+

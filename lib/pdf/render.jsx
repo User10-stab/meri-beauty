@@ -2,6 +2,7 @@ import { renderToBuffer } from "@react-pdf/renderer";
 import { prisma } from "@/lib/prisma";
 import { InvoiceDocument, CreditNoteDocument } from "./InvoiceDocument";
 import { TicketDocument } from "./TicketDocument";
+import { RefundReceiptDocument } from "./RefundReceiptDocument";
 import { getSellerContact } from "./seller-contact";
 
 /**
@@ -87,4 +88,9 @@ export async function renderCreditNotePdf(creditNote, invoice) {
       invoice={serializeInvoice(invoice)}
     />
   );
+}
+
+export async function renderRefundReceiptPdf(operation, receipt) {
+  const contact = await getSellerContact();
+  return renderToBuffer(<RefundReceiptDocument contact={contact} receipt={{ ...receipt, legs: operation.legs }} />);
 }

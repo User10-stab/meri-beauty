@@ -355,7 +355,7 @@ export async function reviewReservationCancellationRequest(input) {
     success: true,
     message: result.refundFailed
       ? "Demande approuvée et réservation annulée, mais le remboursement Stripe a échoué. Il reste signalé pour relance par l'équipe."
-      : "Demande approuvée : la réservation est annulée et l'acompte est remboursé.",
+      : "Demande approuvée : la réservation est annulée. Le remboursement de l'acompte reste à effectuer — voir « Remboursements dus » dans Opérations.",
     refundFailed: result.refundFailed === true,
   };
 }

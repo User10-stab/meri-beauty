@@ -144,6 +144,7 @@ function Transactions({ rows, onOpenDetail }) {
                   transaction={{ id: row.id, transactionType: row.transactionType, hasInvoice: Boolean(invoice) }}
                   orderId={row.payment?.order?.id ?? null}
                   paymentId={row.payment?.id ?? null}
+                  remainingRefundable={row.refundState?.remainingRefundable ?? null}
                   onOpenDetail={() => onOpenDetail(row.id)}
                 />
               </TableCell>

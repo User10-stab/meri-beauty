@@ -66,7 +66,27 @@ function OperationMeta({ leg }) {
  */
 function StripeLegRow({ leg }) {
   const paymentIntentId = leg.stripePaymentIntentId ?? leg.sourceTransaction?.stripePaymentIntentId ?? null;
-  const stripeUrl = paymentIntentId ? `https://dashboard.stripe.com/payments/${paymentIntentId}` : null;
+
+  // A rendez-vous is a Connect DIRECT charge on the staff member's own
+  // Stripe account, so it does not appear on the platform dashboard at all.
+  // Linking to /payments/<pi> without the account id sends the admin to a
+  // page where the payment does not exist — and the natural next move from
+  // there is to go looking for it, or to assume it is already refunded.
+  const account = leg.connectedAccountId ?? null;
+  const stripeUrl = paymentIntentId
+    ? account
+      ? `https://dashboard.stripe.com/${account}/payments/${paymentIntentId}`
+      : `https://dashboard.stripe.com/payments/${paymentIntentId}`
+    : null;
+
+  // A leg that settled for less than it owed: real money moved, so it is
+  // SUCCEEDED, but the remainder is still the customer's. What must be
+  // refunded now is the shortfall, NOT the original figure — showing the
+  // original here would walk the admin straight into refunding it twice.
+  const alreadySettled = leg.settledAmount == null ? 0 : Number(leg.settledAmount);
+  const shortfall = Number(leg.amount) - alreadySettled;
+  const isPartial = leg.status === "SUCCEEDED" && alreadySettled > 0 && shortfall > 0.01;
+  const amountDue = isPartial ? shortfall : Number(leg.amount);
 
   return (
     <li className="rounded-xl border border-blue-200 bg-blue-50/60 p-4">
@@ -74,9 +94,16 @@ function StripeLegRow({ leg }) {
         <div className="min-w-[220px]">
           <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
             <CreditCard size={15} />
-            {money(leg.amount)} — à rembourser dans Stripe
+            {money(amountDue)} — à rembourser dans Stripe
           </p>
           <OperationMeta leg={leg} />
+          {isPartial && (
+            <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-amber-800">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              Déjà remboursé {money(alreadySettled)} sur {money(leg.amount)} — il reste{" "}
+              {money(shortfall)}.
+            </p>
+          )}
           {leg.status === "FAILED" && leg.failureReason && (
             <p className="mt-1.5 flex items-start gap-1.5 text-[12px] text-red-700">
               <AlertTriangle size={13} className="mt-0.5 shrink-0" /> {leg.failureReason}
@@ -86,9 +113,16 @@ function StripeLegRow({ leg }) {
 
         <div className="min-w-[280px] flex-1">
           <p className="mb-2 rounded-lg border border-blue-300 bg-white px-3 py-2 text-[12px] text-blue-900">
-            Remboursez <strong>exactement {money(leg.amount)}</strong> — pas le total de la facture. Seul
+            Remboursez <strong>exactement {money(amountDue)}</strong> — pas le total de la facture. Seul
             ce montant est passé par Stripe.
           </p>
+          {account && (
+            <p className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+              Paiement encaissé sur le compte Stripe de{" "}
+              <strong>{leg.connectedAccountStaffName ?? "l'intervenant"}</strong> — il n&apos;apparaît pas
+              sur le compte principal. Utilisez le lien ci-dessous.
+            </p>
+          )}
           {paymentIntentId ? (
             <p className="mb-2 font-mono text-[11px] break-all text-gray-600">{paymentIntentId}</p>
           ) : (
@@ -204,7 +238,12 @@ export function OutstandingRefunds({ legs }) {
 
   const stripeLegs = legs.filter((leg) => leg.method === "ONLINE");
   const inPersonLegs = legs.filter((leg) => leg.method !== "ONLINE");
-  const total = legs.reduce((sum, leg) => sum + Number(leg.amount), 0);
+  // What is still owed — a partially settled leg contributes only its
+  // remainder, never the figure it started at.
+  const total = legs.reduce(
+    (sum, leg) => sum + (Number(leg.amount) - Number(leg.settledAmount ?? 0)),
+    0,
+  );
 
   return (
     <section className="rounded-2xl border border-amber-300 bg-white p-5">

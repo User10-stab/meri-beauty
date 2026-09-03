@@ -164,6 +164,8 @@ enum RefundOperationSource {
 // received return), and openRefundOperation refuses to build an operation
 // whose trigger it cannot substantiate. See lib/refunds/authorize.js.
 enum RefundTrigger {
+  // Customer used the normal self-cancellation path before the appointment.
+  CUSTOMER_SELF_CANCELLATION
   // An AppointmentCancellationRequest / ReservationCancellationRequest the
   // customer wrote and an OWNER/ADMIN approved. The written message is
   // mandatory even more than 48h before the prestation.
@@ -174,6 +176,9 @@ enum RefundTrigger {
   // Exceptional refund of a no-show. The booking KEEPS its NO_SHOW status;
   // only a financial correction is recorded against it.
   NO_SHOW_EXCEPTION
+  // Goodwill or quality correction after a completed prestation. It never
+  // reopens, cancels, or changes the historical booking.
+  FINANCIAL_CORRECTION
   // Boutique return, after the goods physically came back.
   SHOP_RETURN
 }

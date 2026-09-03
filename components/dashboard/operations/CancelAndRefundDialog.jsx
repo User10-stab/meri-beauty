@@ -46,6 +46,11 @@ const TRIGGERS = Object.freeze([
     label: "Exception — absence (no-show)",
     hint: "Conserve le statut NO_SHOW et n'enregistre qu'une correction financière. Motif obligatoire, audit renforcé.",
   },
+  {
+    value: "FINANCIAL_CORRECTION",
+    label: "Correction financière",
+    hint: "Pour un service déjà terminé ou une correction commerciale. Le statut et les places restent inchangés.",
+  },
 ]);
 
 function Row({ label, value, tone = "default" }) {
@@ -66,20 +71,22 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
   const router = useRouter();
   const [trigger, setTrigger] = useState("SALON_CANCELLATION");
   const [reason, setReason] = useState("");
+  const [requestedAmount, setRequestedAmount] = useState("");
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const result = await previewCancelAndRefund({ paymentId, trigger, reason });
+    const correctionAmount = trigger === "FINANCIAL_CORRECTION" ? requestedAmount || null : null;
+    const result = await previewCancelAndRefund({ paymentId, trigger, reason, requestedAmount: correctionAmount });
     setLoading(false);
     if (result.success) setPreview(result.data);
     else {
       setPreview(null);
       toast.error(result.message);
     }
-  }, [paymentId, trigger, reason]);
+  }, [paymentId, trigger, reason, requestedAmount]);
 
   // Re-previews when the trigger changes, because the trigger decides
   // whether the item is cancelled at all (NO_SHOW keeps its status) and
@@ -94,6 +101,12 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
   }, [open, paymentId, trigger]);
 
   useEffect(() => {
+    if (open && preview?.currentStatus === "COMPLETED" && trigger === "SALON_CANCELLATION") {
+      setTrigger("FINANCIAL_CORRECTION");
+    }
+  }, [open, preview?.currentStatus, trigger]);
+
+  useEffect(() => {
     if (!open) return;
     function onKey(event) {
       if (event.key === "Escape" && !submitting) onClose();
@@ -105,13 +118,22 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
   if (!open) return null;
 
   const reasonTooShort = reason.trim().length < 10;
+  const isFinancialCorrection = trigger === "FINANCIAL_CORRECTION";
   const blocked = Boolean(preview?.blockedReason);
   const canConfirm = Boolean(preview) && !blocked && !reasonTooShort && !submitting && !loading;
 
   async function handleConfirm() {
     if (!canConfirm) return;
     setSubmitting(true);
-    const result = await cancelAndRefund({ paymentId, trigger, reason: reason.trim() });
+    const result = await cancelAndRefund({
+      paymentId,
+      trigger,
+      reason: reason.trim(),
+      // A normal cancellation always returns exactly what remains owed. A
+      // free amount belongs only to the separately auditable financial-
+      // correction flow.
+      requestedAmount: isFinancialCorrection && requestedAmount !== "" ? Number(requestedAmount) : null,
+    });
     setSubmitting(false);
     if (result.success) {
       toast.success(result.message);
@@ -139,11 +161,10 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
           </div>
           <div>
             <h2 id="cancel-refund-title" className="text-base font-semibold text-gray-900">
-              Annuler et générer la note de crédit
+              Annuler ou corriger financièrement
             </h2>
             <p className="mt-1 text-[13px] text-gray-500">
-              Cette opération annule l&apos;élément, crédite la facture et rembourse le client. Elle est
-              définitive.
+              Selon le motif choisi, elle annule l&apos;élément ou conserve son historique, puis prépare le remboursement. Elle ne rembourse rien elle-même.
             </p>
           </div>
         </div>
@@ -248,8 +269,32 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
               />
             </div>
 
+            {isFinancialCorrection ? (
+              <>
+                <label className="mb-1.5 block text-[13px] font-medium text-gray-700" htmlFor="refund-amount">
+                  Montant de la correction financière
+                </label>
+                <input
+                  id="refund-amount"
+                  type="number"
+                  min="0.01"
+                  max={String(preview.remainingRefundable ?? "")}
+                  step="0.01"
+                  value={requestedAmount}
+                  onChange={(event) => setRequestedAmount(event.target.value)}
+                  onBlur={load}
+                  className="mb-4 w-full rounded-lg border border-gray-300 p-2 text-[13px] focus:border-gray-900 focus:outline-none"
+                  placeholder={String(preview.remainingRefundable ?? preview.creditedTotal ?? "")}
+                />
+              </>
+            ) : (
+              <p className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">
+                <strong>Montant automatique :</strong> {money(preview.remainingRefundable)} sera remboursé. Ce montant correspond au solde réellement encaissé et non encore remboursé ; les frais Stripe ne sont pas déduits du client.
+              </p>
+            )}
+
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-              <strong>Cette action ne rembourse rien.</strong> Elle annule, libère et produit le document.
+              <strong>Cette action ne rembourse rien.</strong> Elle prépare le document et, selon le motif, annule ou conserve l&apos;historique.
               Les remboursements restent à effectuer : dans Stripe pour la partie en ligne, en main propre
               pour le reste. Ils apparaîtront en haut de cette page tant qu&apos;ils ne sont pas faits, et
               le client ne sera informé qu&apos;une fois tout confirmé.
@@ -304,7 +349,7 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
             className="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-[13px] font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submitting ? <Loader2 size={15} className="animate-spin" /> : null}
-            Annuler et rembourser
+            Confirmer l&apos;opération
           </button>
         </div>
       </div>

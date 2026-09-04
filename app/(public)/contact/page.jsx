@@ -51,7 +51,7 @@ export default async function ContactPage() {
           <div className="relative h-[450px] w-full overflow-hidden rounded-2xl bg-primary/10 shadow-lg p-2">
             {/* Placeholder for Google Maps or other map service */}
             <iframe
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d20139.178511640624!2d4.296542632110687!3d50.87935641519008!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x47c3c3eea4dee6f9%3A0x7fff6026e637a25d!2s1090%20Jette%2C%20Belgique!5e0!3m2!1sfr!2sma!4v1784551549677!5m2!1sfr!2sma"
+              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d2517.100527249424!2d4.32089157695584!3d50.88484975599088!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x47c3c3d1777fcfc5%3A0x6655490c3339e628!2sRue%20Bonaventure%20113%2C%201090%20Jette%2C%20Belgique!5e0!3m2!1sfr!2sma!4v1788451246715!5m2!1sfr!2sma"
               width="100%"
               height="100%"
               style={{ border: 0 }}
@@ -59,7 +59,8 @@ export default async function ContactPage() {
               loading="lazy"
               referrerPolicy="strict-origin-when-cross-origin"
               className="rounded-2xl"
-/>
+              />
+
               
             {/* <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">

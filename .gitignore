@@ -79,3 +79,7 @@ mailpit.exe
 
 # local AI/dev assistant state
 .claude/
+
+# GitHub Actions SSH keys
+github-actions
+github-actions.pub

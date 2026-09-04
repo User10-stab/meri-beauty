@@ -422,6 +422,9 @@
     @apply bg-gray-2 text-dark-5 dark:text-dark-6 dark:bg-[#020D1A];
   }
 }
+.style-script {
+  font-family: var(--font-style-script);
+}
 
 /* third-party libraries CSS */
 

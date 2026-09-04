@@ -10,7 +10,7 @@ import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-ve
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/lib/promo-codes";
 import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
-import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
+import { validateCustomerIdentity, validateBillingAddress } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
@@ -402,6 +402,29 @@ export async function createFormationReservation(data) {
         where: { id: user.id },
         data: { isCompany: true, vatNumber: vatNumberToSave, ...(vatValidation ?? {}) },
       });
+    }
+
+    // A booking that will be invoiced as B2B needs a billing address on file
+    // — issueInvoice's assertBuyerLegalDataComplete (lib/invoicing.js) throws
+    // BUYER_LEGAL_DATA_INCOMPLETE without one, and guest checkout here never
+    // asked for one (unlike registration, which has required it for a
+    // while — see the User.addressLine1 field comment). Confirmed bug (F1):
+    // a full-price B2B guest booking used to charge the card via Stripe
+    // Checkout and then roll back this entire transaction on that throw,
+    // leaving a captured payment with no Payment row at all. Gated on
+    // vatNumberToSave (not just "isFullPayment") because the same throw
+    // hits later, unattended moments too — settling a deposit's balance in
+    // the salon, or invoicing a forfeited deposit on cancellation.
+    if (vatNumberToSave && !user.addressLine1) {
+      const addressValidation = validateBillingAddress(customerInfo);
+      if (!addressValidation.success) {
+        return {
+          success: false,
+          field: addressValidation.field,
+          message: `${addressValidation.message} Elle est obligatoire pour une réservation avec numéro de TVA.`,
+        };
+      }
+      user = await prisma.user.update({ where: { id: user.id }, data: addressValidation.data });
     }
 
     // Returning customer, or an account predating consent tracking.

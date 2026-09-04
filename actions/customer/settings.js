@@ -201,6 +201,11 @@ export async function getMyCheckoutProfile() {
       isCompany: true,
       vatNumber: true,
       vatValidatedAt: true,
+      addressLine1: true,
+      addressLine2: true,
+      addressCity: true,
+      addressPostalCode: true,
+      addressCountry: true,
     },
   });
   if (!user) return { success: false };
@@ -214,6 +219,12 @@ export async function getMyCheckoutProfile() {
       isCompany: user.isCompany,
       vatNumber: user.vatNumber ?? "",
       vatValidatedAt: user.vatValidatedAt,
+      addressLine1: user.addressLine1 ?? "",
+      addressLine2: user.addressLine2 ?? "",
+      addressCity: user.addressCity ?? "",
+      addressPostalCode: user.addressPostalCode ?? "",
+      addressCountry: user.addressCountry ?? "BE",
+      hasAddressOnFile: Boolean(user.addressLine1 && user.addressCity && user.addressPostalCode),
     },
   };
 }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  prisma: { payment: { findFirst: vi.fn() } },
+  prisma: { payment: { findFirst: vi.fn() }, notification: { findFirst: vi.fn() } },
   stripe: { checkout: { sessions: { list: vi.fn(), retrieve: vi.fn() } } },
   isForeignCheckoutSession: vi.fn(() => false),
   fulfillOrderPayment: vi.fn(),
@@ -49,6 +49,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.isForeignCheckoutSession.mockReturnValue(false);
   mocks.prisma.payment.findFirst.mockResolvedValue(null);
+  mocks.prisma.notification.findFirst.mockResolvedValue(null);
   mocks.stripe.checkout.sessions.retrieve.mockImplementation(async (id) => session({ id }));
 });
 
@@ -96,6 +97,23 @@ describe("reconcileMissedCheckouts", () => {
 
     expect(mocks.confirmWorkshopReservationPayment).not.toHaveBeenCalled();
     expect(result.reconciled).toBe(0);
+  });
+
+  it("skips a session that was already flagged for manual refund", async () => {
+    onePage([
+      session({
+        id: "cs_flagged",
+        payment_intent: "pi_flagged",
+        metadata: { kind: "workshop", reservationId: "r1", workshopAction: "deposit" },
+      }),
+    ]);
+    mocks.prisma.notification.findFirst.mockResolvedValueOnce({ id: "notification_1" });
+
+    const result = await reconcileMissedCheckouts();
+
+    expect(mocks.stripe.checkout.sessions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.confirmWorkshopReservationPayment).not.toHaveBeenCalled();
+    expect(result).toEqual({ checked: 1, reconciled: 0, flagged: 0, failures: [] });
   });
 
   it("skips sessions that are not actually paid", async () => {

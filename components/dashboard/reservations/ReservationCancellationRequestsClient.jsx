@@ -45,11 +45,12 @@ export function ReservationCancellationRequestsClient({ initialRequests }) {
     });
     setProcessingId(null);
     if (!result.success) return toast.error(result.message);
-    toast.success(result.message);
+    if (result.refundFailed) toast.warning(result.message);
+    else toast.success(result.message);
     setRequests((current) =>
       current.map((request) =>
         request.id === requestId
-          ? { ...request, status: decision, decisionNote: notes[requestId] ?? "", reviewedAt: new Date().toISOString() }
+          ? { ...request, status: decision, decisionNote: notes[requestId] ?? "", reviewedAt: new Date().toISOString(), refundFailed: result.refundFailed === true }
           : request
       )
     );
@@ -68,6 +69,9 @@ export function ReservationCancellationRequestsClient({ initialRequests }) {
       {requests.map((request) => {
         const pending = request.status === "PENDING";
         const info = describe(request);
+        const refundFailed =
+          request.status === "APPROVED" &&
+          (request.refundFailed === true || info.payment?.status === "REFUND_FAILED");
         return (
           <article
             key={request.id}
@@ -96,12 +100,14 @@ export function ReservationCancellationRequestsClient({ initialRequests }) {
                 className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold ${
                   pending
                     ? "bg-amber-50 text-amber-700"
-                    : request.status === "APPROVED"
+                    : request.status === "APPROVED" && !refundFailed
                     ? "bg-emerald-50 text-emerald-700"
-                    : "bg-red-50 text-red-700"
+                    : request.status === "REJECTED"
+                    ? "bg-red-50 text-red-700"
+                    : "bg-amber-50 text-amber-800"
                 }`}
               >
-                {pending ? "À traiter" : request.status === "APPROVED" ? "Acceptée" : "Refusée"}
+                {pending ? "À traiter" : refundFailed ? "Acceptée · remboursement à relancer" : request.status === "APPROVED" ? "Acceptée" : "Refusée"}
               </span>
             </div>
 
@@ -140,9 +146,14 @@ export function ReservationCancellationRequestsClient({ initialRequests }) {
                 </div>
               </div>
             ) : (
-              <p className="mt-3 text-sm text-gray-500 dark:text-dark-6">
-                Décision : {request.decisionNote || "Aucun message ajouté."}
-              </p>
+              <div className="mt-3 space-y-2 text-sm text-gray-500 dark:text-dark-6">
+                <p>Décision : {request.decisionNote || "Aucun message ajouté."}</p>
+                {refundFailed && (
+                  <p className="rounded-lg bg-amber-50 px-3 py-2 font-medium text-amber-800">
+                    La réservation est annulée, mais le remboursement Stripe doit encore être relancé.
+                  </p>
+                )}
+              </div>
             )}
           </article>
         );

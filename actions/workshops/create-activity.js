@@ -98,6 +98,13 @@ export async function createActivity(input) {
 
     const { animatorId, sessions, startDate, endDate, ...rest } = parsed.data;
 
+    if (rest.status === "PUBLISHED" && sessions.length === 0) {
+      return {
+        success: false,
+        message: "Une activité publiée doit avoir au moins une session planifiée.",
+      };
+    }
+
     if (animatorId) {
       const animatorExists = await prisma.animator.findUnique({ where: { id: animatorId } });
       if (!animatorExists) {
@@ -176,6 +183,13 @@ export async function updateActivity(input) {
 
     const { id, animatorId, sessions, startDate, endDate, ...rest } = parsed.data;
 
+    if (rest.status === "PUBLISHED" && sessions.length === 0) {
+      return {
+        success: false,
+        message: "Une activité publiée doit avoir au moins une session planifiée.",
+      };
+    }
+
     const existingActivity = await prisma.activity.findUnique({
       where: { id },
       include: { sessions: true },
@@ -218,18 +232,40 @@ export async function updateActivity(input) {
         };
       }
 
-      await prisma.workshopSession.deleteMany({ where: { id: { in: idsToDelete } } });
     }
 
-    const updated = await prisma.activity.update({
-      where: { id },
-      data: {
-        ...rest,
-        animatorId: animatorId || null,
-        sessions: {
-          create: sessions
-            .filter((s) => !s.id)
-            .map((s) => ({
+    const updated = await prisma.$transaction(async (tx) => {
+      if (idsToDelete.length > 0) {
+        await tx.workshopSession.deleteMany({ where: { id: { in: idsToDelete } } });
+      }
+
+      const result = await tx.activity.update({
+        where: { id },
+        data: {
+          ...rest,
+          animatorId: animatorId || null,
+          sessions: {
+            create: sessions
+              .filter((s) => !s.id)
+              .map((s) => ({
+                startDate: new Date(s.startDate),
+                endDate: s.endDate ? new Date(s.endDate) : null,
+                capacity: s.capacity,
+                animatorId: s.animatorId || null,
+                registrationDeadline: s.registrationDeadline
+                  ? new Date(s.registrationDeadline)
+                  : null,
+              })),
+          },
+        },
+        include: { sessions: true },
+      });
+
+      for (const s of sessions) {
+        if (s.id && incomingIds.includes(s.id)) {
+          await tx.workshopSession.update({
+            where: { id: s.id },
+            data: {
               startDate: new Date(s.startDate),
               endDate: s.endDate ? new Date(s.endDate) : null,
               capacity: s.capacity,
@@ -237,28 +273,13 @@ export async function updateActivity(input) {
               registrationDeadline: s.registrationDeadline
                 ? new Date(s.registrationDeadline)
                 : null,
-            })),
-        },
-      },
-      include: { sessions: true },
-    });
-
-    for (const s of sessions) {
-      if (s.id && incomingIds.includes(s.id)) {
-        await prisma.workshopSession.update({
-          where: { id: s.id },
-          data: {
-            startDate: new Date(s.startDate),
-            endDate: s.endDate ? new Date(s.endDate) : null,
-            capacity: s.capacity,
-            animatorId: s.animatorId || null,
-            registrationDeadline: s.registrationDeadline
-              ? new Date(s.registrationDeadline)
-              : null,
-          },
-        });
+            },
+          });
+        }
       }
-    }
+
+      return result;
+    });
 
     revalidatePath("/dashboard/workshops/activities");
     return {
@@ -291,25 +312,34 @@ export async function deleteActivity(id) {
       return { success: false, message: "Activité introuvable." };
     }
 
-    // Deleting an Activity cascades onto its sessions and, from there, onto
-    // every reservation booked on them — taking real customer bookings and
-    // their payment links with it. Booking history is financial history, so
-    // it is never destroyed as a side effect: an activity that is over gets
-    // archived (Activity.status ARCHIVED) rather than deleted.
-    const reservationCount = await prisma.workshopReservation.count({
+    // Cancelled, unpaid holds are not real bookings and may be removed with
+    // an activity. Active reservations and any reservation linked to a
+    // payment remain protected so deletion cannot erase financial history.
+    const reservations = await prisma.workshopReservation.findMany({
       where: { session: { workshopId: id } },
+      select: { id: true, status: true, payment: { select: { id: true } } },
     });
-    if (reservationCount > 0) {
+    const protectedReservations = reservations.filter(
+      (reservation) => reservation.status !== "CANCELLED" || reservation.payment
+    );
+    if (protectedReservations.length > 0) {
       return {
         success: false,
         message:
           `Impossible de supprimer « ${existingActivity.title} » : ` +
-          `${reservationCount} réservation${reservationCount > 1 ? "s y sont rattachées" : " y est rattachée"}. ` +
+          `${protectedReservations.length} réservation${protectedReservations.length > 1 ? "s y sont rattachées" : " y est rattachée"}. ` +
           `Passez son statut à « Archivé » pour la retirer de l'affichage sans perdre l'historique.`,
       };
     }
 
-    await prisma.activity.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      if (reservations.length > 0) {
+        await tx.workshopReservation.deleteMany({
+          where: { id: { in: reservations.map((reservation) => reservation.id) } },
+        });
+      }
+      await tx.activity.delete({ where: { id } });
+    });
 
     revalidatePath("/dashboard/workshops/activities");
     return { success: true, message: "Activité supprimée avec succès !" };

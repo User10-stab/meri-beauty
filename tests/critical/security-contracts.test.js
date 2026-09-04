@@ -40,6 +40,7 @@ describe("payment and webhook security contracts", () => {
   // and lib/formations/fulfill-formation-reservation-payment.js.
   const workshopFulfil = source("lib/workshops/fulfill-workshop-reservation-payment.js");
   const formationFulfil = source("lib/formations/fulfill-formation-reservation-payment.js");
+  const orderFulfil = source("lib/orders/fulfill-order-payment.js");
   const flagLib = source("lib/payments/flag-payment-for-manual-refund.js");
 
   test("Stripe webhook verifies signatures and persists idempotency keys", () => {
@@ -54,7 +55,7 @@ describe("payment and webhook security contracts", () => {
   // human to refund manually from the Stripe Dashboard instead (see
   // flagPaymentForManualRefund's own doc for the two incidents that led here).
   test("underpayments and invalid late payments are flagged for manual refund, never auto-refunded", () => {
-    const allSources = webhook + workshopFulfil + formationFulfil;
+    const allSources = webhook + workshopFulfil + formationFulfil + orderFulfil;
     expect(allSources).toContain("UNDERPAYMENT_EPSILON");
     expect(allSources.match(/reason:\s*["']underpayment["']/g)?.length).toBeGreaterThanOrEqual(3);
     expect(allSources.match(/await flagPaymentForManualRefund\(session,/g)?.length).toBeGreaterThanOrEqual(3);

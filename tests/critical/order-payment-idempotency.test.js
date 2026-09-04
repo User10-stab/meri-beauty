@@ -7,11 +7,15 @@ const mocks = vi.hoisted(() => ({
     $transaction: vi.fn(),
   },
   stripe: { refunds: { create: vi.fn() } },
+  flagPaymentForManualRefund: vi.fn(),
   captureCriticalError: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/stripe", () => ({ stripe: mocks.stripe }));
+vi.mock("@/lib/payments/flag-payment-for-manual-refund", () => ({
+  flagPaymentForManualRefund: mocks.flagPaymentForManualRefund,
+}));
 vi.mock("@/lib/email", () => ({ sendEmail: vi.fn() }));
 vi.mock("@/lib/invoicing", () => ({ issueInvoice: vi.fn(), buildInvoiceCustomer: vi.fn() }));
 vi.mock("@/lib/pdf/render", () => ({ renderInvoicePdf: vi.fn(), renderTicketPdf: vi.fn() }));
@@ -47,6 +51,7 @@ beforeEach(() => {
     order: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
   }));
   mocks.stripe.refunds.create.mockResolvedValue({ id: "re_test" });
+  mocks.flagPaymentForManualRefund.mockResolvedValue(undefined);
 });
 
 describe("order payment finalization idempotency", () => {
@@ -62,7 +67,7 @@ describe("order payment finalization idempotency", () => {
     expect(mocks.stripe.refunds.create).not.toHaveBeenCalled();
   });
 
-  it("refunds a genuinely cancelled order with a stable idempotency key", async () => {
+  it("flags a genuinely cancelled order for manual refund without calling Stripe", async () => {
     mocks.prisma.payment.findFirst.mockResolvedValue(null);
     mocks.prisma.order.findUnique
       .mockResolvedValueOnce(pendingOrder())
@@ -70,18 +75,12 @@ describe("order payment finalization idempotency", () => {
 
     const result = await fulfillOrderPayment(session);
 
-    expect(result).toMatchObject({ received: true, refunded: true });
-    expect(mocks.stripe.refunds.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payment_intent: "pi_test_duplicate",
-        metadata: expect.objectContaining({
-          kind: "order_auto_refund",
-          orderId: "order_100",
-          reason: "order-cancelled-during-payment",
-        }),
-      }),
-      { idempotencyKey: "order-auto-refund:order-cancelled-during-payment:cs_test_duplicate" }
+    expect(result).toMatchObject({ received: true, refunded: false, flaggedForReview: true });
+    expect(mocks.flagPaymentForManualRefund).toHaveBeenCalledWith(
+      session,
+      "commande annulée pendant le traitement du paiement"
     );
+    expect(mocks.stripe.refunds.create).not.toHaveBeenCalled();
   });
 
   it("fails safely instead of refunding an unexplained non-pending order", async () => {

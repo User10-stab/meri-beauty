@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { DASHBOARD_PERMISSIONS, hasPermission } from "@/lib/authorization";
-import { retryRefundReconciliationForPayment } from "@/lib/payments/retry-failed-refunds";
 import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds";
 import { captureError, captureCriticalError } from "@/lib/monitoring";
 
@@ -81,11 +80,8 @@ function serializeStuckPayment(payment) {
 /**
  * Dashboard "Réconciliation" list — every Payment stuck in REFUND_PENDING
  * (a refund was decided but the Stripe call was interrupted before
- * confirming) or REFUND_FAILED (the Stripe call itself errored). Both
- * states are also picked up automatically by the /api/cron sweep
- * (lib/payments/retry-failed-refunds.js) up to MAX_RETRIES — this page is
- * the "never rely on someone noticing logs" backstop: a durable, visible
- * queue an admin can act on directly instead of digging through Sentry/logs.
+ * confirming) or REFUND_FAILED (the Stripe call itself errored). This is a
+ * visible follow-up list: no action on this page sends money to Stripe.
  */
 export async function listStuckPayments() {
   const guard = await requireReconciliationAccess();
@@ -103,22 +99,6 @@ export async function listStuckPayments() {
     captureError(error, { area: "refund-reconciliation", context: "listStuckPayments" });
     return { success: false, message: "Impossible de charger les paiements en attente de réconciliation.", data: [] };
   }
-}
-
-/**
- * Per-row "Réessayer" action — safe to click repeatedly: re-checks the
- * payment's current status and Stripe refund state itself before doing
- * anything (see retryRefundReconciliationForPayment), so a stale row or a
- * double-click can't double-refund.
- */
-export async function retryStuckPayment({ paymentId }) {
-  const guard = await requireReconciliationAccess();
-  if (guard.error) return { success: false, message: guard.error };
-  if (!paymentId) return { success: false, message: "Paiement manquant." };
-
-  const result = await retryRefundReconciliationForPayment(paymentId);
-  revalidatePath(RECONCILIATION_PATH);
-  return result;
 }
 
 /**

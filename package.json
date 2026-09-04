@@ -14,7 +14,8 @@
     "test:e2e": "playwright test",
     "test:integration": "vitest run --config vitest.integration.config.mjs --reporter=default",
     "audit:prod": "npm audit --omit=dev && npm run lint && npm test && npm run build",
-    "seed": "node prisma/seed.mjs"
+    "seed": "node prisma/seed.mjs",
+    "test:e2e:money": "playwright test --config playwright.money.config.mjs"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"

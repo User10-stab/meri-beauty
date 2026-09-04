@@ -38,7 +38,7 @@ describe("editing a workshop never silently destroys its reservations", () => {
 
   test("the booking guard runs before the delete, not after", () => {
     const guardIdx = actions.indexOf("bookedSessions.length > 0");
-    const deleteIdx = actions.indexOf("prisma.workshopSession.deleteMany");
+    const deleteIdx = actions.indexOf("tx.workshopSession.deleteMany");
     expect(guardIdx).toBeGreaterThan(-1);
     expect(deleteIdx).toBeGreaterThan(guardIdx);
   });
@@ -95,11 +95,12 @@ describe("deleting an activity or formation never destroys its bookings", () => 
     const actions = source("actions/workshops/create-activity.js");
     const fnIdx = actions.indexOf("export async function deleteActivity");
     const fn = actions.slice(fnIdx);
-    expect(fn).toContain("prisma.workshopReservation.count");
+    expect(fn).toContain("prisma.workshopReservation.findMany");
     expect(fn).toContain("session: { workshopId: id }");
+    expect(fn).toContain('reservation.status !== "CANCELLED" || reservation.payment');
     // The refusal must come before the delete, and name archiving as the way out.
-    const guardIdx = fn.indexOf("reservationCount > 0");
-    const deleteIdx = fn.indexOf("prisma.activity.delete");
+    const guardIdx = fn.indexOf("protectedReservations.length > 0");
+    const deleteIdx = fn.indexOf("tx.activity.delete");
     expect(guardIdx).toBeGreaterThan(-1);
     expect(deleteIdx).toBeGreaterThan(guardIdx);
     expect(fn).toContain("Archivé");
@@ -109,13 +110,48 @@ describe("deleting an activity or formation never destroys its bookings", () => 
     const actions = source("actions/formations/create-formation.js");
     const fnIdx = actions.indexOf("export async function deleteFormation");
     const fn = actions.slice(fnIdx);
-    expect(fn).toContain("prisma.formationReservation.count");
+    expect(fn).toContain("prisma.formationReservation.findMany");
     expect(fn).toContain("session: { formationId: id }");
-    const guardIdx = fn.indexOf("reservationCount > 0");
-    const deleteIdx = fn.indexOf("prisma.formation.delete");
+    expect(fn).toContain('reservation.status !== "CANCELLED" || reservation.payment');
+    const guardIdx = fn.indexOf("protectedReservations.length > 0");
+    const deleteIdx = fn.indexOf("tx.formation.delete");
     expect(guardIdx).toBeGreaterThan(-1);
     expect(deleteIdx).toBeGreaterThan(guardIdx);
     expect(fn).toContain("Archivé");
+  });
+});
+
+describe("formation mutation safeguards", () => {
+  test("updateFormation keeps the authenticated session for animator resolution", () => {
+    const actions = source("actions/formations/create-formation.js");
+    const fn = actions.slice(
+      actions.indexOf("export async function updateFormation"),
+      actions.indexOf("/**\n * Supprime une formation")
+    );
+    expect(fn).toContain("const { session, error } = await requireFormationAccess");
+    expect(fn).not.toContain("const { error } = await requireFormationAccess");
+  });
+
+  test("published formations require at least one session", () => {
+    const actions = source("actions/formations/create-formation.js");
+    const createFn = actions.slice(actions.indexOf("export async function createFormation"), actions.indexOf("/**\n * Modifie une formation"));
+    const updateFn = actions.slice(actions.indexOf("export async function updateFormation"), actions.indexOf("/**\n * Supprime une formation"));
+    for (const fn of [createFn, updateFn]) {
+      expect(fn).toContain('rest.status === "PUBLISHED" && sessions.length === 0');
+      expect(fn).toContain("doit avoir au moins une session planifiée");
+    }
+  });
+});
+
+describe("workshop mutation safeguards", () => {
+  test("published activities require a session and updates use one transaction", () => {
+    const actions = source("actions/workshops/create-activity.js");
+    const createFn = actions.slice(actions.indexOf("export async function createActivity"), actions.indexOf("/**\n * Modifie une activité"));
+    const updateFn = actions.slice(actions.indexOf("export async function updateActivity"), actions.indexOf("/**\n * Supprime une activité"));
+    expect(createFn).toContain('rest.status === "PUBLISHED" && sessions.length === 0');
+    expect(updateFn).toContain('rest.status === "PUBLISHED" && sessions.length === 0');
+    expect(updateFn).toContain("const updated = await prisma.$transaction(async (tx) => {");
+    expect(updateFn).toContain("await tx.activity.update");
   });
 });
 

@@ -9,6 +9,16 @@ import { requiresAdminApprovalToCancel } from "@/lib/reservationRules";
 import { sendEmail } from "@/lib/email";
 import { rejectAppointment } from "@/actions/appointment/manage-appointment";
 
+const REFUND_EPSILON = 0.01;
+const PAYMENT_REFUND_EVIDENCE_SELECT = {
+  paidAmount: true,
+  status: true,
+  transactions: {
+    where: { isDeleted: false },
+    select: { amount: true, transactionType: true },
+  },
+};
+
 const requestSchema = z.object({
   appointmentId: z.string().min(1),
   reason: z.string().trim().min(10, "Expliquez brièvement votre situation."),
@@ -41,6 +51,17 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function refundableRecordedAmount(payment) {
+  if (!payment || Number(payment.paidAmount) <= REFUND_EPSILON) return 0;
+  const collected = payment.transactions
+    .filter((transaction) => ["DEPOSIT", "FINAL_PAYMENT"].includes(transaction.transactionType))
+    .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+  const refunded = payment.transactions
+    .filter((transaction) => transaction.transactionType === "REFUND")
+    .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+  return Math.max(0, Math.min(Number(payment.paidAmount), collected) - refunded);
 }
 
 async function notifyAdminsOfRequest(request, appointment) {
@@ -89,7 +110,7 @@ export async function submitCancellationExceptionRequest(input) {
     where: { id: parsed.data.appointmentId, isDeleted: false },
     include: {
       user: { select: { fullName: true, email: true } },
-      payment: { select: { status: true } },
+      payment: { select: PAYMENT_REFUND_EVIDENCE_SELECT },
     },
   });
   if (!appointment || appointment.userId !== session.user.id) {
@@ -97,6 +118,12 @@ export async function submitCancellationExceptionRequest(input) {
   }
   if (!["PENDING", "ACCEPTED", "CONFIRMED"].includes(appointment.status)) {
     return { success: false, message: "Ce rendez-vous ne peut plus faire l'objet d'une demande." };
+  }
+  if (refundableRecordedAmount(appointment.payment) <= REFUND_EPSILON) {
+    return {
+      success: false,
+      message: "Aucun paiement encaissé n'est enregistré pour ce rendez-vous. Il n'y a donc rien à rembourser.",
+    };
   }
   // Mirrors cancel-reservation.js's gate: this request only makes sense once
   // self-cancellation is off the table — either the 48h window, or (18 Aug
@@ -106,20 +133,67 @@ export async function submitCancellationExceptionRequest(input) {
   }
 
   try {
-    const request = await prisma.appointmentCancellationRequest.create({
-      data: {
-        appointmentId: appointment.id,
-        requestedByUserId: session.user.id,
-        reason: parsed.data.reason,
-      },
+    const existingRequest = await prisma.appointmentCancellationRequest.findUnique({
+      where: { appointmentId: appointment.id },
     });
+    if (existingRequest && existingRequest.status !== "REJECTED") {
+      return { success: false, message: "Une demande est déjà enregistrée pour ce rendez-vous. L'équipe vous répondra dès que possible." };
+    }
+
+    let request;
+    if (existingRequest) {
+      request = await prisma.$transaction(async (tx) => {
+        const reopened = await tx.appointmentCancellationRequest.updateMany({
+          where: { id: existingRequest.id, status: "REJECTED" },
+          data: {
+            requestedByUserId: session.user.id,
+            reason: parsed.data.reason,
+            status: "PENDING",
+            reviewedAt: null,
+            reviewedByUserId: null,
+            decisionNote: null,
+            createdAt: new Date(),
+          },
+        });
+        if (!reopened.count) throw new Error("REQUEST_ALREADY_PENDING");
+
+        await tx.auditLog.create({
+          data: {
+            actorId: session.user.id,
+            actorRole: session.user.role,
+            action: "appointment.cancellation_request.resubmitted",
+            entityType: "AppointmentCancellationRequest",
+            entityId: existingRequest.id,
+            before: {
+              reason: existingRequest.reason,
+              status: existingRequest.status,
+              decisionNote: existingRequest.decisionNote,
+              reviewedAt: existingRequest.reviewedAt?.toISOString() ?? null,
+              reviewedByUserId: existingRequest.reviewedByUserId,
+              createdAt: existingRequest.createdAt.toISOString(),
+            },
+            after: { reason: parsed.data.reason, status: "PENDING" },
+          },
+        });
+
+        return tx.appointmentCancellationRequest.findUnique({ where: { id: existingRequest.id } });
+      });
+    } else {
+      request = await prisma.appointmentCancellationRequest.create({
+        data: {
+          appointmentId: appointment.id,
+          requestedByUserId: session.user.id,
+          reason: parsed.data.reason,
+        },
+      });
+    }
     await notifyAdminsOfRequest(request, appointment).catch((error) =>
       console.error("[submitCancellationExceptionRequest] notification", error)
     );
     refreshAppointmentViews();
     return { success: true, message: "Votre demande a été transmise à l'équipe. Votre rendez-vous et votre acompte restent inchangés jusqu'à sa décision." };
   } catch (error) {
-    if (error?.code === "P2002") {
+    if (error?.code === "P2002" || error?.message === "REQUEST_ALREADY_PENDING") {
       return { success: false, message: "Une demande est déjà enregistrée pour ce rendez-vous. L'équipe vous répondra dès que possible." };
     }
     console.error("[submitCancellationExceptionRequest]", error);
@@ -157,7 +231,14 @@ export async function reviewCancellationExceptionRequest(input) {
 
   const request = await prisma.appointmentCancellationRequest.findUnique({
     where: { id: parsed.data.requestId },
-    include: { appointment: { include: { user: { select: { fullName: true, email: true } } } } },
+    include: {
+      appointment: {
+        include: {
+          user: { select: { fullName: true, email: true } },
+          payment: { select: PAYMENT_REFUND_EVIDENCE_SELECT },
+        },
+      },
+    },
   });
   if (!request || request.status !== "PENDING") {
     return { success: false, message: "Cette demande a déjà été traitée ou n'existe plus." };
@@ -179,6 +260,13 @@ export async function reviewCancellationExceptionRequest(input) {
     }).catch((error) => console.error("[reviewCancellationExceptionRequest] rejection email", error));
     refreshAppointmentViews();
     return { success: true, message: "Demande refusée. Le client a été informé." };
+  }
+
+  if (refundableRecordedAmount(request.appointment.payment) <= REFUND_EPSILON) {
+    return {
+      success: false,
+      message: "Approbation impossible : aucun paiement encaissé et non remboursé n'est enregistré pour ce rendez-vous.",
+    };
   }
 
   // Claim first so two administrators cannot issue two refunds. If the
@@ -204,5 +292,11 @@ export async function reviewCancellationExceptionRequest(input) {
   }
 
   refreshAppointmentViews();
-  return { success: true, message: "Demande approuvée : le rendez-vous est annulé et l'acompte est remboursé intégralement.", refundFailed: result.refundFailed };
+  return {
+    success: true,
+    message: result.refundFailed
+      ? "Demande approuvée et rendez-vous annulé, mais le remboursement Stripe a échoué. Il reste signalé pour relance par l'équipe."
+      : "Demande approuvée : le rendez-vous est annulé. Le remboursement de l'acompte reste à effectuer.",
+    refundFailed: result.refundFailed === true,
+  };
 }

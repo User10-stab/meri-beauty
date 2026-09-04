@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2 } from "lucide-react";
-import { getTransactionDetail, issueCreditNoteForTransaction } from "@/actions/dashboard/admin-operations";
+import { getTransactionDetail } from "@/actions/dashboard/admin-operations";
+import { issueMissingRefundDocument } from "@/actions/dashboard/cancel-and-refund";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const money = (value) =>
@@ -118,7 +119,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   async function handleGenerateCreditNote() {
     if (!transactionId || generatingNote) return;
     setGeneratingNote(true);
-    const result = await issueCreditNoteForTransaction(transactionId, "");
+    const result = await issueMissingRefundDocument(transactionId);
     setGeneratingNote(false);
     setConfirmingNote(false);
     if (result.success) {
@@ -162,6 +163,8 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const isRefund = detail?.transactionType === "REFUND";
   const signedMoney = (value, refund) => `${refund ? "−" : ""}${money(value)}`;
   const canGenerateNote = isRefund && Boolean(invoice) && !creditNote;
+  const refundReceipt = detail?.settledRefundLeg?.refundOperation ?? null;
+  const canGenerateB2CReceipt = isRefund && !invoice && !refundReceipt;
 
   return createPortal(
     <div
@@ -348,14 +351,45 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                   )}
                 </div>
               )}
+
+              {refundReceipt?.refundReceiptNumber && (
+                <div>
+                  <SectionTitle>Justificatif de remboursement</SectionTitle>
+                  <a
+                    href={`/api/refund-receipts/${refundReceipt.id}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
+                  >
+                    <FileMinus size={15} /> Télécharger le justificatif {refundReceipt.refundReceiptNumber}
+                  </a>
+                </div>
+              )}
+
+              {canGenerateB2CReceipt && (
+                <div>
+                  <SectionTitle>Justificatif de remboursement</SectionTitle>
+                  <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
+                    <span className="text-gray-500">Ce remboursement B2C existe déjà, mais son justificatif manque.</span>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingNote(true)}
+                      disabled={generatingNote}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      {generatingNote ? <Loader2 size={12} className="animate-spin" /> : <FilePlus2 size={12} />} Générer et envoyer
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
 
-          {canGenerateNote && (
+          {(canGenerateNote || canGenerateB2CReceipt) && (
             <ConfirmDialog
               open={confirmingNote}
-              title="Générer une note de crédit ?"
-              message="Ce document porte un numéro légal, séquentiel et définitif — une fois émis, il ne peut plus être annulé ni modifié."
+              title={canGenerateB2CReceipt ? "Créer le justificatif manquant ?" : "Émettre la note de crédit manquante ?"}
+              message={canGenerateB2CReceipt ? "Ce remboursement B2C a déjà eu lieu. Cette action ne rembourse rien de plus : elle crée le justificatif numéroté et l'envoie au client." : "Ce remboursement a déjà eu lieu mais n'a jamais reçu son document comptable. La note de crédit ne rembourse rien de plus — elle documente l'argent déjà rendu. Elle porte un numéro légal, séquentiel et définitif."}
               confirmLabel="Générer"
               cancelLabel="Annuler"
               loading={generatingNote}

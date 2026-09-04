@@ -4,7 +4,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { issueCreditNote } from "@/lib/invoicing";
-import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
+import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed } from "@/lib/payments/pin-pending-refund";
+import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
+import { settleRefundLeg } from "@/lib/refunds/settle-leg";
+import { notifyRefundComplete } from "@/lib/refunds/notify-refund-complete";
+import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import {
   isWithinCancellationWindow,
   requiresAdminApprovalToCancel,
@@ -52,8 +56,8 @@ export async function cancelReservation(appointmentId) {
     const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId, isDeleted: false },
       include: {
-        payment: { include: { invoice: true } },
-        user: { select: { fullName: true } },
+        payment: { include: { invoice: true, transactions: true } },
+        user: { select: { fullName: true, isCompany: true, vatNumber: true } },
         staffService: {
           include: {
             service: { select: { name: true } },
@@ -161,7 +165,31 @@ export async function cancelReservation(appointmentId) {
         await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey, creditNote?.id ?? null);
       }
 
-      return { claimed: true, creditNoteId: creditNote?.id ?? null };
+      // Even though this customer path still asks Stripe to refund
+      // automatically, it must use the same durable operation as every
+      // other refund. Otherwise a B2C deposit gets its money back but has no
+      // numbered receipt and no final customer e-mail.
+      const queued = needsRefund
+        ? await queueManualRefund(tx, {
+            paymentId: payment.id,
+            source: "APPOINTMENT",
+            trigger: "CUSTOMER_SELF_CANCELLATION",
+            reason: "Annulation demandée par le client",
+            amount: remaining,
+            transactions: payment.transactions,
+            creditNoteId: creditNote?.id ?? null,
+            invoiceId: payment.invoice?.id ?? null,
+            decidedByUserId: session.user.id,
+            customerIsBusiness: isBusinessRefundCustomer(appointment.user),
+          })
+        : null;
+
+      return {
+        claimed: true,
+        creditNoteId: creditNote?.id ?? null,
+        refundOperationId: queued?.operationId ?? null,
+        refundLegId: queued?.legs?.find((leg) => leg.method === "ONLINE")?.id ?? null,
+      };
     });
 
     if (!claimed?.claimed) {
@@ -224,32 +252,30 @@ export async function cancelReservation(appointmentId) {
       try {
         const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
         if (stripeSession.payment_intent) {
-          await stripe.refunds.create(
+          const stripeRefund = await stripe.refunds.create(
             { payment_intent: stripeSession.payment_intent, amount: Math.round(remaining * 100) },
             { idempotencyKey: refundIdempotencyKey }
           );
-          const fullyRefunded = remaining + REFUND_EPSILON >= Number(payment.paidAmount);
-          await prisma.$transaction([
-            clearPendingRefund(prisma, payment.id, fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED"),
-            prisma.transaction.create({
-              data: {
-                paymentId: payment.id,
-                amount: remaining,
-                method: "ONLINE",
-                transactionType: "REFUND",
-                paidAt: new Date(),
-                creditNoteId: claimed.creditNoteId,
-              },
-            }),
-          ]);
+          if (!claimed.refundLegId || !claimed.refundOperationId) {
+            throw new Error("REFUND_OPERATION_MISSING");
+          }
+          await settleRefundLeg({
+            prisma,
+            legId: claimed.refundLegId,
+            stripe: {
+              refundId: stripeRefund.id,
+              paymentIntentId: stripeSession.payment_intent,
+              amount: Number(stripeRefund.amount) / 100,
+            },
+          });
+          await notifyRefundComplete({ prisma, operationId: claimed.refundOperationId });
         }
       } catch (err) {
         // The cancellation and credit note are already committed and stay
         // — surface the refund failure loudly so it can be retried/handled
         // manually, rather than silently telling the customer it's done.
-        // pendingRefundAmount/idempotencyKey are left set (not cleared) so
-        // the cron retry job (lib/payments/retry-failed-refunds.js) can pick
-        // it up even if this email/UI message is missed.
+        // pendingRefundAmount/idempotencyKey remain as an audit trail for
+        // staff to reconcile after the manual Stripe action.
         console.error("[cancelReservation] REFUND FAILED for appointment", appointmentId, err);
         refundFailed = true;
         await markRefundFailed(prisma, payment.id, err);

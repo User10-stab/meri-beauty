@@ -1,12 +1,12 @@
 "use server";
 
-import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
+import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
+import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import {
   returnRequestReceivedEmail,
   returnApprovedEmail,
@@ -641,8 +641,7 @@ export async function completeReturnRequest(input) {
     const REFUND_EPSILON = 0.01;
 
     const manualRefund = isManualOrderRefund(rr.order.payment);
-    const refundIdempotencyKey = `return-${rr.id}-${randomUUID()}`;
-    const { creditNote, alreadyRefunded, paidAmount } = await prisma.$transaction(async (tx) => {
+    const { creditNote, refundQueued } = await prisma.$transaction(async (tx) => {
       // Atomically claim this return: the WHERE clause only matches while
       // status is still APPROVED, so if two requests race here only one
       // update actually affects a row — the loser's count is 0 and it
@@ -760,23 +759,32 @@ export async function completeReturnRequest(input) {
           where: { id: rr.order.payment.id },
           data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
         });
-      } else {
-        // Persist this before contacting Stripe: a process crash or timeout
-        // after the external call remains visible to the retry/reconciliation
-        // jobs instead of silently looking paid forever. Pinning the exact
-        // amount + a stable idempotency key here (not recomputed later) is
-        // what lets a retry replay precisely this operation instead of
-        // resolving to the full remaining balance on the payment.
-        await tx.payment.update({
-          where: { id: rr.order.payment.id },
-          data: {
-            status: "REFUND_PENDING",
-            refundAttemptedAt: new Date(),
-            pendingRefundAmount: totalRefund,
-            pendingRefundIdempotencyKey: refundIdempotencyKey,
-            pendingRefundCreditNoteId: creditNote.id,
-          },
+      }
+
+      // Confirmed policy (2026-09-02): the application never issues a Stripe
+      // refund itself — every card refund is performed by hand in the
+      // Stripe dashboard by an OWNER/ADMIN. This records what is owed as a
+      // RefundOperation whose legs carry the precise amount and
+      // payment_intent to refund against; it surfaces on
+      // /dashboard/operations until someone has actually done it, and the
+      // charge.refunded webhook settles it — mirrors rejectAppointment and
+      // cancelWorkshopReservation/cancelFormationReservation.
+      let refundQueued = false;
+      if (!manualRefund) {
+        const queued = await queueManualRefund(tx, {
+          paymentId: rr.order.payment.id,
+          source: "ORDER",
+          trigger: "SHOP_RETURN",
+          reason: rr.reason,
+          amount: totalRefund,
+          transactions: rr.order.payment.transactions,
+          creditNoteId: creditNote.id,
+          invoiceId: rr.order.payment.invoice.id,
+          decidedByUserId: guard.session.user.id,
+          returnRequestId: rr.id,
+          customerIsBusiness: isBusinessRefundCustomer(rr.order.user),
         });
+        refundQueued = Boolean(queued);
       }
 
       if (manualRefund) {
@@ -799,109 +807,46 @@ export async function completeReturnRequest(input) {
         });
       }
 
-      return { creditNote, alreadyRefunded, paidAmount };
+      return { creditNote, refundQueued };
     });
-
-    // Payment.status / the REFUND ledger row are only written once the
-    // refund is actually settled — for a Stripe payment that means only
-    // after the refund call succeeds, so a failed refund never tells the
-    // customer/dashboard money moved when it didn't (see C4/C5's same
-    // pattern). A cash/card on-site payment has no async step here, so its
-    // ledger entry is written immediately.
-    let refundFailed = false;
-    if (rr.order.payment.transactionReference) {
-      try {
-        const session = await stripe.checkout.sessions.retrieve(rr.order.payment.transactionReference);
-        const stripePaymentIntentId =
-          typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
-        if (!stripePaymentIntentId) throw new Error("STRIPE_PAYMENT_INTENT_MISSING");
-        await stripe.refunds.create(
-          { payment_intent: stripePaymentIntentId, amount: Math.round(totalRefund * 100) },
-          { idempotencyKey: refundIdempotencyKey }
-        );
-      } catch (err) {
-        console.error("[completeReturnRequest] REFUND FAILED for return", rr.id, err);
-        refundFailed = true;
-        await prisma.payment.update({
-          where: { id: rr.order.payment.id },
-          data: {
-            status: "REFUND_FAILED",
-            refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
-            refundAttemptedAt: new Date(),
-            refundRetryCount: { increment: 1 },
-          },
-        });
-      }
-    }
-
-    if (!refundFailed && !manualRefund) {
-      const newTotalRefunded = alreadyRefunded + totalRefund;
-      const fullyRefunded = newTotalRefunded + REFUND_EPSILON >= paidAmount;
-      await prisma.$transaction([
-        prisma.transaction.create({
-          data: {
-            paymentId: rr.order.payment.id,
-            amount: totalRefund,
-            method: "ONLINE",
-            transactionType: "REFUND",
-            paidAt: new Date(),
-            creditNoteId: creditNote.id,
-          },
-        }),
-        prisma.payment.update({
-          where: { id: rr.order.payment.id },
-          data: {
-            status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
-            pendingRefundAmount: null,
-            pendingRefundIdempotencyKey: null,
-            pendingRefundCreditNoteId: null,
-          },
-        }),
-        prisma.auditLog.create({
-          data: {
-            actorId: guard.session.user.id,
-            actorRole: guard.session.user.role,
-            action: "order.return_refund_completed",
-            entityType: "ReturnRequest",
-            entityId: rr.id,
-            metadata: {
-              orderId: rr.order.id,
-              orderNumber: rr.order.orderNumber,
-              amount: totalRefund,
-              method: "ONLINE",
-              automatedByStripe: true,
-            },
-          },
-        }),
-      ]);
-    }
 
     const creditNotePdf = await renderCreditNotePdf(creditNote, rr.order.payment.invoice).catch((err) => {
       console.error("[completeReturnRequest] credit note PDF render failed:", err);
       return null;
     });
 
+    // Never `refunded: true`/false-as-failure here — this app does not move
+    // money. `manualRefund` means the cash/card hand-over already happened
+    // at the counter (trusted at the point of confirmation, same as the POS
+    // terminal sale); an ONLINE refund is only ever queued at this point, and
+    // notify-refund-complete.js sends the real "c'est fait" e-mail once the
+    // charge.refunded webhook (or an admin's manual confirmation) settles it.
     sendEmail({
       to: rr.order.user.email,
       ...returnCompletedEmail({
         customerName: rr.order.user.fullName,
         orderNumber: rr.order.orderNumber,
         refundAmount: totalRefund,
-        refundFailed,
         manualRefund,
+        refundPending: !manualRefund && refundQueued,
       }),
       ...(creditNotePdf ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] } : {}),
     }).catch((err) => console.error("[completeReturnRequest] email failed:", err));
 
-    if (refundFailed) {
+    if (!manualRefund && !refundQueued && totalRefund > REFUND_EPSILON) {
+      // Nothing to hand back on purpose (a fully-consumed prior partial
+      // refund would look like this) is not a failure — but queueManualRefund
+      // returning null while totalRefund is still positive means the ledger
+      // and this function disagree about what's owed, which is worth a human
+      // looking at rather than silently telling the customer it's handled.
       const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
       if (salon?.email) {
         sendEmail({
           to: salon.email,
-          subject: `⚠️ Remboursement Stripe échoué – Retour commande n°${rr.order.orderNumber}`,
-          text: `Le remboursement Stripe pour le retour de la commande n°${rr.order.orderNumber} (client : ${rr.order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
-          html: `<p>Le remboursement Stripe pour le retour de la commande n°${rr.order.orderNumber} (client : ${rr.order.user.email}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
-        }).catch((err) => console.error("[completeReturnRequest] refund-failure alert email failed:", err));
+          subject: `⚠️ Remboursement à vérifier – Retour commande n°${rr.order.orderNumber}`,
+          text: `Le retour de la commande n°${rr.order.orderNumber} (client : ${rr.order.user.email}) est finalisé, mais ${totalRefund.toFixed(2)} € restaient dus sans qu'aucun remboursement ait pu être mis en file. Vérifiez ce paiement manuellement.`,
+          html: `<p>Le retour de la commande n°${rr.order.orderNumber} (client : ${rr.order.user.email}) est finalisé, mais ${totalRefund.toFixed(2)} € restaient dus sans qu'aucun remboursement ait pu être mis en file. Vérifiez ce paiement manuellement.</p>`,
+        }).catch((err) => console.error("[completeReturnRequest] refund-inconsistency alert email failed:", err));
       }
     }
 
@@ -909,10 +854,10 @@ export async function completeReturnRequest(input) {
     if (originalMethod === "CASH") revalidateCaisseRoutes();
     return {
       success: true,
-      message: refundFailed
-        ? `Retour finalisé. Le remboursement de €${totalRefund.toFixed(2)} n'a pas pu être traité automatiquement — notre équipe s'en occupe.`
-        : `Retour finalisé — €${totalRefund.toFixed(2)} remboursé(s).`,
-      refundFailed,
+      message: manualRefund
+        ? `Retour finalisé — €${totalRefund.toFixed(2)} remboursé(s) en boutique.`
+        : `Retour finalisé. Le remboursement de €${totalRefund.toFixed(2)} est à effectuer — voir « Remboursements dus » dans Opérations.`,
+      refundQueued,
     };
   } catch (error) {
     if (error.message === "ALREADY_PROCESSED") {

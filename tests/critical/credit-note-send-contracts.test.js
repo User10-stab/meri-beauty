@@ -25,9 +25,9 @@ describe("an issued credit note can be e-mailed to the customer named on its inv
     expect(send).toContain("const invoice = creditNote.invoice;");
   });
 
-  test("refuses a Belgian B2B credit note — same Peppol-only rule as the invoice it corrects", () => {
-    expect(send).toContain('import { isBelgianVatNumber } from "@/lib/billit"');
-    expect(send).toContain('invoice.customerType === "B2B" && isBelgianVatNumber(invoice.customerVatNumber)');
+  test("allows e-mail for a Belgian B2B credit note as an alternative to Billit/Peppol", () => {
+    expect(send).not.toContain("isBelgianVatNumber");
+    expect(send).not.toContain("pas par e-mail direct");
   });
 
   test("a failed provider send is reported as a failure, not a silent success", () => {
@@ -35,6 +35,7 @@ describe("an issued credit note can be e-mailed to the customer named on its inv
   });
 
   test("a send is written to the audit log", () => {
+    expect(send).toContain("data: { emailSentAt: new Date() }");
     expect(send).toContain("AUDIT_ACTIONS.CREDIT_NOTE_EMAILED");
     expect(source("lib/audit-log.js")).toContain('CREDIT_NOTE_EMAILED: "credit_note.emailed"');
   });
@@ -95,6 +96,10 @@ describe("the operations row exposes both send actions per credit note, gated th
     expect(fn).toContain('invoice.customerType === "B2B" && isBelgianVatNumber(invoice.customerVatNumber)');
     expect(fn).toContain("sendCreditNoteByEmail(note.id)");
     expect(fn).toContain("sendCreditNoteToBillit(note.id)");
+    const emailIdx = fn.indexOf('aria-label="Envoyer la note de crédit par e-mail"');
+    const emailButton = fn.slice(fn.lastIndexOf("<button", emailIdx), fn.indexOf("</button>", emailIdx));
+    expect(emailButton).toContain("disabled={sending}");
+    expect(emailButton).not.toContain("emailBlockedReason");
   });
 
   test("the Billit send opens a re-verify confirmation before calling the real action, same as the invoice's own button", () => {
@@ -105,10 +110,17 @@ describe("the operations row exposes both send actions per credit note, gated th
     expect(fn).toContain("onConfirm={handleSendBillit}");
   });
 
-  test("both reservation-tab and transaction-tab credit note selects carry billitSentAt for the \"already sent\" hint", () => {
+  test("both reservation-tab and transaction-tab credit note selects carry delivery timestamps", () => {
     const actions = source("actions/dashboard/admin-operations.js");
-    expect(actions).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } }");
-    const occurrences = actions.split("creditNotes: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } }").length - 1;
+    expect(actions).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
+    const occurrences = actions.split("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }").length - 1;
     expect(occurrences).toBe(2);
+  });
+
+  test("Operations displays e-mail delivery separately from the Billit handoff", () => {
+    expect(rowActions).toContain("note.emailSentAt");
+    expect(rowActions).toContain("e-mail envoyé le");
+    expect(rowActions).toContain("créée dans Billit — à finaliser");
+    expect(rowActions).toContain("non envoyée");
   });
 });

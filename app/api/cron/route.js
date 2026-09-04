@@ -5,7 +5,6 @@ import { sendWorkshopReservationReminders } from "@/lib/reminders/send-workshop-
 import { sendFormationReservationReminders } from "@/lib/reminders/send-formation-reminders";
 import { expireStaleWorkshopHolds } from "@/lib/workshops/expire-stale-holds";
 import { expireStaleFormationHolds } from "@/lib/formations/expire-stale-holds";
-import { retryFailedRefunds } from "@/lib/payments/retry-failed-refunds";
 import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds";
 import { reconcileMissedCheckouts } from "@/lib/payments/reconcile-missed-checkouts";
 import { isValidCronSecret } from "@/lib/cron-auth";
@@ -37,7 +36,6 @@ const JOBS = [
   ["sendFormationReservationReminders", sendFormationReservationReminders],
   ["expireStaleWorkshopHolds", expireStaleWorkshopHolds],
   ["expireStaleFormationHolds", expireStaleFormationHolds],
-  ["retryFailedRefunds", retryFailedRefunds],
   ["reconcileMissedRefunds", reconcileMissedRefunds],
   ["reconcileMissedCheckouts", reconcileMissedCheckouts],
 ];
@@ -53,9 +51,7 @@ export async function GET(req) {
   // Non-blocking: if a previous invocation is still running (the external
   // scheduler firing again before the last run finished, or two schedulers
   // configured by mistake), skip this one outright rather than let both
-  // execute concurrently — retryFailedRefunds and reconcileMissedRefunds in
-  // particular can otherwise both act on the same stuck Payment in the same
-  // window and duplicate a refund's ledger row. Transaction-scoped
+  // execute concurrently. Transaction-scoped
   // (pg_try_advisory_xact_lock, not the plain session-level variant) so it
   // always releases on the connection that acquired it regardless of
   // Prisma's pooling, and auto-releases even if this request crashes.
@@ -93,9 +89,6 @@ export async function GET(req) {
         formationRemindersSent: results.sendFormationReservationReminders?.sentCount ?? null,
         workshopHoldsExpired: results.expireStaleWorkshopHolds?.expiredCount ?? null,
         formationHoldsExpired: results.expireStaleFormationHolds?.expiredCount ?? null,
-        refundsRetried: results.retryFailedRefunds?.retried ?? null,
-        refundsRecovered: results.retryFailedRefunds?.succeeded ?? null,
-        refundsNeedingManualReconciliation: results.retryFailedRefunds?.needsManualReconciliation ?? null,
         missedRefundsChecked: results.reconcileMissedRefunds?.checked ?? null,
         missedRefundsRecovered: results.reconcileMissedRefunds?.reconciled ?? null,
         missedCheckoutsChecked: results.reconcileMissedCheckouts?.checked ?? null,

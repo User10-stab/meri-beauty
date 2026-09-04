@@ -33,6 +33,8 @@ import {
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { Prisma } from "@prisma/client";
 import { reconcileStripeProductOrderRefund } from "@/lib/orders/reconcile-stripe-refund";
+import { findLegForStripeRefund, settleRefundLeg } from "@/lib/refunds/settle-leg";
+import { notifyRefundComplete } from "@/lib/refunds/notify-refund-complete";
 import {
   reconcileExceptionalReservationFullRefund,
   RESERVATION_REFUND_AUTHORIZATION,
@@ -44,7 +46,7 @@ import {
   getDeploymentId,
   DEPLOYMENT_METADATA_KEY,
 } from "@/lib/stripe-deployment";
-import { roundMoney, resolveServiceVatPolicy } from "@/lib/tax-policy";
+import { roundMoney, resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 
 // 1-cent tolerance for float/rounding when comparing Stripe's amount_total
 // against our own expected-price calculation.
@@ -173,7 +175,12 @@ export async function POST(req) {
   // docs/PRE_LAUNCH_FIXES.md).
   if (event.type === "charge.refunded") {
     try {
-      await handleChargeRefunded(event.data.object);
+      // `event.account` is set when the event comes from a connected account
+      // — an appointment refund, which is a Connect direct charge on the
+      // staff member's own Stripe account. Without passing it through, any
+      // Stripe call made while handling this event queries the PLATFORM
+      // account and silently finds nothing.
+      await handleChargeRefunded(event.data.object, event.account ?? null);
       return NextResponse.json({ received: true });
     } catch (err) {
       captureCriticalError(err, { area: "refund-reconciliation", eventType: event.type, eventId: event.id });
@@ -369,13 +376,148 @@ async function findPaymentByChargePaymentIntent(paymentIntentId) {
 }
 
 /**
+ * Settles any RefundLeg this charge's refunds belong to.
+ *
+ * This is now the PRIMARY path, not a confirmation of our own call. Confirmed
+ * policy (2026-09-02): this application never issues a Stripe refund itself —
+ * an OWNER/ADMIN refunds by hand in the Stripe dashboard, having been told the
+ * exact amount and payment_intent by the Operations screen. This handler is
+ * where that manual act is reconciled back into the ledger.
+ *
+ * (Deliberately worded without the API call's literal name: the security
+ * contract in tests/critical/security-contracts.test.js asserts this file
+ * cannot refund, by checking the source for that exact string.)
+ *
+ * MUST run before the external-refund reconciliation below, and MUST stop it
+ * from also running. The operation already has its credit note on disk, and
+ * the legacy "someone refunded from the Stripe Dashboard" path would write a
+ * SECOND REFUND transaction and a SECOND credit note for one movement of
+ * money. When no leg matches — a refund with no operation behind it, which is
+ * still perfectly possible — nothing here fires and the old path runs
+ * unchanged.
+ *
+ * On resolving the amount actually refunded — this was wrong once and the
+ * failure was silent, so it is worth stating plainly.
+ *
+ * `charge.refunds` is NOT expanded on a charge.refunded webhook payload
+ * (verified absent on api_version 2024-06-20). Reading `charge.refunds.data`
+ * and falling back to the planned figure when it was empty therefore meant
+ * the fallback ran EVERY time: an admin refunding 50 € against a 75 € leg
+ * had 75 € written to the ledger and 75 € announced to the customer, and the
+ * mismatch guard in settle-leg.js was dead code. The whole point of letting a
+ * human type the amount into Stripe is that the ledger records what they
+ * actually typed.
+ *
+ * So the refund list is fetched from the API when the payload does not carry
+ * it, and if even that fails the amount is derived from
+ * `charge.amount_refunded` — which IS always present — minus what this
+ * payment's ledger already accounts for. The planned figure is never assumed.
+ *
+ * @returns {Promise<{settledAny: boolean, operationIds: Set<string>}>}
+ */
+async function settleOwnRefundLegs(charge, connectedAccountId = null) {
+  const paymentIntentId =
+    typeof charge.payment_intent === "string" ? charge.payment_intent : charge.payment_intent?.id ?? null;
+  const chargeRefundedTotal = round2((charge.amount_refunded ?? 0) / 100);
+  const operationIds = new Set();
+  let settledAny = false;
+
+  // Leg matching itself needs no Stripe call — findLegForStripeRefund reads
+  // the payment_intent we already stored — so an appointment (Connect) leg
+  // settles here just like a platform one. Only this listing has to be
+  // pointed at the right account, or it returns nothing for a Connect charge
+  // and the refund id is lost.
+  let refunds = charge.refunds?.data ?? [];
+  if (refunds.length === 0 && charge.id) {
+    try {
+      const listed = await stripe.refunds.list(
+        { charge: charge.id, limit: 10 },
+        connectedAccountId ? { stripeAccount: connectedAccountId } : undefined,
+      );
+      refunds = listed.data ?? [];
+    } catch (error) {
+      // Non-fatal: the amount is still recoverable from amount_refunded
+      // below. Only the per-refund id (traceability) is lost.
+      console.error("[stripe-webhook] could not list refunds for charge", charge.id, error);
+    }
+  }
+
+  // Oldest first, so successive refunds on one charge match successive legs
+  // in the order they were created.
+  const candidates =
+    refunds.length > 0
+      ? [...refunds]
+          .sort((a, b) => (a.created ?? 0) - (b.created ?? 0))
+          .map((refund) => ({ id: refund.id, amount: round2((refund.amount ?? 0) / 100) }))
+      : [{ id: null, amount: null }];
+
+  for (const candidate of candidates) {
+    const leg = await findLegForStripeRefund(prisma, { refundId: candidate.id, paymentIntentId });
+    if (!leg) continue;
+
+    let amount = candidate.amount;
+    if (amount == null) {
+      // Last resort: what Stripe says is refunded on this charge in total,
+      // minus what our ledger has already recorded for this payment. Same
+      // derivation the legacy external-refund path uses below, and never the
+      // planned figure — that is the bug this replaces.
+      const operation = await prisma.refundOperation.findUnique({
+        where: { id: leg.refundOperationId },
+        select: { paymentId: true },
+      });
+      const recorded = await prisma.transaction.aggregate({
+        where: { paymentId: operation?.paymentId ?? "", transactionType: "REFUND", isDeleted: false },
+        _sum: { amount: true },
+      });
+      amount = round2(chargeRefundedTotal - Number(recorded._sum.amount ?? 0));
+    }
+
+    const result = await settleRefundLeg({
+      prisma,
+      legId: leg.id,
+      stripe: {
+        refundId: candidate.id ?? leg.stripeRefundId,
+        paymentIntentId,
+        // What the admin actually typed into Stripe. Recorded as-is so an
+        // over- or under-refund shows up instead of being smoothed over.
+        amount,
+      },
+    });
+    operationIds.add(leg.refundOperationId);
+    // ALREADY_SETTLED still counts as ours — a redelivered webhook must not
+    // fall through to the external-refund path and duplicate the ledger.
+    if (result.settled || result.reason === "ALREADY_SETTLED") settledAny = true;
+  }
+
+  for (const operationId of operationIds) {
+    // No-op unless every leg has landed. This is the single closing e-mail,
+    // and the claim on customerNotifiedAt makes a second delivery silent.
+    await notifyRefundComplete({ prisma, operationId }).catch((error) =>
+      console.error("[stripe-webhook] refund notification failed", error),
+    );
+  }
+
+  return { settledAny, operationIds };
+}
+
+/**
  * Keeps our ledger honest when a refund happens outside our own refund
  * actions — most commonly staff refunding directly from the Stripe
  * Dashboard. Without this, Payment.status stays PAID and there's no
  * Transaction{REFUND} row, so the dashboard and any TVA/accounting export
  * silently disagree with what Stripe actually did.
  */
-async function handleChargeRefunded(charge) {
+async function handleChargeRefunded(charge, connectedAccountId = null) {
+  // Ours first. If this refund belongs to a RefundOperation we opened, it is
+  // fully accounted for and the reconciliation below must not touch it.
+  const own = await settleOwnRefundLegs(charge, connectedAccountId);
+  if (own.settledAny) {
+    console.info(
+      `[stripe-webhook] charge.refunded settled ${own.operationIds.size} refund operation(s) we initiated`,
+    );
+    return;
+  }
+
   const payment = await findPaymentByChargePaymentIntent(charge.payment_intent);
   if (!payment) {
     // Most likely an appointment (Connect direct charge) — not reachable
@@ -849,7 +991,7 @@ async function processAppointmentCheckoutSession(session) {
     // so the gapless Belgian invoice number is never consumed on rollback.
     // Deposits are invoiced only after the remaining balance is collected.
     let invoice = null;
-    if (nextPaymentStatus === "PAID") {
+    if (nextPaymentStatus === "PAID" && hasInvoiceableVatIdentity(appointment.user)) {
       const bookingVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
       invoice = await issueInvoice(tx, {
         paymentId,
@@ -1308,7 +1450,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
       // collide. See the flagged edge case in the audit report: this guard
       // silently skips invoicing a legitimate second fee rather than
       // resolving where that revenue's invoice should go.
-      if (!reservation.payment.invoice) {
+      if (!reservation.payment.invoice && hasInvoiceableVatIdentity(reservation.customer)) {
         await issueInvoice(tx, {
           paymentId: reservation.payment.id,
           source: "WORKSHOP",
@@ -1494,7 +1636,7 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
       // collide. See the flagged edge case in the audit report: this guard
       // silently skips invoicing a legitimate second fee rather than
       // resolving where that revenue's invoice should go.
-      if (!reservation.payment.invoice) {
+      if (!reservation.payment.invoice && hasInvoiceableVatIdentity(reservation.customer)) {
         await issueInvoice(tx, {
           paymentId: reservation.payment.id,
           source: "WORKSHOP",

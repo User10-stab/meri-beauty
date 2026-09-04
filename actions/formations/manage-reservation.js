@@ -7,10 +7,11 @@ import { sendEmail } from "@/lib/email";
 import { formationCancellationEmail } from "@/lib/email-templates";
 import { isAdminRole } from "@/lib/authorization";
 import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting-list";
-import { stripe } from "@/lib/stripe";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
-import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed, clearPendingRefund } from "@/lib/payments/pin-pending-refund";
+import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
+import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
+import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 
 function formatSessionDate(date) {
   return new Date(date).toLocaleDateString("fr-FR", {
@@ -86,21 +87,27 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       return { success: false, message: "Cette réservation est déjà annulée." };
     }
 
-    let refundFailed = false;
-    if (refundPayment && reservation.payment?.transactionReference) {
+    // Converted 2026-09-02: this no longer refunds. An OWNER/ADMIN performs
+    // the Stripe refund by hand; what happens here is that the credit note
+    // is issued and the money owed is recorded as a RefundOperation, which
+    // surfaces on /dashboard/operations with the exact amount and
+    // payment_intent until it has actually been paid back.
+    //
+    // Dropping payment.transactionReference from the condition on purpose:
+    // a formation settled in cash used to fall through refunding nothing
+    // and issuing no credit note at all.
+    let refundQueued = false;
+    let queuedRefundAmount = 0;
+    if (refundPayment && reservation.payment) {
       const payment = reservation.payment;
       const alreadyRefunded = payment.transactions
-        .filter((transaction) => transaction.transactionType === "REFUND")
+        .filter((transaction) => transaction.transactionType === "REFUND" && !transaction.isDeleted)
         .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
       const remainingRefund = Math.max(0, Number(payment.paidAmount) - alreadyRefunded);
 
       if (remainingRefund > 0.01) {
-        // Pinned in the same transaction as the credit note — see
-        // lib/payments/pin-pending-refund.js's doc comment for why this has
-        // to happen before the Stripe call below, not just in its catch.
-        const refundIdempotencyKey = buildRefundIdempotencyKey("formation-cancel", payment.id);
-        let creditNoteId = null;
         await prisma.$transaction(async (tx) => {
+          let creditNoteId = null;
           if (payment.invoice) {
             const creditNote = await issueCreditNote(tx, {
               invoiceId: payment.invoice.id,
@@ -109,54 +116,22 @@ export async function cancelFormationReservation(reservationId, { reason, refund
             });
             creditNoteId = creditNote.id;
           }
-          await pinPendingRefund(tx, payment.id, remainingRefund, refundIdempotencyKey, creditNoteId);
-        });
 
-        try {
-          const checkoutSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
-          if (!checkoutSession.payment_intent) throw new Error("Payment Intent Stripe introuvable.");
-          const stripePaymentIntentId =
-            typeof checkoutSession.payment_intent === "string"
-              ? checkoutSession.payment_intent
-              : checkoutSession.payment_intent.id;
-          await stripe.refunds.create(
-            {
-              payment_intent: stripePaymentIntentId,
-              amount: Math.round(remainingRefund * 100),
-              metadata: { kind: "formation_admin_exception", reservationId, adminUserId: session.user.id },
-            },
-            { idempotencyKey: refundIdempotencyKey }
-          );
-          await prisma.$transaction([
-            clearPendingRefund(prisma, payment.id, "REFUNDED"),
-            prisma.transaction.updateMany({
-              where: {
-                paymentId: payment.id,
-                transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
-                stripePaymentIntentId: null,
-              },
-              data: { stripePaymentIntentId },
-            }),
-            prisma.transaction.create({
-              data: {
-                paymentId: payment.id,
-                amount: remainingRefund,
-                method: "ONLINE",
-                transactionType: "REFUND",
-                paidAt: new Date(),
-                stripeCheckoutSessionId: payment.transactionReference,
-                stripePaymentIntentId,
-                creditNoteId,
-              },
-            }),
-          ]);
-        } catch (error) {
-          // pendingRefundAmount/idempotencyKey are left set (not cleared) so
-          // the cron retry job (lib/payments/retry-failed-refunds.js) can
-          // pick this up.
-          refundFailed = true;
-          await markRefundFailed(prisma, payment.id, error);
-        }
+          const queued = await queueManualRefund(tx, {
+            paymentId: payment.id,
+            source: "FORMATION",
+            trigger: "SALON_CANCELLATION",
+            reason: reason.trim(),
+            amount: remainingRefund,
+            transactions: payment.transactions,
+            creditNoteId,
+            invoiceId: payment.invoice?.id ?? null,
+            decidedByUserId: session.user.id,
+            customerIsBusiness: isBusinessRefundCustomer(reservation.customer),
+          });
+          refundQueued = Boolean(queued);
+          if (queued) queuedRefundAmount = remainingRefund;
+        });
       }
     } else if (
       !refundPayment &&
@@ -173,16 +148,18 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       // deposit.
       const payment = reservation.payment;
       await prisma.$transaction(async (tx) => {
-        await issueInvoice(tx, {
-          paymentId: payment.id,
-          source: "FORMATION",
-          totalInclVat: Number(payment.paidAmount),
-          customer: buildInvoiceCustomer(reservation.customer),
-          lines: buildServiceInvoiceLines({
-            description: `Annulation — acompte non remboursable — ${reservation.session.formation.title}`,
-            totalAmount: Number(payment.paidAmount),
-          }),
-        });
+        if (hasInvoiceableVatIdentity(reservation.customer)) {
+          await issueInvoice(tx, {
+            paymentId: payment.id,
+            source: "FORMATION",
+            totalInclVat: Number(payment.paidAmount),
+            customer: buildInvoiceCustomer(reservation.customer),
+            lines: buildServiceInvoiceLines({
+              description: `Annulation — acompte non remboursable — ${reservation.session.formation.title}`,
+              totalAmount: Number(payment.paidAmount),
+            }),
+          });
+        }
         await tx.payment.update({ where: { id: payment.id }, data: { status: "PAID" } });
       });
     }
@@ -202,20 +179,33 @@ export async function cancelFormationReservation(reservationId, { reason, refund
             sessionDate: formatSessionDate(reservation.session.startDate),
             salonPhone: salon?.phone,
             salonEmail: salon?.email,
+            // Always false: this app does not move money, so it can never
+            // announce a completed refund here. The customer is told one is
+            // coming, and only the charge.refunded webhook (or a confirmed
+            // hand-over) sends the "c'est fait" mail, from
+            // notify-refund-complete.js.
+            refunded: false,
+            refundPending: refundQueued,
+            refundAmount: refundQueued ? queuedRefundAmount : null,
+            // An exceptional approval carries the admin's written reason
+            // through reviewReservationCancellationRequest — the customer
+            // who asked for the exception is the one person entitled to it.
+            decisionNote: reason?.trim() || null,
           }),
         })
       )
       .catch((err) => console.error("[cancelFormationReservation] email failed:", err));
 
     revalidatePath("/dashboard/formations/reservations");
+    revalidatePath("/dashboard/operations");
     return {
       success: true,
       message: refundPayment
-        ? refundFailed
-          ? "Réservation annulée, mais le remboursement Stripe a échoué et doit être traité par l'administrateur."
-          : "Réservation annulée et paiement remboursé à titre exceptionnel."
+        ? refundQueued
+          ? "Réservation annulée. Le remboursement est à effectuer — voir « Remboursements dus » dans Opérations."
+          : "Réservation annulée. Aucun montant restant à rembourser."
         : "Réservation annulée sans remboursement.",
-      refundFailed,
+      refundQueued,
     };
   } catch (error) {
     console.error("[cancelFormationReservation]", error);
@@ -260,3 +250,4 @@ export async function markFormationReservationNoShow(reservationId) {
   if (result.success) revalidatePath(RESERVATION_KINDS.FORMATION.revalidatePath);
   return result;
 }
+

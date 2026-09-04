@@ -1,18 +1,14 @@
 import { describe, expect, test } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8");
 
-// P0: a partial Stripe refund stuck in REFUND_PENDING/REFUND_FAILED must
-// retry for the exact amount owed, never for whatever the Transaction
-// ledger's sum happens to leave "remaining" — that recomputation resolves
-// to the full paid amount whenever no REFUND row was ever written, which is
-// exactly why the payment is stuck in the first place.
-describe("refund retry never exceeds the exact pending amount", () => {
+// A failed legacy Stripe call keeps its original amount as audit data, but
+// it must never be replayed automatically or by an old dashboard button.
+describe("failed refunds require a fresh explicit admin action", () => {
   const schema = source("prisma/schema.prisma");
-  const retryEngine = source("lib/payments/retry-failed-refunds.js");
   const returns = source("actions/boutique/returns.js");
   const orders = source("actions/boutique/orders.js");
 
@@ -21,28 +17,22 @@ describe("refund retry never exceeds the exact pending amount", () => {
     expect(schema).toContain("pendingRefundIdempotencyKey");
   });
 
-  test("the retry engine replays the pinned amount instead of recomputing from the ledger", () => {
-    expect(retryEngine).toContain("payment.pendingRefundAmount == null");
-    expect(retryEngine).toContain('return { outcome: "missing-pending-amount" }');
-    expect(retryEngine).toContain("const pinnedAmount = Number(payment.pendingRefundAmount)");
-    expect(retryEngine).toContain("amount: Math.round(pinnedAmount * 100)");
-    expect(retryEngine).toContain("idempotencyKey: payment.pendingRefundIdempotencyKey");
-    // The old bug pattern — deriving the retry amount from paidAmount minus
-    // the ledger sum — must not reappear.
-    expect(retryEngine).not.toContain("Number(payment.paidAmount) - alreadyRefunded");
+  test("the legacy automatic retry engine is deleted", () => {
+    expect(existsSync(`${root}lib/payments/retry-failed-refunds.js`)).toBe(false);
+    expect(source("lib/background-jobs.js")).not.toContain("retryFailedRefunds");
+    expect(source("app/api/cron/route.js")).not.toContain("retryFailedRefunds");
+    expect(source("actions/dashboard/webhook-recovery.js")).not.toContain("retryStuckPayment");
   });
 
-  test("a missing pinned amount is refused rather than guessed", () => {
-    expect(retryEngine).toContain('"missing-pending-amount"');
-    expect(retryEngine).toContain("needsManualReconciliation");
-  });
-
-  test("return refunds pin the amount and idempotency key before calling Stripe, and clear them on success", () => {
-    expect(returns).toContain("pendingRefundAmount: totalRefund");
-    expect(returns).toContain("pendingRefundIdempotencyKey: refundIdempotencyKey");
-    expect(returns).toContain("idempotencyKey: refundIdempotencyKey");
-    expect(returns).toContain("pendingRefundAmount: null");
-    expect(returns).toContain("pendingRefundIdempotencyKey: null");
+  // Converted 2026-09-03: an admin now refunds an ONLINE return by hand in
+  // Stripe, so there is nothing here to pin or retry — the CASH/CARD branch
+  // (manualRefund) is untouched, since it already never called Stripe.
+  test("return refunds no longer pin or call Stripe for the ONLINE case", () => {
+    expect(returns).not.toContain("refunds.create");
+    expect(returns).not.toContain("pendingRefundAmount: totalRefund");
+    expect(returns).not.toContain("pendingRefundIdempotencyKey: refundIdempotencyKey");
+    expect(returns).toContain("queueManualRefund(tx");
+    expect(returns).toContain("issueCreditNote(tx");
   });
 
   test("return refunds refuse to start a second operation while one is already pending", () => {
@@ -63,13 +53,9 @@ describe("refund retry never exceeds the exact pending amount", () => {
   });
 });
 
-// P0: the 4 reservation-side cancellation paths (staff appointment reject,
-// customer appointment cancel, workshop cancel, formation cancel) used to
-// skip this pinning entirely — 3 of them set REFUND_PENDING with no amount
-// (unretryable), and the customer-initiated path wrote nothing at all on
-// failure (invisible to both the retry cron and the reconciliation
-// dashboard). All 4 now share lib/payments/pin-pending-refund.js instead of
-// reimplementing the boutique pattern a 4th and 5th time.
+// P0: a failed legacy Stripe call must remain visible with its original
+// amount. The dashboard can reconcile a webhook after the administrator
+// performs the refund in Stripe, but cannot replay the payment.
 describe("reservation cancellations pin refunds the same way boutique orders/returns do", () => {
   const helper = source("lib/payments/pin-pending-refund.js");
   const rejectAppointment = source("actions/appointment/manage-appointment.js");
@@ -83,8 +69,8 @@ describe("reservation cancellations pin refunds the same way boutique orders/ret
     expect(helper).toContain("pendingRefundIdempotencyKey: idempotencyKey");
     expect(helper).toContain('status: "REFUND_FAILED"');
     expect(helper).toContain("refundRetryCount: { increment: 1 }");
-    // markRefundFailed must NOT null out the pending fields — the whole
-    // point is the retry job can still find them afterward.
+    // markRefundFailed must NOT null out the pending fields: the original
+    // amount remains available for reconciliation and audit.
     const failedFn = helper.slice(
       helper.indexOf("export function markRefundFailed"),
       helper.indexOf("export function clearPendingRefund")
@@ -92,12 +78,15 @@ describe("reservation cancellations pin refunds the same way boutique orders/ret
     expect(failedFn).not.toContain("pendingRefundAmount: null");
   });
 
-  for (const [name, mod] of [
-    ["rejectAppointment (staff/admin)", rejectAppointment],
-    ["cancelReservation (customer)", cancelReservation],
-    ["cancelWorkshopReservation", cancelWorkshop],
-    ["cancelFormationReservation", cancelFormation],
-  ]) {
+  // Only the paths that still refund automatically. As each one is
+  // converted to queueManualRefund it moves to the block below instead —
+  // see tests/critical/refunds-are-manual-contracts.test.js for the policy
+  // this is being migrated towards.
+  //
+  // cancelReservation (customer, outside the 48h window) is the one
+  // deliberate, permanent exception: policy (2026-09-02) keeps its
+  // automatic refund. See that file's own doc comment.
+  for (const [name, mod] of [["cancelReservation (customer)", cancelReservation]]) {
     test(`${name} pins the refund and passes an idempotency key to Stripe`, () => {
       expect(mod).toContain("pinPendingRefund(tx");
       expect(mod).toContain("buildRefundIdempotencyKey");
@@ -105,6 +94,31 @@ describe("reservation cancellations pin refunds the same way boutique orders/ret
       expect(mod).toContain("markRefundFailed(prisma");
     });
   }
+
+  // Converted: an admin now refunds this by hand in Stripe, so there is no
+  // call to pin and no Stripe call to replay.
+  // The money is recorded as owed instead of being sent.
+  //   2026-09-02: cancelWorkshopReservation, cancelFormationReservation
+  //   2026-09-03: rejectAppointment
+  for (const [name, mod] of [
+    ["cancelWorkshopReservation", cancelWorkshop],
+    ["cancelFormationReservation", cancelFormation],
+    ["rejectAppointment (staff/admin)", rejectAppointment],
+  ]) {
+    test(`${name} no longer pins or retries anything`, () => {
+      expect(mod).not.toContain("refunds.create");
+      expect(mod).not.toContain("pinPendingRefund");
+      expect(mod).not.toContain("markRefundFailed");
+      expect(mod).toContain("queueManualRefund(tx");
+      expect(mod).toContain("issueCreditNote(tx");
+    });
+  }
+
+  // The atelier cancellation e-mail takes a `refunded` flag; the formation
+  // one has no such wording at all. Only the former can get this wrong.
+  test("the atelier cancellation e-mail no longer claims a refund happened", () => {
+    expect(cancelWorkshop).toContain("refunded: false");
+  });
 
   test("cancelReservation (customer path) no longer silently drops a failed refund", () => {
     // The old bug: a bare console.error with no durable Payment write at all.

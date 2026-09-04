@@ -43,8 +43,6 @@ describe("POS return and cancellation safeguards", () => {
     expect(returns).toContain("validateManualRefundConfirmation");
     expect(returns).toContain("manualReference: originalMethod === \"CARD\"");
     expect(returns).toContain("method: originalMethod");
-    expect(returns).toContain('status: "REFUND_PENDING"');
-    expect(returns).toContain('status: "REFUND_FAILED"');
   });
 
   test("cancelling a paid physical POS order cannot skip refund confirmation", () => {

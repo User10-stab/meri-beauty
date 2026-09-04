@@ -118,8 +118,8 @@ export function FormationRow({ row, onView, onEdit, onDelete }) {
         <RowActions
           row={row}
           onView={onView}
-          onEdit={row.canManage ? onEdit : undefined}
-          onDelete={row.canManage ? onDelete : undefined}
+          onEdit={row.canEdit ? onEdit : undefined}
+          onDelete={row.canDelete ? onDelete : undefined}
         />
       </td>
     </tr>

@@ -4,8 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { RefreshCw, Loader2, ShieldAlert, CircleCheck } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
-import Button from "@/components/ui/Button";
-import { listStuckPayments, retryStuckPayment, runMissedRefundsScan } from "@/actions/dashboard/webhook-recovery";
+import { listStuckPayments, runMissedRefundsScan } from "@/actions/dashboard/webhook-recovery";
 
 const STATUS_LABEL = {
   REFUND_PENDING: "En attente",
@@ -27,7 +26,6 @@ function formatDate(d) {
 
 export function ReconciliationPageClient({ initialPayments }) {
   const [payments, setPayments] = useState(initialPayments);
-  const [retryingId, setRetryingId] = useState(null);
   const [isScanning, startScan] = useTransition();
   const [isRefreshing, startRefresh] = useTransition();
 
@@ -39,20 +37,6 @@ export function ReconciliationPageClient({ initialPayments }) {
       } else {
         toast.error(result.message);
       }
-    });
-  }
-
-  function handleRetry(payment) {
-    setRetryingId(payment.id);
-    startRefresh(async () => {
-      const result = await retryStuckPayment({ paymentId: payment.id });
-      if (result.success) {
-        toast.success(result.message);
-      } else {
-        toast.error(result.message);
-      }
-      setRetryingId(null);
-      refetch();
     });
   }
 
@@ -112,7 +96,7 @@ export function ReconciliationPageClient({ initialPayments }) {
           </div>
           <p className="font-medium text-gray-700 dark:text-white">Tous les remboursements sont à jour</p>
           <p className="max-w-sm text-sm text-gray-400">
-            Rien ne traîne en attente de traitement Stripe. Le job planifié vérifie aussi automatiquement toutes les 5 minutes.
+            Aucun remboursement en attente. Les remboursements sont effectués uniquement après l&apos;action explicite d&apos;un administrateur.
           </p>
         </div>
       ) : (
@@ -123,9 +107,7 @@ export function ReconciliationPageClient({ initialPayments }) {
               <TableHead>Client</TableHead>
               <TableHead>Montant dû</TableHead>
               <TableHead>Statut</TableHead>
-              <TableHead>Tentatives</TableHead>
               <TableHead>Dernière tentative</TableHead>
-              <TableHead className="pr-6 text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -156,20 +138,7 @@ export function ReconciliationPageClient({ initialPayments }) {
                   )}
                 </TableCell>
                 <TableCell>
-                  <span className="text-gray-500 dark:text-dark-6">{p.refundRetryCount}</span>
-                </TableCell>
-                <TableCell>
                   <span className="text-gray-500 dark:text-dark-6">{formatDate(p.refundAttemptedAt)}</span>
-                </TableCell>
-                <TableCell className="pr-6 text-right">
-                  <Button
-                    onClick={() => handleRetry(p)}
-                    disabled={retryingId === p.id || !p.hasTransactionReference}
-                    className="!px-3 !py-1.5 text-xs"
-                  >
-                    {retryingId === p.id && <Loader2 size={12} className="animate-spin" />}
-                    Réessayer
-                  </Button>
                 </TableCell>
               </TableRow>
             ))}

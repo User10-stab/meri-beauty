@@ -42,7 +42,11 @@ export function FormationsPageClient({ initialFormations = [], initialStaffOptio
         if (filterStatus && f.status !== filterStatus) return false;
         return true;
       })
-      .map((f) => ({ ...f, canManage: isAdminRole(userRole) || f.createdById === currentUserId }));
+      .map((f) => ({
+        ...f,
+        canEdit: isAdminRole(userRole) || f.canEdit || f.createdById === currentUserId,
+        canDelete: isAdminRole(userRole) || f.canDelete || f.createdById === currentUserId,
+      }));
   }, [initialFormations, filterType, filterStatus, userRole, currentUserId]);
 
   function handleEdit(formation) {

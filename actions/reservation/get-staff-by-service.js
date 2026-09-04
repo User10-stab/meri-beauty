@@ -38,7 +38,7 @@ export async function getStaffByService(serviceId) {
         // public booking list until the staff member sets a real price.
         // Kept here as a DB-level pre-filter for performance; the same rule
         // is re-validated in isStaffServiceBookable (lib/staff-availability.js).
-        price: { gte: 0 },
+        price: { gt: 0 },
         duration: { gt: 0 },
         staff: {
           isActive: true,

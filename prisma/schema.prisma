@@ -147,6 +147,72 @@ enum TransactionType {
   REFUND
 }
 
+// Which booking/sale flow a RefundOperation is unwinding. Kept separate
+// from InvoiceSource (which has no POS member) because a counter sale that
+// never produced an invoice still needs an origin recorded on the
+// operation — that is precisely the B2C "justificatif" case.
+enum RefundOperationSource {
+  APPOINTMENT
+  WORKSHOP
+  FORMATION
+  ORDER
+  POS
+}
+
+// WHY this refund is allowed to exist. This is the authorization record,
+// not a label: every value except SALON_CANCELLATION requires something
+// else to already be true (an approved request row, a NO_SHOW status, a
+// received return), and openRefundOperation refuses to build an operation
+// whose trigger it cannot substantiate. See lib/refunds/authorize.js.
+enum RefundTrigger {
+  // Customer used the normal self-cancellation path before the appointment.
+  CUSTOMER_SELF_CANCELLATION
+  // An AppointmentCancellationRequest / ReservationCancellationRequest the
+  // customer wrote and an OWNER/ADMIN approved. The written message is
+  // mandatory even more than 48h before the prestation.
+  CUSTOMER_REQUEST_APPROVED
+  // The salon cancels on its own initiative — no customer request needed,
+  // an administrative motive still is.
+  SALON_CANCELLATION
+  // Exceptional refund of a no-show. The booking KEEPS its NO_SHOW status;
+  // only a financial correction is recorded against it.
+  NO_SHOW_EXCEPTION
+  // Goodwill or quality correction after a completed prestation. It never
+  // reopens, cancels, or changes the historical booking.
+  FINANCIAL_CORRECTION
+  // Boutique return, after the goods physically came back.
+  SHOP_RETURN
+}
+
+// Lifecycle of the whole operation, derived from its legs — never set by
+// hand. PARTIALLY_REFUNDED is the load-bearing one: Stripe can have paid
+// out while a CASH/CARD leg still waits on an admin standing at the till,
+// and the customer must not be told "remboursé" until every leg lands.
+enum RefundOperationStatus {
+  // Legs created, nothing settled yet.
+  PENDING
+  // At least one leg SUCCEEDED and at least one is still outstanding.
+  PARTIALLY_REFUNDED
+  // Every leg SUCCEEDED.
+  COMPLETED
+  // Every unsettled leg FAILED — retryable, keeps its idempotency keys.
+  FAILED
+}
+
+enum RefundLegStatus {
+  // Created, and for ONLINE legs handed (or about to be handed) to Stripe.
+  PENDING
+  // Money confirmed gone: the Stripe webhook fired, or an admin confirmed
+  // the physical hand-over. Only now does a REFUND Transaction row exist.
+  SUCCEEDED
+  // The Stripe call errored. Keeps stripeIdempotencyKey so a retry replays
+  // the same call rather than risking a second refund.
+  FAILED
+  // CASH/CARD: we cannot move this money ourselves. Waits on an admin
+  // confirming the hand-over (and, for CARD, the terminal ticket ref).
+  MANUAL_CONFIRMATION_REQUIRED
+}
+
 // Direction of a non-sale drawer movement. See model CashMovement.
 enum CashMovementType {
   // Cash paid out of the drawer for a business cost — supplier, transport,
@@ -812,6 +878,8 @@ model User {
   reviewedCancellationRequests   AppointmentCancellationRequest[] @relation("CancellationRequestReviewedBy")
   submittedReservationCancellationRequests ReservationCancellationRequest[] @relation("ReservationCancellationRequestedBy")
   reviewedReservationCancellationRequests  ReservationCancellationRequest[] @relation("ReservationCancellationReviewedBy")
+  decidedRefundOperations        RefundOperation[]      @relation("RefundOperationDecidedBy")
+  confirmedRefundLegs            RefundLeg[]            @relation("RefundLegConfirmedBy")
 
   @@index([role])
   @@index([isActive, isDeleted])
@@ -1340,6 +1408,11 @@ model ReturnRequest {
   creditNoteId String?     @unique
   creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id])
 
+  // The operation that actually moved the money back, once the goods were
+  // received and their condition assessed. Distinct from creditNoteId
+  // above: the note is the document, this is the refund itself.
+  refundOperation RefundOperation? @relation("ReturnRequestRefundOperation")
+
   items ReturnRequestItem[]
 
   @@index([orderId])
@@ -1574,6 +1647,10 @@ model AppointmentCancellationRequest {
   reviewedBy       User? @relation("CancellationRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   decisionNote     String?
 
+  // At most one refund operation per approved request — approving twice, or
+  // double-clicking the approve button, can never produce two refunds.
+  refundOperation RefundOperation?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1611,6 +1688,9 @@ model ReservationCancellationRequest {
   reviewedByUserId String?
   reviewedBy       User?     @relation("ReservationCancellationReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
   decisionNote     String?
+
+  // See AppointmentCancellationRequest.refundOperation — same guarantee.
+  refundOperation RefundOperation?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1691,9 +1771,14 @@ model Payment {
   promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
   discountAmount Decimal    @default(0) @db.Decimal(10, 2)
 
-  transactions Transaction[]
-  invoice      Invoice?
-  disputes     StripeDispute[]
+  transactions     Transaction[]
+  invoice          Invoice?
+  disputes         StripeDispute[]
+  // Historical list, not "the current one": a failed operation stays on the
+  // record beside the one that later succeeded. At most one may be in
+  // flight at a time, enforced by a partial unique index — see
+  // model RefundOperation's closing comment.
+  refundOperations RefundOperation[]
 
   @@index([promoCodeId])
 }
@@ -1833,6 +1918,11 @@ model Invoice {
   vatTreatment    VatTreatment @default(DOMESTIC)
   taxNote         String?
 
+  // Set only after Resend confirms that the invoice e-mail was accepted for
+  // delivery. The invoice's customerEmail remains the legal recipient
+  // snapshot; this field answers the operational question "was it sent?".
+  emailSentAt DateTime?
+
   // Set once this invoice has been created as an order in Billit
   // (POST /v1/orders — see lib/billit.js). Billit's own dashboard is where
   // staff finish the actual Peppol/e-mail dispatch, so these two fields only
@@ -1840,8 +1930,9 @@ model Invoice {
   billitOrderId String?
   billitSentAt  DateTime?
 
-  lines       InvoiceLine[]
-  creditNotes CreditNote[]
+  lines            InvoiceLine[]
+  creditNotes      CreditNote[]
+  refundOperations RefundOperation[]
 
   @@index([paymentId])
 }
@@ -1898,9 +1989,18 @@ model CreditNote {
   // the same Peppol path, not an ad-hoc PDF e-mail.
   billitOrderId String?
   billitSentAt  DateTime?
+  // Set only after the e-mail provider confirms the credit note was sent.
+  // This is distinct from billitSentAt, which only records Billit order
+  // creation and never confirms a final Peppol delivery.
+  emailSentAt   DateTime?
 
   returnRequest ReturnRequest?
-  transaction   Transaction?
+  // Plural since the RefundOperation migration: one global correction of a
+  // 21 € invoice is settled by as many REFUND rows as there were payment
+  // methods (Stripe acompte + cash balance). See Transaction.creditNoteId.
+  transactions  Transaction[]
+
+  refundOperation RefundOperation?
 
   @@index([invoiceId])
 }
@@ -1931,6 +2031,10 @@ model CashSession {
 
   transactions Transaction[]
   movements    CashMovement[]
+  // Cash handed back to a customer is booked against the session that was
+  // open when it left the drawer — otherwise the close-of-day count is
+  // short by exactly the refund and nothing in the book explains it.
+  refundLegs   RefundLeg[]
 
   @@index([closedAt])
 }
@@ -2081,7 +2185,15 @@ model Transaction {
   // leaving. Nullable/SetNull: a CreditNote is never deleted for a refund
   // row to keep existing, and a refund recorded before this link existed
   // (or done manually outside Stripe) can be missing one until backfilled.
-  creditNoteId String?     @unique
+  //
+  // Deliberately NOT unique (it was, until the RefundOperation migration).
+  // One cancellation of a reservation paid 50 % online + 50 % at the till
+  // is ONE global correction of the final invoice, settled by TWO refund
+  // movements — a Stripe payout and a cash hand-over. Under the old unique
+  // constraint the second movement could not be attached to the note that
+  // justifies it, which is what forced the per-payment-method partial notes
+  // the accountant then had to reconcile by hand.
+  creditNoteId String?
   creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id], onDelete: SetNull)
 
   amount                  Decimal
@@ -2102,7 +2214,205 @@ model Transaction {
   isDeleted               Boolean           @default(false)
   deletedAt               DateTime?
 
+  // A refund leg reads its ORIGINAL payment row through this (which method,
+  // which payment_intent, how much is left on it) — many legs may point at
+  // one original in a partial-refund history, so it is a list.
+  refundLegsFromThis RefundLeg[] @relation("RefundLegSourceTransaction")
+  // The mirror: set on the REFUND row a leg produces when it settles. One
+  // leg produces at most one REFUND row, hence the singular back-relation.
+  settledRefundLeg   RefundLeg?  @relation("RefundLegSettlementTransaction")
+
   @@index([paymentId])
+  @@index([creditNoteId])
+}
+
+// REFUND OPERATION
+// The single durable record of one decision to unwind a sale: "annuler et
+// rembourser". Before this existed the dashboard's button only produced a
+// CreditNote document, and the money-moving half lived in five separate
+// per-flow copies (appointments, ateliers, formations, commandes, retours)
+// that each re-derived the amount differently — most damagingly by refunding
+// Payment.paidAmount in full against the FIRST Stripe payment, which for a
+// 50 % acompte online + 50 % at the till means asking Stripe for money it
+// never took.
+//
+// The operation owns the accounting correction (ONE credit note for the
+// whole invoice, or ONE refund receipt when the customer is a particulier
+// with no invoice); the RefundLeg rows below own the money movements, one
+// per original payment method. That split is what lets a single 21 € credit
+// note be settled by a 10,50 € Stripe payout plus a 10,50 € cash hand-over.
+//
+// Never spans a SQL transaction with Stripe: the operation, its legs, the
+// credit note and the cancellation of the underlying item all commit
+// together FIRST, and only then is Stripe called with the leg's pinned
+// idempotency key. A crash between the two leaves a replayable PENDING leg,
+// never a silent loss.
+model RefundOperation {
+  id String @id @default(cuid())
+
+  paymentId String
+  payment   Payment @relation(fields: [paymentId], references: [id])
+
+  // Null for a B2C sale that never produced an invoice (see
+  // lib/tax-policy.js#hasInvoiceableVatIdentity — a particulier without a
+  // validated VAT identity never gets one). Those get refundReceiptNumber
+  // below instead of a credit note; they are NOT an error state.
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+
+  source  RefundOperationSource
+  trigger RefundTrigger
+
+  // What the customer is owed in total, across every method. NOT
+  // Payment.paidAmount: prior partial refunds are already subtracted, so
+  // this is what planRefund() computed as still refundable at open time.
+  totalAmount Decimal @db.Decimal(10, 2)
+  reason      String
+
+  // Exactly one of these two is set, decided by whether an Invoice exists.
+  // The credit note is the legal correction of an invoice; the receipt is
+  // the internal justificatif for a B2C ticket. Both are numbered from
+  // their own gapless NumberingCounter series.
+  creditNoteId String?     @unique
+  creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id])
+  // "RB2026-000001". Own series — see lib/refunds/refund-receipt-number.js.
+  refundReceiptNumber String? @unique
+
+  // The OWNER/ADMIN who took responsibility for this. Never nullable in
+  // practice for a dashboard-initiated operation; SetNull only so deleting
+  // a staff account cannot destroy the financial record.
+  decidedByUserId String?
+  decidedBy       User?   @relation("RefundOperationDecidedBy", fields: [decidedByUserId], references: [id], onDelete: SetNull)
+
+  status RefundOperationStatus @default(PENDING)
+
+  // When the underlying booking/order was actually cancelled by this
+  // operation. Null for a NO_SHOW exception, which deliberately KEEPS its
+  // historical status and only receives a financial correction.
+  itemCancelledAt DateTime?
+
+  // The single "votre remboursement est effectué" e-mail, sent once every
+  // leg has SUCCEEDED. Set inside the same update that sends it, so a
+  // redelivered Stripe webhook (or a second admin confirmation) cannot mail
+  // the customer twice. This is the whole reason the field exists.
+  customerNotifiedAt DateTime?
+
+  // Authorization evidence. At most one is set, and openRefundOperation
+  // requires the matching one for its trigger:
+  //   CUSTOMER_REQUEST_APPROVED -> one of the two request ids
+  //   SHOP_RETURN               -> returnRequestId
+  //   SALON_CANCELLATION        -> none (reason carries the motive)
+  //   NO_SHOW_EXCEPTION         -> none (reason is mandatory + audited)
+  // @unique on each is the double-click guard: one approved request can
+  // only ever produce one operation, however many times the button is hit.
+  appointmentCancellationRequestId String?                         @unique
+  appointmentCancellationRequest   AppointmentCancellationRequest? @relation(fields: [appointmentCancellationRequestId], references: [id], onDelete: SetNull)
+  reservationCancellationRequestId String?                         @unique
+  reservationCancellationRequest   ReservationCancellationRequest? @relation(fields: [reservationCancellationRequestId], references: [id], onDelete: SetNull)
+  returnRequestId                  String?                         @unique
+  returnRequest                    ReturnRequest?                  @relation("ReturnRequestRefundOperation", fields: [returnRequestId], references: [id], onDelete: SetNull)
+
+  legs RefundLeg[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // The second half of the double-click guard, and the one that covers
+  // SALON_CANCELLATION / NO_SHOW_EXCEPTION (which have no request row to
+  // key on). A raw partial unique index added in the migration —
+  //   UNIQUE ("paymentId") WHERE status IN ('PENDING','PARTIALLY_REFUNDED')
+  // — makes "at most one operation in flight per payment" a database
+  // guarantee rather than a read-then-check race. Prisma cannot express a
+  // partial index, so it lives in migration.sql; this plain index is what
+  // Prisma manages.
+  @@index([paymentId, status])
+  @@index([status, createdAt])
+  @@index([decidedByUserId])
+}
+
+// REFUND LEG
+// One movement of money back to the customer, against ONE original payment
+// transaction and therefore ONE method. A reservation settled 50 % online +
+// 50 % in cash unwinds into exactly two legs under one operation.
+//
+// The method is never chosen: it is read off the original transaction. Money
+// goes back the way it came, which is both what the customer expects and
+// what keeps the cash book and the Stripe balance each accountable for their
+// own half.
+model RefundLeg {
+  id String @id @default(cuid())
+
+  refundOperationId String
+  refundOperation   RefundOperation @relation(fields: [refundOperationId], references: [id], onDelete: Cascade)
+
+  // The DEPOSIT/FINAL_PAYMENT row being unwound. Nullable only for legacy
+  // reconstruction of a historical refund whose original row is missing;
+  // every leg this codebase creates sets it.
+  sourceTransactionId String?
+  sourceTransaction   Transaction? @relation("RefundLegSourceTransaction", fields: [sourceTransactionId], references: [id], onDelete: SetNull)
+
+  method TransactionMethod
+  // What SHOULD go back, computed by planRefund at open time. Never mutated
+  // afterwards — it is the record of the decision.
+  amount Decimal           @db.Decimal(10, 2)
+  // What ACTUALLY came back, filled in at settlement. Normally identical to
+  // `amount` and therefore null; set only when the two differ.
+  //
+  // It exists because refunds are now executed by hand in the Stripe
+  // dashboard rather than by this application, so the amount is typed by a
+  // person against an invoice that may not match the Stripe payment at all
+  // (a 21 € reservation where Stripe only ever took the 10,50 € acompte).
+  // Overwriting `amount` with what Stripe reports would hide exactly the
+  // mistake worth catching, so both figures are kept and the difference is
+  // surfaced.
+  settledAmount Decimal?   @db.Decimal(10, 2)
+  status RefundLegStatus   @default(PENDING)
+
+  // ── ONLINE ────────────────────────────────────────────────────────────
+  // Pinned BEFORE the Stripe call and never regenerated, so a retry after a
+  // lost response replays the same request instead of issuing a second
+  // refund. This is the field that makes "appel Stripe réussi mais réponse
+  // perdue" safe. Unique so two legs can never share one.
+  stripeIdempotencyKey  String? @unique
+  stripeRefundId        String?
+  stripePaymentIntentId String?
+
+  // ── CARD (external terminal) ──────────────────────────────────────────
+  // We cannot drive the terminal. The admin refunds on the device and types
+  // the ticket reference here; it is mandatory before the leg may settle.
+  terminalReference String?
+
+  // ── CASH ──────────────────────────────────────────────────────────────
+  // Explicit confirmation that the notes actually left the drawer, plus the
+  // till session and cash-book piece number the outflow was booked under.
+  cashHandedOver Boolean      @default(false)
+  cashSessionId  String?
+  cashSession    CashSession? @relation(fields: [cashSessionId], references: [id])
+  pieceNumber    String?      @unique
+
+  // Who confirmed a manual leg. Meaningless for ONLINE (Stripe's webhook
+  // confirms those), required for CASH/CARD.
+  confirmedByUserId String?
+  confirmedBy       User?     @relation("RefundLegConfirmedBy", fields: [confirmedByUserId], references: [id], onDelete: SetNull)
+  confirmedAt       DateTime?
+
+  // The immutable ledger row this leg produced once the money actually
+  // moved. Written at settlement, never at creation — a leg that has no
+  // REFUND Transaction has, by construction, refunded nothing.
+  refundTransactionId String?      @unique
+  refundTransaction   Transaction? @relation("RefundLegSettlementTransaction", fields: [refundTransactionId], references: [id], onDelete: SetNull)
+
+  failureReason String?
+  attemptCount  Int     @default(0)
+  lastAttemptAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([refundOperationId])
+  @@index([status, method])
+  @@index([sourceTransactionId])
+  @@index([cashSessionId])
 }
 
 // CONTRACT

@@ -44,6 +44,7 @@ export async function GET(req, { params }) {
     where: { id },
     select: {
       totalAmount: true,
+      paidAmount: true,
       orderId: true,
       invoice: {
         select: {
@@ -121,7 +122,11 @@ export async function GET(req, { params }) {
       select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
     });
     const { vatRate } = resolveServiceVatPolicy({ customer });
-    const { totalExclVat, vatAmount, totalInclVat } = calculateVatTotals(payment.totalAmount, vatRate);
+    // A ticket proves what has actually been collected. For a deposit,
+    // totalAmount is the full reservation price while paidAmount is the
+    // smaller amount received now. Once the balance is collected,
+    // paidAmount naturally becomes the complete amount.
+    const { totalExclVat, vatAmount, totalInclVat } = calculateVatTotals(payment.paidAmount, vatRate);
     ticketFields = {
       orderNumber: id,
       issuedAt: new Date(),

@@ -18,14 +18,14 @@ describe("the Ateliers/Formations reservation tabs expose facture/ticket/note de
     const blockIdx = actions.indexOf('tab === "workshops"');
     const block = actions.slice(blockIdx, actions.indexOf('} else {', blockIdx));
     expect(block).toContain("invoice: {");
-    expect(block).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } }");
+    expect(block).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
   });
 
   test("the formations query fetches the payment's id, invoice and every credit note against it", () => {
     const blockIdx = actions.indexOf('} else {', actions.indexOf('tab === "workshops"'));
     const block = actions.slice(blockIdx);
     expect(block).toContain("invoice: {");
-    expect(block).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, billitSentAt: true } }");
+    expect(block).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
   });
 
   test("both reservation queries carry the payment id — the ticket action is keyed on it, not the invoice", () => {
@@ -94,7 +94,9 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     // This is the exact fix for the particulier gap: no `if (!invoice) return`
     // short-circuit — the else branch always produces a renderable ticket.
     expect(route).toContain("resolveServiceVatPolicy({ customer })");
-    expect(route).toContain("calculateVatTotals(payment.totalAmount, vatRate)");
+    expect(route).toContain("paidAmount: true");
+    expect(route).toContain("calculateVatTotals(payment.paidAmount, vatRate)");
+    expect(route).not.toContain("calculateVatTotals(payment.totalAmount, vatRate)");
     expect(route).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
   });
 

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { buildRentalPeriodLabel, shortContractRef } from "@/lib/invoicing";
 import { InvoiceDocument, CreditNoteDocument } from "./InvoiceDocument";
 import { TicketDocument } from "./TicketDocument";
+import { RefundReceiptDocument } from "./RefundReceiptDocument";
 import { getSellerContact } from "./seller-contact";
 
 /**
@@ -114,4 +115,9 @@ export async function renderCreditNotePdf(creditNote, invoice) {
       invoice={serializeInvoice(invoice)}
     />
   );
+}
+
+export async function renderRefundReceiptPdf(operation, receipt) {
+  const contact = await getSellerContact();
+  return renderToBuffer(<RefundReceiptDocument contact={contact} receipt={{ ...receipt, legs: operation.legs }} />);
 }

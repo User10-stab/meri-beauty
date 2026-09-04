@@ -70,7 +70,18 @@ function ReservationAtelierContent() {
   const [available, setAvailable] = useState(0);
   const [seats, setSeats] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState("DEPOSIT");
-  const [form, setForm] = useState({ fullName: "", email: "", phone: "", vatNumber: "" });
+  const [form, setForm] = useState({
+    fullName: "",
+    email: "",
+    phone: "",
+    vatNumber: "",
+    addressLine1: "",
+    addressLine2: "",
+    addressCity: "",
+    addressPostalCode: "",
+    addressCountry: "BE",
+  });
+  const [hasAddressOnFile, setHasAddressOnFile] = useState(false);
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
@@ -199,8 +210,14 @@ function ReservationAtelierContent() {
           email: result.data.email || prev.email,
           phone: result.data.phone || prev.phone,
           vatNumber: result.data.vatNumber || prev.vatNumber,
+          addressLine1: result.data.addressLine1 || prev.addressLine1,
+          addressLine2: result.data.addressLine2 || prev.addressLine2,
+          addressCity: result.data.addressCity || prev.addressCity,
+          addressPostalCode: result.data.addressPostalCode || prev.addressPostalCode,
+          addressCountry: result.data.addressCountry || prev.addressCountry,
         }));
         setSavedVatProfile(result.data);
+        setHasAddressOnFile(result.data.hasAddressOnFile);
       });
       return () => { active = false; };
     }
@@ -211,9 +228,15 @@ function ReservationAtelierContent() {
 
   const depositPct = activity?.depositPercentage ?? 50;
   const hasSavedVatProof = isAuthed && hasReusableVatValidation(savedVatProfile, form.vatNumber);
+  const isBusinessBooking = hasReusableVatValidation(savedVatProfile, form.vatNumber);
   const vatPolicy = resolveServiceVatPolicy({
-    customer: hasReusableVatValidation(savedVatProfile, form.vatNumber) ? savedVatProfile : null,
+    customer: isBusinessBooking ? savedVatProfile : null,
   });
+  // A VAT number makes this an invoiceable B2B sale — issueInvoice refuses to
+  // issue without a billing address on file (see the create-workshop
+  // -reservation.js comment at the same check). B2C guests never hit that
+  // gate at all, so they are never asked for an address here.
+  const needsBillingAddress = isBusinessBooking && !hasAddressOnFile;
   const catalogueUnitPrice = Number(activity?.price || 0);
   const unitPrice = repriceTtcCataloguePrice(catalogueUnitPrice, vatPolicy.vatRate);
   const totalPrice = unitPrice * seats;
@@ -248,6 +271,11 @@ function ReservationAtelierContent() {
     if (!isAuthed && !form.fullName.trim()) requiredErrors.fullName = "Le nom complet est obligatoire.";
     if (!form.email.trim()) requiredErrors.email = "L'adresse e-mail est obligatoire.";
     if (!form.phone.trim()) requiredErrors.phone = "Le numéro de téléphone est obligatoire.";
+    if (needsBillingAddress) {
+      if (!form.addressLine1.trim()) requiredErrors.addressLine1 = "L'adresse est obligatoire.";
+      if (!form.addressCity.trim()) requiredErrors.addressCity = "La ville est obligatoire.";
+      if (!form.addressPostalCode.trim()) requiredErrors.addressPostalCode = "Le code postal est obligatoire.";
+    }
     if (Object.keys(requiredErrors).length > 0) {
       setFieldErrors(requiredErrors);
       setError("Veuillez compléter les champs indiqués avant de continuer.");
@@ -676,6 +704,45 @@ function ReservationAtelierContent() {
                       )}
                     </div>
                     )}
+                    {needsBillingAddress && (
+                      <div className="space-y-2 rounded-lg border border-ink/10 bg-ink/[0.02] p-3">
+                        <p className="text-xs text-ink/50">
+                          Adresse de facturation obligatoire pour une facture avec numéro de TVA.
+                        </p>
+                        <div>
+                          <input
+                            type="text"
+                            value={form.addressLine1}
+                            onChange={(e) => { setForm((p) => ({ ...p, addressLine1: e.target.value })); setFieldErrors((p) => ({ ...p, addressLine1: undefined })); }}
+                            className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressLine1 ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                            placeholder="Rue et numéro *"
+                          />
+                          {fieldErrors.addressLine1 && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressLine1}</p>}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <input
+                              type="text"
+                              value={form.addressPostalCode}
+                              onChange={(e) => { setForm((p) => ({ ...p, addressPostalCode: e.target.value })); setFieldErrors((p) => ({ ...p, addressPostalCode: undefined })); }}
+                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressPostalCode ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                              placeholder="Code postal *"
+                            />
+                            {fieldErrors.addressPostalCode && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressPostalCode}</p>}
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              value={form.addressCity}
+                              onChange={(e) => { setForm((p) => ({ ...p, addressCity: e.target.value })); setFieldErrors((p) => ({ ...p, addressCity: undefined })); }}
+                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressCity ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                              placeholder="Ville *"
+                            />
+                            {fieldErrors.addressCity && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressCity}</p>}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -782,6 +849,45 @@ function ReservationAtelierContent() {
                         </p>
                       )}
                     </div>
+                    {needsBillingAddress && (
+                      <div className="space-y-2 rounded-lg border border-ink/10 bg-ink/[0.02] p-3">
+                        <p className="text-xs text-ink/50">
+                          Adresse de facturation obligatoire pour une facture avec numéro de TVA.
+                        </p>
+                        <div>
+                          <input
+                            type="text"
+                            value={form.addressLine1}
+                            onChange={(e) => { setForm((p) => ({ ...p, addressLine1: e.target.value })); setFieldErrors((p) => ({ ...p, addressLine1: undefined })); }}
+                            className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressLine1 ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                            placeholder="Rue et numéro *"
+                          />
+                          {fieldErrors.addressLine1 && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressLine1}</p>}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <input
+                              type="text"
+                              value={form.addressPostalCode}
+                              onChange={(e) => { setForm((p) => ({ ...p, addressPostalCode: e.target.value })); setFieldErrors((p) => ({ ...p, addressPostalCode: undefined })); }}
+                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressPostalCode ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                              placeholder="Code postal *"
+                            />
+                            {fieldErrors.addressPostalCode && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressPostalCode}</p>}
+                          </div>
+                          <div>
+                            <input
+                              type="text"
+                              value={form.addressCity}
+                              onChange={(e) => { setForm((p) => ({ ...p, addressCity: e.target.value })); setFieldErrors((p) => ({ ...p, addressCity: undefined })); }}
+                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressCity ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                              placeholder="Ville *"
+                            />
+                            {fieldErrors.addressCity && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressCity}</p>}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <p className="text-xs text-ink/40">Un compte sera créé automatiquement avec votre email.</p>
                   </div>
                 )}

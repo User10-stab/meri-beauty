@@ -91,7 +91,14 @@ describe("the refusal happens before anything is written", () => {
         paymentId: "pay-1",
         source: "ORDER",
         totalInclVat: 121,
-        customer: { fullName: "Client", email: "client@example.test" },
+        customer: {
+          fullName: "Client",
+          email: "client@example.test",
+          isCompany: true,
+          vatNumber: "BE0751854027",
+          vatValidatedAt: new Date(),
+          legalName: "Client SRL",
+        },
         lines: [{ description: "Produit", quantity: 1, unitPrice: 121 }],
       })
     ).rejects.toThrow("BUYER_LEGAL_DATA_INCOMPLETE");

@@ -80,6 +80,10 @@ mailpit.exe
 # local AI/dev assistant state
 .claude/
 
+# GitHub Actions SSH keys
+github-actions
+github-actions.pub
+
 # Local scratch output (rendered PDFs/screenshots from debugging)
 /tmp
 

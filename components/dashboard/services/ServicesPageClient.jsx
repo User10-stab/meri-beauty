@@ -67,7 +67,7 @@ export function ServicesPageClient({ initialCategories, initialServices, userRol
     const isStaffUser = userRole === "STAFF";
     const confirmMessage = isStaffUser
       ? `Retirer « ${service.name} » de votre profil ? Le service restera disponible pour les autres professionnels.`
-      : `Supprimer définitivement « ${service.name} » ? Cette action est irréversible.`;
+      : `Supprimer « ${service.name} » ? Il ne sera plus visible dans le système mais les données historiques seront préservées.`;
 
     if (!(await confirm(confirmMessage, { danger: true }))) return;
 
@@ -102,7 +102,7 @@ export function ServicesPageClient({ initialCategories, initialServices, userRol
   }
 
   async function handleDeleteCategory(category) {
-    if (!(await confirm(`Supprimer définitivement la catégorie « ${category.name} » et tous ses services ? Cette action est irréversible.`, { danger: true }))) return;
+    if (!(await confirm(`Supprimer la catégorie « ${category.name} » et tous ses services ? Ils ne seront plus visibles mais les données historiques seront préservées.`, { danger: true }))) return;
 
     startDelete(async () => {
       const result = await deleteCategory(category.id);

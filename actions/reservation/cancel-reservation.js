@@ -2,12 +2,8 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { stripe } from "@/lib/stripe";
 import { issueCreditNote } from "@/lib/invoicing";
-import { buildRefundIdempotencyKey, pinPendingRefund, markRefundFailed } from "@/lib/payments/pin-pending-refund";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
-import { settleRefundLeg } from "@/lib/refunds/settle-leg";
-import { notifyRefundComplete } from "@/lib/refunds/notify-refund-complete";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import {
   isWithinCancellationWindow,
@@ -35,9 +31,9 @@ const CANCELLABLE_STATUSES = ["PENDING", "ACCEPTED", "CONFIRMED"];
  *  - The appointment must NOT start within the next 48 hours.
  *
  * If the appointment was already paid (online deposit or full payment), this
- * also issues a credit note and refunds via Stripe — mirrors the staff-side
- * rejectAppointment in actions/appointment/manage-appointment.js, which is
- * the reviewed reference implementation for this exact flow.
+ * also issues a credit note and creates a durable manual-refund work item.
+ * The team completes the Stripe refund from Operations; this action never
+ * moves money itself.
  *
  * @param {string} appointmentId
  * @returns {Promise<{ success: boolean, message?: string }>}
@@ -126,7 +122,6 @@ export async function cancelReservation(appointmentId) {
     }
 
     const needsRefund = wasPaid && payment.transactionReference && remaining > REFUND_EPSILON;
-    const refundIdempotencyKey = needsRefund ? buildRefundIdempotencyKey("appt-customer-cancel", payment.id) : null;
 
     const claimed = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the appointment still being cancellable —
@@ -155,20 +150,9 @@ export async function cancelReservation(appointmentId) {
         });
       }
 
-      // Pinned in the same transaction that commits the cancellation itself
-      // — see lib/payments/pin-pending-refund.js's doc comment for why this
-      // has to happen before the Stripe call below, not just in its catch.
-      // Previously this path recorded nothing at all on failure (no status
-      // change, no pending amount) — invisible to both the retry cron and
-      // the reconciliation dashboard.
-      if (needsRefund) {
-        await pinPendingRefund(tx, payment.id, remaining, refundIdempotencyKey, creditNote?.id ?? null);
-      }
-
-      // Even though this customer path still asks Stripe to refund
-      // automatically, it must use the same durable operation as every
-      // other refund. Otherwise a B2C deposit gets its money back but has no
-      // numbered receipt and no final customer e-mail.
+      // The cancellation, document, and manual-refund operation commit
+      // together. A retry cannot leave a second credit note without a
+      // corresponding Operations work item.
       const queued = needsRefund
         ? await queueManualRefund(tx, {
             paymentId: payment.id,
@@ -188,7 +172,6 @@ export async function cancelReservation(appointmentId) {
         claimed: true,
         creditNoteId: creditNote?.id ?? null,
         refundOperationId: queued?.operationId ?? null,
-        refundLegId: queued?.legs?.find((leg) => leg.method === "ONLINE")?.id ?? null,
       };
     });
 
@@ -242,52 +225,12 @@ export async function cancelReservation(appointmentId) {
       }).catch((err) => console.error("[cancelReservation] dashboard email failed:", err));
     }
 
-    // Payment.status / the REFUND ledger row are only written once Stripe
-    // actually confirms the refund — writing them unconditionally beforehand
-    // would tell the customer "refunded" even if the Stripe call below fails.
-    // pendingRefundAmount/idempotencyKey were already pinned inside the
-    // cancellation transaction above.
-    let refundFailed = false;
-    if (needsRefund) {
-      try {
-        const stripeSession = await stripe.checkout.sessions.retrieve(payment.transactionReference);
-        if (stripeSession.payment_intent) {
-          const stripeRefund = await stripe.refunds.create(
-            { payment_intent: stripeSession.payment_intent, amount: Math.round(remaining * 100) },
-            { idempotencyKey: refundIdempotencyKey }
-          );
-          if (!claimed.refundLegId || !claimed.refundOperationId) {
-            throw new Error("REFUND_OPERATION_MISSING");
-          }
-          await settleRefundLeg({
-            prisma,
-            legId: claimed.refundLegId,
-            stripe: {
-              refundId: stripeRefund.id,
-              paymentIntentId: stripeSession.payment_intent,
-              amount: Number(stripeRefund.amount) / 100,
-            },
-          });
-          await notifyRefundComplete({ prisma, operationId: claimed.refundOperationId });
-        }
-      } catch (err) {
-        // The cancellation and credit note are already committed and stay
-        // — surface the refund failure loudly so it can be retried/handled
-        // manually, rather than silently telling the customer it's done.
-        // pendingRefundAmount/idempotencyKey remain as an audit trail for
-        // staff to reconcile after the manual Stripe action.
-        console.error("[cancelReservation] REFUND FAILED for appointment", appointmentId, err);
-        refundFailed = true;
-        await markRefundFailed(prisma, payment.id, err);
-      }
-    }
-
     return {
       success: true,
       message: wasPaid
-        ? refundFailed
+        ? needsRefund
           ? "Votre réservation a été annulée. Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
-          : "Votre réservation a été annulée. Le remboursement apparaîtra sur votre compte sous quelques jours."
+          : "Votre réservation a été annulée."
         : "Votre réservation a été annulée.",
     };
   } catch (error) {

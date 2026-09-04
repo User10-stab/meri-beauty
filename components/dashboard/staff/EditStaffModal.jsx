@@ -18,7 +18,9 @@ import {
   Layers,
   Info,
   Crop,
+  MapPin,
 } from "lucide-react";
+import { CountrySelect } from "@/components/shared/CountrySelect";
 import { updateIndependentStaff } from "@/actions/staff/update-independent-staff";
 import { updateIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { LanguageTagInput } from "./LanguageTagInput";
@@ -358,6 +360,16 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
       id:                staff.id,
       fullName:          staff.user.fullName,
       phone:             staff.user.phone,
+      addressLine1:      staff.user.addressLine1 ?? "",
+      addressLine2:      staff.user.addressLine2 ?? "",
+      addressCity:       staff.user.addressCity ?? "",
+      addressPostalCode: staff.user.addressPostalCode ?? "",
+      addressCountry:    (() => {
+        // Migrate legacy 2-letter ISO codes to full country names
+        const legacyMap = { BE: "Belgique", FR: "France", LU: "Luxembourg", NL: "Pays-Bas", DE: "Allemagne", CH: "Suisse", ES: "Espagne", IT: "Italie", PT: "Portugal", GB: "Royaume-Uni" };
+        const stored = staff.user.addressCountry ?? "";
+        return legacyMap[stored?.toUpperCase()] ?? stored;
+      })(),
       photo:             staff.photo     ?? null,
       bio:               staff.bio       ?? "",
       languages:         staff.languages ?? [],
@@ -427,6 +439,47 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
               <TextInput id="editPhone" type="tel" placeholder="+33 6 12 34 56 78" error={errors.phone} {...register("phone")} />
               <FieldError message={errors.phone?.message} />
             </div>
+          </div>
+        </div>
+
+        {/* Address */}
+        <div className="mt-4">
+          <Label htmlFor="editAddressLine1" icon={MapPin}>Adresse de facturation</Label>
+          <TextInput id="editAddressLine1" type="text" placeholder="Numéro et rue" error={errors.addressLine1} {...register("addressLine1")} />
+          <FieldError message={errors.addressLine1?.message} />
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-4">
+          <div>
+            <TextInput id="editAddressLine2" type="text" placeholder="Complément d'adresse (optionnel)" error={errors.addressLine2} {...register("addressLine2")} />
+            <FieldError message={errors.addressLine2?.message} />
+          </div>
+          <div>
+            <TextInput id="editAddressPostalCode" type="text" placeholder="Code postal" error={errors.addressPostalCode} {...register("addressPostalCode")} />
+            <FieldError message={errors.addressPostalCode?.message} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-4">
+          <div>
+            <TextInput id="editAddressCity" type="text" placeholder="Ville" error={errors.addressCity} {...register("addressCity")} />
+            <FieldError message={errors.addressCity?.message} />
+          </div>
+          <div>
+            <Controller
+              name="addressCountry"
+              control={control}
+              render={({ field }) => (
+                <CountrySelect
+                  id="editAddressCountry"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  error={Boolean(errors.addressCountry)}
+                  variant="default"
+                />
+              )}
+            />
+            <FieldError message={errors.addressCountry?.message} />
           </div>
         </div>
       </div>

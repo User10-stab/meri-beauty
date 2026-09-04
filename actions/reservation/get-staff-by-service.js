@@ -32,6 +32,7 @@ export async function getStaffByService(serviceId) {
       where: {
         serviceId,
         isActive: true,
+        isDeleted: false,
         // "Assign to me" creates isActive: true rows with price/duration 0,
         // meant to be configured before going live — exclude those from the
         // public booking list until the staff member sets a real price.

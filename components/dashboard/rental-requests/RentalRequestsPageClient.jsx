@@ -209,6 +209,13 @@ export function RentalRequestsPageClient({ initialData, services = [] }) {
             fullName: approvingRef.current.user?.fullName ?? "",
             email: approvingRef.current.user?.email ?? "",
             phone: approvingRef.current.user?.phone ?? "",
+            // Prefill the applicant's registered address — the admin can
+            // still correct it, and it is what the rental invoice prints.
+            addressLine1: approvingRef.current.user?.addressLine1 ?? "",
+            addressLine2: approvingRef.current.user?.addressLine2 ?? "",
+            addressCity: approvingRef.current.user?.addressCity ?? "",
+            addressPostalCode: approvingRef.current.user?.addressPostalCode ?? "",
+            addressCountry: approvingRef.current.user?.addressCountry ?? "BE",
             // The applicant already chose these on their rental request —
             // re-asking the admin to retype them from scratch is how a
             // start date silently drifts from what was actually agreed.

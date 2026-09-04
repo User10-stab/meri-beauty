@@ -99,22 +99,26 @@ describe("reservation no-show never refunds, but does invoice the kept deposit",
   });
 });
 
-describe("both flows expose auth-gated wrappers, admin-only", () => {
+describe("both flows expose auth-gated wrappers with scoped staff capabilities", () => {
   const workshop = source("actions/workshops/manage-reservation.js");
   const formation = source("actions/formations/manage-reservation.js");
 
-  test("workshop wrappers exist and require an admin role", () => {
+  test("workshop wrappers exist and require a server-side activity-operation guard", () => {
     expect(workshop).toContain("export async function completeWorkshopReservation");
     expect(workshop).toContain("export async function markWorkshopReservationNoShow");
     const settleFn = workshop.slice(workshop.indexOf("export async function completeWorkshopReservation"));
-    expect(settleFn).toContain("isAdminRole(session.user.role)");
+    expect(settleFn).toContain("authorizeActivityReservationOperation");
+    expect(settleFn).toContain("STAFF_PERMISSIONS.ACTIVITY_SETTLEMENTS");
+    expect(settleFn).toContain("STAFF_PERMISSIONS.ACTIVITY_ATTENDANCE");
   });
 
-  test("formation wrappers exist and require an admin role", () => {
+  test("formation wrappers exist and require a server-side activity-operation guard", () => {
     expect(formation).toContain("export async function completeFormationReservation");
     expect(formation).toContain("export async function markFormationReservationNoShow");
     const settleFn = formation.slice(formation.indexOf("export async function completeFormationReservation"));
-    expect(settleFn).toContain("isAdminRole(session.user.role)");
+    expect(settleFn).toContain("authorizeActivityReservationOperation");
+    expect(settleFn).toContain("STAFF_PERMISSIONS.ACTIVITY_SETTLEMENTS");
+    expect(settleFn).toContain("STAFF_PERMISSIONS.ACTIVITY_ATTENDANCE");
   });
 });
 
@@ -125,14 +129,14 @@ describe("dashboard exposes settle/no-show on both reservation tables", () => {
     expect(table).toContain("onNoShow={onNoShow}");
   });
 
-  test("both rows only offer the actions on a CONFIRMED booking", () => {
+  test("both rows only offer granted actions on a CONFIRMED booking", () => {
     for (const path of [
       "components/dashboard/workshops/ReservationRow.jsx",
       "components/dashboard/formations/ReservationRow.jsx",
     ]) {
       const row = source(path);
-      expect(row).toContain('row.status === "CONFIRMED" && onSettle');
-      expect(row).toContain('row.status === "CONFIRMED" && onNoShow');
+      expect(row).toContain('row.status === "CONFIRMED" && row.canSettle && onSettle');
+      expect(row).toContain('row.status === "CONFIRMED" && row.canMarkNoShow && onNoShow');
     }
   });
 

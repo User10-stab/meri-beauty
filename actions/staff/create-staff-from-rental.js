@@ -18,7 +18,7 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * has a User account, so we skip creating a new User, generating a password,
  * and sending a welcome email. Instead we:
  *  1. Find the existing user by email
- *  2. Update their fullName / phone if the admin changed them
+ *  2. Update their fullName / phone / professional address if the admin changed them
  *  3. Create the Staff record + Contract (mandatory) + Service assignments
  *
  * If the user does NOT exist (edge case), it falls back to creating a new
@@ -49,6 +49,11 @@ export async function createStaffFromRental(input, rentalRequestId) {
         fullName:          fe.fullName?.[0]          ?? null,
         email:             fe.email?.[0]             ?? null,
         phone:             fe.phone?.[0]             ?? null,
+        addressLine1:      fe.addressLine1?.[0]      ?? null,
+        addressLine2:      fe.addressLine2?.[0]      ?? null,
+        addressCity:       fe.addressCity?.[0]       ?? null,
+        addressPostalCode: fe.addressPostalCode?.[0] ?? null,
+        addressCountry:    fe.addressCountry?.[0]    ?? null,
         photo:             fe.photo?.[0]             ?? null,
         bio:               fe.bio?.[0]               ?? null,
         languages:         fe.languages?.[0]         ?? null,
@@ -66,6 +71,11 @@ export async function createStaffFromRental(input, rentalRequestId) {
     fullName,
     email,
     phone,
+    addressLine1,
+    addressLine2,
+    addressCity,
+    addressPostalCode,
+    addressCountry,
     photo,
     bio,
     languages,
@@ -81,7 +91,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
   const ids = serviceIds ?? [];
   if (ids.length > 0) {
     const found = await prisma.service.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, isDeleted: false },
       select: { id: true },
     });
     if (found.length !== ids.length) {
@@ -163,12 +173,18 @@ export async function createStaffFromRental(input, rentalRequestId) {
         userId = existingUser.id;
 
         // Update user info in case the admin modified the fields,
-        // and promote the user from CUSTOMER to STAFF
+        // and promote the user from CUSTOMER to STAFF. The professional
+        // address from the form wins — it is what the rental invoice prints.
         await tx.user.update({
           where: { id: userId },
           data: {
             fullName,
             phone,
+            addressLine1,
+            addressLine2: addressLine2 || null,
+            addressCity,
+            addressPostalCode,
+            addressCountry,
             role: "STAFF",
             // email is NOT updated — it's the unique identifier and should
             // remain as-is to avoid breaking references
@@ -202,6 +218,11 @@ export async function createStaffFromRental(input, rentalRequestId) {
             fullName,
             email,
             phone,
+            addressLine1,
+            addressLine2: addressLine2 || null,
+            addressCity,
+            addressPostalCode,
+            addressCountry,
             password: hashedPassword,
             role: "STAFF",
             emailVerified: false,

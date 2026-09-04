@@ -26,16 +26,18 @@ describe("the Facture column tells a genuinely pending invoice apart from one th
     expect(fn).toContain("reste à créditer");
   });
 
-  test("both the Transactions and Reservations tables render it instead of a bare invoice-or-fallback ternary", () => {
+  test("the unified operations table renders it instead of a bare invoice-or-fallback ternary", () => {
+    // One shared table now (UnifiedOperationsTable) instead of three
+    // separate tab renderers — one occurrence covers every source.
     const occurrences = client.split("<InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />").length - 1;
-    expect(occurrences).toBe(2);
+    expect(occurrences).toBe(1);
   });
 
   test("eligibility is computed server-side with the exact same rule invoicing itself uses, not re-derived in the client", () => {
     expect(actions).toContain('import { hasInvoiceableVatIdentity } from "@/lib/tax-policy"');
-    // Once per tab that has a Facture column: transactions, workshops, formations.
+    // Once per tab that has a Facture column: transactions, orders, workshops, formations.
     const occurrences = actions.split("hasInvoiceableVatIdentity(").length - 1;
-    expect(occurrences).toBe(3);
+    expect(occurrences).toBe(4);
   });
 
   test("the transactions tab resolves the same polymorphic customer the row already displays, not a re-derived one", () => {
@@ -54,8 +56,10 @@ describe("the Facture column tells a genuinely pending invoice apart from one th
     // missing either would make eligibility silently always false.
     for (const field of ["isCompany: true, vatValidatedAt: true"]) {
       const occurrences = actions.split(field).length - 1;
-      // 4 transactions-tab customer relations + workshops + formations = 6.
-      expect(occurrences, `"${field}" should appear once per customer-bearing select`).toBe(6);
+      // One per hydrator: hydrateOrders' user, hydrateWorkshops' customer,
+      // hydrateFormations' customer, hydrateAppointmentTransactions'
+      // appointment.user.
+      expect(occurrences, `"${field}" should appear once per customer-bearing select`).toBe(4);
     }
   });
 });

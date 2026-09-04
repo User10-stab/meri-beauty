@@ -45,9 +45,10 @@ import {
   isManualOrderRefund,
   manualRefundInstruction,
   refundMethodLabel,
+  validateManualRefundConfirmation,
 } from "@/lib/payments/refund-method";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
-import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
+import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
 
 /**
  * Checkout + order fulfilment.
@@ -274,13 +275,23 @@ function serializeOrder(order) {
         }
       : null,
     invoice: order.payment?.invoice
-      ? { id: order.payment.invoice.id, number: order.payment.invoice.number, issuedAt: order.payment.invoice.issuedAt }
+      ? {
+          id: order.payment.invoice.id,
+          number: order.payment.invoice.number,
+          issuedAt: order.payment.invoice.issuedAt,
+          customerType: order.payment.invoice.customerType,
+          customerVatNumber: order.payment.invoice.customerVatNumber,
+          emailSentAt: order.payment.invoice.emailSentAt,
+          billitSentAt: order.payment.invoice.billitSentAt,
+        }
       : null,
     creditNotes: (order.payment?.invoice?.creditNotes ?? []).map((cn) => ({
       id: cn.id,
       number: cn.number,
       issuedAt: cn.issuedAt,
       totalInclVat: Number(cn.totalInclVat),
+      emailSentAt: cn.emailSentAt,
+      billitSentAt: cn.billitSentAt,
     })),
     returnRequests: (order.returnRequests ?? []).map((rr) => ({
       id: rr.id,
@@ -445,6 +456,13 @@ export async function createOrderFromCart(input) {
     };
   }
   const { fulfilmentMode, customerInfo, pickupPoint, notes, promoCode } = parsed.data;
+
+  // This action is public: hiding delivery in Checkout is only a convenience,
+  // not a protection. Refuse it before creating a customer, reserving stock,
+  // or opening a Stripe checkout if the carrier is paused in production.
+  if (fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabled()) {
+    return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
+  }
 
   try {
     const authSession = await auth();
@@ -946,6 +964,13 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
     }
     if (order.expiresAt && order.expiresAt < new Date()) {
       return { success: false, message: "Le délai de paiement pour cette commande a expiré." };
+    }
+
+    // Orders created before delivery was paused remain visible to staff, but a
+    // pending one must not become a new paid shipping commitment through a
+    // direct checkout-session call or a previously issued resume token.
+    if (order.fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabled()) {
+      return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
     }
 
     // Reuse the live Stripe session instead of minting a new one on every
@@ -1582,7 +1607,28 @@ async function performOrderCancellation(order, reason, actor = {}) {
       remaining = Number(order.payment.paidAmount) - alreadyRefunded;
     }
 
-    const { claimed, creditNote, refundQueued } = await prisma.$transaction(async (tx) => {
+    const originalMethod = getOrderPaymentMethod(order.payment);
+    const needsManualRefund = wasSold && isManualOrderRefund(order.payment) && remaining > REFUND_EPSILON;
+    const needsOnlineRefund = wasSold && Boolean(order.payment?.transactionReference) && remaining > REFUND_EPSILON;
+    if (needsManualRefund) {
+      const confirmationError = validateManualRefundConfirmation({
+        method: originalMethod,
+        confirmed: actor.confirmed,
+        reference: actor.reference,
+      });
+      if (confirmationError) {
+        return {
+          success: false,
+          message: confirmationError,
+          requiresManualRefundConfirmation: true,
+          paymentMethod: originalMethod,
+          paymentMethodLabel: refundMethodLabel(originalMethod),
+          refundInstruction: manualRefundInstruction(originalMethod),
+        };
+      }
+    }
+
+    const { claimed, creditNote, refundOperationId } = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the order still being in a cancellable status —
       // without this, two concurrent cancel calls (e.g. a double-click, or the
       // customer and staff cancelling at once) both pass a plain read-then-check
@@ -1593,7 +1639,7 @@ async function performOrderCancellation(order, reason, actor = {}) {
         data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: reason ?? null },
       });
       if (claim.count === 0) {
-        return { claimed: false, creditNote: null };
+        return { claimed: false, creditNote: null, refundOperationId: null };
       }
 
       for (const item of order.items) {
@@ -1639,25 +1685,46 @@ async function performOrderCancellation(order, reason, actor = {}) {
         });
       }
 
-      // A cancellation authorises a refund; it never moves money itself.
-      // Every payment method is represented by a precise leg in Operations,
-      // where an OWNER/ADMIN confirms the actual Stripe/cash/card movement.
-      const queued =
-        wasSold && remaining > REFUND_EPSILON
-          ? await queueManualRefund(tx, {
-              paymentId: order.payment.id,
-              source: "ORDER",
-              trigger: "SALON_CANCELLATION",
-              reason: reason ?? "Commande annulée",
-              amount: remaining,
-              transactions: order.payment.transactions ?? [],
-              creditNoteId: creditNote?.id ?? null,
-              invoiceId: order.payment.invoice?.id ?? null,
-              decidedByUserId: actor.actorId ?? null,
-              customerIsBusiness: order.user ? isBusinessRefundCustomer(order.user) : false,
-            })
-          : null;
-      const refundQueued = Boolean(queued);
+      if (needsManualRefund) {
+        const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
+        const openCashSession =
+          originalMethod === "CASH"
+            ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
+            : null;
+        const pieceNumber =
+          originalMethod === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
+        await tx.transaction.create({
+          data: {
+            paymentId: order.payment.id,
+            amount: remaining,
+            method: originalMethod,
+            transactionType: "REFUND",
+            paidAt: new Date(),
+            manualReference: originalMethod === "CARD" ? actor.reference.trim() : null,
+            cashSessionId: openCashSession?.id ?? null,
+            pieceNumber,
+            creditNoteId: creditNote?.id ?? null,
+          },
+        });
+        await tx.payment.update({
+          where: { id: order.payment.id },
+          data: { status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+        });
+      }
+
+      const queued = needsOnlineRefund
+        ? await queueManualRefund(tx, {
+            paymentId: order.payment.id,
+            source: "ORDER",
+            trigger: "CUSTOMER_SELF_CANCELLATION",
+            reason: reason ?? "Commande annulée",
+            amount: remaining,
+            transactions: order.payment.transactions,
+            creditNoteId: creditNote?.id ?? null,
+            invoiceId: order.payment.invoice?.id ?? null,
+            decidedByUserId: actor.actorId ?? null,
+          })
+        : null;
 
       await tx.auditLog.create({
         data: {
@@ -1670,12 +1737,14 @@ async function performOrderCancellation(order, reason, actor = {}) {
             orderNumber: order.orderNumber,
             reason: reason ?? null,
             refundAmount: remaining,
-            refundQueued,
+            refundMethod: needsManualRefund ? originalMethod : needsOnlineRefund ? "ONLINE" : null,
+            manualReference: needsManualRefund && originalMethod === "CARD" ? actor.reference.trim() : null,
+            manualRefundConfirmed: needsManualRefund,
           },
         },
       });
 
-      return { claimed: true, creditNote, refundQueued };
+      return { claimed: true, creditNote, refundOperationId: queued?.operationId ?? null };
     });
 
     if (!claimed) {
@@ -1690,8 +1759,11 @@ async function performOrderCancellation(order, reason, actor = {}) {
       });
     }
 
-    const refundNote = refundQueued
-      ? " Le remboursement sera effectué séparément et vous recevrez une confirmation une fois celui-ci finalisé."
+    const refundNote = wasSold
+      ? needsManualRefund
+          ? " Le remboursement a été effectué directement en boutique."
+        : needsOnlineRefund
+          ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
       : "";
 
     // A walk-in POS "client de passage" order has no user/email to notify —
@@ -1721,10 +1793,10 @@ async function performOrderCancellation(order, reason, actor = {}) {
     revalidatePath("/mon-compte");
     return {
       success: true,
-      message: refundQueued
-        ? "Commande annulée. Le remboursement est à effectuer depuis Opérations."
+      message: needsOnlineRefund
+        ? "Commande annulée. Le remboursement est en cours de traitement par notre équipe."
         : "Commande annulée.",
-      refundQueued,
+      refundOperationId,
     };
   } catch (error) {
     console.error("[performOrderCancellation]", error);
@@ -1742,14 +1814,14 @@ export async function cancelOrder(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return { success: false, message: errors.orderId?.[0] ?? "Données invalides." };
   }
-  const { orderId, reason } = parsed.data;
+  const { orderId, reason, manualRefundConfirmed, manualRefundReference } = parsed.data;
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
     include: {
       items: true,
       payment: { include: { invoice: true, transactions: true } },
-      user: { select: { fullName: true, email: true, isCompany: true, vatNumber: true } },
+      user: { select: { fullName: true, email: true } },
     },
   });
   if (!order) return { success: false, message: "Commande introuvable." };
@@ -1771,6 +1843,8 @@ export async function cancelOrder(input) {
   }
 
   return performOrderCancellation(order, reason, {
+    confirmed: manualRefundConfirmed,
+    reference: manualRefundReference,
     actorId: guard.session.user.id,
     actorRole: guard.session.user.role,
   });
@@ -1795,7 +1869,7 @@ export async function cancelMyOrder(orderId) {
     include: {
       items: true,
       payment: { include: { invoice: true, transactions: true } },
-      user: { select: { fullName: true, email: true, isCompany: true, vatNumber: true } },
+      user: { select: { fullName: true, email: true } },
     },
   });
   if (!order || order.userId !== session.user.id) {
@@ -1968,7 +2042,7 @@ export async function reviewOrderCancellationRequest(input) {
   refreshOrderCancellationViews(request.orderId);
   return {
     success: true,
-    message: result.refundQueued
+    message: result.refundOperationId
       ? "Demande approuvée. La commande est annulée et le remboursement est à effectuer dans Opérations."
       : "Demande approuvée. La commande est annulée.",
   };

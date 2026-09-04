@@ -15,7 +15,13 @@ export default async function OperationsPage({ searchParams }) {
   await requireAdmin(false);
   const params = await searchParams;
   const [result, outstandingRefunds] = await Promise.all([
-    getAdminOperations({ tab: params?.tab, page: params?.page, type: params?.type, status: params?.status }),
+    getAdminOperations({
+      tab: params?.tab,
+      page: params?.page,
+      type: params?.type,
+      lifecycleStatus: params?.lifecycleStatus,
+      paymentEvent: params?.paymentEvent,
+    }),
     getOutstandingRefundLegs(),
   ]);
 
@@ -31,7 +37,7 @@ export default async function OperationsPage({ searchParams }) {
       {/* Above the ledger on purpose: money already promised to a customer
           and not yet handed over is the most time-sensitive thing on this
           screen, and every one of these blocks a closing e-mail. */}
-      <OutstandingRefunds legs={outstandingRefunds.data} />
+      <OutstandingRefunds legs={outstandingRefunds.data} manualRefundCases={outstandingRefunds.manualRefundCases} />
       <AdminOperationsClient result={result} />
     </div>
   );

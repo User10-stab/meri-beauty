@@ -14,6 +14,8 @@ const CUSTOMERS_COLUMNS = [
   { key: "fullName", label: "Nom complet" },
   { key: "email", label: "Email" },
   { key: "phone", label: "Téléphone" },
+  { key: "clientType", label: "Type" },
+  { key: "vatNumber", label: "N° TVA" },
   { key: "appointmentsCount", label: "Rendez-vous" },
   { key: "formationsCount", label: "Formations" },
   { key: "isActive", label: "Statut" },

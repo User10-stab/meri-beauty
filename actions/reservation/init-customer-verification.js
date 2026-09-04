@@ -26,10 +26,29 @@ const RATE_LIMIT_MAX_REQUESTS = 3;
  *   email: string,
  *   phone: string,
  *   newsletterSubscribed?: boolean,
+ *   isCompany?: boolean,
+ *   vatNumber?: string,
+ *   addressLine1?: string,
+ *   addressLine2?: string,
+ *   addressCity?: string,
+ *   addressPostalCode?: string,
+ *   addressCountry?: string,
  * }} input
  * @returns {Promise<{ verified: boolean, message: string }>}
  */
-export async function initCustomerVerification({ fullName, email, phone, newsletterSubscribed }) {
+export async function initCustomerVerification({ 
+  fullName, 
+  email, 
+  phone, 
+  newsletterSubscribed,
+  isCompany,
+  vatNumber,
+  addressLine1,
+  addressLine2,
+  addressCity,
+  addressPostalCode,
+  addressCountry,
+}) {
   const validation = validateCustomerIdentity({ fullName, email, phone }, { requirePhone: true });
   if (!validation.success) {
     return { verified: false, field: validation.field, message: validation.message };
@@ -78,6 +97,13 @@ export async function initCustomerVerification({ fullName, email, phone, newslet
         role: "CUSTOMER",
         emailVerified: false,
         isActive: true,
+        isCompany: isCompany ?? false,
+        vatNumber: vatNumber || null,
+        addressLine1: addressLine1 || null,
+        addressLine2: addressLine2 || null,
+        addressCity: addressCity || null,
+        addressPostalCode: addressPostalCode || null,
+        addressCountry: addressCountry || "BE",
         ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
       },
     });
@@ -96,6 +122,23 @@ export async function initCustomerVerification({ fullName, email, phone, newslet
       subject: emailTemplate.subject,
       text: emailTemplate.text,
       html: emailTemplate.html,
+    });
+  } else {
+    // User exists but not verified — update their info with latest data
+    await prisma.user.update({
+      where: { id: existingUser.id },
+      data: {
+        fullName: validFullName,
+        phone: validPhone,
+        isCompany: isCompany ?? false,
+        vatNumber: vatNumber || null,
+        addressLine1: addressLine1 || null,
+        addressLine2: addressLine2 || null,
+        addressCity: addressCity || null,
+        addressPostalCode: addressPostalCode || null,
+        addressCountry: addressCountry || "BE",
+        ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
+      },
     });
   }
 

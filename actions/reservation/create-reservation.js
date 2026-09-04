@@ -255,8 +255,8 @@ export async function createReservation(data) {
     }
 
     // ── 2. Load staff service ────────────────────────────────────────────────
-    const staffService = await prisma.staffService.findUnique({
-      where: { id: staffServiceId },
+    const staffService = await prisma.staffService.findFirst({
+      where: { id: staffServiceId, isDeleted: false },
       include: {
         service: true,
         staff: {
@@ -918,8 +918,8 @@ export async function createMultipleReservations(data) {
     // ── 2. Load all staff services in parallel ────────────────────────────
     const staffServices = await Promise.all(
       appointments.map(({ staffServiceId }) =>
-        prisma.staffService.findUnique({
-          where: { id: staffServiceId },
+        prisma.staffService.findFirst({
+          where: { id: staffServiceId, isDeleted: false },
           include: {
             service: true,
             staff: {

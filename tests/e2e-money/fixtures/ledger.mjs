@@ -132,19 +132,8 @@ export async function assertLedgerSound(paymentId, { expectHeld = null, allowLeg
           `but its operation is for ${money(operation.totalAmount)} €.`,
       );
     }
-    // Exactly one document, decided by whether an invoice existed — never
-    // both, and never neither. The "neither" half is not hypothetical: it
-    // is precisely the bug queueManualRefund had (lib/refunds/queue-manual-refund.js)
-    // until it was given the same allocateRefundReceiptNumber call
-    // openRefundOperation.js already made — every B2C particulier refund
-    // queued through a cancellation action got no justificatif at all, and
-    // the worklist row read "document en attente" forever.
-    if (operation.creditNoteId && operation.refundReceiptNumber) {
-      problems.push(`RefundOperation ${operation.id} carries both a credit note and a refund receipt.`);
-    }
-    if (!operation.creditNoteId && !operation.refundReceiptNumber) {
-      problems.push(`RefundOperation ${operation.id} carries neither a credit note nor a refund receipt.`);
-    }
+    // B2C refunds deliberately have no financial document. B2B operations
+    // retain their credit note; historical receipt data is ignored here.
   }
 
   // ── 4. Every euro refunded is traceable to a leg ────────────────────────

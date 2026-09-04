@@ -62,9 +62,11 @@ export async function getServicesForManualBooking() {
 
     const services = await prisma.service.findMany({
       where: {
+        isDeleted: false,
         staffServices: {
           some: {
             isActive: true,
+            isDeleted: false,
             price: { gt: 0 },
             duration: { gt: 0 },
             ...(callerStaffId ? { staffId: callerStaffId } : {}),
@@ -114,6 +116,7 @@ export async function getStaffForManualBooking(serviceId) {
       where: {
         serviceId,
         isActive: true,
+        isDeleted: false,
         price: { gt: 0 },
         duration: { gt: 0 },
         staff: { isActive: true, isDeleted: false },
@@ -252,8 +255,8 @@ export async function createManualAppointment(input) {
       return { success: false, message: "Vous ne pouvez ajouter un rendez-vous que sur votre propre agenda." };
     }
 
-    const staffService = await prisma.staffService.findUnique({
-      where: { id: staffServiceId },
+    const staffService = await prisma.staffService.findFirst({
+      where: { id: staffServiceId, isDeleted: false },
       include: {
         service: { select: { id: true, name: true } },
         staff: {

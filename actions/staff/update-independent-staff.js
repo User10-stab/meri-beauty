@@ -12,7 +12,7 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * Full update of an independent staff member and its related records.
  *
  * Editable fields:
- *   User  → fullName, phone
+ *   User  → fullName, phone, address (addressLine1/2, city, postalCode, country)
  *   Staff → photo, bio, languages, yearsOfExperience, hireDate, isActive
  *   Services → replaces the full StaffService assignment set
  *   Contract → upserts the active FIXED_RENT contract
@@ -39,6 +39,11 @@ export async function updateIndependentStaff(input) {
       errors: {
         fullName:          fe.fullName?.[0]          ?? null,
         phone:             fe.phone?.[0]             ?? null,
+        addressLine1:      fe.addressLine1?.[0]      ?? null,
+        addressLine2:      fe.addressLine2?.[0]      ?? null,
+        addressCity:       fe.addressCity?.[0]       ?? null,
+        addressPostalCode: fe.addressPostalCode?.[0] ?? null,
+        addressCountry:    fe.addressCountry?.[0]    ?? null,
         photo:             fe.photo?.[0]             ?? null,
         bio:               fe.bio?.[0]               ?? null,
         languages:         fe.languages?.[0]         ?? null,
@@ -56,6 +61,11 @@ export async function updateIndependentStaff(input) {
     id,
     fullName,
     phone,
+    addressLine1,
+    addressLine2,
+    addressCity,
+    addressPostalCode,
+    addressCountry,
     photo,
     bio,
     languages,
@@ -97,7 +107,7 @@ export async function updateIndependentStaff(input) {
   const newServiceIds = serviceIds ?? [];
   if (newServiceIds.length > 0) {
     const found = await prisma.service.findMany({
-      where: { id: { in: newServiceIds } },
+      where: { id: { in: newServiceIds }, isDeleted: false },
       select: { id: true },
     });
     if (found.length !== newServiceIds.length) {
@@ -117,6 +127,14 @@ export async function updateIndependentStaff(input) {
       const userUpdate = {};
       if (fullName !== undefined) userUpdate.fullName = fullName;
       if (phone    !== undefined) userUpdate.phone    = phone;
+      // Address: empty strings are treated as "not provided" so a partial
+      // payload (e.g. the StaffTable active-toggle) can never wipe the
+      // billing address with "". addressLine2 is the nullable optional part.
+      if (addressLine1)    userUpdate.addressLine1    = addressLine1;
+      if (addressCity)     userUpdate.addressCity     = addressCity;
+      if (addressPostalCode) userUpdate.addressPostalCode = addressPostalCode;
+      if (addressCountry)  userUpdate.addressCountry  = addressCountry;
+      if (addressLine2 !== undefined) userUpdate.addressLine2 = addressLine2 || null;
 
       // Keep User.isActive in sync with Staff.isActive so the auth JWT
       // re-validation (which checks User.isActive) correctly blocks login.
@@ -158,7 +176,7 @@ export async function updateIndependentStaff(input) {
       // We skip records that have linked appointments (isActive = false instead).
       if (serviceIds !== undefined) {
         const current = await tx.staffService.findMany({
-          where: { staffId: id },
+          where: { staffId: id, isDeleted: false },
           select: {
             id:       true,
             serviceId: true,
@@ -172,7 +190,7 @@ export async function updateIndependentStaff(input) {
           (sid) => !current.some((ss) => ss.serviceId === sid)
         );
 
-        // Soft-deactivate rows that have appointments, hard-delete the rest
+        // Soft-deactivate rows that have appointments, soft-delete the rest
         for (const ss of toRemove) {
           if (ss._count.appointments > 0) {
             await tx.staffService.update({
@@ -180,7 +198,10 @@ export async function updateIndependentStaff(input) {
               data:  { isActive: false },
             });
           } else {
-            await tx.staffService.delete({ where: { id: ss.id } });
+            await tx.staffService.update({
+              where: { id: ss.id },
+              data:  { isDeleted: true, deletedAt: new Date() },
+            });
           }
         }
 
@@ -192,7 +213,7 @@ export async function updateIndependentStaff(input) {
           if (softDeleted) {
             await tx.staffService.update({
               where: { id: softDeleted.id },
-              data:  { isActive: true },
+              data:  { isActive: true, isDeleted: false, deletedAt: null },
             });
           } else {
             await tx.staffService.create({

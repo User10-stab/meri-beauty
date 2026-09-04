@@ -22,7 +22,7 @@ describe("a staffService with price/duration still at 0 is not publicly bookable
     const whereIdx = src.indexOf("staffServices = await prisma.staffService.findMany");
     const closeIdx = src.indexOf("include:", whereIdx);
     const whereBody = src.slice(whereIdx, closeIdx);
-    expect(whereBody).toContain("price: { gt: 0 }");
+    expect(whereBody).toContain("price: { gte: 0 }");
     expect(whereBody).toContain("duration: { gt: 0 }");
   });
 

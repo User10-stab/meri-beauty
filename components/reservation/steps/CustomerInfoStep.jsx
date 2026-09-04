@@ -9,6 +9,7 @@ import { initCustomerVerification } from "@/actions/reservation/init-customer-ve
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { useTranslations } from "next-intl";
 import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
+import { CountrySelect } from "@/components/shared/CountrySelect";
 
 function Field({ label, htmlFor, required, children }) {
   return (
@@ -27,7 +28,19 @@ function InputIcon({ children }) {
 export default function CustomerInfoStep({ data, updateData, nextStep }) {
   const t = useTranslations("reservationSteps");
   const [formData, setFormData] = useState(
-    data.customerInfo ?? { fullName: "", email: "", phone: "", newsletterSubscribed: false }
+    data.customerInfo ?? { 
+      fullName: "", 
+      email: "", 
+      phone: "", 
+      newsletterSubscribed: false,
+      isCompany: false,
+      vatNumber: "",
+      addressLine1: "",
+      addressLine2: "",
+      addressCity: "",
+      addressPostalCode: "",
+      addressCountry: "Belgique",
+    }
   );
   const [notes, setNotes] = useState(data.notes ?? "");
   const [emailStatus, setEmailStatus] = useState(null);
@@ -55,6 +68,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
     if (!formData.email.trim() || !formData.email.includes("@")) { toast.error(t("customer.enterValidEmail")); return; }
     if (isDisposableEmail(formData.email)) { toast.error(t("customer.disposableEmail")); return; }
     if (!formData.phone.trim()) { toast.error(t("customer.enterPhone")); return; }
+    
     setSendingVerification(true);
     try {
       const result = await initCustomerVerification({
@@ -62,6 +76,13 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
         email: formData.email.trim().toLowerCase(),
         phone: formData.phone.trim(),
         newsletterSubscribed: formData.newsletterSubscribed,
+        isCompany: formData.isCompany,
+        vatNumber: formData.vatNumber?.trim() || null,
+        addressLine1: formData.addressLine1?.trim() || null,
+        addressLine2: formData.addressLine2?.trim() || null,
+        addressCity: formData.addressCity?.trim() || null,
+        addressPostalCode: formData.addressPostalCode?.trim() || null,
+        addressCountry: formData.addressCountry || "Belgique",
       });
       if (result.verified) { updateData({ customerInfo: formData, notes }); nextStep(); }
       else { toast.success(result.message, { duration: 6000 }); }
@@ -109,6 +130,123 @@ export default function CustomerInfoStep({ data, updateData, nextStep }) {
               <input type="tel" id="phone" name="phone" value={formData.phone} onChange={handleChange} placeholder={t("customer.phonePlaceholder")} className="w-full rounded-full border border-[#ede5d8] bg-white py-3 pl-10 pr-4 text-sm text-[#2F3A2E] placeholder:text-[#9a9590] transition-all focus:border-[#2F3A2E] focus:ring-2 focus:ring-[#2F3A2E]/10 focus:outline-none" required />
             </div>
           </Field>
+
+          {/* Client Type */}
+          <div>
+            <label className="mb-2 block text-[13px] font-semibold tracking-wide text-[#2F3A2E]">
+              Type de client
+            </label>
+            <div className="flex gap-3">
+              <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-full border-2 px-4 py-2.5 text-sm font-medium transition-all focus-within:ring-2 focus-within:ring-[#2F3A2E]/20">
+                <input
+                  type="radio"
+                  name="isCompany"
+                  value="false"
+                  checked={!formData.isCompany}
+                  onChange={() => setFormData(prev => ({ ...prev, isCompany: false }))}
+                  className="h-4 w-4 border-[#ede5d8] text-[#2F3A2E] focus:ring-[#2F3A2E]/20"
+                />
+                <span className={!formData.isCompany ? "text-[#2F3A2E]" : "text-[#9a9590]"}>
+                  Particulier
+                </span>
+              </label>
+              <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-full border-2 px-4 py-2.5 text-sm font-medium transition-all focus-within:ring-2 focus-within:ring-[#2F3A2E]/20">
+                <input
+                  type="radio"
+                  name="isCompany"
+                  value="true"
+                  checked={formData.isCompany}
+                  onChange={() => setFormData(prev => ({ ...prev, isCompany: true }))}
+                  className="h-4 w-4 border-[#ede5d8] text-[#2F3A2E] focus:ring-[#2F3A2E]/20"
+                />
+                <span className={formData.isCompany ? "text-[#2F3A2E]" : "text-[#9a9590]"}>
+                  Entreprise
+                </span>
+              </label>
+            </div>
+          </div>
+
+          {/* VAT Number - only shown for Business */}
+          {formData.isCompany && (
+            <Field label="N° TVA" htmlFor="vatNumber">
+              <input
+                type="text"
+                id="vatNumber"
+                name="vatNumber"
+                value={formData.vatNumber}
+                onChange={handleChange}
+                placeholder="BE0123456789"
+                className="w-full rounded-full border border-[#ede5d8] bg-white py-3 px-4 text-sm text-[#2F3A2E] placeholder:text-[#9a9590] transition-all focus:border-[#2F3A2E] focus:ring-2 focus:ring-[#2F3A2E]/10 focus:outline-none"
+              />
+            </Field>
+          )}
+
+          {/* Address Section */}
+          <div className="space-y-4 border-t border-[#ede5d8]/50 pt-5">
+            <p className="text-xs font-semibold uppercase tracking-wider text-[#9a9590]">
+              Adresse (optionnelle)
+            </p>
+            
+            <Field label="Rue et numéro" htmlFor="addressLine1">
+              <input
+                type="text"
+                id="addressLine1"
+                name="addressLine1"
+                value={formData.addressLine1}
+                onChange={handleChange}
+                placeholder="Rue de la Paix 123"
+                className="w-full rounded-full border border-[#ede5d8] bg-white py-3 px-4 text-sm text-[#2F3A2E] placeholder:text-[#9a9590] transition-all focus:border-[#2F3A2E] focus:ring-2 focus:ring-[#2F3A2E]/10 focus:outline-none"
+              />
+            </Field>
+
+            <Field label="Complément d'adresse" htmlFor="addressLine2">
+              <input
+                type="text"
+                id="addressLine2"
+                name="addressLine2"
+                value={formData.addressLine2}
+                onChange={handleChange}
+                placeholder="Appartement, bâtiment, etc."
+                className="w-full rounded-full border border-[#ede5d8] bg-white py-3 px-4 text-sm text-[#2F3A2E] placeholder:text-[#9a9590] transition-all focus:border-[#2F3A2E] focus:ring-2 focus:ring-[#2F3A2E]/10 focus:outline-none"
+              />
+            </Field>
+
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Code postal" htmlFor="addressPostalCode">
+                <input
+                  type="text"
+                  id="addressPostalCode"
+                  name="addressPostalCode"
+                  value={formData.addressPostalCode}
+                  onChange={handleChange}
+                  placeholder="1000"
+                  className="w-full rounded-full border border-[#ede5d8] bg-white py-3 px-4 text-sm text-[#2F3A2E] placeholder:text-[#9a9590] transition-all focus:border-[#2F3A2E] focus:ring-2 focus:ring-[#2F3A2E]/10 focus:outline-none"
+                />
+              </Field>
+
+              <Field label="Ville" htmlFor="addressCity">
+                <input
+                  type="text"
+                  id="addressCity"
+                  name="addressCity"
+                  value={formData.addressCity}
+                  onChange={handleChange}
+                  placeholder="Bruxelles"
+                  className="w-full rounded-full border border-[#ede5d8] bg-white py-3 px-4 text-sm text-[#2F3A2E] placeholder:text-[#9a9590] transition-all focus:border-[#2F3A2E] focus:ring-2 focus:ring-[#2F3A2E]/10 focus:outline-none"
+                />
+              </Field>
+            </div>
+
+            <Field label="Pays" htmlFor="addressCountry">
+              <CountrySelect
+                id="addressCountry"
+                name="addressCountry"
+                value={formData.addressCountry}
+                onChange={(val) => setFormData((prev) => ({ ...prev, addressCountry: val }))}
+                variant="rounded"
+              />
+            </Field>
+          </div>
 
           <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#ede5d8]/50 bg-[#fdf8f0]/50 px-4 py-3">
             <input type="checkbox" name="newsletterSubscribed" checked={formData.newsletterSubscribed} onChange={handleChange} className="mt-0.5 h-4 w-4 rounded border-[#ede5d8] text-[#2F3A2E] focus:ring-[#2F3A2E]/20" />

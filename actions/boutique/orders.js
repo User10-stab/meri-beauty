@@ -1,6 +1,6 @@
 "use server";
 
-import { randomBytes, randomUUID } from "crypto";
+import { randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { revalidatePath } from "next/cache";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
@@ -40,6 +40,8 @@ import {
   refundMethodLabel,
   validateManualRefundConfirmation,
 } from "@/lib/payments/refund-method";
+import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
+import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
 
 /**
  * Checkout + order fulfilment.
@@ -266,13 +268,23 @@ function serializeOrder(order) {
         }
       : null,
     invoice: order.payment?.invoice
-      ? { id: order.payment.invoice.id, number: order.payment.invoice.number, issuedAt: order.payment.invoice.issuedAt }
+      ? {
+          id: order.payment.invoice.id,
+          number: order.payment.invoice.number,
+          issuedAt: order.payment.invoice.issuedAt,
+          customerType: order.payment.invoice.customerType,
+          customerVatNumber: order.payment.invoice.customerVatNumber,
+          emailSentAt: order.payment.invoice.emailSentAt,
+          billitSentAt: order.payment.invoice.billitSentAt,
+        }
       : null,
     creditNotes: (order.payment?.invoice?.creditNotes ?? []).map((cn) => ({
       id: cn.id,
       number: cn.number,
       issuedAt: cn.issuedAt,
       totalInclVat: Number(cn.totalInclVat),
+      emailSentAt: cn.emailSentAt,
+      billitSentAt: cn.billitSentAt,
     })),
     returnRequests: (order.returnRequests ?? []).map((rr) => ({
       id: rr.id,
@@ -421,6 +433,13 @@ export async function createOrderFromCart(input) {
     };
   }
   const { fulfilmentMode, customerInfo, pickupPoint, notes, promoCode } = parsed.data;
+
+  // This action is public: hiding delivery in Checkout is only a convenience,
+  // not a protection. Refuse it before creating a customer, reserving stock,
+  // or opening a Stripe checkout if the carrier is paused in production.
+  if (fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabled()) {
+    return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
+  }
 
   try {
     const authSession = await auth();
@@ -922,6 +941,13 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
     }
     if (order.expiresAt && order.expiresAt < new Date()) {
       return { success: false, message: "Le délai de paiement pour cette commande a expiré." };
+    }
+
+    // Orders created before delivery was paused remain visible to staff, but a
+    // pending one must not become a new paid shipping commitment through a
+    // direct checkout-session call or a previously issued resume token.
+    if (order.fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabled()) {
+      return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
     }
 
     // Reuse the live Stripe session instead of minting a new one on every
@@ -1554,6 +1580,7 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
 
     const originalMethod = getOrderPaymentMethod(order.payment);
     const needsManualRefund = wasSold && isManualOrderRefund(order.payment) && remaining > REFUND_EPSILON;
+    const needsOnlineRefund = wasSold && Boolean(order.payment?.transactionReference) && remaining > REFUND_EPSILON;
     if (needsManualRefund) {
       const confirmationError = validateManualRefundConfirmation({
         method: originalMethod,
@@ -1572,7 +1599,7 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
       }
     }
 
-    const { claimed, creditNote } = await prisma.$transaction(async (tx) => {
+    const { claimed, creditNote, refundOperationId } = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the order still being in a cancellable status —
       // without this, two concurrent cancel calls (e.g. a double-click, or the
       // customer and staff cancelling at once) both pass a plain read-then-check
@@ -1583,7 +1610,7 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
         data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: reason ?? null },
       });
       if (claim.count === 0) {
-        return { claimed: false, creditNote: null };
+        return { claimed: false, creditNote: null, refundOperationId: null };
       }
 
       for (const item of order.items) {
@@ -1661,6 +1688,20 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
         });
       }
 
+      const queued = needsOnlineRefund
+        ? await queueManualRefund(tx, {
+            paymentId: order.payment.id,
+            source: "ORDER",
+            trigger: "CUSTOMER_SELF_CANCELLATION",
+            reason: reason ?? "Commande annulée",
+            amount: remaining,
+            transactions: order.payment.transactions,
+            creditNoteId: creditNote?.id ?? null,
+            invoiceId: order.payment.invoice?.id ?? null,
+            decidedByUserId: manualRefund.actorId ?? null,
+          })
+        : null;
+
       await tx.auditLog.create({
         data: {
           actorId: manualRefund.actorId ?? null,
@@ -1672,109 +1713,18 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
             orderNumber: order.orderNumber,
             reason: reason ?? null,
             refundAmount: remaining,
-            refundMethod: needsManualRefund ? originalMethod : order.payment?.transactionReference ? "ONLINE" : null,
+            refundMethod: needsManualRefund ? originalMethod : needsOnlineRefund ? "ONLINE" : null,
             manualReference: needsManualRefund && originalMethod === "CARD" ? manualRefund.reference.trim() : null,
             manualRefundConfirmed: needsManualRefund,
           },
         },
       });
 
-      return { claimed: true, creditNote };
+      return { claimed: true, creditNote, refundOperationId: queued?.operationId ?? null };
     });
 
     if (!claimed) {
       return { success: true, message: "Cette commande a déjà été annulée." };
-    }
-
-    let refundFailed = false;
-    if (wasSold && order.payment.transactionReference) {
-      if (remaining > REFUND_EPSILON) {
-        // Recorded before the Stripe call, not just in the catch block below —
-        // a crash/timeout mid-call would otherwise leave nothing durable to
-        // reconcile. Pinning the exact amount + a stable idempotency key
-        // preserves the attempted operation for audit and follow-up.
-        const refundIdempotencyKey = `cancel-${orderId}-${randomUUID()}`;
-        await prisma.payment.update({
-          where: { id: order.payment.id },
-          data: {
-            status: "REFUND_PENDING",
-            pendingRefundAmount: remaining,
-            pendingRefundIdempotencyKey: refundIdempotencyKey,
-            pendingRefundCreditNoteId: creditNote?.id ?? null,
-          },
-        });
-        try {
-          const session = await stripe.checkout.sessions.retrieve(order.payment.transactionReference);
-          if (session.payment_intent) {
-            const stripePaymentIntentId =
-              typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent.id;
-            await stripe.refunds.create(
-              { payment_intent: stripePaymentIntentId, amount: Math.round(remaining * 100) },
-              { idempotencyKey: refundIdempotencyKey }
-            );
-            const fullyRefunded = remaining + REFUND_EPSILON >= Number(order.payment.paidAmount);
-            await prisma.$transaction([
-              prisma.transaction.updateMany({
-                where: {
-                  paymentId: order.payment.id,
-                  transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
-                  stripePaymentIntentId: null,
-                },
-                data: { stripePaymentIntentId },
-              }),
-              prisma.transaction.create({
-                data: {
-                  paymentId: order.payment.id,
-                  amount: remaining,
-                  method: "ONLINE",
-                  transactionType: "REFUND",
-                  paidAt: new Date(),
-                  stripeCheckoutSessionId: order.payment.transactionReference,
-                  stripePaymentIntentId,
-                  creditNoteId: creditNote?.id ?? null,
-                },
-              }),
-              prisma.payment.update({
-                where: { id: order.payment.id },
-                data: {
-                  status: fullyRefunded ? "REFUNDED" : "PARTIALLY_REFUNDED",
-                  pendingRefundAmount: null,
-                  pendingRefundIdempotencyKey: null,
-                  pendingRefundCreditNoteId: null,
-                },
-              }),
-              prisma.auditLog.create({
-                data: {
-                  actorId: manualRefund.actorId ?? null,
-                  actorRole: manualRefund.actorRole ?? null,
-                  action: "order.cancellation_refund_completed",
-                  entityType: "Order",
-                  entityId: orderId,
-                  metadata: { orderNumber: order.orderNumber, amount: remaining, method: "ONLINE", automatedByStripe: true },
-                },
-              }),
-            ]);
-          } else {
-            throw new Error("STRIPE_PAYMENT_INTENT_MISSING");
-          }
-        } catch (err) {
-          // The order is already cancelled and stock restored — that's correct
-          // and stays. But don't let the customer email below claim a refund
-          // that didn't happen; surface this to staff instead and persist
-          // the failed attempt for manual reconciliation.
-          console.error("[performOrderCancellation] REFUND FAILED for order", orderId, err);
-          refundFailed = true;
-          await prisma.payment.update({
-            where: { id: order.payment.id },
-            data: {
-              status: "REFUND_FAILED",
-              refundFailureReason: err?.message?.slice(0, 500) ?? "Erreur inconnue",
-              refundAttemptedAt: new Date(),
-              refundRetryCount: { increment: 1 },
-            },
-          });
-        }
-      }
     }
 
     let creditNotePdf = null;
@@ -1786,11 +1736,11 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
     }
 
     const refundNote = wasSold
-      ? refundFailed
-        ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
-        : needsManualRefund
+      ? needsManualRefund
           ? " Le remboursement a été effectué directement en boutique."
-        : " Le remboursement apparaîtra sur votre compte sous quelques jours."
+        : needsOnlineRefund
+          ? " Le remboursement est en cours de traitement par notre équipe — vous serez recontacté(e) si besoin."
+          : ""
       : "";
 
     // A walk-in POS "client de passage" order has no user/email to notify —
@@ -1816,26 +1766,14 @@ async function performOrderCancellation(order, reason, manualRefund = {}) {
       }).catch((err) => console.error("[performOrderCancellation] email failed:", err));
     }
 
-    if (refundFailed) {
-      const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
-      if (salon?.email) {
-        sendEmail({
-          to: salon.email,
-          subject: `⚠️ Remboursement Stripe échoué – Commande n°${order.orderNumber}`,
-          text: `Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user?.email ?? "client de passage"}) a échoué. Traitement manuel requis dans le dashboard Stripe.`,
-          html: `<p>Le remboursement Stripe pour la commande n°${order.orderNumber} (client : ${order.user?.email ?? "client de passage"}) a échoué. Traitement manuel requis dans le dashboard Stripe.</p>`,
-        }).catch((err) => console.error("[performOrderCancellation] refund-failure alert email failed:", err));
-      }
-    }
-
     revalidatePath("/dashboard/boutique/orders");
     revalidatePath("/mon-compte");
     return {
       success: true,
-      message: refundFailed
-        ? "Commande annulée. Le remboursement n'a pas pu être traité automatiquement — notre équipe s'en occupe."
+      message: needsOnlineRefund
+        ? "Commande annulée. Le remboursement est en cours de traitement par notre équipe."
         : "Commande annulée.",
-      refundFailed,
+      refundOperationId,
     };
   } catch (error) {
     console.error("[performOrderCancellation]", error);
@@ -1859,7 +1797,7 @@ export async function cancelOrder(input) {
     where: { id: orderId },
     include: {
       items: true,
-      payment: { include: { invoice: true } },
+      payment: { include: { invoice: true, transactions: true } },
       user: { select: { fullName: true, email: true } },
     },
   });
@@ -1909,7 +1847,7 @@ export async function cancelMyOrder(orderId) {
     where: { id: orderId },
     include: {
       items: true,
-      payment: { include: { invoice: true } },
+      payment: { include: { invoice: true, transactions: true } },
       user: { select: { fullName: true, email: true } },
     },
   });

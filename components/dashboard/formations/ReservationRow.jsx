@@ -124,7 +124,7 @@ export function ReservationRow({ row, onDelete, onSettle, onNoShow }) {
         <div className="flex items-center justify-end gap-2">
           {/* Only a CONFIRMED booking can be settled or marked absent — the
               two ways a formation actually ends once the session has run. */}
-          {row.status === "CONFIRMED" && onSettle && (
+          {row.status === "CONFIRMED" && row.canSettle && onSettle && (
             <button
               type="button"
               onClick={() => onSettle(row)}
@@ -134,7 +134,7 @@ export function ReservationRow({ row, onDelete, onSettle, onNoShow }) {
               Clôturer
             </button>
           )}
-          {row.status === "CONFIRMED" && onNoShow && (
+          {row.status === "CONFIRMED" && row.canMarkNoShow && onNoShow && (
             <button
               type="button"
               onClick={() => onNoShow(row)}

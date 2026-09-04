@@ -5,72 +5,58 @@ import { fileURLToPath } from "node:url";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
 
-// 1 Sep 2026: the Ateliers/Formations reservation tabs on /dashboard/operations
-// listed every booking but offered no way to reach the facture/ticket/note de
-// crédit that goes with it — only the Transactions tab had that. Staff could
-// not, for instance, resend a formation's invoice or reprint its ticket
-// without hunting down the matching transaction row by amount/date.
-describe("the Ateliers/Formations reservation tabs expose facture/ticket/note de crédit, like Transactions already does", () => {
+describe("the Ateliers/Formations reservation tabs expose the B2B invoice status and delivery entry point", () => {
   const actions = source("actions/dashboard/admin-operations.js");
   const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
 
-  test("the workshops query fetches the payment's id, invoice and every credit note against it", () => {
-    const blockIdx = actions.indexOf('tab === "workshops"');
-    const block = actions.slice(blockIdx, actions.indexOf('} else {', blockIdx));
-    expect(block).toContain("invoice: {");
-    expect(block).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
+  test("the workshops hydrator fetches the payment's id, invoice and every credit note against it, via the shared ledger select", () => {
+    const fnIdx = actions.indexOf("async function hydrateWorkshops");
+    const fn = actions.slice(fnIdx, actions.indexOf("\n}\n", fnIdx));
+    expect(fn).toContain("payment: { select: PAYMENT_LEDGER_SELECT }");
+    // PAYMENT_LEDGER_SELECT itself carries invoice + every credit note —
+    // pinned in admin-operations-invoice-actions-contracts.test.js.
   });
 
-  test("the formations query fetches the payment's id, invoice and every credit note against it", () => {
-    const blockIdx = actions.indexOf('} else {', actions.indexOf('tab === "workshops"'));
-    const block = actions.slice(blockIdx);
-    expect(block).toContain("invoice: {");
-    expect(block).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
+  test("the formations hydrator fetches the payment's id, invoice and every credit note against it, via the shared ledger select", () => {
+    const fnIdx = actions.indexOf("async function hydrateFormations");
+    const fn = actions.slice(fnIdx, actions.indexOf("\n}\n", fnIdx));
+    expect(fn).toContain("payment: { select: PAYMENT_LEDGER_SELECT }");
   });
 
-  test("both reservation queries carry the payment id — the ticket action is keyed on it, not the invoice", () => {
-    const workshopsIdx = actions.indexOf('tab === "workshops"');
-    const workshopsBlock = actions.slice(workshopsIdx, actions.indexOf('} else {', workshopsIdx));
-    const formationsBlock = actions.slice(actions.indexOf('} else {', workshopsIdx));
-    for (const block of [workshopsBlock, formationsBlock]) {
-      const paymentIdx = block.indexOf("payment: {");
-      const paymentSelect = block.slice(paymentIdx, block.indexOf("},", paymentIdx));
-      expect(paymentSelect).toContain("id: true");
-    }
+  test("the shared ledger select carries the payment id for the operational context both reservation hydrators need", () => {
+    const selectIdx = actions.indexOf("const PAYMENT_LEDGER_SELECT");
+    const select = actions.slice(selectIdx, actions.indexOf("});", selectIdx));
+    expect(select).toContain("id: true");
   });
 
-  test("the Reservations table renders a Facture column with row actions keyed on the payment", () => {
-    const fnIdx = client.indexOf("function Reservations(");
+  test("the unified table renders the shared facture status component for every source, including reservations", () => {
+    const fnIdx = client.indexOf("function UnifiedOperationsTable(");
     const fn = client.slice(fnIdx, client.indexOf("\nfunction ", fnIdx + 1));
     expect(fn).toContain("<TableHead>Facture</TableHead>");
     expect(fn).toContain("const invoice = row.payment?.invoice ?? null;");
-    expect(fn).toContain(
-      "<InvoiceRowActions invoice={invoice} creditNotes={invoice?.creditNotes ?? []} paymentId={row.payment?.id ?? null} />"
-    );
+    expect(fn).toContain("<InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />");
   });
 
-  test("no transaction is passed on a reservation row — credit-note generation stays a Transactions-tab-only action", () => {
-    const fnIdx = client.indexOf("function Reservations(");
+  test("a transaction IS passed on a reservation row once one exists — cancel-and-refund is reachable from every tab, not just Transactions", () => {
+    // Unification's whole point: an atelier/formation row reached via its
+    // own preset gets the same "Voir / gérer" -> drawer -> "Annuler et
+    // rembourser" path a Transactions-tab row always had. See
+    // latestTransaction() and the Part 1 cancel-and-refund fix.
+    const fnIdx = client.indexOf("function latestTransaction(");
+    expect(fnIdx).toBeGreaterThan(-1);
     const fn = client.slice(fnIdx, client.indexOf("\nfunction ", fnIdx + 1));
-    expect(fn).not.toContain("transaction={");
+    expect(fn).toContain("row.latestTransactionId");
+    expect(client).toContain("transaction={transaction ? { ...transaction, hasInvoice: Boolean(invoice) } : null}");
   });
 });
 
-// A reservation row has no single Transaction to key off (its Payment can
-// carry a deposit and a balance, each independently refundable), so it can
-// legitimately have more than one credit note — unlike a Transactions-tab
-// row, which always has at most one.
-describe("InvoiceRowActions renders every credit note on a row, not just one", () => {
+describe("the compact action column retains financial safety", () => {
   const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
 
-  test("accepts a creditNotes list alongside the legacy singular creditNote prop", () => {
+  test("uses every credit note to keep a fully credited invoice from reopening cancellation", () => {
     expect(rowActions).toContain("creditNotes = null");
     expect(rowActions).toContain("const notes = creditNotes ?? (creditNote ? [creditNote] : [])");
-  });
-
-  test("maps over the list to render one download link per note", () => {
-    expect(rowActions).toContain("{notes.map((note) => (");
-    expect(rowActions).toContain("href={`/api/credit-notes/${note.id}/pdf`}");
+    expect(rowActions).toContain("const invoiceFullyCredited");
   });
 });
 
@@ -125,13 +111,17 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     expect(lib).toContain("export function describeReservationPayment(payment)");
   });
 
-  test("the row actions key the ticket link on the payment, independent of whether an invoice exists", () => {
+  test("the ticket route remains independently authorized and invoice-free", () => {
+    expect(route).toContain("prisma.payment.findUnique");
+    expect(route).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
+  });
+
+  test("keeps tickets and PDFs behind one documents card instead of restoring an action strip", () => {
     const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
-    expect(rowActions).toContain("paymentId = null");
-    expect(rowActions).toContain("href={`/api/payments/${paymentId}/ticket`}");
-    // The button must not be gated on `invoice` — that's exactly the bug.
-    const ticketBlockIdx = rowActions.indexOf("orderId ? (");
-    const ticketBlock = rowActions.slice(ticketBlockIdx, rowActions.indexOf("Aucun ticket disponible", ticketBlockIdx));
-    expect(ticketBlock).not.toContain(": invoice ?");
+    const documents = source("components/dashboard/operations/OperationDocumentsDialog.jsx");
+    expect(rowActions).toContain("Gérer les documents");
+    expect(documents).toContain("/api/payments/${paymentId}/ticket");
+    expect(documents).toContain("/api/invoices/${invoice.id}/pdf");
+    expect(documents).toContain("/api/credit-notes/${note.id}/pdf");
   });
 });

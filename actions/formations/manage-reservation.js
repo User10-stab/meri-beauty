@@ -5,7 +5,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { formationCancellationEmail } from "@/lib/email-templates";
-import { isAdminRole } from "@/lib/authorization";
+import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
+import {
+  ACTIVITY_RESERVATION_KINDS,
+  authorizeActivityReservationOperation,
+} from "@/lib/activity-reservation-access";
 import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting-list";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
@@ -208,20 +212,29 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       refundQueued,
     };
   } catch (error) {
+    if (error.message === "REFUND_ALREADY_PENDING") {
+      return { success: false, message: "Un remboursement est déjà en cours pour cette réservation — attendez sa résolution avant de réessayer." };
+    }
     console.error("[cancelFormationReservation]", error);
     return { success: false, message: "Erreur lors de l'annulation." };
   }
 }
 
 /**
- * Admin-only: closes out a formation reservation, collecting the 50% on-site
- * balance and issuing the final invoice. Before this existed there was no
- * way to record that money at all — see lib/reservations/settle-reservation.js.
+ * Closes out a formation reservation. Admins may close every reservation;
+ * staff require the explicit settlement capability and an assignment to the
+ * formation or the particular session.
  */
 export async function completeFormationReservation(reservationId, { method, paymentConfirmed } = {}) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
-  if (!isAdminRole(session.user.role)) return { success: false, message: "Non autorisé." };
+  const authorization = await authorizeActivityReservationOperation({
+    kind: ACTIVITY_RESERVATION_KINDS.FORMATION,
+    reservationId,
+    user: session.user,
+    capability: STAFF_PERMISSIONS.ACTIVITY_SETTLEMENTS,
+  });
+  if (!authorization.success) return authorization;
 
   const result = await settleReservation({
     kind: "FORMATION",
@@ -235,11 +248,17 @@ export async function completeFormationReservation(reservationId, { method, paym
   return result;
 }
 
-/** Admin-only: records a no-show. Never refunds — the deposit is kept by design. */
+/** Records a no-show. Never refunds — the deposit is kept by design. */
 export async function markFormationReservationNoShow(reservationId) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
-  if (!isAdminRole(session.user.role)) return { success: false, message: "Non autorisé." };
+  const authorization = await authorizeActivityReservationOperation({
+    kind: ACTIVITY_RESERVATION_KINDS.FORMATION,
+    reservationId,
+    user: session.user,
+    capability: STAFF_PERMISSIONS.ACTIVITY_ATTENDANCE,
+  });
+  if (!authorization.success) return authorization;
 
   const result = await markReservationNoShow({
     kind: "FORMATION",

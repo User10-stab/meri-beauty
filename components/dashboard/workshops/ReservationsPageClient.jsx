@@ -78,8 +78,8 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         renderRow={ReservationRow}
         onEdit={isAdmin ? (row) => setChangeModalReservation(row) : undefined}
         onDelete={isAdmin ? (row) => setToCancel(row) : undefined}
-        onSettle={isAdmin ? (row) => setToSettle(row) : undefined}
-        onNoShow={isAdmin ? handleNoShow : undefined}
+        onSettle={(row) => setToSettle(row)}
+        onNoShow={handleNoShow}
         searchPlaceholder="Rechercher une réservation..."
         searchFilter={(row, query) =>
           row.session?.workshop?.title?.toLowerCase().includes(query) ||

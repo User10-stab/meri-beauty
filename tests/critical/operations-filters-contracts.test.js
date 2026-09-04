@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { TYPE_FILTERS, STATUS_FILTERS } from "@/lib/dashboard/operation-filters";
+import { TYPE_FILTERS } from "@/lib/dashboard/operation-filters";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
@@ -21,40 +21,40 @@ describe("operations filters", () => {
     expect(TYPE_FILTERS.orders).toBeUndefined();
   });
 
-  test("an unrecognised type or status falls back to no filter, never reaches Prisma", () => {
+  test("an unrecognised type, lifecycle status or payment event falls back to no filter, never reaches SQL", () => {
     const actions = source("actions/dashboard/admin-operations.js");
     expect(actions).toContain('TYPE_FILTERS[tab]?.includes(params.type) ? params.type : "ALL"');
-    expect(actions).toContain('STATUS_FILTERS[tab]?.includes(params.status) ? params.status : "ALL"');
+    expect(actions).toContain('lifecycleOptions.includes(params.lifecycleStatus) ? params.lifecycleStatus : "ALL"');
+    expect(actions).toContain('PAYMENT_EVENT_FILTERS.includes(params.paymentEvent) ? params.paymentEvent : "ALL"');
   });
 
-  test("the type filter narrows through the session relation, not a top-level column", () => {
+  test("the type filter narrows through the workshop/formation join, not a top-level column", () => {
     const actions = source("actions/dashboard/admin-operations.js");
     // WorkshopReservation/FormationReservation have no type column of their
-    // own — it lives on the Activity/Formation reached through `session`.
-    expect(actions).toContain("session: { workshop: { type } }");
-    expect(actions).toContain("session: { formation: { type } }");
+    // own — it lives on the Activity/Formation the raw-SQL arm joins in.
+    // Cast to text: WorkshopType/FormationType are enums, and the filter
+    // value arrives as a bound text parameter.
+    expect(actions).toContain('w."type"::text = ${type}');
+    expect(actions).toContain('f."type"::text = ${type}');
   });
 
-  test("count() and findMany() are never allowed to disagree on the filter", () => {
+  test("the count and the page always come from the same unioned query", () => {
     const actions = source("actions/dashboard/admin-operations.js");
-    // Every filtered tab must build one `where` and pass it to BOTH calls —
-    // a paginator whose total count ignores the filter shows the wrong page
-    // count and a "Suivant" link that leads to an empty page.
-    for (const [countCall, findCall] of [
-      ["prisma.transaction.count({ where })", "prisma.transaction.findMany({\n          where,"],
-      ["prisma.order.count({ where })", "prisma.order.findMany({\n          where,"],
-      ["prisma.workshopReservation.count({ where })", "prisma.workshopReservation.findMany({\n          where,"],
-      ["prisma.formationReservation.count({ where })", "prisma.formationReservation.findMany({\n          where,"],
-    ]) {
-      expect(actions, `missing "${countCall}"`).toContain(countCall);
-      expect(actions, `missing "${findCall}"`).toContain(findCall);
-    }
+    // Both queries interpolate the SAME `unioned` fragment built once from
+    // the active arms — unlike separate where-clauses, there is no way for
+    // the total to disagree with what's actually filtered on the page.
+    const fnIdx = actions.indexOf("async function listUnifiedOperationIds");
+    const fn = actions.slice(fnIdx, actions.indexOf("\n}\n", fnIdx));
+    expect(fn).toContain("const unioned = Prisma.join(arms,");
+    expect(fn).toContain("FROM (${unioned}) AS combined\n      ORDER BY");
+    expect(fn).toContain("FROM (${unioned}) AS combined`");
   });
 
   test("switching tab resets the filters instead of carrying a stale one across", () => {
     const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
     expect(client).toContain('nextType = tab === nextTab ? type : "ALL"');
-    expect(client).toContain('nextStatus = tab === nextTab ? status : "ALL"');
+    expect(client).toContain('nextLifecycleStatus = tab === nextTab ? lifecycleStatus : "ALL"');
+    expect(client).toContain('nextPaymentEvent = tab === nextTab ? paymentEvent : "ALL"');
   });
 
   test("changing a filter resets to page 1", () => {
@@ -72,9 +72,10 @@ describe("operations filters", () => {
     expect(filterPills).not.toContain("onClick");
   });
 
-  test("the search page threads type/status through to the server action", () => {
+  test("the search page threads type/lifecycleStatus/paymentEvent through to the server action", () => {
     const page = source("app/dashboard/operations/page.jsx");
     expect(page).toContain("type: params?.type");
-    expect(page).toContain("status: params?.status");
+    expect(page).toContain("lifecycleStatus: params?.lifecycleStatus");
+    expect(page).toContain("paymentEvent: params?.paymentEvent");
   });
 });

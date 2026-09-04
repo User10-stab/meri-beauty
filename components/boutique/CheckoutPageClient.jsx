@@ -37,7 +37,7 @@ const MODES = [
   },
 ];
 
-export function CheckoutPageClient({ cart, customerSession }) {
+export function CheckoutPageClient({ cart, customerSession, shippingEnabled = true }) {
   const router = useRouter();
   const isAuthenticated = Boolean(customerSession);
   // A signed-in customer can still reach checkout with no address on file —
@@ -68,6 +68,17 @@ export function CheckoutPageClient({ cart, customerSession }) {
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
   const [shippingDetails, setShippingDetails] = useState({ cost: 0, isFree: true, loading: true, quoteRequired: false });
   const [quoteRequest, setQuoteRequest] = useState({ submitting: false, sent: false });
+
+  const availableModes = shippingEnabled ? MODES : MODES.filter((mode) => mode.value !== "SHIPPING_PREPAID");
+
+  // Handles an open page while the server-side delivery flag changes. Fresh
+  // pages never receive the delivery choice in the first place.
+  useEffect(() => {
+    if (!shippingEnabled && fulfilmentMode === "SHIPPING_PREPAID") {
+      setFulfilmentMode(null);
+      setPickupPoint(null);
+    }
+  }, [shippingEnabled, fulfilmentMode]);
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [vatCheck, setVatCheck] = useState(null);
@@ -268,6 +279,10 @@ export function CheckoutPageClient({ cart, customerSession }) {
 
     if (!fulfilmentMode) {
       toast.error("Veuillez choisir un mode de retrait.");
+      return;
+    }
+    if (!shippingEnabled && fulfilmentMode === "SHIPPING_PREPAID") {
+      toast.error("La livraison est temporairement indisponible. Choisissez le retrait en boutique.");
       return;
     }
     if (quoteRequired) {
@@ -497,7 +512,7 @@ export function CheckoutPageClient({ cart, customerSession }) {
           <section>
             <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Mode de retrait</h2>
             <div className="space-y-3">
-              {MODES.map((mode) => {
+              {availableModes.map((mode) => {
                 const Icon = mode.icon;
                 const selected = fulfilmentMode === mode.value;
                 return (

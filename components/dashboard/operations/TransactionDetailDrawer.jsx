@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2 } from "lucide-react";
+import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2, Mail, AlertTriangle } from "lucide-react";
 import { getTransactionDetail } from "@/actions/dashboard/admin-operations";
-import { issueMissingRefundDocument } from "@/actions/dashboard/cancel-and-refund";
+import { issueMissingRefundDocument, sendB2CRefundConfirmation } from "@/actions/dashboard/cancel-and-refund";
+import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
+import { CancelAndRefundDialog } from "@/components/dashboard/operations/CancelAndRefundDialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
 const money = (value) =>
@@ -95,6 +97,9 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const [error, setError] = useState(null);
   const [generatingNote, setGeneratingNote] = useState(false);
   const [confirmingNote, setConfirmingNote] = useState(false);
+  const [sendingB2CConfirmation, setSendingB2CConfirmation] = useState(false);
+  const [deliveryDocument, setDeliveryDocument] = useState(null);
+  const [cancelRefundOpen, setCancelRefundOpen] = useState(false);
 
   useEffect(() => {
     if (!transactionId) {
@@ -131,6 +136,24 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     }
   }
 
+  async function refreshDetail() {
+    if (!transactionId) return;
+    const refreshed = await getTransactionDetail(transactionId);
+    if (refreshed.success) setDetail(refreshed.data);
+  }
+
+  async function handleSendB2CConfirmation() {
+    const operationId = detail?.settledRefundLeg?.refundOperation?.id;
+    if (!operationId || sendingB2CConfirmation) return;
+    setSendingB2CConfirmation(true);
+    const result = await sendB2CRefundConfirmation(operationId);
+    setSendingB2CConfirmation(false);
+    if (result.success) {
+      toast.success(result.message);
+      await refreshDetail();
+    } else toast.error(result.message);
+  }
+
   useEffect(() => {
     if (!transactionId) return;
     const id = requestAnimationFrame(() => closeBtnRef.current?.focus());
@@ -163,8 +186,16 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const isRefund = detail?.transactionType === "REFUND";
   const signedMoney = (value, refund) => `${refund ? "−" : ""}${money(value)}`;
   const canGenerateNote = isRefund && Boolean(invoice) && !creditNote;
-  const refundReceipt = detail?.settledRefundLeg?.refundOperation ?? null;
-  const canGenerateB2CReceipt = isRefund && !invoice && !refundReceipt;
+  const refundOperation = detail?.settledRefundLeg?.refundOperation ?? null;
+  const hasB2CCustomer = isRefund && refundOperation?.status === "COMPLETED" && !creditNote && !invoice;
+  // Same formula InvoiceRowActions.jsx uses for the Transactions-tab row —
+  // kept identical so "can this be cancelled and refunded" never disagrees
+  // depending on which door an admin walked through to get here.
+  const canCancelAndRefund =
+    Boolean(payment?.id) &&
+    ["DEPOSIT", "FINAL_PAYMENT"].includes(detail?.transactionType) &&
+    !detail?.refundState?.fullyCredited &&
+    Number(detail?.refundState?.remainingRefundable) > 0.01;
 
   return createPortal(
     <div
@@ -245,6 +276,15 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 <Row label="Montant total" value={payment ? money(payment.totalAmount) : null} />
                 <Row label="Déjà réglé" value={payment ? money(payment.paidAmount) : null} />
                 <Row label="Solde restant" value={payment ? money(payment.remainingAmount) : null} />
+                {canCancelAndRefund && (
+                  <button
+                    type="button"
+                    onClick={() => setCancelRefundOpen(true)}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                  >
+                    <AlertTriangle size={14} /> Annuler et rembourser
+                  </button>
+                )}
               </div>
 
               {siblings.length > 1 && (
@@ -307,6 +347,15 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                       <FileText size={15} />
                       Ouvrir la facture PDF
                     </a>
+                    {invoice.customerType === "B2B" && (
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryDocument({ kind: "INVOICE", document: invoice })}
+                        className="mt-3 ml-2 inline-flex items-center gap-2 rounded-lg border border-[#2f3a2e] bg-white px-3 py-2 text-sm font-semibold text-[#2f3a2e] hover:bg-[#f4f7f3]"
+                      >
+                        <Mail size={15} /> {invoice.emailSentAt || invoice.billitSentAt ? "Gérer l'envoi" : "Envoyer la facture"}
+                      </button>
+                    )}
                   </>
                 ) : (
                   <p className="text-sm text-gray-500">
@@ -335,6 +384,21 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                       >
                         <FileMinus size={16} /> Télécharger la note de crédit
                       </a>
+                      {invoice?.customerType === "B2B" && (
+                        <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+                          <p className="font-medium text-amber-900">Livraison B2B</p>
+                          <p className="mt-1 text-xs leading-5 text-amber-800">
+                            Ouvrez la carte de livraison pour choisir l'e-mail ou le handoff Billit / Peppol.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setDeliveryDocument({ kind: "CREDIT_NOTE", document: creditNote })}
+                            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                          >
+                            <Mail size={13} /> Envoyer la note de crédit
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
@@ -352,32 +416,22 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 </div>
               )}
 
-              {refundReceipt?.refundReceiptNumber && (
+              {hasB2CCustomer && (
                 <div>
-                  <SectionTitle>Justificatif de remboursement</SectionTitle>
-                  <a
-                    href={`/api/refund-receipts/${refundReceipt.id}/pdf`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100"
-                  >
-                    <FileMinus size={15} /> Télécharger le justificatif {refundReceipt.refundReceiptNumber}
-                  </a>
-                </div>
-              )}
-
-              {canGenerateB2CReceipt && (
-                <div>
-                  <SectionTitle>Justificatif de remboursement</SectionTitle>
-                  <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
-                    <span className="text-gray-500">Ce remboursement B2C existe déjà, mais son justificatif manque.</span>
+                  <SectionTitle>Communication client</SectionTitle>
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-4 py-3 text-sm">
+                    <p className="font-medium text-emerald-900">Remboursement confirmé</p>
+                    <p className="mt-1 text-xs leading-5 text-emerald-800">
+                      Aucun document n'est joint. L'e-mail est envoyé uniquement si vous le choisissez.
+                    </p>
                     <button
                       type="button"
-                      onClick={() => setConfirmingNote(true)}
-                      disabled={generatingNote}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      onClick={handleSendB2CConfirmation}
+                      disabled={Boolean(refundOperation?.customerNotifiedAt) || sendingB2CConfirmation}
+                      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
                     >
-                      {generatingNote ? <Loader2 size={12} className="animate-spin" /> : <FilePlus2 size={12} />} Générer et envoyer
+                      {sendingB2CConfirmation ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
+                      {refundOperation?.customerNotifiedAt ? "Confirmation déjà envoyée" : "Envoyer la confirmation"}
                     </button>
                   </div>
                 </div>
@@ -385,16 +439,34 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
             </>
           )}
 
-          {(canGenerateNote || canGenerateB2CReceipt) && (
+          {canGenerateNote && (
             <ConfirmDialog
               open={confirmingNote}
-              title={canGenerateB2CReceipt ? "Créer le justificatif manquant ?" : "Émettre la note de crédit manquante ?"}
-              message={canGenerateB2CReceipt ? "Ce remboursement B2C a déjà eu lieu. Cette action ne rembourse rien de plus : elle crée le justificatif numéroté et l'envoie au client." : "Ce remboursement a déjà eu lieu mais n'a jamais reçu son document comptable. La note de crédit ne rembourse rien de plus — elle documente l'argent déjà rendu. Elle porte un numéro légal, séquentiel et définitif."}
+              title="Émettre la note de crédit manquante ?"
+              message="Ce remboursement a déjà eu lieu mais n'a jamais reçu son document comptable. La note de crédit ne rembourse rien de plus — elle documente l'argent déjà rendu. Elle porte un numéro légal, séquentiel et définitif."
               confirmLabel="Générer"
               cancelLabel="Annuler"
               loading={generatingNote}
               onConfirm={handleGenerateCreditNote}
               onCancel={() => setConfirmingNote(false)}
+            />
+          )}
+          <DocumentDeliveryDialog
+            open={Boolean(deliveryDocument)}
+            onClose={() => setDeliveryDocument(null)}
+            document={deliveryDocument?.document ?? null}
+            invoice={invoice}
+            kind={deliveryDocument?.kind ?? "INVOICE"}
+            onDelivered={refreshDetail}
+          />
+          {canCancelAndRefund && (
+            <CancelAndRefundDialog
+              open={cancelRefundOpen}
+              paymentId={payment?.id}
+              onClose={() => {
+                setCancelRefundOpen(false);
+                refreshDetail();
+              }}
             />
           )}
         </div>

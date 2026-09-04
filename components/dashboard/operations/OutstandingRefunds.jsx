@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AlertTriangle, Banknote, CreditCard, ExternalLink, Loader2 } from "lucide-react";
-import { confirmManualRefundLeg } from "@/actions/dashboard/cancel-and-refund";
+import { confirmManualRefundLeg, resolveManualRefundCase } from "@/actions/dashboard/cancel-and-refund";
 
 /**
  * Every refund still owed to a customer.
@@ -44,7 +44,7 @@ const SOURCE_LABEL = Object.freeze({
 });
 
 function documentLabel(operation) {
-  return operation?.creditNote?.number ?? operation?.refundReceiptNumber ?? "document en attente";
+  return operation?.creditNote?.number ?? "aucun document client";
 }
 
 function OperationMeta({ leg }) {
@@ -232,18 +232,67 @@ function InPersonLegRow({ leg, onDone }) {
   );
 }
 
-export function OutstandingRefunds({ legs }) {
-  const router = useRouter();
-  if (!legs || legs.length === 0) return null;
+function ManualRefundCaseRow({ refundCase }) {
+  const [reference, setReference] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const stripeUrl = refundCase.stripeAccountId
+    ? `https://dashboard.stripe.com/${refundCase.stripeAccountId}/payments/${refundCase.stripePaymentIntentId}`
+    : `https://dashboard.stripe.com/payments/${refundCase.stripePaymentIntentId}`;
 
-  const stripeLegs = legs.filter((leg) => leg.method === "ONLINE");
-  const inPersonLegs = legs.filter((leg) => leg.method !== "ONLINE");
+  return (
+    <li className="rounded-xl border border-red-200 bg-red-50/60 p-4">
+      <p className="text-sm font-semibold text-gray-900">
+        {money(refundCase.amount)} — paiement capturé sans réservation/sale
+      </p>
+      <p className="mt-1 text-[12px] text-gray-600">{refundCase.reason}</p>
+      <p className="mt-1 break-all font-mono text-[11px] text-gray-600">{refundCase.stripePaymentIntentId}</p>
+      <a
+        href={stripeUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-[13px] font-medium text-red-800 hover:bg-red-50"
+      >
+        <ExternalLink size={14} /> Ouvrir dans Stripe
+      </a>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <input
+          value={reference}
+          onChange={(event) => setReference(event.target.value)}
+          placeholder="Référence du remboursement Stripe"
+          className="min-w-[240px] rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px]"
+        />
+        <button
+          type="button"
+          disabled={!reference.trim() || submitting}
+          onClick={async () => {
+            setSubmitting(true);
+            const result = await resolveManualRefundCase({ caseId: refundCase.id, stripeReference: reference });
+            setSubmitting(false);
+            if (result.success) window.location.reload();
+            else toast.error(result.message);
+          }}
+          className="rounded-lg bg-gray-900 px-3 py-1.5 text-[13px] font-medium text-white disabled:opacity-40"
+        >
+          {submitting ? "Enregistrement…" : "Marquer remboursé"}
+        </button>
+      </div>
+    </li>
+  );
+}
+
+export function OutstandingRefunds({ legs, manualRefundCases = [] }) {
+  const router = useRouter();
+  if ((!legs || legs.length === 0) && manualRefundCases.length === 0) return null;
+
+  const safeLegs = legs ?? [];
+  const stripeLegs = safeLegs.filter((leg) => leg.method === "ONLINE");
+  const inPersonLegs = safeLegs.filter((leg) => leg.method !== "ONLINE");
   // What is still owed — a partially settled leg contributes only its
   // remainder, never the figure it started at.
-  const total = legs.reduce(
+  const total = safeLegs.reduce(
     (sum, leg) => sum + (Number(leg.amount) - Number(leg.settledAmount ?? 0)),
     0,
-  );
+  ) + manualRefundCases.reduce((sum, refundCase) => sum + Number(refundCase.amount), 0);
 
   return (
     <section className="rounded-2xl border border-amber-300 bg-white p-5">
@@ -252,6 +301,17 @@ export function OutstandingRefunds({ legs }) {
         Ces annulations sont enregistrées et documentées, mais l&apos;argent n&apos;est pas encore reparti.
         Tant qu&apos;une ligne reste ici, le client n&apos;a pas été informé.
       </p>
+
+      {manualRefundCases.length > 0 && (
+        <>
+          <h3 className="mb-2 text-[13px] font-semibold text-red-900">
+            Paiements capturés sans dossier ({manualRefundCases.length})
+          </h3>
+          <ul className="mb-4 space-y-3">
+            {manualRefundCases.map((refundCase) => <ManualRefundCaseRow key={refundCase.id} refundCase={refundCase} />)}
+          </ul>
+        </>
+      )}
 
       {stripeLegs.length > 0 && (
         <>

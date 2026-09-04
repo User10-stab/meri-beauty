@@ -40,12 +40,11 @@ describe("failed refunds require a fresh explicit admin action", () => {
     expect(returns).toContain("REFUND_ALREADY_PENDING");
   });
 
-  test("order cancellation refunds pin the amount and idempotency key before calling Stripe, and clear them on success", () => {
-    expect(orders).toContain("pendingRefundAmount: remaining,");
-    expect(orders).toContain("pendingRefundIdempotencyKey: refundIdempotencyKey,");
-    expect(orders).toContain("idempotencyKey: refundIdempotencyKey");
-    expect(orders).toContain("pendingRefundAmount: null");
-    expect(orders).toContain("pendingRefundIdempotencyKey: null");
+  test("order cancellation queues an online refund without pinning or calling Stripe", () => {
+    expect(orders).not.toContain("refunds.create");
+    expect(orders).not.toContain("pendingRefundAmount: remaining,");
+    expect(orders).not.toContain("pendingRefundIdempotencyKey: refundIdempotencyKey,");
+    expect(orders).toContain("queueManualRefund(tx");
   });
 
   test("order cancellation refuses to start a second refund while one is already pending on the same payment", () => {
@@ -53,10 +52,9 @@ describe("failed refunds require a fresh explicit admin action", () => {
   });
 });
 
-// P0: a failed legacy Stripe call must remain visible with its original
-// amount. The dashboard can reconcile a webhook after the administrator
-// performs the refund in Stripe, but cannot replay the payment.
-describe("reservation cancellations pin refunds the same way boutique orders/returns do", () => {
+// Legacy pins remain only for historical recovery. New cancellation paths
+// queue the precise amount for an administrator to refund in Stripe.
+describe("reservation cancellations queue refunds for manual execution", () => {
   const helper = source("lib/payments/pin-pending-refund.js");
   const rejectAppointment = source("actions/appointment/manage-appointment.js");
   const cancelReservation = source("actions/reservation/cancel-reservation.js");
@@ -78,22 +76,13 @@ describe("reservation cancellations pin refunds the same way boutique orders/ret
     expect(failedFn).not.toContain("pendingRefundAmount: null");
   });
 
-  // Only the paths that still refund automatically. As each one is
-  // converted to queueManualRefund it moves to the block below instead —
-  // see tests/critical/refunds-are-manual-contracts.test.js for the policy
-  // this is being migrated towards.
-  //
-  // cancelReservation (customer, outside the 48h window) is the one
-  // deliberate, permanent exception: policy (2026-09-02) keeps its
-  // automatic refund. See that file's own doc comment.
-  for (const [name, mod] of [["cancelReservation (customer)", cancelReservation]]) {
-    test(`${name} pins the refund and passes an idempotency key to Stripe`, () => {
-      expect(mod).toContain("pinPendingRefund(tx");
-      expect(mod).toContain("buildRefundIdempotencyKey");
-      expect(mod).toContain("idempotencyKey: refundIdempotencyKey");
-      expect(mod).toContain("markRefundFailed(prisma");
-    });
-  }
+  test("cancelReservation (customer) queues a refund without a Stripe retry pin", () => {
+    expect(cancelReservation).not.toContain("refunds.create");
+    expect(cancelReservation).not.toContain("pinPendingRefund");
+    expect(cancelReservation).not.toContain("markRefundFailed");
+    expect(cancelReservation).toContain("queueManualRefund(tx");
+    expect(cancelReservation).toContain("issueCreditNote(tx");
+  });
 
   // Converted: an admin now refunds this by hand in Stripe, so there is no
   // call to pin and no Stripe call to replay.
@@ -120,8 +109,10 @@ describe("reservation cancellations pin refunds the same way boutique orders/ret
     expect(cancelWorkshop).toContain("refunded: false");
   });
 
-  test("cancelReservation (customer path) no longer silently drops a failed refund", () => {
-    // The old bug: a bare console.error with no durable Payment write at all.
-    expect(cancelReservation).toContain("await markRefundFailed(prisma, payment.id, err)");
+  test("cancelReservation (customer path) creates a durable work item before returning success", () => {
+    const queueCall = cancelReservation.indexOf("queueManualRefund(tx");
+    const success = cancelReservation.indexOf("success: true", queueCall);
+    expect(queueCall).toBeGreaterThan(-1);
+    expect(success).toBeGreaterThan(queueCall);
   });
 });

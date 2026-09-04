@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PickupConfirmDialog } from "@/components/dashboard/boutique/PickupConfirmDialog";
 import { markOrderReadyForPickup, markOrderShipped, markOrderCompleted, cancelOrder } from "@/actions/boutique/orders";
 import { generateShippingLabel } from "@/actions/boutique/mondial-relay";
+import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 
 const MODE_LABEL = {
   PICKUP_PREPAID: "Retrait en boutique (payé en ligne)",
@@ -74,6 +75,8 @@ export function OrderDetailClient({ order }) {
   const [generatingLabel, setGeneratingLabel] = useState(false);
   const [closingShipped, setClosingShipped] = useState(false);
   const [collectedAt, setCollectedAt] = useState("");
+  const [deliveryDoc, setDeliveryDoc] = useState(null);
+  const isB2B = order.invoice?.customerType === "B2B";
 
   function runAction(action, ...args) {
     startTransition(async () => {
@@ -325,27 +328,48 @@ export function OrderDetailClient({ order }) {
                 <Printer size={14} />
               </a>
               {order.invoice && (
-              <a
-                href={`/api/invoices/${order.invoice.id}/pdf`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] dark:border-dark-3 dark:text-dark-6"
-              >
-                <span>Facture {order.invoice.number}</span>
-                <Download size={14} />
-              </a>
-              )}
-              {order.creditNotes.map((cn) => (
+              <div className="flex items-center gap-2">
                 <a
-                  key={cn.id}
-                  href={`/api/credit-notes/${cn.id}/pdf`}
+                  href={`/api/invoices/${order.invoice.id}/pdf`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center justify-between rounded-lg border border-red-100 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50"
+                  className="flex flex-1 items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] dark:border-dark-3 dark:text-dark-6"
                 >
-                  <span>Télécharger la note de crédit {cn.number}</span>
-                  <FileMinus size={14} />
+                  <span>Facture {order.invoice.number}</span>
+                  <Download size={14} />
                 </a>
+                {isB2B && (
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryDoc({ kind: "INVOICE", document: order.invoice })}
+                    className="flex items-center gap-1.5 rounded-lg border border-[#2f3a2e] px-3 py-2 text-xs font-semibold text-[#2f3a2e] hover:bg-[#f4f7f3]"
+                  >
+                    <Mail size={14} /> {order.invoice.emailSentAt || order.invoice.billitSentAt ? "Gérer l'envoi" : "Envoyer"}
+                  </button>
+                )}
+              </div>
+              )}
+              {order.creditNotes.map((cn) => (
+                <div key={cn.id} className="flex items-center gap-2">
+                  <a
+                    href={`/api/credit-notes/${cn.id}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex flex-1 items-center justify-between rounded-lg border border-red-100 px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50"
+                  >
+                    <span>Télécharger la note de crédit {cn.number}</span>
+                    <FileMinus size={14} />
+                  </a>
+                  {isB2B && (
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryDoc({ kind: "CREDIT_NOTE", document: cn })}
+                      className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-900 hover:bg-violet-50"
+                    >
+                      <Mail size={14} /> {cn.emailSentAt || cn.billitSentAt ? "Gérer l'envoi" : "Envoyer"}
+                    </button>
+                  )}
+                </div>
               ))}
           </div>
 
@@ -485,7 +509,7 @@ export function OrderDetailClient({ order }) {
           order.payment?.requiresManualRefund
             ? order.payment.refundInstruction
             : order.hasPayment
-              ? "Le client a déjà payé en ligne — un remboursement Stripe sera automatiquement déclenché et le stock sera remis en vente."
+              ? "Le client a déjà payé en ligne — le remboursement sera mis en attente de traitement manuel par l'équipe (visible dans Opérations) et le stock sera remis en vente."
             : "Le stock réservé sera libéré."
         }
         confirmLabel="Annuler la commande"
@@ -522,6 +546,15 @@ export function OrderDetailClient({ order }) {
           </div>
         )}
       </ConfirmDialog>
+
+      <DocumentDeliveryDialog
+        open={Boolean(deliveryDoc)}
+        onClose={() => setDeliveryDoc(null)}
+        document={deliveryDoc?.document ?? null}
+        invoice={order.invoice}
+        kind={deliveryDoc?.kind ?? "INVOICE"}
+        onDelivered={() => router.refresh()}
+      />
     </div>
   );
 }

@@ -15,10 +15,9 @@ import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
  *
  * Scoped to the same Belgian-B2B-only case as the invoice it corrects — a
  * credit note against a Belgian B2B invoice falls under the same 2026
- * structured e-invoicing mandate, so it needs the same Peppol path rather
- * than an ad-hoc PDF e-mail (see sendCreditNoteByEmail's refusal for that
- * exact case). A B2C or foreign-VAT credit note has nowhere sensible to
- * route on Billit and uses sendCreditNoteByEmail instead.
+ * structured e-invoicing mandate. E-mail remains a separate deliberate
+ * delivery choice; this action is only the Belgian Billit/Peppol handoff.
+ * A B2C or foreign-VAT credit note has nowhere sensible to route on Billit.
  */
 export async function sendCreditNoteToBillit(creditNoteId) {
   const session = await auth();

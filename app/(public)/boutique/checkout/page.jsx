@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { CheckoutPageClient } from "@/components/boutique/CheckoutPageClient";
 import { getTranslations } from "next-intl/server";
+import { isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
 
 export const dynamic = "force-dynamic";
 
@@ -55,5 +56,11 @@ export default async function CheckoutPage() {
     if (user) customerSession = user;
   }
 
-  return <CheckoutPageClient cart={cart} customerSession={customerSession} />;
+  return (
+    <CheckoutPageClient
+      cart={cart}
+      customerSession={customerSession}
+      shippingEnabled={isBoutiqueShippingEnabled()}
+    />
+  );
 }

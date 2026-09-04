@@ -8,12 +8,17 @@ import { shippingQuoteRequestOwnerEmail, shippingQuoteRequestConfirmationEmail }
 import { shippingQuoteRequestSchema } from "@/lib/validations/commerce";
 import { calculateShippingCost, calculateTotalWeight, getShippingDetails } from "@/lib/shipping";
 import { applyVatRate, repriceTtcCataloguePrice, resolveGoodsVatPolicy } from "@/lib/tax-policy";
+import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
 
 /**
  * Get current cart shipping calculation for checkout display
  * Returns the same shipping cost that will be charged at checkout
  */
 export async function getCartShippingCost() {
+  if (!isBoutiqueShippingEnabled()) {
+    return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
+  }
+
   try {
     const cart = await getOrCreateActiveCart();
     const fullCart = await prisma.cart.findUnique({
@@ -90,6 +95,10 @@ export async function getCartShippingCost() {
  * the client submits.
  */
 export async function requestShippingQuote(input) {
+  if (!isBoutiqueShippingEnabled()) {
+    return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
+  }
+
   const parsed = shippingQuoteRequestSchema.safeParse(input);
   if (!parsed.success) {
     const errors = parsed.error.flatten().fieldErrors;

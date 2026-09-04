@@ -177,8 +177,9 @@ enum RefundTrigger {
   // Exceptional refund of a no-show. The booking KEEPS its NO_SHOW status;
   // only a financial correction is recorded against it.
   NO_SHOW_EXCEPTION
-  // Goodwill or quality correction after a completed prestation. It never
-  // reopens, cancels, or changes the historical booking.
+  // Legacy value retained because PostgreSQL enum values and historical audit
+  // rows cannot be removed safely from the shared database. New operations
+  // are rejected before they can use it.
   FINANCIAL_CORRECTION
   // Boutique return, after the goods physically came back.
   SHOP_RETURN
@@ -880,6 +881,7 @@ model User {
   reviewedReservationCancellationRequests  ReservationCancellationRequest[] @relation("ReservationCancellationReviewedBy")
   decidedRefundOperations        RefundOperation[]      @relation("RefundOperationDecidedBy")
   confirmedRefundLegs            RefundLeg[]            @relation("RefundLegConfirmedBy")
+  resolvedManualRefundCases       ManualRefundCase[]    @relation("ManualRefundCaseResolvedBy")
 
   @@index([role])
   @@index([isActive, isDeleted])
@@ -2255,8 +2257,7 @@ model RefundOperation {
 
   // Null for a B2C sale that never produced an invoice (see
   // lib/tax-policy.js#hasInvoiceableVatIdentity — a particulier without a
-  // validated VAT identity never gets one). Those get refundReceiptNumber
-  // below instead of a credit note; they are NOT an error state.
+  // validated VAT identity never gets one).
   invoiceId String?
   invoice   Invoice? @relation(fields: [invoiceId], references: [id])
 
@@ -2269,13 +2270,13 @@ model RefundOperation {
   totalAmount Decimal @db.Decimal(10, 2)
   reason      String
 
-  // Exactly one of these two is set, decided by whether an Invoice exists.
-  // The credit note is the legal correction of an invoice; the receipt is
-  // the internal justificatif for a B2C ticket. Both are numbered from
-  // their own gapless NumberingCounter series.
+  // A credit note is the legal correction of an invoice. B2C refunds get no
+  // financial document; a staff member may manually send a plain refund
+  // confirmation after settlement.
   creditNoteId String?     @unique
   creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id])
-  // "RB2026-000001". Own series — see lib/refunds/refund-receipt-number.js.
+  // Historical receipt number only. New operations never allocate it; keep
+  // the persisted field until shared migration history permits its cleanup.
   refundReceiptNumber String? @unique
 
   // The OWNER/ADMIN who took responsibility for this. Never nullable in
@@ -2376,6 +2377,8 @@ model RefundLeg {
   stripeIdempotencyKey  String? @unique
   stripeRefundId        String?
   stripePaymentIntentId String?
+  // All observed Stripe refund ids; one leg may be settled in increments.
+  stripeRefundIds       String[] @default([])
 
   // ── CARD (external terminal) ──────────────────────────────────────────
   // We cannot drive the terminal. The admin refunds on the device and types
@@ -2413,6 +2416,31 @@ model RefundLeg {
   @@index([status, method])
   @@index([sourceTransactionId])
   @@index([cashSessionId])
+}
+
+// A captured Checkout Session that could not be fulfilled. This is separate
+// from Payment because the failure can happen before fulfilment creates one.
+// It is the durable, queryable source of truth for the manual Stripe refund
+// worklist; the notification is only an alerting surface.
+model ManualRefundCase {
+  id String @id @default(cuid())
+
+  stripeCheckoutSessionId String @unique
+  stripePaymentIntentId  String @unique
+  stripeAccountId        String?
+  amount                 Decimal @db.Decimal(10, 2)
+  currency               String  @default("eur")
+  reason                 String
+
+  resolvedAt DateTime?
+  resolutionReference String?
+  resolvedByUserId String?
+  resolvedBy User? @relation("ManualRefundCaseResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([resolvedAt, createdAt])
 }
 
 // CONTRACT

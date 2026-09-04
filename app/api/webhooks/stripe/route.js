@@ -34,7 +34,6 @@ import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { Prisma } from "@prisma/client";
 import { reconcileStripeProductOrderRefund } from "@/lib/orders/reconcile-stripe-refund";
 import { findLegForStripeRefund, settleRefundLeg } from "@/lib/refunds/settle-leg";
-import { notifyRefundComplete } from "@/lib/refunds/notify-refund-complete";
 import {
   reconcileExceptionalReservationFullRefund,
   RESERVATION_REFUND_AUTHORIZATION,
@@ -286,7 +285,7 @@ export async function POST(req) {
     } else if (session.metadata?.kind === "formation") {
       result = await confirmFormationReservationPayment(session);
     } else {
-      result = await processAppointmentCheckoutSession(session);
+      result = await processAppointmentCheckoutSession(session, event.account ?? null);
     }
     return NextResponse.json(result);
   } catch (err) {
@@ -487,14 +486,6 @@ async function settleOwnRefundLegs(charge, connectedAccountId = null) {
     // ALREADY_SETTLED still counts as ours — a redelivered webhook must not
     // fall through to the external-refund path and duplicate the ledger.
     if (result.settled || result.reason === "ALREADY_SETTLED") settledAny = true;
-  }
-
-  for (const operationId of operationIds) {
-    // No-op unless every leg has landed. This is the single closing e-mail,
-    // and the claim on customerNotifiedAt makes a second delivery silent.
-    await notifyRefundComplete({ prisma, operationId }).catch((error) =>
-      console.error("[stripe-webhook] refund notification failed", error),
-    );
   }
 
   return { settledAny, operationIds };
@@ -784,7 +775,7 @@ function validateCheckoutSessionMetadata(session) {
   return { appointmentId, paymentId, paymentScenario, issues };
 }
 
-async function processAppointmentCheckoutSession(session) {
+async function processAppointmentCheckoutSession(session, connectedAccountId = null) {
   const checkoutSessionId = session?.id || null;
   const paymentIntentId = session?.payment_intent || null;
 
@@ -831,7 +822,11 @@ async function processAppointmentCheckoutSession(session) {
   // charge a customer who explicitly cancelled.
   if (preCheck.appointment.status === "CANCELLED") {
     console.warn(`[stripe-webhook] Appointment ${preCheck.appointment.id} cancelled before payment cleared, flagging for manual refund: ${checkoutSessionId}`);
-    await flagPaymentForManualRefund(session, "rendez-vous annulé avant que le paiement ne soit confirmé");
+    await flagPaymentForManualRefund(
+      session,
+      "rendez-vous annulé avant que le paiement ne soit confirmé",
+      { stripeAccountId: connectedAccountId },
+    );
     return { received: true, refunded: false, flaggedForReview: true, reason: "appointment cancelled" };
   }
 
@@ -847,11 +842,17 @@ async function processAppointmentCheckoutSession(session) {
     console.error(
       `[stripe-webhook] UNDERPAYMENT for checkout session ${checkoutSessionId}: expected ${expectedAmountCents} cents, received ${amountReceivedCents} cents`
     );
-    await flagPaymentForManualRefund(session, `paiement insuffisant (${amountReceivedCents} centimes reçus, ${expectedAmountCents} attendus)`);
+    await flagPaymentForManualRefund(
+      session,
+      `paiement insuffisant (${amountReceivedCents} centimes reçus, ${expectedAmountCents} attendus)`,
+      { stripeAccountId: connectedAccountId },
+    );
     return { received: true, refunded: false, flaggedForReview: true, reason: "underpayment" };
   }
 
-  const result = await prisma.$transaction(async (tx) => {
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
     // Row lock: two deliveries of the same event (Stripe's at-least-once
     // guarantee) must not both flip this payment from PENDING.
     await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${paymentId} FOR UPDATE`;
@@ -1047,11 +1048,31 @@ async function processAppointmentCheckoutSession(session) {
       nextAppointmentStatus,
       invoice,
     };
-  }, { timeout: 15000 });
+    }, { timeout: 15000 });
+  } catch (error) {
+    // A legal-data failure happens after Stripe has captured the payment but
+    // before this transaction can persist fulfilment. Record it as durable
+    // manual-refund work instead of returning a 500 that Stripe will retry
+    // until its retry window expires.
+    if (["BUYER_LEGAL_DATA_INCOMPLETE", "SELLER_LEGAL_DATA_INCOMPLETE"].includes(error?.message)) {
+      console.error(`[stripe-webhook] appointment ${appointmentId} needs manual refund after legal-data failure`, error);
+      await flagPaymentForManualRefund(
+        session,
+        `confirmation impossible : données légales de facturation incomplètes (${error.message})`,
+        { stripeAccountId: connectedAccountId },
+      );
+      return { received: true, refunded: false, flaggedForReview: true, reason: "legal-data-incomplete" };
+    }
+    throw error;
+  }
 
   if (result?.reason === "appointment-cancelled") {
     console.warn(`[stripe-webhook] Appointment ${appointmentId} cancelled during payment processing, flagging for manual refund: ${checkoutSessionId}`);
-    await flagPaymentForManualRefund(session, "rendez-vous annulé pendant le traitement du paiement");
+    await flagPaymentForManualRefund(
+      session,
+      "rendez-vous annulé pendant le traitement du paiement",
+      { stripeAccountId: connectedAccountId },
+    );
     return { received: true, refunded: false, flaggedForReview: true, reason: "appointment cancelled" };
   }
 
@@ -1059,7 +1080,11 @@ async function processAppointmentCheckoutSession(session) {
     console.error(
       `[stripe-webhook] STRAY DUPLICATE CHARGE for appointment ${appointmentId}: session ${checkoutSessionId} settled after payment ${paymentId} was already paid via a different session. Flagging for manual refund.`
     );
-    await flagPaymentForManualRefund(session, "double paiement pour le même rendez-vous");
+    await flagPaymentForManualRefund(
+      session,
+      "double paiement pour le même rendez-vous",
+      { stripeAccountId: connectedAccountId },
+    );
     const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { email: true } });
     if (salon?.email) {
       sendEmail({
@@ -1305,7 +1330,7 @@ async function handlePaymentIntentSucceeded(paymentIntent, connectedAccountId = 
     return;
   }
 
-  await processAppointmentCheckoutSession(session);
+  await processAppointmentCheckoutSession(session, connectedAccountId);
 }
 
 async function notifyAppointmentPaymentFailed({ paymentId, appointmentId, failedSessionId = null }) {

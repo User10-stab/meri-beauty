@@ -567,6 +567,9 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       refundQueued: claimed.refundQueued,
     };
   } catch (error) {
+    if (error.message === "REFUND_ALREADY_PENDING") {
+      return { success: false, message: "Un remboursement est déjà en cours pour ce rendez-vous — attendez sa résolution avant de réessayer." };
+    }
     console.error("[rejectAppointment]", error);
     return {
       success: false,

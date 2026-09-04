@@ -22,6 +22,8 @@ describe("granular staff dashboard permissions", () => {
   it("keeps administrators unrestricted and staff least-privileged by default", () => {
     expect(canAccessStaffPermission(ROLES.ADMIN, [], STAFF_PERMISSIONS.POINT_OF_SALE)).toBe(true);
     expect(canAccessStaffPermission(ROLES.STAFF, [], STAFF_PERMISSIONS.POINT_OF_SALE)).toBe(false);
+    expect(canAccessStaffPermission(ROLES.STAFF, [], STAFF_PERMISSIONS.ACTIVITY_SETTLEMENTS)).toBe(false);
+    expect(canAccessStaffPermission(ROLES.STAFF, [], STAFF_PERMISSIONS.ACTIVITY_ATTENDANCE)).toBe(false);
     expect(DEFAULT_STAFF_PERMISSIONS).toEqual([
       STAFF_PERMISSIONS.APPOINTMENTS,
       STAFF_PERMISSIONS.SERVICES,
@@ -60,13 +62,14 @@ describe("granular staff dashboard permissions", () => {
     expect(read("components/dashboard/staff/StaffPermissionsField.jsx")).toContain("Les droits non cochés sont masqués");
   });
 
-  it("scopes staff customers and newsletters to their appointments and formations", () => {
+  it("scopes staff customers and activity reservations to their appointments and assigned sessions", () => {
     const customerScope = read("lib/staff-customer-scope.js");
     const newsletter = read("actions/newsletter/send-newsletter.js");
     const formations = read("actions/formations/get-reservations.js");
     expect(customerScope).toContain("formationReservations");
     expect(customerScope).toContain('status: { in: ["CONFIRMED", "COMPLETED"] }');
     expect(newsletter).toContain("marketingEligibleOnly: true");
-    expect(formations).toContain("createdById: session.user.id");
+    expect(formations).toContain("activityReservationStaffScope");
+    expect(formations).toContain("getActivityReservationCapabilities");
   });
 });

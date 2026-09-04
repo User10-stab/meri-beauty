@@ -7,6 +7,7 @@ import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 import { generateAutologinToken } from "@/lib/autologin";
 import { parseLocalDateString } from "@/lib/slot-availability";
@@ -357,6 +358,20 @@ export async function createCheckoutSession(reservationData) {
       : paymentDecision.depositAmount;
 
     const { user: customerUser, isNewUser } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    // A full online payment can settle before its webhook creates the VAT
+    // invoice. Do not send a VAT-validated customer to Stripe unless the
+    // buyer data that issueInvoice requires already exists; otherwise a
+    // captured payment would repeatedly fail fulfilment after the fact.
+    if (
+      paymentDecision.paymentIntent === "FULL_ONLINE" &&
+      hasInvoiceableVatIdentity(customerUser) &&
+      (!customerUser.addressLine1 || !customerUser.addressCity || !customerUser.addressPostalCode || !customerUser.addressCountry)
+    ) {
+      return {
+        success: false,
+        message: "Votre adresse de facturation complète est obligatoire avant le paiement en ligne avec un numéro de TVA validé.",
+      };
+    }
     // Returning customer, or an account predating consent tracking.
     await recordTermsAcceptance(prisma, customerUser.id);
     // Generate an autologin token for the customer — but only when this

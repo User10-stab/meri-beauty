@@ -28,6 +28,7 @@ export async function getIndependentStaff() {
         yearsOfExperience: true,
         hireDate: true,
         rythme: true,
+        vatNumber: true,
         createdAt: true,
         updatedAt: true,
         dashboardPermissions: true,
@@ -46,6 +47,11 @@ export async function getIndependentStaff() {
             isDeleted: true,
             emailVerified: true,
             createdAt: true,
+            addressLine1: true,
+            addressLine2: true,
+            addressCity: true,
+            addressPostalCode: true,
+            addressCountry: true,
           },
         },
         contracts: {
@@ -81,6 +87,7 @@ export async function getIndependentStaff() {
       yearsOfExperience: s.yearsOfExperience ?? null,
       hireDate: s.hireDate ? s.hireDate.toISOString() : null,
       rythme: s.rythme ?? null,
+      vatNumber: s.vatNumber ?? null,
       createdAt: s.createdAt.toISOString(),
       updatedAt: s.updatedAt.toISOString(),
       dashboardPermissions: s.dashboardPermissions,
@@ -106,6 +113,11 @@ export async function getIndependentStaff() {
       user: {
         ...s.user,
         createdAt: s.user.createdAt.toISOString(),
+        addressLine1: s.user.addressLine1 ?? null,
+        addressLine2: s.user.addressLine2 ?? null,
+        addressCity: s.user.addressCity ?? null,
+        addressPostalCode: s.user.addressPostalCode ?? null,
+        addressCountry: s.user.addressCountry ?? null,
       },
       contract: s.contracts[0]
         ? {

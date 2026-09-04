@@ -22,6 +22,7 @@ import {
   Hash,
   MapPin,
 } from "lucide-react";
+import { CountrySelect } from "@/components/shared/CountrySelect";
 import { createIndependentStaff } from "@/actions/staff/create-independent-staff";
 import { createStaffFromRental } from "@/actions/staff/create-staff-from-rental";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
@@ -252,7 +253,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       addressLine2:      initialValues.addressLine2 ?? "",
       addressCity:       initialValues.addressCity ?? "",
       addressPostalCode: initialValues.addressPostalCode ?? "",
-      addressCountry:    initialValues.addressCountry ?? "BE",
+      addressCountry:    initialValues.addressCountry ?? "Belgique",
       photo:             null,
       bio:               "",
       languages:         [],
@@ -461,12 +462,18 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                 <FieldError message={errors.addressCity?.message} />
               </div>
               <div>
-                <TextInput
-                  id="addressCountry"
-                  type="text"
-                  placeholder="Pays"
-                  error={errors.addressCountry}
-                  {...register("addressCountry")}
+                <Controller
+                  name="addressCountry"
+                  control={control}
+                  render={({ field }) => (
+                    <CountrySelect
+                      id="addressCountry"
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      error={Boolean(errors.addressCountry)}
+                      variant="default"
+                    />
+                  )}
                 />
                 <FieldError message={errors.addressCountry?.message} />
               </div>

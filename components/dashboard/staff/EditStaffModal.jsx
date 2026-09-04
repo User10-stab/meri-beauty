@@ -20,6 +20,7 @@ import {
   Crop,
   MapPin,
 } from "lucide-react";
+import { CountrySelect } from "@/components/shared/CountrySelect";
 import { updateIndependentStaff } from "@/actions/staff/update-independent-staff";
 import { updateIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { LanguageTagInput } from "./LanguageTagInput";
@@ -363,7 +364,12 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
       addressLine2:      staff.user.addressLine2 ?? "",
       addressCity:       staff.user.addressCity ?? "",
       addressPostalCode: staff.user.addressPostalCode ?? "",
-      addressCountry:    staff.user.addressCountry ?? "",
+      addressCountry:    (() => {
+        // Migrate legacy 2-letter ISO codes to full country names
+        const legacyMap = { BE: "Belgique", FR: "France", LU: "Luxembourg", NL: "Pays-Bas", DE: "Allemagne", CH: "Suisse", ES: "Espagne", IT: "Italie", PT: "Portugal", GB: "Royaume-Uni" };
+        const stored = staff.user.addressCountry ?? "";
+        return legacyMap[stored?.toUpperCase()] ?? stored;
+      })(),
       photo:             staff.photo     ?? null,
       bio:               staff.bio       ?? "",
       languages:         staff.languages ?? [],
@@ -460,7 +466,19 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
             <FieldError message={errors.addressCity?.message} />
           </div>
           <div>
-            <TextInput id="editAddressCountry" type="text" placeholder="Pays" error={errors.addressCountry} {...register("addressCountry")} />
+            <Controller
+              name="addressCountry"
+              control={control}
+              render={({ field }) => (
+                <CountrySelect
+                  id="editAddressCountry"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  error={Boolean(errors.addressCountry)}
+                  variant="default"
+                />
+              )}
+            />
             <FieldError message={errors.addressCountry?.message} />
           </div>
         </div>

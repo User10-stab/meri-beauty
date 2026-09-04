@@ -8,6 +8,7 @@ import { updateNewsletterPreference, updateMyVatNumber, updateMyAddress, updateM
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { createAppointmentReview } from "@/actions/review/review-actions";
 import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/review-eligibility";
+import { CountrySelect } from "@/components/shared/CountrySelect";
 
 function Field({ label, error, children }) {
   return (

@@ -94,15 +94,24 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
       salon,
       existingAppointments,
     });
+    
+    // Filter past slots for today
     availability.reservationWindows = filterFutureReservationWindows(
       availability.reservationWindows,
       selectedDate
     );
+    
+    // Also filter the new allTimeSlots array
+    const { filterFutureTimeSlots } = await import("@/lib/slot-availability");
+    const allTimeSlots = availability.allTimeSlots
+      ? filterFutureTimeSlots(availability.allTimeSlots, selectedDate)
+      : [];
 
     return {
       success: true,
       data: {
         reservationWindows: availability.reservationWindows,
+        allTimeSlots, // New: complete timeline with available flags
         freeIntervals: availability.freeIntervals,
         occupiedIntervals: availability.occupiedIntervals,
         isWorkingDay: availability.isWorkingDay,

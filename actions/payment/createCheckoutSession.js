@@ -165,8 +165,8 @@ export async function createCheckoutSession(reservationData) {
     }
 
     // ── 2. Load and validate staff service ────────────────────────────────────
-    const staffService = await prisma.staffService.findUnique({
-      where: { id: staffServiceId },
+    const staffService = await prisma.staffService.findFirst({
+      where: { id: staffServiceId, isDeleted: false },
       include: {
         service: true,
         staff: {

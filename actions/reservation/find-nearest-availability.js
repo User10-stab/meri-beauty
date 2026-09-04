@@ -28,7 +28,7 @@ async function loadSchedulingContext(drafts, maxDaysToScan) {
   const [salon, staffServices] = await Promise.all([
     prisma.salon.findUnique({ where: { id: "main-salon" }, include: { closures: true, workingDays: true } }),
     prisma.staffService.findMany({
-      where: { id: { in: staffServiceIds } },
+      where: { id: { in: staffServiceIds }, isDeleted: false },
       include: {
         staff: {
           include: {

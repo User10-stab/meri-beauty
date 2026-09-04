@@ -38,9 +38,9 @@ export async function assignServiceToMe(serviceId) {
       return { success: false, message: "Profil staff introuvable." };
     }
 
-    // Verify the service exists
-    const service = await prisma.service.findUnique({
-      where: { id: serviceId },
+    // Verify the service exists and is not soft-deleted
+    const service = await prisma.service.findFirst({
+      where: { id: serviceId, isDeleted: false },
       select: { id: true, name: true },
     });
 
@@ -48,9 +48,9 @@ export async function assignServiceToMe(serviceId) {
       return { success: false, message: "Service introuvable." };
     }
 
-    // Check if the staff member is already assigned to this service
+    // Check if the staff member is already assigned to this service (excluding soft-deleted)
     const existing = await prisma.staffService.findFirst({
-      where: { staffId: staff.id, serviceId },
+      where: { staffId: staff.id, serviceId, isDeleted: false },
     });
 
     if (existing) {
@@ -66,19 +66,33 @@ export async function assignServiceToMe(serviceId) {
         data: { isActive: true },
       });
     } else {
-      // Create a new assignment with default price/duration (to be configured later)
-      await prisma.staffService.create({
-        data: {
-          staffId: staff.id,
-          serviceId,
-          createdById: session.user.id,
-          price: 0,
-          duration: 0,
-          margin: null,
-          photo: "",
-          isActive: true,
-        },
+      // Check for a soft-deleted assignment that can be reactivated
+      // (the unique constraint on staffId+serviceId prevents creating a duplicate)
+      const softDeleted = await prisma.staffService.findFirst({
+        where: { staffId: staff.id, serviceId },
       });
+
+      if (softDeleted) {
+        // Re-activate the soft-deleted assignment
+        await prisma.staffService.update({
+          where: { id: softDeleted.id },
+          data: { isActive: true, isDeleted: false, deletedAt: null },
+        });
+      } else {
+        // Create a new assignment with default price/duration (to be configured later)
+        await prisma.staffService.create({
+          data: {
+            staffId: staff.id,
+            serviceId,
+            createdById: session.user.id,
+            price: 0,
+            duration: 0,
+            margin: null,
+            photo: "",
+            isActive: true,
+          },
+        });
+      }
     }
 
     revalidatePath("/dashboard/services");

@@ -1,0 +1,1 @@
+INSERT INTO _prisma_migrations (id, checksum, finished_at, migration_name, rolled_back_at, started_at) VALUES (gen_random_uuid(), 'dummy', NOW(), '20260904120000_add_invoice_contract_id_and_due_date', NULL, NOW());

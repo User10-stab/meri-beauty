@@ -129,9 +129,9 @@ export async function createService(input) {
   }
 
   try {
-    // Verify the category exists
-    const category = await prisma.category.findUnique({
-      where: { id: categoryId },
+    // Verify the category exists and is not soft-deleted
+    const category = await prisma.category.findFirst({
+      where: { id: categoryId, isDeleted: false },
       select: { id: true, name: true },
     });
 
@@ -150,10 +150,11 @@ export async function createService(input) {
       return { success: false, message: "Non authentifié" };
     }
 
-    // Check if a service with the same name already exists in this category (case-insensitive)
+    // Check if a service with the same name already exists in this category (case-insensitive), excluding soft-deleted
     const existingService = await prisma.service.findFirst({
       where: {
         categoryId,
+        isDeleted: false,
         name: {
           equals: name,
           mode: "insensitive",
@@ -641,17 +642,31 @@ export async function deleteService(id) {
 
     await prisma.$transaction(async (tx) => {
       if (isStaffDelete) {
-        // Staff: only remove their own StaffService relationship
-        await tx.staffService.deleteMany({ 
+        // Staff: only soft-delete their own StaffService relationship
+        await tx.staffService.updateMany({ 
           where: { 
             serviceId: id,
-            staffId: staffId
-          } 
+            staffId: staffId,
+            isDeleted: false
+          },
+          data: {
+            isDeleted: true,
+            deletedAt: new Date(),
+          }
         });
       } else {
-        // Admin/Owner: delete all staff-service associations and the service itself
-        await tx.staffService.deleteMany({ where: { serviceId: id } });
-        await tx.service.delete({ where: { id } });
+        // Admin/Owner: soft-delete all staff-service associations and the service itself
+        await tx.staffService.updateMany({ 
+          where: { serviceId: id, isDeleted: false },
+          data: {
+            isDeleted: true,
+            deletedAt: new Date(),
+          }
+        });
+        await tx.service.update({ 
+          where: { id }, 
+          data: { isDeleted: true, deletedAt: new Date() } 
+        });
       }
     });
 
@@ -699,16 +714,18 @@ export async function getCategories() {
     }
 
     const categories = await prisma.category.findMany({
+      where: { isDeleted: false },
       orderBy: { name: "asc" },
       include: {
         services: {
+          where: { isDeleted: false },
           select: {
             id: true,
             name: true,
-            _count: { select: { staffServices: { where: { isActive: true } } } },
+            _count: { select: { staffServices: { where: { isActive: true, isDeleted: false } } } },
             staffServices: currentStaffId
               ? {
-                  where: { staffId: currentStaffId, isActive: true },
+                  where: { staffId: currentStaffId, isActive: true, isDeleted: false },
                   select: { id: true },
                 }
               : false,
@@ -778,9 +795,10 @@ export async function createCategory(input) {
   const { name, description } = parsed.data;
 
   try {
-    // Check if a category with the same name already exists (case-insensitive)
+    // Check if a category with the same name already exists (case-insensitive), excluding soft-deleted
     const existingCategory = await prisma.category.findFirst({
       where: {
+        isDeleted: false,
         name: {
           equals: name,
           mode: 'insensitive',
@@ -917,20 +935,33 @@ export async function deleteCategory(id) {
   }
 
   try {
+    const now = new Date();
     await prisma.$transaction(async (tx) => {
-      // Find all services in this category and delete their StaffService records
+      // Find all services in this category (including already soft-deleted ones to avoid double-processing)
       const services = await tx.service.findMany({
-        where: { categoryId: id },
+        where: { categoryId: id, isDeleted: false },
         select: { id: true },
       });
       const serviceIds = services.map((s) => s.id);
 
+      // Soft-delete all StaffService records for these services
       if (serviceIds.length > 0) {
-        await tx.staffService.deleteMany({ where: { serviceId: { in: serviceIds } } });
-        await tx.service.deleteMany({ where: { categoryId: id } });
+        await tx.staffService.updateMany({ 
+          where: { serviceId: { in: serviceIds }, isDeleted: false },
+          data: { isDeleted: true, deletedAt: now }
+        });
+        // Soft-delete all services in this category
+        await tx.service.updateMany({ 
+          where: { categoryId: id, isDeleted: false },
+          data: { isDeleted: true, deletedAt: now }
+        });
       }
 
-      await tx.category.delete({ where: { id } });
+      // Soft-delete the category itself
+      await tx.category.update({ 
+        where: { id }, 
+        data: { isDeleted: true, deletedAt: now } 
+      });
     });
 
     revalidatePath("/dashboard/services");

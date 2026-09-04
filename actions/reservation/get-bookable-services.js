@@ -23,13 +23,14 @@ export async function getBookableServices(categoryId) {
     }
 
     const services = await prisma.service.findMany({
-      where: { categoryId },
+      where: { categoryId, isDeleted: false },
       orderBy: { name: "asc" },
       include: {
         category: { select: { id: true, name: true } },
         staffServices: {
           where: {
             isActive: true,
+            isDeleted: false,
             staff: {
               isActive: true,
               isDeleted: false,

@@ -53,15 +53,20 @@ export async function getServices() {
 
       // Filter services that have at least one StaffService record for this staff member
       whereClause = {
+        isDeleted: false,
         staffServices: {
           some: {
             staffId: staffId,
             isActive: true,
+            isDeleted: false,
           },
         },
       };
     }
-    // For OWNER/ADMIN, no filtering needed - they see all services
+    // For OWNER/ADMIN, only exclude soft-deleted services
+    else {
+      whereClause = { isDeleted: false };
+    }
 
     const services = await prisma.service.findMany({
       where: whereClause,
@@ -71,6 +76,7 @@ export async function getServices() {
         staffServices: {
           where: {
             isActive: true,
+            isDeleted: false,
             staff: {
               isDeleted: false,
               user: { isDeleted: false, isActive: true },
@@ -162,6 +168,7 @@ export async function getServices() {
 export async function getPublicServices() {
   try {
     const services = await prisma.service.findMany({
+      where: { isDeleted: false },
       take: 7,
       orderBy: [{ category: { name: "asc" } }, { name: "asc" }],
       select: {

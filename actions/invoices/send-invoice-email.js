@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { sendEmail } from "@/lib/email";
+import { invoiceEmail } from "@/lib/email-templates";
 import { renderInvoicePdf } from "@/lib/pdf/render";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { isBelgianVatNumber } from "@/lib/billit";
@@ -63,17 +64,29 @@ export async function sendInvoiceByEmail(invoiceId) {
 
     const pdf = await renderInvoicePdf(invoice);
 
+    const { subject, text, html } = invoiceEmail({
+      customerName: invoice.customerName,
+      invoiceNumber: invoice.number,
+      issuedAt: invoice.issuedAt,
+      dueDate: invoice.dueDate ?? null,
+      lines: invoice.lines.map((l) => ({
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: Number(l.unitPrice),
+        lineTotal: Number(l.lineTotal),
+      })),
+      subtotalExclVat: Number(invoice.subtotalExclVat),
+      vatRate: Number(invoice.vatRate),
+      vatAmount: Number(invoice.vatAmount),
+      totalInclVat: Number(invoice.totalInclVat),
+      sellerName: invoice.sellerName || "Meri Beauty",
+    });
+
     const result = await sendEmail({
       to: recipient,
-      subject: `Votre facture ${invoice.number} — Meri Beauty`,
-      text:
-        `Bonjour ${invoice.customerName},\n\n` +
-        `Vous trouverez ci-joint votre facture ${invoice.number}.\n\n` +
-        `L'équipe Meri Beauty`,
-      html:
-        `<p>Bonjour ${invoice.customerName},</p>` +
-        `<p>Vous trouverez ci-joint votre facture <strong>${invoice.number}</strong>.</p>` +
-        `<p>L'équipe Meri Beauty</p>`,
+      subject,
+      text,
+      html,
       attachments: [{ filename: `facture-${invoice.number}.pdf`, content: pdf }],
     });
 

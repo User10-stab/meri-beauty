@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { sendEmail } from "@/lib/email";
+import { creditNoteEmail } from "@/lib/email-templates";
 import { renderCreditNotePdf } from "@/lib/pdf/render";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { isBelgianVatNumber } from "@/lib/billit";
@@ -55,17 +56,20 @@ export async function sendCreditNoteByEmail(creditNoteId) {
 
     const pdf = await renderCreditNotePdf(creditNote, invoice);
 
+    const { subject, text, html } = creditNoteEmail({
+      customerName: invoice.customerName,
+      creditNoteNumber: creditNote.number,
+      invoiceNumber: invoice.number,
+      issuedAt: creditNote.issuedAt ?? new Date(),
+      totalInclVat: Number(creditNote.totalInclVat),
+      sellerName: invoice.sellerName || "Meri Beauty",
+    });
+
     const result = await sendEmail({
       to: recipient,
-      subject: `Votre note de crédit ${creditNote.number} — Meri Beauty`,
-      text:
-        `Bonjour ${invoice.customerName},\n\n` +
-        `Vous trouverez ci-joint votre note de crédit ${creditNote.number}, relative à la facture ${invoice.number}.\n\n` +
-        `L'équipe Meri Beauty`,
-      html:
-        `<p>Bonjour ${invoice.customerName},</p>` +
-        `<p>Vous trouverez ci-joint votre note de crédit <strong>${creditNote.number}</strong>, relative à la facture ${invoice.number}.</p>` +
-        `<p>L'équipe Meri Beauty</p>`,
+      subject,
+      text,
+      html,
       attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: pdf }],
     });
 

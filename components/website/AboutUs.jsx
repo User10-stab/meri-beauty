@@ -151,7 +151,7 @@ export default function AboutUs() {
           </p>
 
           <div className="mt-6 sm:mt-8">
-            <a href="/services" className="group inline-flex items-center gap-2.5 rounded-full border border-gold/40 px-5 sm:px-6 py-2.5 sm:py-3 text-[12px] sm:text-[13px] font-semibold text-gold transition-all duration-300 hover:bg-gold hover:text-white hover:shadow-lg hover:shadow-gold/20">
+            <a href="/reservation" className="group inline-flex items-center gap-2.5 rounded-full border border-gold/40 px-5 sm:px-6 py-2.5 sm:py-3 text-[12px] sm:text-[13px] font-semibold text-gold transition-all duration-300 hover:bg-gold hover:text-white hover:shadow-lg hover:shadow-gold/20">
               {t("aboutCta")}
               <ArrowIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5 transition-transform duration-300 group-hover:translate-x-1" />
             </a>

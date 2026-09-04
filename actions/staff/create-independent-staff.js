@@ -91,6 +91,11 @@ export async function createIndependentStaff(input) {
         fullName: fe.fullName?.[0] ?? null,
         email: fe.email?.[0] ?? null,
         phone: fe.phone?.[0] ?? null,
+        addressLine1: fe.addressLine1?.[0] ?? null,
+        addressLine2: fe.addressLine2?.[0] ?? null,
+        addressCity: fe.addressCity?.[0] ?? null,
+        addressPostalCode: fe.addressPostalCode?.[0] ?? null,
+        addressCountry: fe.addressCountry?.[0] ?? null,
         photo: fe.photo?.[0] ?? null,
         bio: fe.bio?.[0] ?? null,
         languages: fe.languages?.[0] ?? null,
@@ -109,6 +114,11 @@ export async function createIndependentStaff(input) {
     fullName,
     email,
     phone,
+    addressLine1,
+    addressLine2,
+    addressCity,
+    addressPostalCode,
+    addressCountry,
     photo,
     bio,
     languages,
@@ -125,7 +135,7 @@ export async function createIndependentStaff(input) {
   const ids = serviceIds ?? [];
   if (ids.length > 0) {
     const found = await prisma.service.findMany({
-      where: { id: { in: ids } },
+      where: { id: { in: ids }, isDeleted: false },
       select: { id: true },
     });
     if (found.length !== ids.length) {
@@ -172,6 +182,11 @@ export async function createIndependentStaff(input) {
           fullName,
           email,
           phone,
+          addressLine1,
+          addressLine2: addressLine2 || null,
+          addressCity,
+          addressPostalCode,
+          addressCountry,
           password: hashedPassword,
           role: "STAFF",
           emailVerified: false,

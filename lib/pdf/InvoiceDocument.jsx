@@ -47,14 +47,14 @@ function paymentLine(payment) {
 
 function dueDateLine(invoice, payment) {
   // For staff contract invoices (and any invoice with a dueDate), show the
-  // échéance derived from contract start +30d. Once paid, paymentLine takes
+  // échéance derived from contract start +7d. Once paid, paymentLine takes
   // precedence so the document doesn't claim both \"payée\" and \"échéance\".
   if (payment?.paidAt) return null;
   if (!invoice.dueDate) return null;
   return `Échéance : ${formatDate(invoice.dueDate)}`;
 }
 
-export function InvoiceDocument({ invoice, contact = null }) {
+export function InvoiceDocument({ invoice, contact = null, rental = null }) {
   const payment = invoice.payment ?? null;
 
   return (
@@ -76,6 +76,7 @@ export function InvoiceDocument({ invoice, contact = null }) {
             name={invoice.sellerName}
             address={invoice.sellerAddress}
             vatNumber={invoice.sellerVatNumber}
+            registrationNo={invoice.sellerRegistrationNo}
             rib={contact?.rib}
             contact={contact}
           />
@@ -92,6 +93,8 @@ export function InvoiceDocument({ invoice, contact = null }) {
           <TermsBlock
             items={[
               { label: "Règlement", value: paymentLine(payment) ?? dueDateLine(invoice, payment) ?? "Paiement sécurisé — dû à réception de la facture" },
+              rental?.reference ? { label: "Référence contrat", value: rental.reference } : null,
+              rental?.period ? { label: "Période de location", value: rental.period } : null,
               { label: "Devise", value: "Euro (EUR)" },
               contact?.rib ? { label: "Compte bancaire (RIB)", value: contact.rib } : null,
               contact?.email ? { label: "Questions sur cette facture", value: contact.email } : null,
@@ -139,6 +142,7 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
             name={invoice.sellerName}
             address={invoice.sellerAddress}
             vatNumber={invoice.sellerVatNumber}
+            registrationNo={invoice.sellerRegistrationNo}
             rib={contact?.rib}
             contact={contact}
           />

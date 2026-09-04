@@ -33,16 +33,18 @@ export async function getCategories() {
     }
 
     const categories = await prisma.category.findMany({
+      where: { isDeleted: false },
       orderBy: { name: "asc" },
       include: {
         services: {
+          where: { isDeleted: false },
           select: {
             id: true,
             name: true,
-            _count: { select: { staffServices: { where: { isActive: true } } } },
+            _count: { select: { staffServices: { where: { isActive: true, isDeleted: false } } } },
             staffServices: currentStaffId
               ? {
-                  where: { staffId: currentStaffId, isActive: true },
+                  where: { staffId: currentStaffId, isActive: true, isDeleted: false },
                   select: { id: true },
                 }
               : false,

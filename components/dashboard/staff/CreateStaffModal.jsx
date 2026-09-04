@@ -20,6 +20,7 @@ import {
   Briefcase,
   Layers,
   Hash,
+  MapPin,
 } from "lucide-react";
 import { createIndependentStaff } from "@/actions/staff/create-independent-staff";
 import { createStaffFromRental } from "@/actions/staff/create-staff-from-rental";
@@ -247,6 +248,11 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       fullName:          initialValues.fullName ?? "",
       email:             initialValues.email ?? "",
       phone:             initialValues.phone ?? "",
+      addressLine1:      initialValues.addressLine1 ?? "",
+      addressLine2:      initialValues.addressLine2 ?? "",
+      addressCity:       initialValues.addressCity ?? "",
+      addressPostalCode: initialValues.addressPostalCode ?? "",
+      addressCountry:    initialValues.addressCountry ?? "BE",
       photo:             null,
       bio:               "",
       languages:         [],
@@ -402,6 +408,67 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                   {...register("phone")}
                 />
                 <FieldError message={errors.phone?.message} />
+              </div>
+            </div>
+
+            {/* Address */}
+            <div className="mt-4">
+              <Label htmlFor="addressLine1" icon={MapPin} required>
+                Adresse professionnelle
+              </Label>
+              <TextInput
+                id="addressLine1"
+                type="text"
+                placeholder="Numéro et rue"
+                error={errors.addressLine1}
+                {...register("addressLine1")}
+              />
+              <FieldError message={errors.addressLine1?.message} />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-4">
+              <div>
+                <TextInput
+                  id="addressLine2"
+                  type="text"
+                  placeholder="Complément d'adresse (optionnel)"
+                  error={errors.addressLine2}
+                  {...register("addressLine2")}
+                />
+                <FieldError message={errors.addressLine2?.message} />
+              </div>
+              <div>
+                <TextInput
+                  id="addressPostalCode"
+                  type="text"
+                  placeholder="Code postal"
+                  error={errors.addressPostalCode}
+                  {...register("addressPostalCode")}
+                />
+                <FieldError message={errors.addressPostalCode?.message} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-4">
+              <div>
+                <TextInput
+                  id="addressCity"
+                  type="text"
+                  placeholder="Ville"
+                  error={errors.addressCity}
+                  {...register("addressCity")}
+                />
+                <FieldError message={errors.addressCity?.message} />
+              </div>
+              <div>
+                <TextInput
+                  id="addressCountry"
+                  type="text"
+                  placeholder="Pays"
+                  error={errors.addressCountry}
+                  {...register("addressCountry")}
+                />
+                <FieldError message={errors.addressCountry?.message} />
               </div>
             </div>
           </div>

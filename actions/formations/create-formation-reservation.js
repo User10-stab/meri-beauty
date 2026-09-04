@@ -14,7 +14,7 @@ import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
-import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
 import {
   buildFormationReservationCreatedNotification,
   createNotificationsBulk,
@@ -231,13 +231,19 @@ export async function createFormationReservation(data) {
       if (!authenticatedUser) {
         return { success: false, message: "Votre session n'est plus valide. Veuillez vous reconnecter." };
       }
-      const storedPhone = authenticatedUser.phone?.startsWith("temp-") ? "" : (authenticatedUser.phone ?? "");
-      customerInfo = {
-        ...customerInfo,
-        fullName: authenticatedUser.fullName,
-        email: authenticatedUser.email,
-        phone: storedPhone || customerInfo.phone,
-      };
+      // Only apply the session override for CUSTOMER accounts. Admin/Owner/Staff
+      // users can create reservations on behalf of a client — in that case the
+      // form's customerInfo holds the *client's* data and must not be replaced
+      // with the logged-in staff member's own name/email.
+      if (!isAdminRole(authenticatedUser.role) && authenticatedUser.role !== "STAFF") {
+        const storedPhone = authenticatedUser.phone?.startsWith("temp-") ? "" : (authenticatedUser.phone ?? "");
+        customerInfo = {
+          ...customerInfo,
+          fullName: authenticatedUser.fullName,
+          email: authenticatedUser.email,
+          phone: storedPhone || customerInfo.phone,
+        };
+      }
     }
 
     const customerValidation = validateCustomerIdentity(customerInfo, { requirePhone: true });
@@ -340,7 +346,12 @@ export async function createFormationReservation(data) {
       }
     }
 
-    const needsPhoneBackfill = Boolean(authenticatedUser)
+    // Phone backfill only applies when a CUSTOMER is booking for themselves —
+    // when an admin/staff creates a reservation on behalf of a client,
+    // authenticatedUser is the admin and customerInfo holds the *client's*
+    // data; we must not write the client's phone onto the admin's account.
+    const isCustomerSelf = Boolean(authenticatedUser) && !isAdminRole(authenticatedUser.role) && authenticatedUser.role !== "STAFF";
+    const needsPhoneBackfill = isCustomerSelf
       && (!authenticatedUser.phone || authenticatedUser.phone.startsWith("temp-"));
     if (needsPhoneBackfill) {
       const phoneExists = await prisma.user.findFirst({

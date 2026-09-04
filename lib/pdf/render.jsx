@@ -1,5 +1,6 @@
 import { renderToBuffer } from "@react-pdf/renderer";
 import { prisma } from "@/lib/prisma";
+import { buildRentalPeriodLabel, shortContractRef } from "@/lib/invoicing";
 import { InvoiceDocument, CreditNoteDocument } from "./InvoiceDocument";
 import { TicketDocument } from "./TicketDocument";
 import { getSellerContact } from "./seller-contact";
@@ -22,6 +23,28 @@ async function resolvePayment(invoice) {
       where: { id: invoice.paymentId },
       select: { paidAt: true, transactionReference: true },
     });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rental context for staff contract invoices (reference + period), shown in
+ * the existing TermsBlock section. Resolved live from the linked contract —
+ * a failure degrades to "rows not shown", never to a failed render.
+ */
+async function resolveRental(invoice) {
+  if (!invoice.contractId) return null;
+  try {
+    const contract = await prisma.contract.findUnique({
+      where: { id: invoice.contractId },
+      select: { startDate: true, endDate: true },
+    });
+    if (!contract?.startDate) return null;
+    return {
+      reference: shortContractRef(invoice.contractId),
+      period: buildRentalPeriodLabel({ startDate: contract.startDate, endDate: contract.endDate ?? null }),
+    };
   } catch {
     return null;
   }
@@ -50,9 +73,13 @@ function serializeInvoice(invoice) {
 }
 
 export async function renderInvoicePdf(invoice) {
-  const [contact, payment] = await Promise.all([getSellerContact(), resolvePayment(invoice)]);
+  const [contact, payment, rental] = await Promise.all([
+    getSellerContact(),
+    resolvePayment(invoice),
+    resolveRental(invoice),
+  ]);
   return renderToBuffer(
-    <InvoiceDocument invoice={{ ...serializeInvoice(invoice), payment }} contact={contact} />
+    <InvoiceDocument invoice={{ ...serializeInvoice(invoice), payment }} contact={contact} rental={rental} />
   );
 }
 

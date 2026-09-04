@@ -103,6 +103,7 @@ enum InvoiceSource {
   APPOINTMENT
   WORKSHOP
   FORMATION
+  STAFF_CONTRACT
 }
 
 enum PromoCodeType {
@@ -878,7 +879,12 @@ model Category {
   name        String  @unique
   description String?
 
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
   services Service[]
+
+  @@index([isDeleted])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1369,10 +1375,15 @@ model Service {
   name        String
   description String?
 
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   staffServices StaffService[]
+
+  @@index([categoryId, isDeleted])
 }
 
 // STAFF
@@ -1468,12 +1479,17 @@ model StaffService {
   // list restricts booking availability (see lib/slot-availability.js).
   availableDays WeekDay[] @default([MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY])
 
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   appointments Appointment[]
 
   @@unique([staffId, serviceId])
+  @@index([serviceId, isDeleted])
+  @@index([staffId, isDeleted])
 }
 
 // APPOINTMENT
@@ -1782,14 +1798,17 @@ model Invoice {
   number String        @unique // "2026-000001" — year + gapless in-year sequence
   source InvoiceSource
 
-  paymentId String  @unique
-  payment   Payment @relation(fields: [paymentId], references: [id])
+  paymentId   String?  @unique
+  payment     Payment? @relation(fields: [paymentId], references: [id])
+  contractId  String?  @unique
+  dueDate     DateTime?
 
   issuedAt DateTime @default(now())
 
   sellerName      String
   sellerAddress   String?
   sellerVatNumber String?
+  sellerRegistrationNo String? // Seller BCE/KBO snapshot (Salon.companyRegistrationNo at issue time)
 
   customerName      String
   customerEmail     String

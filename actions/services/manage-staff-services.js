@@ -38,8 +38,8 @@ export async function getServiceStaffAssignments(serviceId) {
 
   try {
     const [service, staffOptions, assignments] = await Promise.all([
-      prisma.service.findUnique({
-        where: { id: serviceId },
+      prisma.service.findFirst({
+        where: { id: serviceId, isDeleted: false },
         select: {
           id: true,
           name: true,
@@ -56,7 +56,7 @@ export async function getServiceStaffAssignments(serviceId) {
         },
       }),
       prisma.staffService.findMany({
-        where: { serviceId },
+        where: { serviceId, isDeleted: false },
         orderBy: [{ staff: { user: { fullName: "asc" } } }],
         include: {
           staff: {
@@ -131,7 +131,7 @@ export async function assignStaffService(input) {
   try {
     const [staff, service] = await Promise.all([
       prisma.staff.findUnique({ where: { id: staffId }, select: { id: true } }),
-      prisma.service.findUnique({ where: { id: serviceId }, select: { id: true } }),
+      prisma.service.findFirst({ where: { id: serviceId, isDeleted: false }, select: { id: true } }),
     ]);
 
     if (!staff || !service) {
@@ -257,7 +257,10 @@ export async function deleteStaffService(id) {
   }
 
   try {
-    await prisma.staffService.delete({ where: { id } });
+    await prisma.staffService.update({ 
+      where: { id, isDeleted: false },
+      data: { isDeleted: true, deletedAt: new Date() }
+    });
     revalidatePath(REVALIDATE_PATH);
 
     return {

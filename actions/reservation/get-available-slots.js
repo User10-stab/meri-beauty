@@ -28,8 +28,8 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
       return { success: false, message: "Paramètres manquants" };
     }
 
-    const staffService = await prisma.staffService.findUnique({
-      where: { id: staffServiceId },
+    const staffService = await prisma.staffService.findFirst({
+      where: { id: staffServiceId, isDeleted: false },
       include: {
         staff: {
           include: {
@@ -137,8 +137,8 @@ export async function getMonthAvailability(staffServiceId, monthDate, excludeApp
       return { success: false, message: "Paramètres manquants" };
     }
 
-    const staffService = await prisma.staffService.findUnique({
-      where: { id: staffServiceId },
+    const staffService = await prisma.staffService.findFirst({
+      where: { id: staffServiceId, isDeleted: false },
       include: {
         staff: {
           include: {

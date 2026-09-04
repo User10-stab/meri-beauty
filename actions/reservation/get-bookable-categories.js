@@ -18,13 +18,16 @@ import { isStaffServiceBookable } from "@/lib/staff-availability";
 export async function getBookableCategories() {
   try {
     const categories = await prisma.category.findMany({
+      where: { isDeleted: false },
       orderBy: { name: "asc" },
       include: {
         services: {
+          where: { isDeleted: false },
           include: {
             staffServices: {
               where: {
                 isActive: true,
+                isDeleted: false,
                 staff: {
                   isActive: true,
                   isDeleted: false,

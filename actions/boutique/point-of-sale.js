@@ -16,7 +16,6 @@ import { sendEmail } from "@/lib/email";
 import { captureError } from "@/lib/monitoring";
 import {
   calculateVatTotals,
-  applyVatRate,
   repriceTtcCataloguePrice,
   resolveGoodsVatPolicy,
   hasInvoiceableVatIdentity,
@@ -336,6 +335,12 @@ export async function completePointOfSaleSale(input) {
   }
 
   const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived } = parsed.data;
+  if (items.some((item) => item.type === "SERVICE")) {
+    return {
+      success: false,
+      message: "Les prestations doivent être encaissées depuis Pointage & encaissement afin de rester liées au catalogue et au personnel.",
+    };
+  }
   if (!attemptKey) {
     return { success: false, message: "Identifiant de tentative de caisse manquant. Rechargez la page." };
   }
@@ -349,7 +354,6 @@ export async function completePointOfSaleSale(input) {
     if (item.type !== "PRODUCT") continue;
     groupedItems.set(item.variantId, (groupedItems.get(item.variantId) ?? 0) + item.quantity);
   }
-  const serviceLines = items.filter((item) => item.type === "SERVICE");
   const placeholderPassword = await bcrypt.hash(randomBytes(18).toString("base64url"), BCRYPT_SALT_ROUNDS);
 
   try {
@@ -469,13 +473,8 @@ export async function completePointOfSaleSale(input) {
         ...item,
         taxUnitPrice: repriceTtcCataloguePrice(item.price, posVatPolicy.vatRate),
       }));
-      const pricedServiceLines = serviceLines.map((item) => ({
-        ...item,
-        taxUnitPrice: applyVatRate(item.unitPrice, posVatPolicy.vatRate),
-      }));
       const productSubtotal = pricedSaleItems.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
-      const serviceSubtotal = pricedServiceLines.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
-      const subtotal = productSubtotal + serviceSubtotal;
+      const subtotal = productSubtotal;
       if (method === "CASH" && cashReceived < subtotal) {
         throw new Error("POS_CASH_INSUFFICIENT");
       }
@@ -507,8 +506,7 @@ export async function completePointOfSaleSale(input) {
             ? "Vente directe en magasin — client de passage"
             : "Vente directe en magasin",
           items: {
-            create: [
-              ...pricedSaleItems.map((item) => ({
+            create: pricedSaleItems.map((item) => ({
                 variantId: item.id,
                 productName: item.product.name,
                 variantName: item.name,
@@ -516,12 +514,6 @@ export async function completePointOfSaleSale(input) {
                 unitPrice: item.taxUnitPrice,
                 quantity: item.quantity,
               })),
-              ...pricedServiceLines.map((item) => ({
-                productName: item.description,
-                unitPrice: item.taxUnitPrice,
-                quantity: item.quantity,
-              })),
-            ],
           },
         },
         include: { items: true },
@@ -607,10 +599,7 @@ export async function completePointOfSaleSale(input) {
             source: "ORDER",
             totalInclVat: subtotal,
             customer: buildInvoiceCustomer(customer),
-            lines: [
-              ...pricedSaleItems.map((item) => ({ description: `${item.product.name} — ${item.name}`, quantity: item.quantity, unitPrice: item.taxUnitPrice })),
-              ...pricedServiceLines.map((item) => ({ description: item.description, quantity: item.quantity, unitPrice: item.taxUnitPrice })),
-            ],
+            lines: pricedSaleItems.map((item) => ({ description: `${item.product.name} — ${item.name}`, quantity: item.quantity, unitPrice: item.taxUnitPrice })),
             vatRate: posVatPolicy.vatRate,
             vatTreatment: posVatPolicy.vatTreatment,
             taxCountryCode: posVatPolicy.taxCountryCode,
@@ -775,6 +764,7 @@ export async function completePointOfSaleSale(input) {
     });
     const receiptPdf = await renderTicketPdf({
       orderNumber: result.order.orderNumber,
+      invoiceNumber: result.invoice?.number ?? null,
       issuedAt: result.order.createdAt,
       sellerName: salon?.legalName || "Meri Beauty",
       sellerAddress: formatSalonAddress(salon),

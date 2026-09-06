@@ -150,7 +150,7 @@ describe("the scanner is gated, honest and race-safe", () => {
   });
 
   test("the door sees the balance still owed, since activities sell on a 50% acompte", () => {
-    expect(action).toContain("balanceDue: Number(reservation.balanceDue)");
+    expect(action).toContain("balanceDue: Number(reservation.payment?.remainingAmount ?? reservation.balanceDue)");
     expect(source("components/dashboard/boutique/CounterPanel.jsx")).toContain(
       "Solde à encaisser"
     );
@@ -261,7 +261,7 @@ describe("the entry scanner lives at the till", () => {
   test("name search remains available for a customer without a phone or QR", () => {
     expect(panel).toContain("searchCounterTickets(value)");
     expect(panel).toContain("lookupActivityCheckInById({ kind: row.kind, id: row.id })");
-    expect(panel).toContain("Code ou nom du client");
+    expect(panel).toContain("Code, client ou service");
     expect(panel).toContain("[AFR]-?[0-9A-F]{10}");
   });
 

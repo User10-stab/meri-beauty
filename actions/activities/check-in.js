@@ -79,12 +79,14 @@ function isOutsideAppointmentScope(guard, reservation) {
 const RESERVATION_INCLUDE = {
   [CHECK_IN_KINDS.WORKSHOP]: {
     customer: { select: { fullName: true, email: true } },
+    payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true } },
     session: {
       select: { startDate: true, endDate: true, workshop: { select: { title: true, type: true } } },
     },
   },
   [CHECK_IN_KINDS.FORMATION]: {
     customer: { select: { fullName: true, email: true } },
+    payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true } },
     session: {
       select: { startDate: true, endDate: true, formation: { select: { title: true, type: true } } },
     },
@@ -93,6 +95,7 @@ const RESERVATION_INCLUDE = {
     user: { select: { fullName: true, email: true } },
     staffService: {
       select: {
+        price: true,
         service: { select: { name: true } },
         staff: { select: { user: { select: { fullName: true } } } },
       },
@@ -139,8 +142,9 @@ function presentAppointment(appointment) {
     seatsCount: 1,
     checkedInSeats: alreadyIn ? 1 : 0,
     remainingSeats: alreadyIn ? 0 : 1,
-    balanceDue: Number(appointment.payment?.remainingAmount ?? 0),
-    totalPrice: Number(appointment.payment?.totalAmount ?? 0),
+    balanceDue: Number(appointment.payment?.remainingAmount ?? appointment.staffService.price ?? 0),
+    totalPrice: Number(appointment.payment?.totalAmount ?? appointment.staffService.price ?? 0),
+    paidAmount: Number(appointment.payment?.paidAmount ?? 0),
     admissible: blockedReason === null,
     blockedReason,
   };
@@ -183,8 +187,9 @@ function presentReservation(reservation, kind) {
     // The single most important number on this screen: ateliers et
     // formations are sold on a 50% acompte, so a perfectly valid ticket can
     // still owe half the price at the door.
-    balanceDue: Number(reservation.balanceDue),
-    totalPrice: Number(reservation.totalPrice),
+    balanceDue: Number(reservation.payment?.remainingAmount ?? reservation.balanceDue),
+    totalPrice: Number(reservation.payment?.totalAmount ?? reservation.totalPrice),
+    paidAmount: Number(reservation.payment?.paidAmount ?? (Number(reservation.totalPrice) - Number(reservation.balanceDue))),
     admissible: blockedReason === null,
     blockedReason,
   };

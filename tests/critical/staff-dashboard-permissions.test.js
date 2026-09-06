@@ -51,9 +51,32 @@ describe("granular staff dashboard permissions", () => {
     expect(read("actions/boutique/orders.js")).toContain("STAFF_PERMISSIONS.ORDERS");
     expect(read("actions/boutique/returns.js")).toContain("STAFF_PERMISSIONS.RETURNS");
     expect(read("actions/boutique/stock.js")).toContain("STAFF_PERMISSIONS.BOUTIQUE_STOCK");
+    const stock = read("actions/boutique/stock.js");
+    const movement = stock.slice(stock.indexOf("export async function recordStockMovement"), stock.indexOf("export async function recordStockCount"));
+    const count = stock.slice(stock.indexOf("export async function recordStockCount"), stock.indexOf("export async function getAllVariants"));
+    expect(movement).toContain("requireStockAccess()");
+    expect(count).toContain("requireStockAccess()");
     const dashboardStats = read("actions/dashboard/get-dashboard-stats.js");
     expect(dashboardStats).toContain("const canSeeOrders");
     expect(dashboardStats).toContain("isAdmin ? prisma.payment.findMany");
+  });
+
+  it("lets a cashier open a session without granting closing or reporting access", () => {
+    const cashSessions = read("actions/dashboard/cash-sessions.js");
+    const openingGuard = cashSessions.slice(
+      cashSessions.indexOf("async function requireCashSessionOpeningAccess()"),
+      cashSessions.indexOf("const SESSION_INCLUDE")
+    );
+    const openSession = cashSessions.slice(
+      cashSessions.indexOf("export async function openCashSession(openingFloat)"),
+      cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash)")
+    );
+    const closeSession = cashSessions.slice(cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash)"));
+
+    expect(openingGuard).toContain("STAFF_PERMISSIONS.POINT_OF_SALE");
+    expect(openingGuard).toContain("STAFF_PERMISSIONS.CASH_REGISTER");
+    expect(openSession).toContain("requireCashSessionOpeningAccess()");
+    expect(closeSession).toContain("requireCashSessionAccess()");
   });
 
   it("persists the permission list on Staff", () => {

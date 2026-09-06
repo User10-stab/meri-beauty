@@ -24,6 +24,7 @@ import { completeOrderPickup } from "@/actions/boutique/orders";
 import { completeAppointment } from "@/actions/appointment/manage-appointment";
 import { completeWorkshopReservation } from "@/actions/workshops/manage-reservation";
 import { completeFormationReservation } from "@/actions/formations/manage-reservation";
+import { CounterWalkInService } from "@/components/dashboard/boutique/CounterWalkInService";
 
 /**
  * One field for the counter: scan or type a code, or type a customer's name
@@ -149,6 +150,7 @@ function CameraScanner({ onDecoded, onClose }) {
 /** The "Pointer l'arrivée" half of the fiche. Absent entirely once nothing is left to check in. */
 function CheckInAction({ ticket, onChanged }) {
   const [admitting, setAdmitting] = useState(false);
+  const isAppointment = ticket.kind === "appointment";
 
   if (!ticket.admissible) {
     return (
@@ -171,7 +173,9 @@ function CheckInAction({ ticket, onChanged }) {
     }
     const seatsAdmitted = result.seatsAdmitted ?? ticket.remainingSeats;
     toast.success(
-      `${seatsAdmitted} place${seatsAdmitted > 1 ? "s" : ""} pointée${seatsAdmitted > 1 ? "s" : ""} — ${result.data.holderName}`
+      isAppointment
+        ? `Arrivée confirmée — ${result.data.holderName}`
+        : `${seatsAdmitted} place${seatsAdmitted > 1 ? "s" : ""} pointée${seatsAdmitted > 1 ? "s" : ""} — ${result.data.holderName}`
     );
     onChanged(result.data);
   }
@@ -179,12 +183,18 @@ function CheckInAction({ ticket, onChanged }) {
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-stroke px-4 py-3 dark:border-dark-3">
       <div className="flex items-center gap-2 text-sm text-dark dark:text-white">
+        {isAppointment ? (
+          <span>Arrivée à confirmer</span>
+        ) : (
+          <>
         <span>Places réservées</span>
-        <strong className="rounded-[7px] border border-stroke px-3 py-2 font-semibold dark:border-dark-3">
+        <strong className="font-semibold">
           {ticket.seatsCount}
         </strong>
         {ticket.checkedInSeats > 0 && (
           <span className="text-body-color dark:text-dark-6">({ticket.remainingSeats} restantes)</span>
+        )}
+          </>
         )}
       </div>
       <button
@@ -196,7 +206,7 @@ function CheckInAction({ ticket, onChanged }) {
         <CheckCircle2 className="h-4 w-4" strokeWidth={2} />
         {admitting
           ? "Pointage…"
-          : ticket.remainingSeats > 1
+          : !isAppointment && ticket.remainingSeats > 1
             ? `Pointer ${ticket.remainingSeats} places`
             : "Pointer l'arrivée"}
       </button>
@@ -204,28 +214,68 @@ function CheckInAction({ ticket, onChanged }) {
   );
 }
 
-/** The "Encaisser le solde" half — a separate, collapsible attestation, same pattern the old till list used. */
+/**
+ * The "Encaisser le solde" half — one screen, one deliberate act.
+ *
+ * This used to cost four clicks: a disclosure toggle to reveal the form, a
+ * second toggle nested inside it to reveal the price field, a checkbox to
+ * attest the money had arrived, and finally the confirm button. Two of those
+ * decided nothing — they only hid fields — and the cashier paid for them at
+ * every transaction with a customer standing there.
+ *
+ * What is left is the form itself and one button whose label *is* the
+ * attestation. The server contract is unchanged: `paymentConfirmed: true` is
+ * still sent and `completeAppointment` / `settleReservation` still refuse
+ * without it. Nothing can observe a cash handover or a terminal's APPROUVÉ
+ * screen, so a human still has to say the money arrived — but they say it
+ * once, by pressing a button that names the amount, instead of ticking a box
+ * they learn to click past on the way to the button.
+ *
+ * The price is always editable rather than hidden behind "Ajuster le prix".
+ * Changing it reveals the reason field and disables the button until a reason
+ * is given, so a price still cannot move unexplained — the same rule
+ * resolveCounterPriceAdjustment enforces server-side.
+ */
 function SettleAction({ ticket, onChanged }) {
-  const [open, setOpen] = useState(false);
-  const [method, setMethod] = useState("CARD");
-  const [received, setReceived] = useState(false);
-  const [terminalApproved, setTerminalApproved] = useState(false);
+  // "Carte — terminal" is the only card option: a card collection has to carry
+  // the terminal's receipt reference, or nothing ties the row to a real
+  // charge. Defaulting to it means the reference field is on screen from the
+  // start rather than appearing after a choice.
+  const [method, setMethod] = useState("EXTERNAL_TERMINAL");
+  // The terminal's "APPROUVÉ" screen used to need its own tick. Card is now
+      // the only card option and therefore the default, so that tick sat on
+      // every card transaction — and it asserts the same fact the confirm
+      // button already states ("j'ai bien reçu X"): for a card, being paid IS
+      // the terminal approving. One attestation, one piece of evidence. The
+      // receipt reference stays required, because that is the evidence.
   const [terminalReference, setTerminalReference] = useState("");
   const [saving, setSaving] = useState(false);
+  const [finalTotal, setFinalTotal] = useState(String(ticket.totalPrice ?? 0));
+  const [adjustmentReason, setAdjustmentReason] = useState("");
   const isExternalTerminal = method === "EXTERNAL_TERMINAL";
   const cashSessionOpen = useCashSessionOpen();
+  const parsedFinalTotal = Number(finalTotal);
+  const priceChanged = Number.isFinite(parsedFinalTotal) && parsedFinalTotal !== Number(ticket.totalPrice ?? 0);
+  const amountDue = Number.isFinite(parsedFinalTotal)
+    ? Math.max(0, Math.round((parsedFinalTotal - Number(ticket.paidAmount ?? 0)) * 100) / 100)
+    : Number(ticket.balanceDue ?? 0);
 
   function selectMethod(next) {
     setMethod(next);
-    if (next !== "EXTERNAL_TERMINAL") {
-      setTerminalApproved(false);
-      setTerminalReference("");
-    }
+    if (next !== "EXTERNAL_TERMINAL") setTerminalReference("");
   }
 
   async function handleSettle() {
-    if (isExternalTerminal && (!terminalApproved || !terminalReference.trim())) {
-      toast.error("Confirmez le paiement approuvé et indiquez la référence du ticket terminal.");
+    if (!Number.isFinite(parsedFinalTotal) || parsedFinalTotal < Number(ticket.paidAmount ?? 0)) {
+      toast.error("Le prix final doit être valide et ne peut pas être inférieur au montant déjà encaissé.");
+      return;
+    }
+    if (priceChanged && adjustmentReason.trim().length < 3) {
+      toast.error("Indiquez la raison de l'ajustement de prix.");
+      return;
+    }
+    if (amountDue > 0 && isExternalTerminal && !terminalReference.trim()) {
+      toast.error("Indiquez la référence du ticket du terminal.");
       return;
     }
     setSaving(true);
@@ -233,7 +283,10 @@ function SettleAction({ ticket, onChanged }) {
     const result = await settle(ticket.reservationId, {
       method,
       paymentConfirmed: true,
-      ...(isExternalTerminal ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
+      ...(priceChanged ? { finalTotal: parsedFinalTotal, adjustmentReason: adjustmentReason.trim() } : {}),
+      ...(isExternalTerminal
+        ? { terminalApproved: true, terminalReference: terminalReference.trim() }
+        : {}),
     });
     setSaving(false);
 
@@ -241,78 +294,98 @@ function SettleAction({ ticket, onChanged }) {
       toast.error(result.message);
       return;
     }
-    toast.success(`${formatPrice(ticket.balanceDue)} encaissés — ${ticket.holderName}`);
+    toast.success(
+      amountDue > 0
+        ? `${formatPrice(amountDue)} encaissés — ${ticket.holderName}`
+        : `Prix ajusté et dossier clôturé — ${ticket.holderName}`
+    );
     onChanged();
   }
 
   return (
     <div className="rounded-[10px] bg-orange-light-5 px-4 py-3 text-orange-dark dark:bg-orange-light/10 dark:text-orange-light">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm font-bold">Solde à encaisser : {formatPrice(ticket.balanceDue)}</p>
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          className="rounded-[7px] bg-white/70 px-3 py-1.5 text-xs font-bold underline underline-offset-2 hover:bg-white dark:bg-black/20 dark:hover:bg-black/30"
-        >
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <p className="text-sm font-bold">
           <Wallet className="mr-1.5 inline h-3.5 w-3.5" strokeWidth={2} />
-          {open ? "Annuler" : "Encaisser ce solde"}
-        </button>
+          {amountDue > 0 ? `Solde à encaisser : ${formatPrice(amountDue)}` : "Aucun solde restant"}
+        </p>
+        <p className="text-xs">Prix total : {formatPrice(ticket.totalPrice)} · Déjà encaissé : {formatPrice(ticket.paidAmount)}</p>
       </div>
 
-      {open && (
-        <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-orange-dark/15 pt-3">
+      <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-orange-dark/15 pt-3">
+          <div className="grid w-full gap-2 sm:grid-cols-[210px_1fr]">
+            <label className="flex items-center gap-2 text-sm">
+              <span className="whitespace-nowrap text-xs font-bold">Prix final</span>
+              <input
+                type="number"
+                min={Number(ticket.paidAmount ?? 0)}
+                max="100000"
+                step="0.01"
+                value={finalTotal}
+                onChange={(event) => setFinalTotal(event.target.value)}
+                aria-label="Prix final TTC"
+                className="w-full rounded-[7px] border border-orange-dark/20 bg-white px-3 py-2 text-sm text-dark outline-none focus:border-orange-dark dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              />
+            </label>
+            {priceChanged && (
+              <input
+                value={adjustmentReason}
+                onChange={(event) => setAdjustmentReason(event.target.value)}
+                maxLength={250}
+                placeholder="Raison obligatoire : geste commercial, correction de tarif…"
+                className="rounded-[7px] border border-orange-dark/20 bg-white px-3 py-2 text-sm text-dark outline-none focus:border-orange-dark dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+              />
+            )}
+          </div>
+          {amountDue > 0 && (
+            <>
           <div className="flex items-center gap-3">
-            {["CASH", "CARD", "EXTERNAL_TERMINAL"].map((value) => (
+            {["CASH", "EXTERNAL_TERMINAL"].map((value) => (
               <label key={value} className="flex items-center gap-1.5 text-sm">
                 <input type="radio" checked={method === value} onChange={() => selectMethod(value)} />
-                {value === "CASH" ? "Espèces" : value === "EXTERNAL_TERMINAL" ? "Terminal externe" : "Carte"}
+                {value === "CASH" ? "Espèces" : "Carte — terminal"}
               </label>
             ))}
           </div>
           {isExternalTerminal && (
-            <div className="flex w-full flex-wrap items-center gap-3 rounded-[10px] border border-orange-dark/15 bg-white/60 p-3 text-orange-dark dark:bg-black/10 dark:text-orange-light">
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  checked={terminalApproved}
-                  onChange={(event) => setTerminalApproved(event.target.checked)}
-                />
-                Terminal APPROUVÉ
-              </label>
-              <input
-                value={terminalReference}
-                onChange={(event) => setTerminalReference(event.target.value)}
-                maxLength={100}
-                placeholder="Référence du ticket terminal"
-                className="min-w-[220px] flex-1 rounded-[7px] border border-orange-dark/20 bg-white px-3 py-2 text-sm outline-none focus:border-orange-dark dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-              />
-            </div>
+            <input
+              value={terminalReference}
+              onChange={(event) => setTerminalReference(event.target.value)}
+              maxLength={100}
+              placeholder="Référence du ticket du terminal"
+              aria-label="Référence du ticket du terminal"
+              className="min-w-[220px] flex-1 rounded-[7px] border border-orange-dark/20 bg-white px-3 py-2 text-sm outline-none focus:border-orange-dark dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
           )}
           {method === "CASH" && !cashSessionOpen && (
             <p className="w-full rounded-[10px] border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
               Aucune session de caisse n&apos;est ouverte — cet encaissement en espèces n&apos;apparaîtra jamais dans le Livre de caisse.
             </p>
           )}
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={received} onChange={(event) => setReceived(event.target.checked)} />
-            J&apos;ai bien reçu {formatPrice(ticket.balanceDue)}
-          </label>
+            </>
+          )}
+          {/* The button is the attestation. It names the amount, so pressing
+              it is a statement about money that arrived rather than a step on
+              the way to one. It stays disabled while a changed price has no
+              reason, so a price cannot move unexplained. */}
           <button
             type="button"
-            disabled={!received || saving || (isExternalTerminal && (!terminalApproved || !terminalReference.trim()))}
+            disabled={saving || (priceChanged && adjustmentReason.trim().length < 3) || (amountDue > 0 && isExternalTerminal && !terminalReference.trim())}
             onClick={handleSettle}
             className="ml-auto inline-flex items-center gap-2 rounded-[7px] bg-dark px-4 py-2 text-sm font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-dark"
           >
-            {saving ? "Encaissement…" : "Confirmer et facturer"}
+            {saving
+              ? "Traitement…"
+              : amountDue > 0
+                ? `J'ai bien reçu ${formatPrice(amountDue)} — encaisser et facturer`
+                : "Je confirme cet ajustement — clôturer"}
           </button>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
 
 function TicketFiche({ ticket, onChanged }) {
-  const owesMoney = ticket.balanceDue > 0;
   const wrongDay = !isToday(ticket.sessionStartDate);
 
   return (
@@ -346,9 +419,13 @@ function TicketFiche({ ticket, onChanged }) {
           <dd className="text-xs text-gray-500 dark:text-dark-6">{ticket.holderEmail}</dd>
         </div>
         <div>
-          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-dark-6">Places</dt>
+          <dt className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-dark-6">
+            {ticket.kind === "appointment" ? "Avec" : "Places"}
+          </dt>
           <dd className="mt-1 text-base font-bold text-dark dark:text-white">
-            {ticket.remainingSeats} restante{ticket.remainingSeats > 1 ? "s" : ""} sur {ticket.seatsCount}
+            {ticket.kind === "appointment"
+              ? ticket.staffName ?? "—"
+              : `${ticket.remainingSeats} restante${ticket.remainingSeats > 1 ? "s" : ""} sur ${ticket.seatsCount}`}
           </dd>
         </div>
       </dl>
@@ -362,7 +439,7 @@ function TicketFiche({ ticket, onChanged }) {
 
       <div className="space-y-3 px-6 pb-6">
         <CheckInAction ticket={ticket} onChanged={onChanged} />
-        {owesMoney && <SettleAction ticket={ticket} onChanged={() => onChanged(null)} />}
+        {ticket.status === "CONFIRMED" && <SettleAction ticket={ticket} onChanged={() => onChanged(null)} />}
       </div>
     </div>
   );
@@ -371,7 +448,6 @@ function TicketFiche({ ticket, onChanged }) {
 /** A boutique pickup order — a different world entirely (Order, not a ticket), routed to the same scan box. */
 function PickupFiche({ order, onSettled }) {
   const [method, setMethod] = useState("CASH");
-  const [terminalApproved, setTerminalApproved] = useState(false);
   const [terminalReference, setTerminalReference] = useState("");
   const [saving, setSaving] = useState(false);
   const needsPayment = !order.hasPayment;
@@ -380,15 +456,12 @@ function PickupFiche({ order, onSettled }) {
 
   function selectMethod(next) {
     setMethod(next);
-    if (next !== "EXTERNAL_TERMINAL") {
-      setTerminalApproved(false);
-      setTerminalReference("");
-    }
+    if (next !== "EXTERNAL_TERMINAL") setTerminalReference("");
   }
 
   async function handleConfirm() {
-    if (needsPayment && isExternalTerminal && (!terminalApproved || !terminalReference.trim())) {
-      toast.error("Confirmez le paiement approuvé et indiquez la référence du ticket terminal.");
+    if (needsPayment && isExternalTerminal && !terminalReference.trim()) {
+      toast.error("Indiquez la référence du ticket du terminal.");
       return;
     }
     setSaving(true);
@@ -396,7 +469,7 @@ function PickupFiche({ order, onSettled }) {
       orderId: order.id,
       method: needsPayment ? method : undefined,
       ...(needsPayment && isExternalTerminal
-        ? { terminalApproved, terminalReference: terminalReference.trim() }
+        ? { terminalApproved: true, terminalReference: terminalReference.trim() }
         : {}),
     });
     setSaving(false);
@@ -433,28 +506,21 @@ function PickupFiche({ order, onSettled }) {
               À encaisser : {formatPrice(order.totalAmount)}
             </p>
             <div className="flex items-center gap-3">
-              {["CASH", "CARD", "EXTERNAL_TERMINAL"].map((value) => (
+              {["CASH", "EXTERNAL_TERMINAL"].map((value) => (
                 <label key={value} className="flex items-center gap-1.5 text-sm text-dark dark:text-white">
                   <input type="radio" checked={method === value} onChange={() => selectMethod(value)} />
-                  {value === "CASH" ? "Espèces" : value === "EXTERNAL_TERMINAL" ? "Terminal externe" : "Carte"}
+                  {value === "CASH" ? "Espèces" : "Carte — terminal"}
                 </label>
               ))}
             </div>
             {isExternalTerminal && (
               <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-stroke bg-gray-50 p-3 dark:border-dark-3 dark:bg-dark-2">
-                <label className="flex items-center gap-2 text-sm font-medium text-dark dark:text-white">
-                  <input
-                    type="checkbox"
-                    checked={terminalApproved}
-                    onChange={(event) => setTerminalApproved(event.target.checked)}
-                  />
-                  Terminal APPROUVÉ
-                </label>
                 <input
                   value={terminalReference}
                   onChange={(event) => setTerminalReference(event.target.value)}
                   maxLength={100}
-                  placeholder="Référence du ticket terminal"
+                  aria-label="Référence du ticket du terminal"
+                  placeholder="Référence du ticket du terminal"
                   className="min-w-[220px] flex-1 rounded-[7px] border border-stroke bg-white px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
                 />
               </div>
@@ -472,7 +538,7 @@ function PickupFiche({ order, onSettled }) {
         {order.readyForPickup && (
           <button
             type="button"
-            disabled={saving || (needsPayment && isExternalTerminal && (!terminalApproved || !terminalReference.trim()))}
+            disabled={saving || (needsPayment && isExternalTerminal && !terminalReference.trim())}
             onClick={handleConfirm}
             className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -522,7 +588,7 @@ function ResultsList({ rows, onSelect }) {
 /**
  * @param {{ canCheckIn?: boolean, canSettle?: boolean, canPickup?: boolean }} props
  */
-export function CounterPanel({ canCheckIn = false, canSettle = false, canPickup = false }) {
+export function CounterPanel({ canCheckIn = false, canSettle = false, canPickup = false, canCreateWalkIn = false }) {
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -637,19 +703,19 @@ export function CounterPanel({ canCheckIn = false, canSettle = false, canPickup 
         <h2 className="text-base font-bold text-dark dark:text-white">Pointage &amp; encaissement</h2>
       </div>
       <p className="mb-4 text-xs text-gray-500 dark:text-dark-6">
-        Scannez le QR du client, saisissez son code, ou cherchez par nom s&apos;il n&apos;en a pas.
+        Scannez le QR du client, saisissez son code, ou cherchez par nom de client ou de service.
       </p>
 
       <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3">
         <div className="min-w-[240px] flex-1">
           <label htmlFor="counter-input" className="mb-2 block text-sm font-medium text-dark dark:text-white">
-            Code ou nom du client
+            Code, client ou service
           </label>
           <input
             id="counter-input"
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="R-XXXXXXXXXX ou Nom Prénom"
+            placeholder="R-XXXXXXXXXX, Nom Prénom ou nom du service"
             autoComplete="off"
             className="w-full rounded-[7px] border border-stroke bg-transparent px-4 py-2.5 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           />
@@ -704,6 +770,8 @@ export function CounterPanel({ canCheckIn = false, canSettle = false, canPickup 
           )}
         </div>
       )}
+
+      {canCreateWalkIn && <CounterWalkInService />}
     </section>
   );
 }

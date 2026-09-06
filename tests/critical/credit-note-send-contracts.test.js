@@ -132,9 +132,11 @@ describe("credit-note delivery is a deliberate action from the operation detail"
   // now a full-width labelled button. Pins the redesign so it cannot
   // silently regress back to icon-only.
   test("both sends live behind one labelled Envoyer box, not a strip of unlabelled icons", () => {
-    expect(rowActions).toContain("<SendDocumentsDialog");
-    expect(rowActions).toContain("Envoyer par e-mail");
-    expect(rowActions).toContain("Envoyer via Billit (Peppol)");
+    expect(rowActions).toContain("<OperationDocumentsDialog");
+    const documents = source("components/dashboard/operations/OperationDocumentsDialog.jsx");
+    expect(documents).toContain("<DocumentDeliveryDialog");
+    expect(documents).toContain("Envoyer la facture");
+    expect(documents).toContain("Envoyer la note");
     expect(rowActions).not.toContain("h-8 w-8");
   });
 });

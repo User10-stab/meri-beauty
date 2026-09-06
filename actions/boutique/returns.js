@@ -586,9 +586,13 @@ export async function completeReturnRequest(input) {
     });
     if (!rr) return { success: false, message: "Demande de retour introuvable." };
     if (rr.status !== "APPROVED") return { success: false, message: "Cette demande doit d'abord être approuvée." };
-    if (!rr.order.payment?.invoice) {
-      return { success: false, message: "Aucune facture n'est associée à cette commande — impossible d'émettre une note de crédit." };
-    }
+    // No invoice guard. A particulier's sale is documented by a ticket, not
+    // an invoice (issueInvoice throws B2C_INVOICE_NOT_ALLOWED for them on
+    // purpose), so demanding one here made the 14-day right of withdrawal
+    // unreachable for exactly the customers the law grants it to — and it
+    // failed at the worst moment, after staff had already received and
+    // inspected the goods. The credit note is conditional below instead, the
+    // same way cancelWorkshopReservation and rejectAppointment already do it.
 
     // Every physical line item must be inspected and classified before any
     // stock decision is made — see ReturnItemCondition. Reject rather than
@@ -720,13 +724,18 @@ export async function completeReturnRequest(input) {
         }
       }
 
-      const creditNote = await issueCreditNote(tx, {
-        invoiceId: rr.order.payment.invoice.id,
-        reason: rr.reason,
-        totalInclVat: totalRefund,
-      });
-
-      await tx.returnRequest.update({ where: { id: rr.id }, data: { creditNoteId: creditNote.id } });
+      // A credit note corrects an invoice. With no invoice there is nothing
+      // to correct, and issuing one anyway would consume a number from the
+      // gapless legal sequence for a document that references nothing.
+      let creditNote = null;
+      if (rr.order.payment.invoice) {
+        creditNote = await issueCreditNote(tx, {
+          invoiceId: rr.order.payment.invoice.id,
+          reason: rr.reason,
+          totalInclVat: totalRefund,
+        });
+        await tx.returnRequest.update({ where: { id: rr.id }, data: { creditNoteId: creditNote.id } });
+      }
 
       if (manualRefund) {
         const newTotalRefunded = alreadyRefunded + totalRefund;
@@ -752,7 +761,7 @@ export async function completeReturnRequest(input) {
             manualReference: originalMethod === "CARD" ? manualRefundReference.trim() : null,
             cashSessionId: openCashSession?.id ?? null,
             pieceNumber,
-            creditNoteId: creditNote.id,
+            creditNoteId: creditNote?.id ?? null,
           },
         });
         await tx.payment.update({
@@ -778,8 +787,8 @@ export async function completeReturnRequest(input) {
           reason: rr.reason,
           amount: totalRefund,
           transactions: rr.order.payment.transactions,
-          creditNoteId: creditNote.id,
-          invoiceId: rr.order.payment.invoice.id,
+          creditNoteId: creditNote?.id ?? null,
+          invoiceId: rr.order.payment.invoice?.id ?? null,
           decidedByUserId: guard.session.user.id,
           returnRequestId: rr.id,
           customerIsBusiness: isBusinessRefundCustomer(rr.order.user),
@@ -810,10 +819,12 @@ export async function completeReturnRequest(input) {
       return { creditNote, refundQueued };
     });
 
-    const creditNotePdf = await renderCreditNotePdf(creditNote, rr.order.payment.invoice).catch((err) => {
-      console.error("[completeReturnRequest] credit note PDF render failed:", err);
-      return null;
-    });
+    const creditNotePdf = creditNote
+      ? await renderCreditNotePdf(creditNote, rr.order.payment.invoice).catch((err) => {
+          console.error("[completeReturnRequest] credit note PDF render failed:", err);
+          return null;
+        })
+      : null;
 
     // Never `refunded: true`/false-as-failure here — this app does not move
     // money. `manualRefund` means the cash/card hand-over already happened
@@ -829,6 +840,7 @@ export async function completeReturnRequest(input) {
         refundAmount: totalRefund,
         manualRefund,
         refundPending: !manualRefund && refundQueued,
+        creditNoteAttached: Boolean(creditNotePdf),
       }),
       ...(creditNotePdf ? { attachments: [{ filename: `note-de-credit-${creditNote.number}.pdf`, content: creditNotePdf }] } : {}),
     }).catch((err) => console.error("[completeReturnRequest] email failed:", err));

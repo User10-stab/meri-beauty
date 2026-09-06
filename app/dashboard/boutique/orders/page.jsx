@@ -1,7 +1,8 @@
 import { requireDashboardPermission } from "@/lib/route-protection";
 import { STAFF_PERMISSIONS } from "@/lib/authorization";
-import { listOrders } from "@/actions/boutique/orders";
+import { listOrders, listPickupsToVerify } from "@/actions/boutique/orders";
 import { OrdersPageClient } from "@/components/dashboard/boutique/OrdersPageClient";
+import { PickupsToVerify } from "@/components/dashboard/boutique/PickupsToVerify";
 import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export default async function OrdersPage() {
   await requireDashboardPermission(STAFF_PERMISSIONS.ORDERS);
   const t = await getTranslations("dashboardBoutique.orders");
 
-  const result = await listOrders();
+  const [result, pickupsToVerify] = await Promise.all([listOrders(), listPickupsToVerify()]);
 
   return (
     <div className="space-y-6">
@@ -35,6 +36,8 @@ export default async function OrdersPage() {
           {result.message}
         </div>
       )}
+
+      <PickupsToVerify orders={pickupsToVerify.data ?? []} />
 
       <OrdersPageClient initialOrders={result.data ?? []} initialTotalCount={result.totalCount ?? 0} />
     </div>

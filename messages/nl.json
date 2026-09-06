@@ -793,6 +793,8 @@
         "coverLabel": "Omslagafbeelding",
         "coverHint": "JPEG, PNG, WebP (max. 20MB)",
         "typeLabel": "Activiteitstype",
+        "typeWorkshop": "Workshop",
+        "typeEvent": "Evenement",
         "titleLabel": "Activiteittitel",
         "titlePlaceholder": "ex. Masterclass Balayage & Brillance",
         "descriptionLabel": "Beschrijving",
@@ -1417,7 +1419,8 @@
       "orderInfo": "Bestelling #{orderNumber} — {customerName}",
       "needsPayment": "Deze bestelling is niet online betaald. Selecteer de betaalmethode die ter plaatse is geïnd:",
       "cash": "Contant",
-      "card": "Kaart",
+      "card": "Kaart — terminal",
+      "terminalReference": "Referentie van de terminalbon",
       "totalToCollect": "Totaal te innen: €{amount}",
       "alreadyPaid": "Deze bestelling is al online betaald. Bevestig alleen de overhandiging van de artikelen aan de klant.",
       "cancel": "Annuleren",
@@ -1578,6 +1581,16 @@
         "create": "Aanmaken",
         "cancel": "Annuleren"
       }
+    },
+    "pickupsToVerify": {
+      "title": "Afhalingen te controleren",
+      "subtitle": "Deze bestellingen zijn vervallen zonder als afgehaald te zijn gemarkeerd. Hun voorraad blijft gereserveerd tot iemand bevestigt wat er gebeurd is — controleer het rek voordat je de artikelen weer te koop zet.",
+      "expiredOn": "Vervallen op {date}",
+      "collected": "Ze is geweest — afhaling afronden",
+      "notCollected": "Nooit afgehaald — weer te koop zetten",
+      "confirmNotCollected": "Bevestig dat deze artikelen nog in de winkel zijn. Ze gaan weer te koop en de klant wordt op de hoogte gebracht van de annulering.",
+      "releasing": "Weer te koop zetten…",
+      "count": "{count, plural, one {# bestelling te controleren} other {# bestellingen te controleren}}"
     }
   },
   "invoices": {
@@ -1809,6 +1822,7 @@
       "categories": "Categorieën",
       "stock": "Voorraad",
       "orders": "Bestellingen",
+      "pickupsToVerifyBadge": "af te halen bestelling(en) te controleren",
       "returns": "Retouren",
       "invoices": "Facturen",
       "promoCodes": "Promotiecodes",

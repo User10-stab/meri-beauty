@@ -875,6 +875,7 @@ model User {
   submittedOrderCancellationRequests OrderCancellationRequest[] @relation("OrderCancellationRequestSubmittedBy")
   reviewedOrderCancellationRequests  OrderCancellationRequest[] @relation("OrderCancellationRequestReviewedBy")
   pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
+  stockReleasedOrders            Order[]                @relation("OrderStockReleasedBy")
   createdPointOfSaleOrders       Order[]                @relation("OrderCreatedByStaff")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
   auditLogs                      AuditLog[]             @relation("AuditActor")
@@ -1329,10 +1330,23 @@ model Order {
   pickedUpByStaffId String?
   pickedUpByStaff   User?     @relation("OrderPickedUpBy", fields: [pickedUpByStaffId], references: [id])
 
-  // PENDING_PICKUP orders auto-cancel + restock if not collected by this date
+  // PENDING_PICKUP orders auto-cancel at this date. They do NOT auto-restock:
+  // "not marked collected" and "never handed over" are different things, and
+  // the cron cannot tell them apart. Releasing the reservation on a guess is
+  // how an item already in the customer's bag becomes sellable again.
   expiresAt    DateTime?
   cancelledAt  DateTime?
   cancelReason String?
+
+  // When the reserved stock of an expired on-site pickup was actually given
+  // back to sellable inventory, and by whom. Null on an expired order means
+  // the goods are still held for it and nobody has yet said which way it went
+  // - that is the "retraits a verifier" worklist. Non-null is also the
+  // idempotency guard: the release decrements reservedQuantity, so it must
+  // happen exactly once however many times the button is pressed.
+  stockReleasedAt       DateTime?
+  stockReleasedByUserId String?
+  stockReleasedBy       User?     @relation("OrderStockReleasedBy", fields: [stockReleasedByUserId], references: [id], onDelete: SetNull)
 
   notes String?
 
@@ -1358,6 +1372,7 @@ model Order {
   @@index([userId])
   @@index([status])
   @@index([expiresAt])
+  @@index([stockReleasedAt])
   @@index([fulfilmentMode])
   @@index([source, status, createdAt])
   @@index([createdByStaffId, createdAt])

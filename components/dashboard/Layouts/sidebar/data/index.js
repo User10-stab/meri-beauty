@@ -50,11 +50,13 @@ const ALL_NAV_DATA = [
           { title: "Produits", url: "/dashboard/boutique/products", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK, permission: STAFF_PERMISSIONS.BOUTIQUE_STOCK },
           { title: "Catégories", url: "/dashboard/boutique/categories", roles: DASHBOARD_PERMISSIONS.BOUTIQUE }, // Admin only — structural CRUD
           { title: "Stock", url: "/dashboard/boutique/stock", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK, permission: STAFF_PERMISSIONS.BOUTIQUE_STOCK },
-          { title: "Commandes", url: "/dashboard/boutique/orders", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.ORDERS },
+          // badge: expired on-site pickups whose stock nobody has ruled on
+          // yet. The count is what keeps that worklist from being forgotten —
+          // see lib/orders/count-pickups-to-verify.js.
+          { title: "Commandes", url: "/dashboard/boutique/orders", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.ORDERS, badge: "pickupsToVerify" },
           { title: "Retours", url: "/dashboard/boutique/returns", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.RETURNS },
           { title: "Codes promo", url: "/dashboard/promo-codes", roles: DASHBOARD_PERMISSIONS.PROMO_CODES },
           { title: "Compte Stripe", url: "/dashboard/payments" },
-          { title: "Réconciliation", url: "/dashboard/payments/reconciliation", roles: DASHBOARD_PERMISSIONS.PAYMENT_RECONCILIATION },
           { title: "Litiges Stripe", url: "/dashboard/payments/disputes", roles: DASHBOARD_PERMISSIONS.STRIPE_DISPUTES },
         ],
       },

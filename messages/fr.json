@@ -793,6 +793,8 @@
         "coverLabel": "Image de couverture",
         "coverHint": "JPEG, PNG, WebP (max. 20Mo)",
         "typeLabel": "Type d'activité",
+        "typeWorkshop": "Atelier",
+        "typeEvent": "Événement",
         "titleLabel": "Titre de l'activité",
         "titlePlaceholder": "ex. Masterclass Balayage & Brillance",
         "descriptionLabel": "Description",
@@ -1456,7 +1458,8 @@
       "orderInfo": "Commande n°{orderNumber} — {customerName}",
       "needsPayment": "Cette commande n'a pas été payée en ligne. Sélectionnez le mode de paiement encaissé sur place :",
       "cash": "Espèces",
-      "card": "Carte bancaire",
+      "card": "Carte — terminal",
+      "terminalReference": "Référence du ticket du terminal",
       "totalToCollect": "Total à encaisser : €{amount}",
       "alreadyPaid": "Cette commande a déjà été payée en ligne. Confirmez uniquement la remise des articles au client.",
       "cancel": "Annuler",
@@ -1578,6 +1581,16 @@
     "loading": {
       "newProduct": "Préparation du nouveau produit…",
       "editProduct": "Ouverture de la fiche produit…"
+    },
+    "pickupsToVerify": {
+      "title": "Retraits à vérifier",
+      "subtitle": "Ces commandes ont expiré sans être marquées « retrait terminé ». Leur stock reste réservé tant que personne n'a confirmé ce qui s'est passé — il faut vérifier en rayon avant de remettre les articles en vente.",
+      "expiredOn": "Expirée le {date}",
+      "collected": "Elle est venue — finaliser le retrait",
+      "notCollected": "Jamais retirée — remettre en vente",
+      "confirmNotCollected": "Confirmez que ces articles sont bien encore en boutique. Ils repasseront en vente et la cliente sera prévenue de l'annulation.",
+      "releasing": "Remise en vente…",
+      "count": "{count, plural, one {# commande à vérifier} other {# commandes à vérifier}}"
     }
   },
   "invoices": {
@@ -1809,6 +1822,7 @@
       "categories": "Catégories",
       "stock": "Stock",
       "orders": "Commandes",
+      "pickupsToVerifyBadge": "retrait(s) à vérifier",
       "returns": "Retours",
       "invoices": "Factures",
       "promoCodes": "Codes promo",

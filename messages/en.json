@@ -793,6 +793,8 @@
         "coverLabel": "Cover image",
         "coverHint": "JPEG, PNG, WebP (max. 20MB)",
         "typeLabel": "Activity type",
+        "typeWorkshop": "Workshop",
+        "typeEvent": "Event",
         "titleLabel": "Activity title",
         "titlePlaceholder": "ex. Masterclass Balayage & Brillance",
         "descriptionLabel": "Description",
@@ -1417,7 +1419,8 @@
       "orderInfo": "Order #{orderNumber} — {customerName}",
       "needsPayment": "This order was not paid online. Select the payment method collected on-site:",
       "cash": "Cash",
-      "card": "Card",
+      "card": "Card — terminal",
+      "terminalReference": "Terminal receipt reference",
       "totalToCollect": "Total to collect: €{amount}",
       "alreadyPaid": "This order has already been paid online. Only confirm the handover of items to the customer.",
       "cancel": "Cancel",
@@ -1578,6 +1581,16 @@
         "create": "Create",
         "cancel": "Cancel"
       }
+    },
+    "pickupsToVerify": {
+      "title": "Pickups to check",
+      "subtitle": "These orders expired without being marked as collected. Their stock stays reserved until someone confirms what happened — check the shelf before putting the items back on sale.",
+      "expiredOn": "Expired on {date}",
+      "collected": "She came — complete the pickup",
+      "notCollected": "Never collected — put back on sale",
+      "confirmNotCollected": "Confirm these items are still in the shop. They will go back on sale and the customer will be told the order was cancelled.",
+      "releasing": "Putting back on sale…",
+      "count": "{count, plural, one {# order to check} other {# orders to check}}"
     }
   },
   "invoices": {
@@ -1809,6 +1822,7 @@
       "categories": "Categories",
       "stock": "Stock",
       "orders": "Orders",
+      "pickupsToVerifyBadge": "pickup(s) to verify",
       "returns": "Returns",
       "invoices": "Invoices",
       "promoCodes": "Promo codes",

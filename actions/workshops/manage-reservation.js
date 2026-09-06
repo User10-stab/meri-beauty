@@ -85,22 +85,6 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       ? `Annulation : ${reason}`
       : null;
 
-    // Atomic claim gated on the reservation not already being cancelled —
-    // without this, two concurrent cancels (double-click, or two admins)
-    // both pass the plain read-then-check above and both refund.
-    const claim = await prisma.workshopReservation.updateMany({
-      where: { id: reservationId, status: { not: "CANCELLED" } },
-      data: {
-        status: "CANCELLED",
-        cancelledAt: new Date(),
-        cancelledByUserId: session.user.id,
-        notes: noteLine ? `${reservation.notes ? `${reservation.notes}\n` : ""}${noteLine}` : reservation.notes,
-      },
-    });
-    if (claim.count === 0) {
-      return { success: false, message: "Cette réservation est déjà annulée." };
-    }
-
     // Deposits are non-refundable by default. When an admin grants an
     // exception, this no longer moves the money itself — confirmed policy
     // (2026-09-02): every Stripe refund is performed by hand in the Stripe
@@ -118,40 +102,69 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
     // reservation settled in cash used to fall through here refunding
     // nothing AND issuing no credit note. Cash now queues a hand-over leg
     // like any other method.
-    let refundQueued = false;
-    let queuedRefundAmount = 0;
-    const REFUND_EPSILON = 0.01;
-    if (refundDeposit && reservation.payment) {
-      const payment = reservation.payment;
-
-      // Cap against what is actually still outstanding — a prior partial
-      // refund (issued from the Stripe dashboard, reconciled by the
-      // charge.refunded webhook) can already have returned part of this.
-      const priorRefunds = await prisma.transaction.aggregate({
-        where: { paymentId: payment.id, transactionType: "REFUND", isDeleted: false },
-        _sum: { amount: true },
-      });
-      const alreadyRefunded = Number(priorRefunds._sum.amount ?? 0);
-      const remaining = Number(payment.paidAmount) - alreadyRefunded;
-
-      if (remaining <= REFUND_EPSILON) {
-        await prisma.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
-      } else {
-        await prisma.$transaction(async (tx) => {
-          const transactions = await tx.transaction.findMany({
+    const cancellation = await prisma.$transaction(async (tx) => {
+      // Claim and every financial side effect deliberately share this
+      // transaction. A failure to issue the legal document or worklist rolls
+      // back the cancellation too; a cancelled seat can never be left without
+      // its associated refund dossier.
+      // The reservation was loaded before entering this transaction. Lock and
+      // reload its payment so a concurrent webhook cannot make us calculate a
+      // refund from stale amounts, transactions, or invoice data.
+      const paymentId = reservation.payment?.id ?? null;
+      if (paymentId) {
+        await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${paymentId} FOR UPDATE`;
+      }
+      const payment = paymentId
+        ? await tx.payment.findUnique({ where: { id: paymentId }, include: { invoice: true } })
+        : null;
+      const transactions = payment
+        ? await tx.transaction.findMany({
             where: { paymentId: payment.id },
-            select: {
-              id: true,
-              amount: true,
-              method: true,
-              transactionType: true,
-              paidAt: true,
-              isDeleted: true,
-              stripePaymentIntentId: true,
-              stripeCheckoutSessionId: true,
-            },
-          });
+            select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true, stripePaymentIntentId: true, stripeCheckoutSessionId: true },
+          })
+        : [];
+      const claim = await tx.workshopReservation.updateMany({
+        where: { id: reservationId, status: { in: ["PENDING_DEPOSIT", "CONFIRMED"] } },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelledByUserId: session.user.id,
+          // Nothing is owed on a cancelled booking. Left standing, this is the
+          // figure the counter would read as a collectable balance.
+          balanceDue: 0,
+          notes: noteLine ? `${reservation.notes ? `${reservation.notes}\n` : ""}${noteLine}` : reservation.notes,
+        },
+      });
+      if (claim.count === 0) return { claimed: false, refundQueued: false, queuedRefundAmount: 0 };
 
+      // A cancelled booking never collects another cent, whatever happens to
+      // the money already taken — refunded, forfeited, or neither. Set once
+      // here rather than inside each money branch below, because there are
+      // three payment updates across the two cancellation files and only the
+      // forfeit one was obvious: the refund branch left 28 workshop payments
+      // reading "REFUNDED" and "still owes €60" at the same time.
+      //
+      // Only the forward-looking field moves. paymentType (DEPOSIT),
+      // totalAmount (the full price), paidAmount (what actually arrived) and
+      // the DEPOSIT transaction row all stay, so the record still shows a
+      // part-payment on a larger booking. paidAmount is what the revenue
+      // reports sum, so income is untouched.
+      if (payment) {
+        await tx.payment.update({ where: { id: payment.id }, data: { remainingAmount: 0 } });
+      }
+
+      let refundQueued = false;
+      let queuedRefundAmount = 0;
+      if (refundDeposit && payment) {
+        const priorRefunds = await tx.transaction.aggregate({
+          where: { paymentId: payment.id, transactionType: "REFUND", isDeleted: false },
+          _sum: { amount: true },
+        });
+        const remaining = Number(payment.paidAmount) - Number(priorRefunds._sum.amount ?? 0);
+
+        if (remaining <= 0.01 && Number(payment.paidAmount) > 0.01) {
+          await tx.payment.update({ where: { id: payment.id }, data: { status: "REFUNDED" } });
+        } else {
           let creditNoteId = null;
           if (payment.invoice) {
             const creditNote = await issueCreditNote(tx, {
@@ -161,30 +174,17 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
             });
             creditNoteId = creditNote.id;
           }
-
           const queued = await queueManualRefund(tx, {
-            paymentId: payment.id,
-            source: "WORKSHOP",
-            trigger: "SALON_CANCELLATION",
-            reason: reason || "Annulation atelier — remboursement exceptionnel",
-            amount: remaining,
-            transactions,
-            creditNoteId,
-            invoiceId: payment.invoice?.id ?? null,
-            decidedByUserId: session.user.id,
-            activityType: reservation.session.workshop.type,
+            paymentId: payment.id, source: "WORKSHOP", trigger: "SALON_CANCELLATION",
+            reason: reason || "Annulation atelier — remboursement exceptionnel", amount: remaining,
+            transactions, creditNoteId, invoiceId: payment.invoice?.id ?? null,
+            decidedByUserId: session.user.id, activityType: reservation.session.workshop.type,
             customerIsBusiness: isBusinessRefundCustomer(reservation.customer),
           });
           refundQueued = Boolean(queued);
-          if (queued) queuedRefundAmount = remaining;
-        });
-      }
-    } else if (
-      !refundDeposit &&
-      reservation.payment &&
-      Number(reservation.payment.paidAmount) > 0.01 &&
-      !reservation.payment.invoice
-    ) {
+          queuedRefundAmount = queued ? remaining : 0;
+        }
+      } else if (!refundDeposit && payment && Number(payment.paidAmount) > 0.01 && !payment.invoice) {
       // Deposit kept, not refunded — this is now final, non-refundable
       // revenue, and Belgian law requires an invoice for it just as much as
       // for a normally-settled reservation (see settleReservation's own
@@ -192,8 +192,6 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
       // lib/reservations/settle-reservation.js's doc comment), so this is
       // the only point where that invoice gets issued for a forfeited
       // deposit.
-      const payment = reservation.payment;
-      await prisma.$transaction(async (tx) => {
         if (hasInvoiceableVatIdentity(reservation.customer)) {
           await issueInvoice(tx, {
             paymentId: payment.id,
@@ -207,8 +205,13 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
           });
         }
         await tx.payment.update({ where: { id: payment.id }, data: { status: "PAID" } });
-      });
+      }
+      return { claimed: true, refundQueued, queuedRefundAmount };
+    });
+    if (!cancellation.claimed) {
+      return { success: false, message: "Cette réservation ne peut plus être annulée." };
     }
+    const { refundQueued, queuedRefundAmount } = cancellation;
 
     notifyAllInWaitingList(reservation.sessionId).catch((err) =>
       console.error("[cancelWorkshopReservation] waiting-list notify failed:", err)
@@ -247,6 +250,9 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
   } catch (error) {
     if (error.message === "REFUND_ALREADY_PENDING") {
       return { success: false, message: "Un remboursement est déjà en cours pour cette réservation — attendez sa résolution avant de réessayer." };
+    }
+    if (error.message === "REFUND_ALLOCATION_INCOMPLETE") {
+      return { success: false, message: "Le détail des encaissements ne permet pas de préparer ce remboursement en toute sécurité. La réservation n'a pas été annulée ; vérifiez l'opération dans la réconciliation." };
     }
     console.error("[cancelWorkshopReservation]", error);
     return { success: false, message: "Erreur lors de l'annulation." };
@@ -478,7 +484,10 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
  * staff require the explicit settlement capability and an assignment to the
  * atelier or the particular session.
  */
-export async function completeWorkshopReservation(reservationId, { method, paymentConfirmed } = {}) {
+export async function completeWorkshopReservation(
+  reservationId,
+  { method, paymentConfirmed, terminalApproved, terminalReference, finalTotal, adjustmentReason } = {}
+) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
   const authorization = await authorizeActivityReservationOperation({
@@ -494,6 +503,10 @@ export async function completeWorkshopReservation(reservationId, { method, payme
     reservationId,
     method,
     paymentConfirmed,
+    terminalApproved,
+    terminalReference,
+    finalTotal,
+    adjustmentReason,
     actorId: session.user.id,
   });
 

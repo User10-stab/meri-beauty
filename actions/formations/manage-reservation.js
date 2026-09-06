@@ -72,25 +72,6 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       return { success: false, message: "Cette réservation est déjà annulée." };
     }
 
-    // Atomic claim gated on the reservation not already being cancelled —
-    // without this, two concurrent cancels (double-click, or two admins)
-    // both pass the plain read-then-check above and both fire the
-    // waiting-list notification / email twice.
-    const claim = await prisma.formationReservation.updateMany({
-      where: { id: reservationId, status: { not: "CANCELLED" } },
-      data: {
-        status: "CANCELLED",
-        cancelledAt: new Date(),
-        cancelledByUserId: session.user.id,
-        notes: reason
-          ? `${reservation.notes ? `${reservation.notes}\n` : ""}${refundPayment ? "Annulation avec remboursement exceptionnel" : "Annulation"} : ${reason}`
-          : reservation.notes,
-      },
-    });
-    if (claim.count === 0) {
-      return { success: false, message: "Cette réservation est déjà annulée." };
-    }
-
     // Converted 2026-09-02: this no longer refunds. An OWNER/ADMIN performs
     // the Stripe refund by hand; what happens here is that the credit note
     // is issued and the money owed is recorded as a RefundOperation, which
@@ -100,17 +81,67 @@ export async function cancelFormationReservation(reservationId, { reason, refund
     // Dropping payment.transactionReference from the condition on purpose:
     // a formation settled in cash used to fall through refunding nothing
     // and issuing no credit note at all.
-    let refundQueued = false;
-    let queuedRefundAmount = 0;
-    if (refundPayment && reservation.payment) {
-      const payment = reservation.payment;
-      const alreadyRefunded = payment.transactions
-        .filter((transaction) => transaction.transactionType === "REFUND" && !transaction.isDeleted)
-        .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
-      const remainingRefund = Math.max(0, Number(payment.paidAmount) - alreadyRefunded);
+    const cancellation = await prisma.$transaction(async (tx) => {
+      // Reservation state, invoice/credit note, and refund worklist must be
+      // one unit of work. If a financial write fails, the place is not
+      // released and the booking remains exactly as it was.
+      // Reload the payment under a row lock. The reservation was read before
+      // this transaction and can otherwise be stale if a webhook settled or
+      // reconciled a payment at the same time.
+      const paymentId = reservation.payment?.id ?? null;
+      if (paymentId) {
+        await tx.$queryRaw`SELECT id FROM "Payment" WHERE id = ${paymentId} FOR UPDATE`;
+      }
+      const payment = paymentId
+        ? await tx.payment.findUnique({ where: { id: paymentId }, include: { invoice: true } })
+        : null;
+      const transactions = payment
+        ? await tx.transaction.findMany({
+            where: { paymentId: payment.id },
+            select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true, stripePaymentIntentId: true, stripeCheckoutSessionId: true },
+          })
+        : [];
+      const claim = await tx.formationReservation.updateMany({
+        where: { id: reservationId, status: { in: ["PENDING_DEPOSIT", "CONFIRMED"] } },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancelledByUserId: session.user.id,
+          // Nothing is owed on a cancelled booking. Left standing, this is the
+          // figure the counter would read as a collectable balance.
+          balanceDue: 0,
+          notes: reason
+            ? `${reservation.notes ? `${reservation.notes}\n` : ""}${refundPayment ? "Annulation avec remboursement exceptionnel" : "Annulation"} : ${reason}`
+            : reservation.notes,
+        },
+      });
+      if (claim.count === 0) return { claimed: false, refundQueued: false, queuedRefundAmount: 0 };
 
-      if (remainingRefund > 0.01) {
-        await prisma.$transaction(async (tx) => {
+      // A cancelled booking never collects another cent, whatever happens to
+      // the money already taken — refunded, forfeited, or neither. Set once
+      // here rather than inside each money branch below, because there are
+      // three payment updates across the two cancellation files and only the
+      // forfeit one was obvious: the refund branch left 28 workshop payments
+      // reading "REFUNDED" and "still owes €60" at the same time.
+      //
+      // Only the forward-looking field moves. paymentType (DEPOSIT),
+      // totalAmount (the full price), paidAmount (what actually arrived) and
+      // the DEPOSIT transaction row all stay, so the record still shows a
+      // part-payment on a larger booking. paidAmount is what the revenue
+      // reports sum, so income is untouched.
+      if (payment) {
+        await tx.payment.update({ where: { id: payment.id }, data: { remainingAmount: 0 } });
+      }
+
+      let refundQueued = false;
+      let queuedRefundAmount = 0;
+      if (refundPayment && payment) {
+        const alreadyRefunded = transactions
+          .filter((transaction) => transaction.transactionType === "REFUND" && !transaction.isDeleted)
+          .reduce((sum, transaction) => sum + Number(transaction.amount), 0);
+        const remainingRefund = Math.max(0, Number(payment.paidAmount) - alreadyRefunded);
+
+        if (remainingRefund > 0.01) {
           let creditNoteId = null;
           if (payment.invoice) {
             const creditNote = await issueCreditNote(tx, {
@@ -120,29 +151,16 @@ export async function cancelFormationReservation(reservationId, { reason, refund
             });
             creditNoteId = creditNote.id;
           }
-
           const queued = await queueManualRefund(tx, {
-            paymentId: payment.id,
-            source: "FORMATION",
-            trigger: "SALON_CANCELLATION",
-            reason: reason.trim(),
-            amount: remainingRefund,
-            transactions: payment.transactions,
-            creditNoteId,
-            invoiceId: payment.invoice?.id ?? null,
-            decidedByUserId: session.user.id,
+            paymentId: payment.id, source: "FORMATION", trigger: "SALON_CANCELLATION",
+            reason: reason.trim(), amount: remainingRefund, transactions, creditNoteId,
+            invoiceId: payment.invoice?.id ?? null, decidedByUserId: session.user.id,
             customerIsBusiness: isBusinessRefundCustomer(reservation.customer),
           });
           refundQueued = Boolean(queued);
-          if (queued) queuedRefundAmount = remainingRefund;
-        });
-      }
-    } else if (
-      !refundPayment &&
-      reservation.payment &&
-      Number(reservation.payment.paidAmount) > 0.01 &&
-      !reservation.payment.invoice
-    ) {
+          queuedRefundAmount = queued ? remainingRefund : 0;
+        }
+      } else if (!refundPayment && payment && Number(payment.paidAmount) > 0.01 && !payment.invoice) {
       // Deposit kept, not refunded — this is now final, non-refundable
       // revenue, and Belgian law requires an invoice for it just as much as
       // for a normally-settled reservation (see settleReservation's own
@@ -150,8 +168,6 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       // lib/reservations/settle-reservation.js's doc comment), so this is
       // the only point where that invoice gets issued for a forfeited
       // deposit.
-      const payment = reservation.payment;
-      await prisma.$transaction(async (tx) => {
         if (hasInvoiceableVatIdentity(reservation.customer)) {
           await issueInvoice(tx, {
             paymentId: payment.id,
@@ -165,8 +181,13 @@ export async function cancelFormationReservation(reservationId, { reason, refund
           });
         }
         await tx.payment.update({ where: { id: payment.id }, data: { status: "PAID" } });
-      });
+      }
+      return { claimed: true, refundQueued, queuedRefundAmount };
+    });
+    if (!cancellation.claimed) {
+      return { success: false, message: "Cette réservation ne peut plus être annulée." };
     }
+    const { refundQueued, queuedRefundAmount } = cancellation;
 
     notifyAllInFormationWaitingList(reservation.sessionId).catch((err) =>
       console.error("[cancelFormationReservation] waiting-list notify failed:", err)
@@ -215,6 +236,9 @@ export async function cancelFormationReservation(reservationId, { reason, refund
     if (error.message === "REFUND_ALREADY_PENDING") {
       return { success: false, message: "Un remboursement est déjà en cours pour cette réservation — attendez sa résolution avant de réessayer." };
     }
+    if (error.message === "REFUND_ALLOCATION_INCOMPLETE") {
+      return { success: false, message: "Le détail des encaissements ne permet pas de préparer ce remboursement en toute sécurité. La réservation n'a pas été annulée ; vérifiez l'opération dans la réconciliation." };
+    }
     console.error("[cancelFormationReservation]", error);
     return { success: false, message: "Erreur lors de l'annulation." };
   }
@@ -225,7 +249,10 @@ export async function cancelFormationReservation(reservationId, { reason, refund
  * staff require the explicit settlement capability and an assignment to the
  * formation or the particular session.
  */
-export async function completeFormationReservation(reservationId, { method, paymentConfirmed } = {}) {
+export async function completeFormationReservation(
+  reservationId,
+  { method, paymentConfirmed, terminalApproved, terminalReference, finalTotal, adjustmentReason } = {}
+) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
   const authorization = await authorizeActivityReservationOperation({
@@ -241,6 +268,10 @@ export async function completeFormationReservation(reservationId, { method, paym
     reservationId,
     method,
     paymentConfirmed,
+    terminalApproved,
+    terminalReference,
+    finalTotal,
+    adjustmentReason,
     actorId: session.user.id,
   });
 

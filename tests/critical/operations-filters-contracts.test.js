@@ -72,6 +72,25 @@ describe("operations filters", () => {
     expect(filterPills).not.toContain("onClick");
   });
 
+  test("the ledger displays each row's installment breakdown, not only a payment-event filter", () => {
+    const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
+    expect(client).toContain("function PaymentBreakdown({ row })");
+    expect(client).toContain("Acompte · {money(sum(deposits))}");
+    expect(client).toContain('{hasDeposit ? "Solde" : "Paiement complet"}');
+    // The "is this still collectible" rule is no longer open-coded here —
+    // it lives in lib/payments/collectible-balance.js, shared with the three
+    // other screens that show a balance. What this row must still do is feed
+    // it both statuses: the payment's and the booking's.
+    expect(client).toContain('from "@/lib/payments/collectible-balance"');
+    expect(client).toContain("const outstandingBalance = collectibleBalance({");
+    expect(client).toContain("paymentStatus: payment.status");
+    expect(client).toContain("lifecycleStatus: row.status ?? payment.appointment?.status");
+    expect(client).toContain('const historicalChangeFeeTotal = Math.max(0, Number(row.changeFeeAmount ?? 0) - taggedChangeFeeTotal)');
+    expect(client).toContain('Frais de modification · {money(changeFeeTotal)}');
+    expect(client).toContain("Solde à encaisser : {money(outstandingBalance)}");
+    expect(client).toContain("<TableHead>Règlement</TableHead>");
+  });
+
   test("the search page threads type/lifecycleStatus/paymentEvent through to the server action", () => {
     const page = source("app/dashboard/operations/page.jsx");
     expect(page).toContain("type: params?.type");

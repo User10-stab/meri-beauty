@@ -137,14 +137,9 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(client).not.toContain("Acompte lié au solde ci-dessous");
     expect(client).not.toContain("Solde de l’acompte ci-dessus");
 
-    // Orders/workshops/formations are entity-grained now — a deposit and its
-    // later balance are just two nested Transaction rows on one entity row,
-    // never two competing top-level rows, so no suppression is needed for
-    // them at all. Appointments alone stay event-grained (their own
-    // dashboard flows, not part of this unification) and keep the exact
-    // suppress-the-deposit-once-a-balance-exists rule, now expressed as SQL.
-    expect(actions).toContain("t.\"transactionType\" = 'DEPOSIT'");
-    expect(actions).toContain("t2.\"transactionType\" = 'FINAL_PAYMENT'");
+    // Entity-grained rows retain their whole payment history. Appointments
+    // do too, so the ledger never hides an actual collection.
+    expect(actions).toContain('JOIN "Appointment" a ON a.id = p."appointmentId"');
     expect(actions).toContain('transactions: { orderBy: { paidAt: "asc" }');
   });
 

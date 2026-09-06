@@ -7,7 +7,10 @@ import { DASHBOARD_PERMISSIONS, hasPermission } from "@/lib/authorization";
 import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds";
 import { captureError, captureCriticalError } from "@/lib/monitoring";
 
-const RECONCILIATION_PATH = "/dashboard/payments/reconciliation";
+// The anomalies list lives inside Opérations now — the standalone
+// Réconciliation route only redirects there, so revalidating it would refresh
+// nothing.
+const RECONCILIATION_PATH = "/dashboard/operations";
 
 async function requireReconciliationAccess() {
   const session = await auth();

@@ -14,6 +14,7 @@ import {
 } from "@/lib/dashboard/operation-filters";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { summarizeRefundState } from "@/lib/refunds/plan-refund";
+import { AUDIT_ACTIONS } from "@/lib/audit-log";
 
 const ADMIN_OPERATION_TABS = Object.freeze(["transactions", "orders", "workshops", "formations"]);
 const PAGE_SIZE = 30;
@@ -80,12 +81,28 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
   // Appointments are only ever reachable from the unrestricted (transactions)
   // preset — Commandes/Ateliers/Formations never showed them before either.
   const includeAppointments = !sourceTypes;
+  // A price adjustment is a business event with no Transaction behind it when
+  // nothing was left to collect — writing off the balance on a booking that
+  // had already paid a deposit, say. Every other arm of this union is anchored
+  // to money, so that event was invisible here and lived only in the audit
+  // log. It is money the salon decided not to take, which is exactly the kind
+  // of thing Opérations exists to show.
+  //
+  // Excluded whenever a *payment* filter is applied, because an adjustment is
+  // not a payment event and would otherwise appear under "Acompte" or
+  // "Solde"; and whenever a lifecycle filter is applied, because the audit row
+  // carries no lifecycle of its own. Both exclusions keep the filters honest
+  // rather than quietly widening what they mean.
+  const includeAdjustments = !sourceTypes && lifecycleStatus === "ALL" && paymentEvent === "ALL";
 
   const arms = [];
 
   if (includeOrders) {
     arms.push(Prisma.sql`
-      SELECT o.id AS id, 'ORDER' AS "sourceType", o."createdAt" AS "sortAt"
+      SELECT o.id AS id, 'ORDER' AS "sourceType", GREATEST(o."createdAt", (
+        SELECT MAX(t."paidAt") FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+        WHERE p."orderId" = o.id AND t."isDeleted" = false
+      )) AS "sortAt"
       FROM "Order" o
       WHERE 1=1
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND o."status"::text = ${lifecycleStatus}` : Prisma.empty}
@@ -102,7 +119,10 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
 
   if (includeWorkshops) {
     arms.push(Prisma.sql`
-      SELECT wr.id AS id, 'WORKSHOP' AS "sourceType", wr."createdAt" AS "sortAt"
+      SELECT wr.id AS id, 'WORKSHOP' AS "sourceType", GREATEST(wr."createdAt", (
+        SELECT MAX(t."paidAt") FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+        WHERE p."workshopReservationId" = wr.id AND t."isDeleted" = false
+      )) AS "sortAt"
       FROM "workshop_reservations" wr
       JOIN "workshop_sessions" ws ON ws.id = wr."sessionId"
       JOIN "workshops" w ON w.id = ws."workshopId"
@@ -122,7 +142,10 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
 
   if (includeFormations) {
     arms.push(Prisma.sql`
-      SELECT fr.id AS id, 'FORMATION' AS "sourceType", fr."createdAt" AS "sortAt"
+      SELECT fr.id AS id, 'FORMATION' AS "sourceType", GREATEST(fr."createdAt", (
+        SELECT MAX(t."paidAt") FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+        WHERE p."formationReservationId" = fr.id AND t."isDeleted" = false
+      )) AS "sortAt"
       FROM "formation_reservations" fr
       JOIN "formation_sessions" fs ON fs.id = fr."sessionId"
       JOIN "formations" f ON f.id = fs."formationId"
@@ -141,27 +164,25 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
   }
 
   if (includeAppointments) {
-    // Mirrors the pre-unification Transactions-tab query exactly: one row
-    // per payment EVENT (not per appointment), with the same
-    // deposit-suppressed-once-a-balance-exists rule. No lifecycleStatus/type
-    // axis applies to this source in this view — a status-filtered request
-    // (e.g. "SHIPPED") correctly excludes appointments rather than matching
-    // them by accident.
+    // Keep every payment event, including deposits after final settlement.
+    // Lifecycle filters apply to the linked appointment.
     arms.push(Prisma.sql`
       SELECT t.id AS id, 'APPOINTMENT' AS "sourceType", t."paidAt" AS "sortAt"
       FROM "Transaction" t
       JOIN "Payment" p ON p.id = t."paymentId"
+      JOIN "Appointment" a ON a.id = p."appointmentId"
       WHERE t."isDeleted" = false
         AND p."appointmentId" IS NOT NULL
-        AND NOT (
-          t."transactionType" = 'DEPOSIT'
-          AND EXISTS (
-            SELECT 1 FROM "Transaction" t2
-            WHERE t2."paymentId" = t."paymentId" AND t2."isDeleted" = false AND t2."transactionType" = 'FINAL_PAYMENT'
-          )
-        )
-        ${lifecycleStatus !== "ALL" ? Prisma.sql`AND false` : Prisma.empty}
+        ${lifecycleStatus !== "ALL" ? Prisma.sql`AND a."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${paymentEvent !== "ALL" ? Prisma.sql`AND t."transactionType"::text = ${paymentEvent}` : Prisma.empty}
+    `);
+  }
+
+  if (includeAdjustments) {
+    arms.push(Prisma.sql`
+      SELECT al.id AS id, 'ADJUSTMENT' AS "sourceType", al."createdAt" AS "sortAt"
+      FROM "AuditLog" al
+      WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_PRICE_ADJUSTED}
     `);
   }
 
@@ -172,7 +193,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
   const [rows, countRows] = await Promise.all([
     prisma.$queryRaw`
       SELECT id, "sourceType" FROM (${unioned}) AS combined
-      ORDER BY "sortAt" DESC
+      ORDER BY "sortAt" DESC, "sourceType", id
       LIMIT ${take} OFFSET ${skip}
     `,
     prisma.$queryRaw`SELECT COUNT(*)::int AS count FROM (${unioned}) AS combined`,
@@ -200,6 +221,7 @@ function deriveRefundFields(payment) {
     },
     latestTransactionId: latest?.id ?? null,
     latestTransactionType: latest?.transactionType ?? null,
+    latestTransactionAt: latest?.paidAt ?? null,
   };
 }
 
@@ -208,7 +230,7 @@ const PAYMENT_LEDGER_SELECT = Object.freeze({
   status: true,
   paidAmount: true,
   remainingAmount: true,
-  transactions: { select: { id: true, amount: true, transactionType: true, isDeleted: true, paidAt: true } },
+  transactions: { orderBy: [{ paidAt: "asc" }, { id: "asc" }], select: { id: true, amount: true, method: true, manualReference: true, transactionType: true, isDeleted: true, paidAt: true } },
   invoice: {
     select: {
       id: true,
@@ -290,6 +312,8 @@ async function hydrateAppointmentTransactions(ids) {
           id: true,
           status: true,
           paymentType: true,
+          paidAmount: true,
+          remainingAmount: true,
           invoice: {
             select: {
               id: true,
@@ -305,8 +329,8 @@ async function hydrateAppointmentTransactions(ids) {
               },
             },
           },
-          transactions: { select: { amount: true, transactionType: true, isDeleted: true } },
-          appointment: { select: { id: true, date: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
+          transactions: { orderBy: [{ paidAt: "asc" }, { id: "asc" }], select: { id: true, amount: true, method: true, manualReference: true, paidAt: true, transactionType: true, isDeleted: true } },
+          appointment: { select: { id: true, status: true, date: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
         },
       },
     },
@@ -325,6 +349,127 @@ async function hydrateAppointmentTransactions(ids) {
         fullyRefunded: refundState.fullyRefunded,
         inconsistencies: refundState.inconsistencies,
       },
+    };
+  });
+}
+
+/**
+ * Price adjustments, resolved back to the booking they changed.
+ *
+ * The audit row carries the numbers (before/after, reason, actor); the
+ * booking supplies the customer and the title. Three entity types share one
+ * action, so they are fetched per type and merged — a JOIN is impossible
+ * because AuditLog.entityId is polymorphic and untyped by design.
+ *
+ * Every field the table reads is filled in, including the ones an adjustment
+ * has no answer for (payment, refundState). Leaving them undefined would make
+ * paymentSummary and the "Voir / gérer" gate read them off a row shape they
+ * were never written for.
+ */
+async function hydrateAdjustments(ids) {
+  if (ids.length === 0) return [];
+
+  const logs = await prisma.auditLog.findMany({
+    where: { id: { in: ids } },
+    select: {
+      id: true,
+      createdAt: true,
+      entityType: true,
+      entityId: true,
+      before: true,
+      after: true,
+      metadata: true,
+      actor: { select: { fullName: true } },
+      actorRole: true,
+    },
+  });
+
+  const idsFor = (type) => logs.filter((l) => l.entityType === type).map((l) => l.entityId);
+
+  const [appointments, workshops, formations] = await Promise.all([
+    prisma.appointment.findMany({
+      where: { id: { in: idsFor("Appointment") } },
+      select: {
+        id: true,
+        status: true,
+        user: { select: { fullName: true, email: true } },
+        staffService: { select: { service: { select: { name: true } } } },
+      },
+    }),
+    prisma.workshopReservation.findMany({
+      where: { id: { in: idsFor("WorkshopReservation") } },
+      select: {
+        id: true,
+        status: true,
+        customer: { select: { fullName: true, email: true } },
+        session: { select: { workshop: { select: { title: true, type: true } } } },
+      },
+    }),
+    prisma.formationReservation.findMany({
+      where: { id: { in: idsFor("FormationReservation") } },
+      select: {
+        id: true,
+        status: true,
+        customer: { select: { fullName: true, email: true } },
+        session: { select: { formation: { select: { title: true } } } },
+      },
+    }),
+  ]);
+
+  const byEntity = new Map();
+  for (const a of appointments) {
+    byEntity.set(a.id, {
+      title: a.staffService?.service?.name ?? "Prestation",
+      kindLabel: "Rendez-vous",
+      customer: a.user,
+      status: a.status,
+    });
+  }
+  for (const w of workshops) {
+    byEntity.set(w.id, {
+      title: w.session?.workshop?.title ?? "Atelier",
+      kindLabel: w.session?.workshop?.type === "EVENT" ? "Événement" : "Atelier",
+      customer: w.customer,
+      status: w.status,
+    });
+  }
+  for (const f of formations) {
+    byEntity.set(f.id, {
+      title: f.session?.formation?.title ?? "Formation",
+      kindLabel: "Formation",
+      customer: f.customer,
+      status: f.status,
+    });
+  }
+
+  return logs.map((log) => {
+    const booking = byEntity.get(log.entityId) ?? null;
+    const previousTotal = Number(log.before?.totalAmount ?? 0);
+    const finalTotal = Number(log.after?.totalAmount ?? 0);
+    return {
+      id: log.id,
+      sourceType: "ADJUSTMENT",
+      adjustedAt: log.createdAt,
+      // Signed: negative is revenue the salon chose not to take. That is not
+      // a refund — no money leaves — and the table must not style it as one.
+      delta: Math.round((finalTotal - previousTotal) * 100) / 100,
+      previousTotal,
+      finalTotal,
+      reason: log.metadata?.reason ?? null,
+      actorName: log.actor?.fullName ?? null,
+      actorRole: log.actorRole ?? null,
+      entityType: log.entityType,
+      entityId: log.entityId,
+      bookingTitle: booking?.title ?? "—",
+      bookingKind: booking?.kindLabel ?? "Réservation",
+      customer: booking?.customer ?? null,
+      status: booking?.status ?? null,
+      // Deliberately inert: an adjustment opens no drawer and settles nothing.
+      payment: null,
+      latestTransactionId: null,
+      latestTransactionType: null,
+      refundState: { totalCollected: 0, totalRefunded: 0, remainingRefundable: 0, fullyCredited: false },
+      customerInvoiceEligible: false,
     };
   });
 }
@@ -363,18 +508,21 @@ export async function getAdminOperations(params = {}) {
       take: PAGE_SIZE,
     });
 
-    const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [] };
+    const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [], ADJUSTMENT: [] };
     for (const row of idRows) idsBySource[row.sourceType]?.push(row.id);
 
-    const [orders, workshops, formations, appointments] = await Promise.all([
+    const [orders, workshops, formations, appointments, adjustments] = await Promise.all([
       hydrateOrders(idsBySource.ORDER),
       hydrateWorkshops(idsBySource.WORKSHOP),
       hydrateFormations(idsBySource.FORMATION),
       hydrateAppointmentTransactions(idsBySource.APPOINTMENT),
+      hydrateAdjustments(idsBySource.ADJUSTMENT),
     ]);
 
     const byId = new Map();
-    for (const row of [...orders, ...workshops, ...formations, ...appointments]) byId.set(row.id, row);
+    for (const row of [...orders, ...workshops, ...formations, ...appointments, ...adjustments]) {
+      byId.set(row.id, row);
+    }
     // Stage A already sorted by sortAt DESC; findMany({ id: { in } }) does
     // not preserve that order, so the final list is rebuilt from it here.
     const data = idRows.map((row) => byId.get(row.id)).filter(Boolean);

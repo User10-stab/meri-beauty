@@ -8,6 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { InvoiceRowActions } from "@/components/dashboard/operations/InvoiceRowActions";
 import { TransactionDetailDrawer } from "@/components/dashboard/operations/TransactionDetailDrawer";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
+import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import {
   TYPE_FILTERS,
   TYPE_LABELS,
@@ -15,6 +16,7 @@ import {
   PAYMENT_EVENT_LABELS,
   LIFECYCLE_STATUS_FILTERS,
   LIFECYCLE_STATUS_LABELS,
+  PAYMENT_STATUS_LABELS,
 } from "@/lib/dashboard/operation-filters";
 
 const TABS = [
@@ -110,7 +112,7 @@ function Badge({ children }) {
 }
 
 /**
- * Flattens the four polymorphic row shapes the unified query can return
+ * Flattens the polymorphic row shapes the unified query can return
  * (ORDER/WORKSHOP/FORMATION are entity-grained; APPOINTMENT stays
  * event-grained, one row per payment event, exactly as before unification —
  * see admin-operations.js's module doc comment) into one shape the table
@@ -118,9 +120,37 @@ function Badge({ children }) {
  * one level up (a list row, not a single transaction's detail).
  */
 function describeUnifiedRow(row) {
+  if (row.sourceType === "ADJUSTMENT") {
+    // A price changed at the counter. Every other row here is anchored to
+    // money that moved; this one is money the salon decided *not* to take —
+    // writing off a balance on a booking that had already paid its deposit,
+    // for instance. It used to exist only in the audit log, so the one screen
+    // anyone reconciles against never showed it.
+    //
+    // Not a refund, and deliberately not styled as one: nothing leaves the
+    // till, so isRefundEvent stays false. The amount is the signed difference,
+    // which is what the event is actually worth; the before → after pair sits
+    // in the detail line so the figure can be checked rather than trusted.
+    const money = (value) =>
+      new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value) || 0);
+    const by = row.actorName ? ` · par ${row.actorName}` : "";
+    const why = row.reason ? ` · ${row.reason}` : "";
+    return {
+      dateLabel: date(row.adjustedAt),
+      kind: "Ajustement de prix",
+      title: `${row.bookingKind} — ${row.bookingTitle}`,
+      href: null,
+      detail: `${money(row.previousTotal)} → ${money(row.finalTotal)}${why}${by}`,
+      lifecycleStatus: row.status,
+      customer: row.customer,
+      customerFallback: "—",
+      totalAmount: row.delta,
+      isRefundEvent: false,
+    };
+  }
   if (row.sourceType === "ORDER") {
     return {
-      dateLabel: date(row.createdAt),
+      dateLabel: date(row.latestTransactionAt ?? row.createdAt),
       kind: "Commande",
       title: `n°${row.orderNumber}`,
       href: `/dashboard/boutique/orders/${row.id}`,
@@ -139,7 +169,7 @@ function describeUnifiedRow(row) {
         ? item.type === "EVENT" ? "Événement" : "Atelier"
         : `Formation ${(TYPE_LABELS[item.type] ?? "").toLowerCase()}`.trim();
     return {
-      dateLabel: date(row.session.startDate),
+      dateLabel: date(row.latestTransactionAt ?? row.createdAt),
       kind,
       title: item.title,
       href: null,
@@ -159,8 +189,8 @@ function describeUnifiedRow(row) {
     kind: "Rendez-vous",
     title: paymentSource(row.payment),
     href: null,
-    detail: row.method,
-    lifecycleStatus: null,
+    detail: `${PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType} · ${row.method}`,
+    lifecycleStatus: row.payment?.appointment?.status ?? null,
     customer,
     customerFallback: "—",
     totalAmount: row.amount,
@@ -179,18 +209,142 @@ function latestTransaction(row) {
   return { id: row.latestTransactionId, transactionType: row.latestTransactionType };
 }
 
+/**
+ * The row's payment state, in the salon's own language.
+ *
+ * Two things were wrong here. It rendered `row.payment.status` raw, so this
+ * column showed "REFUNDED" and "PARTIALLY_REFUNDED" — Prisma enum values, in
+ * English, in a French table — which reads as debug output rather than as a
+ * status, and left the "Règlement" badges beside it looking like the only
+ * statement of where the row stood.
+ *
+ * And it took the refunded total from `row.refundState.totalRefunded`, which
+ * only the order/workshop/formation hydrators supply. Appointment rows carry
+ * a different `refundState` (admin-operations.js builds them per transaction,
+ * not per entity), so that read was permanently undefined for a rendez-vous
+ * and the refund line silently never appeared on one. Summing the row's own
+ * transactions works for every source.
+ */
 function paymentSummary(row) {
-  const status = row.payment?.status ?? "—";
-  const refunded = Number(row.refundState?.totalRefunded ?? 0);
-  if (refunded > 0.01) {
-    return (
-      <>
-        {status}
-        <span className="mt-1 block text-red-600">− {money(refunded)} remboursé</span>
-      </>
+  const status = row.payment?.status;
+  const label = status ? PAYMENT_STATUS_LABELS[status] ?? status : "—";
+
+  const transactions = (row.payment?.transactions ?? []).filter((transaction) => !transaction.isDeleted);
+  const refunded = transactions
+    .filter((transaction) => transaction.transactionType === "REFUND")
+    .reduce((total, transaction) => total + Number(transaction.amount ?? 0), 0);
+
+  // Only when it adds something. On a fully refunded payment the status
+  // already says "Remboursé" and repeating the figure underneath it is the
+  // noise that made this column ambiguous in the first place.
+  const worthShowing = refunded > 0.01 && status !== "REFUNDED";
+  if (!worthShowing) return label;
+
+  return (
+    <>
+      {label}
+      <span className="mt-1 block text-red-600">− {money(refunded)} remboursé</span>
+    </>
+  );
+}
+
+/**
+ * A payment status (PAID/PARTIALLY_PAID) answers whether money is still due,
+ * but it does not tell the salon what the money on this row represents. Make
+ * the installment history readable directly in the ledger: a booking can
+ * carry an online deposit followed by an in-salon balance, while a normal
+ * boutique sale has one full payment.
+ */
+function PaymentBreakdown({ row }) {
+  const payment = row.payment;
+  if (!payment) return <span className="text-xs text-gray-400">Aucun paiement</span>;
+
+  const transactions = (payment.transactions ?? []).filter((transaction) => !transaction.isDeleted);
+  const deposits = transactions.filter((transaction) => transaction.transactionType === "DEPOSIT");
+  const finalPayments = transactions.filter((transaction) => transaction.transactionType === "FINAL_PAYMENT");
+  const changeFees = finalPayments.filter((transaction) => ["SESSION_CHANGE_FEE", "SEATS_CHANGE_FEE"].includes(transaction.manualReference));
+  const balances = finalPayments.filter((transaction) => !["SESSION_CHANGE_FEE", "SEATS_CHANGE_FEE"].includes(transaction.manualReference));
+  const refunds = transactions.filter((transaction) => transaction.transactionType === "REFUND");
+  const sum = (items) => items.reduce((total, item) => total + Number(item.amount ?? 0), 0);
+  // Before the transaction marker existed, session/seat-change fees were
+  // recorded as FINAL_PAYMENT rows. The reservation keeps their total, so
+  // use it to separate that historical amount from the actual balance too.
+  const taggedChangeFeeTotal = sum(changeFees);
+  const historicalChangeFeeTotal = Math.max(0, Number(row.changeFeeAmount ?? 0) - taggedChangeFeeTotal);
+  const balanceTotal = Math.max(0, sum(balances) - historicalChangeFeeTotal);
+  const changeFeeTotal = taggedChangeFeeTotal + historicalChangeFeeTotal;
+  const hasDeposit = deposits.length > 0;
+  // remainingAmount is the original payment-plan balance. It deliberately
+  // survives as an audit trail even after an operation is cancelled/refunded,
+  // so it must not be presented to staff as money still owed in that state —
+  // that rule lives in lib/payments/collectible-balance.js, shared with the
+  // customer reservation list, the calendar drawer and the detail drawer.
+  const outstandingBalance = collectibleBalance({
+    remainingAmount: payment.remainingAmount,
+    paymentStatus: payment.status,
+    lifecycleStatus: row.status ?? payment.appointment?.status,
+  });
+
+  if (deposits.length === 0 && finalPayments.length === 0 && refunds.length === 0) {
+    return outstandingBalance > 0.01 ? (
+      <span className="text-xs font-medium text-amber-700">À encaisser : {money(outstandingBalance)}</span>
+    ) : (
+      <span className="text-xs text-gray-400">Aucun encaissement</span>
     );
   }
-  return status;
+
+  // This column is a record of what money *moved*, not a status — which is
+  // why a refunded row legitimately still shows what was collected: dropping
+  // it would erase the fact that 45 € was ever taken, and the books need it.
+  //
+  // But a green "Paiement complet · 45,00 €" sitting beside a red
+  // "Remboursé · 45,00 €" gives no clue that the two cancel out, and staff
+  // read the pair as the row's state. So once nothing is left, the
+  // collections are shown as spent rather than current, and the net is
+  // stated outright.
+  const collectedTotal = sum(deposits) + balanceTotal + changeFeeTotal;
+  const refundedTotal = sum(refunds);
+  const netCollected = collectedTotal - refundedTotal;
+  const fullyRefunded = refundedTotal > 0.01 && netCollected <= 0.01;
+  const spent = fullyRefunded ? "opacity-60 line-through decoration-1" : "";
+
+  return (
+    <div className="flex min-w-44 flex-col items-start gap-1">
+      <div className="flex flex-wrap gap-1">
+        {deposits.length > 0 && (
+          <span className={`inline-flex rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800 ${spent}`}>
+            Acompte · {money(sum(deposits))}
+          </span>
+        )}
+        {balanceTotal > 0.01 && (
+          <span className={`inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 ${spent}`}>
+            {hasDeposit ? "Solde" : "Paiement complet"} · {money(balanceTotal)}
+          </span>
+        )}
+        {changeFeeTotal > 0.01 && (
+          <span className={`inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-800 ${spent}`}>
+            Frais de modification · {money(changeFeeTotal)}
+          </span>
+        )}
+        {refunds.length > 0 && (
+          <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+            Remboursé · {money(refundedTotal)}
+          </span>
+        )}
+      </div>
+      {fullyRefunded && (
+        <span className="text-xs font-medium text-gray-500">Net encaissé : {money(0)}</span>
+      )}
+      {/* A partial refund is the case where the arithmetic is genuinely hard
+          to do at a glance, so it is the one that most needs stating. */}
+      {!fullyRefunded && refundedTotal > 0.01 && (
+        <span className="text-xs font-medium text-gray-600">Net encaissé : {money(netCollected)}</span>
+      )}
+      {outstandingBalance > 0.01 && (
+        <span className="text-xs font-medium text-amber-700">Solde à encaisser : {money(outstandingBalance)}</span>
+      )}
+    </div>
+  );
 }
 
 function UnifiedOperationsTable({ rows, onOpenDetail }) {
@@ -204,7 +358,8 @@ function UnifiedOperationsTable({ rows, onOpenDetail }) {
           <TableHead>Client</TableHead>
           <TableHead>N° TVA</TableHead>
           <TableHead>Statut</TableHead>
-          <TableHead>Paiement</TableHead>
+          <TableHead>État paiement</TableHead>
+          <TableHead>Règlement</TableHead>
           <TableHead>Facture</TableHead>
           <TableHead className="text-right">Montant</TableHead>
           <TableHead className="pr-6 text-right">Actions</TableHead>
@@ -255,6 +410,21 @@ function UnifiedOperationsTable({ rows, onOpenDetail }) {
                 )}
               </TableCell>
               <TableCell className="text-xs text-gray-500">{paymentSummary(row)}</TableCell>
+              <TableCell>
+                <PaymentBreakdown row={row} />
+                <details className="mt-2 min-w-[220px] text-xs">
+                  <summary className="cursor-pointer font-medium text-[#2f3a2e]">Historique des transactions</summary>
+                  <ul className="mt-2 space-y-2">
+                    {(row.payment?.transactions ?? []).filter((event) => !event.isDeleted).map((event) => (
+                      <li key={event.id}>
+                        <button type="button" onClick={() => onOpenDetail(event.id)} className="text-left underline underline-offset-2">
+                          {date(event.paidAt)} · {PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · {event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : "En ligne"} · {event.transactionType === "REFUND" ? "−" : ""}{money(event.amount)}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </TableCell>
               <TableCell>
                 <InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />
               </TableCell>

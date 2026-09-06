@@ -14,6 +14,7 @@ import {
   requiresAdminApprovalToCancel,
   CANCELLATION_WINDOW_HOURS,
 } from "@/lib/reservationRules";
+import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import { toIntlLocale } from "@/lib/intl-locale";
 import { AppointmentRescheduleModal } from "@/components/website/AppointmentRescheduleModal";
 
@@ -42,6 +43,15 @@ function formatAmount(amount, locale) {
     style: "currency",
     currency: "EUR",
   }).format(amount);
+}
+
+function amountStillDue(payment, reservationStatus) {
+  if (!payment) return 0;
+  return collectibleBalance({
+    remainingAmount: payment.remainingAmount,
+    paymentStatus: payment.status,
+    lifecycleStatus: reservationStatus,
+  });
 }
 
 // ─── Invoice link ──────────────────────────────────────────────────────────────
@@ -107,7 +117,7 @@ function CheckInTicket({ reservation }) {
   if (!reservation.checkInQr || !reservation.checkInCode) return null;
 
   const alreadyUsed = Boolean(reservation.checkedInAt);
-  const remainingDue = Number(reservation.payment?.remainingAmount ?? 0);
+  const remainingDue = amountStillDue(reservation.payment, reservation.status);
 
   return (
     <div className="mt-3 flex flex-col items-center gap-3 rounded-2xl border border-[#C8A46A]/20 bg-[#C8A46A]/5 px-4 py-5 text-center sm:flex-row sm:text-left">
@@ -356,11 +366,11 @@ function ReservationCard({ reservation, onCancelled }) {
                   {formatAmount(reservation.payment.paidAmount, locale)}
                 </span>
               </div>
-              {reservation.payment.remainingAmount > 0 && (
+              {amountStillDue(reservation.payment, reservation.status) > 0 && (
                 <div className="flex items-center justify-between text-xs sm:text-sm pt-1.5 sm:pt-2 border-t-2 border-gray-200">
                   <span className="text-gray-700 font-semibold">{t("remainingToPay")}</span>
                   <span className="font-bold text-amber-600 text-sm sm:text-base">
-                    {formatAmount(reservation.payment.remainingAmount, locale)}
+                    {formatAmount(amountStillDue(reservation.payment, reservation.status), locale)}
                   </span>
                 </div>
               )}

@@ -9,6 +9,7 @@ import { issueMissingRefundDocument, sendB2CRefundConfirmation } from "@/actions
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { CancelAndRefundDialog } from "@/components/dashboard/operations/CancelAndRefundDialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { collectibleBalance } from "@/lib/payments/collectible-balance";
 
 const money = (value) =>
   new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
@@ -85,6 +86,15 @@ function describeSource(payment) {
     };
   }
   return { kind: "—", title: "—", status: null, extra: null, customer: null };
+}
+
+function amountStillDue(payment, sourceStatus) {
+  if (!payment) return null;
+  return collectibleBalance({
+    remainingAmount: payment.remainingAmount,
+    paymentStatus: payment.status,
+    lifecycleStatus: sourceStatus,
+  });
 }
 
 /**
@@ -275,7 +285,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 <Row label="Type" value={payment?.paymentType} />
                 <Row label="Montant total" value={payment ? money(payment.totalAmount) : null} />
                 <Row label="Déjà réglé" value={payment ? money(payment.paidAmount) : null} />
-                <Row label="Solde restant" value={payment ? money(payment.remainingAmount) : null} />
+                <Row label="Solde restant" value={payment ? money(amountStillDue(payment, source.status)) : null} />
                 {canCancelAndRefund && (
                   <button
                     type="button"

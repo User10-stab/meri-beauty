@@ -103,6 +103,22 @@ describe("reservation cancellations queue refunds for manual execution", () => {
     });
   }
 
+  test("activity cancellations commit the reservation and financial worklist together", () => {
+    for (const [name, mod, model] of [
+      ["workshop", cancelWorkshop, "tx.workshopReservation.updateMany"],
+      ["formation", cancelFormation, "tx.formationReservation.updateMany"],
+    ]) {
+      const transactionStart = mod.indexOf("const cancellation = await prisma.$transaction(async (tx) =>");
+      const claim = mod.indexOf(model, transactionStart);
+      const queue = mod.indexOf("queueManualRefund(tx", transactionStart);
+      expect(transactionStart, name).toBeGreaterThan(-1);
+      expect(claim, name).toBeGreaterThan(transactionStart);
+      expect(queue, name).toBeGreaterThan(claim);
+      expect(mod.indexOf('FOR UPDATE', transactionStart), name).toBeGreaterThan(transactionStart);
+      expect(mod.indexOf('REFUND_ALLOCATION_INCOMPLETE', transactionStart), name).toBeGreaterThan(-1);
+    }
+  });
+
   // The atelier cancellation e-mail takes a `refunded` flag; the formation
   // one has no such wording at all. Only the former can get this wrong.
   test("the atelier cancellation e-mail no longer claims a refund happened", () => {

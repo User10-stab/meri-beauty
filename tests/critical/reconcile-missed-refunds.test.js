@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { settleRefundLeg } from "@/lib/refunds/settle-leg";
-import { reconcileMissedRefunds } from "../../lib/payments/reconcile-missed-refunds.js";
+import { reconcileMissedRefunds, __test__ } from "../../lib/payments/reconcile-missed-refunds.js";
 
 vi.mock("@/lib/email", () => ({ sendEmail: vi.fn().mockResolvedValue({}) }));
 vi.mock("@/lib/refunds/settle-leg", async (importOriginal) => {
@@ -260,5 +260,34 @@ describe("reconcileMissedRefunds — connected accounts (appointments)", () => {
 
     expect(result).toMatchObject({ checked: 0, reconciled: 0, failures: [] });
     expect(stripeClient.refunds.list).toHaveBeenCalledOnce(); // platform scan only
+  });
+});
+
+/**
+ * Stripe retries a failing webhook for 3 days then gives up silently. The 72h
+ * window matches that exactly — and leaves nothing at all for the one case it
+ * cannot cover: the scheduler running this job was itself down for longer.
+ */
+describe("the lookback window can be widened to recover from a scheduler outage", () => {
+  test("no configuration means the routine 72h window, unchanged", () => {
+    expect(__test__.configuredLookbackHours(undefined)).toBe(72);
+    expect(__test__.configuredLookbackHours("")).toBe(72);
+  });
+
+  test("a wider window is honoured, a narrower one is not", () => {
+    expect(__test__.configuredLookbackHours("240")).toBe(240);
+    // Narrowing below Stripe's own retry window would open a dead zone
+    // between "still retrying" and "this job would have caught it".
+    expect(__test__.configuredLookbackHours("1")).toBe(72);
+  });
+
+  test("a typo never silently disables the job", () => {
+    for (const bad of ["abc", "-5", "0"]) {
+      expect(__test__.configuredLookbackHours(bad)).toBe(72);
+    }
+  });
+
+  test("the window is capped, so a forgotten override cannot re-scan forever", () => {
+    expect(__test__.configuredLookbackHours("100000")).toBe(__test__.MAX_LOOKBACK_HOURS);
   });
 });

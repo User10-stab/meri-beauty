@@ -7,6 +7,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
 import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
 
 const STATUS_LABEL = {
   PENDING: "En attente",
@@ -64,6 +65,12 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [toComplete, setToComplete] = useState(null);
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  // A card collection is only accepted as EXTERNAL_TERMINAL now, and the
+  // terminal's receipt reference is what ties the row to a real charge. The
+  // existing "j'ai bien reçu" checkbox already says "ou carte APPROUVÉE sur le
+  // terminal", so it doubles as the approval attestation rather than adding a
+  // second tick for the same fact.
+  const [terminalReference, setTerminalReference] = useState("");
   const [isPending, startTransition] = useTransition();
   const [rowLoadingId, setRowLoadingId] = useState(null);
 
@@ -71,7 +78,11 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     const q = search.trim().toLowerCase();
     const result = appointments.filter((a) => {
       if (q) {
-        const hay = `${a.customer?.fullName} ${a.customer?.email} ${a.serviceName}`.toLowerCase();
+        // Flattened by getAllAppointments, like every other field on the row.
+        // As `a.customer?.fullName` these were both permanently undefined, so
+        // searching by name or e-mail matched nothing and only the service
+        // name was ever searchable.
+        const hay = `${a.customerName ?? ""} ${a.customerEmail ?? ""} ${a.serviceName ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (statusFilter && a.status !== statusFilter) return false;
@@ -154,7 +165,13 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     if (!toComplete || !paymentConfirmed) return;
     setRowLoadingId(toComplete.id);
     startTransition(async () => {
-      const result = await completeAppointment(toComplete.id, { method: completeMethod, paymentConfirmed });
+      const result = await completeAppointment(toComplete.id, {
+        method: completeMethod,
+        paymentConfirmed,
+        ...(completeMethod === "EXTERNAL_TERMINAL"
+          ? { terminalApproved: paymentConfirmed, terminalReference: terminalReference.trim() }
+          : {}),
+      });
       setRowLoadingId(null);
       setToComplete(null);
       if (result.success) {
@@ -346,10 +363,21 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         <button
                           type="button"
                           onClick={() => {
-                            if (
-                              a.payment?.status === "PARTIALLY_PAID" ||
-                              (a.payment?.status === "PENDING" && a.payment?.paymentType === "ON_SITE")
-                            ) {
+                            // getAllAppointments flattens the payment onto the
+                            // row (paymentStatus / paymentType / totalAmount /
+                            // paidAmount) — there is no nested `payment`
+                            // object. Reading `a.payment?.status` was always
+                            // undefined, so every "Terminer" took the direct
+                            // path below, the server rightly refused with
+                            // "Mode de paiement requis", and a balance could
+                            // not be settled from this screen at all.
+                            //
+                            // The predicate is shared with the calendar drawer
+                            // and mirrors completeAppointment's own rule, which
+                            // now also covers an appointment with no Payment
+                            // row — the "payer au salon" case, where the money
+                            // was previously recorded nowhere at all.
+                            if (appointmentCollectsAtCounter(a)) {
                               setPaymentConfirmed(false);
                               setToComplete(a);
                             } else {
@@ -396,7 +424,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
       <ConfirmDialog
         open={!!toReject}
         title="Refuser ce rendez-vous ?"
-        message={toReject ? `Le rendez-vous de ${toReject.customer?.fullName} sera ${toReject.status === "PENDING" ? "refusé" : "annulé"}.` : ""}
+        message={toReject ? `Le rendez-vous de ${toReject.customerName} sera ${toReject.status === "PENDING" ? "refusé" : "annulé"}.` : ""}
         confirmLabel="Refuser"
         danger
         loading={isPending}
@@ -427,11 +455,13 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
           onClick={(e) => { if (e.target === e.currentTarget) setToComplete(null); }}
         >
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h3 className="text-base font-semibold text-gray-800">Encaisser le solde restant</h3>
+            <h3 className="text-base font-semibold text-gray-800">
+              {toComplete.paymentStatus ? "Encaisser le solde restant" : "Encaisser le paiement"}
+            </h3>
             <p className="mt-1.5 text-sm text-gray-500">
-              {toComplete.customer?.fullName} doit encore régler{" "}
+              {toComplete.customerName} doit {toComplete.paymentStatus ? "encore " : ""}régler{" "}
               <span className="font-medium text-gray-700">
-                €{(toComplete.payment.totalAmount - toComplete.payment.paidAmount).toFixed(2)}
+                €{appointmentAmountDueAtCounter(toComplete).toFixed(2)}
               </span>{" "}
               sur place. Une facture sera émise pour le montant total dès l'encaissement.
             </p>
@@ -443,8 +473,19 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e]"
             >
               <option value="CASH">Espèces</option>
-              <option value="CARD">Carte</option>
+              <option value="EXTERNAL_TERMINAL">Carte — terminal</option>
             </select>
+
+            {completeMethod === "EXTERNAL_TERMINAL" && (
+              <input
+                value={terminalReference}
+                onChange={(e) => setTerminalReference(e.target.value)}
+                maxLength={100}
+                placeholder="Référence du ticket du terminal"
+                aria-label="Référence du ticket du terminal"
+                className="mt-2 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e]"
+              />
+            )}
 
             <label className="mt-4 flex items-start gap-2 text-xs font-medium text-gray-700">
               <input
@@ -468,7 +509,11 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               <button
                 type="button"
                 onClick={handleCompleteWithPayment}
-                disabled={isPending || !paymentConfirmed}
+                disabled={
+                  isPending ||
+                  !paymentConfirmed ||
+                  (completeMethod === "EXTERNAL_TERMINAL" && !terminalReference.trim())
+                }
                 className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f3a2e]/90 disabled:opacity-50"
               >
                 {isPending ? <Loader2 size={14} className="animate-spin" /> : "Encaisser et terminer"}

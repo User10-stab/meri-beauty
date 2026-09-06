@@ -20,6 +20,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
+import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import { getStaffColor } from "./staffColors";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -59,6 +61,15 @@ function formatPrice(amount) {
     style: "currency",
     currency: "EUR",
   }).format(amount);
+}
+
+function amountStillDue(appointment) {
+  if (!appointment) return 0;
+  return collectibleBalance({
+    remainingAmount: appointment.remainingAmount,
+    paymentStatus: appointment.paymentStatus ?? appointment.payment?.status ?? null,
+    lifecycleStatus: appointment.status,
+  });
 }
 
 const PAYMENT_STATUS_LABELS = {
@@ -123,6 +134,12 @@ export function AppointmentDrawer({
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  // A card collection is only accepted as EXTERNAL_TERMINAL now, and the
+  // terminal's receipt reference is what ties the row to a real charge. The
+  // existing "j'ai bien reçu" checkbox already says "ou carte APPROUVÉE sur le
+  // terminal", so it doubles as the approval attestation rather than adding a
+  // second tick for the same fact.
+  const [terminalReference, setTerminalReference] = useState("");
 
   // Close on Escape
   useEffect(() => {
@@ -171,7 +188,11 @@ export function AppointmentDrawer({
 
   async function handleComplete() {
     if (!appointment?.id || isPending) return;
-    if (appointment.paymentStatus === "PARTIALLY_PAID") {
+    // Was PARTIALLY_PAID alone, so a PENDING/ON_SITE balance could not be
+    // settled from the calendar at all, and an appointment with no Payment
+    // row completed silently with the money recorded nowhere. Shared with the
+    // appointments list; completeAppointment enforces the same rule.
+    if (appointmentCollectsAtCounter(appointment)) {
       setShowPaymentDialog(true);
       return;
     }
@@ -195,7 +216,13 @@ export function AppointmentDrawer({
     setIsPending(true);
     setFeedback(null);
     try {
-      const result = await completeAppointment(appointment.id, { method: completeMethod, paymentConfirmed });
+      const result = await completeAppointment(appointment.id, {
+        method: completeMethod,
+        paymentConfirmed,
+        ...(completeMethod === "EXTERNAL_TERMINAL"
+          ? { terminalApproved: paymentConfirmed, terminalReference: terminalReference.trim() }
+          : {}),
+      });
       setShowPaymentDialog(false);
       if (result.success) {
         setFeedback({ type: "success", message: result.message ?? t("success.appointmentCompleted") });
@@ -252,10 +279,15 @@ export function AppointmentDrawer({
   const paymentLabel = paymentConfig ? t(paymentConfig.key) : null;
   const paymentClassName = PAYMENT_STATUS_STYLES[appointment.paymentStatus] ?? null;
   const actionsDone = feedback?.type === "success";
+  // Null only where there is genuinely nothing to show. With no Payment row
+  // both amounts are null, and the old expression collapsed to null — the
+  // dialog then offered to collect nothing for a service that has a price.
   const balanceDue =
     appointment.totalAmount !== null && appointment.paidAmount !== null
       ? appointment.totalAmount - appointment.paidAmount
-      : null;
+      : appointmentCollectsAtCounter(appointment)
+        ? appointmentAmountDueAtCounter(appointment)
+        : null;
 
   const startHour = appointment.startTime
     ? new Date(appointment.startTime).getHours() * 60 +
@@ -385,11 +417,11 @@ export function AppointmentDrawer({
                 value={formatPrice(appointment.paidAmount)}
               />
             )}
-            {appointment.remainingAmount !== null && (
+            {amountStillDue(appointment) > 0 && (
               <DrawerRow
                 icon={CreditCard}
                 label={t("appointmentPayment.paymentDue")}
-                value={formatPrice(appointment.remainingAmount)}
+                value={formatPrice(amountStillDue(appointment))}
               />
             )}
             <div className="flex items-start gap-3 py-2.5">
@@ -443,8 +475,19 @@ export function AppointmentDrawer({
                 className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
               >
                 <option value="CASH">Espèces</option>
-                <option value="CARD">Carte</option>
+                <option value="EXTERNAL_TERMINAL">Carte — terminal</option>
               </select>
+
+              {completeMethod === "EXTERNAL_TERMINAL" && (
+                <input
+                  value={terminalReference}
+                  onChange={(e) => setTerminalReference(e.target.value)}
+                  maxLength={100}
+                  placeholder="Référence du ticket du terminal"
+                  aria-label="Référence du ticket du terminal"
+                  className="mt-2 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                />
+              )}
               <label className="mt-3 flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-200">
                 <input
                   type="checkbox"
@@ -466,7 +509,11 @@ export function AppointmentDrawer({
                 <button
                   type="button"
                   onClick={handleCompleteWithPayment}
-                  disabled={isPending || !paymentConfirmed}
+                  disabled={
+                    isPending ||
+                    !paymentConfirmed ||
+                    (completeMethod === "EXTERNAL_TERMINAL" && !terminalReference.trim())
+                  }
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#3d4e3b] disabled:opacity-60"
                 >
                   {isPending && <Loader2 size={12} className="animate-spin" />}

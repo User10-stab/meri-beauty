@@ -1,6 +1,7 @@
 "use server";
 
 import { auth } from "@/auth";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
@@ -9,13 +10,16 @@ import { createAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
-import { resolveServiceVatPolicy, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer, calculateVatTotals } from "@/lib/tax-policy";
+import { resolveServiceVatPolicy, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer } from "@/lib/tax-policy";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { renderTicketPdf } from "@/lib/pdf/render";
+import { collectionTicketFields } from "@/lib/cash-book/ticket-identity";
 import { formatSalonAddress } from "@/lib/format-address";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
+import { resolveCounterPriceAdjustment } from "@/lib/payments/counter-price-adjustment";
+import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import {
   createNotificationsBulk,
   buildAppointmentCancelledNotification,
@@ -736,10 +740,13 @@ export async function markAppointmentNoShow(appointmentId) {
  * it, since the checkout webhook only invoices fully-paid-online bookings.
  *
  * @param {string} appointmentId
- * @param {{ method?: "CASH" | "CARD" | "EXTERNAL_TERMINAL", terminalApproved?: boolean, terminalReference?: string|null }} [options] - method is required only
+ * @param {{ method?: "CASH" | "EXTERNAL_TERMINAL", terminalApproved?: boolean, terminalReference?: string|null }} [options] - method is required only
  *   when a balance is actually due.
  */
-export async function completeAppointment(appointmentId, { method, paymentConfirmed, terminalApproved, terminalReference } = {}) {
+export async function completeAppointment(
+  appointmentId,
+  { method, paymentConfirmed, terminalApproved, terminalReference, finalTotal, adjustmentReason } = {}
+) {
   try {
     if (!appointmentId) {
       return { success: false, message: "ID de rendez-vous manquant" };
@@ -772,7 +779,7 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
           },
         },
         staffService: { include: { service: true } },
-        payment: true,
+        payment: { include: { invoice: true } },
       },
     });
 
@@ -791,15 +798,59 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     }
 
     const payment = appointment.payment;
-    const hasBalanceDue = Boolean(payment) && Number(payment.remainingAmount) > 0 && (
+    const onSitePrice = Number(appointment.staffService?.price ?? 0);
+    const priceAdjustment = resolveCounterPriceAdjustment({
+      baseTotal: Number(payment?.totalAmount ?? onSitePrice),
+      paidAmount: Number(payment?.paidAmount ?? 0),
+      finalTotal,
+      reason: adjustmentReason,
+    });
+    if (!priceAdjustment.success) return priceAdjustment;
+
+    const hasBalanceDue = Boolean(payment) && priceAdjustment.amountDue > 0 && (
       payment.status === "PARTIALLY_PAID" ||
-      (payment.status === "PENDING" && payment.paymentType === "ON_SITE")
+      (payment.status === "PENDING" && payment.paymentType === "ON_SITE") ||
+      (payment.status === "PAID" && priceAdjustment.changed)
     );
 
-    if (hasBalanceDue && !["CASH", "CARD", "EXTERNAL_TERMINAL"].includes(method)) {
-      return { success: false, message: "Mode de paiement requis pour encaisser le solde restant." };
+    // An appointment booked "payer au salon", taken in MANUAL confirmation
+    // mode, or created by staff carries no Payment row at all —
+    // shouldCreatePaymentRecord (lib/reservation-payment.js) is only true when
+    // money is taken online at booking time. Completing one used to write
+    // nothing but a status: no transaction, no cash-book line, no invoice,
+    // and therefore no row in Opérations. The service had happened and the
+    // money was recorded nowhere at all, which also kept it out of the till
+    // total and the Z-closure.
+    //
+    // The price is StaffService.price — the same figure the booking quoted
+    // (see create-reservation.js: rawTotalAmount). A zero-priced service
+    // collects nothing and still completes in one click.
+    const collectsOnSite = !payment && priceAdjustment.amountDue > 0;
+
+    // Both paths hand money across a counter, so both need the same
+    // attestations: the system can no more observe cash here than it can when
+    // settling a balance.
+    const collectsMoney = hasBalanceDue || collectsOnSite;
+
+    // A card payment is only accepted as EXTERNAL_TERMINAL, which carries the
+    // terminal's approval and its receipt reference. Plain "CARD" used to be
+    // accepted with no evidence at all: of 29 card collections in the dev
+    // database, exactly one had a reference, so 28 could not be reconciled
+    // against the terminal's end-of-day batch. Cash is at least tied to a
+    // piece number and an open till session; a bare card row was tied to
+    // nothing. The boutique POS (lib/validations/point-of-sale.js) and the
+    // refund path (validateManualRefundConfirmation) already required this —
+    // settlement was the one place that did not.
+    if (collectsMoney && !["CASH", "EXTERNAL_TERMINAL"].includes(method)) {
+      return {
+        success: false,
+        message: hasBalanceDue
+          ? "Mode de paiement requis pour encaisser le solde restant."
+          : "Mode de paiement requis pour encaisser ce rendez-vous.",
+        requiresPaymentConfirmation: true,
+      };
     }
-    if (hasBalanceDue && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
+    if (collectsMoney && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
       return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket.", requiresPaymentConfirmation: true };
     }
     // The system has no way to observe a physical cash handoff or a card
@@ -807,7 +858,7 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     // balance paid (and the system would treat it as real, invoiceable
     // revenue) before any money actually changed hands, exactly like the
     // POS terminal-sale risk this mirrors. See docs/PRODUCTION_ISSUES.md #2.
-    if (hasBalanceDue && paymentConfirmed !== true) {
+    if (collectsMoney && paymentConfirmed !== true) {
       return { success: false, message: "Confirmez avoir bien reçu le paiement avant de terminer le rendez-vous.", requiresPaymentConfirmation: true };
     }
 
@@ -829,18 +880,49 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
 
       let invoice = null;
       let balance = 0;
+      let collection = null;
+      let updatedPayment = payment;
 
-      if (hasBalanceDue) {
-        balance = Number(payment.remainingAmount);
-
-        const updatedPayment = await tx.payment.update({
+      if (priceAdjustment.changed && payment && !collectsMoney) {
+        updatedPayment = await tx.payment.update({
           where: { id: payment.id },
           data: {
-            paidAmount: payment.totalAmount,
-            remainingAmount: 0,
-            status: "PAID",
+            totalAmount: priceAdjustment.finalTotal,
+            remainingAmount: priceAdjustment.amountDue,
+            status: priceAdjustment.amountDue > 0 ? "PARTIALLY_PAID" : "PAID",
           },
         });
+      }
+
+      if (collectsMoney) {
+        balance = priceAdjustment.amountDue;
+
+        // Payment.appointmentId is @unique, so if the customer's own online
+        // payment lands between the read above and this write, the create
+        // throws P2002 and the whole completion rolls back — rather than
+        // recording the same service as collected twice.
+        updatedPayment = payment
+          ? await tx.payment.update({
+              where: { id: payment.id },
+              data: {
+                totalAmount: priceAdjustment.finalTotal,
+                paidAmount: priceAdjustment.finalTotal,
+                remainingAmount: 0,
+                status: "PAID",
+              },
+            })
+          : await tx.payment.create({
+              data: {
+                appointmentId,
+                depositAmount: 0,
+                totalAmount: priceAdjustment.finalTotal,
+                paidAmount: priceAdjustment.finalTotal,
+                remainingAmount: 0,
+                paymentType: "ON_SITE",
+                status: "PAID",
+                paidAt: new Date(),
+              },
+            });
 
         // Attach to whichever till session is open so the counter cash is
         // reconcilable at close (see lib/cash-sessions.js). Without this, an
@@ -857,7 +939,7 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
         // actually enter the till total — see model Transaction.pieceNumber.
         const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.APPOINTMENT) : null;
 
-        await tx.transaction.create({
+        collection = await tx.transaction.create({
           data: {
             paymentId: updatedPayment.id,
             amount: balance,
@@ -883,6 +965,13 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
               description: appointment.staffService.service?.name ?? "Prestation",
               totalAmount: Number(updatedPayment.totalAmount),
               discountAmount: Number(updatedPayment.discountAmount),
+              // Signed, and only when the counter actually moved the price —
+              // otherwise the document reconstructs a price that was never
+              // quoted (worst on a booking that also carried a promo code).
+              adjustmentAmount: priceAdjustment.changed
+                ? priceAdjustment.finalTotal - priceAdjustment.previousTotal
+                : 0,
+              adjustmentReason: priceAdjustment.reason,
             }),
             vatRate: completionVatPolicy.vatRate,
             vatTreatment: completionVatPolicy.vatTreatment,
@@ -892,7 +981,50 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
         }
       }
 
-      return { claimed: true, invoice, balance };
+      if (
+        priceAdjustment.changed &&
+        !collectsMoney &&
+        updatedPayment &&
+        !payment?.invoice &&
+        hasInvoiceableVatIdentity(appointment.user)
+      ) {
+        const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
+        invoice = await issueInvoice(tx, {
+          paymentId: updatedPayment.id,
+          source: "APPOINTMENT",
+          totalInclVat: Number(updatedPayment.totalAmount),
+          customer: buildInvoiceCustomer(appointment.user),
+          lines: buildServiceInvoiceLines({
+            description: appointment.staffService.service?.name ?? "Prestation",
+            totalAmount: Number(updatedPayment.totalAmount),
+            discountAmount: Number(updatedPayment.discountAmount ?? 0),
+          }),
+          vatRate: completionVatPolicy.vatRate,
+          vatTreatment: completionVatPolicy.vatTreatment,
+          taxCountryCode: completionVatPolicy.taxCountryCode,
+          taxNote: completionVatPolicy.taxNote,
+        });
+      }
+
+      if (priceAdjustment.changed) {
+        await tx.auditLog.create({
+          data: {
+            actorId: authCheck.userId,
+            actorRole: authCheck.userRole,
+            action: AUDIT_ACTIONS.RESERVATION_PRICE_ADJUSTED,
+            entityType: "Appointment",
+            entityId: appointmentId,
+            before: { totalAmount: priceAdjustment.previousTotal },
+            after: { totalAmount: priceAdjustment.finalTotal },
+            metadata: {
+              reason: priceAdjustment.reason,
+              paidAmountBeforeAdjustment: priceAdjustment.paidAmount,
+            },
+          },
+        });
+      }
+
+      return { claimed: true, invoice, balance, collection };
     });
 
     if (!result.claimed) {
@@ -901,60 +1033,83 @@ export async function completeAppointment(appointmentId, { method, paymentConfir
     const { invoice, balance } = result;
 
     if (balance > 0) {
-      // The invoice PDF is never auto-e-mailed here either, even when one
-      // was created (VIES-valid company) — only a ticket goes out
-      // automatically. Marie sends the real invoice manually from
-      // Opérations. Mirrors settleReservation's own split.
-      const serviceDescription = appointment.staffService.service?.name ?? "Prestation";
-      const salon = await prisma.salon.findUnique({
-        where: { id: "main-salon" },
-        select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
-      });
-      const { vatRate } = resolveServiceVatPolicy({ customer: appointment.user });
-      const { totalExclVat, vatAmount, totalInclVat } = calculateVatTotals(payment.totalAmount, vatRate);
-      const ticketPdf = await renderTicketPdf({
-        orderNumber: invoice?.number ?? appointmentId,
-        issuedAt: new Date(),
-        sellerName: salon?.legalName || "Meri Beauty",
-        sellerAddress: formatSalonAddress(salon),
-        sellerVatNumber: salon?.vatNumber ?? null,
-        subtotalExclVat: totalExclVat,
-        vatRate,
-        vatAmount,
-        totalInclVat,
-        lines: [{ description: serviceDescription, quantity: 1, unitPrice: totalInclVat }],
-      }).catch((err) => {
-        console.error("[completeAppointment] ticket PDF render failed:", err);
-        return null;
-      });
+      try {
+        // The invoice PDF is never auto-e-mailed here either, even when one
+        // was created (VIES-valid company) — only a ticket goes out
+        // automatically. Marie sends the real invoice manually from
+        // Opérations. Mirrors settleReservation's own split.
+        const serviceDescription = appointment.staffService.service?.name ?? "Prestation";
+        const salon = await prisma.salon.findUnique({
+          where: { id: "main-salon" },
+          select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
+        });
+        const { vatRate } = resolveServiceVatPolicy({ customer: appointment.user });
+        // "Le solde" is wrong when nothing had ever been paid before now.
+        const collectedLabel = collectsOnSite ? "Le paiement" : "Le solde";
+        const receipt = collectionTicketFields(result.collection, invoice, vatRate);
+        const ticketPdf = await renderTicketPdf({
+          ...receipt,
+          sellerName: salon?.legalName || "Meri Beauty",
+          sellerAddress: formatSalonAddress(salon),
+          sellerVatNumber: salon?.vatNumber ?? null,
+          lines: [{ description: serviceDescription, quantity: 1, unitPrice: receipt.totalInclVat }],
+        }).catch((err) => {
+          console.error("[completeAppointment] ticket PDF render failed:", err);
+          return null;
+        });
 
-      const holdsInvoiceForPeppol = Boolean(invoice) && isPeppolMandatoryCustomer(appointment.user);
-      const pendingInvoiceNote = !invoice
-        ? ""
-        : holdsInvoiceForPeppol
-        ? ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
-        : ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément par e-mail.`;
+        const holdsInvoiceForPeppol = Boolean(invoice) && isPeppolMandatoryCustomer(appointment.user);
+        const pendingInvoiceNote = !invoice
+          ? ""
+          : holdsInvoiceForPeppol
+          ? ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
+          : ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément par e-mail.`;
 
-      sendEmail({
-        to: appointment.user.email,
-        subject: "Votre ticket — solde réglé – Meri Beauty",
-        text:
-          `Bonjour ${appointment.user.fullName},\n\n` +
-          `Le solde de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
-          `Votre ticket est joint à cet e-mail.${pendingInvoiceNote}\n\nL'équipe Meri Beauty`,
-        html:
-          `<p>Bonjour ${appointment.user.fullName},</p>` +
-          `<p>Le solde de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
-          `Votre ticket est joint à cet e-mail.${pendingInvoiceNote ? ` ${pendingInvoiceNote.trim()}` : ""}</p><p>L'équipe Meri Beauty</p>`,
-        ...(ticketPdf ? { attachments: [{ filename: `ticket-${appointmentId}.pdf`, content: ticketPdf }] } : {}),
-      }).catch((err) => console.error("[completeAppointment] ticket email failed:", err));
+        sendEmail({
+          to: appointment.user.email,
+          // "Solde" is wrong for a first payment — the on-site case collects
+          // the whole price, and there was never a balance. The body already
+          // says so (collectedLabel); the subject line said otherwise.
+          subject: collectsOnSite
+            ? "Votre ticket — paiement reçu – Meri Beauty"
+            : "Votre ticket — solde réglé – Meri Beauty",
+          text:
+            `Bonjour ${appointment.user.fullName},\n\n` +
+            `${collectedLabel} de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
+            `Votre ticket est joint à cet e-mail.${pendingInvoiceNote}\n\nL'équipe Meri Beauty`,
+          html:
+            `<p>Bonjour ${appointment.user.fullName},</p>` +
+            `<p>${collectedLabel} de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
+            `Votre ticket est joint à cet e-mail.${pendingInvoiceNote ? ` ${pendingInvoiceNote.trim()}` : ""}</p><p>L'équipe Meri Beauty</p>`,
+          ...(ticketPdf ? { attachments: [{ filename: `${receipt.ticketNumber}.pdf`, content: ticketPdf }] } : {}),
+        }).catch((err) => console.error("[completeAppointment] ticket email failed:", err));
 
-      if (method === "CASH") revalidateCaisseRoutes();
+        if (method === "CASH") revalidateCaisseRoutes();
+      } catch (postCommitError) {
+        // Everything above runs AFTER the transaction committed: the money is
+        // recorded, the invoice is issued, the booking is closed. A ticket is a
+        // courtesy on top of that, so nothing here may turn a settlement that
+        // succeeded into one reported as failed.
+        //
+        // collectionTicketFields is the specific hazard — it throws rather than
+        // returning null, and it sits outside renderTicketPdf's own .catch(). It
+        // cannot throw today, because every precondition it checks is guaranteed
+        // by the branch above. But a false failure here is not a cosmetic bug:
+        // createCounterWalkInService deletes the appointment it just created
+        // whenever this action reports failure, so a post-commit throw would ask
+        // it to unwind a collection that really happened.
+        console.error("[POST_COMMIT] settlement succeeded but the ticket step failed:", postCommitError);
+      }
     }
 
+    revalidatePath("/dashboard/operations");
     return {
       success: true,
-      message: hasBalanceDue ? "Rendez-vous terminé — solde encaissé et facturé." : "Rendez-vous marqué comme terminé.",
+      message: collectsOnSite
+        ? "Rendez-vous terminé — paiement encaissé et enregistré."
+        : hasBalanceDue
+          ? "Rendez-vous terminé — solde encaissé et facturé."
+          : "Rendez-vous marqué comme terminé.",
     };
   } catch (error) {
     if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {

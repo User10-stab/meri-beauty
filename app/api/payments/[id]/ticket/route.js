@@ -4,7 +4,8 @@ import { auth } from "@/auth";
 import { canAccessDashboard } from "@/lib/authorization";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
-import { resolveServiceVatPolicy, calculateVatTotals } from "@/lib/tax-policy";
+import { resolveServiceVatPolicy } from "@/lib/tax-policy";
+import { collectionTicketFields } from "@/lib/cash-book/ticket-identity";
 import { describeReservationPayment } from "@/lib/cash-book/reservation-tickets";
 
 // react-pdf needs Node APIs — not edge-compatible.
@@ -22,12 +23,10 @@ const CUSTOMER_SELECT = { fullName: true, isCompany: true, vatNumber: true, vatV
  * staff with nothing to hand over: no invoice (by design) AND no ticket
  * (missing capability, not by design).
  *
- * When an Invoice does exist (a VIES-valid company), its frozen fields are
- * reprinted verbatim — same as sendReservationTicketsForSession's batch. When
- * it doesn't, the ticket is computed straight from the Payment using the
- * exact same VAT policy settleReservation/completeAppointment already apply
- * at settlement time, so the figure shown here always matches what the
- * customer was actually charged.
+ * Each recorded collection gets its own stable ticket, date and amount.
+ * An invoice supplies its seller/VAT policy and a separate reference, never
+ * the ticket's identity or full-sale amount. Without an invoice, use the
+ * service VAT policy. No recorded collection means no payment receipt.
  *
  * A boutique/POS order keeps its own route (app/api/orders/[id]/ticket) —
  * real per-item line items, and it must work even before any Payment exists.
@@ -46,6 +45,10 @@ export async function GET(req, { params }) {
       totalAmount: true,
       paidAmount: true,
       orderId: true,
+      transactions: {
+        where: { isDeleted: false, transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] }, amount: { gt: 0 } },
+        orderBy: [{ paidAt: "asc" }, { id: "asc" }],
+      },
       invoice: {
         select: {
           number: true,
@@ -105,9 +108,6 @@ export async function GET(req, { params }) {
   if (payment.invoice) {
     const inv = payment.invoice;
     ticketFields = {
-      orderNumber: inv.number,
-      invoiceNumber: inv.number,
-      issuedAt: inv.issuedAt,
       sellerName: inv.sellerName,
       sellerAddress: inv.sellerAddress,
       sellerVatNumber: inv.sellerVatNumber,
@@ -122,33 +122,36 @@ export async function GET(req, { params }) {
       select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
     });
     const { vatRate } = resolveServiceVatPolicy({ customer });
-    // A ticket proves what has actually been collected. For a deposit,
-    // totalAmount is the full reservation price while paidAmount is the
-    // smaller amount received now. Once the balance is collected,
-    // paidAmount naturally becomes the complete amount.
-    const { totalExclVat, vatAmount, totalInclVat } = calculateVatTotals(payment.paidAmount, vatRate);
+    // Amounts and original dates come from each collection below, not the
+    // mutable aggregate paidAmount or the full reservation price.
     ticketFields = {
-      orderNumber: id,
-      issuedAt: new Date(),
       sellerName: salon?.legalName || "Meri Beauty",
       sellerAddress: formatSalonAddress(salon),
       sellerVatNumber: salon?.vatNumber ?? null,
-      subtotalExclVat: totalExclVat,
       vatRate,
-      vatAmount,
-      totalInclVat,
     };
   }
 
-  const pdf = await renderTicketPdf({
-    ...ticketFields,
-    lines: [{ description, quantity: 1, unitPrice: Number(ticketFields.totalInclVat) }],
+  const transactionId = new URL(req.url).searchParams.get("transactionId");
+  const collections = payment.transactions.filter((item) => !transactionId || item.id === transactionId);
+  if (!collections.length) {
+    return NextResponse.json({ error: "Aucun encaissement correspondant à ce ticket." }, { status: 404 });
+  }
+  // One page per collection: an older deposit never turns into a full-payment receipt.
+  const tickets = collections.map((transaction) => {
+    const receipt = collectionTicketFields(transaction, payment.invoice, ticketFields.vatRate);
+    return {
+      ...ticketFields,
+      ...receipt,
+      lines: [{ description, quantity: 1, unitPrice: receipt.totalInclVat }],
+    };
   });
+  const pdf = await renderTicketPdf(tickets);
 
   return new NextResponse(pdf, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="ticket-${payment.invoice?.number ?? id}.pdf"`,
+      "Content-Disposition": `inline; filename="${tickets.length === 1 ? tickets[0].ticketNumber : `tickets-${id}`}.pdf"`,
     },
   });
 }

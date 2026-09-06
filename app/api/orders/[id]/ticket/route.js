@@ -41,6 +41,7 @@ export async function GET(req, { params }) {
       where: { id },
       select: {
         orderNumber: true,
+        payment: { select: { invoice: { select: { number: true } } } },
         createdAt: true,
         totalExclVat: true,
         vatRate: true,
@@ -69,6 +70,7 @@ export async function GET(req, { params }) {
 
   const pdf = await renderTicketPdf({
     orderNumber: order.orderNumber,
+    invoiceNumber: order.payment?.invoice?.number ?? null,
     issuedAt: order.createdAt,
     sellerName: salon?.legalName || "Meri Beauty",
     sellerAddress: formatSalonAddress(salon),

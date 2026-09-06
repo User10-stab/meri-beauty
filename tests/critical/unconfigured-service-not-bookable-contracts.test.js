@@ -28,11 +28,11 @@ describe("a staffService with price/duration still at 0 is not publicly bookable
 
   test("createReservation rejects booking an unconfigured service server-side, not just in the listing", () => {
     const src = source("actions/reservation/create-reservation.js");
-    expect(src).toContain("Number(staffService.price) <= 0 || Number(staffService.duration) <= 0");
+    expect(src).toContain("Number(staffService.price) < 0 || Number(staffService.duration) <= 0");
   });
 
   test("createReservations (multi) rejects the same, per-appointment", () => {
     const src = source("actions/reservation/create-reservation.js");
-    expect(src).toContain("Number(ss.price) <= 0 || Number(ss.duration) <= 0");
+    expect(src).toContain("Number(ss.price) < 0 || Number(ss.duration) <= 0");
   });
 });

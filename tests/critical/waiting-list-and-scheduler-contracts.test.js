@@ -143,12 +143,16 @@ describe("the in-process scheduler is observable", () => {
 
   test("a heartbeat is recorded on every tick, including failing ones", () => {
     expect(jobs).toContain("export function getJobsHeartbeat");
-    expect(jobs).toContain("beat.lastRunAt = Date.now()");
+    // Scoped to runJobs: recordExternalJobRun writes the same heartbeat for
+    // the /api/cron runner and appears earlier in the file, so a whole-file
+    // ordering check would compare the wrong two lines.
+    const runJobs = jobs.slice(jobs.indexOf("async function runJobs()"));
+    expect(runJobs).toContain("beat.lastRunAt = Date.now()");
     // Written after allSettled — a thrown job is still a live tick.
-    expect(jobs.indexOf("const settled = await Promise.allSettled")).toBeLessThan(
-      jobs.indexOf("beat.lastRunAt = Date.now()")
+    expect(runJobs.indexOf("const settled = await Promise.allSettled")).toBeLessThan(
+      runJobs.indexOf("beat.lastRunAt = Date.now()")
     );
-    expect(jobs).toContain("beat.lastFailedJobs = failedJobs");
+    expect(runJobs).toContain("beat.lastFailedJobs = failedJobs");
   });
 
   test("the heartbeat survives hot reload re-importing the module", () => {

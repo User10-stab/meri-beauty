@@ -188,7 +188,12 @@ export async function POST(req) {
 
   if (event.type === "charge.dispute.created") {
     try {
-      await handleChargeDisputeCreated(event.data.object);
+      // Same reason as charge.refunded above: a disputed appointment charge
+      // is a Connect direct charge, and looking its session up on the
+      // platform account finds nothing — the dossier would then be filed
+      // with no payment attached, on the one event type where a human has a
+      // deadline to respond.
+      await handleChargeDisputeCreated(event.data.object, event.account ?? null);
       return NextResponse.json({ received: true });
     } catch (err) {
       captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
@@ -356,9 +361,12 @@ function round2(n) {
  * reservation actions), so payment_intent -> session -> Payment is the one
  * lookup path that works everywhere a session id is all we're given.
  */
-async function findPaymentByChargePaymentIntent(paymentIntentId) {
+async function findPaymentByChargePaymentIntent(paymentIntentId, connectedAccountId = null) {
   if (!paymentIntentId) return null;
-  const sessions = await stripe.checkout.sessions.list({ payment_intent: paymentIntentId, limit: 1 });
+  const sessions = await stripe.checkout.sessions.list(
+    { payment_intent: paymentIntentId, limit: 1 },
+    connectedAccountId ? { stripeAccount: connectedAccountId } : undefined,
+  );
   const session = sessions.data[0];
   if (!session) return null;
   return prisma.payment.findUnique({
@@ -508,7 +516,7 @@ async function handleChargeRefunded(charge, connectedAccountId = null) {
     return;
   }
 
-  const payment = await findPaymentByChargePaymentIntent(charge.payment_intent);
+  const payment = await findPaymentByChargePaymentIntent(charge.payment_intent, connectedAccountId);
   if (!payment) {
     // Most likely an appointment (Connect direct charge) — not reachable
     // from this platform-level webhook, see the P10 note above.
@@ -649,8 +657,8 @@ function mapStripeDisputeStatus(status) {
  * alert alone was a one-shot notification with nowhere durable to track who's
  * handling it, what was submitted, or the eventual outcome.
  */
-async function handleChargeDisputeCreated(dispute) {
-  const payment = await findPaymentByChargePaymentIntent(dispute.payment_intent);
+async function handleChargeDisputeCreated(dispute, connectedAccountId = null) {
+  const payment = await findPaymentByChargePaymentIntent(dispute.payment_intent, connectedAccountId);
   const amount = round2((dispute.amount ?? 0) / 100);
 
   if (payment) {
@@ -1463,6 +1471,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
           amount: changeFeeAmount,
           method: "ONLINE",
           transactionType: "FINAL_PAYMENT",
+          manualReference: "SESSION_CHANGE_FEE",
           paidAt: new Date(),
         },
       });
@@ -1629,6 +1638,7 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
           amount: changeFeeAmount,
           method: "ONLINE",
           transactionType: "FINAL_PAYMENT",
+          manualReference: "SEATS_CHANGE_FEE",
           paidAt: new Date(),
         },
       });

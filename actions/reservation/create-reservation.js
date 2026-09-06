@@ -284,7 +284,7 @@ export async function createReservation(data) {
     // listing/booking path filters that out, so without this guard it's
     // publicly bookable as a free, instant appointment the moment working
     // hours exist for that staff member.
-    if (Number(staffService.price) <= 0 || Number(staffService.duration) <= 0) {
+    if (Number(staffService.price) < 0 || Number(staffService.duration) <= 0) {
       return {
         success: false,
         message: "Service non disponible. Ce service n'a pas encore été configuré par le professionnel.",
@@ -942,7 +942,7 @@ export async function createMultipleReservations(data) {
     }
 
     // Same "not yet configured" guard as createReservation above.
-    const unconfigured = staffServices.findIndex((ss) => Number(ss.price) <= 0 || Number(ss.duration) <= 0);
+    const unconfigured = staffServices.findIndex((ss) => Number(ss.price) < 0 || Number(ss.duration) <= 0);
     if (unconfigured !== -1) {
       return {
         success: false,

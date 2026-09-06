@@ -87,7 +87,14 @@ test.describe("atelier — acompte paid online, refunded by hand", () => {
           where: { sessionId: workshop.session.id, customerId: customer.id },
           include: { payment: { include: { transactions: true } } },
         });
-        return row?.payment?.transactions?.length ? row : null;
+        // Both conditions, not just the transactions. Prisma resolves an
+        // `include` as separate queries, so at READ COMMITTED this row can be
+        // read *before* the fulfilment transaction commits while its
+        // transactions are read after it — the reservation then looks
+        // PENDING_DEPOSIT with a settled payment hanging off it, which is a
+        // state that never actually existed. Waiting for the status the
+        // assertions below depend on removes the skew.
+        return row?.status === "CONFIRMED" && row.payment?.transactions?.length ? row : null;
       },
       { what: `the atelier reservation for session ${workshop.session.id} to be fulfilled by checkout.session.completed` },
     );
@@ -172,7 +179,10 @@ test.describe("atelier — acompte paid online, refunded by hand", () => {
           where: { id: operation.id },
           include: { legs: true },
         });
-        return row?.legs?.every((leg) => leg.status === "SUCCEEDED") ? row : null;
+        // Neon reads can briefly lag the webhook transaction. The operation
+        // status is the actual close-the-loop contract, so wait for it too
+        // rather than observing a leg before its derived status is visible.
+        return row?.status === "COMPLETED" && row.legs.every((leg) => leg.status === "SUCCEEDED") ? row : null;
       },
       { what: "charge.refunded to settle the atelier refund leg" },
     );
@@ -189,18 +199,63 @@ test.describe("atelier — acompte paid online, refunded by hand", () => {
     expect(summary.refundedByMethod.ONLINE).toBeCloseTo(EXPECTED_ACOMPTE, 2);
     expect(summary.status).toBe("REFUNDED");
 
-    // Now, and only now, the customer is told.
+    // Now, and only now, an admin may send the optional B2C confirmation.
+    // This must remain an explicit Operations action: the webhook is evidence
+    // that money moved, not authority to contact the customer on its own.
+    await page.goto("/dashboard/operations?tab=workshops&page=1");
+    const settledRow = page
+      .getByRole("row")
+      .filter({ hasText: workshop.activity.title })
+      .filter({ hasText: customer.email });
+    await expect(settledRow).toHaveCount(1, { timeout: 15000 });
+    await settledRow.getByRole("button", { name: /voir\s*\/\s*gérer/i }).click();
+    const settledDrawer = page.getByRole("dialog", { name: /détail de la transaction/i });
+    await expect(settledDrawer).toBeVisible();
+    await settledDrawer.getByRole("button", { name: /envoyer la confirmation/i }).click();
+
     await waitFor(
       async () => {
         const row = await prisma.refundOperation.findUnique({ where: { id: operation.id } });
         return row?.customerNotifiedAt ? row : null;
       },
-      { what: "the customer to be notified once the refund actually landed" },
+      { what: "the customer to be notified once the admin chooses to send it" },
     );
 
     // The seat went back on sale — a full refund releases capacity.
     const cancelled = await prisma.workshopReservation.findUnique({ where: { id: reservation.id } });
     expect(cancelled.status).toBe("CANCELLED");
+
+    // ── A cancelled booking cannot still be owed money ────────────────────
+    //
+    // Cancelling leaves the money wherever it lands — refunded here, forfeited
+    // on the non-refundable path — but either way the salon will never collect
+    // another cent against this reservation. Both fields that answer "how much
+    // is still outstanding" have to say zero.
+    //
+    // This branch is why the check is here rather than only on the forfeit
+    // path: before the fix, 28 of the 34 wrong rows in the dev database came
+    // from the *refund* branch, reading "REFUNDED" and "still owes €60" at the
+    // same time. Nothing surfaced it because the counter only searches
+    // CONFIRMED reservations.
+    expect(
+      Number(cancelled.balanceDue),
+      "a cancelled reservation still claims a collectable balance",
+    ).toBeCloseTo(0, 2);
+
+    const settledPayment = await prisma.payment.findUnique({
+      where: { id: paymentId },
+      select: { remainingAmount: true, paidAmount: true, totalAmount: true, paymentType: true },
+    });
+    expect(
+      Number(settledPayment.remainingAmount),
+      "a cancelled booking's payment still claims money is owed",
+    ).toBeCloseTo(0, 2);
+
+    // And the record of what actually happened survives: this was a deposit,
+    // on a larger booking, and paidAmount — what the revenue reports sum — is
+    // untouched by the cleanup.
+    expect(settledPayment.paymentType).toBe("DEPOSIT");
+    expect(Number(settledPayment.totalAmount)).toBeGreaterThan(Number(settledPayment.paidAmount));
 
     // Issuing a real credit note into the real counters must not leave a hole.
     await assertNumberingContiguous("creditNote", `NC${new Date().getFullYear()}-`);

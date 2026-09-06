@@ -76,32 +76,59 @@ export async function listRefundsInStripe(paymentIntentId, connectedAccountId = 
   return result.data ?? [];
 }
 
+function stripeCli() {
+  const localStripe = join(homedir(), ".local", "bin", "stripe");
+  return process.env.STRIPE_CLI_PATH || (existsSync(localStripe) ? localStripe : "stripe");
+}
+
+function cliEnv() {
+  return { ...process.env, STRIPE_API_KEY: process.env.STRIPE_SECRET_KEY };
+}
+
 /**
- * Redelivers the most recent `charge.refunded` event, to prove settlement is
- * idempotent.
+ * Redelivers the `charge.refunded` event for one specific charge, to prove
+ * settlement is idempotent.
  *
  * Stripe guarantees at-least-once delivery, so a webhook arriving twice is
  * ordinary operation rather than an exotic failure — and the consequence of
- * getting it wrong is a duplicated REFUND row and a second "your refund is
- * done" e-mail to the customer.
+ * getting it wrong is a duplicated REFUND row, a ledger that says more was
+ * refunded than was ever collected, and a second "your refund is done"
+ * e-mail to the customer.
+ *
+ * Scoped to a charge rather than taking whatever is newest. The Stripe test
+ * key is shared with the rest of the team, and "the most recent
+ * charge.refunded on the account" is quite likely to be somebody else's — a
+ * test that resent theirs would pass while proving nothing about ours, and
+ * would replay a stranger's settlement into this database on the way past.
  *
  * Uses the Stripe CLI because event redelivery is not in the REST API. Same
  * binary resolution as scripts/dev-with-stripe-webhooks.mjs.
+ *
+ * @param {{ chargeId: string, connectedAccountId?: string|null, searchDepth?: number }} input
+ * @returns {Promise<string>} the redelivered event id
  */
-export async function resendLatestChargeRefundedEvent() {
-  const localStripe = join(homedir(), ".local", "bin", "stripe");
-  const cli = process.env.STRIPE_CLI_PATH || (existsSync(localStripe) ? localStripe : "stripe");
+export async function resendChargeRefundedEvent({ chargeId, connectedAccountId = null, searchDepth = 50 }) {
+  if (!chargeId) throw new Error("resendChargeRefundedEvent: chargeId is required");
+
+  const cli = stripeCli();
+  const accountArgs = connectedAccountId ? ["--stripe-account", connectedAccountId] : [];
 
   const { stdout } = await execFileAsync(
     cli,
-    ["events", "list", "--type", "charge.refunded", "--limit", "1"],
-    { env: { ...process.env, STRIPE_API_KEY: process.env.STRIPE_SECRET_KEY } },
+    ["events", "list", "--type", "charge.refunded", "--limit", String(searchDepth), ...accountArgs],
+    { env: cliEnv() },
   );
-  const eventId = JSON.parse(stdout)?.data?.[0]?.id;
-  if (!eventId) throw new Error("No charge.refunded event found to resend.");
 
-  await execFileAsync(cli, ["events", "resend", eventId], {
-    env: { ...process.env, STRIPE_API_KEY: process.env.STRIPE_SECRET_KEY },
-  });
-  return eventId;
+  const events = JSON.parse(stdout)?.data ?? [];
+  const mine = events.find((event) => event?.data?.object?.id === chargeId);
+  if (!mine) {
+    throw new Error(
+      `No charge.refunded event found for charge ${chargeId} in the last ${searchDepth} events. ` +
+        "Either the settlement webhook never fired, or the shared test key is busy enough that the " +
+        "event has already fallen outside the search window — raise searchDepth if it is the latter.",
+    );
+  }
+
+  await execFileAsync(cli, ["events", "resend", mine.id, ...accountArgs], { env: cliEnv() });
+  return mine.id;
 }

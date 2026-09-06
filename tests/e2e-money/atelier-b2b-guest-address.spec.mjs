@@ -123,7 +123,14 @@ test.describe("atelier — B2B booking with no address on file", () => {
           where: { sessionId: workshop.session.id, customerId: customer.id },
           include: { payment: { include: { transactions: true, invoice: true } }, customer: true },
         });
-        return row?.payment?.transactions?.length ? row : null;
+        // Both conditions, not just the transactions. Prisma resolves an
+        // `include` as separate queries, so at READ COMMITTED this row can be
+        // read *before* the fulfilment transaction commits while its
+        // transactions are read after it — the reservation then looks
+        // PENDING_DEPOSIT with a settled payment hanging off it, which is a
+        // state that never actually existed. Waiting for the status the
+        // assertions below depend on removes the skew.
+        return row?.status === "CONFIRMED" && row.payment?.transactions?.length ? row : null;
       },
       { what: `the B2B atelier reservation for session ${workshop.session.id} to be fulfilled` },
     );

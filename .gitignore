@@ -94,3 +94,7 @@ github-actions.pub
 # Playwright money-suite HTML report (regenerated on every run; the suite's
 # own artefacts, not source). /test-results is already ignored above.
 /playwright-report-money/
+
+# Playwright dashboard-suite HTML report (regenerated on every run; the
+# suite own artefacts, not source). /test-results is already ignored above.
+/playwright-report-dashboard/

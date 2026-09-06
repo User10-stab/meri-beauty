@@ -20,6 +20,7 @@ import {
 } from "@/actions/boutique/point-of-sale";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { isCashSessionOpen, getSuggestedOpeningFloat, openCashSession } from "@/actions/dashboard/cash-sessions";
+import { createBrowserUuid } from "@/lib/browser-uuid";
 
 const emptyAddress = {
   addressLine1: "",
@@ -96,14 +97,14 @@ export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession =
   const walkInEmailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkInEmail.trim());
 
   function resetAttempt() {
-    const next = crypto.randomUUID();
+    const next = createBrowserUuid();
     localStorage.setItem("meri-pos-attempt-key", next);
     setAttemptKey(next);
     return next;
   }
 
   useEffect(() => {
-    const stored = localStorage.getItem("meri-pos-attempt-key") || crypto.randomUUID();
+    const stored = localStorage.getItem("meri-pos-attempt-key") || createBrowserUuid();
     localStorage.setItem("meri-pos-attempt-key", stored);
     setAttemptKey(stored);
     recoverPointOfSaleCheckout(stored).then((result) => {

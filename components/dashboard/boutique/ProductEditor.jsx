@@ -13,6 +13,7 @@ import { BarcodeLabelDialog } from "@/components/dashboard/boutique/BarcodeLabel
 import { BarcodeTextScannerDialog } from "@/components/dashboard/boutique/BarcodeTextScannerDialog";
 import { createProduct, updateProduct, deleteProduct, generateUniqueSku } from "@/actions/boutique/products";
 import { getProductCategories } from "@/actions/boutique/categories";
+import { createBrowserUuid } from "@/lib/browser-uuid";
 
 /** Not a real EAN/UPC — a locally-unique fallback so a product with no
  * supplier barcode can still get a printable label and be found by
@@ -31,7 +32,7 @@ const STATUS_OPTIONS = [
 
 function emptyVariant(barcode) {
   return {
-    _key: crypto.randomUUID(),
+    _key: createBrowserUuid(),
     id: null,
     name: "Standard",
     sku: "",

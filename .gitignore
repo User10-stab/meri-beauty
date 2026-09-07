@@ -36,7 +36,8 @@ yarn-error.log*
 # bare "env" copies (the .env* rule above does not match a name without the dot)
 /env
 /env.*
-
+# User-uploaded files
+/public/uploads/
 # vercel
 .vercel
 

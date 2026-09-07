@@ -79,9 +79,11 @@ export function StaffPerformanceClient({ initialStaff }) {
     return initialStaff
       .map((s) => {
         const metrics = computeMetrics(s.appointments, range);
+        const formationMetrics = computeMetrics(s.formations ?? [], range);
+        const totalRevenue = metrics.revenue + formationMetrics.revenue;
         const pct = s.contract?.commissionPercentage ? Number(s.contract.commissionPercentage) : null;
-        const commissionOwed = pct != null ? Math.round(metrics.revenue * (pct / 100) * 100) / 100 : null;
-        return { ...s, metrics, commissionOwed };
+        const commissionOwed = pct != null ? Math.round(totalRevenue * (pct / 100) * 100) / 100 : null;
+        return { ...s, metrics, formationMetrics, totalRevenue, commissionOwed };
       })
       .filter((s) => {
         if (!search.trim()) return true;
@@ -96,18 +98,20 @@ export function StaffPerformanceClient({ initialStaff }) {
       rows.reduce(
         (acc, s) => ({
           completed: acc.completed + s.metrics.completed,
-          revenue: acc.revenue + s.metrics.revenue,
+          formationsCompleted: acc.formationsCompleted + s.formationMetrics.completed,
+          revenue: acc.revenue + s.totalRevenue,
           commission: acc.commission + (s.commissionOwed ?? 0),
         }),
-        { completed: 0, revenue: 0, commission: 0 }
+        { completed: 0, formationsCompleted: 0, revenue: 0, commission: 0 }
       ),
     [rows]
   );
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard icon={<CalendarCheck size={18} />} label="Rendez-vous effectués" value={totals.completed} />
+        <SummaryCard icon={<CalendarCheck size={18} />} label="Formations effectuées" value={totals.formationsCompleted} />
         <SummaryCard icon={<TrendingUp size={18} />} label="Chiffre d'affaires généré" value={formatPrice(totals.revenue)} />
         <SummaryCard icon={<Wallet size={18} />} label="Commissions dues" value={formatPrice(totals.commission)} />
       </div>
@@ -152,6 +156,7 @@ export function StaffPerformanceClient({ initialStaff }) {
                 <TableHead className="pl-6">Staff</TableHead>
                 <TableHead>Contrat</TableHead>
                 <TableHead>RDV effectués</TableHead>
+                <TableHead>Formations effectuées</TableHead>
                 <TableHead>Annulés / No-show</TableHead>
                 <TableHead>À venir</TableHead>
                 <TableHead>CA généré</TableHead>
@@ -187,16 +192,21 @@ export function StaffPerformanceClient({ initialStaff }) {
                     <span className="font-medium text-gray-700 dark:text-dark-6">{s.metrics.completed}</span>
                   </TableCell>
                   <TableCell>
-                    <span className="text-gray-500 dark:text-dark-6">{s.metrics.cancelled} / {s.metrics.noShow}</span>
+                    <span className="font-medium text-gray-700 dark:text-dark-6">{s.formationMetrics.completed}</span>
                   </TableCell>
                   <TableCell>
-                    <span className="text-gray-500 dark:text-dark-6">{s.metrics.upcoming}</span>
+                    <span className="text-gray-500 dark:text-dark-6">
+                      {s.metrics.cancelled + s.formationMetrics.cancelled} / {s.metrics.noShow + s.formationMetrics.noShow}
+                    </span>
                   </TableCell>
                   <TableCell>
-                    <span className="font-medium text-gray-700 dark:text-dark-6">{formatPrice(s.metrics.revenue)}</span>
+                    <span className="text-gray-500 dark:text-dark-6">{s.metrics.upcoming + s.formationMetrics.upcoming}</span>
                   </TableCell>
                   <TableCell>
-                    <span className="text-gray-500 dark:text-dark-6">{formatPrice(s.metrics.collected)}</span>
+                    <span className="font-medium text-gray-700 dark:text-dark-6">{formatPrice(s.totalRevenue)}</span>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-gray-500 dark:text-dark-6">{formatPrice(s.metrics.collected + s.formationMetrics.collected)}</span>
                   </TableCell>
                   <TableCell className="pr-6">
                     {s.commissionOwed != null ? (

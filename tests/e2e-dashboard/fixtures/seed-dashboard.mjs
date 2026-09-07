@@ -298,6 +298,40 @@ export async function seedAppointment({
   return { service, staffService, appointment, payment: paymentRow };
 }
 
+/**
+ * A completed, paid booking on an existing formation session — seeded
+ * directly, the same way seedAppointment's `payment: "paid"` branch skips
+ * Stripe: this suite proves attribution and display, not the checkout flow.
+ */
+export async function seedFormationReservation({ session, customer, price = 200 }) {
+  const reservation = await prisma.formationReservation.create({
+    data: {
+      sessionId: session.id,
+      customerId: customer.id,
+      seatsCount: 1,
+      status: "COMPLETED",
+      totalPrice: price,
+      depositAmount: 0,
+      balanceDue: 0,
+    },
+  });
+
+  const payment = await prisma.payment.create({
+    data: {
+      formationReservationId: reservation.id,
+      totalAmount: price,
+      paidAmount: price,
+      remainingAmount: 0,
+      depositAmount: 0,
+      paymentType: "ONLINE",
+      status: "PAID",
+      paidAt: new Date(),
+    },
+  });
+
+  return { reservation, payment };
+}
+
 export async function seedAppointmentInvoice({ staff, customer, createdByUserId }) {
   const runId = getRunId();
 
@@ -558,9 +592,10 @@ export async function readStock(variantId) {
 export async function purgeDashboardRun(runId = getRunId()) {
   const users = await prisma.user.findMany({
     where: { email: { contains: runId } },
-    select: { id: true },
+    select: { id: true, email: true },
   });
   const userIds = users.map((user) => user.id);
+  const userEmails = users.map((user) => user.email);
 
   const deleted = {};
   // The seeded invoice carries no legal number, so unlike the money suite's
@@ -622,6 +657,28 @@ export async function purgeDashboardRun(runId = getRunId()) {
   deleted.orders = (await prisma.order.deleteMany({ where: { id: { in: orderIds } } })).count;
   deleted.variants = (await prisma.productVariant.deleteMany({ where: { id: { in: variantIds } } })).count;
   deleted.products = (await prisma.product.deleteMany({ where: { slug: { contains: runId } } })).count;
+
+  // Formation rows. Payment before FormationReservation
+  // (Payment.formationReservationId has no cascade), FormationReservation
+  // before Formation (FormationSession keeps ON DELETE RESTRICT against its
+  // reservations, so a still-booked session blocks the Formation's own
+  // cascade into FormationSession). The Animator is the auto-upserted
+  // profile resolveFormationAnimatorId() creates when a formation is
+  // assigned to a tagged staff member in the UI — same email, safe to drop
+  // once nothing references it. Scoped by title (not customerId alone) so a
+  // formation left with no reservation is still cleaned up.
+  deleted.formationPayments = (await prisma.payment.deleteMany({
+    where: { formationReservation: { customerId: { in: userIds } } },
+  })).count;
+  deleted.formationReservations = (await prisma.formationReservation.deleteMany({
+    where: { customerId: { in: userIds } },
+  })).count;
+  deleted.formations = (await prisma.formation.deleteMany({
+    where: { title: { contains: runId } },
+  })).count;
+  deleted.animators = (await prisma.animator.deleteMany({
+    where: { email: { in: userEmails } },
+  })).count;
 
   deleted.users = (await prisma.user.deleteMany({ where: { id: { in: userIds } } })).count;
 

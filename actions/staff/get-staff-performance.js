@@ -5,11 +5,17 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 
 /**
- * Per-staff performance snapshot for admin monitoring: appointment counts by
- * status and revenue/commission figures, computed from raw per-appointment
- * data so the client can re-aggregate for any date range without refetching.
- * Revenue is scoped to appointments only — workshops/formations are run by
- * the separate, unlinked Animator directory, not by Staff.
+ * Per-staff performance snapshot for admin monitoring: appointment and
+ * formation counts by status, plus revenue/commission figures, computed from
+ * raw per-booking data so the client can re-aggregate for any date range
+ * without refetching. Appointments attribute to Staff directly via
+ * StaffService. Formations don't — a formation session is assigned an
+ * Animator, not a Staff row — so formation revenue is attributed by matching
+ * FormationSession.animator.email to Staff.user.email, the same bridge
+ * create-formation.js's resolveFormationAnimatorId() maintains and
+ * get-formations.js already uses for staff visibility. Workshops/ateliers
+ * are intentionally left out: nothing bridges their Animator assignment back
+ * to a specific staff email the way formations do.
  *
  * @returns {{ success: boolean, data?: Array<object>, message?: string }}
  */
@@ -50,6 +56,42 @@ export async function getStaffPerformance() {
       },
     });
 
+    const staffEmails = staffList.map((s) => s.user.email).filter(Boolean);
+    const formationReservations = staffEmails.length
+      ? await prisma.formationReservation.findMany({
+          where: { session: { animator: { email: { in: staffEmails } } } },
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            session: {
+              select: {
+                startDate: true,
+                animator: { select: { email: true } },
+                formation: { select: { title: true } },
+              },
+            },
+            payment: { select: { status: true, totalAmount: true, paidAmount: true } },
+          },
+        })
+      : [];
+
+    const formationsByEmail = new Map();
+    for (const r of formationReservations) {
+      const email = r.session.animator?.email;
+      if (!email) continue;
+      if (!formationsByEmail.has(email)) formationsByEmail.set(email, []);
+      formationsByEmail.get(email).push({
+        id: r.id,
+        date: (r.session.startDate ?? r.createdAt).toISOString(),
+        status: r.status,
+        serviceName: r.session.formation.title,
+        amountTotal: r.payment ? Number(r.payment.totalAmount) : 0,
+        amountPaid: r.payment ? Number(r.payment.paidAmount) : 0,
+        paymentStatus: r.payment?.status ?? null,
+      });
+    }
+
     const data = staffList.map((s) => {
       const appointments = s.staffServices.flatMap((ss) =>
         ss.appointments.map((a) => ({
@@ -80,6 +122,7 @@ export async function getStaffPerformance() {
             }
           : null,
         appointments,
+        formations: formationsByEmail.get(s.user.email) ?? [],
       };
     });
 

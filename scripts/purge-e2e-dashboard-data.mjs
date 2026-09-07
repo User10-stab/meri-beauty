@@ -52,9 +52,10 @@ const invoices = await prisma.invoice.findMany({
  * loosely-built list of run ids picks up both — which is exactly what
  * happened once. Nothing was lost (Transaction_paymentId_fkey is RESTRICT and
  * aborted the delete), but relying on a foreign key to be the safety net is
- * luck, not design: this script does not understand workshop or formation
+ * luck, not design: this script still does not understand workshop
  * reservations and would delete their customers out from under them if the
- * database let it.
+ * database let it. (Formation reservations are handled — see
+ * purgeDashboardRun's formation block.)
  *
  * A dashboard run always seeds at least one `e2e+staff.` or `e2e+admin.`
  * account, an

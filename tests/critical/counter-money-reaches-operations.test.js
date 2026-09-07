@@ -37,13 +37,13 @@ const COLLECTORS = [
 
 describe("every counter collection writes a transaction", () => {
   test.each(COLLECTORS)("%s (%s)", (path) => {
-    const module = source(path);
-    expect(module, `${path} collects money without writing a Transaction`).toContain(
+    const code = source(path);
+    expect(code, `${path} collects money without writing a Transaction`).toContain(
       "tx.transaction.create(",
     );
     // Inside the settling transaction, never after it — a collection recorded
     // outside the commit can be lost while the booking still looks paid.
-    expect(module).toContain("prisma.$transaction(");
+    expect(code).toContain("prisma.$transaction(");
   });
 
   test("the walk-in sale reuses the appointment path rather than inventing one", () => {

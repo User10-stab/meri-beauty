@@ -38,27 +38,27 @@ const CANCELLATION_PATHS = [
  */
 describe("cancelling a booking clears what it is owed", () => {
   test.each(CANCELLATION_PATHS)("%s — the reservation's balance is cleared", (path) => {
-    const module = source(path);
-    const claimAt = module.indexOf('status: "CANCELLED"');
+    const code = source(path);
+    const claimAt = code.indexOf('status: "CANCELLED"');
     expect(claimAt, `${path}: no cancellation update found`).toBeGreaterThan(-1);
     // Scoped to the cancellation update itself: a `balanceDue: 0` somewhere
     // else in the file would satisfy a bare toContain while leaving the
     // cancellation path untouched.
-    const block = module.slice(claimAt, claimAt + 600);
+    const block = code.slice(claimAt, claimAt + 600);
     expect(block, `${path}: a cancelled booking still carries a balanceDue`).toContain("balanceDue: 0");
   });
 
   test.each(CANCELLATION_PATHS)("%s — the payment stops claiming an outstanding amount", (path) => {
-    const module = source(path);
-    expect(module).toContain(
+    const code = source(path);
+    expect(code).toContain(
       'await tx.payment.update({ where: { id: payment.id }, data: { remainingAmount: 0 } });',
     );
   });
 
   test.each(CANCELLATION_PATHS)("%s — it happens before the money branches, not inside one", (path) => {
-    const module = source(path);
-    const zeroAt = module.indexOf("data: { remainingAmount: 0 }");
-    const firstBranchAt = module.search(/if \((?:refundPayment|refundDeposit) && payment\)/);
+    const code = source(path);
+    const zeroAt = code.indexOf("data: { remainingAmount: 0 }");
+    const firstBranchAt = code.search(/if \((?:refundPayment|refundDeposit) && payment\)/);
     expect(firstBranchAt, `${path}: no refund branch found`).toBeGreaterThan(-1);
     // Inside a branch it would only apply to that branch — which is exactly
     // how the refund path came to be the worst offender.
@@ -69,15 +69,15 @@ describe("cancelling a booking clears what it is owed", () => {
   });
 
   test.each(CANCELLATION_PATHS)("%s — what was actually paid is left alone", (path) => {
-    const module = source(path);
+    const code = source(path);
     // The fix must not touch the record of the money that really arrived.
     // paidAmount is what the revenue reports sum (REVENUE_STATUSES in
     // get-reports-data.js), and paymentType/totalAmount are how anyone later
     // sees this was a part-payment on a larger booking.
-    expect(module, `${path}: the cancellation rewrites what was collected`).not.toContain(
+    expect(code, `${path}: the cancellation rewrites what was collected`).not.toContain(
       "paidAmount: 0",
     );
-    expect(module).not.toContain("totalAmount: 0");
+    expect(code).not.toContain("totalAmount: 0");
   });
 
   test("the refund path is covered too, not just the forfeited deposit", () => {
@@ -85,10 +85,10 @@ describe("cancelling a booking clears what it is owed", () => {
     // hands off to queueManualRefund. All of them are downstream of the single
     // zeroing above, which is the property this asserts.
     for (const [path] of CANCELLATION_PATHS) {
-      const module = source(path);
-      const zeroAt = module.indexOf("data: { remainingAmount: 0 }");
+      const code = source(path);
+      const zeroAt = code.indexOf("data: { remainingAmount: 0 }");
       for (const marker of ['data: { status: "PAID" }', 'data: { status: "REFUNDED" }']) {
-        const at = module.indexOf(marker);
+        const at = code.indexOf(marker);
         if (at === -1) continue;
         expect(zeroAt, `${path}: ${marker} runs before the balance is cleared`).toBeLessThan(at);
       }

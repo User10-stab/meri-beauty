@@ -98,9 +98,9 @@ describe("an invoice explains the price it charges", () => {
       "actions/appointment/manage-appointment.js",
       "lib/reservations/settle-reservation.js",
     ]) {
-      const module = source(path);
-      expect(module, path).toContain("adjustmentAmount: priceAdjustment.changed");
-      expect(module, path).toContain("adjustmentReason: priceAdjustment.reason");
+      const code = source(path);
+      expect(code, path).toContain("adjustmentAmount: priceAdjustment.changed");
+      expect(code, path).toContain("adjustmentReason: priceAdjustment.reason");
     }
   });
 });
@@ -126,9 +126,9 @@ describe("nothing after the commit can undo a collection", () => {
       "actions/appointment/manage-appointment.js",
       "lib/reservations/settle-reservation.js",
     ]) {
-      const module = source(path);
-      expect(module, path).toContain("} catch (postCommitError) {");
-      expect(module, path).toContain(
+      const code = source(path);
+      expect(code, path).toContain("} catch (postCommitError) {");
+      expect(code, path).toContain(
         "[POST_COMMIT] settlement succeeded but the ticket step failed:",
       );
 
@@ -137,15 +137,15 @@ describe("nothing after the commit can undo a collection", () => {
       // Scoped to the catch body itself. A fixed-size window runs past the
       // closing brace into the action's own error handler, which legitimately
       // rethrows — and then this assertion fails for the wrong reason.
-      const catchAt = module.indexOf("} catch (postCommitError) {");
-      const lineStart = module.lastIndexOf("\n", catchAt) + 1;
-      const indent = module.slice(lineStart, catchAt);
-      const closeAt = module.indexOf(`\n${indent}}`, catchAt);
+      const catchAt = code.indexOf("} catch (postCommitError) {");
+      const lineStart = code.lastIndexOf("\n", catchAt) + 1;
+      const indent = code.slice(lineStart, catchAt);
+      const closeAt = code.indexOf(`\n${indent}}`, catchAt);
       // Comment lines are stripped first. The block explains itself in prose
       // that necessarily uses the words being forbidden — the first version of
       // this assertion failed on its own explanation, which is a way of
       // testing the comment rather than the code.
-      const catchBlock = module
+      const catchBlock = code
         .slice(catchAt, closeAt)
         .split("\n")
         .filter((line) => !line.trim().startsWith("//"))
@@ -162,10 +162,10 @@ describe("nothing after the commit can undo a collection", () => {
       "actions/appointment/manage-appointment.js",
       "lib/reservations/settle-reservation.js",
     ]) {
-      const module = source(path);
-      const tryAt = module.indexOf("try {\n", module.indexOf("balance > 0"));
-      const ticketAt = module.indexOf("collectionTicketFields(", tryAt);
-      const catchAt = module.indexOf("} catch (postCommitError) {");
+      const code = source(path);
+      const tryAt = code.indexOf("try {\n", code.indexOf("balance > 0"));
+      const ticketAt = code.indexOf("collectionTicketFields(", tryAt);
+      const catchAt = code.indexOf("} catch (postCommitError) {");
       expect(tryAt, path).toBeGreaterThan(-1);
       expect(ticketAt, path).toBeGreaterThan(tryAt);
       expect(catchAt, path).toBeGreaterThan(ticketAt);

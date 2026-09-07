@@ -1,0 +1,2 @@
+# Permit the dedicated CI account to activate staging releases only.
+staging-deploy ALL=(root) NOPASSWD: /usr/local/sbin/meri-staging-deploy [0-9a-f]*

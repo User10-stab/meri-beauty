@@ -1,0 +1,82 @@
+name: Deploy staging
+
+on:
+  push:
+    branches: [staging]
+    paths-ignore:
+      - ".github/**"
+      - "infra/staging/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate and deploy staging
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out staging
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run critical tests
+        run: npm run test:critical
+
+      - name: Configure deployment SSH
+        env:
+          STAGING_KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+        run: |
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$STAGING_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$STAGING_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Upload immutable staging release
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+        run: |
+          target="$STAGING_USER@$STAGING_HOST"
+          ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes "$target" \
+            "install -d -m 750 /srv/meribeauty/app/incoming/${GITHUB_SHA}"
+          rsync -a --delete \
+            --exclude '.env' \
+            --exclude 'staging.env' \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '.next' \
+            -e "ssh -i $HOME/.ssh/id_ed25519 -o IdentitiesOnly=yes" \
+            ./ "$target:/srv/meribeauty/app/incoming/${GITHUB_SHA}/"
+
+      - name: Activate staging release
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_USER: ${{ secrets.STAGING_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes \
+            "$STAGING_USER@$STAGING_HOST" \
+            "sudo /usr/local/sbin/meri-staging-deploy ${GITHUB_SHA}"

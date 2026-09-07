@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Root-owned helper invoked only by the staging-deploy account through sudo.
+set -Eeuo pipefail
+
+readonly APP_USER="g21lolpopi"
+readonly APP_ROOT="/srv/meribeauty/app"
+readonly INCOMING_DIR="${APP_ROOT}/incoming"
+readonly RELEASES_DIR="${APP_ROOT}/releases"
+readonly ENV_FILE="${APP_ROOT}/staging.env"
+readonly SERVICE="meri-staging.service"
+
+release="${1:-}"
+if [[ ! "$release" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Expected a full lowercase Git commit SHA." >&2
+  exit 64
+fi
+
+incoming_release="${INCOMING_DIR}/${release}"
+release_dir="${RELEASES_DIR}/${release}"
+if [[ ! -f "${incoming_release}/package.json" || ! -f "${incoming_release}/prisma/schema.prisma" ]]; then
+  echo "Uploaded staging release is incomplete." >&2
+  exit 65
+fi
+if [[ -e "$release_dir" ]]; then
+  echo "Release ${release} already exists; refusing to overwrite it." >&2
+  exit 66
+fi
+if [[ ! -r "$ENV_FILE" ]]; then
+  echo "Staging environment file is unavailable." >&2
+  exit 67
+fi
+
+# A failed install, migration, or build leaves the existing current release running.
+mv "$incoming_release" "$release_dir"
+chown -R "${APP_USER}:${APP_USER}" "$release_dir"
+
+runuser -u "$APP_USER" -- bash -lc "
+  set -a
+  source '${ENV_FILE}'
+  set +a
+  cd '${release_dir}'
+  npm ci --legacy-peer-deps
+  npx prisma migrate deploy
+  npx prisma generate
+  npm run build
+"
+
+previous_target="$(readlink "${APP_ROOT}/current")"
+temporary_link="${APP_ROOT}/.current-${release}"
+ln -s "releases/${release}" "$temporary_link"
+mv -Tf "$temporary_link" "${APP_ROOT}/current"
+
+systemctl restart "$SERVICE"
+healthy=false
+for _ in {1..15}; do
+  if curl --fail --silent --show-error --max-time 2 http://127.0.0.1:3000/api/health >/dev/null; then
+    healthy=true
+    break
+  fi
+  sleep 1
+done
+
+if [[ "$healthy" != true ]]; then
+  echo "New staging release failed its health check; restoring ${previous_target}." >&2
+  ln -s "$previous_target" "$temporary_link"
+  mv -Tf "$temporary_link" "${APP_ROOT}/current"
+  systemctl restart "$SERVICE"
+  exit 70
+fi
+
+echo "Staging release ${release} is healthy."

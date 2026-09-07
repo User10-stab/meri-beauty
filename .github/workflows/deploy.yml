@@ -1,0 +1,92 @@
+name: CI and Deploy to VPS
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+# Prevent overlapping deploys on rapid pushes to master
+concurrency:
+  group: deploy-master
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      # - name: Tests
+      #   run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  deploy:
+    name: Deploy to VPS
+    needs: ci
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            set -e
+
+            echo ">>> Deploying meri-beauty..."
+
+            cd /var/www/meribeauty
+
+            echo ">>> Updating source code..."
+            git checkout master
+            git pull origin master
+
+            echo ">>> Installing dependencies..."
+            npm ci
+
+            echo ">>> Generating Prisma Client..."
+            npx prisma generate
+
+            echo ">>> Applying production migrations..."
+            npx prisma migrate deploy
+
+            echo ">>> Building application..."
+            npm run build
+
+            echo ">>> Restarting PM2..."
+            pm2 restart meribeauty --update-env
+
+            echo ">>> Verifying PM2..."
+            pm2 jlist | grep -q '"name":"meribeauty"' || {
+              pm2 jlist
+              echo "ERROR: meribeauty process not found"
+              exit 1
+            }
+
+            echo ">>> Deployment completed successfully."

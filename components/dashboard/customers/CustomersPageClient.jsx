@@ -20,13 +20,17 @@ const CUSTOMERS_COLUMNS = [
   { key: "formationsCount", label: "Formations" },
   { key: "isActive", label: "Statut" },
   { key: "joinedAt", label: "Inscrit le" },
-  { key: "lastLogin", label: "Dernière connexion" },
 ];
 
 const PAGE_SIZE = 20;
 
 export function CustomersPageClient({ initialCustomers, initialTotalCount, userRole }) {
   const isAdmin = userRole === "OWNER" || userRole === "ADMIN";
+  // Edit is allowed for any dashboard user who can view customers (OWNER/ADMIN always,
+  // STAFF when they hold the CUSTOMERS capability — the page itself is already gated
+  // by requireDashboardPermission(CUSTOMERS), so reaching here implies they can read;
+  // the server action re-checks the write permission + per-customer scope).
+  const canEdit = userRole === "OWNER" || userRole === "ADMIN" || userRole === "STAFF";
   const [customers, setCustomers] = useState(initialCustomers);
   const [totalCount, setTotalCount] = useState(initialTotalCount);
   const [page, setPage] = useState(1);
@@ -104,7 +108,7 @@ export function CustomersPageClient({ initialCustomers, initialTotalCount, userR
         columns={CUSTOMERS_COLUMNS}
         renderRow={(props) => <CustomerRow {...props} />}
         onView={handleView}
-        onEdit={isAdmin ? handleEdit : undefined}
+        onEdit={canEdit ? handleEdit : undefined}
         onDelete={isAdmin ? handleDelete : undefined}
         searchPlaceholder="Rechercher par nom, email ou téléphone..."
         serverPagination={{

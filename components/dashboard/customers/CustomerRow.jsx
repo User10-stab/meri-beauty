@@ -117,13 +117,6 @@ export function CustomerRow({ row, onView, onEdit, onDelete }) {
         </span>
       </td>
 
-      {/* Last Login */}
-      <td className="px-4 py-4 align-middle">
-        <span className="whitespace-nowrap text-gray-500">
-          {formatDate(row.lastLogin)}
-        </span>
-      </td>
-
       {/* Actions */}
       <td className="px-4 py-4 pr-5 align-middle">
         <RowActions

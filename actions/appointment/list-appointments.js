@@ -11,7 +11,7 @@ import { getCurrentStaffId } from "@/lib/route-protection";
  * manage-appointment.js) — the staffId filter param only has any effect for
  * OWNER/ADMIN.
  */
-export async function getAllAppointments({ status, staffId, search } = {}) {
+export async function getAllAppointments({ status, staffId, search, date } = {}) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié.", data: [] };
   if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
@@ -27,9 +27,23 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
   }
 
   try {
+    // date filter: whole day on the appointment's actual date (startTime), not createdAt
+    let dateFilter = {};
+    if (date) {
+      const d = new Date(date);
+      if (!isNaN(d.getTime())) {
+        const start = new Date(d);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(d);
+        end.setHours(23, 59, 59, 999);
+        dateFilter = { startTime: { gte: start, lte: end } };
+      }
+    }
+
     const appointments = await prisma.appointment.findMany({
       where: {
         isDeleted: false,
+        ...dateFilter,
         ...(staffScopeId ? { staffService: { staffId: staffScopeId } } : staffId ? { staffService: { staffId } } : {}),
         ...(status ? { status } : {}),
         ...(search
@@ -41,7 +55,7 @@ export async function getAllAppointments({ status, staffId, search } = {}) {
             }
           : {}),
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ startTime: "desc" }, { date: "desc" }],
       include: {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
         cancelledBy: { select: { id: true, fullName: true, role: true } },

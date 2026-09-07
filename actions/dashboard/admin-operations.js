@@ -94,6 +94,14 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
   // carries no lifecycle of its own. Both exclusions keep the filters honest
   // rather than quietly widening what they mean.
   const includeAdjustments = !sourceTypes && lifecycleStatus === "ALL" && paymentEvent === "ALL";
+  // A transfer is an operational event, not money movement. Show it in the
+  // unrestricted ledger and in the Ateliers & événements / Formations
+  // presets, while excluding it from payment-event filters so it can never
+  // be mistaken for a deposit, balance payment or refund.
+  const includeWorkshopTransfers =
+    (!sourceTypes || sourceTypes.includes("WORKSHOP")) && paymentEvent === "ALL";
+  const includeFormationTransfers =
+    (!sourceTypes || sourceTypes.includes("FORMATION")) && paymentEvent === "ALL";
 
   const arms = [];
 
@@ -183,6 +191,34 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
       SELECT al.id AS id, 'ADJUSTMENT' AS "sourceType", al."createdAt" AS "sortAt"
       FROM "AuditLog" al
       WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_PRICE_ADJUSTED}
+    `);
+  }
+
+  if (includeWorkshopTransfers) {
+    arms.push(Prisma.sql`
+      SELECT al.id AS id, 'TRANSFER' AS "sourceType", al."createdAt" AS "sortAt"
+      FROM "AuditLog" al
+      JOIN "workshop_reservations" wr ON wr.id = al."entityId"
+      JOIN "workshop_sessions" ws ON ws.id = wr."sessionId"
+      JOIN "workshops" w ON w.id = ws."workshopId"
+      WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_SESSION_TRANSFERRED}
+        AND al."entityType" = 'WorkshopReservation'
+        ${lifecycleStatus !== "ALL" ? Prisma.sql`AND wr."status"::text = ${lifecycleStatus}` : Prisma.empty}
+        ${type !== "ALL" ? Prisma.sql`AND w."type"::text = ${type}` : Prisma.empty}
+    `);
+  }
+
+  if (includeFormationTransfers) {
+    arms.push(Prisma.sql`
+      SELECT al.id AS id, 'TRANSFER' AS "sourceType", al."createdAt" AS "sortAt"
+      FROM "AuditLog" al
+      JOIN "formation_reservations" fr ON fr.id = al."entityId"
+      JOIN "formation_sessions" fs ON fs.id = fr."sessionId"
+      JOIN "formations" f ON f.id = fs."formationId"
+      WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_SESSION_TRANSFERRED}
+        AND al."entityType" = 'FormationReservation'
+        ${lifecycleStatus !== "ALL" ? Prisma.sql`AND fr."status"::text = ${lifecycleStatus}` : Prisma.empty}
+        ${type !== "ALL" ? Prisma.sql`AND f."type"::text = ${type}` : Prisma.empty}
     `);
   }
 
@@ -475,6 +511,124 @@ async function hydrateAdjustments(ids) {
 }
 
 /**
+ * Administrative workshop/event and formation transfers. The audit row is
+ * the immutable history; the reservation supplies its current customer,
+ * lifecycle and payment position. This deliberately creates no Transaction
+ * and exposes no invoice/refund action from the transfer row. Split by
+ * entityType using the same idsFor/Promise.all/Map pattern as
+ * hydrateAdjustments above, since a transfer can now be either kind.
+ */
+async function hydrateTransfers(ids) {
+  if (ids.length === 0) return [];
+
+  const logs = await prisma.auditLog.findMany({
+    where: { id: { in: ids }, action: AUDIT_ACTIONS.RESERVATION_SESSION_TRANSFERRED },
+    select: {
+      id: true,
+      createdAt: true,
+      entityType: true,
+      entityId: true,
+      before: true,
+      after: true,
+      metadata: true,
+      actor: { select: { fullName: true } },
+      actorRole: true,
+    },
+  });
+
+  const idsFor = (type) => logs.filter((l) => l.entityType === type).map((l) => l.entityId);
+
+  const [workshopReservations, formationReservations] = await Promise.all([
+    prisma.workshopReservation.findMany({
+      where: { id: { in: idsFor("WorkshopReservation") } },
+      include: {
+        customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
+        payment: { select: PAYMENT_LEDGER_SELECT },
+        session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } },
+      },
+    }),
+    prisma.formationReservation.findMany({
+      where: { id: { in: idsFor("FormationReservation") } },
+      include: {
+        customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
+        payment: { select: PAYMENT_LEDGER_SELECT },
+        session: { select: { startDate: true, formation: { select: { title: true } } } },
+      },
+    }),
+  ]);
+  const reservationById = new Map();
+  for (const r of workshopReservations) reservationById.set(r.id, { ...r, activityTitle: r.session?.workshop?.title });
+  for (const r of formationReservations) reservationById.set(r.id, { ...r, activityTitle: r.session?.formation?.title });
+
+  const workshopSessionIds = [
+    ...new Set(
+      logs.filter((l) => l.entityType === "WorkshopReservation").flatMap((log) => [log.before?.sessionId, log.after?.sessionId]).filter(Boolean)
+    ),
+  ];
+  const formationSessionIds = [
+    ...new Set(
+      logs.filter((l) => l.entityType === "FormationReservation").flatMap((log) => [log.before?.sessionId, log.after?.sessionId]).filter(Boolean)
+    ),
+  ];
+  const [workshopSessions, formationSessions] = await Promise.all([
+    prisma.workshopSession.findMany({
+      where: { id: { in: workshopSessionIds } },
+      select: { id: true, startDate: true, workshop: { select: { title: true } } },
+    }),
+    prisma.formationSession.findMany({
+      where: { id: { in: formationSessionIds } },
+      select: { id: true, startDate: true, formation: { select: { title: true } } },
+    }),
+  ]);
+  const sessionById = new Map();
+  for (const s of workshopSessions) sessionById.set(s.id, { startDate: s.startDate, title: s.workshop?.title });
+  for (const s of formationSessions) sessionById.set(s.id, { startDate: s.startDate, title: s.formation?.title });
+
+  return logs.map((log) => {
+    const reservation = reservationById.get(log.entityId) ?? null;
+    const previousSession = sessionById.get(log.before?.sessionId) ?? null;
+    const targetSession = sessionById.get(log.after?.sessionId) ?? null;
+    const paymentFields = deriveRefundFields(reservation?.payment ?? null);
+    return {
+      id: log.id,
+      sourceType: "TRANSFER",
+      operationOnly: true,
+      transferredAt: log.createdAt,
+      entityType: log.entityType,
+      entityId: log.entityId,
+      previousActivityTitle: log.before?.activityTitle ?? previousSession?.title ?? "Activité précédente",
+      newActivityTitle: log.after?.activityTitle ?? targetSession?.title ?? reservation?.activityTitle ?? "Nouvelle activité",
+      previousSessionDate: log.before?.sessionStartDate ?? previousSession?.startDate ?? null,
+      newSessionDate: log.after?.sessionStartDate ?? targetSession?.startDate ?? reservation?.session?.startDate ?? null,
+      previousTotal: Number(log.before?.totalPrice ?? 0),
+      finalTotal: Number(log.after?.totalPrice ?? 0),
+      balanceDue: Number(log.after?.balanceDue ?? reservation?.balanceDue ?? 0),
+      paidAmount: Number(log.metadata?.paidAmount ?? reservation?.payment?.paidAmount ?? 0),
+      priceDifference: Number(log.metadata?.priceDifference ?? 0),
+      priceDecision: log.metadata?.priceDecision ?? "SAME_PRICE",
+      waivedAmount: Number(log.metadata?.waivedAmount ?? 0),
+      modificationFee: Number(log.metadata?.modificationFee ?? 0),
+      reason: log.metadata?.reason ?? null,
+      // Sourced straight from the audit metadata written by
+      // changeReservationSession/changeFormationReservationSession — no
+      // extra query needed. Null on every transfer that didn't touch an
+      // invoice (the common case, and every B2C transfer — see
+      // b2c-no-invoice-contracts.test.js).
+      invoiceReplacement: log.metadata?.invoiceReplacement ?? null,
+      actorName: log.actor?.fullName ?? null,
+      actorRole: log.actorRole ?? null,
+      status: reservation?.status ?? null,
+      customer: reservation?.customer ?? null,
+      payment: reservation?.payment ?? null,
+      latestTransactionId: null,
+      latestTransactionType: null,
+      refundState: paymentFields.refundState,
+      customerInvoiceEligible: false,
+    };
+  });
+}
+
+/**
  * Paginated, admin-only operational ledger — one unified, entity-grained
  * list (an order or a booking is one row regardless of how many payment
  * events it has) instead of four separately-queried tabs. "Commandes /
@@ -508,19 +662,20 @@ export async function getAdminOperations(params = {}) {
       take: PAGE_SIZE,
     });
 
-    const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [], ADJUSTMENT: [] };
+    const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [], ADJUSTMENT: [], TRANSFER: [] };
     for (const row of idRows) idsBySource[row.sourceType]?.push(row.id);
 
-    const [orders, workshops, formations, appointments, adjustments] = await Promise.all([
+    const [orders, workshops, formations, appointments, adjustments, transfers] = await Promise.all([
       hydrateOrders(idsBySource.ORDER),
       hydrateWorkshops(idsBySource.WORKSHOP),
       hydrateFormations(idsBySource.FORMATION),
       hydrateAppointmentTransactions(idsBySource.APPOINTMENT),
       hydrateAdjustments(idsBySource.ADJUSTMENT),
+      hydrateTransfers(idsBySource.TRANSFER),
     ]);
 
     const byId = new Map();
-    for (const row of [...orders, ...workshops, ...formations, ...appointments, ...adjustments]) {
+    for (const row of [...orders, ...workshops, ...formations, ...appointments, ...adjustments, ...transfers]) {
       byId.set(row.id, row);
     }
     // Stage A already sorted by sortAt DESC; findMany({ id: { in } }) does

@@ -58,8 +58,9 @@ describe("the Facture column tells a genuinely pending invoice apart from one th
       const occurrences = actions.split(field).length - 1;
       // One per hydrator: hydrateOrders' user, hydrateWorkshops' customer,
       // hydrateFormations' customer, hydrateAppointmentTransactions'
-      // appointment.user.
-      expect(occurrences, `"${field}" should appear once per customer-bearing select`).toBe(4);
+      // appointment.user, and hydrateTransfers' reservation customer for
+      // BOTH a workshop and a formation transfer (it now hydrates either).
+      expect(occurrences, `"${field}" should appear once per customer-bearing select`).toBe(6);
     }
   });
 });

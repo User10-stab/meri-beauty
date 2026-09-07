@@ -45,12 +45,13 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     const actions = source("actions/dashboard/admin-operations.js");
     // The Opérations ledger needs to tell a private individual apart from a
     // VAT-registered company across every source (boutique order, atelier,
-    // formation, or appointment) — one occurrence per customer-bearing
+    // formation, appointment or transfer history) — one occurrence per customer-bearing
     // relation: hydrateOrders' user, hydrateWorkshops' customer,
-    // hydrateFormations' customer, and hydrateAppointmentTransactions'
-    // appointment.user.
+    // hydrateFormations' customer, hydrateAppointmentTransactions'
+    // appointment.user, plus hydrateTransfers' current reservation customer
+    // for BOTH a workshop and a formation transfer (it now hydrates either).
     const vatNumberOccurrences = actions.split("vatNumber: true").length - 1;
-    expect(vatNumberOccurrences).toBe(4);
+    expect(vatNumberOccurrences).toBe(6);
   });
 
   test("the ledger shows the invoice's frozen VAT number, falling back to the customer's current one", () => {

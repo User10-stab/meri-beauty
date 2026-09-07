@@ -1434,6 +1434,26 @@ async function applyWorkshopSessionChangeFee(session, meta) {
     return { received: true, alreadyProcessed: true };
   }
 
+  // Paid session-change links are legacy now. If an admin performed the new
+  // direct/free transfer after this Checkout Session was created, applying
+  // the stale link would move the customer again and overwrite that newer
+  // decision. Keep the money for manual review/refund, but never mutate the
+  // reservation in that case.
+  const directTransferAfterLinkCreation = await prisma.auditLog.findFirst({
+    where: {
+      action: "reservation.session_transferred",
+      entityType: "WorkshopReservation",
+      entityId: reservation.id,
+      createdAt: { gt: new Date((session.created ?? 0) * 1000) },
+    },
+    select: { id: true },
+  });
+  if (directTransferAfterLinkCreation) {
+    console.warn("[stripe-webhook] Stale session-change fee paid after a direct admin transfer:", session.id);
+    await flagPaymentForManualRefund(session, "ancien lien de changement payé après un transfert administratif");
+    return { received: true, refunded: false, flaggedForReview: true, reason: "stale session change link" };
+  }
+
   const newSession = await prisma.workshopSession.findUnique({
     where: { id: newSessionId },
     include: { workshop: true },

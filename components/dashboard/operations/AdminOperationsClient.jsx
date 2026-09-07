@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CreditCard, Package, CalendarDays, GraduationCap } from "lucide-react";
+import { ArrowRightLeft, CreditCard, Package, CalendarDays, GraduationCap, X } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { InvoiceRowActions } from "@/components/dashboard/operations/InvoiceRowActions";
 import { TransactionDetailDrawer } from "@/components/dashboard/operations/TransactionDetailDrawer";
@@ -38,6 +38,31 @@ const date = (value) =>
         timeZone: "Europe/Brussels",
       })
     : "—";
+
+const dateTime = (value) =>
+  value
+    ? new Date(value).toLocaleString("fr-BE", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Europe/Brussels",
+      })
+    : "—";
+
+function transferPriceImpact(row) {
+  if (row.priceDecision === "KEEP_CURRENT_PRICE" && row.waivedAmount > 0.01) {
+    return `${money(row.waivedAmount)} offert par le salon`;
+  }
+  if (row.finalTotal > row.previousTotal + 0.01) {
+    return `${money(row.finalTotal - row.previousTotal)} ajouté au solde`;
+  }
+  if (row.finalTotal < row.previousTotal - 0.01) {
+    return `${money(row.previousTotal - row.finalTotal)} retiré du solde`;
+  }
+  return "Prix inchangé";
+}
 
 const paymentSource = (payment) => {
   if (payment?.order) return `Commande n°${payment.order.orderNumber}`;
@@ -120,6 +145,26 @@ function Badge({ children }) {
  * one level up (a list row, not a single transaction's detail).
  */
 function describeUnifiedRow(row) {
+  if (row.sourceType === "TRANSFER") {
+    const by = row.actorName ? ` · par ${row.actorName}` : "";
+    const why = row.reason ? ` · Motif : ${row.reason}` : "";
+    const oldDate = row.previousSessionDate ? date(row.previousSessionDate) : "date inconnue";
+    const newDate = row.newSessionDate ? date(row.newSessionDate) : "date inconnue";
+    return {
+      dateLabel: date(row.transferredAt),
+      kind: "Transfert de réservation",
+      title: `${row.previousActivityTitle} → ${row.newActivityTitle}`,
+      href: null,
+      detail: `${oldDate} → ${newDate} · ${transferPriceImpact(row)}${why}${by}`,
+      lifecycleStatus: row.status,
+      customer: row.customer,
+      customerFallback: "—",
+      totalAmount: 0,
+      amountLabel: "—",
+      amountNote: "Aucun mouvement financier",
+      isRefundEvent: false,
+    };
+  }
   if (row.sourceType === "ADJUSTMENT") {
     // A price changed at the counter. Every other row here is anchored to
     // money that moved; this one is money the salon decided *not* to take —
@@ -181,20 +226,39 @@ function describeUnifiedRow(row) {
       isRefundEvent: false,
     };
   }
-  // APPOINTMENT: not part of the entity-grained merge — this row IS a
-  // Transaction, same shape the old Transactions tab rendered.
-  const customer = paymentCustomer(row.payment);
+  if (row.sourceType === "APPOINTMENT") {
+    // APPOINTMENT: not part of the entity-grained merge — this row IS a
+    // Transaction, same shape the old Transactions tab rendered.
+    const customer = paymentCustomer(row.payment);
+    return {
+      dateLabel: date(row.paidAt),
+      kind: "Rendez-vous",
+      title: paymentSource(row.payment) ?? "Paiement",
+      href: null,
+      detail: `${PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType ?? "Opération"} · ${row.method ?? "—"}`,
+      lifecycleStatus: row.payment?.appointment?.status ?? null,
+      customer,
+      customerFallback: "—",
+      totalAmount: row.amount,
+      isRefundEvent: row.transactionType === "REFUND",
+    };
+  }
+
+  // A stale browser can briefly receive a row type added by a newer server
+  // during a deployment. Never render internal `undefined` values: keep the
+  // row readable and tell the operator how to load its dedicated renderer.
   return {
-    dateLabel: date(row.paidAt),
-    kind: "Rendez-vous",
-    title: paymentSource(row.payment),
+    dateLabel: date(row.createdAt ?? row.paidAt),
+    kind: "Opération",
+    title: "Actualisation requise",
     href: null,
-    detail: `${PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType} · ${row.method}`,
-    lifecycleStatus: row.payment?.appointment?.status ?? null,
-    customer,
-    customerFallback: "—",
-    totalAmount: row.amount,
-    isRefundEvent: row.transactionType === "REFUND",
+    detail: "Actualisez la page pour afficher le détail de cette opération.",
+    lifecycleStatus: row.status ?? null,
+    customer: row.customer ?? null,
+    customerFallback: "Client non chargé",
+    totalAmount: 0,
+    amountLabel: "—",
+    isRefundEvent: false,
   };
 }
 
@@ -202,6 +266,7 @@ function describeUnifiedRow(row) {
 // only have one once a real payment event exists (latestTransactionId);
 // an appointment row already IS that transaction.
 function latestTransaction(row) {
+  if (row.operationOnly) return null;
   if (row.sourceType === "APPOINTMENT") {
     return { id: row.id, transactionType: row.transactionType };
   }
@@ -347,7 +412,92 @@ function PaymentBreakdown({ row }) {
   );
 }
 
-function UnifiedOperationsTable({ rows, onOpenDetail }) {
+function TransferDetailModal({ transfer, onClose }) {
+  if (!transfer) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="transfer-detail-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="w-full max-w-2xl rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-gray-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[rgba(47,58,46,0.08)]">
+              <ArrowRightLeft size={19} className="text-[#2f3a2e]" />
+            </div>
+            <div>
+              <h2 id="transfer-detail-title" className="text-lg font-bold text-gray-900">Détail du transfert</h2>
+              <p className="text-sm text-gray-500">{dateTime(transfer.transferredAt)}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fermer"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-400">Ancienne réservation</p>
+            <p className="mt-2 font-semibold text-gray-900">{transfer.previousActivityTitle}</p>
+            <p className="mt-1 text-sm text-gray-600">{dateTime(transfer.previousSessionDate)}</p>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">Nouvelle réservation</p>
+            <p className="mt-2 font-semibold text-gray-900">{transfer.newActivityTitle}</p>
+            <p className="mt-1 text-sm text-gray-600">{dateTime(transfer.newSessionDate)}</p>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 rounded-xl border border-gray-200 p-4 sm:grid-cols-4">
+          <div><p className="text-xs text-gray-500">Total</p><p className="mt-1 font-semibold">{money(transfer.finalTotal)}</p></div>
+          <div><p className="text-xs text-gray-500">Déjà payé</p><p className="mt-1 font-semibold">{money(transfer.paidAmount)}</p></div>
+          <div><p className="text-xs text-gray-500">Solde restant</p><p className="mt-1 font-semibold">{money(transfer.balanceDue)}</p></div>
+          <div><p className="text-xs text-gray-500">Frais de transfert</p><p className="mt-1 font-semibold">{money(transfer.modificationFee)}</p></div>
+        </div>
+
+        <div className="mt-4 space-y-3 rounded-xl bg-gray-50 p-4 text-sm">
+          <p><span className="font-medium text-gray-700">Impact tarifaire :</span> {transferPriceImpact(transfer)}</p>
+          <p><span className="font-medium text-gray-700">Motif :</span> {transfer.reason || "—"}</p>
+          <p><span className="font-medium text-gray-700">Effectué par :</span> {transfer.actorName || "Administrateur"}</p>
+          {transfer.invoiceReplacement ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+              <p>
+                Ancienne facture n°{transfer.invoiceReplacement.previousInvoiceNumber} annulée par la note de crédit n°
+                {transfer.invoiceReplacement.creditNoteNumber}.
+              </p>
+              <p>
+                {transfer.invoiceReplacement.newInvoiceNumber
+                  ? `Nouvelle facture n°${transfer.invoiceReplacement.newInvoiceNumber} émise.`
+                  : "Nouvelle facture en attente — sera émise à la clôture, une fois le solde encaissé."}
+              </p>
+            </div>
+          ) : (
+            <p className="font-medium text-gray-600">Aucun encaissement ni remboursement n’a été déclenché par ce transfert.</p>
+          )}
+        </div>
+
+        <div className="mt-6 flex justify-end">
+          <button type="button" onClick={onClose} className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#263025]">
+            Fermer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer }) {
   return (
     <Table>
       <TableHeader>
@@ -412,35 +562,47 @@ function UnifiedOperationsTable({ rows, onOpenDetail }) {
               <TableCell className="text-xs text-gray-500">{paymentSummary(row)}</TableCell>
               <TableCell>
                 <PaymentBreakdown row={row} />
-                <details className="mt-2 min-w-[220px] text-xs">
-                  <summary className="cursor-pointer font-medium text-[#2f3a2e]">Historique des transactions</summary>
-                  <ul className="mt-2 space-y-2">
-                    {(row.payment?.transactions ?? []).filter((event) => !event.isDeleted).map((event) => (
-                      <li key={event.id}>
-                        <button type="button" onClick={() => onOpenDetail(event.id)} className="text-left underline underline-offset-2">
-                          {date(event.paidAt)} · {PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · {event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : "En ligne"} · {event.transactionType === "REFUND" ? "−" : ""}{money(event.amount)}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
+                {!row.operationOnly && (
+                  <details className="mt-2 min-w-[220px] text-xs">
+                    <summary className="cursor-pointer font-medium text-[#2f3a2e]">Historique des transactions</summary>
+                    <ul className="mt-2 space-y-2">
+                      {(row.payment?.transactions ?? []).filter((event) => !event.isDeleted).map((event) => (
+                        <li key={event.id}>
+                          <button type="button" onClick={() => onOpenDetail(event.id)} className="text-left underline underline-offset-2">
+                            {date(event.paidAt)} · {PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · {event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : "En ligne"} · {event.transactionType === "REFUND" ? "−" : ""}{money(event.amount)}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </TableCell>
               <TableCell>
-                <InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />
+                {row.operationOnly ? <span className="text-xs text-gray-400">—</span> : <InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />}
               </TableCell>
               <TableCell className={`text-right font-medium ${described.isRefundEvent ? "text-red-600" : ""}`}>
-                {described.isRefundEvent ? "−" : ""}
-                {money(described.totalAmount)}
+                {described.amountLabel ?? `${described.isRefundEvent ? "−" : ""}${money(described.totalAmount)}`}
+                {described.amountNote && <span className="block max-w-28 text-xs font-normal text-gray-400">{described.amountNote}</span>}
               </TableCell>
               <TableCell className="pr-6">
-                <InvoiceRowActions
-                  invoice={invoice}
-                  creditNotes={invoice?.creditNotes ?? []}
-                  transaction={transaction ? { ...transaction, hasInvoice: Boolean(invoice) } : null}
-                  paymentId={row.payment?.id ?? null}
-                  remainingRefundable={row.refundState?.remainingRefundable ?? null}
-                  onOpenDetail={transaction ? () => onOpenDetail(transaction.id) : undefined}
-                />
+                {row.operationOnly ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenTransfer(row)}
+                    className="whitespace-nowrap rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-[#2f3a2e] hover:bg-gray-50"
+                  >
+                    Voir le détail
+                  </button>
+                ) : (
+                  <InvoiceRowActions
+                    invoice={invoice}
+                    creditNotes={invoice?.creditNotes ?? []}
+                    transaction={transaction ? { ...transaction, hasInvoice: Boolean(invoice) } : null}
+                    paymentId={row.payment?.id ?? null}
+                    remainingRefundable={row.refundState?.remainingRefundable ?? null}
+                    onOpenDetail={transaction ? () => onOpenDetail(transaction.id) : undefined}
+                  />
+                )}
               </TableCell>
             </TableRow>
           );
@@ -496,6 +658,7 @@ export function AdminOperationsClient({ result }) {
     paymentEvent = "ALL",
   } = result ?? {};
   const [detailId, setDetailId] = useState(null);
+  const [transferDetail, setTransferDetail] = useState(null);
 
   const hasPrevious = page > 1;
   const hasNext = page * pageSize < totalCount;
@@ -578,7 +741,7 @@ export function AdminOperationsClient({ result }) {
         {data.length === 0 ? (
           <div className="px-6 py-16 text-center text-sm text-gray-500">Aucune donnée dans cette catégorie.</div>
         ) : (
-          <UnifiedOperationsTable rows={data} onOpenDetail={setDetailId} />
+          <UnifiedOperationsTable rows={data} onOpenDetail={setDetailId} onOpenTransfer={setTransferDetail} />
         )}
       </div>
 
@@ -600,6 +763,7 @@ export function AdminOperationsClient({ result }) {
       </div>
 
       <TransactionDetailDrawer transactionId={detailId} onClose={() => setDetailId(null)} />
+      <TransferDetailModal transfer={transferDetail} onClose={() => setTransferDetail(null)} />
     </div>
   );
 }

@@ -1984,6 +1984,21 @@ model Invoice {
   billitOrderId String?
   billitSentAt  DateTime?
 
+  // Set once this invoice has been voided and replaced — currently only by
+  // an admin session transfer that lands on an already-invoiced booking (see
+  // lib/invoicing.js#supersedeInvoice). paymentId is nulled at the same time,
+  // freeing the unique slot for the replacement invoice on the same Payment,
+  // so payment.invoice always resolves to the current document. This row is
+  // never edited or deleted (Belgian VAT law requires the correction to be
+  // its own document) — it stays reachable through its own id, through the
+  // CreditNote that credited it, and through the replacement's
+  // supersedesInvoiceId.
+  supersedesInvoiceId String?   @unique
+  supersedes          Invoice?  @relation("InvoiceSupersession", fields: [supersedesInvoiceId], references: [id])
+  supersededBy        Invoice?  @relation("InvoiceSupersession")
+  supersededAt        DateTime?
+  supersededReason    String?
+
   lines            InvoiceLine[]
   creditNotes      CreditNote[]
   refundOperations RefundOperation[]

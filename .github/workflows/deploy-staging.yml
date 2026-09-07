@@ -21,6 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     timeout-minutes: 30
+    env:
+      # prisma.config.js reads DATABASE_URL eagerly, even for `prisma generate`
+      # (invoked by postinstall) and lint/test steps that import it. This never
+      # opens a real connection here, so a placeholder is sufficient.
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
 
     steps:
       - name: Check out staging

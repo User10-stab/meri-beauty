@@ -323,11 +323,11 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 </div>
               )}
 
-              {payment?.order && (
+              {payment?.id && (
                 <div>
                   <SectionTitle>Reçu / ticket de caisse</SectionTitle>
                   <a
-                    href={`/api/orders/${payment.order.id}/ticket`}
+                    href={payment.order ? `/api/orders/${payment.order.id}/ticket` : `/api/payments/${payment.id}/ticket`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"

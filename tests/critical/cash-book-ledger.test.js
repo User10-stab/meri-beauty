@@ -177,16 +177,38 @@ describe("buildCashBookLedger", () => {
     );
   });
 
-  // A sale already carrying a legal Invoice is tracked through that
-  // Invoice's own record and the Opérations page — deliberately excluded
-  // here so the same money is never represented twice in this ledger.
-  it("excludes any sale whose payment already has an invoice, from the query itself", async () => {
+  // An invoice is a separate legal record of the sale (see the Opérations
+  // page), but the cash it was paid in is still physically in the drawer —
+  // the query must not carry an `invoice: null` condition that would drop
+  // it from this ledger.
+  it("does not filter on whether the payment has an invoice", async () => {
     const client = clientMock({ session: BASE_SESSION });
     await buildCashBookLedger(client, "sess_1");
-    expect(client.transaction.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ payment: { invoice: null } }),
-      })
-    );
+    const { where } = client.transaction.findMany.mock.calls[0][0];
+    expect(where).not.toHaveProperty("payment");
+  });
+
+  it("includes an invoiced (B2B) cash sale in the ledger and its running balance", async () => {
+    const client = clientMock({
+      session: BASE_SESSION,
+      transactions: [
+        {
+          transactionType: "FINAL_PAYMENT",
+          amount: 200,
+          paidAt: new Date("2026-08-01T09:00:00Z"),
+          pieceNumber: "V0001",
+          payment: { invoice: { number: "2026-000050" }, order: { orderNumber: 20 } },
+        },
+      ],
+    });
+
+    const result = await buildCashBookLedger(client, "sess_1");
+    expect(result.rows[1]).toMatchObject({
+      kind: "SALE",
+      label: "Vente produits — commande n°20",
+      entree: 200,
+      solde: 700,
+    });
+    expect(result.totals).toEqual({ entrees: 200, sorties: 0, finalBalance: 700 });
   });
 });

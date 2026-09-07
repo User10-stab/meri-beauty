@@ -22,7 +22,6 @@ function clientMock({ session, transactions = [], movements = [] }) {
           if (where.method && t.method !== where.method) return false;
           if (typeof where.transactionType === "string" && t.transactionType !== where.transactionType) return false;
           if (where.transactionType?.not && t.transactionType === where.transactionType.not) return false;
-          if (where.payment?.invoice === null && t.payment?.invoice != null) return false;
           return true;
         });
         const sum = matches.reduce((acc, t) => acc + Number(t.amount), 0);
@@ -167,12 +166,11 @@ describe("buildDayReport", () => {
     expect(report.expectedCash).toBe(270);
   });
 
-  // A sale already carrying a legal Invoice is tracked through that
-  // Invoice's own record and the Opérations page — deliberately excluded
-  // from the drawer's own expected balance so the same money is never
-  // represented twice. byMethod (the revenue breakdown above) still counts
-  // it; only the cash-reconciliation figure does not.
-  it("a CASH sale that already has an invoice contributes to byMethod but not to expectedCash", async () => {
+  // An invoice is a separate legal record of the sale (see the Opérations
+  // page), but the cash it was paid in is still physically in the drawer —
+  // it counts toward both the revenue breakdown and the cash-reconciliation
+  // figure the same as any other CASH sale.
+  it("a CASH sale that already has an invoice contributes to byMethod and to expectedCash alike", async () => {
     const client = clientMock({
       session: OPEN_SESSION,
       transactions: [
@@ -181,8 +179,8 @@ describe("buildDayReport", () => {
     });
     const report = await buildDayReport(client, "sess_1");
     expect(report.byMethod).toEqual({ CASH: 200 });
-    // 100 (opening) + 0 (the only CASH sale is invoiced, excluded) = 100.
-    expect(report.expectedCash).toBe(100);
+    // 100 (opening) + 200 (the invoiced CASH sale, included) = 300.
+    expect(report.expectedCash).toBe(300);
   });
 
   it("only reads transactions within the session's own open-to-close window", async () => {

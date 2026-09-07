@@ -78,8 +78,8 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         columns={COLUMNS}
         renderRow={ReservationRow}
         onDelete={isAdmin ? setToCancel : undefined}
-        onSettle={isAdmin ? (row) => setToSettle(row) : undefined}
-        onNoShow={isAdmin ? handleNoShow : undefined}
+        onSettle={(row) => setToSettle(row)}
+        onNoShow={handleNoShow}
         searchPlaceholder="Rechercher une réservation..."
         searchFilter={(row, query) =>
           row.session?.formation?.title?.toLowerCase().includes(query) ||

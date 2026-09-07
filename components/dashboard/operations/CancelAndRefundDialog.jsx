@@ -44,12 +44,7 @@ const TRIGGERS = Object.freeze([
   {
     value: "NO_SHOW_EXCEPTION",
     label: "Exception — absence (no-show)",
-    hint: "Conserve le statut NO_SHOW et n'enregistre qu'une correction financière. Motif obligatoire, audit renforcé.",
-  },
-  {
-    value: "FINANCIAL_CORRECTION",
-    label: "Correction financière",
-    hint: "Pour un service déjà terminé ou une correction commerciale. Le statut et les places restent inchangés.",
+    hint: "Conserve le statut NO_SHOW tout en préparant un remboursement exceptionnel. Motif obligatoire, audit renforcé.",
   },
 ]);
 
@@ -71,22 +66,20 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
   const router = useRouter();
   const [trigger, setTrigger] = useState("SALON_CANCELLATION");
   const [reason, setReason] = useState("");
-  const [requestedAmount, setRequestedAmount] = useState("");
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const correctionAmount = trigger === "FINANCIAL_CORRECTION" ? requestedAmount || null : null;
-    const result = await previewCancelAndRefund({ paymentId, trigger, reason, requestedAmount: correctionAmount });
+    const result = await previewCancelAndRefund({ paymentId, trigger, reason });
     setLoading(false);
     if (result.success) setPreview(result.data);
     else {
       setPreview(null);
       toast.error(result.message);
     }
-  }, [paymentId, trigger, reason, requestedAmount]);
+  }, [paymentId, trigger, reason]);
 
   // Re-previews when the trigger changes, because the trigger decides
   // whether the item is cancelled at all (NO_SHOW keeps its status) and
@@ -101,12 +94,6 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
   }, [open, paymentId, trigger]);
 
   useEffect(() => {
-    if (open && preview?.currentStatus === "COMPLETED" && trigger === "SALON_CANCELLATION") {
-      setTrigger("FINANCIAL_CORRECTION");
-    }
-  }, [open, preview?.currentStatus, trigger]);
-
-  useEffect(() => {
     if (!open) return;
     function onKey(event) {
       if (event.key === "Escape" && !submitting) onClose();
@@ -118,7 +105,6 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
   if (!open) return null;
 
   const reasonTooShort = reason.trim().length < 10;
-  const isFinancialCorrection = trigger === "FINANCIAL_CORRECTION";
   const blocked = Boolean(preview?.blockedReason);
   const canConfirm = Boolean(preview) && !blocked && !reasonTooShort && !submitting && !loading;
 
@@ -129,10 +115,6 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
       paymentId,
       trigger,
       reason: reason.trim(),
-      // A normal cancellation always returns exactly what remains owed. A
-      // free amount belongs only to the separately auditable financial-
-      // correction flow.
-      requestedAmount: isFinancialCorrection && requestedAmount !== "" ? Number(requestedAmount) : null,
     });
     setSubmitting(false);
     if (result.success) {
@@ -161,10 +143,10 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
           </div>
           <div>
             <h2 id="cancel-refund-title" className="text-base font-semibold text-gray-900">
-              Annuler ou corriger financièrement
+              Annuler et rembourser
             </h2>
             <p className="mt-1 text-[13px] text-gray-500">
-              Selon le motif choisi, elle annule l&apos;élément ou conserve son historique, puis prépare le remboursement. Elle ne rembourse rien elle-même.
+              Elle annule l&apos;élément puis prépare le remboursement. L&apos;exception absence conserve uniquement le statut NO_SHOW. Elle ne rembourse rien elle-même.
             </p>
           </div>
         </div>
@@ -225,7 +207,7 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
               <Row label="Élément concerné" value={preview.itemLabel} />
               <Row label="Statut actuel" value={preview.currentStatus ?? "—"} />
               {preview.keepsHistoricalStatus && (
-                <Row label="Statut après opération" value="inchangé (correction financière seule)" tone="warn" />
+                <Row label="Statut après opération" value="NO_SHOW conservé (exception absence)" tone="warn" />
               )}
               <Row label="Total encaissé" value={money(preview.totalCollected)} />
               {preview.alreadyRefunded > 0 && (
@@ -239,7 +221,7 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
                     ? "facture déjà entièrement créditée — aucun nouveau document"
                     : preview.documentKind === "CREDIT_NOTE"
                       ? `note de crédit (facture ${preview.invoiceNumber})`
-                      : "justificatif de remboursement (client B2C sans facture)"
+                      : "aucun document financier (client B2C sans facture)"
                 }
               />
               {preview.releasedSeats > 0 && (
@@ -269,29 +251,9 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
               />
             </div>
 
-            {isFinancialCorrection ? (
-              <>
-                <label className="mb-1.5 block text-[13px] font-medium text-gray-700" htmlFor="refund-amount">
-                  Montant de la correction financière
-                </label>
-                <input
-                  id="refund-amount"
-                  type="number"
-                  min="0.01"
-                  max={String(preview.remainingRefundable ?? "")}
-                  step="0.01"
-                  value={requestedAmount}
-                  onChange={(event) => setRequestedAmount(event.target.value)}
-                  onBlur={load}
-                  className="mb-4 w-full rounded-lg border border-gray-300 p-2 text-[13px] focus:border-gray-900 focus:outline-none"
-                  placeholder={String(preview.remainingRefundable ?? preview.creditedTotal ?? "")}
-                />
-              </>
-            ) : (
-              <p className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">
-                <strong>Montant automatique :</strong> {money(preview.remainingRefundable)} sera remboursé. Ce montant correspond au solde réellement encaissé et non encore remboursé ; les frais Stripe ne sont pas déduits du client.
-              </p>
-            )}
+            <p className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">
+              <strong>Montant automatique :</strong> {money(preview.remainingRefundable)} sera remboursé. Ce montant correspond au solde réellement encaissé et non encore remboursé ; les frais Stripe ne sont pas déduits du client.
+            </p>
 
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
               <strong>Cette action ne rembourse rien.</strong> Elle prépare le document et, selon le motif, annule ou conserve l&apos;historique.

@@ -2,11 +2,20 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { CreditCard, Package, CalendarDays, GraduationCap } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { InvoiceRowActions } from "@/components/dashboard/operations/InvoiceRowActions";
 import { TransactionDetailDrawer } from "@/components/dashboard/operations/TransactionDetailDrawer";
-import { TYPE_FILTERS, TYPE_LABELS, STATUS_FILTERS, STATUS_LABELS } from "@/lib/dashboard/operation-filters";
+import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
+import {
+  TYPE_FILTERS,
+  TYPE_LABELS,
+  PAYMENT_EVENT_FILTERS,
+  PAYMENT_EVENT_LABELS,
+  LIFECYCLE_STATUS_FILTERS,
+  LIFECYCLE_STATUS_LABELS,
+} from "@/lib/dashboard/operation-filters";
 
 const TABS = [
   { key: "transactions", label: "Transactions", icon: CreditCard },
@@ -48,6 +57,8 @@ const paymentCustomer = (payment) =>
 // hasInvoiceableVatIdentity server-side). Conflating the two read as a
 // standing error: the invoice looked perpetually "about to arrive".
 function InvoiceStatus({ invoice, customerInvoiceEligible }) {
+  const router = useRouter();
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
   if (invoice) {
     const creditNotes = invoice.creditNotes ?? [];
     const creditedTotal = creditNotes.reduce((total, note) => total + Number(note.totalInclVat ?? 0), 0);
@@ -62,11 +73,27 @@ function InvoiceStatus({ invoice, customerInvoiceEligible }) {
         ) : (
           <span className="mt-1 block text-xs text-amber-700">Non envoyée</span>
         )}
+        {invoice.customerType === "B2B" && (
+          <button
+            type="button"
+            onClick={() => setDeliveryOpen(true)}
+            className="mt-2 inline-flex rounded-lg border border-[#2f3a2e] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#2f3a2e] hover:bg-[#f4f7f3]"
+          >
+            {invoice.emailSentAt || invoice.billitSentAt ? "Gérer l'envoi" : "Envoyer la facture"}
+          </button>
+        )}
         {creditNotes.length > 0 && (
           <span className="mt-1 block text-xs text-violet-700">
             Total notes de crédit : {money(creditedTotal)} — reste à créditer : {money(remainingToCredit)}
           </span>
         )}
+        <DocumentDeliveryDialog
+          open={deliveryOpen}
+          onClose={() => setDeliveryOpen(false)}
+          document={invoice}
+          invoice={invoice}
+          onDelivered={() => router.refresh()}
+        />
       </div>
     );
   }
@@ -82,16 +109,102 @@ function Badge({ children }) {
   );
 }
 
-function Transactions({ rows, onOpenDetail }) {
+/**
+ * Flattens the four polymorphic row shapes the unified query can return
+ * (ORDER/WORKSHOP/FORMATION are entity-grained; APPOINTMENT stays
+ * event-grained, one row per payment event, exactly as before unification —
+ * see admin-operations.js's module doc comment) into one shape the table
+ * renders generically. Mirrors TransactionDetailDrawer.jsx's describeSource,
+ * one level up (a list row, not a single transaction's detail).
+ */
+function describeUnifiedRow(row) {
+  if (row.sourceType === "ORDER") {
+    return {
+      dateLabel: date(row.createdAt),
+      kind: "Commande",
+      title: `n°${row.orderNumber}`,
+      href: `/dashboard/boutique/orders/${row.id}`,
+      detail: `${row.fulfilmentMode} · ${row._count.items} article(s)`,
+      lifecycleStatus: row.status,
+      customer: row.user,
+      customerFallback: "Client de passage",
+      totalAmount: row.totalAmount,
+      isRefundEvent: false,
+    };
+  }
+  if (row.sourceType === "WORKSHOP" || row.sourceType === "FORMATION") {
+    const item = row.sourceType === "WORKSHOP" ? row.session.workshop : row.session.formation;
+    const kind =
+      row.sourceType === "WORKSHOP"
+        ? item.type === "EVENT" ? "Événement" : "Atelier"
+        : `Formation ${(TYPE_LABELS[item.type] ?? "").toLowerCase()}`.trim();
+    return {
+      dateLabel: date(row.session.startDate),
+      kind,
+      title: item.title,
+      href: null,
+      detail: `${row.seatsCount} place(s) · session du ${date(row.session.startDate)}`,
+      lifecycleStatus: row.status,
+      customer: row.customer,
+      customerFallback: "—",
+      totalAmount: row.totalPrice,
+      isRefundEvent: false,
+    };
+  }
+  // APPOINTMENT: not part of the entity-grained merge — this row IS a
+  // Transaction, same shape the old Transactions tab rendered.
+  const customer = paymentCustomer(row.payment);
+  return {
+    dateLabel: date(row.paidAt),
+    kind: "Rendez-vous",
+    title: paymentSource(row.payment),
+    href: null,
+    detail: row.method,
+    lifecycleStatus: null,
+    customer,
+    customerFallback: "—",
+    totalAmount: row.amount,
+    isRefundEvent: row.transactionType === "REFUND",
+  };
+}
+
+// The "Voir / gérer" drawer opens on a Transaction id. Entity-grained rows
+// only have one once a real payment event exists (latestTransactionId);
+// an appointment row already IS that transaction.
+function latestTransaction(row) {
+  if (row.sourceType === "APPOINTMENT") {
+    return { id: row.id, transactionType: row.transactionType };
+  }
+  if (!row.latestTransactionId) return null;
+  return { id: row.latestTransactionId, transactionType: row.latestTransactionType };
+}
+
+function paymentSummary(row) {
+  const status = row.payment?.status ?? "—";
+  const refunded = Number(row.refundState?.totalRefunded ?? 0);
+  if (refunded > 0.01) {
+    return (
+      <>
+        {status}
+        <span className="mt-1 block text-red-600">− {money(refunded)} remboursé</span>
+      </>
+    );
+  }
+  return status;
+}
+
+function UnifiedOperationsTable({ rows, onOpenDetail }) {
   return (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead className="pl-6">Date</TableHead>
           <TableHead>Origine</TableHead>
+          <TableHead>Détail</TableHead>
           <TableHead>Client</TableHead>
           <TableHead>N° TVA</TableHead>
-          <TableHead>Type</TableHead>
+          <TableHead>Statut</TableHead>
+          <TableHead>Paiement</TableHead>
           <TableHead>Facture</TableHead>
           <TableHead className="text-right">Montant</TableHead>
           <TableHead className="pr-6 text-right">Actions</TableHead>
@@ -99,24 +212,32 @@ function Transactions({ rows, onOpenDetail }) {
       </TableHeader>
       <TableBody>
         {rows.map((row) => {
-          const customer = paymentCustomer(row.payment);
+          const described = describeUnifiedRow(row);
+          const customer = described.customer;
           const invoice = row.payment?.invoice ?? null;
           // The invoice freezes the VAT number at issue time (Belgian
           // invoicing rules require a snapshot, not a live join) — prefer it
           // once it exists, and fall back to the customer's current profile
-          // for a transaction that hasn't been invoiced yet.
+          // for a row that hasn't been invoiced yet.
           const vatNumber = invoice?.customerVatNumber ?? customer?.vatNumber ?? null;
-          // A refund is money leaving, not coming in — Transaction.amount is
-          // always stored as a positive magnitude (the codebase-wide
-          // convention: callers sum REFUND rows and subtract), so the sign
-          // has to be flipped here, at display time, rather than in storage.
-          const isRefund = row.transactionType === "REFUND";
+          const transaction = latestTransaction(row);
           return (
             <TableRow key={row.id}>
-              <TableCell className="pl-6">{date(row.paidAt)}</TableCell>
-              <TableCell>{paymentSource(row.payment)}</TableCell>
+              <TableCell className="pl-6">{described.dateLabel}</TableCell>
               <TableCell>
-                {customer?.fullName ?? "—"}
+                {described.href ? (
+                  <Link href={described.href} className="font-medium text-[#2f3a2e] hover:underline">
+                    {described.kind} {described.title}
+                  </Link>
+                ) : (
+                  <span className="font-medium text-gray-900">
+                    {described.kind} — {described.title}
+                  </span>
+                )}
+              </TableCell>
+              <TableCell className="text-xs text-gray-500">{described.detail}</TableCell>
+              <TableCell>
+                {customer?.fullName ?? described.customerFallback}
                 <span className="block text-xs text-gray-400">{customer?.email ?? ""}</span>
               </TableCell>
               <TableCell>
@@ -127,124 +248,29 @@ function Transactions({ rows, onOpenDetail }) {
                 )}
               </TableCell>
               <TableCell>
-                <Badge>{STATUS_LABELS[row.transactionType] ?? row.transactionType}</Badge>
-                <span className="mt-1 block text-xs text-gray-400">{row.method}</span>
+                {described.lifecycleStatus ? (
+                  <Badge>{LIFECYCLE_STATUS_LABELS[described.lifecycleStatus] ?? described.lifecycleStatus}</Badge>
+                ) : (
+                  <Badge>{PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType}</Badge>
+                )}
               </TableCell>
+              <TableCell className="text-xs text-gray-500">{paymentSummary(row)}</TableCell>
               <TableCell>
                 <InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />
               </TableCell>
-              <TableCell className={`text-right font-medium ${isRefund ? "text-red-600" : ""}`}>
-                {isRefund ? "−" : ""}
-                {money(row.amount)}
+              <TableCell className={`text-right font-medium ${described.isRefundEvent ? "text-red-600" : ""}`}>
+                {described.isRefundEvent ? "−" : ""}
+                {money(described.totalAmount)}
               </TableCell>
               <TableCell className="pr-6">
                 <InvoiceRowActions
                   invoice={invoice}
                   creditNotes={invoice?.creditNotes ?? []}
-                  transaction={{ id: row.id, transactionType: row.transactionType, hasInvoice: Boolean(invoice) }}
-                  orderId={row.payment?.order?.id ?? null}
+                  transaction={transaction ? { ...transaction, hasInvoice: Boolean(invoice) } : null}
                   paymentId={row.payment?.id ?? null}
                   remainingRefundable={row.refundState?.remainingRefundable ?? null}
-                  onOpenDetail={() => onOpenDetail(row.id)}
+                  onOpenDetail={transaction ? () => onOpenDetail(transaction.id) : undefined}
                 />
-              </TableCell>
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
-  );
-}
-
-function Orders({ rows }) {
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="pl-6">Commande</TableHead>
-          <TableHead>Client</TableHead>
-          <TableHead>Retrait / livraison</TableHead>
-          <TableHead>Statut</TableHead>
-          <TableHead>Paiement</TableHead>
-          <TableHead className="pr-6 text-right">Total</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={row.id}>
-            <TableCell className="pl-6">
-              <Link
-                href={`/dashboard/boutique/orders/${row.id}`}
-                className="font-medium text-[#2f3a2e] hover:underline"
-              >
-                n°{row.orderNumber}
-              </Link>
-              <span className="block text-xs text-gray-400">
-                {date(row.createdAt)} · {row._count.items} article(s)
-              </span>
-            </TableCell>
-            <TableCell>
-              {row.user?.fullName ?? "Client de passage"}
-              <span className="block text-xs text-gray-400">{row.user?.email ?? "—"}</span>
-            </TableCell>
-            <TableCell>{row.fulfilmentMode}</TableCell>
-            <TableCell>
-              <Badge>{STATUS_LABELS[row.status] ?? row.status}</Badge>
-            </TableCell>
-            <TableCell>{row.payment?.status ?? "En attente"}</TableCell>
-            <TableCell className="pr-6 text-right font-medium">{money(row.totalAmount)}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-function Reservations({ rows, kind }) {
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="pl-6">{kind === "workshops" ? "Atelier / événement" : "Formation"}</TableHead>
-          <TableHead>Client</TableHead>
-          <TableHead>Session</TableHead>
-          <TableHead>Places</TableHead>
-          <TableHead>Statut</TableHead>
-          <TableHead>Facture</TableHead>
-          <TableHead className="text-right">Total</TableHead>
-          <TableHead className="pr-6 text-right">Actions</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => {
-          const item = kind === "workshops" ? row.session.workshop : row.session.formation;
-          const invoice = row.payment?.invoice ?? null;
-          return (
-            <TableRow key={row.id}>
-              <TableCell className="pl-6 font-medium">
-                {item.title}
-                <span className="mt-1 block">
-                  <Badge>{TYPE_LABELS[item.type] ?? item.type}</Badge>
-                </span>
-              </TableCell>
-              <TableCell>
-                {row.customer.fullName}
-                <span className="block text-xs text-gray-400">{row.customer.email}</span>
-              </TableCell>
-              <TableCell>{date(row.session.startDate)}</TableCell>
-              <TableCell>{row.seatsCount}</TableCell>
-              <TableCell>
-                <Badge>{STATUS_LABELS[row.status] ?? row.status}</Badge>
-                <span className="mt-1 block text-xs text-gray-400">
-                  {row.payment?.status ?? "Paiement en attente"}
-                </span>
-              </TableCell>
-              <TableCell>
-                <InvoiceStatus invoice={invoice} customerInvoiceEligible={row.customerInvoiceEligible} />
-              </TableCell>
-              <TableCell className="text-right font-medium">{money(row.totalPrice)}</TableCell>
-              <TableCell className="pr-6">
-                <InvoiceRowActions invoice={invoice} creditNotes={invoice?.creditNotes ?? []} paymentId={row.payment?.id ?? null} />
               </TableCell>
             </TableRow>
           );
@@ -296,20 +322,32 @@ export function AdminOperationsClient({ result }) {
     pageSize = 30,
     totalCount = 0,
     type = "ALL",
-    status = "ALL",
+    lifecycleStatus = "ALL",
+    paymentEvent = "ALL",
   } = result ?? {};
   const [detailId, setDetailId] = useState(null);
 
   const hasPrevious = page > 1;
   const hasNext = page * pageSize < totalCount;
 
-  // Switching tab resets both filters — "Atelier" isn't a meaningful value
-  // once you're looking at Commandes, and carrying it over silently would
-  // make the next tab look empty for no visible reason.
-  function href({ nextTab = tab, nextPage = 1, nextType = tab === nextTab ? type : "ALL", nextStatus = tab === nextTab ? status : "ALL" } = {}) {
+  // "Commandes / Ateliers & événements / Formations" are presets — a
+  // sourceTypes restriction over the SAME unified query (see
+  // OPERATION_PRESETS) — not separate queries, so every row on every tab
+  // gets the same columns and the same Actions capability. Switching tab
+  // resets every filter: "Atelier" isn't a meaningful value once you're
+  // looking at Commandes, and carrying it over silently would make the next
+  // tab look empty for no visible reason.
+  function href({
+    nextTab = tab,
+    nextPage = 1,
+    nextType = tab === nextTab ? type : "ALL",
+    nextLifecycleStatus = tab === nextTab ? lifecycleStatus : "ALL",
+    nextPaymentEvent = tab === nextTab ? paymentEvent : "ALL",
+  } = {}) {
     const search = new URLSearchParams({ tab: nextTab, page: String(nextPage) });
     if (nextType !== "ALL") search.set("type", nextType);
-    if (nextStatus !== "ALL") search.set("status", nextStatus);
+    if (nextLifecycleStatus !== "ALL") search.set("lifecycleStatus", nextLifecycleStatus);
+    if (nextPaymentEvent !== "ALL") search.set("paymentEvent", nextPaymentEvent);
     return `/dashboard/operations?${search.toString()}`;
   }
 
@@ -330,12 +368,13 @@ export function AdminOperationsClient({ result }) {
         ))}
       </div>
 
-      {/* Only the "type" axis distinguishes rows that otherwise look
-          identical until read closely — atelier vs. événement, formation
-          publique vs. privée. Status is the second, universally useful cut
-          (e.g. isolating annulées). Neither renders on a tab with nothing to
-          filter (Commandes has no type filter — its own status list already
-          does the same job the other tabs split into two). */}
+      {/* Three independent axes now that the tabs share one query: "type"
+          still only matters for atelier/événement and formation
+          privée/publique; "payment event" (acompte/solde/remboursement) is
+          meaningful on every row everywhere, unlike the old status slot that
+          only existed on the Transactions tab; "status" is each source's own
+          lifecycle (a merged list when nothing restricts sourceType). None
+          renders when it has nothing to offer on the current tab. */}
       <FilterPills
         label="Type"
         options={TYPE_FILTERS[tab]}
@@ -344,28 +383,32 @@ export function AdminOperationsClient({ result }) {
         buildHref={(value) => href({ nextType: value })}
       />
       <FilterPills
-        label={tab === "transactions" ? "Type de paiement" : "Statut"}
-        options={STATUS_FILTERS[tab]}
-        labels={STATUS_LABELS}
-        active={status}
-        buildHref={(value) => href({ nextStatus: value })}
+        label="Type de paiement"
+        options={PAYMENT_EVENT_FILTERS}
+        labels={PAYMENT_EVENT_LABELS}
+        active={paymentEvent}
+        buildHref={(value) => href({ nextPaymentEvent: value })}
+      />
+      <FilterPills
+        label="Statut"
+        options={LIFECYCLE_STATUS_FILTERS[tab === "transactions" ? "all" : tab]}
+        labels={LIFECYCLE_STATUS_LABELS}
+        active={lifecycleStatus}
+        buildHref={(value) => href({ nextLifecycleStatus: value })}
       />
 
       <div className="border-b border-t border-stroke px-6 py-3 text-sm text-gray-500">
         {totalCount} élément{totalCount > 1 ? "s" : ""} · page {page}
       </div>
 
-      {/* Wide now that the actions column exists — the table scrolls inside
-          its own container rather than pushing the dashboard sideways. */}
+      {/* Wide now that every source's columns are merged into one table —
+          it scrolls inside its own container rather than pushing the
+          dashboard sideways. */}
       <div className="overflow-x-auto">
         {data.length === 0 ? (
           <div className="px-6 py-16 text-center text-sm text-gray-500">Aucune donnée dans cette catégorie.</div>
-        ) : tab === "transactions" ? (
-          <Transactions rows={data} onOpenDetail={setDetailId} />
-        ) : tab === "orders" ? (
-          <Orders rows={data} />
         ) : (
-          <Reservations rows={data} kind={tab} />
+          <UnifiedOperationsTable rows={data} onOpenDetail={setDetailId} />
         )}
       </div>
 

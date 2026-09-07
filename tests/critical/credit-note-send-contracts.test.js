@@ -82,45 +82,47 @@ describe("a Belgian B2B credit note can be sent to Billit for Peppol delivery, l
   });
 });
 
-describe("the operations row exposes both send actions per credit note, gated the same way the invoice's own buttons are", () => {
+describe("credit-note delivery is a deliberate action from the operation detail", () => {
   const rowActions = source("components/dashboard/operations/InvoiceRowActions.jsx");
+  const drawer = source("components/dashboard/operations/TransactionDetailDrawer.jsx");
+  const delivery = source("components/dashboard/operations/DocumentDeliveryDialog.jsx");
 
-  test("renders a CreditNoteActions strip per note instead of a bare download link", () => {
-    expect(rowActions).toContain("function CreditNoteActions({ note, invoice })");
-    expect(rowActions).toContain("<CreditNoteActions key={note.id} note={note} invoice={invoice} />");
+  test("keeps the table to one management entry point", () => {
+    expect(rowActions).toContain("Voir / gérer");
+    expect(rowActions).not.toContain("sendCreditNoteByEmail");
+    expect(rowActions).not.toContain("sendCreditNoteToBillit");
   });
 
-  test("reads the Belgian-B2B gate off the row's invoice — CreditNote has no customerType/vatNumber of its own", () => {
-    const fnIdx = rowActions.indexOf("function CreditNoteActions(");
-    const fn = rowActions.slice(fnIdx, rowActions.indexOf("\nfunction ", fnIdx + 1) === -1 ? undefined : rowActions.indexOf("\nfunction ", fnIdx + 1));
-    expect(fn).toContain('invoice.customerType === "B2B" && isBelgianVatNumber(invoice.customerVatNumber)');
-    expect(fn).toContain("sendCreditNoteByEmail(note.id)");
-    expect(fn).toContain("sendCreditNoteToBillit(note.id)");
-    const emailIdx = fn.indexOf('aria-label="Envoyer la note de crédit par e-mail"');
-    const emailButton = fn.slice(fn.lastIndexOf("<button", emailIdx), fn.indexOf("</button>", emailIdx));
-    expect(emailButton).toContain("disabled={sending}");
-    expect(emailButton).not.toContain("emailBlockedReason");
+  test("opens the same explicit delivery card for the note", () => {
+    expect(drawer).toContain('kind: "CREDIT_NOTE"');
+    expect(drawer).toContain("Envoyer la note de crédit");
+    expect(delivery).toContain("sendCreditNoteByEmail(documentRecord.id)");
+    expect(delivery).toContain("sendCreditNoteToBillit(documentRecord.id)");
+    expect(delivery).toContain("Créer dans Billit / Peppol");
   });
 
-  test("the Billit send opens a re-verify confirmation before calling the real action, same as the invoice's own button", () => {
-    const fnIdx = rowActions.indexOf("function CreditNoteActions(");
-    const fn = rowActions.slice(fnIdx, rowActions.indexOf("\nfunction ", fnIdx + 1));
-    expect(fn).toContain("onClick={() => setConfirmingBillit(true)}");
-    expect(fn).toContain("<ConfirmDialog");
-    expect(fn).toContain("onConfirm={handleSendBillit}");
+  test("Billit handoff asks for confirmation and does not claim automatic Peppol dispatch", () => {
+    expect(delivery).toContain("onClick={() => setConfirmingBillit(true)}");
+    expect(delivery).toContain("L'envoi Peppol est ensuite finalisé manuellement dans Billit");
   });
 
-  test("both reservation-tab and transaction-tab credit note selects carry delivery timestamps", () => {
+  test("both the entity-grained ledger select and the appointment-transactions hydrator carry delivery timestamps", () => {
     const actions = source("actions/dashboard/admin-operations.js");
     expect(actions).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
-    const occurrences = actions.split("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }").length - 1;
-    expect(occurrences).toBe(2);
+    // Shared by orders/workshops/formations (PAYMENT_LEDGER_SELECT).
+    expect(actions).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
+    // Appointments stay on their own, event-grained hydrator — same fields,
+    // its own copy.
+    const appointmentIdx = actions.indexOf("async function hydrateAppointmentTransactions");
+    expect(appointmentIdx).toBeGreaterThan(-1);
+    const appointmentFn = actions.slice(appointmentIdx, actions.indexOf("\n}\n", appointmentIdx));
+    expect(appointmentFn).toContain("select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true }");
   });
 
-  test("Operations displays e-mail delivery separately from the Billit handoff", () => {
-    expect(rowActions).toContain("note.emailSentAt");
-    expect(rowActions).toContain("e-mail envoyé le");
-    expect(rowActions).toContain("créée dans Billit — à finaliser");
-    expect(rowActions).toContain("non envoyée");
+  test("the invoice-status column still displays prior delivery state", () => {
+    const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
+    expect(client).toContain("invoice.emailSentAt");
+    expect(client).toContain("E-mail envoyé le");
+    expect(client).toContain("Créée dans Billit — à finaliser");
   });
 });

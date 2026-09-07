@@ -54,9 +54,14 @@ describe("the Stripe webhook route also flags instead of refunding, for every fa
     expect(src).not.toContain("await refundSession(");
   });
 
-  test("every one of its 10 failed-sale branches calls flagPaymentForManualRefund", () => {
-    const flagCalls = src.split("await flagPaymentForManualRefund(session,").length - 1;
-    expect(flagCalls).toBe(10);
+  test("every failed-sale branch, including legal-data fulfilment failures, calls flagPaymentForManualRefund", () => {
+    const flagCalls = src.match(/await flagPaymentForManualRefund\(\s*session,/g)?.length ?? 0;
+    expect(flagCalls).toBe(11);
+  });
+
+  test("keeps the Stripe Connect account on appointment manual-refund cases", () => {
+    expect(src).toContain("processAppointmentCheckoutSession(session, event.account ?? null)");
+    expect(src).toContain("stripeAccountId: connectedAccountId");
   });
 
   test("the stray-duplicate-charge staff alert email no longer claims an automatic refund happened", () => {

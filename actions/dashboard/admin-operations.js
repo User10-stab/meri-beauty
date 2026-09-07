@@ -1,11 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-import { TYPE_FILTERS, STATUS_FILTERS } from "@/lib/dashboard/operation-filters";
+import {
+  TYPE_FILTERS,
+  PAYMENT_EVENT_FILTERS,
+  LIFECYCLE_STATUS_FILTERS,
+  OPERATION_PRESETS,
+} from "@/lib/dashboard/operation-filters";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { summarizeRefundState } from "@/lib/refunds/plan-refund";
 
@@ -26,8 +32,10 @@ function normalizeParams(params = {}) {
   const tab = ADMIN_OPERATION_TABS.includes(params.tab) ? params.tab : "transactions";
   const page = Math.max(1, Number.parseInt(params.page, 10) || 1);
   const type = TYPE_FILTERS[tab]?.includes(params.type) ? params.type : "ALL";
-  const status = STATUS_FILTERS[tab]?.includes(params.status) ? params.status : "ALL";
-  return { tab, page, type, status };
+  const lifecycleOptions = LIFECYCLE_STATUS_FILTERS[tab === "transactions" ? "all" : tab] ?? [];
+  const lifecycleStatus = lifecycleOptions.includes(params.lifecycleStatus) ? params.lifecycleStatus : "ALL";
+  const paymentEvent = PAYMENT_EVENT_FILTERS.includes(params.paymentEvent) ? params.paymentEvent : "ALL";
+  return { tab, page, type, lifecycleStatus, paymentEvent };
 }
 
 async function requireAdminOperationsAccess() {
@@ -36,239 +44,366 @@ async function requireAdminOperationsAccess() {
   return session;
 }
 
+// ─── Unified operations query ───────────────────────────────────────────────
+//
+// Prisma has no UNION, so this is a two-stage id-then-hydrate query:
+//
+//   Stage A (below): one raw-SQL UNION ALL across Order/WorkshopReservation/
+//   FormationReservation (entity-grained — an order/booking is one row here
+//   regardless of how many payment events it has), plus a fourth
+//   Transaction-sourced arm for appointments, which keep today's
+//   event-grained behaviour unchanged (they are not part of this
+//   unification — see the module doc comment above getAdminOperations).
+//   Selects just {id, sourceType} and does the actual paging/sorting/
+//   filtering, so a growing history never has to be paged after the fact.
+//
+//   Stage B (hydrateXxx below): groups the page's ids by sourceType and runs
+//   the ordinary Prisma `findMany({ where: { id: { in } } })` per source,
+//   reusing the exact same `include` shapes the four tabs already used
+//   before unification — only the selection/paging mechanism moved to SQL,
+//   not the shape of the data fetched for display.
+//
+// Every column/type compared against a caller-supplied filter value is cast
+// to ::text on the SQL side. OrderStatus, WorkshopReservationStatus and
+// FormationReservationStatus are three distinct Postgres enums with
+// non-overlapping labels (and TransactionType is a fourth) — comparing an
+// enum column directly against a bound text parameter throws "operator does
+// not exist", not "no rows", so every such comparison must go through this
+// cast. Literal constants written directly into the SQL text (not bound
+// parameters) don't need it — Postgres resolves an in-line string literal's
+// type from context.
+
+async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, paymentEvent, skip, take }) {
+  const includeOrders = !sourceTypes || sourceTypes.includes("ORDER");
+  const includeWorkshops = !sourceTypes || sourceTypes.includes("WORKSHOP");
+  const includeFormations = !sourceTypes || sourceTypes.includes("FORMATION");
+  // Appointments are only ever reachable from the unrestricted (transactions)
+  // preset — Commandes/Ateliers/Formations never showed them before either.
+  const includeAppointments = !sourceTypes;
+
+  const arms = [];
+
+  if (includeOrders) {
+    arms.push(Prisma.sql`
+      SELECT o.id AS id, 'ORDER' AS "sourceType", o."createdAt" AS "sortAt"
+      FROM "Order" o
+      WHERE 1=1
+        ${lifecycleStatus !== "ALL" ? Prisma.sql`AND o."status"::text = ${lifecycleStatus}` : Prisma.empty}
+        ${
+          paymentEvent !== "ALL"
+            ? Prisma.sql`AND EXISTS (
+                SELECT 1 FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+                WHERE p."orderId" = o.id AND t."isDeleted" = false AND t."transactionType"::text = ${paymentEvent}
+              )`
+            : Prisma.empty
+        }
+    `);
+  }
+
+  if (includeWorkshops) {
+    arms.push(Prisma.sql`
+      SELECT wr.id AS id, 'WORKSHOP' AS "sourceType", wr."createdAt" AS "sortAt"
+      FROM "workshop_reservations" wr
+      JOIN "workshop_sessions" ws ON ws.id = wr."sessionId"
+      JOIN "workshops" w ON w.id = ws."workshopId"
+      WHERE 1=1
+        ${lifecycleStatus !== "ALL" ? Prisma.sql`AND wr."status"::text = ${lifecycleStatus}` : Prisma.empty}
+        ${type !== "ALL" ? Prisma.sql`AND w."type"::text = ${type}` : Prisma.empty}
+        ${
+          paymentEvent !== "ALL"
+            ? Prisma.sql`AND EXISTS (
+                SELECT 1 FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+                WHERE p."workshopReservationId" = wr.id AND t."isDeleted" = false AND t."transactionType"::text = ${paymentEvent}
+              )`
+            : Prisma.empty
+        }
+    `);
+  }
+
+  if (includeFormations) {
+    arms.push(Prisma.sql`
+      SELECT fr.id AS id, 'FORMATION' AS "sourceType", fr."createdAt" AS "sortAt"
+      FROM "formation_reservations" fr
+      JOIN "formation_sessions" fs ON fs.id = fr."sessionId"
+      JOIN "formations" f ON f.id = fs."formationId"
+      WHERE 1=1
+        ${lifecycleStatus !== "ALL" ? Prisma.sql`AND fr."status"::text = ${lifecycleStatus}` : Prisma.empty}
+        ${type !== "ALL" ? Prisma.sql`AND f."type"::text = ${type}` : Prisma.empty}
+        ${
+          paymentEvent !== "ALL"
+            ? Prisma.sql`AND EXISTS (
+                SELECT 1 FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+                WHERE p."formationReservationId" = fr.id AND t."isDeleted" = false AND t."transactionType"::text = ${paymentEvent}
+              )`
+            : Prisma.empty
+        }
+    `);
+  }
+
+  if (includeAppointments) {
+    // Mirrors the pre-unification Transactions-tab query exactly: one row
+    // per payment EVENT (not per appointment), with the same
+    // deposit-suppressed-once-a-balance-exists rule. No lifecycleStatus/type
+    // axis applies to this source in this view — a status-filtered request
+    // (e.g. "SHIPPED") correctly excludes appointments rather than matching
+    // them by accident.
+    arms.push(Prisma.sql`
+      SELECT t.id AS id, 'APPOINTMENT' AS "sourceType", t."paidAt" AS "sortAt"
+      FROM "Transaction" t
+      JOIN "Payment" p ON p.id = t."paymentId"
+      WHERE t."isDeleted" = false
+        AND p."appointmentId" IS NOT NULL
+        AND NOT (
+          t."transactionType" = 'DEPOSIT'
+          AND EXISTS (
+            SELECT 1 FROM "Transaction" t2
+            WHERE t2."paymentId" = t."paymentId" AND t2."isDeleted" = false AND t2."transactionType" = 'FINAL_PAYMENT'
+          )
+        )
+        ${lifecycleStatus !== "ALL" ? Prisma.sql`AND false` : Prisma.empty}
+        ${paymentEvent !== "ALL" ? Prisma.sql`AND t."transactionType"::text = ${paymentEvent}` : Prisma.empty}
+    `);
+  }
+
+  if (arms.length === 0) return { ids: [], totalCount: 0 };
+
+  const unioned = Prisma.join(arms, " UNION ALL ");
+
+  const [rows, countRows] = await Promise.all([
+    prisma.$queryRaw`
+      SELECT id, "sourceType" FROM (${unioned}) AS combined
+      ORDER BY "sortAt" DESC
+      LIMIT ${take} OFFSET ${skip}
+    `,
+    prisma.$queryRaw`SELECT COUNT(*)::int AS count FROM (${unioned}) AS combined`,
+  ]);
+
+  return { ids: rows, totalCount: countRows[0]?.count ?? 0 };
+}
+
+// From a Payment's live transactions, the money summary and the id of the
+// most recent event — the latter decides whether a row can open the detail
+// drawer at all (InvoiceRowActions only gets onOpenDetail when this exists).
+function deriveRefundFields(payment) {
+  const transactions = (payment?.transactions ?? []).filter((t) => !t.isDeleted);
+  const refundState = summarizeRefundState({ transactions, invoice: payment?.invoice ?? null });
+  const latest = transactions.reduce(
+    (best, t) => (!best || new Date(t.paidAt) > new Date(best.paidAt) ? t : best),
+    null,
+  );
+  return {
+    refundState: {
+      totalCollected: refundState.totalCollected,
+      totalRefunded: refundState.totalRefunded,
+      remainingRefundable: refundState.remainingRefundable,
+      fullyCredited: refundState.fullyCredited,
+    },
+    latestTransactionId: latest?.id ?? null,
+    latestTransactionType: latest?.transactionType ?? null,
+  };
+}
+
+const PAYMENT_LEDGER_SELECT = Object.freeze({
+  id: true,
+  status: true,
+  paidAmount: true,
+  remainingAmount: true,
+  transactions: { select: { id: true, amount: true, transactionType: true, isDeleted: true, paidAt: true } },
+  invoice: {
+    select: {
+      id: true,
+      number: true,
+      totalInclVat: true,
+      emailSentAt: true,
+      billitSentAt: true,
+      customerType: true,
+      customerVatNumber: true,
+      creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
+    },
+  },
+});
+
+async function hydrateOrders(ids) {
+  if (ids.length === 0) return [];
+  const rows = await prisma.order.findMany({
+    where: { id: { in: ids } },
+    include: {
+      user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
+      payment: { select: PAYMENT_LEDGER_SELECT },
+      _count: { select: { items: true } },
+    },
+  });
+  return rows.map((row) => ({
+    ...row,
+    sourceType: "ORDER",
+    customerInvoiceEligible: hasInvoiceableVatIdentity(row.user),
+    ...deriveRefundFields(row.payment),
+  }));
+}
+
+async function hydrateWorkshops(ids) {
+  if (ids.length === 0) return [];
+  const rows = await prisma.workshopReservation.findMany({
+    where: { id: { in: ids } },
+    include: {
+      customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
+      payment: { select: PAYMENT_LEDGER_SELECT },
+      session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } },
+    },
+  });
+  return rows.map((row) => ({
+    ...row,
+    sourceType: "WORKSHOP",
+    customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
+    ...deriveRefundFields(row.payment),
+  }));
+}
+
+async function hydrateFormations(ids) {
+  if (ids.length === 0) return [];
+  const rows = await prisma.formationReservation.findMany({
+    where: { id: { in: ids } },
+    include: {
+      customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
+      payment: { select: PAYMENT_LEDGER_SELECT },
+      session: { select: { startDate: true, formation: { select: { title: true, type: true } } } },
+    },
+  });
+  return rows.map((row) => ({
+    ...row,
+    sourceType: "FORMATION",
+    customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
+    ...deriveRefundFields(row.payment),
+  }));
+}
+
+// Unchanged from the pre-unification Transactions-tab query — appointments
+// stay event-grained, one row per Transaction, exactly as before.
+async function hydrateAppointmentTransactions(ids) {
+  if (ids.length === 0) return [];
+  const rows = await prisma.transaction.findMany({
+    where: { id: { in: ids } },
+    include: {
+      creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
+      payment: {
+        select: {
+          id: true,
+          status: true,
+          paymentType: true,
+          invoice: {
+            select: {
+              id: true,
+              number: true,
+              totalInclVat: true,
+              emailSentAt: true,
+              billitSentAt: true,
+              customerType: true,
+              customerVatNumber: true,
+              creditNotes: {
+                orderBy: { issuedAt: "asc" },
+                select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true },
+              },
+            },
+          },
+          transactions: { select: { amount: true, transactionType: true, isDeleted: true } },
+          appointment: { select: { id: true, date: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
+        },
+      },
+    },
+  });
+  return rows.map((row) => {
+    const refundState = summarizeRefundState({
+      transactions: row.payment?.transactions ?? [],
+      invoice: row.payment?.invoice ?? null,
+    });
+    return {
+      ...row,
+      sourceType: "APPOINTMENT",
+      customerInvoiceEligible: hasInvoiceableVatIdentity(resolveTransactionCustomer(row.payment)),
+      refundState: {
+        remainingRefundable: refundState.remainingRefundable,
+        fullyRefunded: refundState.fullyRefunded,
+        inconsistencies: refundState.inconsistencies,
+      },
+    };
+  });
+}
+
 /**
- * Paginated, admin-only operational ledger. Keeping one tab's query per
- * request prevents a growing transaction/order history from slowing the
- * dashboard just because another tab is not currently being viewed.
+ * Paginated, admin-only operational ledger — one unified, entity-grained
+ * list (an order or a booking is one row regardless of how many payment
+ * events it has) instead of four separately-queried tabs. "Commandes /
+ * Ateliers & événements / Formations" are presets (OPERATION_PRESETS) that
+ * restrict `sourceTypes` on this SAME query, not separate queries — so
+ * nothing shown there can go missing just because it hasn't been paid yet
+ * (an entity-grained row exists independent of whether any Transaction has
+ * been written against it).
+ *
+ * Appointments are the one exception, deliberately kept out of the
+ * entity-grained merge (they already have their own dashboard flows) — they
+ * keep appearing, event-grained, only under the unrestricted "transactions"
+ * preset, exactly as before unification.
  */
 export async function getAdminOperations(params = {}) {
   if (!(await requireAdminOperationsAccess())) {
     return { success: false, message: "Non autorisé.", data: [], totalCount: 0, page: 1, pageSize: PAGE_SIZE };
   }
 
-  const { tab, page, type, status } = normalizeParams(params);
+  const { tab, page, type, lifecycleStatus, paymentEvent } = normalizeParams(params);
   const skip = (page - 1) * PAGE_SIZE;
+  const sourceTypes = OPERATION_PRESETS[tab]?.sourceTypes ?? null;
 
   try {
-    let result;
-    if (tab === "transactions") {
-      // Transaction has no separate "status" column of its own — the filter
-      // slot doubles for transactionType (DEPOSIT/FINAL_PAYMENT/REFUND),
-      // which is what actually varies row to row on this tab.
-      const where = {
-        isDeleted: false,
-        ...(status !== "ALL" && { transactionType: status }),
-        // Once the balance exists, the deposit remains part of the immutable
-        // ledger but no longer needs its own row in the overview. It stays
-        // visible in getTransactionDetail() through payment.transactions.
-        NOT: {
-          transactionType: "DEPOSIT",
-          payment: {
-            transactions: { some: { isDeleted: false, transactionType: "FINAL_PAYMENT" } },
-          },
-        },
-      };
-      const [totalCount, data] = await Promise.all([
-        prisma.transaction.count({ where }),
-        prisma.transaction.findMany({
-          where,
-          orderBy: { paidAt: "desc" },
-          skip,
-          take: PAGE_SIZE,
-          include: {
-            // A refund row links to exactly one credit note (Transaction.
-            // creditNoteId), never to "whichever ones exist on the invoice" —
-            // an invoice can carry several partial refunds over time, and a
-            // blanket list would attach every one of them to every row.
-            creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
-            payment: {
-              select: {
-                id: true,
-                status: true,
-                paymentType: true,
-                // The row's invoice drives the download / e-mail actions.
-                // Absent for a payment that never produced one (a deposit
-                // collected before settlement, an appointment paid in part),
-                // which the UI has to show as "pas encore de facture" rather
-                // than a dead button.
-                invoice: {
-                  select: {
-                    id: true,
-                    number: true,
-                    totalInclVat: true,
-                    emailSentAt: true,
-                    billitSentAt: true,
-                    customerType: true,
-                    customerVatNumber: true,
-                    // The invoice is shared by its deposit and final-payment
-                    // rows. Read every partial credit so Operations can show
-                    // the total corrected amount and what remains.
-                    creditNotes: {
-                      orderBy: { issuedAt: "asc" },
-                      select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true },
-                    },
-                  },
-                },
-                // The transaction overview needs the whole payment ledger to
-                // decide whether a new refund is still possible. Looking at a
-                // DEPOSIT row alone would keep the action visible after that
-                // exact amount was already refunded on a sibling REFUND row.
-                transactions: {
-                  select: { amount: true, transactionType: true, isDeleted: true },
-                },
-                order: { select: { id: true, orderNumber: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
-                workshopReservation: { select: { id: true, session: { select: { workshop: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
-                formationReservation: { select: { id: true, session: { select: { formation: { select: { title: true } } } }, customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
-                appointment: { select: { id: true, date: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
-              },
-            },
-          },
-        }),
-      ]);
-      // "Pas encore émise" only makes sense for a customer who will ever get
-      // one — a particulier never does (hasInvoiceableVatIdentity), no
-      // matter how long the payment stays unsettled. The row needs to tell
-      // those two "no invoice" cases apart.
-      result = {
-        totalCount,
-        data: data.map((row) => {
-          const refundState = summarizeRefundState({
-            transactions: row.payment?.transactions ?? [],
-            invoice: row.payment?.invoice ?? null,
-          });
+    const { ids: idRows, totalCount } = await listUnifiedOperationIds({
+      sourceTypes,
+      type,
+      lifecycleStatus,
+      paymentEvent,
+      skip,
+      take: PAGE_SIZE,
+    });
 
-          return {
-            ...row,
-            customerInvoiceEligible: hasInvoiceableVatIdentity(resolveTransactionCustomer(row.payment)),
-            refundState: {
-              remainingRefundable: refundState.remainingRefundable,
-              fullyRefunded: refundState.fullyRefunded,
-              inconsistencies: refundState.inconsistencies,
-            },
-          };
-        }),
-      };
-    } else if (tab === "orders") {
-      const where = status !== "ALL" ? { status } : {};
-      const [totalCount, data] = await Promise.all([
-        prisma.order.count({ where }),
-        prisma.order.findMany({
-          where,
-          orderBy: { createdAt: "desc" },
-          skip,
-          take: PAGE_SIZE,
-          include: {
-            user: { select: { fullName: true, email: true } },
-            payment: { select: { status: true, paidAmount: true, remainingAmount: true } },
-            _count: { select: { items: true } },
-          },
-        }),
-      ]);
-      result = { totalCount, data };
-    } else if (tab === "workshops") {
-      // "Ateliers & événements" is one table because they share a booking
-      // flow — but an atelier and an événement read as different business
-      // lines, so the type filter is what actually separates them.
-      const where = {
-        ...(status !== "ALL" && { status }),
-        ...(type !== "ALL" && { session: { workshop: { type } } }),
-      };
-      const [totalCount, data] = await Promise.all([
-        prisma.workshopReservation.count({ where }),
-        prisma.workshopReservation.findMany({
-          where,
-          orderBy: { createdAt: "desc" },
-          skip,
-          take: PAGE_SIZE,
-          include: {
-            customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
-            payment: {
-              select: {
-                id: true,
-                status: true,
-                paidAmount: true,
-                remainingAmount: true,
-                // Drives the Facture/Ticket/Note de crédit actions — same
-                // shape as the transactions tab's payment.invoice, plus
-                // every credit note issued against it (a reservation row has
-                // no single transaction to key off, so all of them show).
-                invoice: {
-                  select: {
-                    id: true,
-                    number: true,
-                    emailSentAt: true,
-                    billitSentAt: true,
-                    customerType: true,
-                    customerVatNumber: true,
-                    creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
-                  },
-                },
-              },
-            },
-            session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } },
-          },
-        }),
-      ]);
-      result = {
-        totalCount,
-        data: data.map((row) => ({ ...row, customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer) })),
-      };
-    } else {
-      const where = {
-        ...(status !== "ALL" && { status }),
-        ...(type !== "ALL" && { session: { formation: { type } } }),
-      };
-      const [totalCount, data] = await Promise.all([
-        prisma.formationReservation.count({ where }),
-        prisma.formationReservation.findMany({
-          where,
-          orderBy: { createdAt: "desc" },
-          skip,
-          take: PAGE_SIZE,
-          include: {
-            customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
-            payment: {
-              select: {
-                id: true,
-                status: true,
-                paidAmount: true,
-                remainingAmount: true,
-                invoice: {
-                  select: {
-                    id: true,
-                    number: true,
-                    emailSentAt: true,
-                    billitSentAt: true,
-                    customerType: true,
-                    customerVatNumber: true,
-                    creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
-                  },
-                },
-              },
-            },
-            session: { select: { startDate: true, formation: { select: { title: true, type: true } } } },
-          },
-        }),
-      ]);
-      result = {
-        totalCount,
-        data: data.map((row) => ({ ...row, customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer) })),
-      };
-    }
+    const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [] };
+    for (const row of idRows) idsBySource[row.sourceType]?.push(row.id);
+
+    const [orders, workshops, formations, appointments] = await Promise.all([
+      hydrateOrders(idsBySource.ORDER),
+      hydrateWorkshops(idsBySource.WORKSHOP),
+      hydrateFormations(idsBySource.FORMATION),
+      hydrateAppointmentTransactions(idsBySource.APPOINTMENT),
+    ]);
+
+    const byId = new Map();
+    for (const row of [...orders, ...workshops, ...formations, ...appointments]) byId.set(row.id, row);
+    // Stage A already sorted by sortAt DESC; findMany({ id: { in } }) does
+    // not preserve that order, so the final list is rebuilt from it here.
+    const data = idRows.map((row) => byId.get(row.id)).filter(Boolean);
 
     return {
       success: true,
       tab,
       page,
       type,
-      status,
+      lifecycleStatus,
+      paymentEvent,
       pageSize: PAGE_SIZE,
-      totalCount: result.totalCount,
-      data: serializeDecimalFields(result.data),
+      totalCount,
+      data: serializeDecimalFields(data),
     };
   } catch (error) {
     console.error("[getAdminOperations]", error);
-    return { success: false, tab, page, type, status, pageSize: PAGE_SIZE, totalCount: 0, data: [], message: "Impossible de charger les opérations." };
+    return {
+      success: false,
+      tab,
+      page,
+      type,
+      lifecycleStatus,
+      paymentEvent,
+      pageSize: PAGE_SIZE,
+      totalCount: 0,
+      data: [],
+      message: "Impossible de charger les opérations.",
+    };
   }
 }
 
@@ -297,7 +432,11 @@ export async function getTransactionDetail(transactionId) {
         // issued against the invoice (see getAdminOperations' same choice).
         creditNote: { select: { id: true, number: true, issuedAt: true, reason: true, totalInclVat: true } },
         settledRefundLeg: {
-          select: { refundOperation: { select: { id: true, refundReceiptNumber: true, status: true } } },
+          select: {
+            refundOperation: {
+              select: { id: true, status: true, customerNotifiedAt: true, creditNote: { select: { id: true, number: true, emailSentAt: true, billitSentAt: true } } },
+            },
+          },
         },
         payment: {
           include: {
@@ -311,6 +450,14 @@ export async function getTransactionDetail(transactionId) {
                 vatAmount: true,
                 totalInclVat: true,
                 vatTreatment: true,
+                customerType: true,
+                customerVatNumber: true,
+                customerName: true,
+                // Enough to compute fullyCredited via summarizeRefundState
+                // below — not the individual notes themselves, which the
+                // drawer never lists (it shows only this row's own
+                // creditNote, per the comment above).
+                creditNotes: { select: { id: true, totalInclVat: true } },
               },
             },
             // Sibling transactions: a 50 % acompte followed by a balance
@@ -328,7 +475,24 @@ export async function getTransactionDetail(transactionId) {
 
     if (!transaction) return { success: false, message: "Transaction introuvable." };
 
-    return { success: true, data: serializeDecimalFields(transaction) };
+    // Drives the drawer's "Annuler et rembourser" gate — same formula
+    // InvoiceRowActions uses for the Transactions-tab row, computed here via
+    // the canonical helper instead of re-deriving it ad hoc client-side.
+    const refundState = summarizeRefundState({
+      transactions: transaction.payment?.transactions ?? [],
+      invoice: transaction.payment?.invoice ?? null,
+    });
+
+    return {
+      success: true,
+      data: serializeDecimalFields({
+        ...transaction,
+        refundState: {
+          remainingRefundable: refundState.remainingRefundable,
+          fullyCredited: refundState.fullyCredited,
+        },
+      }),
+    };
   } catch (error) {
     console.error("[getTransactionDetail]", error);
     return { success: false, message: "Impossible de charger le détail de cette transaction." };

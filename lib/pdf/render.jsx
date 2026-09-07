@@ -3,7 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { buildRentalPeriodLabel, shortContractRef } from "@/lib/invoicing";
 import { InvoiceDocument, CreditNoteDocument } from "./InvoiceDocument";
 import { TicketDocument } from "./TicketDocument";
-import { RefundReceiptDocument } from "./RefundReceiptDocument";
 import { getSellerContact } from "./seller-contact";
 
 /**
@@ -28,7 +27,6 @@ async function resolvePayment(invoice) {
     return null;
   }
 }
-
 /**
  * Rental context for staff contract invoices (reference + period), shown in
  * the existing TermsBlock section. Resolved live from the linked contract —
@@ -83,7 +81,6 @@ export async function renderInvoicePdf(invoice) {
     <InvoiceDocument invoice={{ ...serializeInvoice(invoice), payment }} contact={contact} rental={rental} />
   );
 }
-
 export async function renderTicketPdf(ticket) {
   const contact = await getSellerContact();
   return renderToBuffer(
@@ -117,7 +114,4 @@ export async function renderCreditNotePdf(creditNote, invoice) {
   );
 }
 
-export async function renderRefundReceiptPdf(operation, receipt) {
-  const contact = await getSellerContact();
-  return renderToBuffer(<RefundReceiptDocument contact={contact} receipt={{ ...receipt, legs: operation.legs }} />);
-}
+// Refund receipts are intentionally not rendered: B2C refund communication is plain e-mail only.

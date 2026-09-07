@@ -66,7 +66,7 @@ describe("accepted appointment lifecycle", () => {
     expect(webhook).toContain('event.type === "payment_intent.succeeded"');
     expect(webhook).toContain("handlePaymentIntentSucceeded(event.data.object, event.account)");
     expect(webhook).toContain("stripe.checkout.sessions.list");
-    expect(webhook).toContain("await processAppointmentCheckoutSession(session)");
+    expect(webhook).toContain("await processAppointmentCheckoutSession(session, connectedAccountId)");
     expect(webhook).toContain('status: nextPaymentStatus');
     expect(webhook).toContain('data: { status: nextAppointmentStatus }');
   });

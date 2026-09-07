@@ -1,7 +1,12 @@
 import { describe, expect, test, vi } from "vitest";
+import { settleRefundLeg } from "@/lib/refunds/settle-leg";
 import { reconcileMissedRefunds } from "../../lib/payments/reconcile-missed-refunds.js";
 
 vi.mock("@/lib/email", () => ({ sendEmail: vi.fn().mockResolvedValue({}) }));
+vi.mock("@/lib/refunds/settle-leg", async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, settleRefundLeg: vi.fn() };
+});
 
 // Per-account fixtures let a single stripeMock stand in for both the
 // platform account (options undefined) and one or more connected accounts
@@ -60,7 +65,7 @@ function appointmentPayment({ recordedRefund = 0 } = {}) {
   };
 }
 
-function prismaMock({ linkedPaymentId = "pay_1", payment, staff = [] }) {
+function prismaMock({ linkedPaymentId = "pay_1", payment, staff = [], ownLeg = null }) {
   const txStub = {
     $executeRaw: vi.fn().mockResolvedValue(0),
     payment: {
@@ -80,12 +85,39 @@ function prismaMock({ linkedPaymentId = "pay_1", payment, staff = [] }) {
     transaction: { findFirst: vi.fn().mockResolvedValue(linkedPaymentId ? { paymentId: linkedPaymentId } : null) },
     payment: { findUnique: vi.fn().mockResolvedValue(payment) },
     staff: { findMany: vi.fn().mockResolvedValue(staff) },
+    refundLeg: { findFirst: vi.fn().mockResolvedValue(ownLeg) },
     $transaction: vi.fn().mockImplementation((cb) => cb(txStub)),
     __txStub: txStub,
   };
 }
 
 describe("reconcileMissedRefunds — platform account (boutique/workshop/formation)", () => {
+  test("settles a queued refund leg instead of duplicating its ledger entry", async () => {
+    const payment = orderPayment();
+    const stripeClient = stripeMock({
+      accounts: {
+        __platform__: {
+          refunds: [{ id: "re_queued", status: "succeeded", charge: "ch_queued", created: 1_700_000_000 }],
+          charge: { id: "ch_queued", amount_refunded: 2100, payment_intent: "pi_queued", refunds: { data: [{ id: "re_queued" }] } },
+        },
+      },
+    });
+    const prismaClient = prismaMock({ payment, ownLeg: { id: "leg_1", refundOperationId: "operation_1" } });
+    settleRefundLeg.mockResolvedValueOnce({ settled: true, operationId: "operation_1" });
+
+    const result = await reconcileMissedRefunds({ stripeClient, prismaClient });
+
+    expect(result).toMatchObject({ checked: 1, reconciled: 1, failures: [] });
+    expect(settleRefundLeg).toHaveBeenCalledWith(expect.objectContaining({
+      prisma: prismaClient,
+      legId: "leg_1",
+      stripe: { refundId: "re_queued", paymentIntentId: "pi_queued", amount: 21 },
+    }));
+    // Settlement records the ledger movement only. Customer communication is
+    // an explicit Operations action, never a reconciliation side effect.
+    expect(prismaClient.$transaction).not.toHaveBeenCalled();
+  });
+
   test("recovers a refund that never reached the webhook", async () => {
     const payment = orderPayment();
     const stripeClient = stripeMock({

@@ -180,8 +180,8 @@ describe("an under-refund cannot be mistaken for a completed one", () => {
     expect(status).toContain("const succeeded = legs.filter(isFullySettled).length");
   });
 
-  test("the closing e-mail holds a short leg as outstanding", () => {
-    const notify = source("lib/refunds/notify-refund-complete.js");
+  test("the manual B2C confirmation holds a short leg as outstanding", () => {
+    const notify = source("lib/refunds/send-b2c-refund-confirmation.js");
     expect(notify).toContain("leg.settledAmount != null && Number(leg.settledAmount) + 0.01 < Number(leg.amount)");
     // And announces what actually went back, not what was planned.
     expect(notify).toContain("const settledOf = (leg) => Number(leg.settledAmount ?? leg.amount)");
@@ -226,11 +226,15 @@ describe("wording never claims money has moved when it has not", () => {
   });
 });
 
-describe("financial corrections preserve completed-service history", () => {
-  test("a completed booking is allowed only through the explicit correction trigger", () => {
+describe("completed services cannot be refunded through Operations", () => {
+  test("the retired correction trigger is rejected and completed bookings remain protected", () => {
     const authorization = source("lib/refunds/authorize.js");
-    expect(authorization).toContain('trigger === "FINANCIAL_CORRECTION"');
-    expect(authorization).toContain('trigger !== "NO_SHOW_EXCEPTION" && trigger !== "FINANCIAL_CORRECTION"');
+    expect(authorization).toContain('if (appointment.status === "COMPLETED")');
+    expect(authorization).toContain("deny(REFUND_DENIAL.COMPLETED_NOT_REFUNDABLE)");
+    expect(authorization).not.toContain("FINANCIAL_CORRECTION");
+
+    const operation = source("lib/refunds/open-refund-operation.js");
+    expect(operation).toContain("FINANCIAL_CORRECTION_RETIRED");
   });
 
   test("a refund ledger row never offers a second cancel/refund operation", () => {
@@ -245,24 +249,24 @@ describe("financial corrections preserve completed-service history", () => {
     expect(rowActions).toContain("!invoiceFullyCredited");
   });
 
-  test("a financial correction explains that an unfinished booking needs cancellation instead", () => {
-    const authorization = source("lib/refunds/authorize.js");
-    expect(authorization).toContain("FINANCIAL_CORRECTION_REQUIRES_COMPLETED");
-    expect(authorization).toContain("n'est pas encore terminée");
-    expect(authorization).toContain("Annulation par le salon");
+  test("the operations dialog exposes no financial-correction choice or partial-amount input", () => {
+    const dialog = source("components/dashboard/operations/CancelAndRefundDialog.jsx");
+    expect(dialog).not.toContain('value: "FINANCIAL_CORRECTION"');
+    expect(dialog).not.toContain("requestedAmount");
+    expect(dialog).toContain("Annuler et rembourser");
   });
 
-  test("a B2C refund receipt is attached only after settlement", () => {
-    const notify = source("lib/refunds/notify-refund-complete.js");
-    expect(notify).toContain("renderRefundReceiptPdf");
-    expect(notify).toContain("justificatif-remboursement-");
+  test("a B2C confirmation is manual and carries no financial document", () => {
+    const notify = source("lib/refunds/send-b2c-refund-confirmation.js");
+    expect(notify).toContain("operation.status !== \"COMPLETED\"");
+    expect(notify).toContain("Remboursement confirmé");
+    expect(notify).not.toContain("attachments");
   });
 
-  test("B2B customers are blocked from every refund-receipt boundary", () => {
+  test("B2B customers require a credit note rather than B2C communication", () => {
     expect(source("lib/refunds/open-refund-operation.js")).toContain("B2B_INVOICE_REQUIRED");
     expect(source("lib/refunds/queue-manual-refund.js")).toContain("B2B_REFUND_REQUIRES_CREDIT_NOTE");
-    expect(source("lib/refunds/notify-refund-complete.js")).toContain("B2B_REFUND_RECEIPT_FORBIDDEN");
-    expect(source("app/api/refund-receipts/[id]/pdf/route.js")).toContain("Un client B2B doit recevoir une note de crédit");
+    expect(source("lib/refunds/send-b2c-refund-confirmation.js")).toContain("B2B_CREDIT_NOTE_REQUIRED");
   });
 });
 
@@ -329,20 +333,13 @@ describe("converting a legacy path redirects its refund, never just deletes it",
   });
 });
 
-describe("the not-yet-converted refund paths are still intact", () => {
-  // These still refund automatically. Listed explicitly so that converting
-  // one is a deliberate act with a test to update, not a silent side effect
-  // of editing something nearby. Shrink this list as each is converted.
-  const remainingAutoRefundSites = [
-    "actions/boutique/orders.js",
-    // Deliberately permanent: customer self-cancel outside the 48h window
-    // keeps its automatic refund by explicit decision (2026-09-02).
-    "actions/reservation/cancel-reservation.js",
-  ];
-
-  for (const file of remainingAutoRefundSites) {
-    test(`${file} still refunds automatically`, () => {
-      expect(source(file)).toContain("refunds.create");
+describe("converted legacy cancellation paths", () => {
+  for (const file of ["actions/boutique/orders.js", "actions/reservation/cancel-reservation.js"]) {
+    test(`${file} queues online refunds instead of calling Stripe`, () => {
+      const action = source(file);
+      expect(action).not.toContain("refunds.create");
+      expect(action).toContain("queueManualRefund(tx");
+      expect(action).toContain("issueCreditNote(tx");
     });
   }
 });

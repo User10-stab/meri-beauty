@@ -456,10 +456,13 @@ export async function createWorkshopReservation(data) {
       discountAmount = promoResult.discountAmount;
       promoMaxUses = promoResult.maxUses;
     }
-    const discountedTotal = Math.max(0, totalPrice - discountAmount);
-
-    const depositAmount = isFullPayment ? discountedTotal : (discountedTotal * depositPct) / 100;
-    const balanceDue = discountedTotal - depositAmount;
+    const discountedTotal = Number(Math.max(0, totalPrice - discountAmount).toFixed(2));
+    const depositAmount = isFullPayment
+      ? discountedTotal
+      : Number(((discountedTotal * depositPct) / 100).toFixed(2));
+    // Derive the balance from the rounded total and rounded deposit so the
+    // two persisted Decimal(10,2) values always add back to the total.
+    const balanceDue = Number((discountedTotal - depositAmount).toFixed(2));
 
     // An unverified customer (brand new, or a previous guest checkout that
     // was never confirmed) reuses their still-live hold on this session

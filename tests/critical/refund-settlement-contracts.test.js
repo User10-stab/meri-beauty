@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *
  *   - a leg becomes SUCCEEDED only when money actually moved;
  *   - a webhook delivered twice settles once;
- *   - the customer is mailed exactly once, and only after EVERY leg landed;
+ *   - a B2C confirmation can only be sent manually, after EVERY leg landed;
  *   - a CARD leg cannot settle without its terminal ticket reference;
  *   - a CASH leg cannot settle without a confirmed hand-over.
  */
@@ -26,20 +26,14 @@ const mocks = vi.hoisted(() => {
       $transaction: vi.fn(async (fn) => fn(tx)),
       refundOperation: { findUnique: vi.fn(), updateMany: vi.fn(), update: vi.fn() },
       refundLeg: { findFirst: vi.fn() },
-      salon: { findUnique: vi.fn() },
+    salon: { findUnique: vi.fn() },
     },
     sendEmail: vi.fn(async () => ({ success: true })),
-    renderCreditNotePdf: vi.fn(async () => Buffer.from("pdf")),
-    renderRefundReceiptPdf: vi.fn(async () => Buffer.from("refund-receipt")),
   };
 });
 
 vi.mock("@/lib/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("@/lib/email", () => ({ sendEmail: mocks.sendEmail }));
-vi.mock("@/lib/pdf/render", () => ({
-  renderCreditNotePdf: mocks.renderCreditNotePdf,
-  renderRefundReceiptPdf: mocks.renderRefundReceiptPdf,
-}));
 vi.mock("@/lib/email-templates", () => ({
   brandedHtml: (title, body) => `<html>${title}${body}</html>`,
   escapeHtml: (value) => String(value),
@@ -47,7 +41,7 @@ vi.mock("@/lib/email-templates", () => ({
 vi.mock("@prisma/client", () => ({ Prisma: { sql: (strings, ...values) => ({ strings, values }) } }));
 
 import { settleRefundLeg } from "@/lib/refunds/settle-leg";
-import { notifyRefundComplete } from "@/lib/refunds/notify-refund-complete";
+import { sendB2CRefundConfirmation } from "@/lib/refunds/send-b2c-refund-confirmation";
 
 function leg(overrides = {}) {
   return {
@@ -126,6 +120,33 @@ describe("settleRefundLeg", () => {
     expect(mocks.tx.transaction.create).not.toHaveBeenCalled();
   });
 
+  it("retains every refund ID when a short refund is topped up", async () => {
+    mocks.tx.refundLeg.findUnique
+      .mockResolvedValueOnce({ refundOperationId: "op-1" })
+      .mockResolvedValueOnce(
+        leg({
+          amount: 10.5,
+          status: "SUCCEEDED",
+          settledAmount: 5,
+          stripeRefundId: "re_first",
+          stripeRefundIds: ["re_first"],
+        }),
+      );
+
+    const result = await settleRefundLeg({
+      prisma: mocks.prisma,
+      legId: "leg-1",
+      stripe: { refundId: "re_top_up", paymentIntentId: "pi_1", amount: 2.5 },
+    });
+
+    expect(result.settled).toBe(true);
+    expect(mocks.tx.refundLeg.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ stripeRefundIds: { set: ["re_first", "re_top_up"] } }),
+      }),
+    );
+  });
+
   it("refuses a CARD leg with no terminal ticket reference", async () => {
     mocks.tx.refundLeg.findUnique
       .mockResolvedValueOnce({ refundOperationId: "op-1" })
@@ -194,7 +215,7 @@ function operation(overrides = {}) {
   return {
     id: "op-1",
     customerNotifiedAt: null,
-    refundReceiptNumber: null,
+    status: "COMPLETED",
     creditNote: null,
     invoice: null,
     legs: [{ method: "ONLINE", amount: 10.5, status: "SUCCEEDED" }],
@@ -208,7 +229,7 @@ function operation(overrides = {}) {
   };
 }
 
-describe("notifyRefundComplete", () => {
+describe("sendB2CRefundConfirmation", () => {
   it("says nothing while a manual leg is still outstanding", async () => {
     mocks.prisma.refundOperation.findUnique.mockResolvedValue(
       operation({
@@ -219,7 +240,7 @@ describe("notifyRefundComplete", () => {
       }),
     );
 
-    const result = await notifyRefundComplete({ prisma: mocks.prisma, operationId: "op-1" });
+    const result = await sendB2CRefundConfirmation({ prisma: mocks.prisma, operationId: "op-1" });
 
     expect(result).toMatchObject({ sent: false, reason: "LEGS_OUTSTANDING" });
     expect(mocks.sendEmail).not.toHaveBeenCalled();
@@ -236,11 +257,12 @@ describe("notifyRefundComplete", () => {
     );
     mocks.prisma.refundOperation.updateMany.mockResolvedValue({ count: 1 });
 
-    const result = await notifyRefundComplete({ prisma: mocks.prisma, operationId: "op-1" });
+    const result = await sendB2CRefundConfirmation({ prisma: mocks.prisma, operationId: "op-1" });
 
     expect(result.sent).toBe(true);
     const mail = mocks.sendEmail.mock.calls[0][0];
     expect(mail.to).toBe("alice@example.com");
+    expect(mail.subject).toContain("Remboursement confirmé");
     expect(mail.text).toContain("21,00");
     expect(mail.text).toContain("espèces");
     expect(mail.text).toContain("carte bancaire (en ligne)");
@@ -253,7 +275,7 @@ describe("notifyRefundComplete", () => {
     // Second delivery: the conditional update matches nothing.
     mocks.prisma.refundOperation.updateMany.mockResolvedValue({ count: 0 });
 
-    const result = await notifyRefundComplete({ prisma: mocks.prisma, operationId: "op-1" });
+    const result = await sendB2CRefundConfirmation({ prisma: mocks.prisma, operationId: "op-1" });
 
     expect(result).toMatchObject({ sent: false, reason: "ALREADY_NOTIFIED" });
     expect(mocks.sendEmail).not.toHaveBeenCalled();
@@ -264,7 +286,7 @@ describe("notifyRefundComplete", () => {
       operation({ customerNotifiedAt: new Date("2026-09-02T10:00:00Z") }),
     );
 
-    const result = await notifyRefundComplete({ prisma: mocks.prisma, operationId: "op-1" });
+    const result = await sendB2CRefundConfirmation({ prisma: mocks.prisma, operationId: "op-1" });
 
     expect(result).toMatchObject({ sent: false, reason: "ALREADY_NOTIFIED" });
     expect(mocks.prisma.refundOperation.updateMany).not.toHaveBeenCalled();
@@ -275,7 +297,7 @@ describe("notifyRefundComplete", () => {
     mocks.prisma.refundOperation.updateMany.mockResolvedValue({ count: 1 });
     mocks.sendEmail.mockResolvedValue({ success: false, error: "smtp down" });
 
-    const result = await notifyRefundComplete({ prisma: mocks.prisma, operationId: "op-1" });
+    const result = await sendB2CRefundConfirmation({ prisma: mocks.prisma, operationId: "op-1" });
 
     expect(result).toMatchObject({ sent: false, reason: "EMAIL_PROVIDER_FAILED" });
     expect(mocks.prisma.refundOperation.update).toHaveBeenCalledWith({
@@ -284,24 +306,24 @@ describe("notifyRefundComplete", () => {
     });
   });
 
-  it("names the B2C refund receipt when there is no invoice to credit", async () => {
+  it("sends no attachment and never uses financial-correction wording", async () => {
     mocks.prisma.refundOperation.findUnique.mockResolvedValue(
-      operation({ refundReceiptNumber: "RB2026-000004" }),
+      operation(),
     );
     mocks.prisma.refundOperation.updateMany.mockResolvedValue({ count: 1 });
 
-    await notifyRefundComplete({ prisma: mocks.prisma, operationId: "op-1" });
+    await sendB2CRefundConfirmation({ prisma: mocks.prisma, operationId: "op-1" });
 
-    expect(mocks.sendEmail.mock.calls[0][0].text).toContain("RB2026-000004");
-    expect(mocks.renderCreditNotePdf).not.toHaveBeenCalled();
-    expect(mocks.renderRefundReceiptPdf).toHaveBeenCalledOnce();
-    expect(mocks.sendEmail.mock.calls[0][0].attachments[0].filename).toBe("justificatif-remboursement-RB2026-000004.pdf");
+    const mail = mocks.sendEmail.mock.calls[0][0];
+    expect(mail.attachments).toBeUndefined();
+    expect(mail.subject).not.toContain("Correction financière");
+    expect(mail.text).not.toContain("Correction financière");
   });
 
-  it("never sends a B2C refund receipt to a business customer", async () => {
+  it("refuses B2B because its credit note has a separate delivery action", async () => {
     mocks.prisma.refundOperation.findUnique.mockResolvedValue(
       operation({
-        refundReceiptNumber: "RB2026-000005",
+        creditNote: { id: "cn-1", number: "NC-1" },
         payment: {
           workshopReservation: {
             session: { workshop: { title: "Atelier pro" } },
@@ -317,10 +339,9 @@ describe("notifyRefundComplete", () => {
       }),
     );
 
-    const result = await notifyRefundComplete({ prisma: mocks.prisma, operationId: "op-1" });
+    const result = await sendB2CRefundConfirmation({ prisma: mocks.prisma, operationId: "op-1" });
 
-    expect(result).toMatchObject({ sent: false, reason: "B2B_REFUND_RECEIPT_FORBIDDEN" });
-    expect(mocks.renderRefundReceiptPdf).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sent: false, reason: "B2B_CREDIT_NOTE_REQUIRED" });
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 });

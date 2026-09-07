@@ -111,12 +111,13 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow }) {
         </div>
       </td>
 
-      {/* Actions — Admin only (view-only for staff, per the confirmed permissions table) */}
+      {/* Cancellation/session moves remain admin-only. Closing and no-show are
+          exposed only where the server granted the row-level capability. */}
       <td className="px-4 py-4 pr-5 align-middle whitespace-nowrap">
         <div className="flex items-center justify-end gap-2">
           {/* Only a CONFIRMED booking can be settled or marked absent — the
               two ways an atelier actually ends once the session has run. */}
-          {row.status === "CONFIRMED" && onSettle && (
+          {row.status === "CONFIRMED" && row.canSettle && onSettle && (
             <button
               type="button"
               onClick={() => onSettle(row)}
@@ -126,7 +127,7 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow }) {
               Clôturer
             </button>
           )}
-          {row.status === "CONFIRMED" && onNoShow && (
+          {row.status === "CONFIRMED" && row.canMarkNoShow && onNoShow && (
             <button
               type="button"
               onClick={() => onNoShow(row)}

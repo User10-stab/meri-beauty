@@ -63,8 +63,17 @@ function serializeBankDeposit(deposit) {
  * `declaredAmount` is the one figure a human types in, straight off the
  * deposit slip — any gap against the computed `amount` becomes `variance`,
  * the same expected-vs-counted shape CashSession already uses.
+ *
+ * `declaredAmount: null` is that same assertion made in one gesture: "the
+ * slip says exactly what left the drawer". It is not an absent figure — the
+ * caller is stating the deposit matched, and the screen labels the control
+ * that way — so it records variance 0 like any other agreeing count. The
+ * control this model provides was never the typing; it is that a human had
+ * to say what the bank received, and that saying so leaves a record.
+ *
+ * `reference` is optional: see the field's own comment in schema.prisma.
  */
-export async function declareBankDeposit({ movementIds, reference, declaredAmount, note = null }) {
+export async function declareBankDeposit({ movementIds, reference = null, declaredAmount = null, note = null }) {
   const guard = await requireBankDepositAccess();
   if (guard.error) return { success: false, message: guard.error };
 
@@ -74,12 +83,11 @@ export async function declareBankDeposit({ movementIds, reference, declaredAmoun
   }
 
   const trimmedReference = typeof reference === "string" ? reference.trim() : "";
-  if (!trimmedReference) {
-    return { success: false, message: "Indiquez la référence de l'opération bancaire (ticket de dépôt ou relevé)." };
-  }
 
-  const declared = Number(declaredAmount);
-  if (!Number.isFinite(declared) || declared < 0) {
+  // Distinguished from 0, which is a real (and alarming) declared figure.
+  const declaresExactMatch = declaredAmount === null || declaredAmount === undefined || declaredAmount === "";
+  const declared = declaresExactMatch ? null : Number(declaredAmount);
+  if (!declaresExactMatch && (!Number.isFinite(declared) || declared < 0)) {
     return { success: false, message: "Le montant déposé doit être un nombre positif ou nul." };
   }
 
@@ -101,14 +109,15 @@ export async function declareBankDeposit({ movementIds, reference, declaredAmoun
       }
 
       const amount = roundMoney(movements.reduce((sum, m) => sum + Number(m.amount), 0));
-      const variance = roundMoney(declared - amount);
+      const declaredFigure = declaresExactMatch ? amount : roundMoney(declared);
+      const variance = roundMoney(declaredFigure - amount);
 
       const deposit = await tx.bankDeposit.create({
         data: {
           amount,
-          declaredAmount: roundMoney(declared),
+          declaredAmount: declaredFigure,
           variance,
-          reference: trimmedReference,
+          reference: trimmedReference || null,
           declaredById: guard.session.user.id,
           note: trimmedNote || null,
         },
@@ -145,14 +154,34 @@ export async function declareBankDeposit({ movementIds, reference, declaredAmoun
  * deposits. confirmedById is still recorded, so a maker/checker split can be
  * enforced later (or simply audited) without a schema change.
  */
-export async function confirmBankDeposit(depositId) {
+export async function confirmBankDeposit(depositId, { reference = null } = {}) {
   const guard = await requireBankDepositAccess();
   if (guard.error) return { success: false, message: guard.error };
 
-  const claim = await prisma.bankDeposit.updateMany({
-    where: { id: depositId, status: "DECLARED" },
-    data: { status: "CONFIRMED", confirmedAt: new Date(), confirmedById: guard.session.user.id },
-  });
+  // Confirmation is the moment the statement is actually in front of
+  // someone, so it is also the natural moment a deposit declared without a
+  // reference finally gets one. Read and write sit in one transaction so the
+  // fill can be gated on the reference still being blank: overwriting a
+  // reference already on the record would silently rewrite which bank
+  // movement this deposit claims to be.
+  const trimmedReference = typeof reference === "string" ? reference.trim() : "";
+
+  let claim;
+  try {
+    claim = await prisma.$transaction(async (tx) => {
+      const existing = await tx.bankDeposit.findUnique({ where: { id: depositId }, select: { reference: true } });
+      const fill = trimmedReference && existing && !existing.reference ? { reference: trimmedReference } : {};
+      return tx.bankDeposit.updateMany({
+        where: { id: depositId, status: "DECLARED" },
+        data: { status: "CONFIRMED", confirmedAt: new Date(), confirmedById: guard.session.user.id, ...fill },
+      });
+    });
+  } catch (error) {
+    if (error?.code === "P2002") {
+      return { success: false, message: "Cette référence bancaire est déjà utilisée par un autre dépôt." };
+    }
+    throw error;
+  }
   if (claim.count === 0) {
     return { success: false, message: "Dépôt introuvable ou déjà confirmé." };
   }
@@ -202,6 +231,72 @@ export async function listUndepositedWithdrawals() {
       amount: Number(m.amount),
       label: m.label,
       occurredAt: m.occurredAt,
+    })),
+  };
+}
+
+/**
+ * Every withdrawal of ONE till session, each carrying whatever deposit it
+ * already belongs to. This is what lets the livre de caisse answer "did the
+ * cash that left this drawer reach the bank" without leaving the page the
+ * cashier is already on — the whole-business view stays at
+ * /dashboard/boutique/caisse/depots, which is a different question
+ * (everything in transit, across every opening).
+ *
+ * Returns deposited withdrawals too, not just the pending ones: a session's
+ * book that quietly dropped a withdrawal the moment it was deposited would
+ * be a book you cannot reconcile after the fact.
+ */
+export async function listSessionWithdrawals(cashSessionId) {
+  const guard = await requireBankDepositAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
+
+  if (typeof cashSessionId !== "string" || !cashSessionId) {
+    return { success: false, message: "Session de caisse introuvable.", data: [] };
+  }
+
+  const movements = await prisma.cashMovement.findMany({
+    where: { type: "WITHDRAWAL", cashSessionId },
+    orderBy: { occurredAt: "asc" },
+    select: {
+      id: true,
+      pieceNumber: true,
+      amount: true,
+      label: true,
+      occurredAt: true,
+      bankDeposit: {
+        select: {
+          id: true,
+          status: true,
+          reference: true,
+          declaredAmount: true,
+          variance: true,
+          declaredAt: true,
+          declaredBy: { select: { fullName: true } },
+        },
+      },
+    },
+  });
+
+  return {
+    success: true,
+    data: movements.map((m) => ({
+      id: m.id,
+      pieceNumber: m.pieceNumber,
+      amount: Number(m.amount),
+      label: m.label,
+      occurredAt: m.occurredAt,
+      deposit: m.bankDeposit
+        ? {
+            id: m.bankDeposit.id,
+            status: m.bankDeposit.status,
+            reference: m.bankDeposit.reference,
+            declaredAmount: Number(m.bankDeposit.declaredAmount),
+            variance: Number(m.bankDeposit.variance),
+            declaredAt: m.bankDeposit.declaredAt,
+            declaredBy: m.bankDeposit.declaredBy?.fullName ?? null,
+          }
+        : null,
     })),
   };
 }

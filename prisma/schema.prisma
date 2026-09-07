@@ -2189,7 +2189,16 @@ model BankDeposit {
   // statement. Unique: two deposits can never legitimately point at the
   // same bank movement — that would be double-counting one trip to the
   // bank as two.
-  reference String @unique
+  //
+  // Optional, because the slip number is routinely not to hand at the
+  // moment the cash is walked out of the drawer, and refusing to record
+  // the trip until it is produced only guarantees the trip goes
+  // unrecorded. A deposit with no reference is still DECLARED-not-
+  // CONFIRMED, so it stays visible in "espèces en transit" until someone
+  // matches it to a statement — which is where the reference gets filled
+  // in. Postgres allows many NULLs under a unique index, so uniqueness
+  // still binds every reference that actually exists.
+  reference String? @unique
 
   status BankDepositStatus @default(DECLARED)
   note   String?

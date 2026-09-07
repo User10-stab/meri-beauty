@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BookOpen, FileText } from "lucide-react";
 import { getCashBookLedger } from "@/actions/dashboard/cash-book";
+import { listSessionWithdrawals } from "@/actions/dashboard/bank-deposits";
+import { CashMovementPanel } from "@/components/dashboard/boutique/CashMovementPanel";
+import { SessionBankDepositPanel } from "@/components/dashboard/boutique/SessionBankDepositPanel";
 
 function formatEuro(value) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(value);
@@ -21,9 +24,19 @@ const ROW_STYLES = {
   WITHDRAWAL: "text-red-600",
 };
 
-export function CashBookClient({ ledger: initialLedger }) {
+export function CashBookClient({ ledger: initialLedger, movements = [], withdrawals = [] }) {
   const [ledger, setLedger] = useState(initialLedger);
+  const [sessionWithdrawals, setSessionWithdrawals] = useState(withdrawals);
   const { session, rows, totals } = ledger;
+
+  const reload = useCallback(() => {
+    getCashBookLedger(session.id).then((result) => {
+      if (result.success) setLedger(result.data);
+    }).catch(() => {});
+    listSessionWithdrawals(session.id).then((result) => {
+      if (result.success) setSessionWithdrawals(result.data);
+    }).catch(() => {});
+  }, [session.id]);
 
   // A closed session's ledger is a frozen historical record — nothing to
   // poll for. An open one changes every time a sale lands anywhere (POS,
@@ -118,6 +131,22 @@ export function CashBookClient({ ledger: initialLedger }) {
           </tbody>
         </table>
       </div>
+
+      {/* Both panels belong to this opening, so they live with it rather than
+          on the index page (movements) and a separate screen (deposits) —
+          recording a withdrawal and walking it to the bank is one errand, and
+          it used to span three pages. A closed session keeps the deposit
+          panel: cash withdrawn on Friday is routinely banked on Monday, long
+          after the till it came from was closed. Recording a *movement*
+          against a closed till is refused server-side, so that panel is only
+          rendered while the session is open. */}
+      {!session.closedAt && <CashMovementPanel initialMovements={movements} onRecorded={reload} />}
+
+      <SessionBankDepositPanel
+        withdrawals={sessionWithdrawals}
+        onChanged={reload}
+        sessionOpen={!session.closedAt}
+      />
     </div>
   );
 }

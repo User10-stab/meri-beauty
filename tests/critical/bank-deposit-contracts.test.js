@@ -24,7 +24,12 @@ describe("bank-deposit schema", () => {
   });
 
   test("the bank reference is unique — two deposits can never claim the same bank movement", () => {
-    expect(schema).toContain("reference String @unique");
+    // Optional since the slip number is routinely not to hand when the cash
+    // leaves the drawer, and refusing the record until it is only meant the
+    // trip went unrecorded. Still @unique: Postgres allows many NULLs under
+    // a unique index, so every reference that exists is still bound to one
+    // deposit.
+    expect(schema).toContain("reference String? @unique");
   });
 
   test("a deposit starts DECLARED and only becomes CONFIRMED once matched to a statement", () => {
@@ -68,6 +73,45 @@ describe("declareBankDeposit", () => {
   test("linking the movements happens in the same transaction as creating the deposit", () => {
     expect(actions).toContain("$transaction(async (tx)");
     expect(actions).toContain("tx.cashMovement.updateMany");
+  });
+
+  test("a missing reference is accepted and stored as absent, not as an empty string", () => {
+    // An empty string would occupy the unique index, so the second
+    // reference-less deposit would collide with the first one.
+    expect(actions).toContain("reference: trimmedReference || null");
+    expect(actions).not.toContain("Indiquez la référence de l'opération bancaire");
+  });
+
+  test("an omitted declared amount is recorded as agreeing, never as zero", () => {
+    // "" and null mean the slip matched what left the drawer. Number("") is
+    // 0 — taking that path would book every one-click deposit as a total
+    // loss with a variance to match.
+    expect(actions).toContain("declaresExactMatch");
+    expect(actions).toContain("const declaredFigure = declaresExactMatch ? amount : roundMoney(declared)");
+    expect(actions).toContain("const variance = roundMoney(declaredFigure - amount)");
+  });
+
+  test("a declared amount of exactly 0 is still a real figure, not treated as omitted", () => {
+    // 0 € reaching the bank on a non-zero withdrawal is the single most
+    // alarming thing this model can record; it must not be swallowed by the
+    // "left blank" branch.
+    expect(actions).toContain('declaredAmount === null || declaredAmount === undefined || declaredAmount === ""');
+  });
+});
+
+describe("filling in a reference after the fact", () => {
+  const actions = source("actions/dashboard/bank-deposits.js");
+
+  test("confirmation can supply the reference a declaration was allowed to omit", () => {
+    expect(actions).toContain("export async function confirmBankDeposit(depositId, { reference = null } = {})");
+  });
+
+  test("it only ever fills a blank, and reads and writes in one transaction", () => {
+    // Overwriting an existing reference would silently change which bank
+    // movement the deposit claims to be; a read outside the transaction
+    // would let two confirmations race to do it.
+    expect(actions).toContain("trimmedReference && existing && !existing.reference");
+    expect(actions).toContain("claim = await prisma.$transaction(async (tx)");
   });
 });
 
@@ -113,6 +157,7 @@ describe("bank-deposit access control", () => {
       "confirmBankDeposit",
       "listBankDeposits",
       "listUndepositedWithdrawals",
+      "listSessionWithdrawals",
       "getCashInTransit",
     ]) {
       const start = actions.indexOf(`export async function ${fn}`);
@@ -146,5 +191,74 @@ describe("bank-deposit UI wiring", () => {
   test("the page surfaces the cash-in-transit figure and the undeposited withdrawals to bundle", () => {
     expect(page).toContain("getCashInTransit()");
     expect(page).toContain("listUndepositedWithdrawals()");
+  });
+});
+
+// Recording a withdrawal and walking it to the bank is one errand, and it
+// used to span three screens: the till index to record the movement, a
+// separate deposits page to declare it, and the book to see any of it. Both
+// halves now sit in the opening's own livre de caisse.
+describe("one opening's movements and deposits live in its own book", () => {
+  const bookPage = source("app/(dashboard)/dashboard/boutique/caisse/[sessionId]/page.jsx");
+  const bookClient = source("components/dashboard/boutique/CashBookClient.jsx");
+  const sessionClient = source("components/dashboard/boutique/CashSessionClient.jsx");
+  const panel = source("components/dashboard/boutique/SessionBankDepositPanel.jsx");
+
+  test("the book page loads this session's movements and its withdrawals", () => {
+    expect(bookPage).toContain("listCashMovements(sessionId)");
+    expect(bookPage).toContain("listSessionWithdrawals(sessionId)");
+  });
+
+  test("the book renders both panels", () => {
+    expect(bookClient).toContain("<CashMovementPanel");
+    expect(bookClient).toContain("<SessionBankDepositPanel");
+  });
+
+  test("the till index no longer carries the movement panel", () => {
+    // Two places to record the same movement is two places for it to be
+    // recorded twice.
+    expect(sessionClient).not.toContain("CashMovementPanel");
+  });
+
+  test("recording a movement is refused on a closed till, so that panel is not offered on one", () => {
+    expect(bookClient).toContain("{!session.closedAt && <CashMovementPanel");
+  });
+
+  test("a closed session still offers depositing — Friday's cash is banked on Monday", () => {
+    expect(bookClient).toContain("<SessionBankDepositPanel");
+    expect(bookClient).toContain("withdrawals={sessionWithdrawals}");
+    // ...but is not told to record the withdrawal on a form that a closed
+    // till does not display.
+    expect(bookClient).toContain("sessionOpen={!session.closedAt}");
+    expect(panel).toContain("{sessionOpen &&");
+  });
+
+  test("the ledger and the deposit list are refreshed from one owner", () => {
+    // The same withdrawals appear in both; two independently refreshed
+    // copies would drift apart on one screen.
+    expect(panel).toContain("export function SessionBankDepositPanel({ withdrawals, onChanged");
+    expect(panel).not.toContain("listSessionWithdrawals");
+  });
+});
+
+describe("depositing this opening's takings takes one click", () => {
+  const panel = source("components/dashboard/boutique/SessionBankDepositPanel.jsx");
+
+  test("every pending withdrawal starts selected", () => {
+    // Tracks deselection rather than selection: a withdrawal recorded while
+    // the panel is open is then included by default, instead of being
+    // quietly left out of a selection made before it existed.
+    expect(panel).toContain("excludedIds");
+    expect(panel).toContain("pending.filter((w) => !excludedIds.includes(w.id))");
+  });
+
+  test("the amount and reference are folded away behind the uncommon case", () => {
+    expect(panel).toContain("showDetails");
+    expect(panel).toContain("Le dépôt diffère");
+  });
+
+  test("the default declaration sends no typed amount, so the server records an exact match", () => {
+    expect(panel).toContain("declaredAmount: typed === \"\" ? null : Number(typed)");
+    expect(panel).toContain("const typed = showDetails ? declaredAmount.trim() : \"\"");
   });
 });

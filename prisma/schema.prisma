@@ -885,7 +885,6 @@ model User {
   closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
   recordedCashMovements          CashMovement[]         @relation("CashMovementRecordedBy")
   declaredBankDeposits           BankDeposit[]          @relation("BankDepositDeclaredBy")
-  confirmedBankDeposits          BankDeposit[]          @relation("BankDepositConfirmedBy")
   submittedCancellationRequests  AppointmentCancellationRequest[] @relation("CancellationRequestSubmittedBy")
   reviewedCancellationRequests   AppointmentCancellationRequest[] @relation("CancellationRequestReviewedBy")
   submittedReservationCancellationRequests ReservationCancellationRequest[] @relation("ReservationCancellationRequestedBy")
@@ -2153,26 +2152,22 @@ model CashMovement {
 // missing without anyone being able to say so. This model is the second
 // fact, deliberately kept separate from the first instead of a field on
 // CashMovement, because one deposit routinely bundles several withdrawals
-// (a week of takings walked to the bank in one trip) and needs its own
-// declared/confirmed lifecycle.
-enum BankDepositStatus {
-  // A staff member says this cash was taken to the bank. Only a claim until
-  // it is matched against the actual statement.
-  DECLARED
-  // Someone has found this exact `reference` on the bank statement. Only a
-  // CONFIRMED deposit counts as cash that has verifiably left the business
-  // for good — see the "espèces en transit" figure.
-  CONFIRMED
-}
-
+// (a week of takings walked to the bank in one trip).
+//
+// Originally a two-step declared/confirmed lifecycle, collapsed to one
+// action (2026-09-07): every deposit here is recorded by the same admin who
+// made the trip, so a second person "confirming" the first person's own
+// claim was never a real check — just an extra click standing between the
+// cashier and the record. What still matters, and is still captured, is
+// that a human said what the bank received and when — see `declaredAt`.
 model BankDeposit {
   id String @id @default(cuid())
 
   // Sum of the linked CashMovement withdrawals — what SHOULD have reached
-  // the bank. Computed server-side from `movements` at declaration time,
-  // never typed in directly: the entire point of this model is that "what
-  // left the till" and "what a human claims was deposited" can never be
-  // made to silently agree just by typing a bigger number.
+  // the bank. Computed server-side from `movements`, never typed in
+  // directly: the entire point of this model is that "what left the till"
+  // and "what a human claims was deposited" can never be made to silently
+  // agree just by typing a bigger number.
   amount Decimal @db.Decimal(10, 2)
 
   // What the deposit slip / receipt actually says, entered by whoever made
@@ -2193,34 +2188,19 @@ model BankDeposit {
   // Optional, because the slip number is routinely not to hand at the
   // moment the cash is walked out of the drawer, and refusing to record
   // the trip until it is produced only guarantees the trip goes
-  // unrecorded. A deposit with no reference is still DECLARED-not-
-  // CONFIRMED, so it stays visible in "espèces en transit" until someone
-  // matches it to a statement — which is where the reference gets filled
-  // in. Postgres allows many NULLs under a unique index, so uniqueness
-  // still binds every reference that actually exists.
+  // unrecorded. Postgres allows many NULLs under a unique index, so
+  // uniqueness still binds every reference that actually exists.
   reference String? @unique
 
-  status BankDepositStatus @default(DECLARED)
-  note   String?
+  note String?
 
   declaredAt   DateTime @default(now())
   declaredById String
   declaredBy   User     @relation("BankDepositDeclaredBy", fields: [declaredById], references: [id])
 
-  // Set once someone has actually found this reference on the bank
-  // statement — see BankDepositStatus.CONFIRMED. Nullable/SetNull rather
-  // than required, same reasoning as CashSession.closedBy: the confirming
-  // user's account existing forever is not a precondition for the deposit
-  // record itself to stay valid.
-  confirmedAt   DateTime?
-  confirmedById String?
-  confirmedBy   User?     @relation("BankDepositConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
-
   movements CashMovement[]
 
   createdAt DateTime @default(now())
-
-  @@index([status])
 }
 
 // TRANSACTION

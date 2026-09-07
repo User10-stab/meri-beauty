@@ -15,6 +15,10 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 // the way" — nothing tied a withdrawal to proof it arrived anywhere.
 describe("bank-deposit schema", () => {
   const schema = source("prisma/schema.prisma");
+  const depositBlock = schema.slice(
+    schema.indexOf("model BankDeposit"),
+    schema.indexOf("model BankDeposit") + schema.slice(schema.indexOf("model BankDeposit")).indexOf("\n}\n") + 3
+  );
 
   test("BankDeposit carries the same expected/declared/variance shape as CashSession", () => {
     expect(schema).toContain("model BankDeposit");
@@ -32,11 +36,14 @@ describe("bank-deposit schema", () => {
     expect(schema).toContain("reference String? @unique");
   });
 
-  test("a deposit starts DECLARED and only becomes CONFIRMED once matched to a statement", () => {
-    expect(schema).toContain("enum BankDepositStatus");
-    expect(schema).toContain("DECLARED");
-    expect(schema).toContain("CONFIRMED");
-    expect(schema).toContain('status BankDepositStatus @default(DECLARED)');
+  test("there is no separate declared/confirmed lifecycle to track", () => {
+    // Removed 2026-09-07: every deposit is recorded by the same admin who
+    // made the trip, so a second "confirm" click checked nothing a second
+    // person hadn't already taken on faith from the first.
+    expect(schema).not.toContain("enum BankDepositStatus");
+    expect(depositBlock).not.toContain("status");
+    expect(depositBlock).not.toContain("confirmedAt");
+    expect(depositBlock).not.toContain("confirmedById");
   });
 
   test("CashMovement links to at most one deposit, nulled rather than orphaned if the deposit disappears", () => {
@@ -99,49 +106,21 @@ describe("declareBankDeposit", () => {
   });
 });
 
-describe("filling in a reference after the fact", () => {
+describe("declaring a deposit is the whole record, with no confirm step after it", () => {
   const actions = source("actions/dashboard/bank-deposits.js");
 
-  test("confirmation can supply the reference a declaration was allowed to omit", () => {
-    expect(actions).toContain("export async function confirmBankDeposit(depositId, { reference = null } = {})");
-  });
-
-  test("it only ever fills a blank, and reads and writes in one transaction", () => {
-    // Overwriting an existing reference would silently change which bank
-    // movement the deposit claims to be; a read outside the transaction
-    // would let two confirmations race to do it.
-    expect(actions).toContain("trimmedReference && existing && !existing.reference");
-    expect(actions).toContain("claim = await prisma.$transaction(async (tx)");
-  });
-});
-
-describe("confirmBankDeposit", () => {
-  const actions = source("actions/dashboard/bank-deposits.js");
-
-  test("confirming is an atomic claim gated on still being DECLARED", () => {
-    // Same shape as closeCashSession's claim — a double-click or two staff
-    // acting on the same deposit must not confirm it twice.
-    expect(actions).toContain('where: { id: depositId, status: "DECLARED" }');
-    expect(actions).toContain("if (claim.count === 0)");
-  });
-
-  test("confirmedById is always recorded, even though same-person confirmation is allowed", () => {
-    expect(actions).toContain("confirmedById: guard.session.user.id");
+  test("confirmBankDeposit no longer exists", () => {
+    expect(actions).not.toContain("export async function confirmBankDeposit");
   });
 });
 
 describe("getCashInTransit", () => {
   const actions = source("actions/dashboard/bank-deposits.js");
 
-  test("counts both unbundled withdrawals and declared-but-unconfirmed deposits", () => {
-    // These are the two states where cash has left the drawer but nothing
-    // has yet verified it reached the bank.
+  test("counts withdrawals never bundled into a deposit — declaring one is now the whole record", () => {
     expect(actions).toContain('where: { type: "WITHDRAWAL", bankDepositId: null }');
-    expect(actions).toContain('where: { status: "DECLARED" }');
-  });
-
-  test("a healthy books reads zero, not an absence of the figure", () => {
-    expect(actions).toContain("undepositedAmount + unconfirmedAmount");
+    // There is no second, declared-but-unconfirmed state left to sum.
+    expect(actions).not.toContain("unconfirmedAmount");
   });
 });
 
@@ -154,7 +133,6 @@ describe("bank-deposit access control", () => {
     // as the deposits themselves.
     for (const fn of [
       "declareBankDeposit",
-      "confirmBankDeposit",
       "listBankDeposits",
       "listUndepositedWithdrawals",
       "listSessionWithdrawals",
@@ -184,8 +162,9 @@ describe("bank-deposit UI wiring", () => {
     expect(client).toContain("if (!result.success) return toast.error(result.message)");
   });
 
-  test("confirming is only offered on a still-DECLARED deposit", () => {
-    expect(client).toContain('d.status === "DECLARED"');
+  test("the history has no status column or confirm action — there is nothing left to confirm", () => {
+    expect(client).not.toContain("confirmBankDeposit");
+    expect(client).not.toContain("Confirmer");
   });
 
   test("the page surfaces the cash-in-transit figure and the undeposited withdrawals to bundle", () => {
@@ -260,5 +239,10 @@ describe("depositing this opening's takings takes one click", () => {
   test("the default declaration sends no typed amount, so the server records an exact match", () => {
     expect(panel).toContain("declaredAmount: typed === \"\" ? null : Number(typed)");
     expect(panel).toContain("const typed = showDetails ? declaredAmount.trim() : \"\"");
+  });
+
+  test("a deposited withdrawal has no confirm affordance — declaring it was already the whole record", () => {
+    expect(panel).not.toContain("confirmBankDeposit");
+    expect(panel).not.toContain("Confirmer");
   });
 });

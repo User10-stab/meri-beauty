@@ -26,7 +26,6 @@ async function requireBankDepositAccess() {
 
 const DEPOSIT_INCLUDE = {
   declaredBy: { select: { id: true, fullName: true } },
-  confirmedBy: { select: { id: true, fullName: true } },
   movements: { select: { id: true, pieceNumber: true, amount: true, label: true, occurredAt: true } },
 };
 
@@ -37,12 +36,9 @@ function serializeBankDeposit(deposit) {
     declaredAmount: Number(deposit.declaredAmount),
     variance: Number(deposit.variance),
     reference: deposit.reference,
-    status: deposit.status,
     note: deposit.note,
     declaredAt: deposit.declaredAt,
     declaredBy: deposit.declaredBy ? { id: deposit.declaredBy.id, fullName: deposit.declaredBy.fullName } : null,
-    confirmedAt: deposit.confirmedAt,
-    confirmedBy: deposit.confirmedBy ? { id: deposit.confirmedBy.id, fullName: deposit.confirmedBy.fullName } : null,
     movements: (deposit.movements ?? []).map((m) => ({
       id: m.id,
       pieceNumber: m.pieceNumber,
@@ -144,53 +140,6 @@ export async function declareBankDeposit({ movementIds, reference = null, declar
   return { success: true, data: serializeBankDeposit(full) };
 }
 
-/**
- * Marks a declared deposit as verified against the actual bank statement —
- * the only thing that turns "a staff member says this reached the bank"
- * into something closer to proof.
- *
- * Deliberately does not require the confirming user to differ from
- * declaredById: a single-person shop must still be able to confirm its own
- * deposits. confirmedById is still recorded, so a maker/checker split can be
- * enforced later (or simply audited) without a schema change.
- */
-export async function confirmBankDeposit(depositId, { reference = null } = {}) {
-  const guard = await requireBankDepositAccess();
-  if (guard.error) return { success: false, message: guard.error };
-
-  // Confirmation is the moment the statement is actually in front of
-  // someone, so it is also the natural moment a deposit declared without a
-  // reference finally gets one. Read and write sit in one transaction so the
-  // fill can be gated on the reference still being blank: overwriting a
-  // reference already on the record would silently rewrite which bank
-  // movement this deposit claims to be.
-  const trimmedReference = typeof reference === "string" ? reference.trim() : "";
-
-  let claim;
-  try {
-    claim = await prisma.$transaction(async (tx) => {
-      const existing = await tx.bankDeposit.findUnique({ where: { id: depositId }, select: { reference: true } });
-      const fill = trimmedReference && existing && !existing.reference ? { reference: trimmedReference } : {};
-      return tx.bankDeposit.updateMany({
-        where: { id: depositId, status: "DECLARED" },
-        data: { status: "CONFIRMED", confirmedAt: new Date(), confirmedById: guard.session.user.id, ...fill },
-      });
-    });
-  } catch (error) {
-    if (error?.code === "P2002") {
-      return { success: false, message: "Cette référence bancaire est déjà utilisée par un autre dépôt." };
-    }
-    throw error;
-  }
-  if (claim.count === 0) {
-    return { success: false, message: "Dépôt introuvable ou déjà confirmé." };
-  }
-
-  const updated = await prisma.bankDeposit.findUnique({ where: { id: depositId }, include: DEPOSIT_INCLUDE });
-  revalidateCaisseRoutes();
-  return { success: true, data: serializeBankDeposit(updated) };
-}
-
 /** Deposit history, most recent first. */
 export async function listBankDeposits({ page = 1, pageSize = 20 } = {}) {
   const guard = await requireBankDepositAccess();
@@ -267,7 +216,6 @@ export async function listSessionWithdrawals(cashSessionId) {
       bankDeposit: {
         select: {
           id: true,
-          status: true,
           reference: true,
           declaredAmount: true,
           variance: true,
@@ -289,7 +237,6 @@ export async function listSessionWithdrawals(cashSessionId) {
       deposit: m.bankDeposit
         ? {
             id: m.bankDeposit.id,
-            status: m.bankDeposit.status,
             reference: m.bankDeposit.reference,
             declaredAmount: Number(m.bankDeposit.declaredAmount),
             variance: Number(m.bankDeposit.variance),
@@ -302,38 +249,25 @@ export async function listSessionWithdrawals(cashSessionId) {
 }
 
 /**
- * "Espèces en transit": cash that has left a till drawer but is not yet
- * verifiably at the bank — this is the one number that answers "did the
- * money actually go to the bank, or somewhere else". It is the sum of:
- *   - withdrawals never even bundled into a deposit declaration, and
- *   - deposits that were declared but never confirmed against a statement.
- * It should read zero on a healthy books; anything else is cash whose
- * whereabouts nothing in the system has verified yet.
+ * "Espèces en transit": cash withdrawn from a till drawer but not yet
+ * bundled into a bank deposit declaration — the one number that answers
+ * "did this withdrawal ever get recorded as reaching the bank". Declaring a
+ * deposit is now the whole record (see the module comment), so this is the
+ * entire gap; it should read zero on a healthy books.
  */
 export async function getCashInTransit() {
   const guard = await requireBankDepositAccess();
   if (guard.error) return { success: false, message: guard.error, data: null };
 
-  const [undeposited, unconfirmed] = await Promise.all([
-    prisma.cashMovement.aggregate({
-      where: { type: "WITHDRAWAL", bankDepositId: null },
-      _sum: { amount: true },
-    }),
-    prisma.bankDeposit.aggregate({
-      where: { status: "DECLARED" },
-      _sum: { declaredAmount: true },
-    }),
-  ]);
+  const undeposited = await prisma.cashMovement.aggregate({
+    where: { type: "WITHDRAWAL", bankDepositId: null },
+    _sum: { amount: true },
+  });
 
-  const undepositedAmount = Number(undeposited._sum.amount ?? 0);
-  const unconfirmedAmount = Number(unconfirmed._sum.declaredAmount ?? 0);
+  const undepositedAmount = roundMoney(Number(undeposited._sum.amount ?? 0));
 
   return {
     success: true,
-    data: {
-      undepositedAmount,
-      unconfirmedAmount,
-      total: roundMoney(undepositedAmount + unconfirmedAmount),
-    },
+    data: { undepositedAmount },
   };
 }

@@ -1,10 +1,10 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Landmark, CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
+import { Landmark, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
-import { declareBankDeposit, confirmBankDeposit } from "@/actions/dashboard/bank-deposits";
+import { declareBankDeposit } from "@/actions/dashboard/bank-deposits";
 
 function formatEuro(value) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(value);
@@ -29,6 +29,10 @@ function formatTime(iso) {
  * while this panel is open is then included by default instead of silently
  * left behind by a selection made before it existed.
  *
+ * Declaring is the only step: there is no later "confirm" click to hunt
+ * down, because it never checked anything a second person didn't already
+ * take on faith — see the module comment on declareBankDeposit.
+ *
  * `withdrawals` is owned by CashBookClient, which also owns the ledger the
  * same movements appear in: two copies of that list, refreshed
  * independently, would eventually disagree on the same screen.
@@ -39,7 +43,6 @@ export function SessionBankDepositPanel({ withdrawals, onChanged, sessionOpen = 
   const [reference, setReference] = useState("");
   const [declaredAmount, setDeclaredAmount] = useState("");
   const [note, setNote] = useState("");
-  const [confirmReference, setConfirmReference] = useState({});
   const [isPending, startTransition] = useTransition();
 
   const pending = useMemo(() => withdrawals.filter((w) => !w.deposit), [withdrawals]);
@@ -81,16 +84,6 @@ export function SessionBankDepositPanel({ withdrawals, onChanged, sessionOpen = 
           ? "Dépôt enregistré — aucun écart."
           : `Dépôt enregistré — écart de ${formatEuro(result.data.variance)}.`
       );
-      onChanged?.();
-    });
-  }
-
-  function handleConfirm(depositId) {
-    startTransition(async () => {
-      const result = await confirmBankDeposit(depositId, { reference: confirmReference[depositId] ?? null });
-      if (!result.success) return toast.error(result.message);
-      setConfirmReference((prev) => ({ ...prev, [depositId]: "" }));
-      toast.success("Dépôt confirmé sur relevé bancaire.");
       onChanged?.();
     });
   }
@@ -206,39 +199,9 @@ export function SessionBankDepositPanel({ withdrawals, onChanged, sessionOpen = 
                     <span className="font-mono text-xs text-gray-400">{w.pieceNumber}</span>
                     <span className="flex-1 text-gray-700 dark:text-dark-6">{w.label}</span>
                     <span className="font-medium text-gray-900 dark:text-white">{formatEuro(w.amount)}</span>
-                    {w.deposit.reference && (
-                      <span className="font-mono text-xs text-gray-400">{w.deposit.reference}</span>
-                    )}
+                    <span className="font-mono text-xs text-gray-400">{w.deposit.reference ?? "—"}</span>
                     {w.deposit.variance !== 0 && (
                       <span className="text-xs font-medium text-red-600">écart {formatEuro(w.deposit.variance)}</span>
-                    )}
-                    {w.deposit.status === "CONFIRMED" ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
-                        <CheckCircle2 size={12} />
-                        Confirmé
-                      </span>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        {!w.deposit.reference && (
-                          <input
-                            type="text"
-                            value={confirmReference[w.deposit.id] ?? ""}
-                            onChange={(event) =>
-                              setConfirmReference((prev) => ({ ...prev, [w.deposit.id]: event.target.value }))
-                            }
-                            placeholder="Réf. relevé (optionnel)"
-                            className="h-8 w-40 rounded-lg border border-gray-200 px-2 text-xs outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-                          />
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleConfirm(w.deposit.id)}
-                          disabled={isPending}
-                          className="rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-500/10 dark:text-amber-400"
-                        >
-                          Confirmer sur relevé
-                        </button>
-                      </div>
                     )}
                   </div>
                 ))}

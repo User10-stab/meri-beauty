@@ -2,12 +2,11 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowLeft, Landmark, CheckCircle2, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Landmark, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
 import {
   declareBankDeposit,
-  confirmBankDeposit,
   listUndepositedWithdrawals,
   listBankDeposits,
   getCashInTransit,
@@ -41,9 +40,8 @@ function StatCard({ icon, label, value, tone = "default" }) {
 /**
  * A withdrawal leaving the drawer and that cash actually reaching the bank
  * are two different facts (see actions/dashboard/bank-deposits.js). This
- * screen is where the second fact gets recorded: bundle one or more
- * undeposited withdrawals, declare what the deposit slip says, and later —
- * once someone checks the actual bank statement — confirm it.
+ * screen is where the second fact gets recorded, in one step: bundle one or
+ * more undeposited withdrawals and declare what the deposit slip says.
  */
 export function BankDepositClient({ initialUndeposited, initialHistory, initialTransit }) {
   const [undeposited, setUndeposited] = useState(initialUndeposited);
@@ -79,9 +77,8 @@ export function BankDepositClient({ initialUndeposited, initialHistory, initialT
     if (selectedIds.length === 0) return toast.error("Sélectionnez au moins un retrait à déposer.");
 
     // Both blanks mean something specific rather than nothing: no reference
-    // is a deposit whose slip number will be filled in at confirmation, and
-    // no amount is "the slip says exactly what left the drawer". See
-    // declareBankDeposit.
+    // is one this deposit simply never had, and no amount is "the slip says
+    // exactly what left the drawer". See declareBankDeposit.
     const typed = declaredAmount.trim();
     if (typed !== "") {
       const parsed = Number(typed);
@@ -106,15 +103,6 @@ export function BankDepositClient({ initialUndeposited, initialHistory, initialT
           ? "Dépôt déclaré — aucun écart."
           : `Dépôt déclaré — écart de ${formatEuro(result.data.variance)}.`
       );
-      refresh();
-    });
-  }
-
-  function handleConfirm(depositId) {
-    startTransition(async () => {
-      const result = await confirmBankDeposit(depositId);
-      if (!result.success) return toast.error(result.message);
-      toast.success("Dépôt confirmé sur relevé bancaire.");
       refresh();
     });
   }
@@ -145,18 +133,6 @@ export function BankDepositClient({ initialUndeposited, initialHistory, initialT
             label="Retraits non déposés"
             value={formatEuro(transit.undepositedAmount)}
             tone={transit.undepositedAmount > 0 ? "warning" : "default"}
-          />
-          <StatCard
-            icon={<AlertTriangle size={20} />}
-            label="Déposés, non confirmés"
-            value={formatEuro(transit.unconfirmedAmount)}
-            tone={transit.unconfirmedAmount > 0 ? "warning" : "default"}
-          />
-          <StatCard
-            icon={<Landmark size={20} />}
-            label="Total en transit"
-            value={formatEuro(transit.total)}
-            tone={transit.total > 0 ? "warning" : "default"}
           />
         </div>
       )}
@@ -256,8 +232,6 @@ export function BankDepositClient({ initialUndeposited, initialHistory, initialT
                   <th className="px-4 py-3">Retraits</th>
                   <th className="px-4 py-3">Déposé</th>
                   <th className="px-4 py-3">Écart</th>
-                  <th className="px-4 py-3">Statut</th>
-                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-dark-3">
@@ -272,30 +246,6 @@ export function BankDepositClient({ initialUndeposited, initialHistory, initialT
                     <td className="px-4 py-3">{formatEuro(d.declaredAmount)}</td>
                     <td className={`px-4 py-3 font-medium ${d.variance === 0 ? "text-emerald-600" : "text-red-600"}`}>
                       {formatEuro(d.variance)}
-                    </td>
-                    <td className="px-4 py-3">
-                      {d.status === "CONFIRMED" ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
-                          <CheckCircle2 size={12} />
-                          Confirmé
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
-                          Déclaré
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {d.status === "DECLARED" && (
-                        <button
-                          type="button"
-                          onClick={() => handleConfirm(d.id)}
-                          disabled={isPending}
-                          className="text-sm font-medium text-[#2f3a2e] hover:underline disabled:opacity-50 dark:text-white"
-                        >
-                          Confirmer
-                        </button>
-                      )}
                     </td>
                   </tr>
                 ))}

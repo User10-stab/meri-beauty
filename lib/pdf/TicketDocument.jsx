@@ -85,6 +85,9 @@ function TicketPage({ ticket, contact = null }) {
 
         <Text style={styles.title}>TICKET DE CAISSE</Text>
         <Text style={styles.meta}>N° {ticketNumber} — {formatDate(ticket.issuedAt)}</Text>
+        {/* Cash-only: the livre de caisse line this collection produced.
+            Absent for CARD/ONLINE, which never enter that book. */}
+        {ticket.pieceNumber ? <Text style={styles.meta}>N° pièce {ticket.pieceNumber}</Text> : null}
         {ticket.orderNumber != null ? <Text style={styles.meta}>Commande n° {ticket.orderNumber}</Text> : null}
 
         <Rule />

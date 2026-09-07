@@ -48,7 +48,8 @@ export async function GET(req, { params }) {
                 transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
                 amount: { gt: 0 },
               },
-              select: { id: true },
+              orderBy: { paidAt: "asc" },
+              select: { id: true, pieceNumber: true, paidAt: true },
             },
           },
         },
@@ -85,8 +86,18 @@ export async function GET(req, { params }) {
     }
   }
 
+  // CASH-only, and only ever set by the same allocatePieceNumber call that
+  // stamps every other till line (see lib/cash-book/piece-number.js) — a
+  // CARD/ONLINE order has none, so this stays null exactly where the ticket
+  // isn't a cash-book line to begin with. Ordered by paidAt above; the most
+  // recent qualifying collection is the meaningful one to print (the rare
+  // deposit-then-balance case resolves to the balance, which is what
+  // actually settled the sale).
+  const piece = order.payment?.transactions.filter((t) => t.pieceNumber).at(-1)?.pieceNumber ?? null;
+
   const pdf = await renderTicketPdf({
     orderNumber: order.orderNumber,
+    pieceNumber: piece,
     invoiceNumber: order.payment?.invoice?.number ?? null,
     issuedAt: order.createdAt,
     sellerName: salon?.legalName || "Meri Beauty",

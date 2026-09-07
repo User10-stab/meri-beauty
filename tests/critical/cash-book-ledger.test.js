@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { buildCashBookLedger } from "@/lib/cash-book/build-ledger";
+
+const root = fileURLToPath(new URL("../../", import.meta.url));
+const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
 
 /**
  * A minimal mocked Prisma-shaped client, in the same style as
@@ -132,11 +137,12 @@ describe("buildCashBookLedger", () => {
       session: BASE_SESSION,
       transactions: [
         {
+          id: "refund-1",
           transactionType: "REFUND",
           amount: 40,
           paidAt: new Date("2026-08-01T11:00:00Z"),
           pieceNumber: "V0003",
-          payment: { invoice: { number: "2026-000041" }, order: { orderNumber: 14 } },
+          payment: { id: "pay-14", invoice: { number: "2026-000041" }, order: { id: "order-14", orderNumber: 14 } },
         },
       ],
     });
@@ -150,6 +156,11 @@ describe("buildCashBookLedger", () => {
       entree: 0,
       sortie: 40,
       solde: 460,
+      // transactionToRow does not branch on isRefund for these — a REFUND
+      // row needs the exact same trail back to its ticket as a SALE row.
+      transactionId: "refund-1",
+      paymentId: "pay-14",
+      orderId: "order-14",
     });
   });
 
@@ -210,5 +221,86 @@ describe("buildCashBookLedger", () => {
       solde: 700,
     });
     expect(result.totals).toEqual({ entrees: 200, sorties: 0, finalBalance: 700 });
+  });
+
+  // These ids are never displayed directly — they're what
+  // CashBookClient.jsx's pieceNumberHref uses to link N° pièce to the
+  // transaction's actual ticket (see components/dashboard/boutique/CashBookClient.jsx).
+  // transaction.id and payment.id are already present on the raw Prisma row
+  // (the query includes payment rather than selecting it), so carrying them
+  // onto the returned row is a reshape, not a new query.
+  it("carries transactionId/paymentId/orderId on an order-backed sale, for linking to its ticket", async () => {
+    const client = clientMock({
+      session: BASE_SESSION,
+      transactions: [
+        {
+          id: "txn-1",
+          transactionType: "FINAL_PAYMENT",
+          amount: 10,
+          paidAt: new Date("2026-08-01T09:00:00Z"),
+          pieceNumber: "V0001",
+          payment: { id: "pay-1", invoice: null, order: { id: "order-1", orderNumber: 1 } },
+        },
+      ],
+    });
+    const result = await buildCashBookLedger(client, "sess_1");
+    expect(result.rows[1]).toMatchObject({ transactionId: "txn-1", paymentId: "pay-1", orderId: "order-1" });
+  });
+
+  it("carries transactionId/paymentId but no orderId for a reservation-backed sale", async () => {
+    const client = clientMock({
+      session: BASE_SESSION,
+      transactions: [
+        {
+          id: "txn-2",
+          transactionType: "FINAL_PAYMENT",
+          amount: 10,
+          paidAt: new Date("2026-08-01T09:00:00Z"),
+          pieceNumber: "R0001",
+          payment: { id: "pay-2", invoice: null, appointment: { staffService: null } },
+        },
+      ],
+    });
+    const result = await buildCashBookLedger(client, "sess_1");
+    expect(result.rows[1]).toMatchObject({ transactionId: "txn-2", paymentId: "pay-2", orderId: null });
+  });
+
+  it("a drawer movement carries no transaction/payment/order id — there is nothing to link", async () => {
+    const client = clientMock({
+      session: BASE_SESSION,
+      movements: [{ type: "EXPENSE", amount: 25, occurredAt: new Date("2026-08-01T10:00:00Z"), pieceNumber: "D0001", label: "Achat" }],
+    });
+    const result = await buildCashBookLedger(client, "sess_1");
+    expect(result.rows[1]).not.toHaveProperty("transactionId");
+    expect(result.rows[1]).not.toHaveProperty("paymentId");
+    expect(result.rows[1]).not.toHaveProperty("orderId");
+  });
+});
+
+// pieceNumberHref (CashBookClient.jsx) is what actually turns these ids into
+// the link a controller clicks — verified against source since it's plain
+// UI logic with no server round trip of its own to exercise.
+describe("N° pièce links to the ticket it produced", () => {
+  const client = source("components/dashboard/boutique/CashBookClient.jsx");
+
+  it("an order-backed row (SALE or REFUND) links to the order's ticket", () => {
+    expect(client).toContain("if (row.orderId) return `/api/orders/${row.orderId}/ticket`;");
+  });
+
+  it("a SALE row for a reservation payment links to its exact collection, via transactionId", () => {
+    expect(client).toContain(
+      'if (row.paymentId && row.kind === "SALE") return `/api/payments/${row.paymentId}/ticket?transactionId=${row.transactionId}`;'
+    );
+  });
+
+  it("a REFUND row for a reservation payment links to the payment's ticket without transactionId", () => {
+    // collectionTicketFields rejects a REFUND transactionType, and the
+    // payments-ticket route only ever queries DEPOSIT/FINAL_PAYMENT
+    // collections — a REFUND's own transactionId can never resolve there.
+    expect(client).toContain("if (row.paymentId) return `/api/payments/${row.paymentId}/ticket`;");
+  });
+
+  it("only SALE and REFUND rows are eligible — a drawer movement has no ticket", () => {
+    expect(client).toContain('if (row.kind !== "SALE" && row.kind !== "REFUND") return null;');
   });
 });

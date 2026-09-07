@@ -9,8 +9,8 @@ vi.mock("@/lib/pdf/render", () => ({ renderTicketPdf: mocks.render }));
 vi.mock("@/lib/cash-book/reservation-tickets", () => ({ describeReservationPayment: () => "Prestation" }));
 import { GET } from "@/app/api/payments/[id]/ticket/route";
 
-const deposit = { id: "deposit-1", transactionType: "DEPOSIT", amount: 60.5, paidAt: new Date("2026-09-01T10:00:00Z") };
-const balance = { id: "balance-1", transactionType: "FINAL_PAYMENT", amount: 60.5, paidAt: new Date("2026-09-05T10:00:00Z") };
+const deposit = { id: "deposit-1", transactionType: "DEPOSIT", amount: 60.5, paidAt: new Date("2026-09-01T10:00:00Z"), pieceNumber: "R0007" };
+const balance = { id: "balance-1", transactionType: "FINAL_PAYMENT", amount: 60.5, paidAt: new Date("2026-09-05T10:00:00Z"), pieceNumber: "R0008" };
 const invoice = { number: "F-2026-000065", vatRate: 21, totalInclVat: 121, sellerName: "Salon" };
 
 describe("receipt identity and invoice association", () => {
@@ -41,6 +41,14 @@ describe("receipt identity and invoice association", () => {
     { ...deposit, id: null },
   ])("does not invent a collection receipt for invalid data", (row) => {
     expect(() => collectionTicketFields(row, invoice)).toThrow();
+  });
+
+  // The cash-book line this collection produced (see lib/cash-book/piece-number.js) —
+  // CARD/ONLINE transactions never get one, so the ticket must not invent one either.
+  it("carries the transaction's own piece number onto the ticket, cash-only", () => {
+    expect(collectionTicketFields(deposit, invoice).pieceNumber).toBe("R0007");
+    expect(collectionTicketFields({ ...deposit, pieceNumber: null }, invoice).pieceNumber).toBeNull();
+    expect(collectionTicketFields({ ...deposit, pieceNumber: undefined }, invoice).pieceNumber).toBeNull();
   });
 });
 

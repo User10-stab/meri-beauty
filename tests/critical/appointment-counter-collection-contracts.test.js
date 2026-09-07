@@ -155,8 +155,8 @@ describe("the server applies the same rule, and is the one that matters", () => 
 describe("both screens ask the shared question", () => {
   test("the appointments list", () => {
     const client = source("components/dashboard/appointments/AppointmentsPageClient.jsx");
-    expect(client).toContain("appointmentCollectsAtCounter(a)");
-    expect(client).not.toMatch(/a\.paymentStatus === "PARTIALLY_PAID" \|\|/);
+    expect(client).toContain("appointmentCollectsAtCounter(row)");
+    expect(client).not.toMatch(/row\.payment\?\.status === "PARTIALLY_PAID" \|\|/);
   });
 
   test("the calendar drawer, which used to recognise only PARTIALLY_PAID", () => {

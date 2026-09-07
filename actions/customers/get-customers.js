@@ -12,9 +12,8 @@ import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
  * - OWNER/ADMIN: See all customers
  * - STAFF: See only customers linked to their appointments or formations
  *
- * @returns {{ success: boolean, data: Array<{ id, fullName, nickName, email, phone, avatar, isActive, lastLogin, createdAt }>, totalCount: number, page: number, pageSize: number, message?: string }}
- */
-const DEFAULT_CUSTOMERS_PAGE_SIZE = 20;
+ * @returns {{ success: boolean, data: Array<{ id, fullName, nickName, email, phone, avatar, isActive, createdAt }>, totalCount: number, page: number, pageSize: number, message?: string }}
+ */const DEFAULT_CUSTOMERS_PAGE_SIZE = 20;
 
 export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOMERS_PAGE_SIZE } = {}) {
   try {
@@ -80,8 +79,12 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
           isActive: true,
           isCompany: true,
           vatNumber: true,
-          lastLogin: true,
-          createdAt: true,
+          addressLine1: true,
+          addressLine2: true,
+          addressCity: true,
+          addressPostalCode: true,
+           addressCountry: true,
+           createdAt: true,
           _count: {
             select: {
               appointments: staffRelationshipFilters
@@ -106,8 +109,12 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
       isActive: c.isActive,
       isCompany: c.isCompany,
       vatNumber: c.vatNumber ?? null,
-      lastLogin: c.lastLogin?.toISOString() ?? null,
-      joinedAt: c.createdAt.toISOString(),
+      addressLine1: c.addressLine1 ?? null,
+      addressLine2: c.addressLine2 ?? null,
+      addressCity: c.addressCity ?? null,
+      addressPostalCode: c.addressPostalCode ?? null,
+       addressCountry: c.addressCountry ?? null,
+       joinedAt: c.createdAt.toISOString(),
       appointmentsCount: c._count.appointments,
       formationsCount: c._count.formationReservations,
     }));

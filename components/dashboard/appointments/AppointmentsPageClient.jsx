@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition, useEffect } from "react";
+import { useMemo, useState, useTransition, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { Search, Loader2, CalendarX } from "lucide-react";
+import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2 } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
@@ -55,11 +55,145 @@ function formatDateTime(date, startTime) {
   return `${d} · ${t}`;
 }
 
+// ─── Actions — pattern unique kebab du dashboard (RowActions) ─────────────────────
+// Une seule ancre par ligne, menu minimaliste, aligné, tooltips natifs, pas de
+// boutons multiples côte à côte. Réutilise le même shell que
+// components/dashboard/Tables/RowActions.jsx et AppointmentRow.jsx.
+function getAppointmentMenuItems(row, handlers) {
+  const { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog } = handlers;
+  switch (row.status) {
+    case "PENDING":
+      return [
+        { key: "accept", label: "Accepter", icon: Check, variant: "success", onClick: () => onConfirm(row.id) },
+        { key: "divider-1", divider: true },
+        { key: "refuse", label: "Refuser", icon: X, variant: "danger", onClick: () => onCancel(row) },
+      ];
+    case "ACCEPTED":
+      return [
+        { key: "cancel", label: "Annuler", icon: X, variant: "danger", onClick: () => onCancel(row) },
+      ];
+    case "CONFIRMED": {
+      // Also covers an appointment with no Payment row at all — booked
+      // "payer au salon" — where money is owed but there was nothing to
+      // flag on `row.payment`. Shared with the calendar drawer and mirrors
+      // completeAppointment's own server-side rule.
+      const handleComplete = () => {
+        if (appointmentCollectsAtCounter(row)) {
+          onOpenCompleteDialog(row);
+        } else {
+          onComplete(row.id);
+        }
+      };
+      return [
+        { key: "complete", label: "Terminer", icon: CheckCircle2, variant: "success", onClick: handleComplete },
+        { key: "divider-1", divider: true },
+        { key: "noshow", label: "Marquer absente", icon: UserX, variant: "warning", onClick: () => onNoShow(row.id) },
+        { key: "cancel", label: "Annuler", icon: X, variant: "danger", onClick: () => onCancel(row) },
+      ];
+    }
+    default:
+      return [];
+  }
+}
+
+const MENU_VARIANT_CLASSES = {
+  default: "text-gray-700 hover:bg-gray-50",
+  success: "text-emerald-700 hover:bg-emerald-50",
+  warning: "text-amber-700 hover:bg-amber-50",
+  danger: "text-red-600 hover:bg-red-50",
+};
+
+function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog }) {
+  const [open, setOpen] = useState(false);
+  const [loadingKey, setLoadingKey] = useState(null);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    function handleKey(e) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [open]);
+
+  const items = getAppointmentMenuItems(row, { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog });
+
+  if (items.length === 0) {
+    return <span className="flex justify-end text-gray-300" aria-hidden="true">—</span>;
+  }
+
+  async function handleItemClick(item) {
+    if (!item.onClick || loadingKey || rowLoadingId === row.id) return;
+    setLoadingKey(item.key);
+    try {
+      await item.onClick();
+    } finally {
+      setLoadingKey(null);
+      setOpen(false);
+    }
+  }
+
+  const isBusy = loadingKey !== null || rowLoadingId === row.id;
+
+  return (
+    <div ref={ref} className="relative flex justify-end">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={isBusy}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Actions du rendez-vous"
+        title="Actions du rendez-vous"
+        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:opacity-60"
+      >
+        {isBusy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={14} />}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label="Actions du rendez-vous"
+          className="absolute right-0 top-full z-40 mt-1 w-48 origin-top-right rounded-lg border border-gray-100 bg-white py-1 shadow-lg shadow-gray-200/60 animate-in fade-in-0 zoom-in-95"
+        >
+          {items.map((item) => {
+            if (item.divider) return <div key={item.key} className="my-1 border-t border-gray-100" role="separator" />;
+            const Icon = item.icon;
+            const cls = MENU_VARIANT_CLASSES[item.variant] ?? MENU_VARIANT_CLASSES.default;
+            return (
+              <button
+                key={item.key}
+                role="menuitem"
+                type="button"
+                onClick={() => handleItemClick(item)}
+                disabled={!!loadingKey}
+                title={item.label}
+                className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors focus-visible:bg-gray-50 focus-visible:outline-none disabled:opacity-40 ${cls}`}
+              >
+                <Icon size={14} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AppointmentsPageClient({ initialAppointments, staffOptions, showStaffFilter }) {
   const [appointments, setAppointments] = useState(initialAppointments);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [staffFilter, setStaffFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
   const [toReject, setToReject] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [toComplete, setToComplete] = useState(null);
@@ -78,41 +212,42 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     const q = search.trim().toLowerCase();
     const result = appointments.filter((a) => {
       if (q) {
-        // Flattened by getAllAppointments, like every other field on the row.
-        // As `a.customer?.fullName` these were both permanently undefined, so
-        // searching by name or e-mail matched nothing and only the service
-        // name was ever searchable.
-        const hay = `${a.customerName ?? ""} ${a.customerEmail ?? ""} ${a.serviceName ?? ""}`.toLowerCase();
+        const hay = `${a.customer?.fullName ?? a.customerName ?? ""} ${a.customer?.email ?? a.customerEmail ?? ""} ${a.serviceName}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       if (statusFilter && a.status !== statusFilter) return false;
       if (staffFilter && a.staffId !== staffFilter) return false;
+      if (dateFilter) {
+        const d = new Date(dateFilter);
+        const start = new Date(d); start.setHours(0, 0, 0, 0);
+        const end = new Date(d); end.setHours(23, 59, 59, 999);
+        const apptTime = new Date(a.startTime || a.date || 0).getTime();
+        if (apptTime < start.getTime() || apptTime > end.getTime()) return false;
+      }
       return true;
     });
-    
-    // Sort by createdAt descending (newest first)
+
+    // Tri par date/heure du rendez-vous — DESC (plus récent en premier), inclut heure
     return result.sort((a, b) => {
-      const dateA = new Date(a.createdAt || 0).getTime();
-      const dateB = new Date(b.createdAt || 0).getTime();
+      const dateA = new Date(a.startTime || a.date || 0).getTime();
+      const dateB = new Date(b.startTime || b.date || 0).getTime();
       return dateB - dateA;
     });
-  }, [appointments, search, statusFilter, staffFilter]);
-
-  useEffect(() => {
-    console.log(appointments);
-  }, [appointments]);
+  }, [appointments, search, statusFilter, staffFilter, dateFilter]);
 
   function refetch(next) {
     const params = {
       search: next.search ?? search,
       status: next.status !== undefined ? next.status : statusFilter,
       staffId: next.staffId !== undefined ? next.staffId : staffFilter,
+      date: next.date !== undefined ? next.date : dateFilter,
     };
     startTransition(async () => {
       const result = await getAllAppointments({
         search: params.search || undefined,
         status: params.status || undefined,
         staffId: params.staffId || undefined,
+        date: params.date || undefined,
       });
       if (result.success) setAppointments(result.data);
       else toast.error(result.message);
@@ -202,8 +337,9 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
 
   return (
     <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-      <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 sm:flex-row sm:items-center">
-        <form onSubmit={handleSearchSubmit} className="relative w-full max-w-xs">
+      {/* Filtres — wrap sur mobile, évite d'élargir la table, long noms tronqués */}
+      <div className="flex flex-col gap-3 border-b border-stroke px-4 py-4 dark:border-dark-3 sm:px-6 lg:flex-row lg:flex-wrap lg:items-center">
+        <form onSubmit={handleSearchSubmit} className="relative w-full max-w-xs shrink-0">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
@@ -220,14 +356,14 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
             setStatusFilter(e.target.value);
             refetch({ status: e.target.value });
           }}
-          className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+          className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
         >
           <option value="">Tous les statuts</option>
           {Object.entries(STATUS_LABEL).map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
         </select>
-      
+
         {showStaffFilter && (
           <select
             value={staffFilter}
@@ -235,13 +371,39 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               setStaffFilter(e.target.value);
               refetch({ staffId: e.target.value });
             }}
-            className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            className="h-9 w-full max-w-[220px] truncate rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
+            title={staffFilter ? staffOptions?.find((s) => s.id === staffFilter)?.fullName ?? "" : "Toute l'équipe"}
           >
-            <option value="">Toute l'équipe</option>
-            {staffOptions.map((s) => (
-              <option key={s.id} value={s.id}>{s.fullName}</option>
+            <option value="">Tous les prestataires</option>
+            {staffOptions?.map((s) => (
+              <option key={s.id} value={s.id} title={s.fullName}>{s.fullName}</option>
             ))}
           </select>
+        )}
+
+        <input
+          type="date"
+          value={dateFilter}
+          onChange={(e) => {
+            setDateFilter(e.target.value);
+            refetch({ date: e.target.value });
+          }}
+          aria-label="Filtrer par date du rendez-vous"
+          title="Filtrer par date du rendez-vous"
+          className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
+        />
+        {dateFilter && (
+          <button
+            type="button"
+            onClick={() => {
+              setDateFilter("");
+              refetch({ date: "" });
+            }}
+            className="h-9 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6"
+            title="Réinitialiser la date"
+          >
+            Toutes les dates
+          </button>
         )}
       </div>
 
@@ -254,177 +416,96 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         </div>
       ) : (
         <div className={isPending ? "opacity-60 transition-opacity" : "transition-opacity"}>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-6">Client</TableHead>
-                <TableHead>Service</TableHead>
-                <TableHead>Experte</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Montant payé</TableHead>
-                <TableHead>Statut du paiement</TableHead>
-                <TableHead>Statut</TableHead>
-                <TableHead className="pr-6 text-left">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell className="pl-6">
-                    {a.customerName ? (
-                      <>
-                        <div className="font-medium text-gray-800 dark:text-white">{a.customerName}</div>
-                        <div className="text-xs text-gray-400">{a.customerEmail}</div>
-                      </>
-                    ) : (
-                      <div className="text-sm text-gray-400 italic">Client non disponible</div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-gray-600 dark:text-dark-6">{a.serviceName}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-gray-600 dark:text-dark-6">{a.staffName}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-gray-600 dark:text-dark-6">{formatDateTime(a.date, a.startTime)}</span>
-                  </TableCell>
-                  <TableCell>
-                    {a.paidAmount ? (
-                      <div className="flex flex-col gap-1">
-                        <span className="text-gray-700">
-                          {a.paidAmount.toFixed(2)} €
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {a.paymentStatus ? (
-                      <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${PAYMENT_STATUS_STYLE[a.paymentStatus] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
-                        {PAYMENT_STATUS_LABEL[a.paymentStatus] ?? a.paymentStatus}
-                      </span>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[a.status]}`}>
-                      {STATUS_LABEL[a.status]}
-                    </span>
-                    {a.status === "CANCELLED" || a.status === "REJECTED" ? (
-                      <div className="mt-1 max-w-48 text-xs text-gray-400">
-                        <div>{a.cancelledBy?.fullName ?? a.cancellationSource ?? "Système"}</div>
-                        {a.cancellationReason && <div className="truncate" title={a.cancellationReason}>{a.cancellationReason}</div>}
-                      </div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="pr-6 text-left">
-                    {a.status === "PENDING" ? (
-                      <div className="flex justify-start gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleConfirm(a.id)}
-                          disabled={rowLoadingId === a.id}
-                          className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
-                        >
-                          {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Accepter"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRejectionReason("");
-                            setToReject(a);
-                          }}
-                          disabled={rowLoadingId === a.id}
-                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
-                        >
-                          Refuser
-                        </button>
-                      </div>
-                    ) : a.status === "ACCEPTED" ? (
-                      <div className="flex items-center justify-start gap-2">
-                        <span className="text-xs text-blue-600">En attente la confirmation du client</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRejectionReason("");
-                            setToReject(a);
-                          }}
-                          disabled={rowLoadingId === a.id}
-                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
-                        >
-                          Annuler
-                        </button>
-                      </div>
-                    ) : a.status === "CONFIRMED" ? (
-                      <div className="flex justify-start gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            // getAllAppointments flattens the payment onto the
-                            // row (paymentStatus / paymentType / totalAmount /
-                            // paidAmount) — there is no nested `payment`
-                            // object. Reading `a.payment?.status` was always
-                            // undefined, so every "Terminer" took the direct
-                            // path below, the server rightly refused with
-                            // "Mode de paiement requis", and a balance could
-                            // not be settled from this screen at all.
-                            //
-                            // The predicate is shared with the calendar drawer
-                            // and mirrors completeAppointment's own rule, which
-                            // now also covers an appointment with no Payment
-                            // row — the "payer au salon" case, where the money
-                            // was previously recorded nowhere at all.
-                            if (appointmentCollectsAtCounter(a)) {
-                              setPaymentConfirmed(false);
-                              setToComplete(a);
-                            } else {
-                              handleCompleteDirect(a.id);
-                            }
-                          }}
-                          disabled={rowLoadingId === a.id}
-                          className="rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:opacity-50"
-                        >
-                          {rowLoadingId === a.id ? <Loader2 size={12} className="animate-spin" /> : "Terminer"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleNoShow(a.id)}
-                          disabled={rowLoadingId === a.id}
-                          title="Aucun remboursement ne sera émis"
-                          className="rounded-lg border border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
-                        >
-                          Absente
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRejectionReason("");
-                            setToReject(a);
-                          }}
-                          disabled={rowLoadingId === a.id}
-                          className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
-                        >
-                          Annuler
-                        </button>
-                      </div>
-                    ) : (
-                      <span className="text-gray-300">—</span>
-                    )}
-                  </TableCell>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="whitespace-nowrap pl-6">Client</TableHead>
+                  <TableHead className="whitespace-nowrap">Service</TableHead>
+                  <TableHead className="whitespace-nowrap">Experte</TableHead>
+                  <TableHead className="whitespace-nowrap">Date</TableHead>
+                  <TableHead className="whitespace-nowrap">Montant payé</TableHead>
+                  <TableHead className="whitespace-nowrap">Statut du paiement</TableHead>
+                  <TableHead className="whitespace-nowrap">Statut</TableHead>
+                  <TableHead className="w-[112px] whitespace-nowrap pr-6 text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="pl-6">
+                      {a.customerName || a.customer?.fullName ? (
+                        <>
+                          <div className="max-w-[180px] truncate font-medium text-gray-800 dark:text-white" title={a.customerName ?? a.customer?.fullName}>{a.customerName ?? a.customer?.fullName}</div>
+                          <div className="max-w-[180px] truncate text-xs text-gray-400" title={a.customerEmail ?? a.customer?.email}>{a.customerEmail ?? a.customer?.email}</div>
+                        </>
+                      ) : (
+                        <div className="text-sm italic text-gray-400">Client non disponible</div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className="block max-w-[160px] truncate text-gray-600 dark:text-dark-6" title={a.serviceName}>{a.serviceName}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="block max-w-[140px] truncate text-gray-600 dark:text-dark-6" title={a.staffName}>{a.staffName}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="whitespace-nowrap text-gray-600 dark:text-dark-6">{formatDateTime(a.date, a.startTime)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="whitespace-nowrap font-medium text-gray-700">
+                        {a.payment != null || a.paidAmount != null
+                          ? `${Number(a.paidAmount ?? a.payment?.paidAmount ?? 0).toFixed(2)} €`
+                          : "0.00 €"}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      {a.payment != null || a.paymentStatus != null ? (
+                        a.paymentStatus || a.payment?.status ? (
+                          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${PAYMENT_STATUS_STYLE[a.paymentStatus ?? a.payment.status] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
+                            {PAYMENT_STATUS_LABEL[a.paymentStatus ?? a.payment.status] ?? a.paymentStatus ?? a.payment.status}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">Aucun paiement</span>
+                        )
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">Aucun paiement</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[a.status]}`}>
+                        {STATUS_LABEL[a.status]}
+                      </span>
+                      {a.status === "CANCELLED" || a.status === "REJECTED" ? (
+                        <div className="mt-1 max-w-48 text-xs text-gray-400">
+                          <div className="truncate" title={a.cancelledBy?.fullName ?? a.cancellationSource ?? "Système"}>{a.cancelledBy?.fullName ?? a.cancellationSource ?? "Système"}</div>
+                          {a.cancellationReason && <div className="truncate" title={a.cancellationReason}>{a.cancellationReason}</div>}
+                        </div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="pr-6">
+                      <AppointmentActionsCell
+                        row={a}
+                        rowLoadingId={rowLoadingId}
+                        onConfirm={handleConfirm}
+                        onCancel={(row) => { setRejectionReason(""); setToReject(row); }}
+                        onComplete={handleCompleteDirect}
+                        onNoShow={handleNoShow}
+                        onOpenCompleteDialog={(row) => { setPaymentConfirmed(false); setToComplete(row); }}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       )}
 
       <ConfirmDialog
         open={!!toReject}
         title="Refuser ce rendez-vous ?"
-        message={toReject ? `Le rendez-vous de ${toReject.customerName} sera ${toReject.status === "PENDING" ? "refusé" : "annulé"}.` : ""}
+        message={toReject ? `Le rendez-vous de ${toReject.customer?.fullName ?? toReject.customerName} sera ${toReject.status === "PENDING" ? "refusé" : "annulé"}.` : ""}
         confirmLabel="Refuser"
         danger
         loading={isPending}
@@ -459,7 +540,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               {toComplete.paymentStatus ? "Encaisser le solde restant" : "Encaisser le paiement"}
             </h3>
             <p className="mt-1.5 text-sm text-gray-500">
-              {toComplete.customerName} doit {toComplete.paymentStatus ? "encore " : ""}régler{" "}
+              {toComplete.customer?.fullName ?? toComplete.customerName} doit {toComplete.paymentStatus ? "encore " : ""}régler{" "}
               <span className="font-medium text-gray-700">
                 €{appointmentAmountDueAtCounter(toComplete).toFixed(2)}
               </span>{" "}

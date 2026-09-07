@@ -30,35 +30,18 @@ if [[ ! -r "$ENV_FILE" ]]; then
   exit 67
 fi
 
-environment=()
-while IFS= read -r assignment || [[ -n "$assignment" ]]; do
-  [[ -z "$assignment" || "$assignment" =~ ^[[:space:]]*# ]] && continue
-  key="${assignment%%=*}"
-  value="${assignment#*=}"
-  if [[ "$key" == "$assignment" || ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-    echo "Invalid staging environment entry." >&2
-    exit 68
-  fi
-  # systemd EnvironmentFile accepts spaces in unquoted values. Do not source
-  # it: shell evaluation both rejects those values and could execute content.
-  if [[ "$value" =~ ^\".*\"$ || "$value" =~ ^\'.*\'$ ]]; then
-    value="${value:1:${#value}-2}"
-  fi
-  environment+=("${key}=${value}")
-done < "$ENV_FILE"
-
 # A failed install, migration, or build leaves the existing current release running.
 mv "$incoming_release" "$release_dir"
 chown -R "${APP_USER}:${APP_USER}" "$release_dir"
 
-runuser -u "$APP_USER" -- env "${environment[@]}" bash -lc "
-  set -e
-  cd '${release_dir}'
-  npm ci --legacy-peer-deps
-  npx prisma migrate deploy
-  npx prisma generate
-  npm run build
-"
+# Let systemd parse the same EnvironmentFile syntax it uses for the app.
+# This avoids shell-evaluating configuration and keeps environment values out
+# of process arguments while the build runs.
+systemd-run --quiet --wait --pipe --collect \
+  --property="User=${APP_USER}" \
+  --property="WorkingDirectory=${release_dir}" \
+  --property="EnvironmentFile=${ENV_FILE}" \
+  /bin/bash -lc 'set -e; npm ci --legacy-peer-deps; npx prisma migrate deploy; npx prisma generate; npm run build'
 
 previous_target="$(readlink "${APP_ROOT}/current")"
 temporary_link="${APP_ROOT}/.current-${release}"

@@ -26,6 +26,10 @@ jobs:
       # (invoked by postinstall) and lint/test steps that import it. This never
       # opens a real connection here, so a placeholder is sufficient.
       DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+      # lib/stripe.js constructs the Stripe SDK at import time, so any test
+      # file that doesn't mock @/lib/stripe throws at collection without a
+      # key present. No real call is ever made in test:critical.
+      STRIPE_SECRET_KEY: "sk_test_ci_placeholder"
 
     steps:
       - name: Check out staging

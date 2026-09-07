@@ -548,10 +548,28 @@ export async function changeFormationReservationSession(reservationId, newSessio
             throw reissueError;
           }
         }
+        // Shaped for OperationDocumentsDialog/DocumentDeliveryDialog
+        // (components/dashboard/operations) — the same PDF-open/e-mail/Billit
+        // machinery every other invoice and credit note in Operations already
+        // uses. Supersession only ever fires for an invoiceable (B2B)
+        // customer, so customerType/customerVatNumber are known without an
+        // extra query.
         invoiceReplacement = {
-          previousInvoiceNumber: payment.invoice.number,
-          creditNoteNumber: creditNote.number,
-          newInvoiceNumber: newInvoice?.number ?? null,
+          previousInvoice: {
+            id: payment.invoice.id,
+            number: payment.invoice.number,
+            customerType: "B2B",
+            customerVatNumber: reservation.customer.vatNumber,
+          },
+          creditNote: { id: creditNote.id, number: creditNote.number },
+          newInvoice: newInvoice
+            ? {
+                id: newInvoice.id,
+                number: newInvoice.number,
+                customerType: "B2B",
+                customerVatNumber: reservation.customer.vatNumber,
+              }
+            : null,
         };
       }
 
@@ -645,9 +663,9 @@ export async function changeFormationReservationSession(reservationId, newSessio
     revalidatePath("/dashboard/operations");
     const { invoiceReplacement } = result;
     const documentNote = invoiceReplacement
-      ? ` Note de crédit n°${invoiceReplacement.creditNoteNumber}${
-          invoiceReplacement.newInvoiceNumber ? ` et nouvelle facture n°${invoiceReplacement.newInvoiceNumber}` : ""
-        } émise${invoiceReplacement.newInvoiceNumber ? "s" : ""} — à transmettre au client depuis Opérations.`
+      ? ` Note de crédit n°${invoiceReplacement.creditNote.number}${
+          invoiceReplacement.newInvoice ? ` et nouvelle facture n°${invoiceReplacement.newInvoice.number}` : ""
+        } émise${invoiceReplacement.newInvoice ? "s" : ""} — à transmettre au client depuis Opérations.`
       : "";
     return {
       success: true,

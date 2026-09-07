@@ -3,11 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { ArrowRightLeft, CreditCard, Package, CalendarDays, GraduationCap, X } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { InvoiceRowActions } from "@/components/dashboard/operations/InvoiceRowActions";
 import { TransactionDetailDrawer } from "@/components/dashboard/operations/TransactionDetailDrawer";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
+import { getTransferDetail } from "@/actions/dashboard/admin-operations";
 import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import {
   TYPE_FILTERS,
@@ -413,7 +415,11 @@ function PaymentBreakdown({ row }) {
 }
 
 function TransferDetailModal({ transfer, onClose }) {
+  const router = useRouter();
+  const [deliveryDocument, setDeliveryDocument] = useState(null);
   if (!transfer) return null;
+
+  const replacement = transfer.invoiceReplacement;
 
   return (
     <div
@@ -470,17 +476,65 @@ function TransferDetailModal({ transfer, onClose }) {
           <p><span className="font-medium text-gray-700">Impact tarifaire :</span> {transferPriceImpact(transfer)}</p>
           <p><span className="font-medium text-gray-700">Motif :</span> {transfer.reason || "—"}</p>
           <p><span className="font-medium text-gray-700">Effectué par :</span> {transfer.actorName || "Administrateur"}</p>
-          {transfer.invoiceReplacement ? (
+          {replacement ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
-              <p>
-                Ancienne facture n°{transfer.invoiceReplacement.previousInvoiceNumber} annulée par la note de crédit n°
-                {transfer.invoiceReplacement.creditNoteNumber}.
-              </p>
-              <p>
-                {transfer.invoiceReplacement.newInvoiceNumber
-                  ? `Nouvelle facture n°${transfer.invoiceReplacement.newInvoiceNumber} émise.`
-                  : "Nouvelle facture en attente — sera émise à la clôture, une fois le solde encaissé."}
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p>
+                  Ancienne facture n°{replacement.previousInvoice.number} annulée par la note de crédit n°
+                  {replacement.creditNote.number}.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href={`/api/invoices/${replacement.previousInvoice.id}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    Facture (PDF)
+                  </a>
+                  <a
+                    href={`/api/credit-notes/${replacement.creditNote.id}/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    Note de crédit (PDF)
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryDocument({ kind: "CREDIT_NOTE", document: replacement.creditNote, invoice: replacement.previousInvoice })}
+                    className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    Envoyer la note de crédit
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                {replacement.newInvoice ? (
+                  <>
+                    <p>Nouvelle facture n°{replacement.newInvoice.number} émise.</p>
+                    <div className="flex flex-wrap gap-2">
+                      <a
+                        href={`/api/invoices/${replacement.newInvoice.id}/pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                      >
+                        Facture (PDF)
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => setDeliveryDocument({ kind: "INVOICE", document: replacement.newInvoice, invoice: replacement.newInvoice })}
+                        className="rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                      >
+                        Envoyer la facture
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p>Nouvelle facture en attente — sera émise à la clôture, une fois le solde encaissé.</p>
+                )}
+              </div>
             </div>
           ) : (
             <p className="font-medium text-gray-600">Aucun encaissement ni remboursement n’a été déclenché par ce transfert.</p>
@@ -493,7 +547,53 @@ function TransferDetailModal({ transfer, onClose }) {
           </button>
         </div>
       </div>
+      <DocumentDeliveryDialog
+        open={Boolean(deliveryDocument)}
+        onClose={() => setDeliveryDocument(null)}
+        document={deliveryDocument?.document ?? null}
+        invoice={deliveryDocument?.invoice ?? null}
+        kind={deliveryDocument?.kind ?? "INVOICE"}
+        onDelivered={() => router.refresh()}
+      />
     </div>
+  );
+}
+
+/**
+ * A Workshop/Formation row's link to "why did this change" — the transfer
+ * that moved it here. Self-contained (own fetch, own modal instance) rather
+ * than threaded through UnifiedOperationsTable's props: the transfer this
+ * points at may not be one of the current page's own 30 hydrated rows (a
+ * different tab, filter, or page of pagination), so it always fetches fresh
+ * via getTransferDetail instead of assuming the data is already on hand —
+ * same reasoning as InvoiceStatus owning its own DocumentDeliveryDialog above.
+ */
+function TransferCrossLink({ logId, transferredAt }) {
+  const [transfer, setTransfer] = useState(null);
+  const [loading, setLoading] = useState(false);
+  if (!logId) return null;
+
+  async function open() {
+    if (loading) return;
+    setLoading(true);
+    const result = await getTransferDetail(logId);
+    setLoading(false);
+    if (result.success) setTransfer(result.data);
+    else toast.error(result.message);
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={open}
+        disabled={loading}
+        className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[#2f3a2e] underline underline-offset-2 hover:text-[#1f291f] disabled:opacity-50"
+      >
+        <ArrowRightLeft size={11} /> Transférée le {date(transferredAt)}
+      </button>
+      <TransferDetailModal transfer={transfer} onClose={() => setTransfer(null)} />
+    </>
   );
 }
 
@@ -540,7 +640,10 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer }) {
                   </span>
                 )}
               </TableCell>
-              <TableCell className="text-xs text-gray-500">{described.detail}</TableCell>
+              <TableCell className="text-xs text-gray-500">
+                {described.detail}
+                <TransferCrossLink logId={row.lastTransferLogId} transferredAt={row.lastTransferredAt} />
+              </TableCell>
               <TableCell>
                 {customer?.fullName ?? described.customerFallback}
                 <span className="block text-xs text-gray-400">{customer?.email ?? ""}</span>

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   transactions: vi.fn(),
   workshops: vi.fn(),
   formations: vi.fn(),
+  auditLogs: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -15,12 +16,16 @@ vi.mock("@/lib/prisma", () => ({ prisma: {
   transaction: { findMany: mocks.transactions },
   workshopReservation: { findMany: mocks.workshops },
   formationReservation: { findMany: mocks.formations },
+  auditLog: { findMany: mocks.auditLogs },
 } }));
 import { getAdminOperations } from "@/actions/dashboard/admin-operations";
 
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.auth.mockResolvedValue({ user: { id: "admin", role: "ADMIN" } });
+  // hydrateWorkshops/hydrateFormations cross-link each row to its most
+  // recent transfer (attachLastTransfer) — no transfer history by default.
+  mocks.auditLogs.mockResolvedValue([]);
 });
 
 it("retains the deposit and final payment when filtering completed appointments", async () => {

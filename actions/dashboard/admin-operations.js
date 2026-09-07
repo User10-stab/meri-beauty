@@ -281,6 +281,31 @@ const PAYMENT_LEDGER_SELECT = Object.freeze({
   },
 });
 
+/**
+ * Cross-links a Workshop/Formation row to its most recent transfer, so the
+ * row that shows "what this reservation looks like now" can point at "why it
+ * changed" instead of leaving that as a second, seemingly unrelated row in
+ * the ledger. One batched query per hydrator call, not per row.
+ */
+async function attachLastTransfer(rows, entityType) {
+  if (rows.length === 0) return rows;
+  const logs = await prisma.auditLog.findMany({
+    where: { action: AUDIT_ACTIONS.RESERVATION_SESSION_TRANSFERRED, entityType, entityId: { in: rows.map((row) => row.id) } },
+    select: { id: true, entityId: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const latestByEntity = new Map();
+  for (const log of logs) {
+    // Ordered desc, so the first one seen per entity is the most recent —
+    // only that one is worth surfacing on the row.
+    if (!latestByEntity.has(log.entityId)) latestByEntity.set(log.entityId, log);
+  }
+  return rows.map((row) => {
+    const log = latestByEntity.get(row.id);
+    return { ...row, lastTransferLogId: log?.id ?? null, lastTransferredAt: log?.createdAt ?? null };
+  });
+}
+
 async function hydrateOrders(ids) {
   if (ids.length === 0) return [];
   const rows = await prisma.order.findMany({
@@ -309,12 +334,13 @@ async function hydrateWorkshops(ids) {
       session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } },
     },
   });
-  return rows.map((row) => ({
+  const mapped = rows.map((row) => ({
     ...row,
     sourceType: "WORKSHOP",
     customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
     ...deriveRefundFields(row.payment),
   }));
+  return attachLastTransfer(mapped, "WorkshopReservation");
 }
 
 async function hydrateFormations(ids) {
@@ -327,12 +353,13 @@ async function hydrateFormations(ids) {
       session: { select: { startDate: true, formation: { select: { title: true, type: true } } } },
     },
   });
-  return rows.map((row) => ({
+  const mapped = rows.map((row) => ({
     ...row,
     sourceType: "FORMATION",
     customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
     ...deriveRefundFields(row.payment),
   }));
+  return attachLastTransfer(mapped, "FormationReservation");
 }
 
 // Unchanged from the pre-unification Transactions-tab query — appointments
@@ -799,6 +826,33 @@ export async function getTransactionDetail(transactionId) {
   } catch (error) {
     console.error("[getTransactionDetail]", error);
     return { success: false, message: "Impossible de charger le détail de cette transaction." };
+  }
+}
+
+/**
+ * One transfer's full detail, by its AuditLog id — for the "↔ Transférée
+ * le ..." cross-link on a Workshop/Formation row. That row's own page may
+ * not include the transfer as one of its 30 hydrated rows (different tab,
+ * different filter, different page of pagination), so this is a dedicated
+ * round trip rather than a lookup into whatever the current page already
+ * fetched. Reuses hydrateTransfers exactly as the main list does, so the
+ * TransferDetailModal renders an identical shape either way it was opened.
+ */
+export async function getTransferDetail(auditLogId) {
+  if (!(await requireAdminOperationsAccess())) {
+    return { success: false, message: "Non autorisé." };
+  }
+  if (typeof auditLogId !== "string" || !auditLogId) {
+    return { success: false, message: "Transfert introuvable." };
+  }
+
+  try {
+    const [transfer] = await hydrateTransfers([auditLogId]);
+    if (!transfer) return { success: false, message: "Transfert introuvable." };
+    return { success: true, data: serializeDecimalFields(transfer) };
+  } catch (error) {
+    console.error("[getTransferDetail]", error);
+    return { success: false, message: "Impossible de charger le détail de ce transfert." };
   }
 }
 

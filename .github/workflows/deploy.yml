@@ -47,7 +47,6 @@ jobs:
       - name: Production build
         run: npm run build
 
-
   deploy:
     name: Deploy to VPS
     needs: ci

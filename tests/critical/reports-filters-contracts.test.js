@@ -242,10 +242,9 @@ describe("a counter receipt can be reprinted", () => {
     expect(route).toContain("prisma.order.findUnique(");
   });
 
-  test("it is dashboard-only", () => {
-    // A ticket names no customer, so there is no ownership to check and
-    // nothing a customer could legitimately fetch here.
-    expect(route).toContain("if (!canAccessDashboard(session.user.role))");
+  test("a customer can reprint only their own named order receipt", () => {
+    expect(route).toContain("userId: true");
+    expect(route).toContain("order.userId !== session.user.id || !order.payment?.transactions.length");
     expect(route).toContain("{ status: 403 }");
     expect(route).toContain("{ status: 401 }");
   });

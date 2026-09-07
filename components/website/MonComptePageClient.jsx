@@ -101,6 +101,36 @@ function InvoiceLink({ invoice }) {
   );
 }
 
+function PaymentTicketLink({ payment }) {
+  if (!payment?.id || !payment.transactions?.length) return null;
+  return (
+    <a
+      href={`/api/payments/${payment.id}/ticket`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink/60 hover:text-gold"
+    >
+      <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+      Télécharger le ticket de caisse
+    </a>
+  );
+}
+
+function OrderTicketLink({ order }) {
+  if (!order?.payment?.transactions?.length) return null;
+  return (
+    <a
+      href={`/api/orders/${order.id}/ticket`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink/60 hover:text-gold"
+    >
+      <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+      Télécharger le ticket de caisse
+    </a>
+  );
+}
+
 function EmptyState({ icon: Icon, text }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-ink/15 bg-white/50 py-16 text-center">
@@ -172,12 +202,14 @@ function OrderCard({ order }) {
         ))}
       </ul>
 
-      <div className="mt-3 flex items-center justify-between border-t border-ink/8 pt-3">
-        {order.pickupCode && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(order.status) ? (
-          <span className="text-[11px] text-ink/45">Code de retrait : <span className="font-mono font-semibold text-ink/70">{order.pickupCode}</span></span>
-        ) : (
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink/8 pt-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {order.pickupCode && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(order.status) && (
+            <span className="text-[11px] text-ink/45">Code de retrait : <span className="font-mono font-semibold text-ink/70">{order.pickupCode}</span></span>
+          )}
           <InvoiceLink invoice={order.payment?.invoice} />
-        )}
+          <OrderTicketLink order={order} />
+        </div>
         <span className="text-sm font-bold text-gold">{formatPrice(order.totalAmount)}</span>
       </div>
 
@@ -520,7 +552,10 @@ function ReservationCard({ reservation, kind }) {
           <span className="text-sm font-bold text-gold">{formatPrice(reservation.totalPrice)}</span>
         </div>
 
-        <InvoiceLink invoice={reservation.payment?.invoice} />
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+          <InvoiceLink invoice={reservation.payment?.invoice} />
+          <PaymentTicketLink payment={reservation.payment} />
+        </div>
 
         <CheckInTicket reservation={reservation} typeLabel={typeLabel} />
 

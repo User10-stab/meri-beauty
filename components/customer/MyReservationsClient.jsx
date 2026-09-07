@@ -73,6 +73,25 @@ function InvoiceLink({ invoice }) {
   );
 }
 
+function PaymentTicketLink({ payment }) {
+  const hasCollection = payment?.transactions?.some((transaction) =>
+    ["DEPOSIT", "FINAL_PAYMENT"].includes(transaction.transactionType) && Number(transaction.amount) > 0,
+  );
+  if (!payment?.id || !hasCollection) return null;
+
+  return (
+    <a
+      href={`/api/payments/${payment.id}/ticket`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 transition-colors hover:text-[#C8A46A]"
+    >
+      <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+      Télécharger le ticket de caisse
+    </a>
+  );
+}
+
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
 const APPOINTMENT_STATUS_CONFIG = {
@@ -375,9 +394,10 @@ function ReservationCard({ reservation, onCancelled }) {
                 </div>
               )}
             </div>
-            {reservation.payment.invoice && (
-              <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-gray-200">
+            {(reservation.payment.invoice || reservation.payment.transactions?.length > 0) && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 border-t border-gray-200 pt-2 sm:mt-3 sm:pt-3">
                 <InvoiceLink invoice={reservation.payment.invoice} />
+                <PaymentTicketLink payment={reservation.payment} />
               </div>
             )}
           </div>

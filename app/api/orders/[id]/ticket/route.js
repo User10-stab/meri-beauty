@@ -22,26 +22,36 @@ export const runtime = "nodejs";
  * this stays available for it anyway, since a customer at the till usually
  * just wants the slip.
  *
- * Dashboard roles only. A ticket names no customer, so there is no ownership
- * to check and nothing a customer could legitimately fetch here.
+ * Dashboard roles may reprint any receipt. A logged-in customer may reprint
+ * only a receipt for their own named order; anonymous walk-in sales keep the
+ * dashboard-only restriction because there is no owner to authenticate.
  */
 export async function GET(req, { params }) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
   }
-  if (!canAccessDashboard(session.user.role)) {
-    return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
-  }
-
   const { id } = await params;
 
   const [order, salon] = await Promise.all([
     prisma.order.findUnique({
       where: { id },
       select: {
+        userId: true,
         orderNumber: true,
-        payment: { select: { invoice: { select: { number: true } } } },
+        payment: {
+          select: {
+            invoice: { select: { number: true } },
+            transactions: {
+              where: {
+                isDeleted: false,
+                transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
+                amount: { gt: 0 },
+              },
+              select: { id: true },
+            },
+          },
+        },
         createdAt: true,
         totalExclVat: true,
         vatRate: true,
@@ -66,6 +76,13 @@ export async function GET(req, { params }) {
 
   if (!order) {
     return NextResponse.json({ error: "Commande introuvable." }, { status: 404 });
+  }
+  if (!canAccessDashboard(session.user.role)) {
+    // A customer may only obtain proof of a collection that belongs to them;
+    // a pending checkout must never be printable as a paid receipt.
+    if (order.userId !== session.user.id || !order.payment?.transactions.length) {
+      return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
+    }
   }
 
   const pdf = await renderTicketPdf({

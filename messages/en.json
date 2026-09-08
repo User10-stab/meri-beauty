@@ -313,6 +313,101 @@
     "saturday": "Saturday",
     "sunday": "Sunday"
   },
+  "concept": {
+    "hero": {
+      "eyebrow": "The Concept",
+      "titleLine1": "Push the door.",
+      "titleAccent": "The rest is to discover.",
+      "description1": "A beauty salon, a boutique, encounters,",
+      "description2": "workshops and a touch of everyday magic.",
+      "welcome": "Welcome to MeriBeauty.",
+      "cta": "Book a visit",
+      "imageAlt": "Warm interior of the MeriBeauty salon"
+    },
+    "story": {
+      "eyebrow": "The story",
+      "title1": "It all started with the desire",
+      "title2a": "to create",
+      "title2b": "a place that",
+      "title2c": "did not yet exist.",
+      "p1": "For several years, my world was made of travels, salons, boutiques, meeting spaces with other professionals... And little by little, the desire to go further grew.",
+      "p2": "I didn't just want to open another beauty salon.",
+      "p3": "I wanted to create an atypical place. Where different crafts could express themselves, where you feel welcome and can grow your own universe.",
+      "p4": "A place where you could come for an appointment, discover a product in the boutique, join a workshop, learn something new or simply pause for a moment.",
+      "p5": "From this desire was born Meribeauty Concept & Shop: bringing together in one place everything I wanted to live, transmit and share",
+      "signatureName": "Marie",
+      "signatureRole": "Founder of MeriBeauty",
+      "imageAlt": "Maria, founder of MeriBeauty"
+    },
+    "atmosphere": {
+      "eyebrow": "The soul of the place",
+      "title1": "There are places you visit.",
+      "title2": "And others that you",
+      "titleAccent": "feel.",
+      "p1": "The first time I set foot in Scotland, I felt something hard to explain.",
+      "p2": "The vast landscapes, old stones, paths lost in mist, cottages lit by candlelight, by the glow of flames... There was something nostalgic and comforting at once.",
+      "p3": "It is this atmosphere that I wanted to bring back with me",
+      "p4": "Meribeauty is inspired by that Scotland.",
+      "p5": "Not only in its decoration, but in its entire atmosphere. Textures, raw wood, antique objects, soft light, small details you discover by looking around.",
+      "p6": "A warm, slightly mysterious, living and imperfect place.",
+      "quote": "Little moments from elsewhere\nare born in the heart of Jette.",
+      "imageAlt1": "Warm interior, soft light",
+      "imageAlt2": "Warm interior, soft light"
+    },
+    "universes": {
+      "eyebrow": "MeriBeauty Studio & Shop",
+      "title1": "Several universes,",
+      "title2": "a single address.",
+      "items": [
+        {
+          "eyebrow": "The Studio",
+          "body": "Several independent professionals gathered in one place, each with her specialty and her universe.",
+          "cta": "Discover services"
+        },
+        {
+          "eyebrow": "The Boutique",
+          "body": "A selection of professional products, our own creations and beautiful discoveries chosen with care.",
+          "cta": "Discover the boutique"
+        },
+        {
+          "eyebrow": "Training",
+          "body": "A space to transmit, learn and perfect your skills around the universe of beauty and nail art.",
+          "cta": "Discover training"
+        },
+        {
+          "eyebrow": "Workshops & Events",
+          "body": "Gatherings throughout the year to create, learn, discover, meet and share differently.",
+          "cta": "See upcoming events"
+        }
+      ],
+      "imageAlts": {
+        "studio": "MeriBeauty beauty studio",
+        "boutique": "MeriBeauty boutique products",
+        "formations": "MeriBeauty professional training",
+        "ateliers": "MeriBeauty creative workshop and gathering"
+      }
+    },
+    "human": {
+      "eyebrow": "The faces of MeriBeauty",
+      "title1": "Different universes,",
+      "title2": "united under one roof.",
+      "p1": "MeriBeauty is also the meeting of several independent professionals. Each practices her specialty, develops her own universe and keeps her way of working.",
+      "p2": "Because we don't try to all look alike: it is precisely our differences, our know-how and our personalities that bring the place to life.",
+      "p3": "You choose the professional who suits you, and she takes care of you in her own way.",
+      "cta": "Meet the team",
+      "imageAlt": "The MeriBeauty team — moments of sharing and complicity"
+    },
+    "finalCta": {
+      "eyebrow": "You are most welcome",
+      "title1": "It's up to you",
+      "title2": "to push the door.",
+      "description1": "For a treatment, a discovery, a meeting or simply",
+      "description2": "a moment — there is always something waiting for you here.",
+      "quote": "…a moment for yourself, that feels good.",
+      "ctaBooking": "Book an appointment",
+      "ctaShop": "Visit the shop"
+    }
+  },
   "auth": {
     "signIn": "Sign in",
     "signInSubtitle": "Sign in to manage your beauty space",

@@ -348,20 +348,24 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         </select>
 
         {showStaffFilter && (
-          <select
-            value={staffFilter}
-            onChange={(e) => {
-              setStaffFilter(e.target.value);
-              refetch({ staffId: e.target.value });
-            }}
-            className="h-9 w-full max-w-[220px] truncate rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
-            title={staffFilter ? staffOptions?.find((s) => s.id === staffFilter)?.fullName ?? "" : "Toute l'équipe"}
-          >
-            <option value="">Tous les prestataires</option>
-            {staffOptions?.map((s) => (
-              <option key={s.id} value={s.id} title={s.fullName}>{s.fullName}</option>
-            ))}
-          </select>
+          <div className="flex w-full flex-col gap-1 sm:w-auto">
+            <select
+              id="prestataire-filter"
+              value={staffFilter}
+              onChange={(e) => {
+                setStaffFilter(e.target.value);
+                refetch({ staffId: e.target.value });
+              }}
+              className="h-9 w-full max-w-[220px] truncate rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
+              title={staffFilter ? staffOptions?.find((s) => s.id === staffFilter)?.fullName ?? "" : "Tous les prestataires"}
+              aria-label="Prestataire"
+            >
+              <option value="">Tous les prestataires</option>
+              {staffOptions?.map((s) => (
+                <option key={s.id} value={s.id} title={s.fullName}>{s.fullName}</option>
+              ))}
+            </select>
+          </div>
         )}
 
         <input

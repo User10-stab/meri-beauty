@@ -313,6 +313,101 @@
     "saturday": "Zaterdag",
     "sunday": "Zondag"
   },
+  "concept": {
+    "hero": {
+      "eyebrow": "Het Concept",
+      "titleLine1": "Duw de deur open.",
+      "titleAccent": "De rest valt te ontdekken.",
+      "description1": "Een schoonheidssalon, een boutique, ontmoetingen,",
+      "description2": "workshops en wat magie in het dagelijks leven.",
+      "welcome": "Welkom bij MeriBeauty.",
+      "cta": "Bezoek boeken",
+      "imageAlt": "Warm interieur van de MeriBeauty salon"
+    },
+    "story": {
+      "eyebrow": "Het verhaal",
+      "title1": "Het begon allemaal met de wens",
+      "title2a": "om te creëren",
+      "title2b": "een plek die",
+      "title2c": "nog niet bestond.",
+      "p1": "Jarenlang bestond mijn wereld uit reizen, salons, boetieks, ontmoetingsplekken met andere professionals... En beetje bij beetje groeide de wens om verder te gaan.",
+      "p2": "Ik wilde niet zomaar nog een schoonheidssalon openen.",
+      "p3": "Ik wilde een atypische plek creëren. Waar verschillende vakgebieden zich kunnen uiten, waar je je welkom voelt en je eigen universum kunt laten groeien.",
+      "p4": "Een plek waar je kunt komen voor een afspraak, een product in de boutique kunt ontdekken, kunt deelnemen aan een workshop, iets nieuws kunt leren of gewoon even pauzeren.",
+      "p5": "Uit die wens is Meribeauty Concept & Shop geboren: op één plek samenbrengen wat ik wilde beleven, doorgeven en delen",
+      "signatureName": "Marie",
+      "signatureRole": "Oprichtster van MeriBeauty",
+      "imageAlt": "Maria, oprichtster van MeriBeauty"
+    },
+    "atmosphere": {
+      "eyebrow": "De ziel van de plek",
+      "title1": "Er zijn plekken die je bezoekt.",
+      "title2": "En andere die je",
+      "titleAccent": "voelt.",
+      "p1": "De eerste keer dat ik voet zette in Schotland, voelde ik iets dat moeilijk uit te leggen is.",
+      "p2": "De uitgestrekte landschappen, oude stenen, paden verloren in mist, cottages verlicht door kaarslicht, door de gloed van vlammen... Er was iets nostalgisch en geruststellends tegelijk.",
+      "p3": "Het is die sfeer die ik mee naar huis wilde nemen",
+      "p4": "Meribeauty is geïnspireerd door dat Schotland.",
+      "p5": "Niet alleen in de decoratie, maar in de hele sfeer. Texturen, ruw hout, antieke objecten, zacht licht, kleine details die je ontdekt als je om je heen kijkt.",
+      "p6": "Een warme, licht mysterieuze, levende en imperfecte plek.",
+      "quote": "Kleine momenten van elders\nworden geboren in het hart van Jette.",
+      "imageAlt1": "Warm interieur, zacht licht",
+      "imageAlt2": "Warm interieur, zacht licht"
+    },
+    "universes": {
+      "eyebrow": "MeriBeauty Studio & Shop",
+      "title1": "Verschillende universums,",
+      "title2": "één adres.",
+      "items": [
+        {
+          "eyebrow": "De Studio",
+          "body": "Verschillende onafhankelijke professionals verenigd op één plek, elk met haar specialiteit en universum.",
+          "cta": "Ontdek diensten"
+        },
+        {
+          "eyebrow": "De Boutique",
+          "body": "Een selectie van professionele producten, onze eigen creaties en mooie ontdekkingen met zorg gekozen.",
+          "cta": "Ontdek de boutique"
+        },
+        {
+          "eyebrow": "Opleidingen",
+          "body": "Een ruimte om door te geven, te leren en je te vervolmaken rond de wereld van schoonheid en nagelverzorging.",
+          "cta": "Ontdek opleidingen"
+        },
+        {
+          "eyebrow": "Workshops & Evenementen",
+          "body": "Bijeenkomsten het hele jaar door om te creëren, te leren, te ontdekken, te ontmoeten en anders te delen.",
+          "cta": "Bekijk komende evenementen"
+        }
+      ],
+      "imageAlts": {
+        "studio": "MeriBeauty beautystudio",
+        "boutique": "MeriBeauty boutique producten",
+        "formations": "MeriBeauty professionele opleiding",
+        "ateliers": "MeriBeauty creatieve workshop en bijeenkomst"
+      }
+    },
+    "human": {
+      "eyebrow": "De gezichten van MeriBeauty",
+      "title1": "Verschillende universums,",
+      "title2": "verenigd onder één dak.",
+      "p1": "MeriBeauty is ook de ontmoeting van verschillende onafhankelijke professionals. Ieder beoefent haar specialiteit, ontwikkelt haar eigen universum en behoudt haar manier van werken.",
+      "p2": "Omdat we niet allemaal hetzelfde willen zijn: juist onze verschillen, onze knowhow en onze persoonlijkheden brengen de plek tot leven.",
+      "p3": "Jij kiest de professional die bij je past, en zij zorgt op haar manier voor jou.",
+      "cta": "Ontmoet het team",
+      "imageAlt": "Het MeriBeauty team — momenten van delen en verbondenheid"
+    },
+    "finalCta": {
+      "eyebrow": "Jullie zijn van harte welkom",
+      "title1": "Aan jou de wens",
+      "title2": "om de deur te openen.",
+      "description1": "Voor een verzorging, een ontdekking, een ontmoeting of gewoon",
+      "description2": "een moment — er wacht hier altijd iets op je.",
+      "quote": "…een moment voor jezelf, dat goed doet.",
+      "ctaBooking": "Afspraak boeken",
+      "ctaShop": "Naar de winkel"
+    }
+  },
   "auth": {
     "signIn": "Inloggen",
     "signInSubtitle": "Log in om je beautystudio te beheren",

@@ -74,7 +74,7 @@ describe("completePointOfSaleSale wires the walk-in e-mail without creating an i
 });
 
 describe("the POS UI warns before e-mailing a walk-in ticket to an existing account", () => {
-  const clientSource = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+  const clientSource = source("components/dashboard/boutique/counter/CounterCart.jsx");
 
   test("checks for an exact e-mail match rather than a loose substring search", () => {
     expect(clientSource).toContain("searchPointOfSaleCustomers(value)");
@@ -87,7 +87,11 @@ describe("the POS UI warns before e-mailing a walk-in ticket to an existing acco
     expect(clientSource).toContain("function useMatchedAccountInstead()");
     expect(clientSource).toContain("toggleWalkIn(false)");
     expect(clientSource).toContain("selectCustomer(walkInEmailMatch)");
-    expect(clientSource).toContain("Un compte existe déjà pour cette adresse");
+    // The warning copy itself renders from CounterBuyerForm now, shared with
+    // the other counter screens — the handler above stays in CounterCart
+    // (the retail till, formerly PointOfSaleClient).
+    const buyerFormSource = source("components/dashboard/boutique/counter/CounterBuyerForm.jsx");
+    expect(buyerFormSource).toContain("Un compte existe déjà pour cette adresse");
   });
 
   test("the warning only triggers once the typed address looks like a complete e-mail", () => {

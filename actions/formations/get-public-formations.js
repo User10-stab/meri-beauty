@@ -2,16 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-
-const HELD_OR_CONFIRMED_RESERVATION = {
-  OR: [
-    { status: { in: ["CONFIRMED", "COMPLETED"] } },
-    {
-      status: "PENDING_DEPOSIT",
-      OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }],
-    },
-  ],
-};
+import { liveSeatFilter } from "@/lib/reservations/session-occupancy";
 
 export async function getPublicFormations() {
   try {
@@ -25,7 +16,7 @@ export async function getPublicFormations() {
           where: { status: "SCHEDULED" },
           include: {
             reservations: {
-              where: HELD_OR_CONFIRMED_RESERVATION,
+              where: liveSeatFilter(),
               select: { seatsCount: true },
             },
           },
@@ -52,7 +43,7 @@ export async function getPublicFormationById(id) {
           where: { status: "SCHEDULED" },
           include: {
             reservations: {
-              where: HELD_OR_CONFIRMED_RESERVATION,
+              where: liveSeatFilter(),
               select: { seatsCount: true },
             },
           },

@@ -65,7 +65,7 @@ describe("point-of-sale security contracts", () => {
   });
 
   test("the counter UI supports ZXing camera scanning", () => {
-    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
     expect(ui).toContain('from "@zxing/browser"');
     expect(ui).toContain("BrowserMultiFormatReader");
     expect(ui).toContain("decodeFromConstraints");
@@ -73,7 +73,7 @@ describe("point-of-sale security contracts", () => {
   });
 
   test("the counter UI renders, polls, recovers, and explicitly cancels Stripe QR payments", () => {
-    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
     expect(ui).toContain('from "qrcode"');
     expect(ui).toContain("recoverPointOfSaleCheckout");
     expect(ui).toContain("getPointOfSaleOrderStatus");
@@ -106,7 +106,7 @@ describe("point-of-sale security contracts", () => {
     expect(schema).toContain("cashReceived");
     expect(schema).toContain("changeGiven");
 
-    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
     expect(ui).toContain("pos-cash-received");
     expect(ui).toContain("Monnaie à rendre");
   });
@@ -116,15 +116,17 @@ describe("point-of-sale security contracts", () => {
     expect(pos).toContain("needsAddress = !customer?.addressLine1");
     expect(pos).toContain('error.message === "POS_ADDRESS_REQUIRED"');
 
-    const validation = source("lib/validations/point-of-sale.js");
+    const validation = source("lib/validations/counter-customer.js");
     expect(validation).toContain("addressLine1");
     // Optional at the schema level — completePointOfSaleSale enforces the
     // real requirement server-side once it knows the customer's DB state.
     expect(validation).toContain('.optional().or(z.literal(""))');
 
-    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
     expect(ui).toContain("needsAddress = !addressOnFile");
-    expect(ui).toContain("updateCustomerAddress");
+
+    const buyerForm = source("components/dashboard/boutique/counter/CounterBuyerForm.jsx");
+    expect(buyerForm).toContain("updateCustomerAddress");
   });
 
   test("an existing email is reused case-insensitively instead of creating a duplicate customer", () => {
@@ -144,7 +146,7 @@ describe("point-of-sale security contracts", () => {
     expect(validation).toContain('type: z.literal("PRODUCT")');
     expect(validation).not.toContain('type: z.literal("SERVICE")');
 
-    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
     expect(ui).not.toContain("addServiceLine");
     expect(ui).not.toContain('type: "SERVICE"');
 
@@ -168,7 +170,7 @@ describe("point-of-sale security contracts", () => {
     const schema = source("prisma/schema.prisma");
     expect(schema).toMatch(/userId String\?\s*\n\s*user\s+User\?/);
 
-    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
     expect(ui).toContain("isWalkIn");
     expect(ui).toContain("toggleWalkIn");
     expect(ui).toContain('customer: isWalkIn ? null : customer');
@@ -190,7 +192,7 @@ describe("point-of-sale security contracts", () => {
 
     expect(pos).toContain('manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null');
 
-    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
     expect(ui).toContain("terminalApproved");
     expect(ui).toContain("terminalReference");
     expect(ui).toContain("APPROUVÉ");
@@ -199,7 +201,7 @@ describe("point-of-sale security contracts", () => {
   });
 
   test("the counter accepts both USB scans and QR camera results", () => {
-    const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+    const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
     const labels = source("components/dashboard/boutique/BarcodeLabelDialog.jsx");
     expect(ui).toContain("Lecteur USB : QR ou code-barres");
     expect(ui).toContain("BrowserMultiFormatReader");

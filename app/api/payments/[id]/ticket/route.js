@@ -5,7 +5,7 @@ import { canAccessDashboard } from "@/lib/authorization";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
 import { resolveServiceVatPolicy } from "@/lib/tax-policy";
-import { collectionTicketFields } from "@/lib/cash-book/ticket-identity";
+import { collectionTicketFields, consolidatedTicketFields } from "@/lib/cash-book/ticket-identity";
 import { describeReservationPayment } from "@/lib/cash-book/reservation-tickets";
 
 // react-pdf needs Node APIs — not edge-compatible.
@@ -23,13 +23,23 @@ const CUSTOMER_SELECT = { fullName: true, isCompany: true, vatNumber: true, vatV
  * staff with nothing to hand over: no invoice (by design) AND no ticket
  * (missing capability, not by design).
  *
- * Each recorded collection gets its own stable ticket, date and amount.
+ * By default this returns ONE consolidated receipt for the whole payment
+ * (identity T-<paymentId>, full prestation amount, a per-leg acompte/solde
+ * breakdown) — a customer who paid in two steps gets one coherent document,
+ * not two separately-numbered half-receipts. `?transactionId=<id>` still
+ * returns a single leg on its own (identity T-<transactionId>), for the rare
+ * case staff need just the acompte slip.
+ *
  * An invoice supplies its seller/VAT policy and a separate reference, never
- * the ticket's identity or full-sale amount. Without an invoice, use the
- * service VAT policy. No recorded collection means no payment receipt.
+ * the ticket's identity. Without an invoice, use the service VAT policy.
+ * No recorded collection means no payment receipt.
  *
  * A boutique/POS order keeps its own route (app/api/orders/[id]/ticket) —
  * real per-item line items, and it must work even before any Payment exists.
+ *
+ * Staff/dashboard access only — no client self-service download. Neither
+ * settleReservation nor completeAppointment auto-e-mail this ticket to the
+ * customer any more.
  */
 export async function GET(req, { params }) {
   const session = await auth();
@@ -38,6 +48,10 @@ export async function GET(req, { params }) {
   }
 
   const { id } = await params;
+
+  if (!canAccessDashboard(session.user.role)) {
+    return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
+  }
 
   const payment = await prisma.payment.findUnique({
     where: { id },
@@ -64,21 +78,18 @@ export async function GET(req, { params }) {
       },
       appointment: {
         select: {
-          userId: true,
           user: { select: CUSTOMER_SELECT },
           staffService: { select: { service: { select: { name: true } } } },
         },
       },
       workshopReservation: {
         select: {
-          customerId: true,
           customer: { select: CUSTOMER_SELECT },
           session: { select: { workshop: { select: { title: true, type: true } } } },
         },
       },
       formationReservation: {
         select: {
-          customerId: true,
           customer: { select: CUSTOMER_SELECT },
           session: { select: { formation: { select: { title: true } } } },
         },
@@ -90,14 +101,6 @@ export async function GET(req, { params }) {
   }
   if (payment.orderId) {
     return NextResponse.json({ error: "Utilisez le reçu de la commande boutique pour ce paiement." }, { status: 400 });
-  }
-
-  const ownerId =
-    payment.appointment?.userId ?? payment.workshopReservation?.customerId ?? payment.formationReservation?.customerId ?? null;
-  if (!canAccessDashboard(session.user.role)) {
-    if (!ownerId || ownerId !== session.user.id) {
-      return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
-    }
   }
 
   const description = describeReservationPayment(payment);
@@ -133,25 +136,33 @@ export async function GET(req, { params }) {
   }
 
   const transactionId = new URL(req.url).searchParams.get("transactionId");
-  const collections = payment.transactions.filter((item) => !transactionId || item.id === transactionId);
-  if (!collections.length) {
-    return NextResponse.json({ error: "Aucun encaissement correspondant à ce ticket." }, { status: 404 });
+
+  let ticket;
+  if (transactionId) {
+    // Explicit "give me just this leg" — the acompte slip on its own, say.
+    const txn = payment.transactions.find((item) => item.id === transactionId);
+    if (!txn) {
+      return NextResponse.json({ error: "Aucun encaissement correspondant à ce ticket." }, { status: 404 });
+    }
+    const receipt = collectionTicketFields(txn, payment.invoice, ticketFields.vatRate);
+    ticket = { ...ticketFields, ...receipt, lines: [{ description, quantity: 1, unitPrice: receipt.totalInclVat }] };
+  } else {
+    // One consolidated receipt for the whole payment, however many legs it took
+    // (acompte online + solde au comptoir). The per-leg split is the `payments`
+    // block; the single line carries the full prestation price.
+    if (!payment.transactions.length) {
+      return NextResponse.json({ error: "Aucun encaissement correspondant à ce ticket." }, { status: 404 });
+    }
+    const receipt = consolidatedTicketFields(id, payment.transactions, payment.invoice, ticketFields.vatRate);
+    ticket = { ...ticketFields, ...receipt, lines: [{ description, quantity: 1, unitPrice: receipt.totalInclVat }] };
   }
-  // One page per collection: an older deposit never turns into a full-payment receipt.
-  const tickets = collections.map((transaction) => {
-    const receipt = collectionTicketFields(transaction, payment.invoice, ticketFields.vatRate);
-    return {
-      ...ticketFields,
-      ...receipt,
-      lines: [{ description, quantity: 1, unitPrice: receipt.totalInclVat }],
-    };
-  });
-  const pdf = await renderTicketPdf(tickets);
+
+  const pdf = await renderTicketPdf(ticket);
 
   return new NextResponse(pdf, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${tickets.length === 1 ? tickets[0].ticketNumber : `tickets-${id}`}.pdf"`,
+      "Content-Disposition": `inline; filename="${ticket.ticketNumber}.pdf"`,
     },
   });
 }

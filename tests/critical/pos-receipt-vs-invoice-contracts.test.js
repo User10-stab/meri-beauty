@@ -84,23 +84,30 @@ describe("a named customer always gets a receipt at the till; the invoice itself
 });
 
 describe("the till mirrors the VIES-only invoice rule", () => {
-  const clientSource = source("components/dashboard/boutique/PointOfSaleClient.jsx");
+  const clientSource = source("components/dashboard/boutique/counter/CounterCart.jsx");
+  // The VAT/invoice-status copy itself renders from CounterBuyerForm now —
+  // shared with the walk-in service composer and, later, a counter booking
+  // composer — while CounterCart (the retail till, formerly PointOfSaleClient)
+  // keeps the state and the derived booleans it's fed.
+  const buyerFormSource = source("components/dashboard/boutique/counter/CounterBuyerForm.jsx");
 
   test("a saved reusable VIES proof is carried into the till and does not ask for another check", () => {
     expect(clientSource).toContain("vatInvoiceReady: Boolean(match.vatInvoiceReady)");
-    expect(clientSource).toContain('customer.vatInvoiceReady ? "Validée" : "Vérifier"');
-    expect(clientSource).toContain("TVA déjà validée via VIES");
+    expect(buyerFormSource).toContain('customer.vatInvoiceReady ? "Validée" : "Vérifier"');
+    expect(buyerFormSource).toContain("TVA déjà validée via VIES");
   });
 
   test("there is no invoice checkbox for a particular customer", () => {
-    expect(clientSource).toContain("Client particulier — aucune facture ne sera générée");
+    expect(buyerFormSource).toContain("Client particulier — aucune facture ne sera générée");
     expect(clientSource).not.toContain("Demander une facture");
     expect(clientSource).not.toContain("requestInvoice");
+    expect(buyerFormSource).not.toContain("Demander une facture");
+    expect(buyerFormSource).not.toContain("requestInvoice");
   });
 
   test("a VIES VAT customer is told the invoice is created but sent manually", () => {
     expect(clientSource).toContain("const willHaveVatInvoice = customer.vatInvoiceReady || Boolean(customer.vatNumber.trim())");
-    expect(clientSource).toContain("puis envoyée manuellement depuis Opérations");
+    expect(buyerFormSource).toContain("puis envoyée manuellement depuis Opérations");
   });
 
   test("a receipt-only sale is printable at the till just like a walk-in ticket", () => {

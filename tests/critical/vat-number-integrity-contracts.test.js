@@ -171,13 +171,17 @@ describe("a VAT number is never stored apart from its verification proof", () =>
   );
 
   test("the POS VAT field is optional and available for every payment method", () => {
-    const client = source("components/dashboard/boutique/PointOfSaleClient.jsx");
-    expect(client).toContain("facultatif");
+    const client = source("components/dashboard/boutique/counter/CounterCart.jsx");
     // Not gated inside any `method === "..."` branch: it lives in the general
     // customer section, so it is equally reachable for CASH, CARD_QR and
     // EXTERNAL_TERMINAL.
     expect(client).toContain('customer.vatNumber');
     expect(client).toContain("updateCustomerVat");
+
+    // The "(facultatif)" copy itself renders from CounterBuyerForm now,
+    // shared with the other counter screens.
+    const buyerForm = source("components/dashboard/boutique/counter/CounterBuyerForm.jsx");
+    expect(buyerForm).toContain("facultatif");
   });
 
   test.each([

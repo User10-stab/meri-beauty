@@ -146,9 +146,12 @@ describe("the server applies the same rule, and is the one that matters", () => 
     expect(source("prisma/schema.prisma")).toContain("appointmentId          String?               @unique");
   });
 
-  test("the ticket does not call a first payment a balance", () => {
-    expect(action).toContain('const collectedLabel = collectsOnSite ? "Le paiement" : "Le solde";');
+  test("no client-facing message calls a first payment a balance — there is none to word any more", () => {
+    // No ticket is generated or e-mailed on settlement at all now (see
+    // counter-adjustment-documents.test.js), so there is no "Le solde"/"Le
+    // paiement" wording left to get wrong.
     expect(action).not.toContain("Le solde de €${balance.toFixed(2)}");
+    expect(action).not.toContain('const collectedLabel = collectsOnSite ? "Le paiement" : "Le solde";');
   });
 });
 

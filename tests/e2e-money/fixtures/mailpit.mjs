@@ -77,3 +77,35 @@ export async function waitForEmail({ to, subject = null, timeout = 30_000 }) {
       `${seen.map((message) => message.Subject).join(" | ") || "none"}`,
   );
 }
+
+/**
+ * The other direction of waitForEmail: proving a message never arrives.
+ *
+ * There is no way to poll for an absence the way waitForEmail polls for a
+ * presence — a short window merely proves "not yet". What makes that
+ * tolerable here is that `sendEmail` is either called synchronously in the
+ * same request that already completed (nothing pending to race), or not
+ * called at all; there is no async dispatch this could catch mid-flight. The
+ * wait is still real time, not a formality: Resend/Mailpit round-trips other
+ * scenarios in this suite in well under a second, so several seconds of
+ * silence on a matching subject is meaningful, not merely "checked too soon".
+ *
+ * @param {{ to: string, subject?: RegExp, timeout?: number }} input
+ */
+export async function assertNoEmail({ to, subject = null, timeout = 8_000 }) {
+  const deadline = Date.now() + timeout;
+  let match = null;
+
+  while (Date.now() < deadline && !match) {
+    const results = await api(`/api/v1/search?query=${encodeURIComponent(`to:"${to}"`)}&limit=25`);
+    const seen = results.messages ?? [];
+    match = subject ? seen.find((message) => subject.test(message.Subject ?? "")) : seen[0];
+    if (!match) await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+
+  if (match) {
+    throw new Error(
+      `Expected no e-mail to ${to}${subject ? ` matching ${subject}` : ""}, but "${match.Subject}" arrived.`,
+    );
+  }
+}

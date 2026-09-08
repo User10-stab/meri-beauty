@@ -40,6 +40,9 @@ const styles = StyleSheet.create({
   lineDetail: { flexDirection: "row", justifyContent: "space-between", marginTop: 1 },
   lineQtyUnit: { fontSize: 7, color: COLORS.muted },
   lineAmount: { fontSize: 8, fontWeight: 700 },
+  paymentsRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 1.5 },
+  paymentsLabel: { fontSize: 7.5, color: COLORS.text },
+  paymentsValue: { fontSize: 7.5, fontWeight: 700 },
   totalsRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 1.5 },
   totalsLabel: { fontSize: 7.5, color: COLORS.muted },
   totalsValue: { fontSize: 7.5 },
@@ -64,15 +67,19 @@ const BASE_HEIGHT = 300; // header + totals + footer, empty cart
 const ITEM_HEIGHT = 26;
 const LONG_DESCRIPTION_EXTRA = 10; // budget for a description wrapping to 2 lines
 
-function estimateTicketHeight(lines) {
+const PAYMENT_ROW_HEIGHT = 12;
+
+function estimateTicketHeight(lines, payments = []) {
   return (
     BASE_HEIGHT +
-    lines.reduce((sum, line) => sum + ITEM_HEIGHT + (line.description.length > 28 ? LONG_DESCRIPTION_EXTRA : 0), 0)
+    lines.reduce((sum, line) => sum + ITEM_HEIGHT + (line.description.length > 28 ? LONG_DESCRIPTION_EXTRA : 0), 0) +
+    (payments.length > 1 ? payments.length * PAYMENT_ROW_HEIGHT + PAYMENT_ROW_HEIGHT : 0)
   );
 }
 
 function TicketPage({ ticket, contact = null }) {
-  const pageHeight = estimateTicketHeight(ticket.lines);
+  const payments = Array.isArray(ticket.payments) ? ticket.payments : [];
+  const pageHeight = estimateTicketHeight(ticket.lines, payments);
   const ticketNumber = ticket.ticketNumber ?? `T-C-${ticket.orderNumber}`;
 
   return (
@@ -108,6 +115,18 @@ function TicketPage({ ticket, contact = null }) {
         })}
 
         <Rule />
+
+        {payments.length > 1 ? (
+          <>
+            {payments.map((p, index) => (
+              <View style={styles.paymentsRow} key={index} wrap={false}>
+                <Text style={styles.paymentsLabel}>{p.label} du {formatDate(p.issuedAt)}</Text>
+                <Text style={styles.paymentsValue}>{money(p.amount)}</Text>
+              </View>
+            ))}
+            <Rule />
+          </>
+        ) : null}
 
         <View style={styles.totalsRow}>
           <Text style={styles.totalsLabel}>Sous-total HT</Text>

@@ -11,21 +11,36 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 // 24 Aug 2026: an appointment balance paid in cash created a Transaction with
 // method CASH but no cashSessionId, so it never entered the till total. Every
 // close showed the drawer holding more than expected, with nothing explaining
-// the difference. The three other on-site money paths already did this.
-describe("every on-site payment lands in the open till session", () => {
-  // POS is deliberately excluded here — see "the counter sale uniquely
-  // refuses to run with no till open" below: every other on-site path still
-  // leaves the row unassigned rather than block a payment already promised.
+// the difference. Fixed by attaching whichever session happened to be open —
+// but "attach one if it exists" still allowed a session to be missing
+// entirely. An 8 Sep 2026 audit of the dev database's own Livre de caisse
+// caught exactly that: three real appointment payments taken before that
+// day's till was ever opened, permanently invisible from every session's book
+// (Transaction.cashSessionId is written once and never backfilled). Rather
+// than reverting to a flat refusal — appointment/atelier-formation/order-
+// pickup settlement deliberately never turn away a payment already promised —
+// each of the three now gates cash behind a one-click, same-screen "ouvrir la
+// caisse" (see CashSessionGate.jsx): the server still refuses authoritatively
+// if none is open, but the UI never lets that refusal actually interrupt a
+// real customer, since opening a till is a two-second, same-screen step.
+describe("every on-site payment lands in the open till session, or is refused until one is", () => {
+  // The three settlement paths for an *already-existing* obligation — a
+  // rendez-vous, an atelier/formation balance, an order pickup. Cash refunds
+  // (actions/boutique/returns.js, see below) are deliberately excluded: this
+  // gate protects against creating an unreconcilable cash *sale*, not against
+  // giving money back, which the plan never touched.
   test.each([
-    ["actions/appointment/manage-appointment.js", "appointment balance"],
-    ["lib/reservations/settle-reservation.js", "atelier/formation balance"],
-    ["actions/boutique/orders.js", "order pickup"],
-    ["actions/boutique/returns.js", "cash refund"],
-  ])("%s attaches the open cash session", (file) => {
+    ["actions/appointment/manage-appointment.js", "APPOINTMENT_CASH_SESSION_CLOSED"],
+    ["lib/reservations/settle-reservation.js", "RESERVATION_CASH_SESSION_CLOSED"],
+    ["actions/boutique/orders.js", "PICKUP_CASH_SESSION_CLOSED"],
+  ])("%s refuses a cash collection with no till open, and attaches the real session otherwise", (file, errorCode) => {
     const content = source(file);
-    expect(content).toContain("cashSessionId: openCashSession?.id ?? null");
-    // Format-agnostic: the POS wraps the same call across lines. What must
-    // hold is that it looks up the *open* session, not how it is indented.
+    expect(content).toContain('cashSessionId: method === "CASH" ? openCashSession.id : null');
+    expect(content, "no authoritative in-transaction refusal").toContain(`throw new Error("${errorCode}")`);
+    expect(content, "the thrown error is never mapped back to a user-facing refusal").toContain(`if (error.message === "${errorCode}")`);
+    expect(content).toContain("requiresCashSession: true");
+    // Format-agnostic: what must hold is that it looks up the *open* session,
+    // not how the lookup happens to be indented.
     expect(content).toMatch(/cashSession\.findFirst\(\{\s*where: \{ closedAt: null \}/);
   });
 
@@ -36,21 +51,22 @@ describe("every on-site payment lands in the open till session", () => {
     expect(content).toContain('method === "CASH"\n            ? await tx.cashSession.findFirst');
   });
 
-  test("a missing session never blocks the payment", () => {
-    // Refusing to take a customer's money because nobody opened the till
-    // would be a worse failure than an unassigned row.
-    expect(source("actions/appointment/manage-appointment.js")).toContain(
+  // The one on-site cash path that still never blocks — giving a customer's
+  // money back is not the risk this gate exists to prevent.
+  test("a cash refund still never blocks on a missing session", () => {
+    expect(source("actions/boutique/returns.js")).toContain(
       "cashSessionId: openCashSession?.id ?? null"
     );
   });
 
-  // 1 Sep 2026: unlike every other on-site path, the counter POS refuses to
-  // ring up anything — any payment method, not just cash — with no till
-  // session open. Checked twice: once before the transaction (fast-path,
-  // avoids doing all the writes just to abort), and again inside it
-  // (authoritative — with staff on multiple terminals, the session can close
-  // in the gap between the two reads).
-  test("the counter sale uniquely refuses to run with no till open, whatever the payment method", () => {
+  // 1 Sep 2026: the counter POS refuses to ring up anything — any payment
+  // method, not just cash — with no till session open; the three settlement
+  // paths above later adopted the same shape for CASH specifically. Checked
+  // twice: once before the transaction (fast-path, avoids doing all the
+  // writes just to abort), and again inside it (authoritative — with staff on
+  // multiple terminals, the session can close in the gap between the two
+  // reads).
+  test("the counter sale (new bookings, retail till) refuses to run with no till open, whatever the payment method", () => {
     const pos = source("actions/boutique/point-of-sale.js");
     expect(pos).toContain("const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }");
     expect(pos).toContain("requiresCashSession: true");
@@ -60,6 +76,53 @@ describe("every on-site payment lands in the open till session", () => {
     // now required for every method — see the cash-book queries, which all
     // filter on method: "CASH" alongside cashSessionId.
     expect(pos).toContain('cashSessionId: method === "CASH" ? openCashSession.id : null');
+  });
+
+  test("the new counter booking creation gates cash the same way", () => {
+    const create = source("actions/counter/create-reservation.js");
+    expect(create).toContain('if (!openCashSession) throw new Error("CASH_SESSION_REQUIRED")');
+    expect(create).toContain('if (error.message === "CASH_SESSION_REQUIRED")');
+    expect(create).toContain("requiresCashSession: true");
+  });
+});
+
+// 8 Sep 2026: closing the gap above only helps if staff actually see it in
+// time to fix it — a passive warning they could click past (the previous
+// design) still let the exact same orphaned-row bug happen, it just also
+// showed a sentence nobody was required to read. CashSessionGate.jsx replaces
+// that warning with a one-click "ouvrir la caisse" that disables the
+// settle/collect button until it resolves, wired into every screen a CASH
+// radio can be selected on.
+describe("a CASH selection with no till open blocks submission until resolved inline", () => {
+  test.each([
+    ["components/dashboard/boutique/counter/FicheSettleAction.jsx", "settle"],
+    ["components/dashboard/boutique/counter/PickupFiche.jsx", "pickup"],
+    ["components/dashboard/boutique/counter/CounterBookingComposer.jsx", "composer"],
+  ])("%s renders the inline gate instead of a passive warning", (file) => {
+    const content = source(file);
+    expect(content).toContain('import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSessionGate"');
+    expect(content).toContain("<CashSessionGate onOpened={markCashSessionOpen}");
+    // The old warning-only paragraph must actually be gone, not merely
+    // supplemented — otherwise staff see both and the gate reads as optional.
+    expect(content, "the passive, non-blocking warning text should have been replaced").not.toContain(
+      "cet encaissement en espèces n&apos;apparaîtra jamais dans le Livre de caisse",
+    );
+  });
+
+  test("useCashSessionOpen exposes a way to reflect an inline open immediately", () => {
+    const hook = source("components/dashboard/boutique/counter/useCashSessionOpen.js");
+    expect(hook).toContain("markOpen");
+    expect(hook).toContain("markClosed");
+  });
+
+  test("a server refusal (a session closed in the race window) re-shows the gate instead of just erroring", () => {
+    for (const file of [
+      "components/dashboard/boutique/counter/FicheSettleAction.jsx",
+      "components/dashboard/boutique/counter/PickupFiche.jsx",
+      "components/dashboard/boutique/counter/CounterBookingComposer.jsx",
+    ]) {
+      expect(source(file)).toContain("if (result.requiresCashSession) markCashSessionClosed();");
+    }
   });
 });
 
@@ -77,10 +140,12 @@ describe("the till lists what is still owed without re-implementing settlement",
   });
 
   test("the panel settles through those same actions", () => {
-    const panel = source("components/dashboard/boutique/CounterPanel.jsx");
-    expect(panel).toContain('import { completeAppointment } from "@/actions/appointment/manage-appointment"');
-    expect(panel).toContain('import { completeWorkshopReservation } from "@/actions/workshops/manage-reservation"');
-    expect(panel).toContain('import { completeFormationReservation } from "@/actions/formations/manage-reservation"');
+    // These three imports moved from CounterPanel.jsx into the standalone
+    // settle-action component when the counter split into one file per piece.
+    const settleAction = source("components/dashboard/boutique/counter/FicheSettleAction.jsx");
+    expect(settleAction).toContain('import { completeAppointment } from "@/actions/appointment/manage-appointment"');
+    expect(settleAction).toContain('import { completeWorkshopReservation } from "@/actions/workshops/manage-reservation"');
+    expect(settleAction).toContain('import { completeFormationReservation } from "@/actions/formations/manage-reservation"');
   });
 
   test("running the till is not enough — each kind needs its own permission", () => {
@@ -121,7 +186,9 @@ describe("the till lists what is still owed without re-implementing settlement",
 });
 
 describe("nothing is marked paid before the money is in hand", () => {
-  const panel = source("components/dashboard/boutique/CounterPanel.jsx");
+  // FicheSettleAction.jsx is CounterPanel's old inline SettleAction,
+  // extracted to its own file when the counter split into one file per piece.
+  const panel = source("components/dashboard/boutique/counter/FicheSettleAction.jsx");
 
   test("the settle call carries the staff attestation", () => {
     expect(panel).toContain("paymentConfirmed: true");
@@ -152,9 +219,12 @@ describe("nothing is marked paid before the money is in hand", () => {
     // total disables confirmation until a reason is given. The server refuses
     // the same way (resolveCounterPriceAdjustment), so this is the screen
     // agreeing with it rather than the only thing standing in the way.
-    expect(panel).toContain(
-      "disabled={saving || (priceChanged && adjustmentReason.trim().length < 3) || (amountDue > 0 && isExternalTerminal && !terminalReference.trim())}",
-    );
+    expect(panel).toContain("saving ||");
+    expect(panel).toContain("(priceChanged && adjustmentReason.trim().length < 3) ||");
+    expect(panel).toContain('(amountDue > 0 && isExternalTerminal && !terminalReference.trim()) ||');
+    // 8 Sep 2026: a fourth clause — cash cannot be confirmed while no till is
+    // open either, same principle as the price/terminal-reference guards.
+    expect(panel).toContain('(amountDue > 0 && method === "CASH" && !cashSessionOpen)');
     expect(source("lib/payments/counter-price-adjustment.js")).toContain(
       "Indiquez la raison de l'ajustement de prix.",
     );
@@ -191,7 +261,11 @@ describe("nothing is marked paid before the money is in hand", () => {
   });
 
   test("a slow response cannot overwrite a newer search", () => {
-    expect(panel).toContain("if (requestRef.current !== requestId) return;");
+    // The race-guard lives in CounterSurface now — it owns all three
+    // lookup/search calls (code lookup, name search, select-a-result) so
+    // they keep sharing one requestRef instead of racing each other.
+    const surface = source("components/dashboard/boutique/counter/CounterSurface.jsx");
+    expect(surface).toContain("if (requestRef.current !== requestId) return;");
   });
 });
 

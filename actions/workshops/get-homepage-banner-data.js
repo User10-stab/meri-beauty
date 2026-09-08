@@ -2,16 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
-
-const HELD_OR_CONFIRMED_RESERVATION = {
-  OR: [
-    { status: { in: ["CONFIRMED", "COMPLETED"] } },
-    {
-      status: "PENDING_DEPOSIT",
-      OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }],
-    },
-  ],
-};
+import { liveSeatFilter } from "@/lib/reservations/session-occupancy";
 
 /**
  * Data for the homepage promo banner: prioritizes whichever upcoming
@@ -37,7 +28,7 @@ export async function getHomepageBannerData() {
         orderBy: { startDate: "asc" },
         include: {
           workshop: true,
-          reservations: { where: HELD_OR_CONFIRMED_RESERVATION, select: { seatsCount: true } },
+          reservations: { where: liveSeatFilter(), select: { seatsCount: true } },
         },
       }),
       prisma.formationSession.findMany({
@@ -49,7 +40,7 @@ export async function getHomepageBannerData() {
         orderBy: { startDate: "asc" },
         include: {
           formation: true,
-          reservations: { where: HELD_OR_CONFIRMED_RESERVATION, select: { seatsCount: true } },
+          reservations: { where: liveSeatFilter(), select: { seatsCount: true } },
         },
       }),
     ]);

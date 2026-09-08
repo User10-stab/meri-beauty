@@ -4,17 +4,30 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { ROLES, STAFF_PERMISSIONS, getStaffId, hasDashboardPermission, isAdminRole } from "@/lib/authorization";
-import { resolveOrCreateCustomer } from "@/actions/reservation/create-reservation";
 import { completeAppointment } from "@/actions/appointment/manage-appointment";
-import { PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
+import { CounterCustomerError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
+import { counterCustomerSchema } from "@/lib/validations/counter-customer";
+import { resolveCounterCustomer } from "@/lib/counter/resolve-counter-customer";
 
+// Same "existing account, or a brand-new one with a phone" shape as
+// create-reservation.js's own buyerSchema. The {userId} branch merges in the
+// VAT/address picks too — an already-matched customer can still turn this
+// sale into a B2B one (add a VAT number, supply an address) exactly like a
+// counter-created reservation can; without the merge, zod's default
+// unknown-key stripping would silently drop a VAT number typed for an
+// existing customer instead of validating and saving it.
 const customerSchema = z.union([
-  z.object({ userId: z.string().min(1) }),
-  z.object({
-    fullName: z.string().trim().min(2),
-    email: z.string().trim().email(),
-    phone: z.string().trim().min(6),
-  }),
+  z.object({ userId: z.string().min(1) }).merge(
+    counterCustomerSchema.pick({
+      vatNumber: true,
+      addressLine1: true,
+      addressLine2: true,
+      addressCity: true,
+      addressPostalCode: true,
+      addressCountry: true,
+    })
+  ),
+  counterCustomerSchema.omit({ id: true }).extend({ phone: z.string().trim().min(6) }),
 ]);
 
 const saleSchema = z.object({
@@ -137,18 +150,11 @@ export async function createCounterWalkInService(input) {
     });
     if (!staffService) return { success: false, message: "Prestation introuvable ou non autorisée." };
 
-    let user;
-    if ("userId" in data.customer) {
-      user = await prisma.user.findFirst({
-        where: { id: data.customer.userId, role: "CUSTOMER", isDeleted: false },
-      });
-      if (!user) return { success: false, message: "Client introuvable." };
-    } else {
-      ({ user } = await resolveOrCreateCustomer(
-        { ...data.customer, newsletterSubscribed: false },
-        undefined,
-      ));
-    }
+    // Same resolver a booking-buyer completion uses (actions/counter/
+    // update-buyer.js): a B2B walk-in now gets the same VAT/VIES and
+    // address rule here as everywhere else in the counter, instead of this
+    // path only ever creating a bare {fullName,email,phone} B2C account.
+    const user = await resolveCounterCustomer(prisma, data.customer);
 
     const completedAt = new Date();
     // The empty interval is intentional: while CONFIRMED, the database's
@@ -222,6 +228,9 @@ export async function createCounterWalkInService(input) {
     }
     if (error instanceof PhoneAlreadyRegisteredError) {
       return { success: false, message: "Ce numéro est déjà associé à un autre compte." };
+    }
+    if (error instanceof CounterCustomerError) {
+      return { success: false, message: error.message };
     }
     console.error("[createCounterWalkInService]", error);
     return { success: false, message: "Impossible d'enregistrer cette prestation." };

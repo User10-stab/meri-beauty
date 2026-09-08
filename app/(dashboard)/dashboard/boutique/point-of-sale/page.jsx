@@ -1,8 +1,7 @@
 import { auth } from "@/auth";
 import { requireDashboardPermission } from "@/lib/route-protection";
 import { STAFF_PERMISSIONS, hasDashboardPermission } from "@/lib/authorization";
-import { PointOfSaleClient } from "@/components/dashboard/boutique/PointOfSaleClient";
-import { CounterPanel } from "@/components/dashboard/boutique/CounterPanel";
+import { CounterSurface } from "@/components/dashboard/boutique/counter/CounterSurface";
 
 export const metadata = { title: "Caisse — Meri Beauty" };
 
@@ -33,14 +32,14 @@ export default async function PointOfSalePage() {
   ]);
 
   return (
-    <div className="space-y-6">
-      <CounterPanel
-        canCheckIn={canAppointments || canWorkshops || canFormations}
-        canSettle={canAppointments || canWorkshops || canFormations}
-        canPickup={canOrders}
-        canCreateWalkIn={canAppointments}
-      />
-      <PointOfSaleClient canAdjustStock={canAdjustStock} canOpenCashSession />
-    </div>
+    <CounterSurface
+      canCheckIn={canAppointments || canWorkshops || canFormations}
+      canSettle={canAppointments || canWorkshops || canFormations}
+      canPickup={canOrders}
+      canCreateWalkInService={canAppointments}
+      canCreateSessionBooking={canWorkshops || canFormations}
+      canAdjustStock={canAdjustStock}
+      canOpenCashSession
+    />
   );
 }

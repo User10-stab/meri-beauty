@@ -46,7 +46,7 @@ describe("every place a name creates or edits a real account imports the shared 
     ["profile self-edit", "lib/validations/staff-settings.js", "fullName: fullNameSchema.optional()"],
     ["admin/staff account creation", "lib/validations/admin-account.js", "fullName: fullNameSchema"],
     ["independent staff onboarding", "lib/validations/independent-staff.js", "fullName: fullNameSchema"],
-    ["POS walk-in customer", "lib/validations/point-of-sale.js", "fullName: fullNameSchema"],
+    ["POS walk-in customer", "lib/validations/counter-customer.js", "fullName: fullNameSchema"],
     ["guest checkout", "lib/validations/commerce.js", "fullName: fullNameSchema"],
   ];
 

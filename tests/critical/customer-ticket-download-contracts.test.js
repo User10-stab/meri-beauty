@@ -13,12 +13,14 @@ describe("customer receipt downloads", () => {
     expect(history).toContain("payment: paymentSelect");
   });
 
-  test("shows the owner a receipt link for both boutique orders and activity payments", () => {
+  test("shows the owner a receipt link for boutique orders, but never for activity payments — that ticket is staff-only now", () => {
     const profile = source("components/website/MonComptePageClient.jsx");
     const reservations = source("components/customer/MyReservationsClient.jsx");
     expect(profile).toContain("href={`/api/orders/${order.id}/ticket`}");
-    expect(profile).toContain("href={`/api/payments/${payment.id}/ticket`}");
-    expect(reservations).toContain("href={`/api/payments/${payment.id}/ticket`}");
+    expect(profile).not.toContain("href={`/api/payments/${payment.id}/ticket`}");
+    expect(reservations).not.toContain("href={`/api/payments/${payment.id}/ticket`}");
+    expect(profile).not.toContain("PaymentTicketLink");
+    expect(reservations).not.toContain("PaymentTicketLink");
   });
 
   test("keeps a B2B invoice and a pickup code visible alongside the receipt", () => {

@@ -7,8 +7,6 @@ import { prisma } from "@/lib/prisma";
 import { hasDashboardPermission, canAccessDashboard, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { computeCashVariance } from "@/lib/cash-sessions";
 import { computeSessionCashTotals } from "@/lib/cash-book/session-totals";
-import { sendReservationTicketsForSession } from "@/lib/cash-book/reservation-tickets";
-import { captureError } from "@/lib/monitoring";
 
 /**
  * A daily till open/close boundary. Before this, every CASH POS sale was
@@ -212,16 +210,6 @@ export async function closeCashSession(sessionId, countedCash) {
   if (claim.count === 0) {
     return { success: false, message: "Cette session vient d'être clôturée par quelqu'un d'autre." };
   }
-
-  // Ateliers/formations/rendez-vous already got their legal Invoice at
-  // settlement time, but never the compact till-style ticket a customer
-  // actually expects as a receipt — sent once here, in a single batch, now
-  // that the session is definitively closed. Best-effort: a PDF or email
-  // failure must never turn an already-committed till closure into an
-  // error response.
-  await sendReservationTicketsForSession(prisma, sessionId).catch((error) => {
-    captureError(error, { area: "cash-book", context: "close-session-reservation-tickets", sessionId });
-  });
 
   const updated = await prisma.cashSession.findUnique({ where: { id: sessionId }, include: SESSION_INCLUDE });
   revalidateCaisseRoutes();

@@ -10,13 +10,10 @@ import { createAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
-import { resolveServiceVatPolicy, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer } from "@/lib/tax-policy";
+import { resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
-import { renderTicketPdf } from "@/lib/pdf/render";
-import { collectionTicketFields } from "@/lib/cash-book/ticket-identity";
-import { formatSalonAddress } from "@/lib/format-address";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { resolveCounterPriceAdjustment } from "@/lib/payments/counter-price-adjustment";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
@@ -861,6 +858,21 @@ export async function completeAppointment(
     if (collectsMoney && paymentConfirmed !== true) {
       return { success: false, message: "Confirmez avoir bien reçu le paiement avant de terminer le rendez-vous.", requiresPaymentConfirmation: true };
     }
+    // Cash with no till open used to be accepted and left unassigned
+    // (cashSessionId: null), which is invisible from every Livre de caisse
+    // forever — Transaction.pieceNumber is written once and never
+    // backfilled. Fast-path check before the transaction; the authoritative
+    // one is inside it, in case a session closes in the gap between the two.
+    if (collectsMoney && method === "CASH") {
+      const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+      if (!openCashSessionGate) {
+        return {
+          success: false,
+          message: "Aucune session de caisse n'est ouverte. Ouvrez la caisse avant d'encaisser en espèces.",
+          requiresCashSession: true,
+        };
+      }
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on the appointment still being CONFIRMED —
@@ -925,16 +937,16 @@ export async function completeAppointment(
             });
 
         // Attach to whichever till session is open so the counter cash is
-        // reconcilable at close (see lib/cash-sessions.js). Without this, an
-        // appointment balance paid in cash never reached the till total and
-        // showed up as an unexplained surplus at every close — the boutique
-        // paths (completeOrderPickup, the POS sale) and settleReservation all
-        // already did this; only appointments were missing it. Never blocks
-        // the settlement if no session is open: the row is left unassigned.
+        // reconcilable at close (see lib/cash-sessions.js). Authoritative
+        // check — the fast-path gate above already refused this request once
+        // if no session was open, but a session can close in the gap between
+        // that read and this write; re-checked here so the answer is never
+        // stale by the time the row is actually created.
         const openCashSession =
           method === "CASH"
             ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
             : null;
+        if (method === "CASH" && !openCashSession) throw new Error("APPOINTMENT_CASH_SESSION_CLOSED");
         // Cash-book line number, allocated only for the CASH rows that
         // actually enter the till total — see model Transaction.pieceNumber.
         const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.APPOINTMENT) : null;
@@ -946,7 +958,7 @@ export async function completeAppointment(
             method: method === "CASH" ? "CASH" : "CARD",
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
-            cashSessionId: openCashSession?.id ?? null,
+            cashSessionId: method === "CASH" ? openCashSession.id : null,
             pieceNumber,
             manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
           },
@@ -1030,77 +1042,14 @@ export async function completeAppointment(
     if (!result.claimed) {
       return { success: false, message: "Ce rendez-vous vient de changer d'état. Actualisez la page." };
     }
-    const { invoice, balance } = result;
+    const { balance } = result;
 
-    if (balance > 0) {
-      try {
-        // The invoice PDF is never auto-e-mailed here either, even when one
-        // was created (VIES-valid company) — only a ticket goes out
-        // automatically. Marie sends the real invoice manually from
-        // Opérations. Mirrors settleReservation's own split.
-        const serviceDescription = appointment.staffService.service?.name ?? "Prestation";
-        const salon = await prisma.salon.findUnique({
-          where: { id: "main-salon" },
-          select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
-        });
-        const { vatRate } = resolveServiceVatPolicy({ customer: appointment.user });
-        // "Le solde" is wrong when nothing had ever been paid before now.
-        const collectedLabel = collectsOnSite ? "Le paiement" : "Le solde";
-        const receipt = collectionTicketFields(result.collection, invoice, vatRate);
-        const ticketPdf = await renderTicketPdf({
-          ...receipt,
-          sellerName: salon?.legalName || "Meri Beauty",
-          sellerAddress: formatSalonAddress(salon),
-          sellerVatNumber: salon?.vatNumber ?? null,
-          lines: [{ description: serviceDescription, quantity: 1, unitPrice: receipt.totalInclVat }],
-        }).catch((err) => {
-          console.error("[completeAppointment] ticket PDF render failed:", err);
-          return null;
-        });
-
-        const holdsInvoiceForPeppol = Boolean(invoice) && isPeppolMandatoryCustomer(appointment.user);
-        const pendingInvoiceNote = !invoice
-          ? ""
-          : holdsInvoiceForPeppol
-          ? ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
-          : ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément par e-mail.`;
-
-        sendEmail({
-          to: appointment.user.email,
-          // "Solde" is wrong for a first payment — the on-site case collects
-          // the whole price, and there was never a balance. The body already
-          // says so (collectedLabel); the subject line said otherwise.
-          subject: collectsOnSite
-            ? "Votre ticket — paiement reçu – Meri Beauty"
-            : "Votre ticket — solde réglé – Meri Beauty",
-          text:
-            `Bonjour ${appointment.user.fullName},\n\n` +
-            `${collectedLabel} de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
-            `Votre ticket est joint à cet e-mail.${pendingInvoiceNote}\n\nL'équipe Meri Beauty`,
-          html:
-            `<p>Bonjour ${appointment.user.fullName},</p>` +
-            `<p>${collectedLabel} de €${balance.toFixed(2)} pour votre rendez-vous du ${appointment.date.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} a bien été encaissé. ` +
-            `Votre ticket est joint à cet e-mail.${pendingInvoiceNote ? ` ${pendingInvoiceNote.trim()}` : ""}</p><p>L'équipe Meri Beauty</p>`,
-          ...(ticketPdf ? { attachments: [{ filename: `${receipt.ticketNumber}.pdf`, content: ticketPdf }] } : {}),
-        }).catch((err) => console.error("[completeAppointment] ticket email failed:", err));
-
-        if (method === "CASH") revalidateCaisseRoutes();
-      } catch (postCommitError) {
-        // Everything above runs AFTER the transaction committed: the money is
-        // recorded, the invoice is issued, the booking is closed. A ticket is a
-        // courtesy on top of that, so nothing here may turn a settlement that
-        // succeeded into one reported as failed.
-        //
-        // collectionTicketFields is the specific hazard — it throws rather than
-        // returning null, and it sits outside renderTicketPdf's own .catch(). It
-        // cannot throw today, because every precondition it checks is guaranteed
-        // by the branch above. But a false failure here is not a cosmetic bug:
-        // createCounterWalkInService deletes the appointment it just created
-        // whenever this action reports failure, so a post-commit throw would ask
-        // it to unwind a collection that really happened.
-        console.error("[POST_COMMIT] settlement succeeded but the ticket step failed:", postCommitError);
-      }
-    }
+    // No client-facing document or e-mail is sent for this balance
+    // collection — only the legally-required Invoice, issued above inside
+    // the transaction (and never auto-sent — Marie sends it manually from
+    // Opérations). The cash-book UI still needs a refresh for a CASH
+    // collection.
+    if (balance > 0 && method === "CASH") revalidateCaisseRoutes();
 
     revalidatePath("/dashboard/operations");
     return {
@@ -1117,6 +1066,13 @@ export async function completeAppointment(
     }
     if (error.message === "BUYER_LEGAL_DATA_INCOMPLETE") {
       return { success: false, message: error.userMessage };
+    }
+    if (error.message === "APPOINTMENT_CASH_SESSION_CLOSED") {
+      return {
+        success: false,
+        message: "La session de caisse vient d'être clôturée. Ouvrez-la à nouveau avant d'encaisser.",
+        requiresCashSession: true,
+      };
     }
     console.error("[completeAppointment]", error);
     return { success: false, message: "Erreur lors de la finalisation du rendez-vous." };

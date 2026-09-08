@@ -89,6 +89,9 @@ export async function renderTicketPdf(ticket) {
     vatRate: Number(item.vatRate),
     vatAmount: Number(item.vatAmount),
     totalInclVat: Number(item.totalInclVat),
+    ...(Array.isArray(item.payments)
+      ? { payments: item.payments.map((p) => ({ ...p, amount: Number(p.amount) })) }
+      : {}),
   });
   return renderToBuffer(
     <TicketDocument

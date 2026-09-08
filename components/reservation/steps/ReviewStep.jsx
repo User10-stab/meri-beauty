@@ -65,7 +65,7 @@ function SingleServiceCard({ data, onEdit }) {
         <InfoRow icon={<User size={13} />} label={t("review.expert")}>
           <div className="flex items-center gap-2">
             <span className="relative h-8 w-8 overflow-hidden rounded-full ring-1 ring-[#ede5d8] flex-shrink-0">
-              {staffPhoto ? (<Image src={staffPhoto} alt={staffName} fill className="object-cover" />) : (<span className="flex h-full w-full items-center justify-center bg-[#2F3A2E] text-xs font-bold text-white">{staffName.charAt(0)}</span>)}
+              {staffPhoto ? (<Image src={staffPhoto} alt={staffName} fill unoptimized className="object-cover" />) : (<span className="flex h-full w-full items-center justify-center bg-[#2F3A2E] text-xs font-bold text-white">{staffName.charAt(0)}</span>)}
             </span>
             <span>{staffName}</span>
           </div>
@@ -89,7 +89,7 @@ function MultiServiceCard({ drafts, onEdit }) {
               <InfoRow icon={<Tag size={13} />} label={t("review.service")}>{draft.service?.name ?? "—"}</InfoRow>
               <InfoRow icon={<User size={13} />} label={t("review.expert")}>
                 <div className="flex items-center gap-2">
-                  <span className="relative h-7 w-7 overflow-hidden rounded-full ring-1 ring-[#ede5d8]"><Image src={draft.staff?.photo ?? ""} alt={draft.staff?.user?.fullName ?? ""} fill className="object-cover" />{!draft.staff?.photo && <span className="flex h-full w-full items-center justify-center bg-[#2F3A2E] text-[10px] font-bold text-white">{(draft.staff?.user?.fullName ?? "?").charAt(0)}</span>}</span>
+                  <span className="relative h-7 w-7 overflow-hidden rounded-full ring-1 ring-[#ede5d8]"><Image src={draft.staff?.photo ?? ""} alt={draft.staff?.user?.fullName ?? ""} fill unoptimized className="object-cover" />{!draft.staff?.photo && <span className="flex h-full w-full items-center justify-center bg-[#2F3A2E] text-[10px] font-bold text-white">{(draft.staff?.user?.fullName ?? "?").charAt(0)}</span>}</span>
                   <span className="text-sm">{draft.staff?.user?.fullName ?? "—"}</span>
                 </div>
               </InfoRow>

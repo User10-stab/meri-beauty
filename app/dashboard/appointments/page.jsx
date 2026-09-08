@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS } from "@/lib/authorization";
-import { getAllAppointments } from "@/actions/appointment/get-all-appointments";
+import { STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
+import { getAllAppointments, getStaffFilterOptions } from "@/actions/appointment/list-appointments";
 import { AppointmentsPageClient } from "@/components/dashboard/appointments/AppointmentsPageClient";
 import { getTranslations } from "next-intl/server";
 
@@ -25,10 +25,13 @@ function countByStatus(appointments, status) {
 
 export default async function AppointmentsPage() {
   // Auth guard — accessible to Admin, Owner and Staff
-  await requireDashboardPermission(STAFF_PERMISSIONS.APPOINTMENTS);
+  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.APPOINTMENTS);
 
   const t = await getTranslations();
-  const result = await getAllAppointments();
+  const [result, staffResult] = await Promise.all([
+    getAllAppointments(),
+    isAdminRole(user.role) ? getStaffFilterOptions() : Promise.resolve({ success: true, data: [] }),
+  ]);
   const appointments = result.data ?? [];
 
   const pendingCount = countByStatus(appointments, "PENDING");
@@ -84,7 +87,11 @@ export default async function AppointmentsPage() {
 
       {/* ── Table ───────────────────────────────────────────────────────── */}
       <Suspense fallback={<AppointmentsTableSkeleton />}>
-        <AppointmentsPageClient initialAppointments={appointments} />
+        <AppointmentsPageClient
+          initialAppointments={appointments}
+          staffOptions={staffResult.data ?? []}
+          showStaffFilter={isAdminRole(user.role)}
+        />
       </Suspense>
     </div>
   );

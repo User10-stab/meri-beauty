@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 
 // ─── Metadata is handled via a separate metadata export pattern.
 // Since this is a client component (for scroll/intersection animations),
@@ -576,76 +577,32 @@ function Reveal({ children, className = "", delay = 0, direction = "up" }) {
 // ── SECTION 1 · HERO ─────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
 function HeroSection() {
-  const imgRef = useParallax(0.22);
-
+  const t = useTranslations("concept.hero");
   return (
-    <section
-      className="relative h-[92vh] min-h-[600px] w-full overflow-hidden"
-      aria-label="Le concept MeriBeauty"
-    >
-      {/* Parallax background */}
-      <div ref={imgRef} className="absolute inset-0 will-change-transform" style={{ top: "-12%" }}>
-        <Image
-          src="/Images/heroImage.webp"
-          alt="Intérieur chaleureux du salon MeriBeauty"
-          fill
-          priority
-          className="object-cover object-center"
-          sizes="100vw"
-        />
-      </div>
-
-      {/* Gradient overlay — heavier at the bottom-left where text sits */}
-      <div className="absolute inset-0 bg-gradient-to-br from-primary/85 via-primary/55 to-primary/20" />
-      <div className="absolute inset-0 bg-gradient-to-t from-primary/70 via-transparent to-transparent" />
-
-      {/* Content */}
-      <div className="relative z-10 flex h-full flex-col items-start justify-end px-6 pb-16 sm:px-10 md:px-16 lg:px-24 lg:pb-24">
-        {/* Eyebrow label */}
-        <div className="mb-6 flex items-center gap-3">
-          <span className="h-px w-10 bg-gold/70" />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.28em] text-gold">
-            Le Concept
-          </span>
+    <section className="relative h-[700px] overflow-hidden bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url('/Images/heroImage.webp')` }}>
+      <div className="mx-auto grid h-full w-full items-center lg:grid-cols-2">
+        <div className="relative z-10 flex h-full w-full flex-col items-center bg-[#2F3A2E]/90 px-6 py-24">
+          <div className=" w-full max-w-2xl px-2 text-center sm:w-3/4 sm:px-0 lg:text-left">
+            <span className="mb-5 inline-block text-sm font-semibold uppercase tracking-[0.32em] text-[#C8A46A]">
+              {t("eyebrow")}
+            </span>
+            <h1 className="w-full text-[2.2rem] font-bold leading-tight text-[#F8F6F2] xs:text-[2.6rem] sm:text-5xl lg:text-[3.6rem] xl:text-[4rem]">
+              {t("titleLine1")}
+              <br />
+              <em className="font-light italic text-[#C8A46A]/90">{t("titleAccent")}</em>
+            </h1>
+            <div className="mx-auto mt-8 h-[3px] w-20 rounded-full bg-[#C8A46A] lg:mx-0" />
+            <p className="mx-auto mt-8 max-w-lg text-[15px] leading-7 text-gray-300 sm:text-[17px] sm:leading-9 lg:mx-0">
+              {t("description1")} {t("description2")}
+              <br />
+              <em className="text-gray-200/70">{t("welcome")}</em>
+            </p>
+            <Botanical className="h-45 w-40 rotate-[90deg] text-gold" />
+          </div>
         </div>
-
-        {/* Main headline — mirroring the mockup's two-line composition */}
-        <h1 className="max-w-2xl text-[3rem] font-bold leading-[1.08] tracking-tight text-cream sm:text-[3.8rem] lg:text-[5rem]">
-          Poussez la porte.
-          <br />
-          <em className="font-light italic text-cream/85">
-            Le reste est à&nbsp;découvrir.
-          </em>
-        </h1>
-
-        {/* Sub-copy */}
-        <p className="mt-7 max-w-md text-[15px] leading-[1.85] text-cream/65">
-          Un salon de beauté, une boutique, des rencontres,
-          <br className="hidden sm:block" />
-          des ateliers et quelques magie hors du quotidien.
-          <br />
-          <em className="text-cream/50">Bienvenue chez MeriBeauty.</em>
-        </p>
-
-        {/* CTA */}
-        <div className="mt-10">
-          <Link
-            href="/reservation"
-            className="group inline-flex items-center gap-3 border border-gold/50 px-8 py-3.5 text-[13px] font-semibold uppercase tracking-[0.16em] text-gold transition-all duration-300 hover:bg-gold hover:text-primary hover:border-gold"
-          >
-            Réserver une visite
-            <ArrowRight className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-1" />
-          </Link>
+        <div className="relative hidden h-full w-full bg-black/20 lg:block lg:col-span-1">
+          <div className="absolute inset-y-0 left-0 w-52 bg-gradient-to-r from-[#2F3A2E]/90 via-[#2F3A2E]/80 to-transparent" />
         </div>
-      </div>
-
-      {/* Subtle corner botanical — bottom right */}
-      <div
-        className="pointer-events-none absolute bottom-0 right-0 text-cream/[0.06]"
-        aria-hidden="true"
-        style={{ width: 220, height: 320 }}
-      >
-        <BotanicalBranch className="h-full w-full" />
       </div>
     </section>
   );
@@ -655,11 +612,12 @@ function HeroSection() {
 // ── SECTION 2 · CREAM — L'HISTOIRE ───────────────────────────
 // ─────────────────────────────────────────────────────────────
 function StorySection() {
+  const t = useTranslations("concept.story");
   const [textRef, textInView] = useInView();
   const [imgRef, imgInView] = useInView();
 
   return (
-  <section className="relative w-full overflow-hidden bg-[#fdf8f0] " aria-label="Notre histoire">
+  <section id="histoire" className="relative w-full overflow-hidden bg-[#fdf8f0] " aria-label={t("eyebrow")}>
       {/* Faint grid texture */}
       {/* <div
         aria-hidden="true"
@@ -715,7 +673,7 @@ function StorySection() {
             <div className="relative aspect-[3/4] w-full max-w-[480px] overflow-hidden">
               <Image
                 src="/Images/histoire.webp"
-                alt="Maria, fondatrice de MeriBeauty"
+                alt={t("imageAlt")}
                 fill
                 className="object-cover object-top"
                 sizes="(max-width: 1024px) 100vw, 50vw"
@@ -741,51 +699,40 @@ function StorySection() {
              {/* Eyebrow */}
         <div className="mb-4 flex items-center gap-3 lg:mb-3">
           {/* <span className="h-px w-8 bg-gold/50" /> */}
-          <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gold/90">
-            L'histoire
+             <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gold/90">
+            {t("eyebrow")}
           </span>
         </div>
-            <h2 className="mb-8 text-[2rem] font-semibold leading-[1.15] tracking-tight text-ink sm:text-[2.4rem] lg:text-[2.8rem]">
-              Tout a commencé par l'envie
-              de créer{" "}
+            <h2 className="mb-6 text-[1.7rem] font-semibold leading-[1.15] tracking-tight text-ink xs:text-[2rem] sm:mb-8 sm:text-[2.4rem] lg:text-[2.8rem]">
+              {t("title1")}
+              <br />
+              {t("title2a")}{" "}
               <span className="font-light text-gold/90 font-semibold">
-                un endroit qui
+                {t("title2b")}
                 <br />
-                n'existait pas encore.
+                {t("title2c")}
               </span>
             </h2>
 
-            {/* <GoldDivider className="mb-8 max-w-[200px]" /> */}
-
-            <div className="space-y-3 text-[15px] leading-[1.9] text-ink/65">
-              <p>
-                Pendant plusieurs années, mon univers a été fait de voyages, de salons, de boutiques, d'espaces de rencontres avec d'autres professionnels... Et petit à petit, l'envie d'aller plus loin a germé.
-              </p>
-              <p>
-                Je ne voulais pas simplement ouvrir un salon de beauté de plus.
-              </p>
-              <p>
-                J'avais envie de créer un endroit atypique. Où différentes professions métiers pourraient s'exprimer, où l'on se sent bien accueilli et grandir son propre univers.
-              </p>
-              <p>
-               Un endroit où l'on pourrait venir pour un rendez-vous, découvrir un produit dans la boutique, participer à un atelier, apprendre quelque chose de nouveau ou simplement s'arrêter un instant.
-              </p>
-              <p>
-                C'est de cette envie qu'est né Meribeauty Concept & Shop : réunir dans un même lieu tout ce que j'avais envie de vivre, de transmettre et de partager
-              </p>
+            <div className="space-y-3 text-[14px] leading-[1.9] text-ink/65 sm:text-[15px]">
+              <p>{t("p1")}</p>
+              <p>{t("p2")}</p>
+              <p>{t("p3")}</p>
+              <p>{t("p4")}</p>
+              <p>{t("p5")}</p>
             </div>
 
             {/* Signature */}
-            <div className="mt-10 flex justify-between items-center gap-4">
+            <div className="mt-8 flex justify-between gap-4 xs:flex-row sm:mt-10 items-center">
               <div>
                <p
                   style={{ fontFamily: "var(--font-betania-patmos)" }}
-                  className="text-[1.6rem] text-primary/60 italic"
+                  className="text-[1.5rem] text-primary/60 italic sm:text-[1.6rem]"
                 >
-                  Marie
+                  {t("signatureName")}
                 </p>
-                <p className="mt-1 text-[14px] font-semibold ">
-                  Fondatrice de MeriBeauty
+                <p className="mt-1 text-[13px] font-semibold sm:text-[14px]">
+                  {t("signatureRole")}
                 </p>
               </div>
               <div className="w-[150px] h-[150px] relative  ">
@@ -817,6 +764,7 @@ function StorySection() {
 // ── SECTION 3 · DARK GREEN — L'ÂME DU LIEU ──────────────────
 // ─────────────────────────────────────────────────────────────
 function AtmosphereSection() {
+  const t = useTranslations("concept.atmosphere");
   const [leftRef, leftInView] = useInView();
   const [rightRef, rightInView] = useInView();
 
@@ -861,63 +809,49 @@ function AtmosphereSection() {
           {/* ── Left: Editorial text ── */}
           <div
             ref={leftRef}
-            className={`flex flex-col w-2/5 justify-center transition-all duration-1000 ease-out ${
+            className={`flex w-full flex-col justify-center transition-all duration-1000 ease-out lg:w-2/5 ${
               leftInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
             }`}
           >
             {/* Eyebrow */}
-            <div className="mb-8 flex items-center gap-3">
-              <span className="text-[12px] font-bold uppercase tracking-[0.24em] text-gold/60">
-                L'Âme du lieu
+            <div className="mb-6 flex items-center gap-3 sm:mb-8">
+              <span className="text-[11px] font-bold uppercase tracking-[0.24em] text-gold/60 sm:text-[12px]">
+                {t("eyebrow")}
               </span>
             </div>
 
-            <h2 className="mb-8 text-[2rem] font-bold leading-[1.1] tracking-tight text-cream sm:text-[2.4rem] lg:text-[2.9rem]">
-              Il y a des endroits que l'on visite.
+            <h2 className="mb-6 text-[1.8rem] font-bold leading-[1.1] tracking-tight text-cream xs:text-[2rem] sm:mb-8 sm:text-[2.4rem] lg:text-[2.9rem]">
+              {t("title1")}
               <br />
               <em className="font-light no-italic ">
-                Et d'autres que l'on <span className="text-gold" >ressent.</span> 
+                {t("title2")} <span className="text-gold">{t("titleAccent")}</span> 
               </em>
             </h2>
 
-            <div className="space-y-3 text-[15px] leading-[1.9] text-cream/55">
-              <p>
-               La première fois que j'ai posé les pieds en Écosse, j'ai ressenti quelque chose de difficile à expliquer.
-              </p>
-              <p>
-              Les paysages immenses, les vieilles pierres, les chemins perdus dans la brume, les cottages éclairés à la bougie, à la lueur des flammes... Il y avait quelque chose de nostalgique et de réconfortant à la fois.
-              </p>
-              <p>
-                C'est cette atmosphère que j'ai eu envie de ramener avec moi
-              </p>
-              <p>
-                Meribeauty s'inspire de cette Écosse-là.
-              </p>
-              <p>
-                Pas seulement dans sa décoration, mais dans son atmosphère entière. Les textures, le bois brut, les objets anciens, la lumière douce, les petits détails que l'on découvre en regardant autour de soi.
-              </p>
-              <p>
-                Un lieu chaleureux, un peu mystérieux, vivant et imparfait.
-              </p>
+            <div className="space-y-3 text-[14px] leading-[1.9] text-cream/55 sm:text-[15px]">
+              <p>{t("p1")}</p>
+              <p>{t("p2")}</p>
+              <p>{t("p3")}</p>
+              <p>{t("p4")}</p>
+              <p>{t("p5")}</p>
+              <p>{t("p6")}</p>
             </div>
 
             {/* Italic pull-quote */}
             <blockquote
-              className="mt-10 border-l-2 border-gold/40 pl-6"
+              className="mt-8 border-l-2 border-gold/40 pl-5 sm:mt-10 sm:pl-6"
             >
               <p
-                className="text-[1.3rem] italic leading-[1.7] text-gold/50"
+                className="whitespace-pre-line text-[1.15rem] italic leading-[1.7] text-gold/50 sm:text-[1.3rem]"
                 style={{ fontFamily: "var(--font-betania-patmos)" }}
               >
-                Les petits moments d'ailleurs
-                <br />
-                naissent au cœur de Jette.
+                {t("quote")}
               </p>
             </blockquote>
           </div>
 
           {/* ── Right: Photo composition ── */}
-          <div className="w-3/5 flex gap-4 ">
+          <div className="flex w-full flex-col gap-3 sm:gap-4 lg:w-3/5 lg:flex-row lg:gap-4 ">
             <div className="flex flex-col gap-4">
                <Image
                   src="/Images/studio-1.webp"
@@ -975,100 +909,78 @@ function AtmosphereSection() {
 // ── SECTION 4 · CREAM — LES UNIVERS ──────────────────────────
 // ─────────────────────────────────────────────────────────────
 
-const UNIVERSES = [
-  {
-    key: "studio",
-    eyebrow: "Le Studio",
-    image: "/Images/salone.webp",
-    imageAlt: "Le studio beauté MeriBeauty",
-    aspect: "aspect-[3/4]",
-    heading: "Le Studio",
-    body:
-      "Plusieurs professionnelles, une seule adresse. Des soins pensés sur mesure dans un espace intime et rassurant — coiffure, épilation, soins visage et corps.",
-    cta: "Découvrir les prestations",
-    href: "/reservation",
-  },
-  {
-    key: "boutique",
-    eyebrow: "La Boutique",
-    image: "/Images/bloc1.png",
-    imageAlt: "Produits de la boutique MeriBeauty",
-    aspect: "aspect-[4/3]",
-    heading: "La Boutique",
-    body:
-      "Une sélection de produits soigneusement choisis — soins naturels, bougies, objets de beauté et petites douceurs pour prolonger le rituel chez soi.",
-    cta: "Découvrir la boutique",
-    href: "/boutique",
-  },
-  {
-    key: "formations",
-    eyebrow: "Les Formations",
-    image: "/Images/bloc2.png",
-    imageAlt: "Formation professionnelle MeriBeauty",
-    aspect: "aspect-[3/4]",
-    heading: "Les Formations",
-    body:
-      "Un espace pour apprendre, se perfectionner, se réinventer. Formations professionnelles et ateliers ouverts à toutes — pour les mains expertes comme pour les curieuses.",
-    cta: "Découvrir les formations",
-    href: "/formations",
-  },
-  {
-    key: "ateliers",
-    eyebrow: "Les Ateliers & Évènements",
-    image: "/Images/bloc3.png",
-    imageAlt: "Atelier créatif et rencontre MeriBeauty",
-    aspect: "aspect-[4/3]",
-    heading: "Les Ateliers\n& Évènements",
-    body:
-      "Des soirées et matinées pour se retrouver, partager, apprendre et créer. Des moments qui sortent de l'ordinaire, dans un cadre qui fait du bien.",
-    cta: "Découvrir les ateliers",
-    href: "/evenements",
-  },
-];
+const UNIVERSE_IMAGES = {
+  studio: { image: "/Images/LE STUDIO.webp", imageAltKey: "studio", href: "/reservation" },
+  boutique: { image: "/Images/LA BOUTIQUE.webp", imageAltKey: "boutique", href: "/boutique" },
+  formations: { image: "/Images/LES FORMATIONS.webp", imageAltKey: "formations", href: "/formations" },
+  ateliers: { image: "/Images/LES ATELIERS & EVENEMENTS.webp", imageAltKey: "ateliers", href: "/evenements" },
+};
+const UNIVERSE_KEYS = ["studio", "boutique", "formations", "ateliers"];
+
+/** Small wax-seal badge icon — matches reference white disc with delicate gold botanical */
+function UniverseBadgeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="h-[18px] w-[18px] text-[#b89664]" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
+      {/* tiny gift / botanical — thin line, premium */}
+      <path d="M12 15.5V8" strokeLinecap="round" />
+      <path d="M12 8 C11.1 6.2 9.4 5.3 8 6.2 C6.6 7.1 6.8 9.2 8.6 10.2 L12 12 L15.4 10.2 C17.2 9.2 17.4 7.1 16 6.2 C14.6 5.3 12.9 6.2 12 8Z" strokeLinejoin="round" />
+      <path d="M7.2 11.5 H16.8 C17.6 11.5 18.2 12.1 18.2 13 C18.2 14.8 17.3 17.2 12 17.2 C6.7 17.2 5.8 14.8 5.8 13 C5.8 12.1 6.4 11.5 7.2 11.5Z" strokeLinejoin="round" />
+      <path d="M9.5 14.2 C9.8 15 10.7 15.8 12 15.8 C13.3 15.8 14.2 15 14.5 14.2" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function UniverseCard({ item, index }) {
   const [ref, inView] = useInView();
-  const isEven = index % 2 === 0;
-
   return (
     <article
       ref={ref}
-      className={`transition-all duration-1000 ease-out ${
-        inView
-          ? "opacity-100 translate-y-0"
-          : "opacity-0 translate-y-10"
+      className={`flex h-full flex-col transition-all duration-700 ease-out ${
+        inView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
       }`}
-      style={{ transitionDelay: `${index * 120}ms` }}
+      style={{ transitionDelay: `${index * 100}ms` }}
     >
-      <div className="group">
-        {/* Image */}
-        <div className={`relative w-full overflow-hidden ${item.aspect}`}>
+      <div className="group relative mx-auto flex h-full w-full max-w-[255px] flex-col overflow-hidden rounded-[12px] border border-[#ece6d8] bg-white shadow-[0_2px_16px_rgba(47,58,46,0.06)]">
+        {/* Image — 255 × 255 */}
+        <div className="relative h-[255px] w-[255px] shrink-0 overflow-hidden bg-[#f3eee5] self-center">
           <Image
             src={item.image}
             alt={item.imageAlt}
             fill
-            className="object-cover transition-transform duration-[6s] ease-out group-hover:scale-[1.04]"
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+            className="object-cover object-center transition-transform duration-[700ms] ease-out group-hover:scale-[1.03]"
+            sizes="255px"
           />
-          {/* Subtle warm tint */}
-          <div className="absolute inset-0 bg-gradient-to-t from-ink/30 via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-60" />
+          <div className="absolute inset-0 ring-1 ring-inset ring-black/5" />
         </div>
 
-        {/* Text block */}
-        <div className="pt-5">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-gold/70">
-            {item.eyebrow}
+        {/* Overlapping badge — anchored to image bottom, centered */}
+        <div className="pointer-events-none absolute left-0 right-0 top-0 flex justify-center">
+          <div className="relative h-[255px] w-[255px]">
+            <div className="absolute bottom-0 left-1/2 flex h-10 w-10 -translate-x-1/2 translate-y-1/2 items-center justify-center rounded-full border border-[#ece6d8] bg-white shadow-[0_4px_14px_rgba(47,58,46,0.12)]">
+              <UniverseBadgeIcon />
+            </div>
+          </div>
+        </div>
+
+        {/* Text */}
+        <div className="flex flex-1 flex-col px-6 pb-8 pt-12">
+          <p className="mb-2  text-[12px] font-semibold uppercase tracking-[0.18em] text-[#2f3a2e]">
+            {item.eyebrow.split("\n").map((l, i) => (
+              <span key={i} className={i > 0 ? "block" : ""}>{l}</span>
+            ))}
           </p>
-          <h3 className="mb-3 whitespace-pre-line text-[1.25rem] font-bold leading-[1.2] text-ink">
-            {item.heading}
-          </h3>
-          <p className="text-[14px] leading-[1.8] text-ink/60">{item.body}</p>
+          {/* keep heading hidden per reference — eyebrow is the card title; preserving for a11y/SEO but visually merged */}
+          <h3 className="sr-only">{item.heading.replace("\n", " ")}</h3>
+          <p className="min-h-[66px] text-[14px] font-normal leading-[1.7] text-[#6b6f64]">
+            {item.body}
+          </p>
           <Link
             href={item.href}
-            className="group/link mt-5 inline-flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.16em] text-gold transition-all duration-200 hover:gap-3"
+            className="group/link mt-5 inline-flex items-center gap-1.5 text-[12px] font-medium tracking-[0.02em] text-[#3e4a3b] underline decoration-[#d8cfba] underline-offset-[4px] transition-colors hover:text-ink hover:decoration-gold"
           >
             {item.cta}
-            <ArrowRight className="h-3 w-3 transition-transform duration-200 group-hover/link:translate-x-0.5" />
+            <span aria-hidden="true" className="transition-transform duration-200 group-hover/link:translate-x-0.5">→</span>
           </Link>
         </div>
       </div>
@@ -1077,46 +989,69 @@ function UniverseCard({ item, index }) {
 }
 
 function UniversesSection() {
+  const t = useTranslations("concept.universes");
   const [headRef, headInView] = useInView();
-
+  const universes = UNIVERSE_KEYS.map((key, idx) => ({
+    key,
+    ...UNIVERSE_IMAGES[key],
+    eyebrow: t(`items.${idx}.eyebrow`),
+    body: t(`items.${idx}.body`),
+    cta: t(`items.${idx}.cta`),
+    imageAlt: t(`imageAlts.${key}`),
+    heading: t(`items.${idx}.eyebrow`),
+  }));
   return (
-    <section className="relative w-full overflow-hidden bg-cream" aria-label="Les univers MeriBeauty">
-      {/* Top botanical */}
+    <section className="relative w-full overflow-hidden bg-[#fdf8f0] py-16" aria-label={t("eyebrow")}>
+      {/* Subtle warm texture */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute right-8 top-8 text-gold/[0.07]"
-        style={{ width: 120, height: 180 }}
-      >
-        <BotanicalBranch className="h-full w-full" />
-      </div>
+        className="pointer-events-none absolute inset-0 opacity-[0.55]"
+        style={{
+          backgroundImage: "radial-gradient(ellipse at 30% 20%, rgba(184,150,100,0.07) 0%, transparent 60%), radial-gradient(ellipse at 80% 90%, rgba(184,150,100,0.05) 0%, transparent 55%)",
+        }}
+      />
 
-      <div className="mx-auto max-w-[1400px] px-6 py-20 sm:px-10 lg:px-16 lg:py-28 xl:px-24">
+      <div className="relative mx-auto max-w-[1530px] px-6 py-16 sm:px-8 lg:px-10 lg:py-20 xl:px-12 xl:py-24">
+        {/* Desktop: intro left (280-320) + 4 cards | Tablet/Mobile: stacked */}
+        <div className="flex flex-col gap-10 lg:flex-row lg:items-start lg:gap-8 xl:gap-10">
+          {/* Intro */}
+          <div
+            ref={headRef}
+            className={`relative flex w-full shrink-0 flex-col lg:w-[270px] xl:w-[300px] transition-all duration-700 ease-out ${
+              headInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+            }`}
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#b89664]">{t("eyebrow")}</p>
+            <h2 className="mt-4 font-display text-[1.9rem] font-normal leading-[1.08] tracking-[-0.02em] text-ink xs:text-[2.05rem] sm:text-[2.35rem] lg:text-[2.55rem]">
+              <span className="block font-semibold tracking-tight text-[#1f2a1e]">{t("title1")}</span>
+              <span className="block font-light italic text-[#b89664]">{t("title2")}</span>
+            </h2>
 
-        {/* Section header */}
-        <div
-          ref={headRef}
-          className={`mb-16 transition-all duration-900 ease-out lg:mb-20 ${
-            headInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"
-          }`}
-        >
-          <div className="mb-5 flex items-center gap-3">
-            <span className="h-px w-8 bg-gold/50" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-gold/70">
-              MeriBeauty Studio &amp; Shop
-            </span>
+            {/* Botanical decoration — integrated, bottom-left of intro, premium scale */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none mt-6 hidden select-none text-[#c8b9a0] lg:block"
+            >
+              <div className="relative h-[380px] w-[160px] -ml-2 overflow-visible  rotate-[-18deg]">
+                {/* Use the existing detailed Botanical Illustration scaled to reference: pale, thin, organic */}
+                <Botanical className=" w-full h-full" />
+               
+                {/* soft wash to integrate */}
+                <div className="absolute inset-0 bg-gradient-to-t from-[#fdf8f0] via-transparent to-transparent" />
+              </div>
+            </div>
+            {/* Mobile: much smaller sprig below heading */}
+            <div aria-hidden="true" className="pointer-events-none mt-4 flex justify-start text-[#d6cbb6] opacity-60 lg:hidden">
+              <BotanicalBranch className="h-20 w-14 rotate-[18deg]" />
+            </div>
           </div>
-          <h2 className="max-w-xl text-[2rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[2.5rem] lg:text-[3rem]">
-            Plusieurs univers,
-            <br />
-            <em className="font-light italic text-primary/60">une seule adresse.</em>
-          </h2>
-        </div>
 
-        {/* 4-column asymmetric editorial grid */}
-        <div className="grid grid-cols-1 gap-x-8 gap-y-14 sm:grid-cols-2 lg:grid-cols-4 lg:gap-y-0 lg:items-start">
-          {UNIVERSES.map((item, i) => (
-            <UniverseCard key={item.key} item={item} index={i} />
-          ))}
+          {/* Cards — responsive: 1 col xs, 2 cols sm, 4 cols lg, gap scales */}
+          <div className="grid flex-1 grid-cols-1 gap-6 xs:gap-5 sm:grid-cols-2 sm:gap-5 lg:grid-cols-4 lg:gap-5 xl:gap-6 justify-items-center sm:justify-items-stretch">
+            {universes.map((item, i) => (
+              <UniverseCard key={item.key} item={item} index={i} />
+            ))}
+          </div>
         </div>
       </div>
     </section>
@@ -1127,108 +1062,81 @@ function UniversesSection() {
 // ── SECTION 5 · HUMAN / WARMTH ───────────────────────────────
 // ─────────────────────────────────────────────────────────────
 function HumanSection() {
-  const [headRef, headInView] = useInView();
-  const [gridRef, gridInView] = useInView();
+  const t = useTranslations("concept.human");
+  const [contentRef, contentInView] = useInView();
 
   return (
     <section
-      className="relative w-full overflow-hidden bg-primary"
-      aria-label="Les visages de MeriBeauty"
+      className="relative w-full overflow-hidden bg-[#fdf8f0] "
+      aria-label={t("eyebrow")}
     >
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 opacity-[0.025]"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(0deg,#b89664 0px,#b89664 1px,transparent 1px,transparent 72px)",
-        }}
-      />
-
-      <div className="mx-auto max-w-[1400px] px-6 py-20 sm:px-10 lg:px-16 lg:py-28 xl:px-24">
-
-        {/* Header */}
-        <div
-          ref={headRef}
-          className={`mb-14 max-w-2xl transition-all duration-1000 ease-out ${
-            headInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          }`}
-        >
-          <div className="mb-6 flex items-center gap-3">
-            <span className="h-px w-8 bg-gold/40" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.24em] text-gold/60">
-              Les usages de MeriBeauty
-            </span>
+      {/* Split composition: image left, cream content right */}
+      <div className="flex min-h-[480px] flex-col sm:min-h-[560px] lg:min-h-[640px] lg:flex-row">
+        {/* Image — immersive, edge-to-edge, responsive */}
+        <div className="relative w-full shrink-0 overflow-hidden bg-[#2f3a2e] lg:w-[50%] xl:w-[48%]">
+          <div className="relative aspect-[4/3] w-full sm:aspect-[16/10] lg:aspect-auto lg:h-full lg:min-h-[640px]">
+            <Image
+              src="/Images/hero.png"
+              alt={t("imageAlt")}
+              fill
+              className="object-cover object-center"
+              sizes="(max-width: 1024px) 100vw, 50vw"
+              priority={false}
+            />
+            {/* Soft warm cinematic veil — dark, légèrement doré comme référence */}
+            <div className="absolute inset-0 bg-gradient-to-t from-black/15 via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-[#2f3a2e]/10 mix-blend-multiply" />
           </div>
-          <h2 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-cream sm:text-[2.5rem] lg:text-[2.9rem]">
-            Des univers différents,
-            <br />
-            <em className="font-light italic text-gold/70">
-              réunis sous un même&nbsp;toit.
-            </em>
-          </h2>
-          <p className="mt-6 max-w-lg text-[15px] leading-[1.9] text-cream/55">
-            MeriBeauty, c'est un endroit où la beauté se vit autrement. Un espace de beauté,
-            une boutique, des formations et des ateliers réunis. Chacune avec sa propre identité,
-            ses propres rituels, sa propre façon de prendre soin. Mais toutes connectées par
-            quelque chose d'essentiel — la présence, l'attention et le soin du détail.
-          </p>
-          <p className="mt-4 text-[15px] leading-[1.9] text-cream/40">
-            Pour que chaque visite soit différente, chaque moment soit personnalisé sur ce lieu 
-            et que l'on reparte un peu mieux qu'on était venu.
-          </p>
         </div>
 
-        {/* Immersive photo composition — wide panoramic strip */}
-        <div
-          ref={gridRef}
-          className={`transition-all duration-1000 ease-out delay-200 ${
-            gridInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
-          }`}
-        >
-          <div className="grid grid-cols-12 gap-3 sm:gap-4">
-
-            {/* Wide left image */}
-            <div className="relative col-span-12 aspect-[16/7] overflow-hidden sm:col-span-7 sm:aspect-[4/3]">
-              <Image
-                src="/Images/DemandLocation.webp"
-                alt="Ambiance chaleureuse du salon MeriBeauty"
-                fill
-                className="object-cover object-center transition-transform duration-[8s] hover:scale-[1.03]"
-                sizes="(max-width: 640px) 100vw, 58vw"
-              />
-              <div className="absolute inset-0 bg-gradient-to-r from-primary/20 via-transparent to-transparent" />
+        {/* Content — warm cream, editorial whitespace */}
+        <div className="relative flex w-full flex-1 items-center bg-[#fdf8f0] lg:w-[50%] xl:w-[52%]">
+          {/* Decorative botanical — right side, thin elegant, consistent with other sections */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute right-0 top-1/2 hidden -translate-y-1/2 lg:block"
+            style={{ width: 140, height: 380 }}
+          >
+            <div className="relative h-full w-full overflow-visible">
+              <LeftBotanical className="absolute right-[-8px] top-1/2 h-[360px] w-[120px] -translate-y-1/2 text-[#d6cbb6] " />
             </div>
-
-            {/* Right: two stacked images */}
-            <div className="col-span-12 grid grid-rows-2 gap-3 sm:col-span-5 sm:gap-4">
-              <div className="relative aspect-[16/9] overflow-hidden sm:aspect-auto sm:h-full">
-                <Image
-                  src="/Images/aboutUs.webp"
-                  alt="Soins et rituels beauté"
-                  fill
-                  className="object-cover transition-transform duration-[8s] hover:scale-[1.03]"
-                  sizes="(max-width: 640px) 100vw, 42vw"
-                />
-                <div className="absolute inset-0 bg-primary/15" />
-              </div>
-              <div className="relative aspect-[16/9] overflow-hidden sm:aspect-auto sm:h-full">
-                <Image
-                  src="/Images/expert.jpg"
-                  alt="Equipe MeriBeauty"
-                  fill
-                  className="object-cover object-top transition-transform duration-[8s] hover:scale-[1.03]"
-                  sizes="(max-width: 640px) 100vw, 42vw"
-                />
-                <div className="absolute inset-0 bg-primary/20" />
-              </div>
-            </div>
-
+          </div>
+          {/* Mobile botanical — small, behind content */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute bottom-2 right-2 opacity-[0.22] lg:hidden"
+            style={{ width: 90, height: 160 }}
+          >
+            <BotanicalBranch className="h-full w-full -rotate-12 text-[#d6cbb6]" />
           </div>
 
-          {/* Caption */}
-          <p className="mt-5 text-center text-[11px] font-medium uppercase tracking-[0.2em] text-gold/35">
-            Rencontres l'équipe →
-          </p>
+          <div
+            ref={contentRef}
+            className={`relative mx-auto w-full max-w-[700px] px-6 py-12 sm:px-10 sm:py-14 lg:px-12 lg:py-10 xl:px-16 xl:py-12 2xl:px-2 transition-all duration-700 ease-out ${
+              contentInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
+            }`}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#b89664] sm:text-[11px]">{t("eyebrow")}</p>
+
+            <h2 className="mt-3 font-display text-[1.7rem] font-normal leading-[1.12] tracking-[-0.02em] text-[#1f2a1e] xs:text-[1.9rem] sm:mt-4 sm:text-[2.2rem] lg:text-[2.8rem]">
+              <span className="block font-medium">{t("title1")}</span>
+              <span className="block font-light italic text-[#b89664]">{t("title2")}</span>
+            </h2>
+
+            <div className="mt-5 space-y-3 text-[14px] leading-[1.8] text-[#5c635c] sm:mt-6 sm:space-y-4 sm:text-[15px] sm:leading-[1.85]">
+              <p>{t("p1")}</p>
+              <p>{t("p2")}</p>
+              <p>{t("p3")}</p>
+            </div>
+
+            <Link
+              href="/animateurs"
+              className="group mt-6 inline-flex items-center gap-1.5 text-[13px] font-medium tracking-[0.03em] text-[#b89664] underline decoration-[#e9ddd0] underline-offset-[5px] transition-all hover:text-[#9a8054] hover:decoration-[#b89664] sm:mt-8 sm:text-[15px]"
+            >
+              {t("cta")}
+              <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-0.5">→</span>
+            </Link>
+          </div>
         </div>
       </div>
     </section>
@@ -1239,29 +1147,29 @@ function HumanSection() {
 // ── SECTION 6 · FINAL CTA ─────────────────────────────────────
 // ─────────────────────────────────────────────────────────────
 function FinalCtaSection() {
+  const t = useTranslations("concept.finalCta");
   const imgRef = useParallax(0.18);
   const [contentRef, contentInView] = useInView();
 
   return (
     <section
-      className="relative w-full overflow-hidden"
-      style={{ minHeight: "85vh" }}
+      className="relative min-h-[620px] overflow-hidden bg-cover bg-center bg-no-repeat sm:min-h-[700px] lg:h-[75vh] z-0" style={{ backgroundImage: `url('/Images/FINAL CTA.webp')` }}
       aria-label="Prêt à pousser la porte"
     >
       {/* Parallax background */}
-      <div ref={imgRef} className="absolute inset-0 will-change-transform" style={{ top: "-10%" }}>
-        <Image
-          src="/Images/heroImage.webp"
+      <div className="absolute inset-0 will-change-transform bg-black/60 z-1" >
+        {/* <Image
+          src="/Images/FINAL CTA.webp"
           alt="Invitation à entrer chez MeriBeauty"
           fill
           className="object-cover object-center"
           sizes="100vw"
-        />
+        /> */}
       </div>
 
       {/* Dark overlay — heavier than hero for legibility */}
-      <div className="absolute inset-0 bg-primary/80" />
-      <div className="absolute inset-0 bg-gradient-to-t from-primary/70 via-primary/50 to-transparent" />
+      {/* <div className="absolute inset-0 bg-primary/80" />
+      <div className="absolute inset-0 " /> */}
 
       {/* Subtle botanical corners */}
       <div
@@ -1286,51 +1194,40 @@ function FinalCtaSection() {
           contentInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
         }`}
       >
-        {/* Eyebrow */}
-        <div className="mb-8 flex items-center gap-3">
-          <span className="h-px w-8 bg-gold/50" />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.28em] text-gold/80">
-            Vous êtes les bienvenu·e·s
-          </span>
-          <span className="h-px w-8 bg-gold/50" />
-        </div>
-
         {/* Headline */}
-        <h2 className="mb-6 max-w-2xl text-[2.4rem] font-bold leading-[1.08] tracking-tight text-cream sm:text-[3rem] lg:text-[3.8rem]">
-          À vous l'envie
+        <h2 className="mb-5 max-w-2xl text-[2rem] font-bold leading-[1.08] tracking-tight text-cream xs:text-[2.4rem] sm:mb-6 sm:text-[3rem] lg:text-[4rem]">
+          {t("title1")}
           <br />
-          <em className="font-light italic text-cream/75">
-            de pousser la porte.
+          <em className="font-light italic text-gold">
+            {t("title2")}
           </em>
         </h2>
 
         {/* Sub-copy */}
-        <p className="mx-auto mb-3 max-w-lg text-[15px] leading-[1.85] text-cream/55">
-          Pour un soin, une découverte, une rencontre ou simplement
+        <p className="mx-auto mb-2 max-w-lg px-2 text-[15px] leading-[1.85] text-white sm:mb-3 sm:px-0 sm:text-[17px]">
+          {t("description1")}
           <br className="hidden sm:block" />
-          un moment — il y a toujours quelque chose qui vous attend ici.
+          {t("description2")}
         </p>
-        <p className="mb-2 font-display text-[1rem] italic text-cream/35" style={{ fontFamily: "Georgia, serif" }}>
-          «&nbsp;…un moment pour soi, qui fait du bien.&nbsp;»
-        </p>
+        <p className="mb-2 font-display text-[14px] italic text-cream/70 sm:text-[15px]">« {t("quote")} »</p>
 
-        <GoldDivider className="my-8 w-32 mx-auto" />
+        <GoldDivider className="my-6 w-32 mx-auto sm:my-8" />
 
-        {/* CTA buttons */}
-        <div className="flex flex-wrap items-center justify-center gap-4">
+        {/* CTA buttons — stack on xs */}
+        <div className="flex w-full max-w-md flex-col items-stretch justify-center gap-3 px-4 sm:w-auto sm:max-w-none sm:flex-row sm:flex-wrap sm:items-center sm:px-0 sm:gap-4">
           <Link
             href="/reservation"
-            className="group inline-flex items-center gap-3 bg-gold px-8 py-4 text-[13px] font-semibold uppercase tracking-[0.16em] text-primary shadow-lg shadow-gold/20 transition-all duration-300 hover:bg-gold/90 hover:shadow-xl hover:shadow-gold/30"
+            className="group inline-flex items-center justify-center gap-3 bg-gold px-6 py-3.5 text-[12px] font-semibold uppercase tracking-[0.16em] text-primary shadow-lg shadow-gold/20 transition-all duration-300 hover:bg-gold/90 hover:shadow-xl hover:shadow-gold/30 sm:px-8 sm:py-4 sm:text-[13px]"
           >
-            Réserver un rendez-vous
+            {t("ctaBooking")}
             <ArrowRight className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-1" />
           </Link>
 
           <Link
             href="/boutique"
-            className="group inline-flex items-center gap-3 border border-cream/30 px-8 py-4 text-[13px] font-semibold uppercase tracking-[0.16em] text-cream/80 transition-all duration-300 hover:border-gold/50 hover:text-gold"
+            className="group inline-flex items-center justify-center gap-3 border border-cream/30 px-6 py-3.5 text-[12px] font-semibold uppercase tracking-[0.16em] text-cream/80 transition-all duration-300 hover:border-gold/50 hover:text-gold sm:px-8 sm:py-4 sm:text-[13px]"
           >
-            Voir la boutique
+            {t("ctaShop")}
             <ArrowRight className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-1" />
           </Link>
         </div>

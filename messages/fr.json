@@ -313,6 +313,101 @@
     "saturday": "Samedi",
     "sunday": "Dimanche"
   },
+  "concept": {
+    "hero": {
+      "eyebrow": "Le Concept",
+      "titleLine1": "Poussez la porte.",
+      "titleAccent": "Le reste est à découvrir.",
+      "description1": "Un salon de beauté, une boutique, des rencontres,",
+      "description2": "des ateliers et quelques magie hors du quotidien.",
+      "welcome": "Bienvenue chez MeriBeauty.",
+      "cta": "Réserver une visite",
+      "imageAlt": "Intérieur chaleureux du salon MeriBeauty"
+    },
+    "story": {
+      "eyebrow": "L'histoire",
+      "title1": "Tout a commencé par l'envie",
+      "title2a": "de créer",
+      "title2b": "un endroit qui",
+      "title2c": "n'existait pas encore.",
+      "p1": "Pendant plusieurs années, mon univers a été fait de voyages, de salons, de boutiques, d'espaces de rencontres avec d'autres professionnels... Et petit à petit, l'envie d'aller plus loin a germé.",
+      "p2": "Je ne voulais pas simplement ouvrir un salon de beauté de plus.",
+      "p3": "J'avais envie de créer un endroit atypique. Où différentes professions métiers pourraient s'exprimer, où l'on se sent bien accueilli et grandir son propre univers.",
+      "p4": "Un endroit où l'on pourrait venir pour un rendez-vous, découvrir un produit dans la boutique, participer à un atelier, apprendre quelque chose de nouveau ou simplement s'arrêter un instant.",
+      "p5": "C'est de cette envie qu'est né Meribeauty Concept & Shop : réunir dans un même lieu tout ce que j'avais envie de vivre, de transmettre et de partager",
+      "signatureName": "Marie",
+      "signatureRole": "Fondatrice de MeriBeauty",
+      "imageAlt": "Maria, fondatrice de MeriBeauty"
+    },
+    "atmosphere": {
+      "eyebrow": "L'Âme du lieu",
+      "title1": "Il y a des endroits que l'on visite.",
+      "title2": "Et d'autres que l'on",
+      "titleAccent": "ressent.",
+      "p1": "La première fois que j'ai posé les pieds en Écosse, j'ai ressenti quelque chose de difficile à expliquer.",
+      "p2": "Les paysages immenses, les vieilles pierres, les chemins perdus dans la brume, les cottages éclairés à la bougie, à la lueur des flammes... Il y avait quelque chose de nostalgique et de réconfortant à la fois.",
+      "p3": "C'est cette atmosphère que j'ai eu envie de ramener avec moi",
+      "p4": "Meribeauty s'inspire de cette Écosse-là.",
+      "p5": "Pas seulement dans sa décoration, mais dans son atmosphère entière. Les textures, le bois brut, les objets anciens, la lumière douce, les petits détails que l'on découvre en regardant autour de soi.",
+      "p6": "Un lieu chaleureux, un peu mystérieux, vivant et imparfait.",
+      "quote": "Les petits moments d'ailleurs\nnaissent au cœur de Jette.",
+      "imageAlt1": "Intérieur chaleureux, lumière tamisée",
+      "imageAlt2": "Intérieur chaleureux, lumière tamisée"
+    },
+    "universes": {
+      "eyebrow": "MeriBeauty Studio & Shop",
+      "title1": "Plusieurs univers,",
+      "title2": "une seule adresse.",
+      "items": [
+        {
+          "eyebrow": "Le Studio",
+          "body": "Plusieurs professionnelles indépendantes réunies dans un même lieu, chacune avec sa spécialité et son univers.",
+          "cta": "Découvrir les prestations"
+        },
+        {
+          "eyebrow": "La Boutique",
+          "body": "Une sélection de produits professionnels, nos propres créations et de belles découvertes choisies avec soin.",
+          "cta": "Découvrir la boutique"
+        },
+        {
+          "eyebrow": "Les Formations",
+          "body": "Un espace pour transmettre, apprendre et se perfectionner autour de l'univers de la beauté et de l'onglerie.",
+          "cta": "Découvrir les formations"
+        },
+        {
+          "eyebrow": "Les Ateliers & Évènements",
+          "body": "Des rendez-vous tout au long de l'année pour créer, apprendre, découvrir, rencontrer et partager autrement.",
+          "cta": "Voir les prochains évènements"
+        }
+      ],
+      "imageAlts": {
+        "studio": "Le studio beauté MeriBeauty",
+        "boutique": "Produits de la boutique MeriBeauty",
+        "formations": "Formation professionnelle MeriBeauty",
+        "ateliers": "Atelier créatif et rencontre MeriBeauty"
+      }
+    },
+    "human": {
+      "eyebrow": "Les visages de MeriBeauty",
+      "title1": "Des univers différents,",
+      "title2": "réunis sous un même toit.",
+      "p1": "MeriBeauty, c'est aussi la rencontre de plusieurs professionnelles indépendantes. Chacune exerce sa spécialité, développe son propre univers et conserve sa manière de travailler.",
+      "p2": "Parce que nous ne cherchons pas à toutes nous ressembler : ce sont justement nos différences, notre savoir-faire et nos personnalités qui font vivre le lieu.",
+      "p3": "Vous choisissez la professionnelle qui vous correspond, et elle prend soin de vous à sa façon.",
+      "cta": "Rencontrer l'équipe",
+      "imageAlt": "L'équipe MeriBeauty — moments de partage et de complicité"
+    },
+    "finalCta": {
+      "eyebrow": "Vous êtes les bienvenu·e·s",
+      "title1": "À vous l'envie",
+      "title2": "de pousser la porte.",
+      "description1": "Pour un soin, une découverte, une rencontre ou simplement",
+      "description2": "un moment — il y a toujours quelque chose qui vous attend ici.",
+      "quote": "…un moment pour soi, qui fait du bien.",
+      "ctaBooking": "Réserver un rendez-vous",
+      "ctaShop": "Voir la boutique"
+    }
+  },
   "auth": {
     "signIn": "Connexion",
     "signInSubtitle": "Connectez-vous pour gérer votre espace beauté",

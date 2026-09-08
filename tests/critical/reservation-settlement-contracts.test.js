@@ -69,7 +69,16 @@ describe("reservation settlement — collecting the on-site balance", () => {
   test("attaches a cash balance to the open till session so it reconciles at close", () => {
     expect(lib).toContain('method === "CASH"');
     expect(lib).toContain("cashSession.findFirst({ where: { closedAt: null }");
-    expect(lib).toContain("cashSessionId: openCashSession?.id ?? null");
+    expect(lib).toContain('cashSessionId: method === "CASH" ? openCashSession.id : null');
+  });
+
+  // See tests/critical/till-settlement-contracts.test.js for the full
+  // "no till open" gate contract shared with completeAppointment and
+  // completeOrderPickup.
+  test("refuses a cash balance when no till session is open", () => {
+    expect(lib).toContain("requiresCashSession: true");
+    expect(lib).toContain('throw new Error("RESERVATION_CASH_SESSION_CLOSED")');
+    expect(lib).toContain('if (error.message === "RESERVATION_CASH_SESSION_CLOSED")');
   });
 
   test("issues the final invoice for the FULL amount, not just the collected balance", () => {

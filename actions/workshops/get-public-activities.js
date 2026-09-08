@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
+import { liveSeatFilter } from "@/lib/reservations/session-occupancy";
 
 export async function getPublicActivities() {
   try {
@@ -15,18 +16,7 @@ export async function getPublicActivities() {
           where: { status: "SCHEDULED" },
           include: {
             reservations: {
-              where: {
-                OR: [
-                  { status: { in: ["CONFIRMED", "COMPLETED"] } },
-                  {
-                    status: "PENDING_DEPOSIT",
-                    OR: [
-                      { holdExpiresAt: null },
-                      { holdExpiresAt: { gt: new Date() } }
-                    ]
-                  }
-                ]
-              },
+              where: liveSeatFilter(),
               select: {
                 seatsCount: true
               }
@@ -55,18 +45,7 @@ export async function getPublicActivityById(id) {
           where: { status: "SCHEDULED" },
           include: {
             reservations: {
-              where: {
-                OR: [
-                  { status: { in: ["CONFIRMED", "COMPLETED"] } },
-                  {
-                    status: "PENDING_DEPOSIT",
-                    OR: [
-                      { holdExpiresAt: null },
-                      { holdExpiresAt: { gt: new Date() } }
-                    ]
-                  }
-                ]
-              },
+              where: liveSeatFilter(),
               select: {
                 seatsCount: true
               }

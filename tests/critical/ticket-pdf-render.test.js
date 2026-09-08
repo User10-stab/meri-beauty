@@ -20,6 +20,17 @@ it("renders a multi-collection PDF and a standalone boutique ticket", async () =
     lines: [{ description: "Acompte formation", quantity: 1, unitPrice: 60.5 }],
   };
   for (const input of [
+    // A consolidated reservation ticket: full prestation total + an acompte/solde breakdown.
+    {
+      ...ticket, ticketNumber: "T-payment-1",
+      subtotalExclVat: 100, vatAmount: 21, totalInclVat: 121,
+      lines: [{ description: "Atelier — savon", quantity: 1, unitPrice: 121 }],
+      payments: [
+        { label: "Acompte", issuedAt: new Date("2026-09-01"), amount: 60.5, pieceNumber: null },
+        { label: "Solde", issuedAt: new Date("2026-09-05"), amount: 60.5, pieceNumber: "R0008" },
+      ],
+    },
+    // TicketDocument still tolerates an array (one page per element).
     [ticket, { ...ticket, ticketNumber: "T-balance" }],
     { ...ticket, ticketNumber: undefined, orderNumber: 123 },
     // CARD/ONLINE never gets a piece number — the conditional render must
@@ -40,5 +51,14 @@ describe("N° pièce only prints when the collection actually had one", () => {
 
   it("is conditional on ticket.pieceNumber — a CARD/ONLINE ticket must not print a blank line", () => {
     expect(template).toContain("{ticket.pieceNumber ? <Text style={styles.meta}>N° pièce {ticket.pieceNumber}</Text> : null}");
+  });
+});
+
+describe("the acompte/solde breakdown only prints for a multi-leg payment", () => {
+  const template = source("lib/pdf/TicketDocument.jsx");
+
+  it("is gated on payments.length > 1 — a one-shot payment keeps the old layout", () => {
+    expect(template).toContain("payments.length > 1 ? (");
+    expect(template).toContain("{p.label} du {formatDate(p.issuedAt)}");
   });
 });

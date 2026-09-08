@@ -81,17 +81,23 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     // short-circuit — the else branch always produces a renderable ticket.
     expect(route).toContain("resolveServiceVatPolicy({ customer })");
     expect(route).toContain("paidAmount: true");
-    expect(route).toContain("collectionTicketFields(transaction, payment.invoice, ticketFields.vatRate)");
+    expect(route).toContain("consolidatedTicketFields(id, payment.transactions, payment.invoice, ticketFields.vatRate)");
+    expect(route).toContain("collectionTicketFields(txn, payment.invoice, ticketFields.vatRate)");
     expect(route).not.toContain("calculateVatTotals(payment.totalAmount, vatRate)");
     expect(route).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
   });
 
-  test("uses the Invoice's seller and VAT policy, but the collection's identity and amount", () => {
+  test("uses the Invoice's seller and VAT policy, but the payment's own identity and amount", () => {
     expect(route).toContain("if (payment.invoice) {");
     expect(route).toContain("sellerName: inv.sellerName");
     expect(route).toContain("vatRate: inv.vatRate");
-    expect(route).toContain("collectionTicketFields(transaction, payment.invoice, ticketFields.vatRate)");
+    expect(route).toContain("consolidatedTicketFields(id, payment.transactions, payment.invoice, ticketFields.vatRate)");
     expect(route).not.toContain("orderNumber: inv.number");
+  });
+
+  test("still lets staff print one collection on its own via ?transactionId=", () => {
+    expect(route).toContain('new URL(req.url).searchParams.get("transactionId")');
+    expect(route).toContain("collectionTicketFields(txn, payment.invoice, ticketFields.vatRate)");
   });
 
   test("reuses the same description helper as the close-of-session batch", () => {
@@ -102,11 +108,9 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     expect(route).toContain("if (payment.orderId)");
   });
 
-  test("a non-dashboard caller can only fetch their own ticket", () => {
+  test("is staff/dashboard only — no client self-service download", () => {
     expect(route).toContain("canAccessDashboard(session.user.role)");
-    expect(route).toContain(
-      "payment.appointment?.userId ?? payment.workshopReservation?.customerId ?? payment.formationReservation?.customerId ?? null"
-    );
+    expect(route).not.toContain("ownerId");
   });
 
   test("describeReservationPayment is exported for reuse, not duplicated", () => {

@@ -15,6 +15,7 @@ import { captureWarning } from "@/lib/monitoring";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import {
   buildFormationReservationCreatedNotification,
   createNotificationsBulk,
@@ -169,21 +170,10 @@ export async function checkFormationSessionAvailability(sessionId) {
 
     if (!session) return { success: false, message: "Session introuvable." };
 
-    const reserved = await prisma.formationReservation.aggregate({
-      where: {
-        sessionId,
-        OR: [
-          { status: { in: ["CONFIRMED", "COMPLETED"] } },
-          {
-            status: "PENDING_DEPOSIT",
-            OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }],
-          },
-        ],
-      },
-      _sum: { seatsCount: true },
+    const takenSeats = await sessionOccupancy(prisma, {
+      kind: OCCUPANCY_KINDS.FORMATION,
+      sessionId,
     });
-
-    const takenSeats = reserved._sum.seatsCount ?? 0;
     const capacity = session.capacity ?? session.formation.capacity;
     const available = capacity - takenSeats;
 
@@ -489,21 +479,10 @@ export async function createFormationReservation(data) {
         reservation = await prisma.$transaction(async (tx) => {
           await tx.$queryRaw`SELECT id FROM formation_sessions WHERE id = ${sessionId} FOR UPDATE`;
 
-          const reserved = await tx.formationReservation.aggregate({
-            where: {
-              sessionId,
-              OR: [
-                { status: { in: ["CONFIRMED", "COMPLETED"] } },
-                {
-                  status: "PENDING_DEPOSIT",
-                  OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }],
-                },
-              ],
-            },
-            _sum: { seatsCount: true },
+          const takenSeats = await sessionOccupancy(tx, {
+            kind: OCCUPANCY_KINDS.FORMATION,
+            sessionId,
           });
-
-          const takenSeats = reserved._sum.seatsCount ?? 0;
           const capacity = session.capacity ?? formation.capacity;
           const available = capacity - takenSeats;
 

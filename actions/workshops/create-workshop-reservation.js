@@ -15,6 +15,7 @@ import { captureWarning } from "@/lib/monitoring";
 import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-workshop-reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import {
   buildWorkshopReservationCreatedNotification,
   createNotificationsBulk,
@@ -166,24 +167,10 @@ export async function checkWorkshopSessionAvailability(sessionId) {
 
     if (!session) return { success: false, message: "Session introuvable." };
 
-    const reserved = await prisma.workshopReservation.aggregate({
-      where: {
-        sessionId,
-        OR: [
-          { status: { in: ["CONFIRMED", "COMPLETED"] } },
-          {
-            status: "PENDING_DEPOSIT",
-            OR: [
-              { holdExpiresAt: null },
-              { holdExpiresAt: { gt: new Date() } }
-            ]
-          }
-        ]
-      },
-      _sum: { seatsCount: true },
+    const takenSeats = await sessionOccupancy(prisma, {
+      kind: OCCUPANCY_KINDS.WORKSHOP,
+      sessionId,
     });
-
-    const takenSeats = reserved._sum.seatsCount ?? 0;
     const capacity = session.capacity ?? session.workshop.capacity;
     if (!Number.isInteger(capacity) || capacity < 1) {
       return { success: false, message: "Capacité de session invalide." };
@@ -498,24 +485,10 @@ export async function createWorkshopReservation(data) {
         reservation = await prisma.$transaction(async (tx) => {
           await tx.$queryRaw`SELECT id FROM workshop_sessions WHERE id = ${sessionId} FOR UPDATE`;
 
-          const reserved = await tx.workshopReservation.aggregate({
-            where: {
-              sessionId,
-              OR: [
-                { status: { in: ["CONFIRMED", "COMPLETED"] } },
-                {
-                  status: "PENDING_DEPOSIT",
-                  OR: [
-                    { holdExpiresAt: null },
-                    { holdExpiresAt: { gt: new Date() } }
-                  ]
-                }
-              ]
-            },
-            _sum: { seatsCount: true },
+          const takenSeats = await sessionOccupancy(tx, {
+            kind: OCCUPANCY_KINDS.WORKSHOP,
+            sessionId,
           });
-
-          const takenSeats = reserved._sum.seatsCount ?? 0;
           const capacity = session.capacity ?? activity.capacity;
           if (!Number.isInteger(capacity) || capacity < 1) {
             throw new Error("INVALID_SESSION_CAPACITY");

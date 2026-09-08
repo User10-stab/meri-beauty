@@ -101,21 +101,6 @@ function InvoiceLink({ invoice }) {
   );
 }
 
-function PaymentTicketLink({ payment }) {
-  if (!payment?.id || !payment.transactions?.length) return null;
-  return (
-    <a
-      href={`/api/payments/${payment.id}/ticket`}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink/60 hover:text-gold"
-    >
-      <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
-      Télécharger le ticket de caisse
-    </a>
-  );
-}
-
 function OrderTicketLink({ order }) {
   if (!order?.payment?.transactions?.length) return null;
   return (
@@ -552,10 +537,11 @@ function ReservationCard({ reservation, kind }) {
           <span className="text-sm font-bold text-gold">{formatPrice(reservation.totalPrice)}</span>
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
-          <InvoiceLink invoice={reservation.payment?.invoice} />
-          <PaymentTicketLink payment={reservation.payment} />
-        </div>
+        {reservation.payment?.invoice && (
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+            <InvoiceLink invoice={reservation.payment.invoice} />
+          </div>
+        )}
 
         <CheckInTicket reservation={reservation} typeLabel={typeLabel} />
 

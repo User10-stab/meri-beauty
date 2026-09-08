@@ -14,10 +14,12 @@ import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting
 import { issueCreditNote, issueInvoice, supersedeInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
+import { changeReservationSeatsFree } from "@/lib/reservations/change-reservation-seats";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { formationSessionChangeEmail } from "@/lib/email-templates";
+import { OCCUPANCY_KINDS, liveSeatFilter, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 
 // The transfer is a free admin correction — see changeFormationReservationSession.
 const TRANSFER_PRICE_DECISIONS = {
@@ -315,12 +317,7 @@ export async function getFormationTransferOptions(reservationId) {
         include: {
           formation: { select: { id: true, title: true, price: true } },
           reservations: {
-            where: {
-              OR: [
-                { status: { in: ["CONFIRMED", "COMPLETED"] } },
-                { status: "PENDING_DEPOSIT", OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: now } }] },
-              ],
-            },
+            where: liveSeatFilter(now),
             select: { seatsCount: true },
           },
         },
@@ -453,18 +450,12 @@ export async function changeFormationReservationSession(reservationId, newSessio
         throw new Error("TARGET_SESSION_NOT_AVAILABLE");
       }
 
-      const occupied = await tx.formationReservation.aggregate({
-        where: {
-          sessionId: target.id,
-          id: { not: reservation.id },
-          OR: [
-            { status: { in: ["CONFIRMED", "COMPLETED"] } },
-            { status: "PENDING_DEPOSIT", OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }] },
-          ],
-        },
-        _sum: { seatsCount: true },
+      const occupiedByOthers = await sessionOccupancy(tx, {
+        kind: OCCUPANCY_KINDS.FORMATION,
+        sessionId: target.id,
+        excludeReservationId: reservation.id,
       });
-      if ((occupied._sum.seatsCount ?? 0) + reservation.seatsCount > target.capacity) {
+      if (occupiedByOthers + reservation.seatsCount > target.capacity) {
         throw new Error("TARGET_SESSION_FULL");
       }
 
@@ -686,6 +677,36 @@ export async function changeFormationReservationSession(reservationId, newSessio
     console.error("[changeFormationReservationSession]", error);
     return { success: false, message: knownMessage };
   }
+}
+
+/**
+ * Free counter seat-count change on a CONFIRMED formation reservation — see
+ * lib/reservations/change-reservation-seats.js for the pricing/invoicing
+ * rules. Formations have no paid Stripe seat-change flow to collide with
+ * (that legacy path only exists for workshops); gated on the same
+ * settlement capability as closing a booking out, not admin-only.
+ */
+export async function changeFormationReservationSeatsFree(reservationId, { newSeatsCount, reason } = {}) {
+  const session = await auth();
+  if (!session?.user) return { success: false, message: "Non authentifié." };
+  const authorization = await authorizeActivityReservationOperation({
+    kind: ACTIVITY_RESERVATION_KINDS.FORMATION,
+    reservationId,
+    user: session.user,
+    capability: STAFF_PERMISSIONS.ACTIVITY_SETTLEMENTS,
+  });
+  if (!authorization.success) return authorization;
+
+  const result = await changeReservationSeatsFree({
+    kind: "FORMATION",
+    reservationId,
+    newSeatsCount,
+    reason,
+    actorId: session.user.id,
+  });
+
+  if (result.success) revalidatePath(RESERVATION_KINDS.FORMATION.revalidatePath);
+  return result;
 }
 
 /**

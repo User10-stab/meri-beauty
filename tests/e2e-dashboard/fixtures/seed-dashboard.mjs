@@ -16,7 +16,7 @@ import { getRunId, taggedEmail } from "../../e2e-money/fixtures/run-id.mjs";
 export const STAFF_PASSWORD = "E2eDash!2026";
 
 /** Same partial-unique-index dance as the money suite's seedCustomer. */
-function tagPhone(tag) {
+export function tagPhone(tag) {
   let hash = 0;
   for (const char of tag) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return `04${String(hash % 100_000_000).padStart(8, "0")}`;
@@ -159,7 +159,7 @@ export async function seedAdmin({ label }) {
  * weakened by keeping this document out of the books.
  */
 /** One service this staff member offers, priced for the scenario. */
-async function createStaffService({ staff, createdByUserId, price = 60 }) {
+export async function createStaffService({ staff, createdByUserId, price = 60 }) {
   const service = await prisma.service.findFirst({ where: { isDeleted: false }, select: { id: true, name: true } });
   if (!service) throw new Error("createStaffService: no Service in the database to attach a StaffService to.");
 
@@ -658,15 +658,24 @@ export async function purgeDashboardRun(runId = getRunId()) {
   deleted.variants = (await prisma.productVariant.deleteMany({ where: { id: { in: variantIds } } })).count;
   deleted.products = (await prisma.product.deleteMany({ where: { slug: { contains: runId } } })).count;
 
-  // Formation rows. Payment before FormationReservation
-  // (Payment.formationReservationId has no cascade), FormationReservation
-  // before Formation (FormationSession keeps ON DELETE RESTRICT against its
-  // reservations, so a still-booked session blocks the Formation's own
-  // cascade into FormationSession). The Animator is the auto-upserted
-  // profile resolveFormationAnimatorId() creates when a formation is
-  // assigned to a tagged staff member in the UI — same email, safe to drop
-  // once nothing references it. Scoped by title (not customerId alone) so a
-  // formation left with no reservation is still cleaned up.
+  // Formation rows. Transaction before Payment — Transaction_paymentId_fkey
+  // is RESTRICT, exactly like the appointment case above, and a formation
+  // reservation actually sold at the counter (rather than hand-seeded by
+  // seedFormationReservation, which leaves no Transaction row at all) has
+  // one. Missed until a real counter sale went through this purge for the
+  // first time and it failed 23001 mid-delete. Payment before
+  // FormationReservation (Payment.formationReservationId has no cascade),
+  // FormationReservation before Formation (FormationSession keeps ON DELETE
+  // RESTRICT against its reservations, so a still-booked session blocks the
+  // Formation's own cascade into FormationSession). The Animator is the
+  // auto-upserted profile resolveFormationAnimatorId() creates when a
+  // formation is assigned to a tagged staff member in the UI — same email,
+  // safe to drop once nothing references it. Scoped by title (not
+  // customerId alone) so a formation left with no reservation is still
+  // cleaned up.
+  deleted.formationTransactions = (await prisma.transaction.deleteMany({
+    where: { payment: { formationReservation: { customerId: { in: userIds } } } },
+  })).count;
   deleted.formationPayments = (await prisma.payment.deleteMany({
     where: { formationReservation: { customerId: { in: userIds } } },
   })).count;

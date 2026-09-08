@@ -1312,6 +1312,21 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     if (needsPayment && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
       return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket." };
     }
+    // Cash with no till open used to be accepted and left unassigned
+    // (cashSessionId: null), which is invisible from every Livre de caisse
+    // forever — Transaction.pieceNumber is written once and never backfilled.
+    // Fast-path check before the transaction; the authoritative one is inside
+    // it, in case a session closes in the gap between the two.
+    if (needsPayment && method === "CASH") {
+      const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+      if (!openCashSessionGate) {
+        return {
+          success: false,
+          message: "Aucune session de caisse n'est ouverte. Ouvrez la caisse avant d'encaisser en espèces.",
+          requiresCashSession: true,
+        };
+      }
+    }
 
     const { invoice } = await prisma.$transaction(async (tx) => {
       let invoice = null;
@@ -1332,12 +1347,16 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
         });
 
         // Attach to whichever till session is open so the counter cash is
-        // reconcilable at close (see lib/cash-sessions.js). Never blocks the
-        // payment if none is open — the row is simply left unassigned.
+        // reconcilable at close (see lib/cash-sessions.js). Authoritative
+        // check — the fast-path gate above already refused this request once
+        // if no session was open, but a session can close in the gap between
+        // that read and this write; re-checked here so the answer is never
+        // stale by the time the row is actually created.
         const openCashSession =
           method === "CASH"
             ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
             : null;
+        if (method === "CASH" && !openCashSession) throw new Error("PICKUP_CASH_SESSION_CLOSED");
         // Cash-book line number, allocated only for the CASH rows that
         // actually enter the till total — see model Transaction.pieceNumber.
         const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
@@ -1349,7 +1368,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
             method: method === "EXTERNAL_TERMINAL" ? "CARD" : method,
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
-            cashSessionId: openCashSession?.id ?? null,
+            cashSessionId: method === "CASH" ? openCashSession.id : null,
             pieceNumber,
             manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
           },
@@ -1480,6 +1499,13 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     }
     if (error.message === "PICKUP_ALREADY_CLAIMED") {
       return { success: false, message: "Cette commande vient d'être traitée sur un autre poste." };
+    }
+    if (error.message === "PICKUP_CASH_SESSION_CLOSED") {
+      return {
+        success: false,
+        message: "La session de caisse vient d'être clôturée. Ouvrez-la à nouveau avant d'encaisser.",
+        requiresCashSession: true,
+      };
     }
     console.error("[completeOrderPickup]", error);
     return { success: false, message: "Impossible de finaliser le retrait." };

@@ -106,69 +106,33 @@ describe("an invoice explains the price it charges", () => {
 });
 
 /**
- * A settlement that committed must never be reported as a failure.
- *
- * The ticket is rendered and e-mailed *after* the transaction commits, and
- * `collectionTicketFields` throws rather than returning null — it sat outside
- * the `.catch()` that already wrapped `renderTicketPdf`. It cannot throw
- * today, because the branch above guarantees every precondition it checks.
- *
- * The reason this is worth a guard rather than a comment: the failure is no
- * longer cosmetic. `createCounterWalkInService` deletes the appointment it
- * just created whenever the settlement reports failure, so a post-commit
- * throw would ask it to unwind money that had really been taken. The delete
- * would then hit the Payment_exactly_one_source CHECK and fail silently —
- * safe by accident, which is not a property to rely on.
+ * Neither settlement path generates or e-mails a ticket to the client any
+ * more — only the legally-required Invoice is issued, inside the
+ * transaction. The post-commit step left behind is a plain cash-book
+ * revalidation, which cannot throw in a way that risks the settlement's own
+ * success response (no PDF render, no e-mail, no
+ * `consolidatedTicketFields` call outside a transaction).
  */
-describe("nothing after the commit can undo a collection", () => {
-  test("the ticket step is wrapped so it cannot fail the settlement", () => {
+describe("no client-facing ticket is generated or e-mailed after settlement", () => {
+  test("neither settlement path renders or e-mails a ticket to the customer", () => {
     for (const path of [
       "actions/appointment/manage-appointment.js",
       "lib/reservations/settle-reservation.js",
     ]) {
       const code = source(path);
-      expect(code, path).toContain("} catch (postCommitError) {");
-      expect(code, path).toContain(
-        "[POST_COMMIT] settlement succeeded but the ticket step failed:",
-      );
-
-      // The catch must swallow, not re-report. A `return { success: false }`
-      // inside it would reinstate exactly the bug this guards against.
-      // Scoped to the catch body itself. A fixed-size window runs past the
-      // closing brace into the action's own error handler, which legitimately
-      // rethrows — and then this assertion fails for the wrong reason.
-      const catchAt = code.indexOf("} catch (postCommitError) {");
-      const lineStart = code.lastIndexOf("\n", catchAt) + 1;
-      const indent = code.slice(lineStart, catchAt);
-      const closeAt = code.indexOf(`\n${indent}}`, catchAt);
-      // Comment lines are stripped first. The block explains itself in prose
-      // that necessarily uses the words being forbidden — the first version of
-      // this assertion failed on its own explanation, which is a way of
-      // testing the comment rather than the code.
-      const catchBlock = code
-        .slice(catchAt, closeAt)
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("//"))
-        .join("\n");
-      expect(catchBlock, path).not.toContain("success: false");
-      expect(catchBlock, path).not.toContain("throw ");
+      expect(code, path).not.toContain("consolidatedTicketFields(");
+      expect(code, path).not.toContain("renderTicketPdf(");
+      expect(code, path).not.toContain("[POST_COMMIT] settlement succeeded but the ticket step failed:");
     }
   });
 
-  test("the throwing call is the one inside the wrapper", () => {
-    // If collectionTicketFields ever moves back above the try, the guard is
-    // decorative. Assert the ordering rather than mere presence.
+  test("the cash-book UI still refreshes after a CASH collection", () => {
     for (const path of [
       "actions/appointment/manage-appointment.js",
       "lib/reservations/settle-reservation.js",
     ]) {
       const code = source(path);
-      const tryAt = code.indexOf("try {\n", code.indexOf("balance > 0"));
-      const ticketAt = code.indexOf("collectionTicketFields(", tryAt);
-      const catchAt = code.indexOf("} catch (postCommitError) {");
-      expect(tryAt, path).toBeGreaterThan(-1);
-      expect(ticketAt, path).toBeGreaterThan(tryAt);
-      expect(catchAt, path).toBeGreaterThan(ticketAt);
+      expect(code, path).toContain('method === "CASH") revalidateCaisseRoutes()');
     }
   });
 });

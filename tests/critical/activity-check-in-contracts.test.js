@@ -151,7 +151,7 @@ describe("the scanner is gated, honest and race-safe", () => {
 
   test("the door sees the balance still owed, since activities sell on a 50% acompte", () => {
     expect(action).toContain("balanceDue: Number(reservation.payment?.remainingAmount ?? reservation.balanceDue)");
-    expect(source("components/dashboard/boutique/CounterPanel.jsx")).toContain(
+    expect(source("components/dashboard/boutique/counter/FicheSettleAction.jsx")).toContain(
       "Solde à encaisser"
     );
   });
@@ -175,11 +175,7 @@ describe("the scanner is gated, honest and race-safe", () => {
   });
 
   test("a paid multi-seat ticket checks in every remaining reserved place", () => {
-    const panel = source("components/dashboard/boutique/CounterPanel.jsx");
-    const checkInAction = panel.slice(
-      panel.indexOf("function CheckInAction"),
-      panel.indexOf("function SettleAction")
-    );
+    const checkInAction = source("components/dashboard/boutique/counter/FicheCheckInAction.jsx");
 
     expect(action).toContain("const seatsAdmitted = isAppointment ? 1 : before.remainingSeats");
     expect(action).toContain("checkedInSeats: { increment: seatsAdmitted }");
@@ -197,6 +193,11 @@ describe("the scanner is gated, honest and race-safe", () => {
       "const changeFeeAmount = Number(reservation.totalPrice) * SESSION_CHANGE_FEE_RATE"
     );
     expect(management).toContain('workshopAction: "seats_change_fee"');
+    // The counter's free seat change is a different export entirely — it
+    // never touches Stripe. See tests/critical/counter-seat-change-contracts.test.js.
+    expect(management).toContain("export async function changeWorkshopReservationSeatsFree(");
+    const freeFlow = source("lib/reservations/change-reservation-seats.js");
+    expect(freeFlow).not.toContain('from "@/lib/stripe"');
   });
 
   test("every admission is auditable", () => {
@@ -241,12 +242,18 @@ describe("the database backs up the application's seat guard", () => {
 // it on another.
 describe("the entry scanner lives at the till", () => {
   const page = source("app/(dashboard)/dashboard/boutique/point-of-sale/page.jsx");
-  const panel = source("components/dashboard/boutique/CounterPanel.jsx");
+  // The counter merged into one component tree: CounterSurface (state +
+  // dispatch, what CounterPanel used to be) and CounterOmniBar (the input +
+  // scanner it renders) replace the single CounterPanel.jsx file.
+  const surface = source("components/dashboard/boutique/counter/CounterSurface.jsx");
+  const omniBar = source("components/dashboard/boutique/counter/CounterOmniBar.jsx");
 
   test("the till renders one unified pointage and settlement panel", () => {
-    expect(page).toContain("<CounterPanel");
-    expect(panel).toContain('import { lookupCounterCode } from "@/actions/counter/lookup"');
-    expect(panel).toContain('import { searchCounterTickets } from "@/actions/boutique/settlements"');
+    expect(page).toContain("<CounterSurface");
+    expect(page).not.toContain("<CounterPanel");
+    expect(page).not.toContain("<PointOfSaleClient");
+    expect(surface).toContain('import { lookupCounterCode } from "@/actions/counter/lookup"');
+    expect(surface).toContain('import { searchCounter } from "@/actions/counter/search"');
   });
 
   test("scanning and settling include appointments, workshops and formations", () => {
@@ -254,15 +261,36 @@ describe("the entry scanner lives at the till", () => {
     expect(page).toContain("canCheckIn={canAppointments || canWorkshops || canFormations}");
   });
 
-  test("a cashier holding no counter capability gets no panel at all", () => {
-    expect(panel).toContain("if (!canCheckIn && !canSettle && !canPickup) return null;");
+  test("a cashier holding no counter capability gets no counter section, but keeps the till", () => {
+    // Unlike the old CounterPanel, this can no longer return null for the
+    // whole page — CounterCart (the retail till) is gated only on
+    // POINT_OF_SALE at the page level and must keep rendering even for a
+    // cashier who holds none of the three booking-type permissions.
+    expect(surface).toContain("const showCounterSection = canCheckIn || canSettle || canPickup;");
+    expect(surface).toContain("{showCounterSection && (");
+    expect(surface).toContain("<CounterCart");
   });
 
   test("name search remains available for a customer without a phone or QR", () => {
-    expect(panel).toContain("searchCounterTickets(value)");
-    expect(panel).toContain("lookupActivityCheckInById({ kind: row.kind, id: row.id })");
-    expect(panel).toContain("Code, client ou service");
-    expect(panel).toContain("[AFR]-?[0-9A-F]{10}");
+    expect(surface).toContain("searchCounter(value)");
+    expect(surface).toContain("lookupActivityCheckInById({ kind: row.kind, id: row.id })");
+    expect(omniBar).toContain("Code, client ou service");
+    expect(surface).toContain("[AFR]-?[0-9A-F]{10}");
+  });
+
+  // 8 Sep 2026: the omnibar's name search used to hit searchCounterTickets
+  // (bookings) alone. searchCounter fans the same query out to services,
+  // boutique products and open atelier/formation sessions too, so three
+  // letters of any of those also surfaces something — see the Traps section
+  // of the unified-counter plan for why this stayed additive rather than
+  // rewriting each domain's own search.
+  test("the unified search reuses each domain's existing, already-gated search rather than re-implementing it", () => {
+    const unifiedSearch = source("actions/counter/search.js");
+    expect(unifiedSearch).toContain('import { searchCounterTickets } from "@/actions/boutique/settlements"');
+    expect(unifiedSearch).toContain('import { searchCounterServices } from "@/actions/counter/walk-in-service"');
+    expect(unifiedSearch).toContain('import { searchPointOfSaleProducts } from "@/actions/boutique/point-of-sale"');
+    expect(unifiedSearch).toContain("Promise.allSettled([");
+    expect(unifiedSearch).toContain("hasAnySuccess");
   });
 
   test("name search resolves the matching customer before filtering each reservation type", () => {

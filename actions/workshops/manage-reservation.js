@@ -16,9 +16,11 @@ import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-wor
 import { issueCreditNote, issueInvoice, supersedeInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
+import { changeReservationSeatsFree } from "@/lib/reservations/change-reservation-seats";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
+import { OCCUPANCY_KINDS, liveSeatFilter, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 
 // The 10% charge remains limited to seat-count changes. Moving a customer to
 // another session/activity is an admin correction and is free of charge.
@@ -330,12 +332,7 @@ export async function getWorkshopTransferOptions(reservationId) {
         include: {
           workshop: { select: { id: true, title: true, type: true, price: true } },
           reservations: {
-            where: {
-              OR: [
-                { status: { in: ["CONFIRMED", "COMPLETED"] } },
-                { status: "PENDING_DEPOSIT", OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: now } }] },
-              ],
-            },
+            where: liveSeatFilter(now),
             select: { seatsCount: true },
           },
         },
@@ -466,18 +463,12 @@ export async function changeReservationSession(reservationId, newSessionId, { re
         throw new Error("TARGET_SESSION_NOT_AVAILABLE");
       }
 
-      const occupied = await tx.workshopReservation.aggregate({
-        where: {
-          sessionId: target.id,
-          id: { not: reservation.id },
-          OR: [
-            { status: { in: ["CONFIRMED", "COMPLETED"] } },
-            { status: "PENDING_DEPOSIT", OR: [{ holdExpiresAt: null }, { holdExpiresAt: { gt: new Date() } }] },
-          ],
-        },
-        _sum: { seatsCount: true },
+      const occupiedByOthers = await sessionOccupancy(tx, {
+        kind: OCCUPANCY_KINDS.WORKSHOP,
+        sessionId: target.id,
+        excludeReservationId: reservation.id,
       });
-      if ((occupied._sum.seatsCount ?? 0) + reservation.seatsCount > target.capacity) {
+      if (occupiedByOthers + reservation.seatsCount > target.capacity) {
         throw new Error("TARGET_SESSION_FULL");
       }
 
@@ -828,6 +819,37 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     console.error("[changeReservationSeats]", error);
     return { success: false, message: "Erreur lors de la modification du nombre de places." };
   }
+}
+
+/**
+ * Free counter seat-count change on a CONFIRMED atelier/événement
+ * reservation — see lib/reservations/change-reservation-seats.js for the
+ * pricing/invoicing rules. Distinct from changeReservationSeats above: no
+ * Stripe, no fee, and gated on the same settlement capability as closing a
+ * booking out, not admin-only — whoever may already collect the balance at
+ * the till may change the quantity that determines it.
+ */
+export async function changeWorkshopReservationSeatsFree(reservationId, { newSeatsCount, reason } = {}) {
+  const session = await auth();
+  if (!session?.user) return { success: false, message: "Non authentifié." };
+  const authorization = await authorizeActivityReservationOperation({
+    kind: ACTIVITY_RESERVATION_KINDS.WORKSHOP,
+    reservationId,
+    user: session.user,
+    capability: STAFF_PERMISSIONS.ACTIVITY_SETTLEMENTS,
+  });
+  if (!authorization.success) return authorization;
+
+  const result = await changeReservationSeatsFree({
+    kind: "WORKSHOP",
+    reservationId,
+    newSeatsCount,
+    reason,
+    actorId: session.user.id,
+  });
+
+  if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
+  return result;
 }
 
 /**

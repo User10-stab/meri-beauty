@@ -76,23 +76,35 @@ function isOutsideAppointmentScope(guard, reservation) {
     && reservation.staffId !== guard.ownStaffId;
 }
 
+// The buyer-completion fields (id, VAT, address presence) are additive to
+// what check-in itself needs — FicheBuyerAction reads them off the same
+// ticket the door already fetched rather than a second round trip.
+const HOLDER_SELECT = {
+  fullName: true,
+  email: true,
+  id: true,
+  vatNumber: true,
+  vatValidatedAt: true,
+  addressLine1: true,
+};
+
 const RESERVATION_INCLUDE = {
   [CHECK_IN_KINDS.WORKSHOP]: {
-    customer: { select: { fullName: true, email: true } },
+    customer: { select: HOLDER_SELECT },
     payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true } },
     session: {
       select: { startDate: true, endDate: true, workshop: { select: { title: true, type: true } } },
     },
   },
   [CHECK_IN_KINDS.FORMATION]: {
-    customer: { select: { fullName: true, email: true } },
+    customer: { select: HOLDER_SELECT },
     payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true } },
     session: {
       select: { startDate: true, endDate: true, formation: { select: { title: true, type: true } } },
     },
   },
   [CHECK_IN_KINDS.APPOINTMENT]: {
-    user: { select: { fullName: true, email: true } },
+    user: { select: HOLDER_SELECT },
     staffService: {
       select: {
         price: true,
@@ -136,8 +148,12 @@ function presentAppointment(appointment) {
     staffName: appointment.staffService.staff?.user?.fullName ?? null,
     sessionStartDate: appointment.startTime,
     sessionEndDate: appointment.endTime,
+    holderId: appointment.user.id,
     holderName: appointment.user.fullName,
     holderEmail: appointment.user.email,
+    holderVatNumber: appointment.user.vatNumber,
+    holderVatInvoiceReady: Boolean(appointment.user.vatValidatedAt),
+    holderHasAddress: Boolean(appointment.user.addressLine1),
     status: appointment.status,
     seatsCount: 1,
     checkedInSeats: alreadyIn ? 1 : 0,
@@ -178,8 +194,12 @@ function presentReservation(reservation, kind) {
     activityType: activity.type,
     sessionStartDate: reservation.session.startDate,
     sessionEndDate: reservation.session.endDate,
+    holderId: reservation.customer.id,
     holderName: reservation.customer.fullName,
     holderEmail: reservation.customer.email,
+    holderVatNumber: reservation.customer.vatNumber,
+    holderVatInvoiceReady: Boolean(reservation.customer.vatValidatedAt),
+    holderHasAddress: Boolean(reservation.customer.addressLine1),
     status: reservation.status,
     seatsCount: reservation.seatsCount,
     checkedInSeats: reservation.checkedInSeats,

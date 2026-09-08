@@ -119,6 +119,30 @@ export async function searchCounterTickets(query) {
 
   try {
     const customerIds = await findCustomerIdsByName(value);
+    const appointmentMatch = value
+      ? {
+          OR: [
+            { userId: { in: customerIds } },
+            { staffService: { service: { name: { contains: value, mode: "insensitive" } } } },
+          ],
+        }
+      : {};
+    const workshopMatch = value
+      ? {
+          OR: [
+            { customerId: { in: customerIds } },
+            { session: { workshop: { title: { contains: value, mode: "insensitive" } } } },
+          ],
+        }
+      : {};
+    const formationMatch = value
+      ? {
+          OR: [
+            { customerId: { in: customerIds } },
+            { session: { formation: { title: { contains: value, mode: "insensitive" } } } },
+          ],
+        }
+      : {};
     const searchResults = await Promise.allSettled([
       scope.canAppointments
         ? prisma.appointment.findMany({
@@ -126,7 +150,7 @@ export async function searchCounterTickets(query) {
               status: "CONFIRMED",
               isDeleted: false,
               ...(scope.ownStaffId ? { staffId: scope.ownStaffId } : {}),
-              ...(customerIds ? { userId: { in: customerIds } } : {}),
+              ...appointmentMatch,
               ...(dateFilter ? { startTime: dateFilter } : {}),
             },
             select: {
@@ -134,7 +158,7 @@ export async function searchCounterTickets(query) {
               startTime: true,
               checkedInAt: true,
               user: { select: { fullName: true } },
-              staffService: { select: { service: { select: { name: true } } } },
+              staffService: { select: { price: true, service: { select: { name: true } } } },
               payment: { select: { remainingAmount: true, totalAmount: true, paidAmount: true } },
             },
             orderBy: { startTime: "desc" },
@@ -146,7 +170,7 @@ export async function searchCounterTickets(query) {
         ? prisma.workshopReservation.findMany({
             where: {
               status: "CONFIRMED",
-              ...(customerIds ? { customerId: { in: customerIds } } : {}),
+              ...workshopMatch,
               ...(dateFilter ? { session: { startDate: dateFilter } } : {}),
             },
             select: {
@@ -166,7 +190,7 @@ export async function searchCounterTickets(query) {
         ? prisma.formationReservation.findMany({
             where: {
               status: "CONFIRMED",
-              ...(customerIds ? { customerId: { in: customerIds } } : {}),
+              ...formationMatch,
               ...(dateFilter ? { session: { startDate: dateFilter } } : {}),
             },
             select: {
@@ -213,8 +237,9 @@ export async function searchCounterTickets(query) {
         customerName: appointment.user?.fullName ?? "—",
         label: appointment.staffService?.service?.name ?? "Prestation",
         occurredAt: appointment.startTime,
-        balanceDue: Number(appointment.payment?.remainingAmount ?? 0),
-        totalAmount: Number(appointment.payment?.totalAmount ?? 0),
+        balanceDue: Number(appointment.payment?.remainingAmount ?? appointment.staffService?.price ?? 0),
+        totalAmount: Number(appointment.payment?.totalAmount ?? appointment.staffService?.price ?? 0),
+        paidAmount: Number(appointment.payment?.paidAmount ?? 0),
         checkedIn: Boolean(appointment.checkedInAt),
       })),
       ...workshops.map((reservation) => ({
@@ -226,6 +251,7 @@ export async function searchCounterTickets(query) {
         occurredAt: reservation.session.startDate,
         balanceDue: Number(reservation.payment?.remainingAmount ?? 0),
         totalAmount: Number(reservation.payment?.totalAmount ?? 0),
+        paidAmount: Number(reservation.payment?.paidAmount ?? 0),
         checkedIn: reservation.checkedInSeats >= reservation.seatsCount,
       })),
       ...formations.map((reservation) => ({
@@ -236,6 +262,7 @@ export async function searchCounterTickets(query) {
         occurredAt: reservation.session.startDate,
         balanceDue: Number(reservation.payment?.remainingAmount ?? 0),
         totalAmount: Number(reservation.payment?.totalAmount ?? 0),
+        paidAmount: Number(reservation.payment?.paidAmount ?? 0),
         checkedIn: reservation.checkedInSeats >= reservation.seatsCount,
       })),
     ];

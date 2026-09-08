@@ -125,4 +125,18 @@ describe("credit-note delivery is a deliberate action from the operation detail"
     expect(client).toContain("E-mail envoyé le");
     expect(client).toContain("Créée dans Billit — à finaliser");
   });
+
+  // 3 Sep 2026: both delivery channels moved off the row strip (which used
+  // to render a bare download link plus two unlabelled 32px icon buttons
+  // per note) into one Envoyer box shared with the invoice, each channel
+  // now a full-width labelled button. Pins the redesign so it cannot
+  // silently regress back to icon-only.
+  test("both sends live behind one labelled Envoyer box, not a strip of unlabelled icons", () => {
+    expect(rowActions).toContain("<OperationDocumentsDialog");
+    const documents = source("components/dashboard/operations/OperationDocumentsDialog.jsx");
+    expect(documents).toContain("<DocumentDeliveryDialog");
+    expect(documents).toContain("Envoyer la facture");
+    expect(documents).toContain("Envoyer la note");
+    expect(rowActions).not.toContain("h-8 w-8");
+  });
 });

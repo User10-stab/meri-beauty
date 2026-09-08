@@ -28,9 +28,12 @@ describe("stale CONFIRMED appointments are surfaced, never auto-completed, and e
   test("is wired into both the HTTP cron route and the in-process job runner", () => {
     const httpRoute = source("app/api/cron/appointments/route.js");
     expect(httpRoute).toContain("notifyUnsettledAppointments");
+    expect(httpRoute).toContain("expireStalePendingAppointments");
+    expect(httpRoute).toContain("stalePendingAppointmentsExpired");
 
     const backgroundJobs = source("lib/background-jobs.js");
     expect(backgroundJobs).toContain("notifyUnsettledAppointments");
+    expect(backgroundJobs).toContain("expireStalePendingAppointments");
   });
 
   test("rejectAppointment refuses a cancel-with-refund once the appointment is more than 7 days past", () => {

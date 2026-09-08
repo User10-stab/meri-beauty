@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { BELGIUM_VAT_RATE } from "@/lib/tax-policy";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Banknote, Camera, CameraOff, CreditCard, ImageOff, Loader2, Lock, Minus, PackageSearch, Plus, ScanLine, Search, ShieldQuestion, SlidersHorizontal, Trash2, UserRound, Wallet, X } from "lucide-react";
@@ -21,6 +20,7 @@ import {
 } from "@/actions/boutique/point-of-sale";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { isCashSessionOpen, getSuggestedOpeningFloat, openCashSession } from "@/actions/dashboard/cash-sessions";
+import { createBrowserUuid } from "@/lib/browser-uuid";
 
 const emptyAddress = {
   addressLine1: "",
@@ -49,8 +49,6 @@ export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession =
   const [productResults, setProductResults] = useState([]);
   const [searchingProducts, setSearchingProducts] = useState(false);
   const [cart, setCart] = useState([]);
-  const [serviceDescription, setServiceDescription] = useState("");
-  const [servicePrice, setServicePrice] = useState("");
   // No account, no invoice — a simplified ticket is issued instead. Blocked
   // together with CARD_QR (Stripe checkout needs a real customer_email) —
   // enforced again server-side, this is just the matching UI gate.
@@ -99,14 +97,14 @@ export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession =
   const walkInEmailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkInEmail.trim());
 
   function resetAttempt() {
-    const next = crypto.randomUUID();
+    const next = createBrowserUuid();
     localStorage.setItem("meri-pos-attempt-key", next);
     setAttemptKey(next);
     return next;
   }
 
   useEffect(() => {
-    const stored = localStorage.getItem("meri-pos-attempt-key") || crypto.randomUUID();
+    const stored = localStorage.getItem("meri-pos-attempt-key") || createBrowserUuid();
     localStorage.setItem("meri-pos-attempt-key", stored);
     setAttemptKey(stored);
     recoverPointOfSaleCheckout(stored).then((result) => {
@@ -350,32 +348,6 @@ export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession =
     return () => clearTimeout(timeout);
   }, [productQuery]);
 
-  function addServiceLine() {
-    const description = serviceDescription.trim();
-    const price = Number(servicePrice);
-    if (!description) return toast.error("Indiquez la description de la prestation.");
-    if (!Number.isFinite(price) || price <= 0) return toast.error("Indiquez un prix valide.");
-    setCart((current) => [
-      ...current,
-      {
-        key: crypto.randomUUID(),
-        type: "SERVICE",
-        variantId: null,
-        productName: description,
-        variantName: "Prestation",
-        unitPrice: Math.round(price * 100) / 100,
-        // The cashier quotes a customer-facing price. The server taxes what it
-        // receives, so hand it the net equivalent — unrounded, so re-applying
-        // 21 % lands back on the exact figure typed here.
-        unitPriceExclVat: price / (1 + BELGIUM_VAT_RATE / 100),
-        availableQuantity: Infinity,
-        quantity: 1,
-      },
-    ]);
-    setServiceDescription("");
-    setServicePrice("");
-  }
-
   useEffect(() => {
     if (!scannerOpen) return undefined;
 
@@ -528,7 +500,7 @@ export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession =
   }
 
   function submitSale() {
-    if (!cart.length) return toast.error("Ajoutez au moins un produit ou une prestation.");
+    if (!cart.length) return toast.error("Ajoutez au moins un produit.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
     if (isWalkIn && !walkInEmailReady) {
       return toast.error("Indiquez l'e-mail du client pour envoyer le ticket.");
@@ -544,11 +516,7 @@ export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession =
       const result = await completePointOfSaleSale({
         customer: isWalkIn ? null : customer,
         walkInEmail: isWalkIn ? walkInEmail.trim() : "",
-        items: cart.map((item) =>
-          item.type === "SERVICE"
-            ? { type: "SERVICE", description: item.productName, unitPrice: item.unitPriceExclVat, quantity: item.quantity }
-            : { type: "PRODUCT", variantId: item.variantId, quantity: item.quantity }
-        ),
+        items: cart.map((item) => ({ type: "PRODUCT", variantId: item.variantId, quantity: item.quantity })),
         method,
         attemptKey,
         ...(method === "EXTERNAL_TERMINAL" ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
@@ -689,14 +657,11 @@ export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession =
             )}
           </>
         ) : (
-          // A staff member with "Caisse" (vente) but not "Clôture de caisse"
-          // (ouverture/fermeture) can never pass CASH_REGISTER's server-side
-          // guard on openCashSession — showing the form anyway would just
-          // fail with a generic "Accès non autorisé". Point them at whoever
-          // holds that permission instead of a dead end.
+          // This branch is only a defensive fallback: every user who reaches
+          // the POS has POINT_OF_SALE and can therefore open a session. The
+          // server action enforces the same rule independently.
           <p className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6">
-            Vous n&apos;avez pas la permission d&apos;ouvrir la caisse. Demandez à un collègue disposant de
-            l&apos;accès « Clôture de caisse » de l&apos;ouvrir.
+            Vous n&apos;avez pas la permission d&apos;ouvrir la caisse. Demandez à un responsable de vérifier vos accès.
           </p>
         )}
       </div>
@@ -865,31 +830,6 @@ export function PointOfSaleClient({ canAdjustStock = false, canOpenCashSession =
             </ul>
           )}
         </div>
-
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            addServiceLine();
-          }}
-          className="flex gap-2"
-        >
-          <input
-            value={serviceDescription}
-            onChange={(event) => setServiceDescription(event.target.value)}
-            placeholder="Prestation (ex. Coupe cheveux)"
-            autoComplete="off"
-            className="h-11 flex-1 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-          />
-          <input
-            value={servicePrice}
-            onChange={(event) => setServicePrice(event.target.value)}
-            placeholder="Prix TTC €"
-            inputMode="decimal"
-            autoComplete="off"
-            className="h-11 w-28 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-          />
-          <Button type="submit">Ajouter</Button>
-        </form>
 
         {cart.length === 0 ? (
           <div className="rounded-lg border border-dashed border-gray-200 px-5 py-12 text-center text-sm text-gray-500">Le panier est vide.</div>

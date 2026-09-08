@@ -111,7 +111,7 @@ describe("the till lists what is still owed without re-implementing settlement",
     // The list now serves check-in as well as settlement, so a paid-in-full
     // ticket must not disappear merely because remainingAmount is zero.
     expect(action).toContain('status: "CONFIRMED"');
-    expect(action).toContain("balanceDue: Number(appointment.payment?.remainingAmount ?? 0)");
+    expect(action).toContain("balanceDue: Number(appointment.payment?.remainingAmount ?? appointment.staffService?.price ?? 0)");
     expect(action).not.toContain("remainingAmount: { gt: 0 }");
   });
 
@@ -127,17 +127,58 @@ describe("nothing is marked paid before the money is in hand", () => {
     expect(panel).toContain("paymentConfirmed: true");
   });
 
-  test("the button is disabled until the cashier ticks that they received it", () => {
+  test("the confirm button is itself the attestation, and names the amount", () => {
     // Nothing in the system can observe a cash handoff or a terminal's
-    // "APPROUVÉ" screen — same guard as the POS terminal sale.
-    expect(panel).toContain("disabled={!received || saving || (isExternalTerminal && (!terminalApproved || !terminalReference.trim()))}");
-    expect(panel).toContain("J&apos;ai bien reçu {formatPrice(ticket.balanceDue)}");
+    // "APPROUVÉ" screen — same guard as the POS terminal sale. What changed is
+    // where a human says the money arrived: it used to be a checkbox sitting
+    // next to the confirm button, which is a tick people learn to click past
+    // on their way to the thing they actually wanted. It is now the button
+    // label, so the single deliberate act names the sum being attested to.
+    //
+    // The wording is asserted, not merely the presence of a button, because a
+    // label that stopped naming the amount would quietly turn an attestation
+    // back into a "next" button.
+    expect(panel).toContain("J'ai bien reçu ${formatPrice(amountDue)} — encaisser et facturer");
+    expect(panel).toContain("paymentConfirmed: true");
+    // And the ceremony that used to hide the form is gone: no disclosure
+    // toggle, no separate tick. Re-adding either would put the clicks back.
+    expect(panel).not.toContain("checked={received}");
+    expect(panel).not.toContain("Encaisser ce solde");
   });
 
-  test("the Pointage settlement panel supports an external terminal reference", () => {
+  test("a changed price cannot be confirmed without a reason", () => {
+    // The price field is always visible now rather than hidden behind its own
+    // toggle, so the guard that matters moved into the button: typing a new
+    // total disables confirmation until a reason is given. The server refuses
+    // the same way (resolveCounterPriceAdjustment), so this is the screen
+    // agreeing with it rather than the only thing standing in the way.
+    expect(panel).toContain(
+      "disabled={saving || (priceChanged && adjustmentReason.trim().length < 3) || (amountDue > 0 && isExternalTerminal && !terminalReference.trim())}",
+    );
+    expect(source("lib/payments/counter-price-adjustment.js")).toContain(
+      "Indiquez la raison de l'ajustement de prix.",
+    );
+  });
+
+  test("a card collection cannot be recorded without the terminal's receipt reference", () => {
+    // Card is EXTERNAL_TERMINAL only now: bare "CARD" was accepted with no
+    // evidence at all, and of 29 card collections in the dev database exactly
+    // one carried a reference — so 28 could not be reconciled against the
+    // terminal's end-of-day batch. Cash at least has a piece number and an
+    // open till session behind it.
     expect(panel).toContain('"EXTERNAL_TERMINAL"');
-    expect(panel).toContain("Terminal APPROUVÉ");
     expect(panel).toContain("terminalReference: terminalReference.trim()");
+    expect(panel).toContain('{value === "CASH" ? "Espèces" : "Carte — terminal"}');
+    expect(panel, "a card option with no reference came back").not.toContain(
+      '"CASH", "CARD", "EXTERNAL_TERMINAL"',
+    );
+
+    // The separate "Terminal APPROUVÉ" tick is deliberately gone: for a card,
+    // being paid IS the terminal approving, and the confirm button already
+    // states "j'ai bien reçu X". One attestation, one piece of evidence —
+    // the reference, which is the evidence, stays required.
+    expect(panel).not.toContain("Terminal APPROUVÉ");
+    expect(panel).toContain("terminalApproved: true");
   });
 
   test("a refused settlement surfaces its reason instead of silently succeeding", () => {

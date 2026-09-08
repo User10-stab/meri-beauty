@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { stripe } from "@/lib/stripe";
 import { isAdminRole } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { planRefund } from "@/lib/refunds/plan-refund";
@@ -321,7 +322,27 @@ export async function confirmManualRefundLeg({ legId, terminalReference = null, 
   };
 }
 
-/** Marks a captured-but-unfulfilled payment as manually refunded in Stripe. */
+/**
+ * Closes a "captured payment with no application record" case.
+ *
+ * These are payments Stripe took where the reservation/order they belonged to
+ * no longer exists, so there is no Payment row, no invoice and no ledger to
+ * attach anything to — this table IS the ledger for them, and closing a row
+ * is the only record that the money went back.
+ *
+ * That is exactly why the reference is verified against Stripe rather than
+ * believed. A typed string used to be enough to clear a red row: a typo, a
+ * reference from a different payment, or a refund that was started and failed
+ * would all have read as "remboursé" with nobody ever looking again.
+ *
+ * What is checked, against the connected account when the charge was one:
+ *   - the reference is a real refund on THIS case's payment_intent
+ *   - that refund actually succeeded (not pending, failed or cancelled)
+ *   - the succeeded refunds on that payment_intent cover the case amount
+ *
+ * The last one is a sum, not a single-refund comparison, so an admin who paid
+ * it back in two goes can still close the case with either reference.
+ */
 export async function resolveManualRefundCase({ caseId, stripeReference = "" }) {
   const session = await requireAdmin();
   if (!session) return { success: false, message: "Non autorisé." };
@@ -330,16 +351,72 @@ export async function resolveManualRefundCase({ caseId, stripeReference = "" }) 
     return { success: false, message: "La référence Stripe est obligatoire." };
   }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const refundCase = await tx.manualRefundCase.findUnique({ where: { id: caseId } });
-    if (!refundCase) return { resolved: false, reason: "NOT_FOUND" };
-    if (refundCase.resolvedAt) return { resolved: false, reason: "ALREADY_RESOLVED" };
+  // Admins reach the refund from the "Ouvrir dans Stripe" link, so what gets
+  // pasted back is as often a dashboard URL as a bare id.
+  const reference = (stripeReference.match(/re_[A-Za-z0-9]+/)?.[0] ?? stripeReference.trim());
+  if (!reference.startsWith("re_")) {
+    return {
+      success: false,
+      message: "Entrez l'identifiant du remboursement Stripe (il commence par « re_ »), pas celui du paiement.",
+    };
+  }
 
+  const refundCase = await prisma.manualRefundCase.findUnique({ where: { id: caseId } });
+  if (!refundCase) return { success: false, message: "Dossier introuvable." };
+  if (refundCase.resolvedAt) return { success: false, message: "Ce dossier est déjà clôturé." };
+
+  const stripeAccount = refundCase.stripeAccountId ? { stripeAccount: refundCase.stripeAccountId } : undefined;
+  const expectedCents = Math.round(Number(refundCase.amount) * 100);
+
+  let refund;
+  let refundedCents;
+  try {
+    refund = await stripe.refunds.retrieve(reference, stripeAccount);
+    // A single page is enough: Stripe's default limit of 10 is far more
+    // refunds than one of these cases can plausibly have been paid back in,
+    // and a case that somehow exceeded it would fail closed, not open.
+    const refunds = await stripe.refunds.list({ payment_intent: refundCase.stripePaymentIntentId }, stripeAccount);
+    refundedCents = refunds.data
+      .filter((entry) => entry.status === "succeeded")
+      .reduce((sum, entry) => sum + (entry.amount ?? 0), 0);
+  } catch (error) {
+    console.error("[resolveManualRefundCase] Stripe verification failed", error);
+    return {
+      success: false,
+      message: "Impossible de vérifier ce remboursement auprès de Stripe. Vérifiez la référence et réessayez.",
+    };
+  }
+
+  if (refund.payment_intent !== refundCase.stripePaymentIntentId) {
+    return {
+      success: false,
+      message: "Ce remboursement concerne un autre paiement. Vérifiez la référence dans Stripe.",
+    };
+  }
+  if (refund.status !== "succeeded") {
+    return {
+      success: false,
+      message: `Ce remboursement n'est pas abouti côté Stripe (statut : ${refund.status}). Le dossier reste ouvert.`,
+    };
+  }
+  if (refund.currency && refundCase.currency && refund.currency.toLowerCase() !== refundCase.currency.toLowerCase()) {
+    return { success: false, message: "La devise du remboursement ne correspond pas à celle du paiement." };
+  }
+  if (refundedCents + 1 < expectedCents) {
+    // Tolerate a single cent of rounding between the Decimal and Stripe's
+    // integer minor units; anything larger is a genuinely short refund.
+    return {
+      success: false,
+      message: `Stripe n'a remboursé que ${(refundedCents / 100).toFixed(2)} € sur ${Number(refundCase.amount).toFixed(2)} €. Le dossier reste ouvert tant que le solde n'est pas rendu.`,
+    };
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
     const claim = await tx.manualRefundCase.updateMany({
       where: { id: caseId, resolvedAt: null },
       data: {
         resolvedAt: new Date(),
-        resolutionReference: stripeReference.trim(),
+        resolutionReference: refund.id,
         resolvedByUserId: session.user.id,
       },
     });
@@ -351,20 +428,24 @@ export async function resolveManualRefundCase({ caseId, stripeReference = "" }) 
         action: "refund.manual_capture_case_resolved",
         entityType: "ManualRefundCase",
         entityId: caseId,
-        metadata: { stripeReference: stripeReference.trim(), amount: Number(refundCase.amount) },
+        metadata: {
+          stripeReference: refund.id,
+          stripePaymentIntentId: refundCase.stripePaymentIntentId,
+          stripeAccountId: refundCase.stripeAccountId ?? null,
+          amount: Number(refundCase.amount),
+          // What Stripe itself says came back, not what anyone typed.
+          verifiedRefundedAmount: refundedCents / 100,
+        },
       },
     });
     return { resolved: true };
   });
 
   if (!result.resolved) {
-    return {
-      success: false,
-      message: result.reason === "ALREADY_RESOLVED" ? "Ce dossier est déjà clôturé." : "Dossier introuvable.",
-    };
+    return { success: false, message: "Ce dossier est déjà clôturé." };
   }
   revalidatePath("/dashboard/operations");
-  return { success: true, message: "Dossier clôturé — remboursement Stripe enregistré." };
+  return { success: true, message: "Dossier clôturé — remboursement vérifié auprès de Stripe." };
 }
 
 /**

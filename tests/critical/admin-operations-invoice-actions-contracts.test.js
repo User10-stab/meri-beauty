@@ -45,12 +45,13 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     const actions = source("actions/dashboard/admin-operations.js");
     // The Opérations ledger needs to tell a private individual apart from a
     // VAT-registered company across every source (boutique order, atelier,
-    // formation, or appointment) — one occurrence per customer-bearing
+    // formation, appointment or transfer history) — one occurrence per customer-bearing
     // relation: hydrateOrders' user, hydrateWorkshops' customer,
-    // hydrateFormations' customer, and hydrateAppointmentTransactions'
-    // appointment.user.
+    // hydrateFormations' customer, hydrateAppointmentTransactions'
+    // appointment.user, plus hydrateTransfers' current reservation customer
+    // for BOTH a workshop and a formation transfer (it now hydrates either).
     const vatNumberOccurrences = actions.split("vatNumber: true").length - 1;
-    expect(vatNumberOccurrences).toBe(4);
+    expect(vatNumberOccurrences).toBe(6);
   });
 
   test("the ledger shows the invoice's frozen VAT number, falling back to the customer's current one", () => {
@@ -137,14 +138,9 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(client).not.toContain("Acompte lié au solde ci-dessous");
     expect(client).not.toContain("Solde de l’acompte ci-dessus");
 
-    // Orders/workshops/formations are entity-grained now — a deposit and its
-    // later balance are just two nested Transaction rows on one entity row,
-    // never two competing top-level rows, so no suppression is needed for
-    // them at all. Appointments alone stay event-grained (their own
-    // dashboard flows, not part of this unification) and keep the exact
-    // suppress-the-deposit-once-a-balance-exists rule, now expressed as SQL.
-    expect(actions).toContain("t.\"transactionType\" = 'DEPOSIT'");
-    expect(actions).toContain("t2.\"transactionType\" = 'FINAL_PAYMENT'");
+    // Entity-grained rows retain their whole payment history. Appointments
+    // do too, so the ledger never hides an actual collection.
+    expect(actions).toContain('JOIN "Appointment" a ON a.id = p."appointmentId"');
     expect(actions).toContain('transactions: { orderBy: { paidAt: "asc" }');
   });
 

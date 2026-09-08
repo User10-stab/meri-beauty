@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DataTable } from "../Tables/DataTable";
 import { ReservationRow } from "./ReservationRow";
+import { ChangeSessionModal } from "./ChangeSessionModal";
 import {
   cancelFormationReservation,
   completeFormationReservation,
@@ -25,6 +26,7 @@ const COLUMNS = [
 export function ReservationsPageClient({ initialReservations = [], userRole }) {
   const router = useRouter();
   const isAdmin = isAdminRole(userRole);
+  const [changeModalReservation, setChangeModalReservation] = useState(null);
   const [toCancel, setToCancel] = useState(null);
   const [isCancelling, startCancel] = useTransition();
   const [toSettle, setToSettle] = useState(null);
@@ -77,6 +79,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         data={initialReservations}
         columns={COLUMNS}
         renderRow={ReservationRow}
+        onEdit={isAdmin ? (row) => setChangeModalReservation(row) : undefined}
         onDelete={isAdmin ? setToCancel : undefined}
         onSettle={(row) => setToSettle(row)}
         onNoShow={handleNoShow}
@@ -87,6 +90,13 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
           row.customer?.email?.toLowerCase().includes(query)
         }
       />
+
+      <ChangeSessionModal
+        open={!!changeModalReservation}
+        onClose={() => setChangeModalReservation(null)}
+        reservation={changeModalReservation}
+      />
+
       <CancelReservationDialog
         reservation={toCancel}
         onClose={() => setToCancel(null)}

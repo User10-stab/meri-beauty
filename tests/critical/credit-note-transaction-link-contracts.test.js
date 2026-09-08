@@ -39,7 +39,6 @@ describe("every REFUND transaction row can be linked to the credit note that fun
   // avoir une note de crédit associée").
   const directLinkSites = [
     ["actions/boutique/returns.js", 2],
-    ["actions/boutique/orders.js", 2],
     ["actions/reservation/cancel-reservation.js", 1],
     ["actions/appointment/manage-appointment.js", 1],
     ["actions/workshops/manage-reservation.js", 1],
@@ -55,6 +54,12 @@ describe("every REFUND transaction row can be linked to the credit note that fun
       expect(occurrences, `${file} should reference creditNoteId at least ${minOccurrences} time(s)`).toBeGreaterThanOrEqual(minOccurrences);
     });
   }
+
+  test("order cancellation passes its credit note to the queued operation", () => {
+    const orders = source("actions/boutique/orders.js");
+    expect(orders).toContain("queueManualRefund(tx");
+    expect(orders).toContain("creditNoteId: creditNote?.id ?? null");
+  });
 
   test("the order-refund reconciliation helper hands its transaction id back to the caller", () => {
     const helper = source("lib/orders/reconcile-stripe-refund.js");

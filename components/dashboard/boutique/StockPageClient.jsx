@@ -8,7 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { StockAdjustDialog } from "@/components/dashboard/boutique/StockAdjustDialog";
 import { StockHistoryDrawer } from "@/components/dashboard/boutique/StockHistoryDrawer";
 
-export function StockPageClient({ initialVariants, initialSearch = "" }) {
+export function StockPageClient({ initialVariants, initialSearch = "", userRole = null }) {
   const router = useRouter();
   const [search, setSearch] = useState(initialSearch);
   const [scannedCode, setScannedCode] = useState("");
@@ -155,6 +155,7 @@ export function StockPageClient({ initialVariants, initialSearch = "" }) {
 
       <StockAdjustDialog
         variant={adjusting}
+        userRole={userRole}
         onClose={() => setAdjusting(null)}
         onAdjusted={() => {
           setAdjusting(null);

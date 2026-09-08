@@ -6,13 +6,17 @@ import { SidebarProvider } from "./sidebar/sidebar-context";
 import { OnboardingGuard } from "@/components/dashboard/onboarding/OnboardingGuard";
 import { StripeReminderBanner } from "@/components/dashboard/onboarding/StripeReminderBanner";
 
-export function DashboardShell({ user, dashboardPermissions = [], children }) {
+export function DashboardShell({ user, dashboardPermissions = [], pickupsToVerifyCount = 0, children }) {
   return (
     <SidebarProvider>
       <OnboardingGuard userRole={user?.role} />
       {user?.role === "STAFF" && <StripeReminderBanner />}
       <div className="dashboard-scope flex min-h-screen overflow-x-hidden">
-        <Sidebar userRole={user?.role} dashboardPermissions={dashboardPermissions} />
+        <Sidebar
+          userRole={user?.role}
+          dashboardPermissions={dashboardPermissions}
+          pickupsToVerifyCount={pickupsToVerifyCount}
+        />
 
         <div className="min-w-0 flex-1 bg-gray-2 dark:bg-[#020d1a]">
           <Header user={user} />

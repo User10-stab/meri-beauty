@@ -557,7 +557,7 @@ export async function createFormationReservation(data) {
           }
 
           return created;
-        });
+        }, { timeout: 15_000 });
       } catch (err) {
         if (typeof err.message === "string" && err.message.startsWith("SOLD_OUT:")) {
           const available = Number(err.message.slice("SOLD_OUT:".length));

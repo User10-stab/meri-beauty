@@ -14,6 +14,7 @@ import {
   requiresAdminApprovalToCancel,
   CANCELLATION_WINDOW_HOURS,
 } from "@/lib/reservationRules";
+import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import { toIntlLocale } from "@/lib/intl-locale";
 import { AppointmentRescheduleModal } from "@/components/website/AppointmentRescheduleModal";
 
@@ -44,6 +45,15 @@ function formatAmount(amount, locale) {
   }).format(amount);
 }
 
+function amountStillDue(payment, reservationStatus) {
+  if (!payment) return 0;
+  return collectibleBalance({
+    remainingAmount: payment.remainingAmount,
+    paymentStatus: payment.status,
+    lifecycleStatus: reservationStatus,
+  });
+}
+
 // ─── Invoice link ──────────────────────────────────────────────────────────────
 
 function InvoiceLink({ invoice }) {
@@ -59,6 +69,25 @@ function InvoiceLink({ invoice }) {
         <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
       </svg>
       Facture {invoice.number}
+    </a>
+  );
+}
+
+function PaymentTicketLink({ payment }) {
+  const hasCollection = payment?.transactions?.some((transaction) =>
+    ["DEPOSIT", "FINAL_PAYMENT"].includes(transaction.transactionType) && Number(transaction.amount) > 0,
+  );
+  if (!payment?.id || !hasCollection) return null;
+
+  return (
+    <a
+      href={`/api/payments/${payment.id}/ticket`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-600 transition-colors hover:text-[#C8A46A]"
+    >
+      <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+      Télécharger le ticket de caisse
     </a>
   );
 }
@@ -107,7 +136,7 @@ function CheckInTicket({ reservation }) {
   if (!reservation.checkInQr || !reservation.checkInCode) return null;
 
   const alreadyUsed = Boolean(reservation.checkedInAt);
-  const remainingDue = Number(reservation.payment?.remainingAmount ?? 0);
+  const remainingDue = amountStillDue(reservation.payment, reservation.status);
 
   return (
     <div className="mt-3 flex flex-col items-center gap-3 rounded-2xl border border-[#C8A46A]/20 bg-[#C8A46A]/5 px-4 py-5 text-center sm:flex-row sm:text-left">
@@ -356,18 +385,19 @@ function ReservationCard({ reservation, onCancelled }) {
                   {formatAmount(reservation.payment.paidAmount, locale)}
                 </span>
               </div>
-              {reservation.payment.remainingAmount > 0 && (
+              {amountStillDue(reservation.payment, reservation.status) > 0 && (
                 <div className="flex items-center justify-between text-xs sm:text-sm pt-1.5 sm:pt-2 border-t-2 border-gray-200">
                   <span className="text-gray-700 font-semibold">{t("remainingToPay")}</span>
                   <span className="font-bold text-amber-600 text-sm sm:text-base">
-                    {formatAmount(reservation.payment.remainingAmount, locale)}
+                    {formatAmount(amountStillDue(reservation.payment, reservation.status), locale)}
                   </span>
                 </div>
               )}
             </div>
-            {reservation.payment.invoice && (
-              <div className="mt-2 sm:mt-3 pt-2 sm:pt-3 border-t border-gray-200">
+            {(reservation.payment.invoice || reservation.payment.transactions?.length > 0) && (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 border-t border-gray-200 pt-2 sm:mt-3 sm:pt-3">
                 <InvoiceLink invoice={reservation.payment.invoice} />
+                <PaymentTicketLink payment={reservation.payment} />
               </div>
             )}
           </div>

@@ -1,8 +1,10 @@
 import { requireAdmin } from "@/lib/route-protection";
 import { getAdminOperations } from "@/actions/dashboard/admin-operations";
 import { getOutstandingRefundLegs } from "@/actions/dashboard/cancel-and-refund";
+import { listStuckPayments } from "@/actions/dashboard/webhook-recovery";
 import { AdminOperationsClient } from "@/components/dashboard/operations/AdminOperationsClient";
 import { OutstandingRefunds } from "@/components/dashboard/operations/OutstandingRefunds";
+import { PaymentAnomalies } from "@/components/dashboard/operations/PaymentAnomalies";
 
 export const metadata = {
   title: "Opérations — Dashboard",
@@ -14,7 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function OperationsPage({ searchParams }) {
   await requireAdmin(false);
   const params = await searchParams;
-  const [result, outstandingRefunds] = await Promise.all([
+  const [result, outstandingRefunds, stuckPayments] = await Promise.all([
     getAdminOperations({
       tab: params?.tab,
       page: params?.page,
@@ -23,6 +25,7 @@ export default async function OperationsPage({ searchParams }) {
       paymentEvent: params?.paymentEvent,
     }),
     getOutstandingRefundLegs(),
+    listStuckPayments(),
   ]);
 
   return (
@@ -38,6 +41,11 @@ export default async function OperationsPage({ searchParams }) {
           and not yet handed over is the most time-sensitive thing on this
           screen, and every one of these blocks a closing e-mail. */}
       <OutstandingRefunds legs={outstandingRefunds.data} manualRefundCases={outstandingRefunds.manualRefundCases} />
+      {/* Below the refund worklist and above the ledger: these are payments
+          the old auto-refund path left stranded, not part of the current
+          manual flow. Kept visible — removing the only screen that shows them
+          would hide the discrepancy, not fix it. */}
+      <PaymentAnomalies initialPayments={stuckPayments.data ?? []} />
       <AdminOperationsClient result={result} />
     </div>
   );

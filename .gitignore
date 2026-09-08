@@ -96,5 +96,6 @@ github-actions.pub
 # own artefacts, not source). /test-results is already ignored above.
 /playwright-report-money/
 
-
-/public/uploads/
+# Playwright dashboard-suite HTML report (regenerated on every run; the
+# suite own artefacts, not source). /test-results is already ignored above.
+/playwright-report-dashboard/

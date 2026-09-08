@@ -59,9 +59,23 @@ test.describe("Meri Beauty project constraints", () => {
   test("reservation cannot skip required steps before a service is selected", async ({ page }) => {
     await page.goto("/reservation#booking");
 
-    await expect(page.locator("button").filter({ hasText: /^2$/ })).toBeDisabled();
-    await expect(page.locator("button").filter({ hasText: /^3$/ })).toBeDisabled();
-    await expect(page.getByRole("button", { name: /Suivant/i })).toBeDisabled();
+    await expect(page.locator("#booking")).toBeVisible();
+
+    // The stepper used to render clickable numbers, and this test asserted
+    // 2 and 3 were disabled. They are gone: ReservationForm's goToStep only
+    // moves backwards, so there is no forward shortcut to disable any more.
+    // What must stay true is that neither route forward exists before a
+    // choice is made.
+    await expect(page.locator("button").filter({ hasText: /^[2-8]$/ })).toHaveCount(0);
+
+    // Step 1 (CategoryStep) hides the global nav entirely — advancing happens
+    // by picking a category, never by a Next button. So "Suivant" must not be
+    // reachable here at all; if it is ever rendered on this step it must at
+    // least be disabled.
+    const next = page.getByRole("button", { name: /Suivant/i });
+    const count = await next.count();
+    if (count > 0) await expect(next.first()).toBeDisabled();
+    expect(count).toBe(0);
   });
 
   test("contact page exposes the required form fields and validation schema", async ({ page }) => {
@@ -69,7 +83,9 @@ test.describe("Meri Beauty project constraints", () => {
 
     await expect(page.getByPlaceholder("Votre nom")).toBeVisible();
     await expect(page.getByPlaceholder("votre@email.com")).toHaveAttribute("type", "email");
-    await expect(page.getByPlaceholder("Sujet de votre message")).toBeVisible();
+    // "Objet", not "Sujet" — the placeholder was aligned with its own label
+    // (home.contactSubjectPlaceholder) and this assertion was left behind.
+    await expect(page.getByPlaceholder("Objet de votre message")).toBeVisible();
     await expect(page.getByPlaceholder("Votre message...")).toBeVisible();
     await expect(page.getByRole("button", { name: /envoyer le message/i })).toBeVisible();
 

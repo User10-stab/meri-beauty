@@ -13,17 +13,31 @@ import { useTranslations } from "next-intl";
 export function PickupConfirmDialog({ order, onClose, onDone }) {
   const t = useTranslations("dashboardBoutique.pickupConfirmDialog");
   const [method, setMethod] = useState("CASH");
+  // A card collection is only accepted as EXTERNAL_TERMINAL: its receipt
+  // reference is the only thing tying the row to a real charge on the
+  // terminal, so completeOrderPickup refuses one without it.
+  const [terminalReference, setTerminalReference] = useState("");
   const [loading, startLoading] = useTransition();
 
   if (!order) return null;
 
   const needsPayment = !order.hasPayment;
+  // Belt and braces behind the callers. This used to be a bare
+  // `order.totalAmount.toFixed(2)`, and a caller that built its own payload
+  // without the amount (PickupsToVerify did) took the entire orders page down
+  // to the error boundary the moment staff clicked "elle est venue" — the
+  // handover could not be recorded at all. A dialog is not worth a page.
+  const amountToCollect = Number(order.totalAmount);
+  const hasAmount = Number.isFinite(amountToCollect);
 
   function handleConfirm() {
     startLoading(async () => {
       const result = await completeOrderPickup({
         orderId: order.id,
         method: needsPayment ? method : undefined,
+        ...(needsPayment && method === "EXTERNAL_TERMINAL"
+          ? { terminalApproved: true, terminalReference: terminalReference.trim() }
+          : {}),
       });
       if (result.success) {
         toast.success(result.message);
@@ -69,15 +83,38 @@ export function PickupConfirmDialog({ order, onClose, onDone }) {
               </label>
               <label
                 className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
-                  method === "CARD" ? "border-[#2f3a2e] bg-[#2f3a2e]/5" : "border-gray-200 hover:bg-gray-50"
+                  method === "EXTERNAL_TERMINAL" ? "border-[#2f3a2e] bg-[#2f3a2e]/5" : "border-gray-200 hover:bg-gray-50"
                 }`}
               >
-                <input type="radio" name="method" checked={method === "CARD"} onChange={() => setMethod("CARD")} />
+                <input
+                  type="radio"
+                  name="method"
+                  checked={method === "EXTERNAL_TERMINAL"}
+                  onChange={() => setMethod("EXTERNAL_TERMINAL")}
+                />
                 <CreditCard size={18} className="text-gray-500" />
                 <span className="text-sm font-medium text-gray-800">{t("card")}</span>
               </label>
             </div>
-            <p className="text-lg font-semibold text-[#2f3a2e]">{t("totalToCollect", { amount: order.totalAmount.toFixed(2) })}</p>
+
+            {method === "EXTERNAL_TERMINAL" && (
+              <input
+                value={terminalReference}
+                onChange={(event) => setTerminalReference(event.target.value)}
+                maxLength={100}
+                placeholder={t("terminalReference")}
+                aria-label={t("terminalReference")}
+                className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e]"
+              />
+            )}
+            {/* Deliberately hidden rather than shown as 0,00 € when the
+                amount is missing: a wrong figure at the till is worse than
+                none, and the server recomputes the total anyway. */}
+            {hasAmount && (
+              <p className="text-lg font-semibold text-[#2f3a2e]">
+                {t("totalToCollect", { amount: amountToCollect.toFixed(2) })}
+              </p>
+            )}
           </div>
         ) : (
           <p className="text-sm text-gray-600">
@@ -93,7 +130,10 @@ export function PickupConfirmDialog({ order, onClose, onDone }) {
           >
             {t("cancel")}
           </button>
-          <Button onClick={handleConfirm} disabled={loading}>
+          <Button
+            onClick={handleConfirm}
+            disabled={loading || (needsPayment && method === "EXTERNAL_TERMINAL" && !terminalReference.trim())}
+          >
             {loading && <Loader2 size={14} className="animate-spin" />}
             {t("confirm")}
           </Button>

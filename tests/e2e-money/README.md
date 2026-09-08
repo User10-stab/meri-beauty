@@ -112,6 +112,129 @@ clean up. That is worth knowing: a checkout that never completes is safe.
 A failure at any step *after* checkout is a real signal and should be read,
 not re-run.
 
+## The rendez-vous scenario is the Connect one
+
+`rendez-vous-connect-refund.spec.mjs` is the only scenario here that is **not**
+charged on the platform account. A rendez-vous is a Stripe Connect *direct
+charge* on the staff member's own connected account, which changes almost
+every step: the Checkout Session is created with `{ stripeAccount }`, the
+refund has to be issued on that account, and both
+`checkout.session.completed` and `charge.refunded` arrive carrying
+`event.account` that settlement must resolve back to the right staff member.
+
+The atelier specs would all keep passing with that routing completely broken,
+because they never produce an event that carries an account at all.
+
+Two consequences worth knowing before editing it:
+
+- It **cannot seed its own staff member.** `Staff.stripeAccountId` is
+  `@unique`, so a second row cannot even borrow the existing account, and
+  Express onboarding is an interactive Stripe flow. The spec finds the real
+  onboarded staff member and books against them, changing nothing about their
+  configuration. With `depositEnabled: false` that means a full online
+  payment — a deposit variant would require mutating a shared row.
+- It books by inserting the appointment rather than driving the public
+  booking wizard. The funnel is UI; what is under test here is the money.
+
+## The boutique scenario is the only one with stock
+
+`boutique-order-online-refund.spec.mjs` is not a variation on the ateliers.
+It is the only paid path where **stock** moves, and it moves in three places,
+each in a different module and a different transaction:
+
+| When | What | Where |
+|---|---|---|
+| checkout | `reservedQuantity` up | `createOrderFromCart` |
+| fulfilment | `stockQuantity` down, `reservedQuantity` back | `fulfillOrderPayment` (webhook) |
+| cancellation | `stockQuantity` back up | `open-refund-operation` |
+
+An atelier exercises none of it — seats are a count on one row. The spec
+asserts the pair at every step, including that the goods return **when the
+order is cancelled, not when the money lands**: the item is back on the shelf
+and sellable while the refund may sit in the worklist for days. A test that
+only checked stock at the end would pass either way.
+
+It uses PICKUP_PREPAID rather than shipping deliberately: Mondial Relay rate
+tiers are still a placeholder (PROJECT_REQUIREMENTS.md §2), so a shipping
+test would assert a price nobody has agreed to.
+
+## The redelivery scenario proves a duplicate is ignored
+
+`webhook-redelivery-idempotency.spec.mjs` delivers the same `charge.refunded`
+twice. Every other scenario here delivers each event exactly once, so all of
+them would keep passing with that guard removed entirely — while a duplicate
+wrote a second `REFUND` row for money that only moved once.
+
+The guard is arithmetic, not an event-id ledger: settlement subtracts what our
+transactions already record from what Stripe says was refunded in total, and
+writes the difference. That is the better design — it also absorbs a refund
+made by hand that produced no event we saw — but only if the subtraction is
+right, and nothing exercised it.
+
+Two things about the test worth keeping if it is ever edited:
+
+- It holds the invariant across a **25-second window** instead of checking
+  once. Redelivery is asynchronous, so a single read straight afterwards
+  passes by being early — exactly how this could look green with the bug
+  present.
+- It compares the REFUND **rows**, not their count. A settlement that rewrote
+  the existing row with a doubled amount keeps the count at one and is just
+  as catastrophic.
+
+`resendChargeRefundedEvent` is scoped to a specific charge on purpose. Taking
+"the most recent charge.refunded on the account" would, on a shared test key,
+usually pick up a colleague's refund — passing while proving nothing, and
+replaying a stranger's settlement into this database on the way past.
+
+## The credit-note scenario is the only B2B refund
+
+`credit-note-delivery.spec.mjs` is the only scenario here that produces a
+credit note somebody actually receives, and it has to be B2B: a credit note
+reverses an invoice, and an invoice is only issued to a buyer with a
+validated VAT number. The other three refund scenarios are all B2C, so their
+`assertNumberingContiguous` call is a no-op — correct, but not coverage.
+
+It asserts the **mailbox**, not `CreditNote.emailSentAt`. That column records
+what the application believed; `sendEmail` resolves `{ success: false }` on a
+provider failure rather than throwing, so the two can disagree — and a B2B
+customer cannot reclaim VAT on a document they were never sent. The column is
+only checked once the PDF has been seen in Mailpit, and the attachment's size
+is asserted too, because a zero-byte PDF satisfies "has an attachment" and is
+useless to the recipient.
+
+Two hazards if you edit it:
+
+- **Sending is two clicks from sending the wrong document.** The invoice
+  cell's "Gérer l'envoi" and the drawer's "Envoyer la note de crédit" open
+  the same dialog with different `kind`s. Clicking the wrong one e-mails a
+  real invoice to a real address (T10).
+- **Every run burns a legal number.** It issues a real credit note into the
+  gapless series, and those are never deleted. When it fails, read the
+  `error-context.md` snapshot rather than re-running to see if it was a flake
+  (T12).
+
+## The formation scenario proves money does *not* move
+
+`formation-non-refundable.spec.mjs` is the only scenario here whose point is
+that nothing is refunded. `PROJECT_REQUIREMENTS.md` §2 records that a
+formation's deposit **and** balance are non-refundable regardless of
+attendance, and `cancelFormationReservation` implements that: an ordinary
+cancellation returns nothing, and `refundPayment` is an admin-discretion
+exception requiring a written reason.
+
+"No refund" is an absence, and an absence is what a passing test can most
+easily assert for the wrong reason — a booking that never got paid at all
+would satisfy "no RefundOperation exists". So the assertions are positive
+first: the payment is still `PAID`, the collected total is unchanged, and
+**Stripe itself still reports nothing refunded**. Only then the absence.
+
+It also asserts the disclosure on the booking page ("ne sont remboursables en
+aucun cas") — not decoration, since that sentence is what makes keeping the
+money defensible, and it sits on the same screen as the pay button.
+
+§4 flags this policy for legal re-check. That is a reason to pin it: if it
+changes, somebody has to change an assertion and notice.
+
 ## A known limitation
 
 A **mixed-method refund is currently unreachable through the UI.**

@@ -4,11 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Package, Sparkles, GraduationCap, Loader2, FileDown, ExternalLink, Truck, AlertTriangle } from "lucide-react";
-import { cancelMyOrder } from "@/actions/boutique/orders";
+import { cancelMyOrder, submitOrderCancellationRequest } from "@/actions/boutique/orders";
 import { submitReservationCancellationRequest } from "@/actions/reservations/cancellation-request";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 
-const CUSTOMER_CANCELLABLE_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP"];
+const CUSTOMER_CANCELLABLE_STATUSES = ["PENDING_PICKUP"];
+const CUSTOMER_CANCELLATION_REQUESTABLE_STATUSES = ["PAID", "PROCESSING", "READY_FOR_PICKUP"];
 
 const ORDER_STATUS_LABELS = {
   PENDING_PAYMENT: "Paiement en attente",
@@ -100,6 +101,36 @@ function InvoiceLink({ invoice }) {
   );
 }
 
+function PaymentTicketLink({ payment }) {
+  if (!payment?.id || !payment.transactions?.length) return null;
+  return (
+    <a
+      href={`/api/payments/${payment.id}/ticket`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink/60 hover:text-gold"
+    >
+      <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+      Télécharger le ticket de caisse
+    </a>
+  );
+}
+
+function OrderTicketLink({ order }) {
+  if (!order?.payment?.transactions?.length) return null;
+  return (
+    <a
+      href={`/api/orders/${order.id}/ticket`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink/60 hover:text-gold"
+    >
+      <FileDown className="h-3.5 w-3.5" strokeWidth={1.75} />
+      Télécharger le ticket de caisse
+    </a>
+  );
+}
+
 function EmptyState({ icon: Icon, text }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-ink/15 bg-white/50 py-16 text-center">
@@ -113,7 +144,15 @@ function OrderCard({ order }) {
   const router = useRouter();
   const [cancelling, setCancelling] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [requestingCancellation, setRequestingCancellation] = useState(false);
+  const [cancellationReason, setCancellationReason] = useState("");
+  const [submittingCancellationRequest, setSubmittingCancellationRequest] = useState(false);
   const canCancel = CUSTOMER_CANCELLABLE_STATUSES.includes(order.status);
+  const cancellationRequest = order.cancellationRequest ?? null;
+  const canRequestCancellation =
+    CUSTOMER_CANCELLATION_REQUESTABLE_STATUSES.includes(order.status) &&
+    cancellationRequest?.status !== "PENDING" &&
+    cancellationRequest?.status !== "APPROVED";
 
   async function handleCancel() {
     setCancelling(true);
@@ -125,6 +164,22 @@ function OrderCard({ order }) {
       toast.error(result.message);
       setCancelling(false);
       setConfirming(false);
+    }
+  }
+
+  async function handleCancellationRequest() {
+    setSubmittingCancellationRequest(true);
+    try {
+      const result = await submitOrderCancellationRequest({ orderId: order.id, reason: cancellationReason });
+      if (result.success) {
+        toast.success(result.message);
+        setRequestingCancellation(false);
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    } finally {
+      setSubmittingCancellationRequest(false);
     }
   }
 
@@ -147,12 +202,14 @@ function OrderCard({ order }) {
         ))}
       </ul>
 
-      <div className="mt-3 flex items-center justify-between border-t border-ink/8 pt-3">
-        {order.pickupCode && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(order.status) ? (
-          <span className="text-[11px] text-ink/45">Code de retrait : <span className="font-mono font-semibold text-ink/70">{order.pickupCode}</span></span>
-        ) : (
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink/8 pt-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {order.pickupCode && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(order.status) && (
+            <span className="text-[11px] text-ink/45">Code de retrait : <span className="font-mono font-semibold text-ink/70">{order.pickupCode}</span></span>
+          )}
           <InvoiceLink invoice={order.payment?.invoice} />
-        )}
+          <OrderTicketLink order={order} />
+        </div>
         <span className="text-sm font-bold text-gold">{formatPrice(order.totalAmount)}</span>
       </div>
 
@@ -194,6 +251,23 @@ function OrderCard({ order }) {
         </div>
       )}
 
+      {order.status === "PENDING_PAYMENT" && (
+        <p className="mt-3 border-t border-ink/8 pt-3 text-xs text-ink/50">
+          Cette tentative de paiement sera automatiquement annulée si le paiement n&apos;est pas finalisé.
+        </p>
+      )}
+
+      {cancellationRequest?.status === "PENDING" && (
+        <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Votre demande d&apos;annulation est en cours d&apos;examen. La commande et le paiement restent inchangés jusque-là.
+        </p>
+      )}
+      {cancellationRequest?.status === "REJECTED" && (
+        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          Votre précédente demande a été refusée.{cancellationRequest.decisionNote ? ` Message de l'équipe : ${cancellationRequest.decisionNote}` : ""}
+        </p>
+      )}
+
       {canCancel && (
         <div className="mt-3 flex items-center justify-end gap-2 border-t border-ink/8 pt-3">
           {confirming ? (
@@ -224,6 +298,44 @@ function OrderCard({ order }) {
               className="text-xs font-semibold text-red-600 hover:text-red-700"
             >
               Annuler la commande
+            </button>
+          )}
+        </div>
+      )}
+
+      {canRequestCancellation && (
+        <div className="mt-3 border-t border-ink/8 pt-3">
+          {requestingCancellation ? (
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+              <p className="text-xs text-amber-900">
+                Votre demande sera examinée par l&apos;équipe. Aucun remboursement n&apos;est effectué avant son accord.
+              </p>
+              <textarea
+                value={cancellationReason}
+                onChange={(event) => setCancellationReason(event.target.value)}
+                rows={3}
+                maxLength={1000}
+                placeholder="Expliquez brièvement votre demande"
+                className="w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-ink outline-none focus:border-gold"
+              />
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setRequestingCancellation(false)} disabled={submittingCancellationRequest} className="text-xs font-semibold text-ink/60">
+                  Retour
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancellationRequest}
+                  disabled={submittingCancellationRequest || cancellationReason.trim().length < 10}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-[#2f3a2e] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {submittingCancellationRequest && <Loader2 className="h-3 w-3 animate-spin" />}
+                  Envoyer la demande
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setRequestingCancellation(true)} className="text-xs font-semibold text-red-600 hover:text-red-700">
+              Demander l&apos;annulation
             </button>
           )}
         </div>
@@ -440,7 +552,10 @@ function ReservationCard({ reservation, kind }) {
           <span className="text-sm font-bold text-gold">{formatPrice(reservation.totalPrice)}</span>
         </div>
 
-        <InvoiceLink invoice={reservation.payment?.invoice} />
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2">
+          <InvoiceLink invoice={reservation.payment?.invoice} />
+          <PaymentTicketLink payment={reservation.payment} />
+        </div>
 
         <CheckInTicket reservation={reservation} typeLabel={typeLabel} />
 

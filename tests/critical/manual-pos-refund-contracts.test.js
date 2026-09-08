@@ -45,17 +45,16 @@ describe("POS return and cancellation safeguards", () => {
     expect(returns).toContain("method: originalMethod");
   });
 
-  test("cancelling a paid physical POS order cannot skip refund confirmation", () => {
-    expect(orders).toContain("requiresManualRefundConfirmation: true");
-    expect(orders).toContain("validateManualRefundConfirmation");
-    expect(orders).toContain('transactionType: "REFUND"');
-    expect(orders).toContain("manualReference: originalMethod === \"CARD\"");
+  test("cancelling a paid physical POS order queues the refund for Operations", () => {
+    expect(orders).toContain("queueManualRefund(tx");
+    expect(orders).not.toContain("requiresManualRefundConfirmation: true");
+    expect(orders).not.toContain("stripe.refunds.create");
   });
 
-  test("dashboard asks the cashier for proof before completing physical refunds", () => {
+  test("only the dedicated returns screen asks the cashier for proof before completing physical refunds", () => {
     expect(returnsUi).toContain("manualRefundConfirmed");
     expect(returnsUi).toContain("Référence du ticket terminal (obligatoire)");
-    expect(orderUi).toContain("manualRefundConfirmed");
-    expect(orderUi).toContain("Référence du ticket terminal (obligatoire)");
+    expect(orderUi).not.toContain("manualRefundConfirmed");
+    expect(orderUi).toContain("Aucun argent ne sera envoyé automatiquement");
   });
 });

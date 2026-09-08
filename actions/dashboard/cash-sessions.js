@@ -16,8 +16,9 @@ import { captureError } from "@/lib/monitoring";
  * gave a running expected total or a counted-vs-expected reconciliation —
  * a shortfall was only findable by recounting every sale one by one.
  *
- * Same permission as the register itself (DASHBOARD_PERMISSIONS.ORDERS) —
- * whoever can run the till can open/close it.
+ * Opening is part of running the counter: a cashier must be able to begin a
+ * shift without being granted access to prior counts, discrepancies, or
+ * closing controls. Those financial-review capabilities remain separate.
  */
 async function requireCashSessionAccess() {
   const session = await auth();
@@ -25,6 +26,24 @@ async function requireCashSessionAccess() {
   if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.CASH_REGISTER))) {
     return { error: "Accès non autorisé." };
   }
+  return { session };
+}
+
+/**
+ * A cashier can open a till from the POS, while the cash-register permission
+ * remains required to inspect or close sessions. Keep this guard server-side:
+ * the POS page hiding or showing its opening form is not an authorization
+ * boundary.
+ */
+async function requireCashSessionOpeningAccess() {
+  const session = await auth();
+  if (!session?.user) return { error: "Non authentifié." };
+
+  const [canUsePos, canManageCashRegister] = await Promise.all([
+    hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE),
+    hasDashboardPermission(session.user, STAFF_PERMISSIONS.CASH_REGISTER),
+  ]);
+  if (!canUsePos && !canManageCashRegister) return { error: "Accès non autorisé." };
   return { session };
 }
 
@@ -93,7 +112,7 @@ export async function getCurrentCashSession() {
  * fetching the whole session history first.
  */
 export async function getSuggestedOpeningFloat() {
-  const guard = await requireCashSessionAccess();
+  const guard = await requireCashSessionOpeningAccess();
   if (guard.error) return { success: false, message: guard.error, data: null };
 
   const lastClosed = await prisma.cashSession.findFirst({
@@ -105,7 +124,7 @@ export async function getSuggestedOpeningFloat() {
 }
 
 export async function openCashSession(openingFloat) {
-  const guard = await requireCashSessionAccess();
+  const guard = await requireCashSessionOpeningAccess();
   if (guard.error) return { success: false, message: guard.error };
 
   const amount = Number(openingFloat);

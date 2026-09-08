@@ -102,6 +102,11 @@ export async function getAllAppointments() {
       customerPhone: appt.user?.phone ?? "—",
       // Service & staff
       serviceName: appt.staffService?.service?.name ?? "—",
+      // The quoted price, needed even when no Payment row exists: it is what
+      // the counter collects when the appointment was booked "payer au
+      // salon". Without it the screen cannot tell a free service from an
+      // unrecorded paid one. The calendar row calls the same figure `price`.
+      servicePrice: appt.staffService?.price ? Number(appt.staffService.price) : 0,
       staffName: appt.staffService?.staff?.user?.fullName ?? "—",
       // Scheduling
       date: appt.date?.toISOString() ?? null,

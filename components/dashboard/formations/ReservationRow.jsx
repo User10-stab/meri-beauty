@@ -55,7 +55,7 @@ function formatSessionDate(date) {
   });
 }
 
-export function ReservationRow({ row, onDelete, onSettle, onNoShow }) {
+export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow }) {
   const priceFormatted = (value) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
 
@@ -117,9 +117,8 @@ export function ReservationRow({ row, onDelete, onSettle, onNoShow }) {
         </div>
       </td>
 
-      {/* Cancel is the only action — admin-only internal tool, no session/seat change flow.
-          Same pattern as the atelier row: no client-side status guard, cancelFormationReservation
-          itself rejects an already-cancelled reservation and surfaces that as a toast. */}
+      {/* Cancellation/session moves remain admin-only. Closing and no-show are
+          exposed only where the server granted the row-level capability. */}
       <td className="px-4 py-4 pr-5 align-middle whitespace-nowrap">
         <div className="flex items-center justify-end gap-2">
           {/* Only a CONFIRMED booking can be settled or marked absent — the
@@ -144,7 +143,7 @@ export function ReservationRow({ row, onDelete, onSettle, onNoShow }) {
               Absent
             </button>
           )}
-          <RowActions row={row} onDelete={onDelete} />
+          <RowActions row={row} onEdit={onEdit} onDelete={onDelete} />
         </div>
       </td>
     </tr>

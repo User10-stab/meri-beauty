@@ -6,7 +6,6 @@ import { Wallet, Lock, LockOpen, History, BookOpen, Landmark, Calculator } from 
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
 import { openCashSession, closeCashSession, listCashSessions } from "@/actions/dashboard/cash-sessions";
-import { CashMovementPanel } from "@/components/dashboard/boutique/CashMovementPanel";
 import { DenominationCounter } from "@/components/dashboard/boutique/DenominationCounter";
 
 function formatEuro(value) {
@@ -43,7 +42,7 @@ function StatCard({ icon, label, value }) {
   );
 }
 
-export function CashSessionClient({ initialCurrent, initialHistory, initialSummary = null, initialMovements = [] }) {
+export function CashSessionClient({ initialCurrent, initialHistory, initialSummary = null }) {
   const [current, setCurrent] = useState(initialCurrent);
   const [history, setHistory] = useState(initialHistory);
   const [summary, setSummary] = useState(initialSummary);
@@ -160,9 +159,12 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
                 <Lock size={18} className="text-[#2f3a2e]" />
                 <h2 className="font-semibold text-gray-900 dark:text-white">Session ouverte</h2>
               </div>
+              {/* Mouvements de caisse and dépôts bancaires both live in this
+                  opening's book now, so this is the way in to the day's
+                  actual work — not a footnote link. */}
               <Link
                 href={`/dashboard/boutique/caisse/${current.id}`}
-                className="inline-flex items-center gap-1 text-sm font-medium text-[#2f3a2e] hover:underline dark:text-white"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3 py-2 text-sm font-semibold text-white hover:bg-opacity-90"
               >
                 <BookOpen size={14} />
                 Livre de caisse
@@ -170,6 +172,9 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
             </div>
             <p className="text-sm text-gray-500 dark:text-dark-6">
               Ouverte le {formatDateTime(current.openedAt)} par {current.openedBy?.fullName ?? "—"} — fond de caisse {formatEuro(current.openingFloat)}.
+            </p>
+            <p className="text-xs text-gray-400">
+              Mouvements de caisse et dépôts bancaires de cette ouverture se trouvent dans son livre de caisse.
             </p>
             <div className="flex flex-wrap items-end gap-3 border-t border-gray-100 pt-4 dark:border-dark-3">
               <div>
@@ -207,8 +212,6 @@ export function CashSessionClient({ initialCurrent, initialHistory, initialSumma
           </div>
         )}
       </div>
-
-      {current && <CashMovementPanel initialMovements={initialMovements} />}
 
       <div>
         <div className="mb-3 flex items-center gap-2">

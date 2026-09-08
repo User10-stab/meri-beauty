@@ -56,7 +56,10 @@ describe("the Stripe webhook route also flags instead of refunding, for every fa
 
   test("every failed-sale branch, including legal-data fulfilment failures, calls flagPaymentForManualRefund", () => {
     const flagCalls = src.match(/await flagPaymentForManualRefund\(\s*session,/g)?.length ?? 0;
-    expect(flagCalls).toBe(11);
+    // Includes a legacy session-change fee paid after a newer direct admin
+    // transfer: the fee is flagged for manual review instead of moving the
+    // reservation back to the stale target session.
+    expect(flagCalls).toBe(12);
   });
 
   test("keeps the Stripe Connect account on appointment manual-refund cases", () => {

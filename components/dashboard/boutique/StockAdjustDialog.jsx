@@ -8,35 +8,47 @@ import { recordStockMovement } from "@/actions/boutique/stock";
 import { useTranslations } from "next-intl";
 
 /**
- * @param {{ variant: object|null, onClose: () => void, onAdjusted: () => void }} props
+ * `recordStockMovement` refuses every type except SALON_USAGE for a STAFF
+ * session — a deliberate server-side guard, since the UI is not a security
+ * boundary. This dialog used to offer all four types to everybody anyway,
+ * with RESTOCK selected by default, so a staff member with the stock
+ * permission opened it, filled it in and was told "Accès non autorisé" with
+ * no indication of which type they were allowed to use. The action's own
+ * comment claimed the UI already filtered this; it did not.
+ *
+ * @param {{ variant: object|null, userRole: string|null, onClose: () => void, onAdjusted: () => void }} props
  */
-export function StockAdjustDialog({ variant, onClose, onAdjusted }) {
+export function StockAdjustDialog({ variant, userRole = null, onClose, onAdjusted }) {
   const t = useTranslations("dashboardBoutique.stock.adjustDialog");
-  const [type, setType] = useState("RESTOCK");
+  const isStaffOnly = userRole === "STAFF";
+  const [type, setType] = useState(isStaffOnly ? "SALON_USAGE" : "RESTOCK");
   const [quantity, setQuantity] = useState("");
   const [reason, setReason] = useState("");
   const [loading, startLoading] = useTransition();
 
-  const TYPES = [
+  const ALL_TYPES = [
     { value: "RESTOCK", label: t("types.RESTOCK"), hint: t("types.RESTOCK_hint"), sign: "+" },
     { value: "LOSS", label: t("types.LOSS"), hint: t("types.LOSS_hint"), sign: "−" },
     { value: "SALON_USAGE", label: t("types.SALON_USAGE"), hint: t("types.SALON_USAGE_hint"), sign: "−" },
     { value: "ADJUSTMENT", label: t("types.ADJUSTMENT"), hint: t("types.ADJUSTMENT_hint"), sign: "−" },
   ];
+  // Mirrors the server guard rather than duplicating a policy: staff record
+  // what they took off the shelf for a service, and nothing else.
+  const TYPES = isStaffOnly ? ALL_TYPES.filter((option) => option.value === "SALON_USAGE") : ALL_TYPES;
 
   useEffect(() => {
     if (!variant) return;
-    setType("RESTOCK");
+    setType(isStaffOnly ? "SALON_USAGE" : "RESTOCK");
     setQuantity("");
     setReason("");
-  }, [variant]);
+  }, [variant, isStaffOnly]);
 
   if (!variant) return null;
 
   const selected = TYPES.find((t) => t.value === type);
   const projected =
     quantity && !isNaN(quantity)
-      ? type === "RESTOCK"
+      ? selected?.sign === "+"
         ? variant.stockQuantity + Number(quantity)
         : variant.stockQuantity - Number(quantity)
       : null;

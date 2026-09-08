@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BookOpen, FileText } from "lucide-react";
 import { getCashBookLedger } from "@/actions/dashboard/cash-book";
+import { listSessionWithdrawals } from "@/actions/dashboard/bank-deposits";
+import { CashMovementPanel } from "@/components/dashboard/boutique/CashMovementPanel";
+import { SessionBankDepositPanel } from "@/components/dashboard/boutique/SessionBankDepositPanel";
 
 function formatEuro(value) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(value);
@@ -21,9 +24,40 @@ const ROW_STYLES = {
   WITHDRAWAL: "text-red-600",
 };
 
-export function CashBookClient({ ledger: initialLedger }) {
+/**
+ * Where a row's N° pièce links to, so a controller reading the book can pull
+ * up the actual document behind the line — not just its own sale (link with
+ * ?transactionId, which /api/payments/[id]/ticket resolves to exactly one
+ * collection), but for a REFUND too, since that's the row type where "what
+ * did this money come from" traceability matters most. collectionTicketFields
+ * rejects a REFUND transactionType and the payments-ticket route only ever
+ * queries DEPOSIT/FINAL_PAYMENT collections, so a REFUND's own transactionId
+ * can never resolve there — it links to the payment's ticket without one
+ * instead, opening whatever collection(s) are on file for it. A drawer
+ * movement (CashMovement — EXPENSE/CASH_IN/WITHDRAWAL) has no Payment at
+ * all, so it never gets a link.
+ */
+function pieceNumberHref(row) {
+  if (row.kind !== "SALE" && row.kind !== "REFUND") return null;
+  if (row.orderId) return `/api/orders/${row.orderId}/ticket`;
+  if (row.paymentId && row.kind === "SALE") return `/api/payments/${row.paymentId}/ticket?transactionId=${row.transactionId}`;
+  if (row.paymentId) return `/api/payments/${row.paymentId}/ticket`;
+  return null;
+}
+
+export function CashBookClient({ ledger: initialLedger, movements = [], withdrawals = [] }) {
   const [ledger, setLedger] = useState(initialLedger);
+  const [sessionWithdrawals, setSessionWithdrawals] = useState(withdrawals);
   const { session, rows, totals } = ledger;
+
+  const reload = useCallback(() => {
+    getCashBookLedger(session.id).then((result) => {
+      if (result.success) setLedger(result.data);
+    }).catch(() => {});
+    listSessionWithdrawals(session.id).then((result) => {
+      if (result.success) setSessionWithdrawals(result.data);
+    }).catch(() => {});
+  }, [session.id]);
 
   // A closed session's ledger is a frozen historical record — nothing to
   // poll for. An open one changes every time a sale lands anywhere (POS,
@@ -102,10 +136,25 @@ export function CashBookClient({ ledger: initialLedger }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-dark-3">
-            {rows.map((row, index) => (
+            {rows.map((row, index) => {
+              const href = pieceNumberHref(row);
+              return (
               <tr key={`${row.kind}-${row.pieceNumber ?? index}-${row.date}`}>
                 <td className="whitespace-nowrap px-4 py-3">{formatDateTime(row.date)}</td>
-                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">{row.pieceNumber ?? "—"}</td>
+                <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
+                  {href ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[#2f3a2e] hover:underline dark:text-white"
+                    >
+                      {row.pieceNumber}
+                    </a>
+                  ) : (
+                    row.pieceNumber ?? "—"
+                  )}
+                </td>
                 <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">{row.reference ?? "—"}</td>
                 <td className={`px-4 py-3 ${ROW_STYLES[row.kind] ?? ""}`}>{row.label}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-right">{row.entree ? formatEuro(row.entree) : "—"}</td>
@@ -114,10 +163,27 @@ export function CashBookClient({ ledger: initialLedger }) {
                   {formatEuro(row.solde)}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
+
+      {/* Both panels belong to this opening, so they live with it rather than
+          on the index page (movements) and a separate screen (deposits) —
+          recording a withdrawal and walking it to the bank is one errand, and
+          it used to span three pages. A closed session keeps the deposit
+          panel: cash withdrawn on Friday is routinely banked on Monday, long
+          after the till it came from was closed. Recording a *movement*
+          against a closed till is refused server-side, so that panel is only
+          rendered while the session is open. */}
+      {!session.closedAt && <CashMovementPanel initialMovements={movements} onRecorded={reload} />}
+
+      <SessionBankDepositPanel
+        withdrawals={sessionWithdrawals}
+        onChanged={reload}
+        sessionOpen={!session.closedAt}
+      />
     </div>
   );
 }

@@ -134,23 +134,24 @@ describe("point-of-sale security contracts", () => {
     expect(pos).toContain("Order.userId");
   });
 
-  test("the counter can sell an ad-hoc service line alongside products, with no stock/variant lookup for it", () => {
+  test("ad-hoc service lines are removed from the shop-order till path", () => {
     expect(pos).toContain('item.type !== "PRODUCT"');
-    expect(pos).toContain("serviceLines = items.filter");
-    expect(pos).toContain("serviceSubtotal");
-    expect(pos).toContain("...pricedServiceLines.map((item) => ({");
+    expect(pos).toContain('items.some((item) => item.type === "SERVICE")');
+    expect(pos).not.toContain("serviceLines = items.filter");
+    expect(pos).not.toContain("pricedServiceLines");
 
     const validation = source("lib/validations/point-of-sale.js");
     expect(validation).toContain('type: z.literal("PRODUCT")');
-    expect(validation).toContain('type: z.literal("SERVICE")');
-    expect(validation).toContain("discriminatedUnion");
-
-    const schema = source("prisma/schema.prisma");
-    expect(schema).toContain("variantId String?");
+    expect(validation).not.toContain('type: z.literal("SERVICE")');
 
     const ui = source("components/dashboard/boutique/PointOfSaleClient.jsx");
-    expect(ui).toContain("addServiceLine");
-    expect(ui).toContain('type: "SERVICE"');
+    expect(ui).not.toContain("addServiceLine");
+    expect(ui).not.toContain('type: "SERVICE"');
+
+    const counter = source("actions/counter/walk-in-service.js");
+    expect(counter).toContain("staffService.findMany");
+    expect(counter).toContain("createCounterWalkInService");
+    expect(counter).toContain("completeAppointment(appointment.id");
   });
 
   test("a walk-in client de passage sale creates no account and issues a ticket instead of an invoice", () => {

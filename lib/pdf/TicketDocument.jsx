@@ -71,11 +71,11 @@ function estimateTicketHeight(lines) {
   );
 }
 
-export function TicketDocument({ ticket, contact = null }) {
+function TicketPage({ ticket, contact = null }) {
   const pageHeight = estimateTicketHeight(ticket.lines);
+  const ticketNumber = ticket.ticketNumber ?? `T-C-${ticket.orderNumber}`;
 
   return (
-    <Document title={`Ticket ${ticket.orderNumber}`} author={ticket.sellerName}>
       <Page size={[WIDTH, pageHeight]} style={styles.page}>
         <Text style={styles.shopName}>{ticket.sellerName}</Text>
         {ticket.sellerAddress ? <Text style={styles.muted}>{ticket.sellerAddress}</Text> : null}
@@ -84,7 +84,11 @@ export function TicketDocument({ ticket, contact = null }) {
         <Rule />
 
         <Text style={styles.title}>TICKET DE CAISSE</Text>
-        <Text style={styles.meta}>N° {ticket.orderNumber} — {formatDate(ticket.issuedAt)}</Text>
+        <Text style={styles.meta}>N° {ticketNumber} — {formatDate(ticket.issuedAt)}</Text>
+        {/* Cash-only: the livre de caisse line this collection produced.
+            Absent for CARD/ONLINE, which never enter that book. */}
+        {ticket.pieceNumber ? <Text style={styles.meta}>N° pièce {ticket.pieceNumber}</Text> : null}
+        {ticket.orderNumber != null ? <Text style={styles.meta}>Commande n° {ticket.orderNumber}</Text> : null}
 
         <Rule />
 
@@ -123,7 +127,7 @@ export function TicketDocument({ ticket, contact = null }) {
         <Text style={styles.thanks}>Merci de votre visite !</Text>
         {ticket.invoiceNumber ? (
           <Text style={styles.notice}>
-            Ce ticket accompagne votre facture n° {ticket.invoiceNumber}, transmise séparément.
+            Facture liée : {ticket.invoiceNumber}. Ce ticket ne remplace pas la facture.
           </Text>
         ) : (
           <Text style={styles.notice}>
@@ -136,6 +140,14 @@ export function TicketDocument({ ticket, contact = null }) {
         </Text>
         {contact?.email ? <Text style={styles.notice}>{contact.email}</Text> : null}
       </Page>
+  );
+}
+
+export function TicketDocument({ ticket, contact = null }) {
+  const tickets = Array.isArray(ticket) ? ticket : [ticket];
+  return (
+    <Document title="Tickets de caisse" author={tickets[0]?.sellerName}>
+      {tickets.map((item) => <TicketPage key={item.ticketNumber ?? item.orderNumber} ticket={item} contact={contact} />)}
     </Document>
   );
 }

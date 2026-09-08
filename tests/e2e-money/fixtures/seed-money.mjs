@@ -140,6 +140,206 @@ export async function seedWorkshopSession({
 }
 
 /**
+ * A formation with a deposit split — the module with no e2e coverage at all.
+ *
+ * Formations are not ateliers with a different label. Their money policy is
+ * the opposite one: `PROJECT_REQUIREMENTS.md` §2 records that **the deposit
+ * and the balance are both non-refundable regardless of attendance**, and
+ * `cancelFormationReservation` implements exactly that — cancelling refunds
+ * nothing unless an admin passes `refundPayment` with a written reason.
+ *
+ * That policy is also the one §4 flags for legal re-check, which is a good
+ * reason to have it pinned by a test: whatever it becomes, somebody should
+ * have to change an assertion to change it.
+ *
+ * PUBLIC rather than PRIVATE: a PRIVATE formation is capped at exactly one
+ * seat (enforced in Zod), so it cannot exercise a seat count at all.
+ *
+ * @param {{ price?: number, capacity?: number, depositPercentage?: number, daysAhead?: number }} [options]
+ */
+export async function seedFormationSession({
+  price = 120,
+  capacity = 6,
+  depositPercentage = 50,
+  daysAhead = 45,
+} = {}) {
+  const runId = getRunId();
+
+  const formation = await prisma.formation.create({
+    data: {
+      type: "PUBLIC",
+      title: `E2E Formation ${runId}`,
+      description: "Formation créée automatiquement par la suite money e2e.",
+      price,
+      duration: 240,
+      capacity,
+      status: "PUBLISHED",
+      depositPercentage,
+    },
+  });
+
+  const session = await prisma.formationSession.create({
+    data: {
+      formationId: formation.id,
+      startDate: farFutureDate(daysAhead),
+      capacity,
+      status: "SCHEDULED",
+    },
+  });
+
+  return { formation, session, price, depositPercentage };
+}
+
+/**
+ * A published product with stock, for the boutique checkout.
+ *
+ * Created fresh rather than picked from the catalogue for the same reason
+ * workshops are: buying a colleague's product consumes real stock, and "the
+ * one order for this product" has to be unambiguous for the assertions to
+ * mean anything.
+ *
+ * The stock numbers are the point of the boutique scenario. A prepaid order
+ * moves them twice — `reservedQuantity` up at checkout, then at fulfilment
+ * `stockQuantity` down and `reservedQuantity` back — and a cancellation moves
+ * `stockQuantity` back up. None of that happens on an atelier, so none of it
+ * is covered by any other scenario here.
+ *
+ * @param {{ label?: string, price?: number, stockQuantity?: number }} [options]
+ */
+export async function seedShopProduct({ label = "boutique", price = 32, stockQuantity = 12 } = {}) {
+  const runId = getRunId();
+  const slug = `e2e-${label}-${runId}`.toLowerCase();
+
+  const product = await prisma.product.create({
+    data: {
+      name: `E2E Produit ${label} ${runId}`,
+      slug,
+      description: "Produit créé automatiquement par la suite money e2e.",
+      status: "ACTIVE",
+      variants: {
+        create: {
+          name: "Standard",
+          sku: `E2E-${runId}-${label}`.toUpperCase(),
+          price,
+          costPrice: Number((price / 2).toFixed(2)),
+          stockQuantity,
+          reservedQuantity: 0,
+          isActive: true,
+        },
+      },
+    },
+    include: { variants: true },
+  });
+
+  return { product, variant: product.variants[0], slug, price };
+}
+
+/** The two numbers every boutique stock assertion in this suite is about. */
+export async function readVariantStock(variantId) {
+  const variant = await prisma.productVariant.findUnique({
+    where: { id: variantId },
+    select: { stockQuantity: true, reservedQuantity: true },
+  });
+  return { stock: variant.stockQuantity, reserved: variant.reservedQuantity };
+}
+
+/**
+ * An accepted rendez-vous on the one staff member who can actually take
+ * money — and deliberately not a seeded one.
+ *
+ * Appointments are Stripe Connect *direct charges* on the staff member's own
+ * connected account, which is the whole reason this scenario exists: it is a
+ * different code path from every atelier flow already covered, right through
+ * to `charge.refunded` arriving with an `event.account` that has to be
+ * matched back to the right staff member.
+ *
+ * A connected account cannot be invented. `Staff.stripeAccountId` is
+ * `@unique`, so a second Staff row cannot even borrow the existing one, and
+ * onboarding a fresh Express account is an interactive Stripe flow. So this
+ * finds the real onboarded staff member and books against them.
+ *
+ * Nothing about that staff member is modified. The scenario is therefore
+ * whatever their configuration allows — with `depositEnabled: false` that is
+ * a full online payment, which is exactly the case worth covering first.
+ *
+ * The appointment itself is inserted rather than booked through the public
+ * wizard: the booking funnel is UI, and what is under test here is the money.
+ */
+export async function seedConnectAppointment({ customer, daysAhead = 40 } = {}) {
+  const staff = await prisma.staff.findFirst({
+    where: {
+      stripeAccountId: { not: null },
+      stripeChargesEnabled: true,
+      stripePayoutsEnabled: true,
+      isDeleted: false,
+    },
+    include: {
+      user: { select: { fullName: true } },
+      staffServices: {
+        where: { isActive: true },
+        include: { service: { select: { name: true } } },
+        orderBy: { price: "desc" },
+      },
+    },
+  });
+
+  if (!staff) {
+    throw new Error(
+      "No staff member has a Stripe Connect account with charges and payouts enabled. Appointments are " +
+        "direct charges on the staff member's own account, so this scenario cannot run without one, and " +
+        "one cannot be seeded (Staff.stripeAccountId is unique and Express onboarding is interactive).",
+    );
+  }
+
+  // Priced services only: several of the seeded StaffService rows are 0 €,
+  // which Stripe will not accept as a line item and which would prove nothing
+  // about a payment in any case.
+  const staffService = staff.staffServices.find((row) => Number(row.price) > 0);
+  if (!staffService) {
+    throw new Error(
+      `Staff ${staff.user?.fullName ?? staff.id} has a connected account but no service priced above 0 €.`,
+    );
+  }
+
+  const price = Number(staffService.price);
+  const duration = staffService.duration > 0 ? staffService.duration : 60;
+
+  // `Appointment_no_overlap` is a Postgres exclusion constraint: this staff
+  // member cannot hold two overlapping appointments. Every run books the same
+  // person, so collisions are the normal case, not the exception.
+  let appointment = null;
+  let attempt = 0;
+  while (!appointment) {
+    const start = new Date();
+    start.setDate(start.getDate() + daysAhead);
+    start.setHours(10, 0, 0, 0);
+    start.setMinutes(start.getMinutes() + attempt * duration);
+    const end = new Date(start.getTime() + duration * 60 * 1000);
+
+    try {
+      appointment = await prisma.appointment.create({
+        data: {
+          userId: customer.id,
+          staffServiceId: staffService.id,
+          staffId: staff.id,
+          date: start,
+          startTime: start,
+          endTime: end,
+          // ACCEPTED is where the salon has said yes and the customer has not
+          // yet paid — the exact state /appointment/[id]/payment exists for.
+          status: "ACCEPTED",
+        },
+      });
+    } catch (error) {
+      if (!/Appointment_no_overlap|23P01/.test(error.message ?? "") || attempt >= 20) throw error;
+      attempt += 1;
+    }
+  }
+
+  return { staff, staffService, appointment, price, serviceName: staffService.service.name };
+}
+
+/**
  * Deletes exactly what one run created, in foreign-key-safe order.
  *
  * Invoices and credit notes are deliberately NOT touched — they carry gapless

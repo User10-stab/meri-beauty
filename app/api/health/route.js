@@ -6,12 +6,16 @@ import { isValidCronSecret } from "@/lib/cron-auth";
 /**
  * Liveness + scheduler heartbeat.
  *
- * The background jobs (reminders, order/hold expiry, refund retries) run
- * in-process on a 5-minute interval started from instrumentation.js — there is
- * no external cron on the OVH box, PM2 just keeps the Node process alive. That
- * works, but it was unobservable: if the process came back without the
- * scheduler, or the interval was lost, nothing anywhere said so and the first
+ * The background jobs (reminders, order/hold expiry, refund reconciliation) run
+ * one of two ways, chosen by JOBS_RUNNER (see lib/background-jobs.js):
+ * in-process on a 5-minute interval started from instrumentation.js, or from
+ * an external scheduler calling /api/cron and /api/cron/appointments. Either
+ * way was unobservable: if the process came back without the scheduler, or the
+ * external scheduler stopped calling, nothing anywhere said so and the first
  * symptom would have been a customer never receiving their reminder.
+ *
+ * Both runners write the same heartbeat, so this endpoint means the same thing
+ * in both modes; `scheduler.mode` says which one is expected to be feeding it.
  *
  * Two response shapes on purpose:
  *
@@ -46,6 +50,9 @@ export async function GET(req) {
         status: healthy ? "ok" : "degraded",
         database: databaseUp ? "up" : "down",
         scheduler: heartbeat.running ? "up" : "down",
+        // Safe to expose: it says which mechanism should be feeding the
+        // heartbeat, not how to reach or trigger it.
+        schedulerMode: heartbeat.mode,
       },
       { status }
     );
@@ -57,6 +64,8 @@ export async function GET(req) {
       database: databaseUp ? "up" : "down",
       scheduler: {
         running: heartbeat.running,
+        mode: heartbeat.mode,
+        maxSilenceMs: heartbeat.maxSilenceMs ?? null,
         startedAt: heartbeat.startedAt ? new Date(heartbeat.startedAt).toISOString() : null,
         lastRunAt: heartbeat.lastRunAt ? new Date(heartbeat.lastRunAt).toISOString() : null,
         msSinceLastRun: heartbeat.msSinceLastRun ?? null,

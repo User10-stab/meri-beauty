@@ -24,13 +24,12 @@ export default async function PointOfSalePage() {
   // routing a boutique pickup code needs ORDERS. Someone holding none of
   // these would only ever see a panel with nothing it can act on — hide it
   // outright instead.
-  const [canAdjustStock, canAppointments, canWorkshops, canFormations, canOrders, canOpenCashSession] = await Promise.all([
+  const [canAdjustStock, canAppointments, canWorkshops, canFormations, canOrders] = await Promise.all([
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.BOUTIQUE_STOCK),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.ORDERS),
-    hasDashboardPermission(session.user, STAFF_PERMISSIONS.CASH_REGISTER),
   ]);
 
   return (
@@ -39,8 +38,9 @@ export default async function PointOfSalePage() {
         canCheckIn={canAppointments || canWorkshops || canFormations}
         canSettle={canAppointments || canWorkshops || canFormations}
         canPickup={canOrders}
+        canCreateWalkIn={canAppointments}
       />
-      <PointOfSaleClient canAdjustStock={canAdjustStock} canOpenCashSession={canOpenCashSession} />
+      <PointOfSaleClient canAdjustStock={canAdjustStock} canOpenCashSession />
     </div>
   );
 }

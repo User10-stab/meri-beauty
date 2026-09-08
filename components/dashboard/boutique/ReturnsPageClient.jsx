@@ -298,7 +298,23 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
                 )}
               </>
             ) : (
-              <p className="mt-1">Le remboursement sera envoyé automatiquement via Stripe après confirmation de réception.</p>
+              // This used to promise that Stripe would send the refund on
+              // its own. (Deliberately paraphrased rather than quoted: a
+              // contract test forbids that exact sentence, and a negative
+              // source grep cannot tell code from a comment about code —
+              // trap T4 in E2E_FINDINGS.md.)
+              // Nothing is sent automatically: completeReturnRequest calls
+              // queueManualRefund, which records a debt for an OWNER/ADMIN to
+              // pay by hand in the Stripe dashboard (confirmed policy
+              // 2026-09-02 — this application never calls Stripe to refund).
+              // So the screen told staff the customer had been paid while the
+              // money sat in the worklist untouched, on the one screen where
+              // believing that means somebody never gets refunded.
+              <p className="mt-1">
+                Le remboursement sera <span className="font-semibold">mis en attente</span> après confirmation de
+                réception : un administrateur doit ensuite l&apos;effectuer à la main dans Stripe. Il apparaîtra dans
+                « Opérations › Remboursements dus » jusqu&apos;à ce que ce soit fait.
+              </p>
             )}
           </div>
         )}

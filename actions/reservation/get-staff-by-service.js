@@ -35,10 +35,11 @@ export async function getStaffByService(serviceId) {
         isDeleted: false,
         // "Assign to me" creates isActive: true rows with price/duration 0,
         // meant to be configured before going live — exclude those from the
-        // public booking list until the staff member sets a real price.
+        // public booking list until the staff member configures a duration.
+        // A free service is valid when it has a real duration.
         // Kept here as a DB-level pre-filter for performance; the same rule
         // is re-validated in isStaffServiceBookable (lib/staff-availability.js).
-        price: { gt: 0 },
+        price: { gte: 0 },
         duration: { gt: 0 },
         staff: {
           isActive: true,

@@ -74,7 +74,14 @@ test.describe("atelier — paid in full online, cancelled and refunded from the 
           where: { sessionId: workshop.session.id, customerId: customer.id },
           include: { payment: { include: { transactions: true } } },
         });
-        return row?.payment?.transactions?.length ? row : null;
+        // Both conditions, not just the transactions. Prisma resolves an
+        // `include` as separate queries, so at READ COMMITTED this row can be
+        // read *before* the fulfilment transaction commits while its
+        // transactions are read after it — the reservation then looks
+        // PENDING_DEPOSIT with a settled payment hanging off it, which is a
+        // state that never actually existed. Waiting for the status the
+        // assertions below depend on removes the skew.
+        return row?.status === "CONFIRMED" && row.payment?.transactions?.length ? row : null;
       },
       { what: `the atelier reservation for session ${workshop.session.id} to be fulfilled by checkout.session.completed` },
     );
@@ -95,7 +102,10 @@ test.describe("atelier — paid in full online, cancelled and refunded from the 
     await loginAsAdmin(page);
     await page.goto("/dashboard/operations?tab=workshops&page=1");
 
-    const row = page.getByRole("row").filter({ hasText: workshop.activity.title });
+    const row = page
+      .getByRole("row")
+      .filter({ hasText: workshop.activity.title })
+      .filter({ hasText: customer.email });
     await expect(row).toHaveCount(1, { timeout: 15000 });
     await row.getByRole("button", { name: /voir\s*\/\s*gérer/i }).click();
 
@@ -163,7 +173,9 @@ test.describe("atelier — paid in full online, cancelled and refunded from the 
           where: { id: operation.id },
           include: { legs: true },
         });
-        return found?.legs?.every((leg) => leg.status === "SUCCEEDED") ? found : null;
+        // Neon reads can briefly lag the webhook transaction. Wait for the
+        // operation's derived completion status as well as its settled leg.
+        return found?.status === "COMPLETED" && found.legs.every((leg) => leg.status === "SUCCEEDED") ? found : null;
       },
       { what: "charge.refunded to settle the atelier refund leg" },
     );
@@ -185,7 +197,10 @@ test.describe("atelier — paid in full online, cancelled and refunded from the 
     // Re-open the row from the unified screen — its "Voir / gérer" now opens
     // the settled REFUND transaction, not the original FINAL_PAYMENT one.
     await page.goto("/dashboard/operations?tab=workshops&page=1");
-    const settledRow = page.getByRole("row").filter({ hasText: workshop.activity.title });
+    const settledRow = page
+      .getByRole("row")
+      .filter({ hasText: workshop.activity.title })
+      .filter({ hasText: customer.email });
     await expect(settledRow).toHaveCount(1, { timeout: 15000 });
     await settledRow.getByRole("button", { name: /voir\s*\/\s*gérer/i }).click();
 

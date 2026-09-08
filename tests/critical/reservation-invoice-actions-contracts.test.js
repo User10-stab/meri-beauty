@@ -81,14 +81,17 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     // short-circuit — the else branch always produces a renderable ticket.
     expect(route).toContain("resolveServiceVatPolicy({ customer })");
     expect(route).toContain("paidAmount: true");
-    expect(route).toContain("calculateVatTotals(payment.paidAmount, vatRate)");
+    expect(route).toContain("collectionTicketFields(transaction, payment.invoice, ticketFields.vatRate)");
     expect(route).not.toContain("calculateVatTotals(payment.totalAmount, vatRate)");
     expect(route).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
   });
 
-  test("reprints the Invoice's frozen fields verbatim when one does exist", () => {
+  test("uses the Invoice's seller and VAT policy, but the collection's identity and amount", () => {
     expect(route).toContain("if (payment.invoice) {");
-    expect(route).toContain("invoiceNumber: inv.number");
+    expect(route).toContain("sellerName: inv.sellerName");
+    expect(route).toContain("vatRate: inv.vatRate");
+    expect(route).toContain("collectionTicketFields(transaction, payment.invoice, ticketFields.vatRate)");
+    expect(route).not.toContain("orderNumber: inv.number");
   });
 
   test("reuses the same description helper as the close-of-session batch", () => {

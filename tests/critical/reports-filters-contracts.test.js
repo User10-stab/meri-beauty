@@ -242,10 +242,9 @@ describe("a counter receipt can be reprinted", () => {
     expect(route).toContain("prisma.order.findUnique(");
   });
 
-  test("it is dashboard-only", () => {
-    // A ticket names no customer, so there is no ownership to check and
-    // nothing a customer could legitimately fetch here.
-    expect(route).toContain("if (!canAccessDashboard(session.user.role))");
+  test("a customer can reprint only their own named order receipt", () => {
+    expect(route).toContain("userId: true");
+    expect(route).toContain("order.userId !== session.user.id || !order.payment?.transactions.length");
     expect(route).toContain("{ status: 403 }");
     expect(route).toContain("{ status: 401 }");
   });
@@ -256,6 +255,18 @@ describe("a counter receipt can be reprinted", () => {
 
   test("a missing order is a 404, not a crash", () => {
     expect(route).toContain("{ status: 404 }");
+  });
+
+  // CASH-only, same as every other piece number in the book (see
+  // lib/cash-book/piece-number.js) — a CARD/ONLINE order simply has none.
+  // Ordered by paidAt and takes the last qualifying one: the rare
+  // deposit-then-balance case resolves to the balance, the collection that
+  // actually settled the sale, rather than leaning on piece-number string
+  // comparison (which resets every calendar year).
+  test("prints the most recent qualifying CASH collection's piece number, not the first", () => {
+    expect(route).toContain('orderBy: { paidAt: "asc" }');
+    expect(route).toContain("select: { id: true, pieceNumber: true, paidAt: true }");
+    expect(route).toContain('order.payment?.transactions.filter((t) => t.pieceNumber).at(-1)?.pieceNumber ?? null');
   });
 
   test("the order screen offers it even when there is no invoice", () => {

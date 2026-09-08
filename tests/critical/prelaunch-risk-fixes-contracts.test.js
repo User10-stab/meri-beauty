@@ -22,17 +22,25 @@ describe("48h pre-launch risk fixes", () => {
 
     const drawer = source("components/dashboard/calendar/AppointmentDrawer.jsx");
     expect(drawer).toContain("paymentConfirmed");
-    expect(drawer).toContain("disabled={isPending || !paymentConfirmed}");
+    // The confirm button now also waits on the terminal receipt reference when
+    // the method is a card, so the expression spans several lines. What has to
+    // hold is that it still cannot be pressed without the attestation.
+    expect(drawer).toMatch(/disabled=\{\s*isPending \|\|\s*!paymentConfirmed/);
 
     const list = source("components/dashboard/appointments/AppointmentsPageClient.jsx");
     expect(list).toContain("paymentConfirmed");
-    expect(list).toContain("disabled={isPending || !paymentConfirmed}");
+    expect(list).toMatch(/disabled={s*isPending ||s*!paymentConfirmed/);
   });
 
   test("an expired on-site-pickup order alerts staff, not just the customer", () => {
     const expiry = source("lib/orders/expire-stale-orders.js");
     expect(expiry).toContain("async function alertStaffOfPickupExpiry");
-    expect(expiry).toContain('order.status !== "PENDING_PAYMENT"');
+    // The branch that alerts staff is now the else of the never-paid branch:
+    // a pickup tells the salon (and only the salon), because whether the goods
+    // are on a shelf or in the customer's bag decides both what happens to the
+    // stock and what the customer should be told.
+    expect(expiry).toContain('if (order.status === "PENDING_PAYMENT") {');
+    expect(expiry).toContain("alertStaffOfPickupExpiry(order)");
   });
 
   test("the public CGV page no longer shows the internal draft note or a placeholder legal name", () => {

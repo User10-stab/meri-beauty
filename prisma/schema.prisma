@@ -73,6 +73,15 @@ enum ReservationCancellationRequestStatus {
   REJECTED
 }
 
+// A paid product order is never cancelled directly by its buyer. The request
+// gives OWNER/ADMIN a durable decision point before stock, legal documents,
+// and a manual refund operation are created.
+enum OrderCancellationRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum PaymentStatus {
   PENDING
   PAID
@@ -82,13 +91,11 @@ enum PaymentStatus {
   FAILED
   // A refund was decided (cancellation/return approved) but the Stripe call
   // hasn't been confirmed successful yet — set right before attempting it,
-  // so a crash/timeout mid-call still leaves a durably queryable row for
-  // the retry job to pick up, not just whatever the synchronous try/catch
-  // managed to report. See lib/payments/retry-failed-refunds.js.
+  // so a crash/timeout mid-call leaves a durably queryable row for manual
+  // reconciliation instead of relying on a transient synchronous error.
   REFUND_PENDING
-  // The Stripe refund call itself errored (network, card issuer, etc.) —
-  // previously only surfaced via a best-effort staff email that could be
-  // missed; now durably retryable via the same job.
+  // A legacy direct Stripe refund call errored (network, card issuer, etc.).
+  // Kept as durable audit data for manual reconciliation of historical rows.
   REFUND_FAILED
 }
 
@@ -254,6 +261,7 @@ enum NotificationType {
   APPOINTMENT_NO_SHOW
   APPOINTMENT_CANCELLATION_REQUEST
   RESERVATION_CANCELLATION_REQUEST
+  ORDER_CANCELLATION_REQUEST
   APPOINTMENT_REMINDER
   PAYMENT_RECEIVED
   PAYMENT_PENDING
@@ -864,7 +872,10 @@ model User {
   stockMovements                 InventoryMovement[]    @relation("StockMovementBy")
   carts                          Cart[]
   orders                         Order[]                @relation("OrderBuyer")
+  submittedOrderCancellationRequests OrderCancellationRequest[] @relation("OrderCancellationRequestSubmittedBy")
+  reviewedOrderCancellationRequests  OrderCancellationRequest[] @relation("OrderCancellationRequestReviewedBy")
   pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
+  stockReleasedOrders            Order[]                @relation("OrderStockReleasedBy")
   createdPointOfSaleOrders       Order[]                @relation("OrderCreatedByStaff")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
   auditLogs                      AuditLog[]             @relation("AuditActor")
@@ -874,7 +885,6 @@ model User {
   closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
   recordedCashMovements          CashMovement[]         @relation("CashMovementRecordedBy")
   declaredBankDeposits           BankDeposit[]          @relation("BankDepositDeclaredBy")
-  confirmedBankDeposits          BankDeposit[]          @relation("BankDepositConfirmedBy")
   submittedCancellationRequests  AppointmentCancellationRequest[] @relation("CancellationRequestSubmittedBy")
   reviewedCancellationRequests   AppointmentCancellationRequest[] @relation("CancellationRequestReviewedBy")
   submittedReservationCancellationRequests ReservationCancellationRequest[] @relation("ReservationCancellationRequestedBy")
@@ -1319,10 +1329,23 @@ model Order {
   pickedUpByStaffId String?
   pickedUpByStaff   User?     @relation("OrderPickedUpBy", fields: [pickedUpByStaffId], references: [id])
 
-  // PENDING_PICKUP orders auto-cancel + restock if not collected by this date
+  // PENDING_PICKUP orders auto-cancel at this date. They do NOT auto-restock:
+  // "not marked collected" and "never handed over" are different things, and
+  // the cron cannot tell them apart. Releasing the reservation on a guess is
+  // how an item already in the customer's bag becomes sellable again.
   expiresAt    DateTime?
   cancelledAt  DateTime?
   cancelReason String?
+
+  // When the reserved stock of an expired on-site pickup was actually given
+  // back to sellable inventory, and by whom. Null on an expired order means
+  // the goods are still held for it and nobody has yet said which way it went
+  // - that is the "retraits a verifier" worklist. Non-null is also the
+  // idempotency guard: the release decrements reservedQuantity, so it must
+  // happen exactly once however many times the button is pressed.
+  stockReleasedAt       DateTime?
+  stockReleasedByUserId String?
+  stockReleasedBy       User?     @relation("OrderStockReleasedBy", fields: [stockReleasedByUserId], references: [id], onDelete: SetNull)
 
   notes String?
 
@@ -1343,13 +1366,43 @@ model Order {
   items          OrderItem[]
   payment        Payment?
   returnRequests ReturnRequest[]
+  cancellationRequest OrderCancellationRequest?
 
   @@index([userId])
   @@index([status])
   @@index([expiresAt])
+  @@index([stockReleasedAt])
   @@index([fulfilmentMode])
   @@index([source, status, createdAt])
   @@index([createdByStaffId, createdAt])
+}
+
+// A request is deliberately separate from Order.status: filing it does not
+// cancel the order, restock anything, issue a credit note, or move money.
+// One row per order keeps a complete decision history; a rejected request can
+// be reopened by the buyer without ever creating a duplicate review item.
+model OrderCancellationRequest {
+  id String @id @default(cuid())
+
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  requestedByUserId String
+  requestedBy       User @relation("OrderCancellationRequestSubmittedBy", fields: [requestedByUserId], references: [id], onDelete: Cascade)
+  reason            String
+  status            OrderCancellationRequestStatus @default(PENDING)
+
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  reviewedBy       User? @relation("OrderCancellationRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  decisionNote     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([requestedByUserId])
+  @@index([reviewedByUserId])
 }
 
 // ORDER ITEM
@@ -1734,25 +1787,24 @@ model Payment {
   // of silently succeeding and double-fulfilling.
   transactionReference   String?               @unique
 
-  // Durable refund-retry bookkeeping — see PaymentStatus.REFUND_PENDING/
-  // REFUND_FAILED above and lib/payments/retry-failed-refunds.js. Cleared
-  // implicitly by moving on to REFUNDED/PARTIALLY_REFUNDED; not reset to
-  // null on success since a resolved failure history is still worth
-  // keeping for reporting.
+  // Durable refund-attempt history. It supports manual reconciliation; this
+  // application deliberately does not retry a failed Stripe refund on its
+  // own. Cleared implicitly by moving on to REFUNDED/PARTIALLY_REFUNDED;
+  // not reset to null on success since resolved failure history is useful
+  // for reporting.
   refundFailureReason String?
   refundAttemptedAt   DateTime?
   refundRetryCount    Int       @default(0)
 
   // The exact amount (and a stable Stripe idempotency key) for the refund
   // operation currently in flight. Set atomically with status:
-  // REFUND_PENDING, before the Stripe call — so a retry after a crash or a
-  // failed attempt replays this exact amount instead of recomputing "what's
-  // left" from the Transaction ledger, which would wrongly resolve to the
-  // full outstanding balance whenever no REFUND row was ever written (the
-  // very reason the payment is stuck). Cleared once the operation resolves
-  // (REFUNDED/PARTIALLY_REFUNDED); kept through REFUND_FAILED so retries
-  // keep using it. While either is set, no new refund may be started against
-  // this payment — see the "already pending" guard at each call site.
+  // REFUND_PENDING, before the Stripe call, so a crash or failed attempt
+  // preserves the exact amount for manual reconciliation rather than
+  // recomputing "what's left" from the Transaction ledger. Cleared once the
+  // operation resolves (REFUNDED/PARTIALLY_REFUNDED); retained through
+  // REFUND_FAILED as an audit record. While either is set, no new refund may
+  // be started against this payment — see the "already pending" guard at
+  // each call site.
   pendingRefundAmount         Decimal?
   pendingRefundIdempotencyKey String?
   // The credit note is always issued up front, inside the same DB
@@ -1932,6 +1984,21 @@ model Invoice {
   billitOrderId String?
   billitSentAt  DateTime?
 
+  // Set once this invoice has been voided and replaced — currently only by
+  // an admin session transfer that lands on an already-invoiced booking (see
+  // lib/invoicing.js#supersedeInvoice). paymentId is nulled at the same time,
+  // freeing the unique slot for the replacement invoice on the same Payment,
+  // so payment.invoice always resolves to the current document. This row is
+  // never edited or deleted (Belgian VAT law requires the correction to be
+  // its own document) — it stays reachable through its own id, through the
+  // CreditNote that credited it, and through the replacement's
+  // supersedesInvoiceId.
+  supersedesInvoiceId String?   @unique
+  supersedes          Invoice?  @relation("InvoiceSupersession", fields: [supersedesInvoiceId], references: [id])
+  supersededBy        Invoice?  @relation("InvoiceSupersession")
+  supersededAt        DateTime?
+  supersededReason    String?
+
   lines            InvoiceLine[]
   creditNotes      CreditNote[]
   refundOperations RefundOperation[]
@@ -2100,26 +2167,22 @@ model CashMovement {
 // missing without anyone being able to say so. This model is the second
 // fact, deliberately kept separate from the first instead of a field on
 // CashMovement, because one deposit routinely bundles several withdrawals
-// (a week of takings walked to the bank in one trip) and needs its own
-// declared/confirmed lifecycle.
-enum BankDepositStatus {
-  // A staff member says this cash was taken to the bank. Only a claim until
-  // it is matched against the actual statement.
-  DECLARED
-  // Someone has found this exact `reference` on the bank statement. Only a
-  // CONFIRMED deposit counts as cash that has verifiably left the business
-  // for good — see the "espèces en transit" figure.
-  CONFIRMED
-}
-
+// (a week of takings walked to the bank in one trip).
+//
+// Originally a two-step declared/confirmed lifecycle, collapsed to one
+// action (2026-09-07): every deposit here is recorded by the same admin who
+// made the trip, so a second person "confirming" the first person's own
+// claim was never a real check — just an extra click standing between the
+// cashier and the record. What still matters, and is still captured, is
+// that a human said what the bank received and when — see `declaredAt`.
 model BankDeposit {
   id String @id @default(cuid())
 
   // Sum of the linked CashMovement withdrawals — what SHOULD have reached
-  // the bank. Computed server-side from `movements` at declaration time,
-  // never typed in directly: the entire point of this model is that "what
-  // left the till" and "what a human claims was deposited" can never be
-  // made to silently agree just by typing a bigger number.
+  // the bank. Computed server-side from `movements`, never typed in
+  // directly: the entire point of this model is that "what left the till"
+  // and "what a human claims was deposited" can never be made to silently
+  // agree just by typing a bigger number.
   amount Decimal @db.Decimal(10, 2)
 
   // What the deposit slip / receipt actually says, entered by whoever made
@@ -2136,29 +2199,23 @@ model BankDeposit {
   // statement. Unique: two deposits can never legitimately point at the
   // same bank movement — that would be double-counting one trip to the
   // bank as two.
-  reference String @unique
+  //
+  // Optional, because the slip number is routinely not to hand at the
+  // moment the cash is walked out of the drawer, and refusing to record
+  // the trip until it is produced only guarantees the trip goes
+  // unrecorded. Postgres allows many NULLs under a unique index, so
+  // uniqueness still binds every reference that actually exists.
+  reference String? @unique
 
-  status BankDepositStatus @default(DECLARED)
-  note   String?
+  note String?
 
   declaredAt   DateTime @default(now())
   declaredById String
   declaredBy   User     @relation("BankDepositDeclaredBy", fields: [declaredById], references: [id])
 
-  // Set once someone has actually found this reference on the bank
-  // statement — see BankDepositStatus.CONFIRMED. Nullable/SetNull rather
-  // than required, same reasoning as CashSession.closedBy: the confirming
-  // user's account existing forever is not a precondition for the deposit
-  // record itself to stay valid.
-  confirmedAt   DateTime?
-  confirmedById String?
-  confirmedBy   User?     @relation("BankDepositConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
-
   movements CashMovement[]
 
   createdAt DateTime @default(now())
-
-  @@index([status])
 }
 
 // TRANSACTION

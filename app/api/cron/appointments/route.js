@@ -2,8 +2,10 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendAppointmentReminders } from "@/lib/reminders/send-appointment-reminders";
 import { notifyUnsettledAppointments } from "@/lib/appointments/notify-unsettled-appointments";
+import { expireStalePendingAppointments } from "@/lib/appointments/expire-stale-appointments";
 import { isValidCronSecret } from "@/lib/cron-auth";
 import { captureCriticalError } from "@/lib/monitoring";
+import { recordExternalJobRun } from "@/lib/background-jobs";
 
 /**
  * Secured job runner — appointment reminders (24h + 2h windows) and the
@@ -16,6 +18,7 @@ import { captureCriticalError } from "@/lib/monitoring";
 const JOBS = [
   ["sendAppointmentReminders", sendAppointmentReminders],
   ["notifyUnsettledAppointments", notifyUnsettledAppointments],
+  ["expireStalePendingAppointments", expireStalePendingAppointments],
 ];
 
 export async function GET(req) {
@@ -40,6 +43,7 @@ export async function GET(req) {
 
       // allSettled, not all: one job throwing must never mask whether the
       // other one actually ran.
+      const startedAt = Date.now();
       const settled = await Promise.allSettled(JOBS.map(([, run]) => run()));
 
       const results = {};
@@ -55,11 +59,23 @@ export async function GET(req) {
         }
       });
 
+      // Feeds the same heartbeat the in-process interval writes, so
+      // /api/health answers "is the schedule actually running" under
+      // JOBS_RUNNER=external too — otherwise switching runners would leave it
+      // reporting the scheduler down forever.
+      recordExternalJobRun({
+        startedAt,
+        failedJobs: settled
+          .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
+          .filter(Boolean),
+      });
+
       return NextResponse.json({
         success: !anyFailed,
         remindersSent: results.sendAppointmentReminders?.sentCount ?? null,
         unsettledAppointmentsFound: results.notifyUnsettledAppointments?.staleCount ?? null,
         unsettledDigestSent: results.notifyUnsettledAppointments?.emailSent ?? null,
+        stalePendingAppointmentsExpired: results.expireStalePendingAppointments?.expiredCount ?? null,
         failedJobs: settled
           .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
           .filter(Boolean),

@@ -68,6 +68,7 @@ describe("TicketDocument footer adapts when a ticket accompanies an existing inv
   test("never claims 'not a nominative invoice' when one was already issued", () => {
     const branchIdx = doc.indexOf("ticket.invoiceNumber ?");
     expect(branchIdx).toBeGreaterThan(-1);
-    expect(doc.slice(branchIdx, branchIdx + 400)).toContain("accompagne votre facture n°");
+    expect(doc.slice(branchIdx, branchIdx + 400)).toContain("Facture liée :");
+    expect(doc.slice(branchIdx, branchIdx + 400)).toContain("Ce ticket ne remplace pas la facture");
   });
 });

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { expireStaleOrders } from "@/lib/orders/expire-stale-orders";
+import { expireStaleOrders, releaseUnverifiedPickups } from "@/lib/orders/expire-stale-orders";
 import { sendWorkshopReservationReminders } from "@/lib/reminders/send-workshop-reminders";
 import { sendFormationReservationReminders } from "@/lib/reminders/send-formation-reminders";
 import { expireStaleWorkshopHolds } from "@/lib/workshops/expire-stale-holds";
@@ -9,6 +9,7 @@ import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds"
 import { reconcileMissedCheckouts } from "@/lib/payments/reconcile-missed-checkouts";
 import { isValidCronSecret } from "@/lib/cron-auth";
 import { captureCriticalError } from "@/lib/monitoring";
+import { recordExternalJobRun } from "@/lib/background-jobs";
 
 /**
  * Secured job runner — boutique order expiry + atelier/formation reminders.
@@ -32,6 +33,7 @@ import { captureCriticalError } from "@/lib/monitoring";
  */
 const JOBS = [
   ["expireStaleOrders", expireStaleOrders],
+  ["releaseUnverifiedPickups", releaseUnverifiedPickups],
   ["sendWorkshopReservationReminders", sendWorkshopReservationReminders],
   ["sendFormationReservationReminders", sendFormationReservationReminders],
   ["expireStaleWorkshopHolds", expireStaleWorkshopHolds],
@@ -67,6 +69,7 @@ export async function GET(req) {
       // other six actually ran — a single bad account previously turned this
       // whole endpoint into a 500 with no way to tell which job(s) were the
       // problem.
+      const startedAt = Date.now();
       const settled = await Promise.allSettled(JOBS.map(([, run]) => run()));
 
       const results = {};
@@ -82,9 +85,21 @@ export async function GET(req) {
         }
       });
 
+      // Feeds the same heartbeat the in-process interval writes, so
+      // /api/health answers "is the schedule actually running" under
+      // JOBS_RUNNER=external too — otherwise switching runners would leave it
+      // reporting the scheduler down forever.
+      recordExternalJobRun({
+        startedAt,
+        failedJobs: settled
+          .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
+          .filter(Boolean),
+      });
+
       return NextResponse.json({
         success: !anyFailed,
         ordersExpired: results.expireStaleOrders?.expiredCount ?? null,
+        unverifiedPickupsReleased: results.releaseUnverifiedPickups?.releasedCount ?? null,
         workshopRemindersSent: results.sendWorkshopReservationReminders?.sentCount ?? null,
         formationRemindersSent: results.sendFormationReservationReminders?.sentCount ?? null,
         workshopHoldsExpired: results.expireStaleWorkshopHolds?.expiredCount ?? null,

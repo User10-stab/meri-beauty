@@ -95,9 +95,18 @@ export function CancelReservationDialog({ reservation, onClose, onConfirm, loadi
           />
         </div>
 
+        {/* This line used to say the money would be sent by Stripe on its
+            own. It is not: cancelWorkshopReservation and
+            cancelFormationReservation both call queueManualRefund, which
+            records a debt an OWNER/ADMIN settles by hand (confirmed policy
+            2026-09-02 — this application never calls Stripe to refund).
+            Saying otherwise here is worse than elsewhere, because this is the
+            dialog where an admin *decides* to grant an exceptional refund:
+            they tick the box, read that Stripe has it, and nobody ever pays
+            the customer. Same defect as the returns screen (B7). */}
         <p className="mt-3 text-xs text-gray-400">
           {refundDeposit
-            ? `${formatPrice(paidAmount)} (${paidLabel}) sera remboursé via Stripe.`
+            ? `${formatPrice(paidAmount)} (${paidLabel}) sera mis en attente de remboursement — un administrateur devra l'effectuer à la main dans Stripe. À régler dans « Opérations › Remboursements dus ».`
             : `${formatPrice(paidAmount)} (${paidLabel}) ne sera pas remboursé.`}
         </p>
 

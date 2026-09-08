@@ -28,7 +28,7 @@ const MOVEMENT_TYPES = [
  * actions/dashboard/cash-movements.js), so there's nothing useful to show
  * here without one.
  */
-export function CashMovementPanel({ initialMovements }) {
+export function CashMovementPanel({ initialMovements, onRecorded }) {
   const [movements, setMovements] = useState(initialMovements);
   const [type, setType] = useState("EXPENSE");
   const [amount, setAmount] = useState("");
@@ -48,6 +48,10 @@ export function CashMovementPanel({ initialMovements }) {
       setAmount("");
       setLabel("");
       toast.success(`${result.data.pieceNumber} enregistré.`);
+      // The panel now sits directly under the ledger and the deposit list
+      // it feeds, so a movement that only appeared in this table would
+      // leave both of those visibly stale on the same screen.
+      onRecorded?.(result.data);
     });
   }
 

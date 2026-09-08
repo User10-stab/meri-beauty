@@ -73,14 +73,31 @@ export async function getMyOrderHistory() {
 
   const userId = session.user.id;
 
-  const invoiceSelect = { select: { invoice: { select: { id: true, number: true } } } };
+  // Customer documents live on the payment: invoices are B2B-only, whereas a
+  // receipt is available after every actual collection. Keep the collection
+  // data here so the account UI never offers a receipt for an unpaid order.
+  const paymentSelect = {
+    select: {
+      id: true,
+      invoice: { select: { id: true, number: true } },
+      transactions: {
+        where: {
+          isDeleted: false,
+          transactionType: { in: ["DEPOSIT", "FINAL_PAYMENT"] },
+          amount: { gt: 0 },
+        },
+        select: { id: true },
+      },
+    },
+  };
 
   const [orders, workshopReservations, formationReservations] = await Promise.all([
     prisma.order.findMany({
       where: { userId },
       include: {
         items: { select: { productName: true, variantName: true, quantity: true, unitPrice: true } },
-        payment: invoiceSelect,
+        payment: paymentSelect,
+        cancellationRequest: { select: { status: true, decisionNote: true } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -94,7 +111,7 @@ export async function getMyOrderHistory() {
             workshop: { select: { title: true, type: true, cover: true } },
           },
         },
-        payment: invoiceSelect,
+        payment: paymentSelect,
         // Drives the "demande en attente / refusée" state on the reservation
         // card — neither flow allows self-cancellation, so the customer's
         // only route is an exception request (see
@@ -113,7 +130,7 @@ export async function getMyOrderHistory() {
             formation: { select: { title: true, type: true, cover: true } },
           },
         },
-        payment: invoiceSelect,
+        payment: paymentSelect,
         cancellationRequest: { select: { status: true, decisionNote: true } },
       },
       orderBy: { createdAt: "desc" },

@@ -32,8 +32,20 @@ describe("reservation settlement — collecting the on-site balance", () => {
   });
 
   test("requires a payment method only when a balance is actually due", () => {
-    expect(lib).toContain('!["CASH", "CARD", "EXTERNAL_TERMINAL"].includes(method)');
-    expect(lib).toContain('payment.status === "PARTIALLY_PAID" && Number(payment.remainingAmount) > 0');
+    // A card collection is accepted only as EXTERNAL_TERMINAL, which carries
+    // the terminal's approval and its receipt reference. Bare "CARD" was
+    // accepted with no evidence at all — of 29 card collections in the dev
+    // database exactly one had a reference, so 28 could not be reconciled
+    // against the terminal's end-of-day batch. Cash at least has a piece
+    // number and an open till session behind it. The boutique POS and the
+    // refund path already refused a referenceless card; settlement was the
+    // last place that did not.
+    expect(lib).toContain('!["CASH", "EXTERNAL_TERMINAL"].includes(method)');
+    expect(lib, "a card collection was accepted without a terminal reference").not.toContain(
+      '["CASH", "CARD", "EXTERNAL_TERMINAL"]',
+    );
+    expect(lib).toContain("priceAdjustment.amountDue > 0");
+    expect(lib).toContain('payment.status === "PARTIALLY_PAID"');
   });
 
   test("external terminal settlement requires approval and stores the terminal reference", () => {

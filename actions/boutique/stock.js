@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { STAFF_PERMISSIONS, hasDashboardPermission, isAdminRole, ROLES } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, hasDashboardPermission, ROLES } from "@/lib/authorization";
 import { stockAdjustmentSchema, stockCountSchema } from "@/lib/validations/boutique";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 
@@ -20,16 +20,6 @@ import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
  * backstop if this logic is ever bypassed — they are not the primary guard.
  */
 
-async function requireStaff() {
-  const session = await auth();
-  if (!session?.user) return { error: "Non authentifié." };
-  // Staff can log SALON_USAGE against their own service consumption;
-  // RESTOCK/LOSS/ADJUSTMENT beyond that stay admin-only via the UI layer.
-  const allowed = [ROLES.OWNER, ROLES.ADMIN, ROLES.STAFF];
-  if (!allowed.includes(session.user.role)) return { error: "Accès non autorisé." };
-  return { session };
-}
-
 async function requireStockAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifie." };
@@ -45,7 +35,7 @@ async function requireStockAccess() {
  * `type` so callers never pass a negative quantity by hand.
  */
 export async function recordStockMovement(input) {
-  const guard = await requireStaff();
+  const guard = await requireStockAccess();
   if (guard.error) return { success: false, message: guard.error };
 
   const parsed = stockAdjustmentSchema.safeParse(input);
@@ -154,7 +144,7 @@ export async function recordStockMovement(input) {
  * still reads as "what changed," not "what the count was."
  */
 export async function recordStockCount(input) {
-  const guard = await requireStaff();
+  const guard = await requireStockAccess();
   if (guard.error) return { success: false, message: guard.error };
 
   const parsed = stockCountSchema.safeParse(input);

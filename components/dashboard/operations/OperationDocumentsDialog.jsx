@@ -80,7 +80,7 @@ export function OperationDocumentsDialog({ open, onClose, invoice, creditNotes =
 
             {paymentId && (
               <a href={`/api/payments/${paymentId}/ticket`} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50">
-                <Receipt size={18} className="text-[#2f3a2e]" /> Ouvrir le ticket de caisse
+                <Receipt size={18} className="text-[#2f3a2e]" /> Ouvrir les tickets de caisse
               </a>
             )}
           </div>

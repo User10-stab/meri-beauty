@@ -11,7 +11,24 @@ import { MenuItem } from "./menu-item";
 import { useSidebarContext } from "./sidebar-context";
 import { useTranslations } from "next-intl";
 
-export function Sidebar({ userRole, dashboardPermissions = [] }) {
+/**
+ * A count of things waiting on a human, shown against the nav item that leads
+ * to them. Rendered only when there is something to show — a nav full of
+ * zeroes teaches people to stop reading the badges.
+ */
+function NavBadge({ count, label: describedAs }) {
+  if (!count) return null;
+  return (
+    <span
+      className="ml-auto inline-flex min-w-[1.375rem] items-center justify-center rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-semibold tabular-nums text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
+      aria-label={describedAs ? `${count} ${describedAs}` : undefined}
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
+export function Sidebar({ userRole, dashboardPermissions = [], pickupsToVerifyCount = 0 }) {
   const t = useTranslations("dashboard");
   const pathname = usePathname();
   const { setIsOpen, isOpen, isMobile, toggleSidebar } = useSidebarContext();
@@ -22,7 +39,7 @@ export function Sidebar({ userRole, dashboardPermissions = [] }) {
   const titleKeys = {
     "Tableau de bord": "dashboard", "Rendez-vous": "appointments", "Calendrier": "calendar",
     "Tous les rendez-vous": "allAppointments", "Clients": "customers", "Services": "services",
-    "Paiements": "payments", "Compte Stripe": "stripe", "Réconciliation": "reconciliation",
+    "Paiements": "payments", "Compte Stripe": "stripe",
     "Workshops & Événements": "workshops", "Activités": "activities", "Animateurs": "animators",
     "Réservations": "reservations", "Liste d'attente": "waitingList", "Formations": "courses", "Staff": "staff",
     "Performance": "performance", "Auto-Entrepreneur": "independentStaff", "Boutique": "shop", "Produits": "products",
@@ -31,6 +48,15 @@ export function Sidebar({ userRole, dashboardPermissions = [] }) {
     "Avis clients": "reviews", "Rapports": "reports"
   };
   const label = (value) => titleKeys[value] ? t(`sidebar.${titleKeys[value]}`) : value;
+
+  // Nav items name a badge rather than carrying a number, so the data file
+  // stays a plain static structure and the counts stay server-supplied.
+  const badgeCounts = { pickupsToVerify: pickupsToVerifyCount };
+  const badgeFor = (item) => (item.badge ? badgeCounts[item.badge] ?? 0 : 0);
+  // A collapsed group hides its children, so it carries their total. Without
+  // this the badge is only visible to someone who already opened the section
+  // it is meant to send them to.
+  const groupBadgeFor = (item) => (item.items ?? []).reduce((total, sub) => total + badgeFor(sub), 0);
 
   const toggleExpanded = (title) => {
     setExpandedItems((prev) => (prev.includes(title) ? [] : [title]));
@@ -115,7 +141,14 @@ export function Sidebar({ userRole, dashboardPermissions = [] }) {
 
                 <nav role="navigation" aria-label={section.label}>
                   <ul className="space-y-2">
-                    {section.items.map((item) => (
+                    {section.items.map((item) => {
+                      const isExpanded = expandedItems.includes(item.title);
+                      // Rolled up onto the closed group only: when it is open
+                      // the child below carries its own, and showing both
+                      // reads as two separate things needing attention.
+                      const groupCount = isExpanded ? 0 : groupBadgeFor(item);
+
+                      return (
                       <li key={item.title}>
                         {item.items.length ? (
                           <div>
@@ -132,17 +165,22 @@ export function Sidebar({ userRole, dashboardPermissions = [] }) {
 
                               <span>{label(item.title)}</span>
 
+                              <NavBadge
+                                count={groupCount}
+                                label={t("sidebar.pickupsToVerifyBadge")}
+                              />
+
                               <ChevronUp
                                 className={cn(
-                                  "ml-auto rotate-180 transition-transform duration-200",
-                                  expandedItems.includes(item.title) &&
-                                    "rotate-0",
+                                  "rotate-180 transition-transform duration-200",
+                                  groupCount ? "ml-1.5" : "ml-auto",
+                                  isExpanded && "rotate-0",
                                 )}
                                 aria-hidden="true"
                               />
                             </MenuItem>
 
-                            {expandedItems.includes(item.title) && (
+                            {isExpanded && (
                               <ul
                                 className="ml-9 mr-0 space-y-1.5 pb-[15px] pr-0 pt-2"
                                 role="menu"
@@ -153,8 +191,13 @@ export function Sidebar({ userRole, dashboardPermissions = [] }) {
                                       as="link"
                                       href={subItem.url}
                                       isActive={pathname === subItem.url}
+                                      className="flex items-center gap-3"
                                     >
                                       <span>{label(subItem.title)}</span>
+                                      <NavBadge
+                                        count={badgeFor(subItem)}
+                                        label={t("sidebar.pickupsToVerifyBadge")}
+                                      />
                                     </MenuItem>
                                   </li>
                                 ))}
@@ -182,12 +225,17 @@ export function Sidebar({ userRole, dashboardPermissions = [] }) {
                                 />
 
                                 <span>{label(item.title)}</span>
+                                <NavBadge
+                                  count={badgeFor(item)}
+                                  label={t("sidebar.pickupsToVerifyBadge")}
+                                />
                               </MenuItem>
                             );
                           })()
                         )}
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </nav>
               </div>

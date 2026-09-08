@@ -83,16 +83,17 @@ export async function renderInvoicePdf(invoice) {
 }
 export async function renderTicketPdf(ticket) {
   const contact = await getSellerContact();
+  const normalize = (item) => ({
+    ...item,
+    subtotalExclVat: Number(item.subtotalExclVat),
+    vatRate: Number(item.vatRate),
+    vatAmount: Number(item.vatAmount),
+    totalInclVat: Number(item.totalInclVat),
+  });
   return renderToBuffer(
     <TicketDocument
       contact={contact}
-      ticket={{
-        ...ticket,
-        subtotalExclVat: Number(ticket.subtotalExclVat),
-        vatRate: Number(ticket.vatRate),
-        vatAmount: Number(ticket.vatAmount),
-        totalInclVat: Number(ticket.totalInclVat),
-      }}
+      ticket={Array.isArray(ticket) ? ticket.map(normalize) : normalize(ticket)}
     />
   );
 }

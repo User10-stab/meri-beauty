@@ -1,3 +1,4 @@
+import { auth } from "@/auth";
 import { requireDashboardPermission } from "@/lib/route-protection";
 import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getAllVariants } from "@/actions/boutique/stock";
@@ -16,6 +17,10 @@ export async function generateMetadata() {
 
 export default async function StockPage({ searchParams }) {
   await requireDashboardPermission(STAFF_PERMISSIONS.BOUTIQUE_STOCK);
+  // recordStockMovement refuses every movement type except SALON_USAGE for
+  // a STAFF session. The adjust dialog has to know that, or it offers
+  // staff three options the server will always reject.
+  const session = await auth();
   const t = await getTranslations("dashboardBoutique.stock");
 
   // The counter's "corriger le stock" shortcut (see PointOfSaleClient's product
@@ -51,7 +56,7 @@ export default async function StockPage({ searchParams }) {
         </div>
       )}
 
-      <StockPageClient initialVariants={variants} initialSearch={initialSearch} />
+      <StockPageClient initialVariants={variants} initialSearch={initialSearch} userRole={session?.user?.role} />
     </div>
   );
 }

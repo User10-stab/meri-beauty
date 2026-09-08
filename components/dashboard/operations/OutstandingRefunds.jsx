@@ -254,11 +254,15 @@ function ManualRefundCaseRow({ refundCase }) {
       >
         <ExternalLink size={14} /> Ouvrir dans Stripe
       </a>
-      <div className="mt-3 flex flex-wrap gap-2">
+      <p className="mt-3 text-[11px] text-gray-500">
+        La référence est vérifiée auprès de Stripe : le remboursement doit exister sur ce paiement,
+        avoir abouti et couvrir le montant. Sans quoi le dossier reste ouvert.
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
         <input
           value={reference}
           onChange={(event) => setReference(event.target.value)}
-          placeholder="Référence du remboursement Stripe"
+          placeholder="Identifiant du remboursement (re_…)"
           className="min-w-[240px] rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px]"
         />
         <button

@@ -39,6 +39,19 @@ function formatDate(iso) {
   });
 }
 
+function formatPaymentMethods(value) {
+  switch (value) {
+    case "BOTH":
+      return "Cash & Online";
+    case "ONLINE_ONLY":
+      return "Online only";
+    case "CASH_ONLY":
+      return "Cash only";
+    default:
+      return "Cash & Online";
+  }
+}
+
 // ─── Column definitions ───────────────────────────────────────────────────────
 
 const COLUMNS = [
@@ -50,6 +63,7 @@ const COLUMNS = [
   { key: "services", label: "Services" },
   { key: "hireDate", label: "Date d'embauche" },
   { key: "stripeStatus", label: "Stripe" },
+  { key: "paymentMethods", label: "Paiement" },
   { key: "isActive", label: "Statut" },
 ];
 
@@ -381,6 +395,7 @@ export function StaffTable({ data, isLoading = false, services = [] }) {
       else if (sortKey === "phone") { av = a.user.phone; bv = b.user.phone; }
       else if (sortKey === "isActive") { av = a.isActive; bv = b.isActive; }
       else if (sortKey === "hireDate") { av = a.hireDate ?? ""; bv = b.hireDate ?? ""; }
+      else if (sortKey === "paymentMethods") { av = a.allowedPaymentMethods ?? "BOTH"; bv = b.allowedPaymentMethods ?? "BOTH"; }
       else { av = a[sortKey] ?? ""; bv = b[sortKey] ?? ""; }
       if (typeof av === "boolean") return sortDir === "asc" ? Number(av) - Number(bv) : Number(bv) - Number(av);
       return sortDir === "asc"
@@ -656,6 +671,16 @@ function StaffRow({ staff, onAction, onDelete, isPending }) {
             Non connecté
           </span>
         )}
+      </td>
+
+      {/* Payment methods */}
+      <td className="px-4 py-4 align-middle">
+        <div className="flex flex-col leading-tight">
+          <span className="text-sm text-gray-800">{formatPaymentMethods(staff.allowedPaymentMethods)}</span>
+          {staff.depositEnabled && staff.allowedPaymentMethods === "BOTH" && Number(staff.depositPercentage) > 0 && (
+            <span className="text-xs text-gray-500">{staff.depositPercentage}% acompte</span>
+          )}
+        </div>
       </td>
 
       {/* Statut */}

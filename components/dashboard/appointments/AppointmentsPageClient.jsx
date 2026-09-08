@@ -2,11 +2,12 @@
 
 import { useMemo, useState, useTransition, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2 } from "lucide-react";
+import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2, RefreshCw } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
 import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { resendPaymentEmail } from "@/actions/payment/resend-payment-email";
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
 
 const STATUS_LABEL = {
@@ -207,6 +208,12 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [terminalReference, setTerminalReference] = useState("");
   const [isPending, startTransition] = useTransition();
   const [rowLoadingId, setRowLoadingId] = useState(null);
+  const [relancingId, setRelancingId] = useState(null);
+
+  // Keep local list in sync when server revalidates after manual creation
+  useEffect(() => {
+    setAppointments(initialAppointments);
+  }, [initialAppointments]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -266,6 +273,17 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     if (result.success) {
       toast.success(result.message);
       refetch({});
+    } else {
+      toast.error(result.message);
+    }
+  }
+
+  async function handleResendPayment(appointmentId) {
+    setRelancingId(appointmentId);
+    const result = await resendPaymentEmail(appointmentId);
+    setRelancingId(null);
+    if (result.success) {
+      toast.success(result.message);
     } else {
       toast.error(result.message);
     }
@@ -466,8 +484,25 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     <TableCell>
                       {a.payment != null || a.paymentStatus != null ? (
                         a.paymentStatus || a.payment?.status ? (
-                          <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${PAYMENT_STATUS_STYLE[a.paymentStatus ?? a.payment.status] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
-                            {PAYMENT_STATUS_LABEL[a.paymentStatus ?? a.payment.status] ?? a.paymentStatus ?? a.payment.status}
+                          <span className="inline-flex items-center gap-1.5">
+                            <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${PAYMENT_STATUS_STYLE[a.paymentStatus ?? a.payment.status] ?? "bg-gray-50 text-gray-600 border-gray-200"}`}>
+                              {PAYMENT_STATUS_LABEL[a.paymentStatus ?? a.payment.status] ?? a.paymentStatus ?? a.payment.status}
+                            </span>
+                            {(a.paymentStatus ?? a.payment?.status) === "PENDING" && (
+                              <button
+                                type="button"
+                                onClick={() => handleResendPayment(a.id)}
+                                disabled={relancingId === a.id}
+                                title="Relancer le paiement"
+                                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-amber-600 transition-colors hover:bg-amber-50 hover:text-amber-700 disabled:opacity-40"
+                              >
+                                {relancingId === a.id ? (
+                                  <Loader2 size={13} className="animate-spin" />
+                                ) : (
+                                  <RefreshCw size={13} />
+                                )}
+                              </button>
+                            )}
                           </span>
                         ) : (
                           <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs font-medium text-gray-600">Aucun paiement</span>

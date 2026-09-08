@@ -21,10 +21,28 @@ const NAV_LINKS = [
 ];
 
 export default function Navbar() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState("Accueil");
   const [cartItemCount, setCartItemCount] = useState(0);
   const { data: session, status } = useSession();
+
+  // Active link is derived from current URL, not from click state
+  const normalizedPath = (() => {
+    if (!pathname) return "/";
+    // Strip locale prefix (/fr, /en, /nl) if present
+    const seg = pathname.split("/").filter(Boolean);
+    const locales = ["fr", "en", "nl"];
+    if (seg.length > 0 && locales.includes(seg[0])) {
+      return "/" + seg.slice(1).join("/");
+    }
+    return pathname || "/";
+  })();
+  const isActiveLink = (href) => {
+    const cleanHref = href.replace(/\/$/, "") || "/";
+    const cleanPath = normalizedPath.replace(/\/$/, "") || "/";
+    if (cleanHref === "/") return cleanPath === "/";
+    return cleanPath === cleanHref || cleanPath.startsWith(cleanHref + "/");
+  };
   // See Footer.jsx for why this is gated on mount rather than fetching the
   // session server-side (avoids a hydration mismatch without forcing every
   // public route to render dynamically).
@@ -126,10 +144,9 @@ export default function Navbar() {
             <li key={link.label}>
               <Link
                 href={link.href}
-                onClick={() => setActive(link.label)}
                 className={`font-display relative whitespace-nowrap text-[15px] font-medium tracking-wide transition-colors duration-200
                   ${
-                    active === link.label
+                    isActiveLink(link.href)
                       ? "text-gold"
                       : "text-cream/70 hover:text-cream/95"
                   }`}
@@ -314,9 +331,9 @@ export default function Navbar() {
             <li key={link.label}>
               <Link
                 href={link.href}
-                onClick={() => { setActive(link.label); setOpen(false); }}
+                onClick={() => setOpen(false)}
                 className={`font-display block border-b border-cream/10 py-3.5 text-[15px] font-medium tracking-wide transition-colors
-                  ${active === link.label ? "text-gold" : "text-cream/70 hover:text-cream"}`}
+                  ${isActiveLink(link.href) ? "text-gold" : "text-cream/70 hover:text-cream"}`}
               >
                 {link.label}
               </Link>

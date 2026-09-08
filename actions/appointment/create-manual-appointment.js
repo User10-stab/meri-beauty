@@ -3,10 +3,12 @@
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
 import {
   reservationCreatedAutomaticEmail,
   staffReservationConfirmedEmail,
+  staffReservationRequestedEmail,
 } from "@/lib/email-templates";
 import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
 import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
@@ -18,14 +20,16 @@ import {
 } from "@/lib/appointment-scheduling";
 import {
   createNotificationsBulk,
+  buildAppointmentCreatedNotification,
   buildAppointmentConfirmedNotification,
   getAppointmentNotificationRecipients,
   getAppointmentEmailRecipients,
 } from "@/lib/notifications";
-import { resolveOrCreateCustomer } from "@/actions/reservation/create-reservation";
+import { resolveOrCreateCustomer, sendWelcomeEmailIfNew } from "@/actions/reservation/create-reservation";
 import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { getAvailableSlots as getAvailableSlotsAction } from "@/actions/reservation/get-available-slots";
+import { isSellerLegalDataComplete } from "@/lib/invoicing";
 
 // Re-export getAvailableSlots for use in the manual appointment modal
 export const getAvailableSlots = getAvailableSlotsAction;
@@ -126,7 +130,15 @@ export async function getStaffForManualBooking(serviceId) {
         id: true,
         price: true,
         duration: true,
-        staff: { select: { id: true, user: { select: { fullName: true } } } },
+        staff: {
+          select: {
+            id: true,
+            depositEnabled: true,
+            depositPercentage: true,
+            allowedPaymentMethods: true,
+            user: { select: { fullName: true } },
+          },
+        },
       },
       orderBy: { staff: { user: { fullName: "asc" } } },
     });
@@ -139,6 +151,9 @@ export async function getStaffForManualBooking(serviceId) {
         staffName: s.staff.user?.fullName ?? "Membre du personnel",
         price: Number(s.price),
         duration: s.duration,
+        depositEnabled: Boolean(s.staff.depositEnabled),
+        depositPercentage: Number(s.staff.depositPercentage ?? 0),
+        allowedPaymentMethods: s.staff.allowedPaymentMethods ?? "BOTH",
       })),
     };
   } catch (error) {
@@ -267,6 +282,9 @@ export async function createManualAppointment(input) {
             depositEnabled: true,
             depositPercentage: true,
             allowedPaymentMethods: true,
+            stripeAccountId: true,
+            stripeChargesEnabled: true,
+            stripePayoutsEnabled: true,
           },
         },
       },
@@ -319,8 +337,10 @@ export async function createManualAppointment(input) {
         return { success: false, message: "Client introuvable." };
       }
     } else {
+      let isNewUser = false;
+      let temporaryPassword = null;
       try {
-        ({ user } = await resolveOrCreateCustomer(
+        ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(
           { ...customer, newsletterSubscribed: false },
           undefined
         ));
@@ -337,8 +357,167 @@ export async function createManualAppointment(input) {
         }
         throw err;
       }
+
+      // Send login credentials to newly created customers
+      sendWelcomeEmailIfNew({ user, isNewUser, temporaryPassword }, "[createManualAppointment]")
+        .catch((err) => console.error("[createManualAppointment] welcome email failed:", err));
+
+      // Manual reservations are created by staff — email verification is unnecessary
+      if (isNewUser) {
+        prisma.user.update({ where: { id: user.id }, data: { emailVerified: true } })
+          .catch((err) => console.error("[createManualAppointment] emailVerified update failed:", err));
+      }
     }
 
+    // ── Branch on whether an acompte is required for this staff ─────────────
+    // Reuses the same Staff.depositEnabled / depositPercentage / allowedPaymentMethods
+    // logic as the public booking flow (getReservationPaymentDecision).
+    const staffName = staffService.staff?.user?.fullName ?? "votre experte";
+    const serviceName = staffService.service?.name ?? "votre service";
+    const totalAmount = Number(staffService.price);
+    const depositAmount = Number(paymentDecision.depositAmount ?? 0);
+
+    if (paymentDecision.shouldCreatePaymentRecord && paymentDecision.requiresOnlinePaymentNow) {
+      // ── Case 1: staff requires an acompte → PENDING + Payment + Stripe link ─
+      const amountToPay = paymentDecision.paymentType === "ONLINE" ? totalAmount : depositAmount;
+
+      if (!(await isSellerLegalDataComplete())) {
+        return { success: false, message: "Le paiement en ligne n'est pas disponible pour le moment." };
+      }
+      const staffStripe = staffService.staff;
+      if (!staffStripe?.stripeAccountId || !staffStripe.stripeChargesEnabled || !staffStripe.stripePayoutsEnabled) {
+        return { success: false, message: "Le compte Stripe du professionnel n'est pas prêt à recevoir des paiements." };
+      }
+
+      // Create appointment PENDING + payment PENDING atomically
+      const { appointment, payment } = await prisma.$transaction(async (tx) => {
+        const appt = await tx.appointment.create({
+          data: {
+            userId: user.id,
+            staffServiceId,
+            staffId,
+            date: appointmentDate,
+            startTime,
+            endTime,
+            status: "PENDING",
+            notes: notes || null,
+          },
+        });
+        const pay = await tx.payment.create({
+          data: {
+            appointmentId: appt.id,
+            depositAmount,
+            totalAmount,
+            paidAmount: 0,
+            remainingAmount: totalAmount,
+            paymentType: paymentDecision.paymentType,
+            status: "PENDING",
+          },
+        });
+        return { appointment: appt, payment: pay };
+      });
+
+      // Create Stripe Checkout Session (direct charge on staff's connected account)
+      const checkoutSession = await stripe.checkout.sessions.create(
+        {
+          line_items: [
+            {
+              price_data: {
+                currency: "eur",
+                product_data: {
+                  name: paymentDecision.paymentType === "ONLINE" ? serviceName : `Acompte - ${serviceName}`,
+                  description: `${staffName} • ${appointmentDate.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} • ${time}`,
+                },
+                unit_amount: Math.round(amountToPay * 100),
+              },
+              quantity: 1,
+            },
+          ],
+          mode: "payment",
+          success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/mes-reservations?canceled=true`,
+          customer_email: user.email,
+          payment_intent_data: {
+            metadata: {
+              appointmentId: appointment.id,
+              paymentId: payment.id,
+              paymentScenario: paymentDecision.paymentIntent,
+            },
+          },
+          metadata: {
+            appointmentId: appointment.id,
+            paymentId: payment.id,
+            paymentScenario: paymentDecision.paymentIntent,
+          },
+        },
+        { stripeAccount: staffService.staff.stripeAccountId }
+      );
+
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { transactionReference: checkoutSession.id },
+      });
+
+      const paymentUrl = checkoutSession.url;
+
+      // Notifications: pending appointment → use Created notification
+      const recipientUserIds = await getAppointmentNotificationRecipients(staffId);
+      if (recipientUserIds.length > 0) {
+        const inputs = recipientUserIds.map((uid) =>
+          buildAppointmentCreatedNotification({
+            userId: uid,
+            appointmentId: appointment.id,
+            date: appointmentDate,
+            startTime,
+            serviceName,
+            staffName,
+            customerName: user.fullName,
+          })
+        );
+        createNotificationsBulk(inputs).catch((err) =>
+          console.error("[createManualAppointment] notifications failed:", err)
+        );
+      }
+
+      // Email to client: acompte à payer with CTA
+      const { manualDepositRequiredEmail } = await import("@/lib/email-templates");
+      sendEmail({
+        to: user.email,
+        ...manualDepositRequiredEmail({
+          customerName: user.fullName,
+          serviceName,
+          staffName,
+          date: appointmentDate,
+          time,
+          depositAmount: amountToPay,
+          totalAmount,
+          paymentUrl,
+        }),
+      }).catch((err) => console.error("[createManualAppointment] deposit email failed:", err));
+
+      // Staff email: keep them informed (pending)
+      const emailRecipients = await getAppointmentEmailRecipients(staffId);
+      for (const recipient of emailRecipients) {
+        sendEmail({
+          to: recipient.email,
+          ...staffReservationRequestedEmail({
+            staffName: recipient.fullName,
+            customerName: user.fullName,
+            serviceName,
+            date: appointmentDate,
+            time,
+          }),
+        }).catch((err) => console.error("[createManualAppointment] staff pending email failed:", err));
+      }
+
+      return {
+        success: true,
+        message: "Rendez-vous créé en attente du paiement de l'acompte. Un email a été envoyé au client.",
+        data: { appointmentId: appointment.id, paymentUrl, status: "PENDING", requiresPayment: true },
+      };
+    }
+
+    // ── Case 2: staff does NOT require an acompte → keep existing CONFIRMED flow ─
     const appointment = await prisma.appointment.create({
       data: {
         userId: user.id,
@@ -347,15 +526,12 @@ export async function createManualAppointment(input) {
         date: appointmentDate,
         startTime,
         endTime,
-        status: paymentDecision.appointmentStatusBeforePayment,
+        status: "CONFIRMED",
         notes: notes || null,
       },
     });
 
-    // ── Notifications / email (fire-and-forget, never blocks the response) ──
-    const staffName = staffService.staff?.user?.fullName ?? "votre experte";
-    const serviceName = staffService.service?.name ?? "votre service";
-
+    // Notifications / email (fire-and-forget)
     const recipientUserIds = await getAppointmentNotificationRecipients(staffId);
     if (recipientUserIds.length > 0) {
       const inputs = recipientUserIds.map((uid) =>
@@ -383,14 +559,12 @@ export async function createManualAppointment(input) {
         staffName,
         date: appointmentDate,
         time,
-        totalAmount: Number(staffService.price),
+        totalAmount,
         checkInCode: ticket.checkInCode,
       }),
       ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
     }).catch((err) => console.error("[createManualAppointment] confirmation email failed:", err));
 
-    // Staff must always receive an email when a reservation is created for them,
-    // whether the manual booking was made by themselves or by an admin.
     const emailRecipients = await getAppointmentEmailRecipients(staffId);
     for (const recipient of emailRecipients) {
       sendEmail({
@@ -402,7 +576,7 @@ export async function createManualAppointment(input) {
           date: appointmentDate,
           time,
           duration: staffService.duration,
-          totalAmount: Number(staffService.price),
+          totalAmount,
         }),
       }).catch((err) => console.error("[createManualAppointment] staff email failed:", err));
     }
@@ -410,7 +584,7 @@ export async function createManualAppointment(input) {
     return {
       success: true,
       message: "Rendez-vous ajouté avec succès.",
-      data: { appointmentId: appointment.id },
+      data: { appointmentId: appointment.id, status: "CONFIRMED", requiresPayment: false },
     };
   } catch (error) {
     console.error("[createManualAppointment]", error);

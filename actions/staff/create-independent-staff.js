@@ -217,6 +217,7 @@ export async function createIndependentStaff(input) {
           fixedRent: contract.fixedRent,
           startDate: new Date(contract.startDate),
           endDate: contract.endDate ? new Date(contract.endDate) : null,
+          dueDate: contract.dueDate != null && String(contract.dueDate).trim() !== "" ? String(contract.dueDate).trim() : null,
           status: "ACTIVE",
           notes: contract.notes ?? null,
         },
@@ -299,7 +300,10 @@ export async function createIndependentStaff(input) {
     // Errors are logged but do not fail the staff creation response.
     try {
       await createAndSendStaffContractInvoice({
-        contract: createdContract,
+        contract: {
+          ...createdContract,
+          dueDate: contract.dueDate != null && String(contract.dueDate).trim() !== "" ? String(contract.dueDate).trim() : createdContract.dueDate ?? null,
+        },
         user: { ...createdUser, vatNumber },
       });
     } catch (invoiceErr) {

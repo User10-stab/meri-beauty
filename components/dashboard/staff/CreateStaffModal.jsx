@@ -267,6 +267,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
         fixedRent: initialValues.contract?.fixedRent ?? "",
         startDate: initialValues.contract?.startDate ?? "",
         endDate:   initialValues.contract?.endDate ?? "",
+        dueDate:   initialValues.contract?.dueDate ?? "",
         notes:     initialValues.contract?.notes ?? "",
       },
     },
@@ -695,6 +696,27 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                   />
                   <FieldError message={errors.contract?.endDate?.message} />
                 </div>
+              </div>
+
+              {/* Délai de paiement */}
+              <div>
+                <Label htmlFor="contractDueDate" icon={Calendar}>
+                  Délai de paiement (jours)
+                </Label>
+                <TextInput
+                  id="contractDueDate"
+                  type="number"
+                  min="0"
+                  max="365"
+                  step="1"
+                  placeholder="ex. 7"
+                  error={errors.contract?.dueDate}
+                  {...register("contract.dueDate")}
+                />
+                <FieldError message={errors.contract?.dueDate?.message} />
+                <p className="mt-1 text-[11px] text-gray-400">
+                  Nombre de jours après la date de début du contrat à laquelle le loyer doit être payé. Laissez vide pour 7 jours par défaut.
+                </p>
               </div>
 
               {/* Notes */}

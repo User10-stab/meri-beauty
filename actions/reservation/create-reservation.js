@@ -169,7 +169,7 @@ export async function resolveOrCreateCustomer(customerInfo, authenticatedUserId)
  * @param {{ user: object, isNewUser: boolean, temporaryPassword: string|null }} params
  * @param {string} logPrefix - e.g. "[createReservation]" for error logging
  */
-async function sendWelcomeEmailIfNew({ user, isNewUser, temporaryPassword }, logPrefix) {
+export async function sendWelcomeEmailIfNew({ user, isNewUser, temporaryPassword }, logPrefix) {
   if (!isNewUser || !temporaryPassword) return;
 
   try {

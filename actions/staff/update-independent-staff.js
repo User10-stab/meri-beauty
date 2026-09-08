@@ -258,6 +258,7 @@ export async function updateIndependentStaff(input) {
               fixedRent: contract.fixedRent,
               startDate: new Date(contract.startDate),
               endDate:   contract.endDate ? new Date(contract.endDate) : null,
+              dueDate:  contract.dueDate != null && String(contract.dueDate).trim() !== "" ? String(contract.dueDate).trim() : null,
               status:    "ACTIVE",
               notes:     contract.notes ?? null,
             },

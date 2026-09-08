@@ -3,6 +3,7 @@ import { requireDashboardPermission } from "@/lib/route-protection";
 import { STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
 import { getAllAppointments, getStaffFilterOptions } from "@/actions/appointment/list-appointments";
 import { AppointmentsPageClient } from "@/components/dashboard/appointments/AppointmentsPageClient";
+import { NewAppointmentButton } from "@/components/dashboard/appointments/NewAppointmentButton";
 import { getTranslations } from "next-intl/server";
 
 export async function generateMetadata() {
@@ -50,27 +51,32 @@ export default async function AppointmentsPage() {
           </p>
         </div>
 
-        {/* Stats strip */}
-        <div className="flex flex-wrap items-center gap-3">
-          <StatBadge
-            label={t("common.total")}
-            value={appointments.length}
-            color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
-          />
-          {pendingCount > 0 && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {/* Stats strip */}
+          <div className="flex flex-wrap items-center gap-3">
             <StatBadge
-              label={t("appointmentStatus.pending")}
-              value={pendingCount}
-              color="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+              label={t("common.total")}
+              value={appointments.length}
+              color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
             />
-          )}
-          {confirmedCount > 0 && (
-            <StatBadge
-              label={t("appointmentStatus.confirmed")}
-              value={confirmedCount}
-              color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-            />
-          )}
+            {pendingCount > 0 && (
+              <StatBadge
+                label={t("appointmentStatus.pending")}
+                value={pendingCount}
+                color="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+              />
+            )}
+            {confirmedCount > 0 && (
+              <StatBadge
+                label={t("appointmentStatus.confirmed")}
+                value={confirmedCount}
+                color="bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+              />
+            )}
+          </div>
+          <div className="w-full shrink-0 sm:w-auto">
+            <NewAppointmentButton isAdmin={isAdminRole(user.role)} />
+          </div>
         </div>
       </div>
 

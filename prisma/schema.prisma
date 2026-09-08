@@ -2512,6 +2512,7 @@ model Contract {
   fixedRent            Decimal?
   startDate            DateTime
   endDate              DateTime?
+  dueDate              String?
   status               ContractStatus
   notes                String?
   createdAt            DateTime       @default(now())

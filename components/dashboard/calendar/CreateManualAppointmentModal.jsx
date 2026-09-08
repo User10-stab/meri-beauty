@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition, useRef } from "react";
 import { toast } from "sonner";
-import { X, Loader2, User, Search, UserPlus, Calendar, Clock, Scissors, FileText } from "lucide-react";
+import { X, Loader2, User, Search, UserPlus, Calendar, Clock, Scissors, FileText, ChevronDown, ChevronUp } from "lucide-react";
 import {
   createManualAppointment,
   getServicesForManualBooking,
@@ -85,6 +85,9 @@ export function CreateManualAppointmentModal({
   const [availableSlots, setAvailableSlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [availabilityReason, setAvailabilityReason] = useState(null);
+  const [workingHours, setWorkingHours] = useState(null);
+  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
+  const timeDropdownRef = useRef(null);
 
   // ── Customer: search existing, or fill in a new one ─────────────────────
   const [customerMode, setCustomerMode] = useState("search"); // "search" | "new"
@@ -111,6 +114,8 @@ export function CreateManualAppointmentModal({
     setNewCustomer({ fullName: "", email: "", phone: "" });
     setAvailableSlots([]);
     setAvailabilityReason(null);
+    setWorkingHours(null);
+    setTimeDropdownOpen(false);
     setLoadingSlots(false);
   }, [open, defaultDate]);
 
@@ -167,6 +172,8 @@ export function CreateManualAppointmentModal({
     if (!selectedStaff || !date) {
       setAvailableSlots([]);
       setAvailabilityReason(null);
+      setWorkingHours(null);
+      setTimeDropdownOpen(false);
       setTime("");
       return;
     }
@@ -175,19 +182,45 @@ export function CreateManualAppointmentModal({
     getAvailableSlots(selectedStaff.staffServiceId, date).then((res) => {
       setLoadingSlots(false);
       if (res.success) {
-        setAvailableSlots(res.data.reservationWindows || []);
+        // Reuse same slot-generation as normal reservation flow: fixed 30-min timeline
+        // with availability determined by service duration, working hours, appointments, TimeOff, etc.
+        // `allTimeSlots` is the canonical timeline (10:00,10:30...16:30 for 10-17), `reservationWindows` is fallback for backward compat
+        const slots = res.data.allTimeSlots || res.data.reservationWindows || [];
+        setAvailableSlots(slots);
         setAvailabilityReason(res.data.reason);
-        // Clear time if the current selection is no longer available
-        if (time && !res.data.reservationWindows?.some(slot => slot.startTime === time)) {
+        setWorkingHours(res.data.workingHours || null);
+        // Clear time if the current selection is no longer available (same logic as DateTimeStep)
+        const isTimeStillAvailable = slots.some((slot) => slot.startTime === time && slot.available !== false);
+        if (time && !isTimeStillAvailable) {
           setTime("");
         }
       } else {
         setAvailableSlots([]);
         setAvailabilityReason(null);
+        setWorkingHours(null);
         setTime("");
       }
     });
   }, [selectedStaff, date]);
+
+  // Close time dropdown on outside click / Escape
+  useEffect(() => {
+    if (!timeDropdownOpen) return;
+    function handleClickOutside(e) {
+      if (timeDropdownRef.current && !timeDropdownRef.current.contains(e.target)) {
+        setTimeDropdownOpen(false);
+      }
+    }
+    function handleKey(e) {
+      if (e.key === "Escape") setTimeDropdownOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [timeDropdownOpen]);
 
   const selectedService = useMemo(
     () => (selectedStaff ? { duration: selectedStaff.duration } : null),
@@ -236,12 +269,13 @@ export function CreateManualAppointmentModal({
         // Use the server-provided error message, which will include the specific
         // "Ce créneau vient d'être réservé" message if the slot became unavailable
         toast.error(result.message || "Une erreur est survenue.");
-        // If the error is about availability, refresh the slots
+        // If the error is about availability, refresh the slots (same logic as normal flow)
         if (result.message?.includes("créneau") || result.message?.includes("disponible")) {
           getAvailableSlots(effectiveStaff.staffServiceId, date).then((res) => {
             if (res.success) {
-              setAvailableSlots(res.data.reservationWindows || []);
+              setAvailableSlots(res.data.allTimeSlots || res.data.reservationWindows || []);
               setAvailabilityReason(res.data.reason);
+              setWorkingHours(res.data.workingHours || null);
               setTime("");
             }
           });
@@ -272,7 +306,7 @@ export function CreateManualAppointmentModal({
         </div>
 
         {/* Content */}
-        <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
           {/* Service — pick first, then the staff member who does it */}
           <ModalField label="Prestation" required>
             <div className="relative">
@@ -334,48 +368,108 @@ export function CreateManualAppointmentModal({
               </div>
               <FieldError message={errors.date} />
             </ModalField>
-            <ModalField label="Heure" required>
-              <div className="relative">
-                <Clock size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                {loadingSlots ? (
-                  <div className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-400 flex items-center">
-                    Chargement…
-                  </div>
-                ) : availableSlots.length > 0 ? (
-                  <select
-                    value={time}
-                    onChange={(e) => setTime(e.target.value)}
-                    className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"
+                        <ModalField label="Heure" required>
+              {loadingSlots ? (
+                <div className="flex h-9 w-full items-center rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-400">Chargement des créneaux…</div>
+              ) : !selectedStaff || !date ? (
+                <div className="flex h-9 w-full items-center rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm text-gray-400">Sélectionnez d&apos;abord une date</div>
+              ) : availableSlots.length === 0 ? (
+                <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-[#ede5d8]/60 bg-white px-4 py-6 text-center">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#fdf8f0] border border-[#ede5d8]"><Clock size={16} className="text-[#c2b8aa]" /></div>
+                  <p className="text-sm font-medium text-[#2F3A2E]">Aucun créneau disponible</p>
+                  <p className="max-w-[260px] text-xs leading-relaxed text-[#9a9590]">
+                    {availabilityReason === "Staff not available" && "Membre du personnel non disponible"}
+                    {availabilityReason === "User deleted" && "Compte utilisateur supprimé"}
+                    {availabilityReason === "No working hours configured" && "Aucun horaire de travail configuré"}
+                    {availabilityReason === "No active contract" && "Aucun contrat actif"}
+                    {availabilityReason === "Contract has not started yet" && "Le contrat n'a pas encore commencé"}
+                    {availabilityReason === "Contract has expired" && "Le contrat a expiré"}
+                    {availabilityReason === "Salon closed this day" && "Salon fermé ce jour"}
+                    {availabilityReason === "Staff not working this day" && "Membre du personnel ne travaille pas ce jour"}
+                    {availabilityReason === "Staff on time off" && "Membre du personnel en congé"}
+                    {availabilityReason === "Salon closure" && "Salon fermé"}
+                    {!availabilityReason && "Jour non disponible — choisissez une autre date"}
+                  </p>
+                </div>
+              ) : (
+                <div className="relative" ref={timeDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setTimeDropdownOpen((v) => !v)}
+                    className="flex h-9 w-full items-center justify-between rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none transition-colors hover:border-[#b89664]/50 focus:border-[#b89664] focus:ring-2 focus:ring-[#b89664]/20"
+                    aria-haspopup="listbox"
+                    aria-expanded={timeDropdownOpen}
                   >
-                    <option value="">Sélectionner…</option>
-                    {availableSlots.map((slot) => (
-                      <option key={slot.startTime} value={slot.startTime}>
-                        {slot.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="h-9 w-full rounded-lg border border-gray-200 pl-8 pr-3 text-sm text-gray-400 flex items-center">
-                    {date && selectedStaff ? "Aucun créneau disponible" : "Sélectionnez d'abord une date"}
-                  </div>
-                )}
-              </div>
-              <FieldError message={errors.time} />
-              {availabilityReason && availableSlots.length === 0 && date && selectedStaff && (
-                <p className="mt-1 text-xs text-gray-500">
-                  {availabilityReason === "Staff not available" && "Membre du personnel non disponible"}
-                  {availabilityReason === "User deleted" && "Compte utilisateur supprimé"}
-                  {availabilityReason === "No working hours configured" && "Aucun horaire de travail configuré"}
-                  {availabilityReason === "No active contract" && "Aucun contrat actif"}
-                  {availabilityReason === "Contract has not started yet" && "Le contrat n'a pas encore commencé"}
-                  {availabilityReason === "Contract has expired" && "Le contrat a expiré"}
-                  {availabilityReason === "Salon closed this day" && "Salon fermé ce jour"}
-                  {availabilityReason === "Staff not working this day" && "Membre du personnel ne travaille pas ce jour"}
-                  {availabilityReason === "Staff on time off" && "Membre du personnel en congé"}
-                  {availabilityReason === "Salon closure" && "Salon fermé"}
-                  {!availabilityReason && "Jour non disponible"}
+                    <span className="flex items-center gap-2">
+                      <Clock size={14} className="text-gray-400" />
+                      {time ? (
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-semibold text-[#2F3A2E]">{time}</span>
+                          {selectedService?.duration && (
+                            <>
+                              <span className="text-gray-300">→</span>
+                              <span className="text-[#6f6a64]">{(() => { const [h,m]=time.split(":").map(Number); const end=new Date(0,0,0,h,m+selectedService.duration); return `${String(end.getHours()).padStart(2,"0")}:${String(end.getMinutes()).padStart(2,"0")}`; })()}</span>
+                            </>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-gray-400">Sélectionner une heure</span>
+                      )}
+                    </span>
+                    {timeDropdownOpen ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+                  </button>
+                  {timeDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-[#ede5d8] bg-white shadow-lg">
+                      <div className="p-3">
+                        <p className="mb-2 text-xs font-semibold text-[#2F3A2E]">Sélectionner une heure</p>
+                        {workingHours && (
+                          <p className="mb-2 text-[11px] text-[#9a9590]">{workingHours.start} – {workingHours.end} • {formatDuration(selectedStaff.duration)} • {availableSlots.filter((s) => s.available !== false).length} créneaux libres</p>
+                        )}
+                        <div className="grid max-h-[176px] grid-cols-2 gap-2 overflow-y-auto pr-1 sm:max-h-[220px]">
+                          {availableSlots.map((slot) => {
+                            const isAvailable = slot.available !== false;
+                            const isSelected = time === slot.startTime;
+                            return (
+                              <button
+                                key={slot.startTime}
+                                type="button"
+                                onClick={() => {
+                                  if (!isAvailable) return;
+                                  setTime(slot.startTime);
+                                  setTimeDropdownOpen(false);
+                                }}
+                                disabled={!isAvailable}
+                                aria-pressed={isSelected}
+                                title={isAvailable ? `Réserver à ${slot.startTime}` : `${slot.startTime} — indisponible`}
+                                className={`flex h-[38px] items-center justify-center rounded-xl border text-sm font-bold tabular-nums transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-[#b89664]/30 ${
+                                  !isAvailable
+                                    ? "cursor-not-allowed border-[#ede5d8] bg-[#fafafa] text-[#c2b8aa] opacity-60"
+                                    : isSelected
+                                      ? "border-[#b89664] bg-[#b89664] text-white shadow-sm"
+                                      : "border-[#ede5d8]/70 bg-white text-[#2F3A2E] hover:border-[#b89664] hover:bg-[#fdf8f0]"
+                                }`}
+                              >
+                                {slot.startTime}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-2 flex items-center gap-3 border-t border-[#fdf8f0] pt-2 text-[11px] text-[#9a9590]">
+                          <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#b89664] border border-[#b89664]" /> Sélectionné</span>
+                          <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-white border border-[#ede5d8]" /> Libre</span>
+                          <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#fafafa] border border-[#ede5d8]" /> Occupé</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {time && selectedService && !loadingSlots && availableSlots.length > 0 && (
+                <p className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-[#2F3A2E] px-3 py-1 text-xs font-semibold text-white">
+                  <Clock size={11} className="text-white/70" /> {time} → {(() => { const [h,m]=time.split(":").map(Number); const end=new Date(0,0,0,h,m+selectedService.duration); return `${String(end.getHours()).padStart(2,"0")}:${String(end.getMinutes()).padStart(2,"0")}`; })()}
                 </p>
               )}
+              <FieldError message={errors.time} />
             </ModalField>
           </div>
           {selectedService && (
@@ -513,9 +607,37 @@ export function CreateManualAppointmentModal({
             </div>
           </ModalField>
 
-          <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
-            Le rendez-vous est ajouté directement en statut confirmé. Le paiement se règle sur place, comme pour tout rendez-vous en espèces — enregistrez-le au moment de terminer le rendez-vous.
-          </p>
+          {/* {(() => {
+            const staff = selectedStaff ?? staffOptions[0] ?? null;
+            const requiresDeposit = Boolean(
+              staff &&
+              staff.depositEnabled &&
+              staff.allowedPaymentMethods === "BOTH" &&
+              Number(staff.depositPercentage ?? 0) > 0
+            );
+            const requiresFullOnline = staff?.allowedPaymentMethods === "ONLINE_ONLY";
+            if (requiresFullOnline) {
+              return (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Ce professionnel n&apos;accepte que le paiement en ligne. Le rendez-vous sera créé en attente et le client recevra un email avec un lien pour payer l&apos;intégralité afin de le confirmer.
+                </p>
+              );
+            }
+            if (requiresDeposit) {
+              const depositAmount = ((staff.price * staff.depositPercentage) / 100).toFixed(2);
+              return (
+                <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  Ce professionnel demande un acompte de {staff.depositPercentage}% (soit €{depositAmount}). Le rendez-vous sera créé en
+                  attente (<span className="font-semibold">PENDING</span>) et le client recevra un email avec un lien « Payer l&apos;acompte » — il passera <span className="font-semibold">CONFIRMÉ</span> automatiquement après paiement.
+                </p>
+              );
+            }
+            return (
+              <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                Le rendez-vous est ajouté directement en statut confirmé. Le paiement se règle sur place, comme pour tout rendez-vous en espèces — enregistrez-le au moment de terminer le rendez-vous.
+              </p>
+            );
+          })()} */}
 
           {/* Footer */}
           <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">

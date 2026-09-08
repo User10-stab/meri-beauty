@@ -1130,7 +1130,7 @@ function HumanSection() {
             </div>
 
             <Link
-              href="/animateurs"
+              href="/#equipe"
               className="group mt-6 inline-flex items-center gap-1.5 text-[13px] font-medium tracking-[0.03em] text-[#b89664] underline decoration-[#e9ddd0] underline-offset-[5px] transition-all hover:text-[#9a8054] hover:decoration-[#b89664] sm:mt-8 sm:text-[15px]"
             >
               {t("cta")}

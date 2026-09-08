@@ -962,10 +962,22 @@ async function processAppointmentCheckoutSession(session, connectedAccountId = n
     // rather than inlined, so a delayed/duplicate webhook delivery for an
     // appointment that's already CONFIRMED (or further along) preserves its
     // current status instead of forcing it back to PENDING.
-    const nextAppointmentStatus = resolveAppointmentStatusAfterPayment({
+    let nextAppointmentStatus = resolveAppointmentStatusAfterPayment({
       currentStatus: appointment.status,
       confirmationMode,
     });
+    // Manual reservations created as PENDING with a required acompte (DEPOSIT_ONLINE / FULL_ONLINE)
+    // must become CONFIRMED once Stripe confirms payment, even when the staff's
+    // reservationConfirmationMode is MANUAL. The generic resolver keeps MANUAL PENDING
+    // unchanged, but a successful Stripe payment for a manual booking is the explicit
+    // confirmation signal (PENDING → CONFIRMED via webhook). This mirrors the
+    // ACCEPTED → CONFIRMED path and does not affect normal MANUAL bookings without payment.
+    if (
+      appointment.status === "PENDING" &&
+      (paymentScenario === "DEPOSIT_ONLINE" || paymentScenario === "FULL_ONLINE")
+    ) {
+      nextAppointmentStatus = "CONFIRMED";
+    }
 
     await tx.payment.update({
       where: { id: paymentId },

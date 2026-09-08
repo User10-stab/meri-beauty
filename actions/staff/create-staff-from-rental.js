@@ -260,6 +260,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
           fixedRent: contract.fixedRent,
           startDate: new Date(contract.startDate),
           endDate: contract.endDate ? new Date(contract.endDate) : null,
+          dueDate: contract.dueDate != null && String(contract.dueDate).trim() !== "" ? String(contract.dueDate).trim() : null,
           status: "ACTIVE",
           notes: contract.notes ?? null,
         },
@@ -321,7 +322,10 @@ export async function createStaffFromRental(input, rentalRequestId) {
       const finalContract = contractForInvoice ?? staff.contract;
       if (finalContract && invoiceUser) {
         await createAndSendStaffContractInvoice({
-          contract: finalContract,
+          contract: {
+            ...finalContract,
+            dueDate: contract.dueDate != null && String(contract.dueDate).trim() !== "" ? String(contract.dueDate).trim() : finalContract.dueDate ?? null,
+          },
           user: { ...invoiceUser, vatNumber: invoiceUser.vatNumber ?? vatNumber },
         });
       }

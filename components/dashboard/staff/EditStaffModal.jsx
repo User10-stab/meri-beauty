@@ -334,6 +334,14 @@ function ViewContent({ staff }) {
           )}
           <InfoRow label="Début" value={formatDate(staff.contract.startDate)} />
           <InfoRow label="Fin"   value={formatDate(staff.contract.endDate)} />
+          <InfoRow
+            label="Délai paiement"
+            value={
+              staff.contract.dueDate != null && String(staff.contract.dueDate).trim() !== ""
+                ? `${staff.contract.dueDate} jour${Number(staff.contract.dueDate) !== 1 ? "s" : ""} après début`
+                : "7 jours après début (défaut)"
+            }
+          />
           {staff.contract.notes && (
             <InfoRow label="Notes" value={staff.contract.notes} />
           )}
@@ -385,6 +393,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
             fixedRent: staff.contract.fixedRent ?? "",
             startDate: staff.contract.startDate ? staff.contract.startDate.slice(0, 10) : "",
             endDate:   staff.contract.endDate   ? staff.contract.endDate.slice(0, 10)   : "",
+            dueDate:   staff.contract.dueDate ?? "",
             notes:     staff.contract.notes     ?? "",
           }
         : null,
@@ -657,6 +666,15 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
                 <TextInput id="editContractEnd" type="date" error={errors.contract?.endDate} {...register("contract.endDate")} />
                 <FieldError message={errors.contract?.endDate?.message} />
               </div>
+            </div>
+
+            <div>
+              <Label htmlFor="editContractDueDate" icon={Calendar}>Délai de paiement (jours)</Label>
+              <TextInput id="editContractDueDate" type="number" min="0" max="365" step="1" placeholder="ex. 7" error={errors.contract?.dueDate} {...register("contract.dueDate")} />
+              <FieldError message={errors.contract?.dueDate?.message} />
+              <p className="mt-1 text-[11px] text-gray-400">
+                Nombre de jours après la date de début à laquelle le loyer doit être payé. Vide = 7 jours.
+              </p>
             </div>
 
             <div>

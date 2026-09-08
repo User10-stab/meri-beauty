@@ -36,6 +36,9 @@ export async function getIndependentStaff() {
         stripeAccountType: true,
         stripeChargesEnabled: true,
         stripePayoutsEnabled: true,
+        allowedPaymentMethods: true,
+        depositEnabled: true,
+        depositPercentage: true,
         user: {
           select: {
             id: true,
@@ -59,7 +62,7 @@ export async function getIndependentStaff() {
           take: 1,
         },
         staffServices: {
-          where: { isActive: true },
+          where: { isActive: true, service: { isDeleted: false } },
           select: {
             isActive: true,
             serviceId: true,
@@ -96,6 +99,9 @@ export async function getIndependentStaff() {
       stripeAccountType: s.stripeAccountType,
       stripeChargesEnabled: s.stripeChargesEnabled,
       stripePayoutsEnabled: s.stripePayoutsEnabled,
+      allowedPaymentMethods: s.allowedPaymentMethods ?? "BOTH",
+      depositEnabled: Boolean(s.depositEnabled),
+      depositPercentage: s.depositPercentage != null ? Number(s.depositPercentage) : 0,
       // Compliance data
       workingHoursCount: s._count.workingHours,
       userIsDeleted: s.user.isDeleted,

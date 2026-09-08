@@ -5,6 +5,7 @@ import { getReviewDashboardData } from "@/actions/review/review-actions";
 import { isAdminRole } from "@/lib/authorization";
 import { AppointmentsPageClient } from "@/components/dashboard/appointments/AppointmentsPageClient";
 import { ReviewsDashboardCard } from "@/components/dashboard/reviews/ReviewsDashboardCard";
+import { NewAppointmentButton } from "@/components/dashboard/appointments/NewAppointmentButton";
 
 export const metadata = {
   title: "Tous les rendez-vous — Dashboard",
@@ -23,13 +24,18 @@ export default async function AllAppointmentsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold text-dark dark:text-white">Tous les rendez-vous</h1>
-        <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          {isAdminRole(user.role)
-            ? "Rendez-vous de toute l'équipe."
-            : "Vos rendez-vous."}
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-bold text-dark dark:text-white">Tous les rendez-vous</h1>
+          <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
+            {isAdminRole(user.role)
+              ? "Rendez-vous de toute l'équipe."
+              : "Vos rendez-vous."}
+          </p>
+        </div>
+        <div className="w-full shrink-0 sm:w-auto">
+          <NewAppointmentButton isAdmin={isAdminRole(user.role)} />
+        </div>
       </div>
 
       {appointmentsResult.message && (

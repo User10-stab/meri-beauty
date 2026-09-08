@@ -29,6 +29,7 @@ export async function upsertStaffContract(staffId, input) {
         fixedRent: fe.fixedRent?.[0] ?? null,
         startDate: fe.startDate?.[0] ?? null,
         endDate: fe.endDate?.[0] ?? null,
+        dueDate: fe.dueDate?.[0] ?? null,
         notes: fe.notes?.[0] ?? null,
       },
     };
@@ -50,7 +51,7 @@ export async function upsertStaffContract(staffId, input) {
       return { success: false, message: "Profil staff introuvable." };
     }
 
-    const { fixedRent, startDate, endDate, notes } = parsed.data;
+    const { fixedRent, startDate, endDate, dueDate, notes } = parsed.data;
 
     // Find existing active contract
     const existingContract = await prisma.contract.findFirst({
@@ -65,6 +66,7 @@ export async function upsertStaffContract(staffId, input) {
           fixedRent,
           startDate: new Date(startDate),
           endDate: endDate ? new Date(endDate) : null,
+          dueDate: dueDate != null && String(dueDate).trim() !== "" ? String(dueDate).trim() : null,
           notes: notes ?? null,
         },
       });
@@ -76,6 +78,7 @@ export async function upsertStaffContract(staffId, input) {
           fixedRent,
           startDate: new Date(startDate),
           endDate: endDate ? new Date(endDate) : null,
+          dueDate: dueDate != null && String(dueDate).trim() !== "" ? String(dueDate).trim() : null,
           notes: notes ?? null,
           status: "ACTIVE",
         },

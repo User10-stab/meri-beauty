@@ -1,6 +1,7 @@
 import SiteHeader from "@/components/website/SiteHeader";
 import Footer from "@/components/website/Footer";
 import SiteTermsNotice from "@/components/website/SiteTermsNotice";
+import HashScrollHandler from "@/components/HashScrollHandler";
 import { getSalon } from "@/actions/salon/get-salon";
 import { getPublicServices } from "@/actions/services/get-services";
 import { getAppBaseUrl } from "@/lib/site-url";
@@ -85,6 +86,7 @@ export default async function PublicLayout({ children }) {
       )}
 
       <SiteHeader />
+      <HashScrollHandler />
 
       {/*
         All h1/h2/h3 inside public pages get Bodoni Moda automatically.

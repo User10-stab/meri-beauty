@@ -977,6 +977,7 @@ function UniverseCard({ item, index }) {
           </p>
           <Link
             href={item.href}
+            scroll={false}
             className="group/link mt-5 inline-flex items-center gap-1.5 text-[12px] font-medium tracking-[0.02em] text-[#3e4a3b] underline decoration-[#d8cfba] underline-offset-[4px] transition-colors hover:text-ink hover:decoration-gold"
           >
             {item.cta}
@@ -1131,6 +1132,7 @@ function HumanSection() {
 
             <Link
               href="/#equipe"
+              scroll={false}
               className="group mt-6 inline-flex items-center gap-1.5 text-[13px] font-medium tracking-[0.03em] text-[#b89664] underline decoration-[#e9ddd0] underline-offset-[5px] transition-all hover:text-[#9a8054] hover:decoration-[#b89664] sm:mt-8 sm:text-[15px]"
             >
               {t("cta")}
@@ -1216,7 +1218,8 @@ function FinalCtaSection() {
         {/* CTA buttons — stack on xs */}
         <div className="flex w-full max-w-md flex-col items-stretch justify-center gap-3 px-4 sm:w-auto sm:max-w-none sm:flex-row sm:flex-wrap sm:items-center sm:px-0 sm:gap-4">
           <Link
-            href="/reservation"
+            href="/reservation#booking"
+            scroll={false}
             className="group inline-flex items-center justify-center gap-3 bg-gold px-6 py-3.5 text-[12px] font-semibold uppercase tracking-[0.16em] text-primary shadow-lg shadow-gold/20 transition-all duration-300 hover:bg-gold/90 hover:shadow-xl hover:shadow-gold/30 sm:px-8 sm:py-4 sm:text-[13px]"
           >
             {t("ctaBooking")}

@@ -49,7 +49,6 @@ const SOCIAL_ICONS = {
   instagram: { component: InstagramIcon, label: "Instagram", color: "hover:text-pink-500" },
   facebook: { component: FacebookIcon, label: "Facebook", color: "hover:text-blue-600" },
   tiktok: { component: TiktokIcon, label: "TikTok", color: "hover:text-black" },
-  pinterest: { component: PinterestIcon, label: "Pinterest", color: "hover:text-red-600" },
 };
 
 function TiktokIcon({ size = 18 }) {
@@ -138,7 +137,7 @@ export default function StaffProfileHero({
         <div className="absolute bottom-20 left-1/4 w-80 h-80 bg-gradient-to-tr from-[#2F3A2E]/3 to-transparent rounded-full blur-3xl" />
       </div>
 
-      <div className="relative mx-auto max-w-[1200px] px-4 pb-16 sm:px-6 sm:pb-20 md:px-10 md:pb-24 lg:px-14">
+      <div className="relative  mx-auto max-w-[1200px] px-4 pb-16 sm:px-6 sm:pb-20 md:px-10 md:pb-24 lg:px-14">
         <div
           ref={heroRef}
           className={`transition-all duration-1000 ease-out ${
@@ -201,7 +200,7 @@ export default function StaffProfileHero({
             </div>
 
             {/* Right - Information Section */}
-            <div className="flex flex-col space-y-8 lg:pt-4">
+            <div className="flex flex-col justify-center justify-center space-y-8 lg:pt-4">
              
 
               {/* Name with staggered animation */}
@@ -295,7 +294,7 @@ export default function StaffProfileHero({
               </div>
 
               {/* CTA Button */}
-              <div className={`pt-4 transition-all duration-700 delay-800 ${
+              {/* <div className={`pt-4 transition-all duration-700 delay-800 ${
                 heroInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
               }`}>
                 <Link
@@ -306,7 +305,7 @@ export default function StaffProfileHero({
                   Prendre rendez-vous
                   <span className="ml-1 text-white/70 transition-transform group-hover:translate-x-1">→</span>
                 </Link>
-              </div>
+              </div> */}
 
         
             </div>

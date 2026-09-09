@@ -446,6 +446,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                   <TableHead className="whitespace-nowrap">Service</TableHead>
                   <TableHead className="whitespace-nowrap">Experte</TableHead>
                   <TableHead className="whitespace-nowrap">Date</TableHead>
+                  <TableHead className="whitespace-nowrap">Créé le</TableHead>
                   <TableHead className="whitespace-nowrap">Montant payé</TableHead>
                   <TableHead className="whitespace-nowrap">Statut du paiement</TableHead>
                   <TableHead className="whitespace-nowrap">Statut</TableHead>
@@ -473,6 +474,11 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     </TableCell>
                     <TableCell>
                       <span className="whitespace-nowrap text-gray-600 dark:text-dark-6">{formatDateTime(a.date, a.startTime)}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="whitespace-nowrap text-gray-600 dark:text-dark-6" title={a.createdAt ? new Date(a.createdAt).toISOString() : undefined}>
+                        {a.createdAt ? formatDateTime(a.createdAt, a.createdAt) : "—"}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <span className="whitespace-nowrap font-medium text-gray-700">

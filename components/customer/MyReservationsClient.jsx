@@ -702,7 +702,8 @@ function EmptyState() {
         {t("emptyDescription")}
       </p>
       <Link
-        href="/reservation"
+        href="/reservation#booking"
+        scroll={false}
         className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[#2F3A2E] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#3d4e3b]"
       >
         {t("bookNow")}

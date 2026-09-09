@@ -33,13 +33,16 @@ function PaymentOption({ title, description, badge, selected, disabled, index, o
   );
 }
 
-export default function PaymentStep({ data, customerSession }) {
+export default function PaymentStep({ data, customerSession, origin = "/reservation", showStatus }) {
   const t = useTranslations("reservationSteps");
   const [paymentMethod, setPaymentMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [appliedPromo, setAppliedPromo] = useState(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const router = useRouter();
+  const fallbackServiceName = data.appointmentDrafts?.[0]?.service?.name ?? data.service?.name ?? null;
+  const fallbackStaffName = data.appointmentDrafts?.[0]?.staff?.user?.fullName ?? data.staff?.user?.fullName ?? null;
+  const fallbackDateLabel = data.date ? `${new Date(data.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" })} • ${data.time ?? ""}` : null;
 
   const drafts = data.appointmentDrafts ?? [];
   const draft = drafts[0];
@@ -63,18 +66,35 @@ export default function PaymentStep({ data, customerSession }) {
     const loadingToastId = toast.loading(t("payment.redirecting"));
     try {
       const customerInfo = customerSession ? { userId: customerSession.id, fullName: customerSession.fullName ?? "", email: customerSession.email ?? "", phone: customerSession.phone ?? "" } : data.customerInfo;
-      const result = await createCheckoutSession({ staffServiceId, date: data.date, time: data.time, customerInfo, paymentMethod, notes: data.notes, promoCode: appliedPromo?.code ?? null, termsAccepted: acceptedTerms });
+      const result = await createCheckoutSession({ staffServiceId, date: data.date, time: data.time, customerInfo, paymentMethod, notes: data.notes, promoCode: appliedPromo?.code ?? null, termsAccepted: acceptedTerms, origin });
       toast.dismiss(loadingToastId);
-      if (!result.success || !result.url) { toast.error((result.message || t("payment.sessionFailed")) + (result.error ? ` — ${result.error}` : "")); setProcessing(false); return; }
+      if (!result.success || !result.url) {
+        setProcessing(false);
+        const errMsg = (result.message || t("payment.sessionFailed")) + (result.error ? ` — ${result.error}` : "");
+        if (showStatus) showStatus({ success: false, message: errMsg, paymentStatus: "FAILED", serviceName: fallbackServiceName, staffName: fallbackStaffName, dateLabel: fallbackDateLabel, onRetry: () => handlePayment() });
+        else toast.error(errMsg);
+        return;
+      }
       if (!customerSession && result.autologinToken && result.customerEmail) {
         try { await signIn("credentials", { email: result.customerEmail, autologinToken: result.autologinToken, redirect: false }); } catch {}
       }
-      window.location.href = result.url;
+      // Append origin to Stripe redirect so success page can return to correct place
+      let url = result.url;
+      try {
+        const u = new URL(url);
+        if (origin) u.searchParams.set("origin", origin);
+        url = u.toString();
+      } catch {
+        // if url is not absolute, attach manually
+        if (origin) url += (url.includes("?") ? "&" : "?") + `origin=${encodeURIComponent(origin)}`;
+      }
+      window.location.href = url;
     } catch (err) {
       console.error("[PaymentStep] unexpected error:", err);
       toast.dismiss(loadingToastId);
-      toast.error(t("payment.genericError"));
       setProcessing(false);
+      if (showStatus) showStatus({ success: false, message: t("payment.genericError"), paymentStatus: "FAILED", serviceName: fallbackServiceName, staffName: fallbackStaffName, dateLabel: fallbackDateLabel, onRetry: () => handlePayment() });
+      else toast.error(t("payment.genericError"));
     }
   };
 
@@ -85,16 +105,41 @@ export default function PaymentStep({ data, customerSession }) {
       const customerInfo = customerSession ? { userId: customerSession.id, fullName: customerSession.fullName ?? "", email: customerSession.email ?? "", phone: customerSession.phone ?? "" } : data.customerInfo;
       const result = await createReservation({ staffServiceId, date: data.date, time: data.time, customerInfo, paymentMethod: "cash", notes: data.notes, promoCode: appliedPromo?.code ?? null, termsAccepted: acceptedTerms });
       toast.dismiss(loadingToastId);
-      if (!result.success) { toast.error(result.message || t("payment.reservationFailed")); setProcessing(false); return; }
+      if (!result.success) {
+        setProcessing(false);
+        if (showStatus) showStatus({ success: false, message: result.message || t("payment.reservationFailed"), paymentStatus: "FAILED", serviceName: fallbackServiceName, staffName: fallbackStaffName, dateLabel: fallbackDateLabel, onRetry: () => handleSalonNoDeposit() });
+        else toast.error(result.message || t("payment.reservationFailed"));
+        return;
+      }
       const { isNewUser, autologinToken, user } = result.data;
       if (!customerSession && autologinToken && user?.email) { try { await signIn("credentials", { email: user.email, autologinToken, redirect: false }); } catch {} }
-      toast.success(t("payment.reservationConfirmed"));
-      setTimeout(() => router.push("/"), 2000);
+      const appointmentStatus = result.data?.appointment?.status ?? "CONFIRMED";
+      if (showStatus) {
+        showStatus({
+          success: true,
+          appointmentStatus,
+          paymentStatus: null,
+          paymentType: "ON_SITE",
+          totalAmount,
+          depositAmount: 0,
+          isManualMode: false,
+          serviceName: fallbackServiceName,
+          staffName: fallbackStaffName,
+          dateLabel: fallbackDateLabel,
+          allowedPaymentMethods: draft?.staffService?.staff?.allowedPaymentMethods ?? "CASH_ONLY",
+        });
+      } else {
+        toast.success(t("payment.reservationConfirmed"));
+        setTimeout(() => router.push(origin), 1200);
+      }
+      setProcessing(false);
+      return;
     } catch (err) {
       console.error("[PaymentStep] handleSalonNoDeposit:", err);
       toast.dismiss(loadingToastId);
-      toast.error(t("payment.genericError"));
       setProcessing(false);
+      if (showStatus) showStatus({ success: false, message: t("payment.genericError"), paymentStatus: "FAILED", serviceName: fallbackServiceName, staffName: fallbackStaffName, dateLabel: fallbackDateLabel, onRetry: () => handleSalonNoDeposit() });
+      else toast.error(t("payment.genericError"));
     }
   };
 

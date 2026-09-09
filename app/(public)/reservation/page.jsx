@@ -50,7 +50,7 @@ export default async function Page() {
           <div className="absolute inset-2 border border-[#b89664]/30" />
         </div>
         <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
-          <ReservationForm customerSession={customerSession} />
+          <ReservationForm customerSession={customerSession} origin="/reservation" />
         </div>
         <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-1/2 hidden -translate-x-1/2 items-center gap-3 text-[#b89664]/50 sm:flex">
           <span className="h-px w-16 bg-current" />

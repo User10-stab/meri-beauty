@@ -106,7 +106,6 @@ export default function StaffProfileHero({
     bio ||
     `Passionn\u00e9e par la beaut\u00e9 et les d\u00e9tails qui font toute la diff\u00e9rence, ${firstName} accompagne chaque cliente avec une approche personnalis\u00e9e pour r\u00e9v\u00e9ler la meilleure version d\u2019elle-m\u00eame.`;
 
-  const role = "Coiffeuse & Experte beauté";
 
   const daysLabel = rythmeDays && rythmeDays.length > 0
     ? rythmeDays.join(", ")

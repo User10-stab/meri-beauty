@@ -85,7 +85,7 @@ export default async function Hero() {
               <ArrowIcon className="h-3.5 w-3.5 transition-transform duration-300 group-hover:translate-x-1 sm:h-4 sm:w-4" />
             </a>
             <a
-              href="#concept"
+              href="/concept"
               className="inline-flex items-center justify-center gap-1.5 rounded-full border border-white/30 px-4 py-2.5 text-[13px] text-white backdrop-blur-sm transition-all duration-300 hover:border-white/60 hover:bg-white/10 sm:px-8 sm:py-4 sm:gap-2 sm:text-[15px] lg:px-9"
             >
               {t("heroConcept")}

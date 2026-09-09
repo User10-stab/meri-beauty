@@ -203,15 +203,7 @@ export default function StaffProfileHero({
 
             {/* Right - Information Section */}
             <div className="flex flex-col space-y-8 lg:pt-4">
-              {/* Role badge with animation */}
-              <div className={`transition-all duration-700 delay-200 ${
-                heroInView ? "opacity-100 translate-x-0" : "opacity-0 translate-x-8"
-              }`}>
-                <span className="inline-flex items-center gap-2 rounded-full border border-[#b89664]/30 bg-gradient-to-r from-white to-[#faf8f5] px-5 py-2 text-sm font-medium text-[#6f6a64] shadow-sm">
-                  <div className="h-2 w-2 rounded-full bg-[#b89664]" />
-                  {role}
-                </span>
-              </div>
+             
 
               {/* Name with staggered animation */}
               <div className={`transition-all duration-700 delay-300 ${

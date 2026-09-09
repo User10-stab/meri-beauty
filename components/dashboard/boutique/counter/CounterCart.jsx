@@ -60,6 +60,12 @@ export function CounterCart({
   // enforced again server-side, this is just the matching UI gate.
   const [isWalkIn, setIsWalkIn] = useState(false);
   const [walkInEmail, setWalkInEmail] = useState("");
+  // Nudge, not a hard requirement — staff can uncheck this to skip
+  // collecting an e-mail from a walk-in and still complete the sale.
+  const [collectWalkInEmail, setCollectWalkInEmail] = useState(true);
+  // Only meaningful once the buyer turns out VAT-eligible — lets a B2B
+  // client decline the invoice for this specific sale.
+  const [invoiceRequested, setInvoiceRequested] = useState(true);
   // Set once the typed walk-in address turns out to already belong to a
   // real account — surfaced as a warning instead of silently e-mailing a
   // ticket to someone who has an actual customer profile to attach it to.
@@ -538,7 +544,7 @@ export function CounterCart({
   function submitSale() {
     if (!cart.length) return toast.error("Ajoutez au moins un produit.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
-    if (isWalkIn && !walkInEmailReady) {
+    if (isWalkIn && collectWalkInEmail && !walkInEmailReady) {
       return toast.error("Indiquez l'e-mail du client pour envoyer le ticket.");
     }
     if (method === "EXTERNAL_TERMINAL" && !terminalConfirmOpen) {
@@ -555,6 +561,7 @@ export function CounterCart({
         items: cart.map((item) => ({ type: "PRODUCT", variantId: item.variantId, quantity: item.quantity })),
         method,
         attemptKey,
+        invoiceRequested,
         ...(method === "EXTERNAL_TERMINAL" ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
         ...(method === "CASH" ? { cashReceived: cashReceivedNumber } : {}),
       });
@@ -909,6 +916,10 @@ export function CounterCart({
           needsAddress={needsAddress}
           willHaveVatInvoice={willHaveVatInvoice}
           willBeBelgianB2B={willBeBelgianB2B}
+          collectWalkInEmail={collectWalkInEmail}
+          onCollectWalkInEmailChange={setCollectWalkInEmail}
+          invoiceRequested={invoiceRequested}
+          onInvoiceRequestedChange={setInvoiceRequested}
         />
 
         <div className="space-y-2 border-t border-gray-100 pt-5 dark:border-dark-3">
@@ -949,7 +960,7 @@ export function CounterCart({
             isPending ||
             !attemptKey ||
             cart.length === 0 ||
-            (isWalkIn && !walkInEmailReady) ||
+            (isWalkIn && collectWalkInEmail && !walkInEmailReady) ||
             (method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
             (!isWalkIn && needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim()))
           }

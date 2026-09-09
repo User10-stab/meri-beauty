@@ -334,7 +334,7 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived } = parsed.data;
+  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived, invoiceRequested } = parsed.data;
   if (items.some((item) => item.type === "SERVICE")) {
     return {
       success: false,
@@ -467,7 +467,11 @@ export async function completePointOfSaleSale(input) {
         saleItems.push({ ...variant, quantity, available });
       }
 
-      const shouldCreateInvoice = !isWalkIn && hasInvoiceableVatIdentity(customer);
+      const isVatEligible = !isWalkIn && hasInvoiceableVatIdentity(customer);
+      // Defaults to true (today's behavior) when omitted — the till only
+      // ever sends false when staff/the client explicitly declined it.
+      const wantsInvoice = invoiceRequested !== false;
+      const shouldCreateInvoice = isVatEligible && wantsInvoice;
       const posVatPolicy = resolveGoodsVatPolicy({ customer });
       const pricedSaleItems = saleItems.map((item) => ({
         ...item,
@@ -497,6 +501,7 @@ export async function completePointOfSaleSale(input) {
           totalExclVat: taxTotals.totalExclVat,
           totalVat: taxTotals.vatAmount,
           customerVatNumber: shouldCreateInvoice ? customer?.vatNumber ?? null : null,
+          invoiceRequested: isVatEligible ? wantsInvoice : null,
           pickedUpAt: isQrPayment ? null : new Date(),
           pickedUpByStaffId: isQrPayment ? null : guard.session.user.id,
           expiresAt: isQrPayment ? new Date(Date.now() + (POS_CHECKOUT_SECONDS + 4 * 60) * 1000) : null,

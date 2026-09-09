@@ -1284,6 +1284,13 @@ model Order {
   customerVatNumber String?
   taxNote           String?
 
+  // Only meaningful when the resolved customer was actually VAT-eligible
+  // (hasInvoiceableVatIdentity) — null means the question never applied
+  // (B2C/walk-in). true = invoice generated (default); false = the client
+  // was eligible but staff/client declined it for this sale, so no Invoice
+  // was created despite a valid VAT identity — kept for audit/reporting.
+  invoiceRequested Boolean?
+
   // `totalAmount` above is already the post-discount figure; these two are
   // kept only so the eventual Payment row (created later, once Stripe
   // confirms or the on-site pickup is completed) can copy which code was

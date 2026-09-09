@@ -423,6 +423,7 @@ export function CounterBookingComposer({
             willHaveVatInvoice={buyerWillHaveVatInvoice}
             willBeBelgianB2B={buyerWillBeBelgianB2B}
             allowWalkIn={false}
+            showInvoiceOptOut={false}
           />
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -500,6 +501,7 @@ export function CounterBookingComposer({
             willHaveVatInvoice={buyerWillHaveVatInvoice}
             willBeBelgianB2B={buyerWillBeBelgianB2B}
             allowWalkIn={false}
+            showInvoiceOptOut={false}
           />
 
           <div className="flex flex-wrap items-center gap-4 border-t border-stroke pt-3 dark:border-dark-3">

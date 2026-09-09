@@ -33,7 +33,7 @@ const money = (value) =>
   new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
 
 const shortDate = (value) =>
-  value ? new Date(value).toLocaleDateString("fr-BE", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  value ? new Date(value).toLocaleDateString("fr-BE", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" }) : "—";
 
 const SOURCE_LABEL = Object.freeze({
   APPOINTMENT: "Rendez-vous",

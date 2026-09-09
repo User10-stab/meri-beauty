@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole } from "@/lib/authorization";
+import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import {
   TYPE_FILTERS,
@@ -15,6 +15,7 @@ import {
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { summarizeRefundState } from "@/lib/refunds/plan-refund";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
+import { checkInQrDataUrl, pickupQrDataUrl } from "@/lib/qrcode";
 
 const ADMIN_OPERATION_TABS = Object.freeze(["transactions", "orders", "workshops", "formations"]);
 const PAGE_SIZE = 30;
@@ -295,6 +296,11 @@ const PAYMENT_LEDGER_SELECT = Object.freeze({
       billitSentAt: true,
       customerType: true,
       customerVatNumber: true,
+      // Lets the delivery dialog show the client's own address next to the
+      // "envoyer aussi au client" toggle (the send action reads it from the
+      // DB regardless).
+      customerName: true,
+      customerEmail: true,
       creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
     },
   },
@@ -421,6 +427,8 @@ async function hydrateAppointmentTransactions(ids) {
               billitSentAt: true,
               customerType: true,
               customerVatNumber: true,
+              customerName: true,
+              customerEmail: true,
               creditNotes: {
                 orderBy: { issuedAt: "asc" },
                 select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true },
@@ -791,7 +799,8 @@ export async function getAdminOperations(params = {}) {
  * list renders 30 rows per page and only ever one of them gets opened.
  */
 export async function getTransactionDetail(transactionId) {
-  if (!(await requireAdminOperationsAccess())) {
+  const session = await requireAdminOperationsAccess();
+  if (!session) {
     return { success: false, message: "Non autorisé." };
   }
   if (typeof transactionId !== "string" || !transactionId) {
@@ -846,10 +855,10 @@ export async function getTransactionDetail(transactionId) {
             // settled at the counter are two rows against one Payment, and
             // reading either one alone misrepresents what the customer paid.
             transactions: { orderBy: { paidAt: "asc" }, select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true } },
-            order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, user: { select: { fullName: true, email: true } }, createdByStaff: { select: { fullName: true, role: true } } } },
-            workshopReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
-            formationReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
-            appointment: { select: { id: true, date: true, status: true, user: { select: { fullName: true, email: true } }, staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
+            order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, pickupCode: true, pickedUpAt: true, user: { select: { fullName: true, email: true } }, createdByStaff: { select: { fullName: true, role: true } } } },
+            workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
+            formationReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
+            appointment: { select: { id: true, date: true, status: true, checkInCode: true, checkedInAt: true, user: { select: { fullName: true, email: true } }, staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
           },
         },
       },
@@ -887,10 +896,41 @@ export async function getTransactionDetail(transactionId) {
       transaction.payment.formationReservation.performedBy = performedBy;
     }
 
+    // The drawer is the only surface that can e-mail a ticket for a booking
+    // whose balance was discounted to zero: no Transaction is created for that
+    // settlement, so it never reaches the Livre de caisse, which is where the
+    // only other send button lives. Resolved through the permission rather than
+    // assumed from this action's admin-only gate, so narrowing that gate later
+    // cannot silently hand the button to someone without SEND_TICKET_EMAIL.
+    const canSendTicketEmail = await hasDashboardPermission(
+      session.user,
+      STAFF_PERMISSIONS.SEND_TICKET_EMAIL,
+    );
+
+    // ticketEmailedAt records only *that* a ticket went out, never for which
+    // price. A counter adjustment after a send leaves the client holding a
+    // receipt for a total that no longer exists, so the drawer compares the two
+    // timestamps and says so — see the "reçu obsolète" line in
+    // TransactionDetailDrawer.
+    const lastPriceAdjustedAt = transaction.payment?.ticketEmailedAt
+      ? await resolveLastPriceAdjustment(transaction.payment)
+      : null;
+
+    // The same check-in QR the customer got attached to their confirmation
+    // e-mail (lib/activities/appointment-check-in-qr.js and the reservation
+    // equivalents) — regenerated here from the stored plaintext code rather
+    // than kept anywhere as an image, same as the customer's own /mon-compte
+    // and /mes-reservations views. Staff needs this to show a client who lost
+    // the e-mail their code again, or to confirm one was actually minted.
+    const checkIn = await resolveCheckInAsset(transaction.payment);
+
     return {
       success: true,
       data: serializeDecimalFields({
         ...transaction,
+        canSendTicketEmail,
+        lastPriceAdjustedAt,
+        checkIn,
         refundState: {
           remainingRefundable: refundState.remainingRefundable,
           fullyCredited: refundState.fullyCredited,
@@ -901,6 +941,72 @@ export async function getTransactionDetail(transactionId) {
     console.error("[getTransactionDetail]", error);
     return { success: false, message: "Impossible de charger le détail de cette transaction." };
   }
+}
+
+/**
+ * When this payment's booking was last repriced at the counter, or null if it
+ * never was. The audit row is the only record of an adjustment — nothing on
+ * Payment itself distinguishes a total that was always 40 € from one discounted
+ * down to it — and it is polymorphic over the three booking types, keyed the
+ * same way the three settlement paths write it (AUDIT_ACTIONS
+ * .RESERVATION_PRICE_ADJUSTED on the reservation, not on the Payment).
+ */
+/**
+ * The polymorphic Payment carries at most one check-in code, on whichever
+ * relation is actually populated — same branching as describeSource() in
+ * TransactionDetailDrawer.jsx. Only a CONFIRMED reservation/appointment ever
+ * has one (see the checkInCode column comments in prisma/schema.prisma), and
+ * a boutique order only for pickup fulfilment, so null here just means
+ * "nothing to show," not a data problem.
+ */
+async function resolveCheckInAsset(payment) {
+  if (payment?.appointment?.checkInCode) {
+    const { checkInCode: code, checkedInAt } = payment.appointment;
+    return { kind: "APPOINTMENT", code, usedAt: checkedInAt, seatsLabel: null, qr: await checkInQrDataUrl(code) };
+  }
+  if (payment?.workshopReservation?.checkInCode) {
+    const r = payment.workshopReservation;
+    return {
+      kind: "WORKSHOP",
+      code: r.checkInCode,
+      usedAt: r.checkedInAt,
+      seatsLabel: `${r.checkedInSeats}/${r.seatsCount} place(s) scannée(s)`,
+      qr: await checkInQrDataUrl(r.checkInCode),
+    };
+  }
+  if (payment?.formationReservation?.checkInCode) {
+    const r = payment.formationReservation;
+    return {
+      kind: "FORMATION",
+      code: r.checkInCode,
+      usedAt: r.checkedInAt,
+      seatsLabel: `${r.checkedInSeats}/${r.seatsCount} place(s) scannée(s)`,
+      qr: await checkInQrDataUrl(r.checkInCode),
+    };
+  }
+  if (payment?.order?.pickupCode) {
+    const { pickupCode: code, pickedUpAt } = payment.order;
+    return { kind: "ORDER_PICKUP", code, usedAt: pickedUpAt, seatsLabel: null, qr: await pickupQrDataUrl(code) };
+  }
+  return null;
+}
+
+async function resolveLastPriceAdjustment(payment) {
+  const booking = payment.appointment
+    ? { entityType: "Appointment", entityId: payment.appointment.id }
+    : payment.workshopReservation
+      ? { entityType: "WorkshopReservation", entityId: payment.workshopReservation.id }
+      : payment.formationReservation
+        ? { entityType: "FormationReservation", entityId: payment.formationReservation.id }
+        : null;
+  if (!booking) return null;
+
+  const row = await prisma.auditLog.findFirst({
+    where: { action: AUDIT_ACTIONS.RESERVATION_PRICE_ADJUSTED, ...booking },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  return row?.createdAt ?? null;
 }
 
 /**

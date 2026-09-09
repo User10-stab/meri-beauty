@@ -37,8 +37,14 @@ const SETTLE_BY_KIND = {
  * Changing it reveals the reason field and disables the button until a reason
  * is given, so a price still cannot move unexplained — the same rule
  * resolveCounterPriceAdjustment enforces server-side.
+ *
+ * `canCollectCash` is false for every staff member who is not Marie or an
+ * OWNER/ADMIN (see isTillCashOperator). Their balance is still collected and
+ * invoiced by the settle action, but off-till — so the payment method, the
+ * terminal reference and the till-session gate all disappear, and the button
+ * is a plain "Enregistrer et clôturer".
  */
-export function FicheSettleAction({ ticket, onChanged }) {
+export function FicheSettleAction({ ticket, onChanged, canCollectCash = false }) {
   // "Carte — terminal" is the only card option: a card collection has to carry
   // the terminal's receipt reference, or nothing ties the row to a real
   // charge. Defaulting to it means the reference field is on screen from the
@@ -61,6 +67,9 @@ export function FicheSettleAction({ ticket, onChanged }) {
   const amountDue = Number.isFinite(parsedFinalTotal)
     ? Math.max(0, Math.round((parsedFinalTotal - Number(ticket.paidAmount ?? 0)) * 100) / 100)
     : Number(ticket.balanceDue ?? 0);
+  // A balance is taken *at the till* only when this cashier may — otherwise
+  // it's recorded off-till by the settle action, with no method to pick.
+  const takesMoneyAtTill = canCollectCash && amountDue > 0;
 
   function selectMethod(next) {
     setMethod(next);
@@ -76,19 +85,25 @@ export function FicheSettleAction({ ticket, onChanged }) {
       toast.error("Indiquez la raison de l'ajustement de prix.");
       return;
     }
-    if (amountDue > 0 && isExternalTerminal && !terminalReference.trim()) {
+    if (takesMoneyAtTill && isExternalTerminal && !terminalReference.trim()) {
       toast.error("Indiquez la référence du ticket du terminal.");
       return;
     }
     setSaving(true);
     const settle = SETTLE_BY_KIND[ticket.kind];
     const result = await settle(ticket.reservationId, {
-      method,
-      paymentConfirmed: true,
-      ...(priceChanged ? { finalTotal: parsedFinalTotal, adjustmentReason: adjustmentReason.trim() } : {}),
-      ...(isExternalTerminal
-        ? { terminalApproved: true, terminalReference: terminalReference.trim() }
+      // Off-till: no method, no attestation — the settle action records the
+      // collection detached from every cash session (isTillCashOperator).
+      ...(takesMoneyAtTill
+        ? {
+            method,
+            paymentConfirmed: true,
+            ...(isExternalTerminal
+              ? { terminalApproved: true, terminalReference: terminalReference.trim() }
+              : {}),
+          }
         : {}),
+      ...(priceChanged ? { finalTotal: parsedFinalTotal, adjustmentReason: adjustmentReason.trim() } : {}),
     });
     setSaving(false);
 
@@ -110,7 +125,11 @@ export function FicheSettleAction({ ticket, onChanged }) {
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <p className="text-sm font-bold">
           <Wallet className="mr-1.5 inline h-3.5 w-3.5" strokeWidth={2} />
-          {amountDue > 0 ? `Solde à encaisser : ${formatPrice(amountDue)}` : "Aucun solde restant"}
+          {amountDue <= 0
+            ? "Aucun solde restant"
+            : takesMoneyAtTill
+              ? `Solde à encaisser : ${formatPrice(amountDue)}`
+              : `Solde à enregistrer : ${formatPrice(amountDue)}`}
         </p>
         <p className="text-xs">Prix total : {formatPrice(ticket.totalPrice)} · Déjà encaissé : {formatPrice(ticket.paidAmount)}</p>
       </div>
@@ -140,7 +159,7 @@ export function FicheSettleAction({ ticket, onChanged }) {
               />
             )}
           </div>
-          {amountDue > 0 && (
+          {takesMoneyAtTill && (
             <>
           <div className="flex items-center gap-3">
             {["CASH", "EXTERNAL_TERMINAL"].map((value) => (
@@ -176,17 +195,19 @@ export function FicheSettleAction({ ticket, onChanged }) {
             disabled={
               saving ||
               (priceChanged && adjustmentReason.trim().length < 3) ||
-              (amountDue > 0 && isExternalTerminal && !terminalReference.trim()) ||
-              (amountDue > 0 && method === "CASH" && !cashSessionOpen)
+              (takesMoneyAtTill && isExternalTerminal && !terminalReference.trim()) ||
+              (takesMoneyAtTill && method === "CASH" && !cashSessionOpen)
             }
             onClick={handleSettle}
             className="ml-auto inline-flex items-center gap-2 rounded-[7px] bg-dark px-4 py-2 text-sm font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-dark"
           >
             {saving
               ? "Traitement…"
-              : amountDue > 0
+              : takesMoneyAtTill
                 ? `J'ai bien reçu ${formatPrice(amountDue)} — encaisser et facturer`
-                : "Je confirme cet ajustement — clôturer"}
+                : amountDue > 0
+                  ? `Enregistrer ${formatPrice(amountDue)} et clôturer`
+                  : "Je confirme cet ajustement — clôturer"}
           </button>
       </div>
     </div>

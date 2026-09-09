@@ -1403,6 +1403,12 @@
         "PICKUP_PREPAID": "Afhalen (betaald)",
         "PICKUP_ON_SITE": "Afhalen (ter plaatse)",
         "SHIPPING_PREPAID": "Verzending"
+      },
+      "overdue": {
+        "badge": "Achterstallig",
+        "NOT_PREPARED": "Nog niet klaargemaakt / verzonden",
+        "NOT_COLLECTED": "Al dagen klaar, nooit opgehaald",
+        "NOT_CONFIRMED_DELIVERED": "Verzonden, ontvangst nooit bevestigd"
       }
     },
     "returns": {
@@ -1941,6 +1947,8 @@
     "main": "HOOFDMENU",
     "sidebar": {
       "dashboard": "Dashboard",
+      "notifications": "Notificaties",
+      "unreadNotificationsBadge": "ongelezen notificatie(s)",
       "appointments": "Afspraken",
       "calendar": "Kalender",
       "allAppointments": "Alle afspraken",

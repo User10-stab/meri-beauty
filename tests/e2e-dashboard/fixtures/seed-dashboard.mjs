@@ -332,6 +332,112 @@ export async function seedFormationReservation({ session, customer, price = 200 
   return { reservation, payment };
 }
 
+/**
+ * A past atelier/formation session "owned" by a given staff member
+ * (`createdById`) — required for that staff member to even see or settle a
+ * reservation on it (see `activityReservationStaffScope` in
+ * lib/activity-reservation-access.js, which scopes STAFF to sessions they
+ * created or animate). Past `startDate` so `settleReservation`'s "this
+ * session hasn't happened yet" guard doesn't refuse the close.
+ *
+ * @param {{ kind: "WORKSHOP"|"FORMATION", createdById: string, price?: number, capacity?: number, hoursAgo?: number }} params
+ */
+export async function seedActivitySessionOwnedBy({ kind, createdById, price = 80, capacity = 8, hoursAgo = 2 }) {
+  const runId = getRunId();
+  const startDate = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
+
+  if (kind === "WORKSHOP") {
+    const activity = await prisma.activity.create({
+      data: {
+        type: "WORKSHOP",
+        title: `E2E Atelier ${runId}`,
+        description: "Atelier créé automatiquement par la suite dashboard e2e.",
+        price,
+        duration: 120,
+        capacity,
+        status: "PUBLISHED",
+        depositPercentage: 50,
+        createdById,
+      },
+    });
+    const session = await prisma.workshopSession.create({
+      data: { workshopId: activity.id, startDate, capacity, status: "SCHEDULED" },
+    });
+    return { activity, session };
+  }
+
+  const formation = await prisma.formation.create({
+    data: {
+      type: "PUBLIC",
+      title: `E2E Formation ${runId}`,
+      description: "Formation créée automatiquement par la suite dashboard e2e.",
+      price,
+      duration: 240,
+      capacity,
+      status: "PUBLISHED",
+      depositPercentage: 50,
+      createdById,
+    },
+  });
+  const session = await prisma.formationSession.create({
+    data: { formationId: formation.id, startDate, capacity, status: "SCHEDULED" },
+  });
+  return { formation, session };
+}
+
+/**
+ * A CONFIRMED, PARTIALLY_PAID booking on an existing workshop/formation
+ * session — same shape as seedAppointment's `payment: "balanceDue"` branch:
+ * a 50% deposit already paid online (with its own DEPOSIT Transaction), a
+ * balance still due at the counter. `seedFormationReservation` above seeds an
+ * already-COMPLETED/fully-PAID booking, the wrong shape for a spec that needs
+ * to actually exercise "Clôturer" collecting a real balance.
+ *
+ * @param {{ kind: "WORKSHOP"|"FORMATION", session: object, customer: object, price?: number, seatsCount?: number }} params
+ */
+export async function seedActivityReservationWithBalance({ kind, session, customer, price = 80, seatsCount = 1 }) {
+  const deposit = Number((price / 2).toFixed(2));
+  const remaining = Number((price - deposit).toFixed(2));
+  const delegate = kind === "WORKSHOP" ? prisma.workshopReservation : prisma.formationReservation;
+  const foreignKey = kind === "WORKSHOP" ? "sessionId" : "sessionId";
+  const paymentForeignKey = kind === "WORKSHOP" ? "workshopReservationId" : "formationReservationId";
+
+  const reservation = await delegate.create({
+    data: {
+      [foreignKey]: session.id,
+      customerId: customer.id,
+      seatsCount,
+      status: "CONFIRMED",
+      totalPrice: price,
+      depositAmount: deposit,
+      balanceDue: remaining,
+    },
+  });
+
+  const payment = await prisma.payment.create({
+    data: {
+      [paymentForeignKey]: reservation.id,
+      totalAmount: price,
+      paidAmount: deposit,
+      remainingAmount: remaining,
+      depositAmount: deposit,
+      paymentType: "DEPOSIT",
+      status: "PARTIALLY_PAID",
+      paidAt: new Date(),
+      transactions: {
+        create: {
+          amount: deposit,
+          method: "ONLINE",
+          transactionType: "DEPOSIT",
+          paidAt: new Date(),
+        },
+      },
+    },
+  });
+
+  return { reservation, payment };
+}
+
 export async function seedAppointmentInvoice({ staff, customer, createdByUserId }) {
   const runId = getRunId();
 

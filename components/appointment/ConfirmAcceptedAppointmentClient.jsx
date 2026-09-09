@@ -105,7 +105,7 @@ export default function ConfirmAcceptedAppointmentClient({ appointment, confirmT
       <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm sm:p-8">
         <h1 className="text-2xl font-bold text-[#2F3A2E]">Confirmez votre réservation</h1>
         <p className="mt-2 text-gray-600">{appointment.serviceName} avec {appointment.staffName}</p>
-        <p className="mt-1 text-sm text-gray-500">{new Date(appointment.date).toLocaleDateString("fr-FR")} à {new Date(appointment.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</p>
+        <p className="mt-1 text-sm text-gray-500">{new Date(appointment.date).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} à {new Date(appointment.startTime).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}</p>
 
         {!isCashOnly && (
           <div className="mt-6 space-y-3">

@@ -106,15 +106,18 @@ describe("an invoice explains the price it charges", () => {
 });
 
 /**
- * Neither settlement path generates or e-mails a ticket to the client any
- * more — only the legally-required Invoice is issued, inside the
- * transaction. The post-commit step left behind is a plain cash-book
- * revalidation, which cannot throw in a way that risks the settlement's own
- * success response (no PDF render, no e-mail, no
- * `consolidatedTicketFields` call outside a transaction).
+ * A ticket is e-mailed to the client after settlement only when the acting
+ * staff member holds SEND_TICKET_EMAIL — neither settlement path builds or
+ * sends a ticket itself; both delegate to the same shared, permission-gated
+ * sendTicketByEmail (actions/payments/send-ticket-email.js), which re-derives
+ * auth() and checks the permission internally. lib/reservations/
+ * settle-reservation.js stays a pure money module (deliberately not
+ * "use server") — it only exposes paymentId/transactionId/balance for its
+ * two wrappers to act on. The post-commit send is fire-and-forget, so it
+ * cannot throw in a way that risks the settlement's own success response.
  */
-describe("no client-facing ticket is generated or e-mailed after settlement", () => {
-  test("neither settlement path renders or e-mails a ticket to the customer", () => {
+describe("a ticket is e-mailed after settlement only when the acting staff holds SEND_TICKET_EMAIL", () => {
+  test("neither settlement path inlines ticket-building — both delegate to the shared sender", () => {
     for (const path of [
       "actions/appointment/manage-appointment.js",
       "lib/reservations/settle-reservation.js",
@@ -123,6 +126,32 @@ describe("no client-facing ticket is generated or e-mailed after settlement", ()
       expect(code, path).not.toContain("consolidatedTicketFields(");
       expect(code, path).not.toContain("renderTicketPdf(");
       expect(code, path).not.toContain("[POST_COMMIT] settlement succeeded but the ticket step failed:");
+    }
+  });
+
+  test("manage-appointment.js sends the ticket only when a balance was actually collected", () => {
+    const code = source("actions/appointment/manage-appointment.js");
+    expect(code).toContain('import { sendTicketByEmail } from "@/actions/payments/send-ticket-email"');
+    expect(code).toContain("if (balance > 0) {");
+    expect(code).toContain("sendTicketByEmail(result.collection.paymentId");
+  });
+
+  test("settle-reservation.js stays free of any send/permission code — it only exposes paymentId/transactionId/balance for its callers", () => {
+    const lib = source("lib/reservations/settle-reservation.js");
+    expect(lib).not.toContain("sendTicketByEmail");
+    expect(lib).toContain("paymentId: payment.id");
+    expect(lib).toContain("transactionId: result.collection?.id ?? null");
+  });
+
+  test("both reservation wrappers call sendTicketByEmail gated on a collected balance, and never leak the internal fields to the client", () => {
+    for (const path of [
+      "actions/workshops/manage-reservation.js",
+      "actions/formations/manage-reservation.js",
+    ]) {
+      const code = source(path);
+      expect(code, path).toContain('import { sendTicketByEmail } from "@/actions/payments/send-ticket-email"');
+      expect(code, path).toContain("if (result.balance > 0) {");
+      expect(code, path).toContain("const { paymentId, transactionId, balance, ...publicResult } = result;");
     }
   });
 

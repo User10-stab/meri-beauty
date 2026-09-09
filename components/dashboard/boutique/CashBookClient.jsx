@@ -59,9 +59,15 @@ export function CashBookClient({ ledger: initialLedger, movements = [], withdraw
   const [sendingRow, setSendingRow] = useState(null);
   const { session, rows, totals } = ledger;
 
+  // Deliberately Payment-scoped, unlike the N° pièce link above: the book is a
+  // per-movement register, but the client is owed the whole prestation. Sending
+  // this row's leg alone produced a receipt reading "10,00 €" for a 40 € booking
+  // settled after a counter discount — no total, no acompte, nothing tying it
+  // back. Without transactionId, buildPaymentTicket takes its consolidated
+  // branch: the real total, with the Acompte/Solde split printed underneath.
   async function handleSendTicket(row, rowKey) {
     setSendingRow(rowKey);
-    const result = await sendTicketByEmail(row.paymentId, { transactionId: row.kind === "SALE" ? row.transactionId : undefined });
+    const result = await sendTicketByEmail(row.paymentId);
     setSendingRow(null);
     if (result.success) toast.success(result.message);
     else toast.error(result.message);
@@ -188,7 +194,7 @@ export function CashBookClient({ ledger: initialLedger, movements = [], withdraw
                         type="button"
                         onClick={() => handleSendTicket(row, rowKey)}
                         disabled={sendingRow === rowKey}
-                        title="Envoyer par e-mail"
+                        title="Envoyer au client le ticket complet de la réservation (total et acompte compris), et non le seul encaissement de cette ligne"
                         aria-label="Envoyer par e-mail"
                         className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-dark-3 dark:text-white"
                       >

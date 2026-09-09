@@ -13,6 +13,7 @@ export function ReviewRow({ row, onDelete }) {
       day: "2-digit",
       month: "short",
       year: "numeric",
+      timeZone: "Europe/Brussels",
     });
   };
 

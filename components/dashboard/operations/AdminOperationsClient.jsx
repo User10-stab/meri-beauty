@@ -819,8 +819,11 @@ export function AdminOperationsClient({ result }) {
           privée/publique; "payment event" (acompte/solde/remboursement) is
           meaningful on every row everywhere, unlike the old status slot that
           only existed on the Transactions tab; "status" is each source's own
-          lifecycle (a merged list when nothing restricts sourceType). None
-          renders when it has nothing to offer on the current tab. */}
+          lifecycle. On Transactions (no sourceType restriction) that would be
+          the Order and Reservation vocabularies mixed into one flat, mostly
+          irrelevant-to-each-other pill row, so it's hidden there — pick
+          Commandes / Ateliers & événements / Formations to filter by status.
+          None renders when it has nothing to offer on the current tab. */}
       <FilterPills
         label="Type"
         options={TYPE_FILTERS[tab]}
@@ -837,7 +840,7 @@ export function AdminOperationsClient({ result }) {
       />
       <FilterPills
         label="Statut"
-        options={LIFECYCLE_STATUS_FILTERS[tab === "transactions" ? "all" : tab]}
+        options={tab === "transactions" ? [] : LIFECYCLE_STATUS_FILTERS[tab]}
         labels={LIFECYCLE_STATUS_LABELS}
         active={lifecycleStatus}
         buildHref={(value) => href({ nextLifecycleStatus: value })}

@@ -13,13 +13,19 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
  * Nothing here can observe a cash handoff or a terminal's APPROUVÉ screen,
  * so a human has to attest before the system books it as real revenue and
  * issues an invoice against it.
+ *
+ * `canCollectCash` is false for every staff member who is not Marie or an
+ * OWNER/ADMIN (see isTillCashOperator). Their balance is still collected and
+ * invoiced, but off-till — so there is no payment method to pick and nothing
+ * to attest, and this dialog collapses to a plain "Clôturer" confirmation.
  */
-export function SettleReservationDialog({ reservation, onClose, onConfirm, loading }) {
+export function SettleReservationDialog({ reservation, onClose, onConfirm, loading, canCollectCash = true }) {
   const [method, setMethod] = useState("CASH");
   const [confirmed, setConfirmed] = useState(false);
 
   const balance = Number(reservation?.payment?.remainingAmount ?? 0);
-  const hasBalance = balance > 0;
+  const hasBalance = balance > 0 && canCollectCash;
+  const collectsOffTill = balance > 0 && !canCollectCash;
 
   // Reset per reservation, so a previous row's attestation never carries over.
   useEffect(() => {
@@ -38,12 +44,14 @@ export function SettleReservationDialog({ reservation, onClose, onConfirm, loadi
       message={
         hasBalance
           ? `Encaissez le solde de ${priceFormatted} avant de clôturer. Une facture sera émise et envoyée au client.`
-          : "Cette réservation est déjà entièrement payée. Elle sera simplement marquée comme terminée."
+          : collectsOffTill
+            ? `Le solde de ${priceFormatted} sera enregistré et facturé à la clôture. L'encaissement en caisse est réservé à l'administration.`
+            : "Cette réservation est déjà entièrement payée. Elle sera simplement marquée comme terminée."
       }
       confirmLabel={hasBalance ? "Encaisser et clôturer" : "Clôturer"}
       loading={loading}
       confirmDisabled={hasBalance && !confirmed}
-      onConfirm={() => onConfirm({ method, paymentConfirmed: confirmed })}
+      onConfirm={() => (hasBalance ? onConfirm({ method, paymentConfirmed: confirmed }) : onConfirm({}))}
       onCancel={onClose}
     >
       {hasBalance && (

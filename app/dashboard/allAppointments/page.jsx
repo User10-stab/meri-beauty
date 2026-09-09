@@ -2,7 +2,7 @@ import { requireDashboardPermission } from "@/lib/route-protection";
 import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getAllAppointments, getStaffFilterOptions } from "@/actions/appointment/list-appointments";
 import { getReviewDashboardData } from "@/actions/review/review-actions";
-import { isAdminRole } from "@/lib/authorization";
+import { isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { AppointmentsPageClient } from "@/components/dashboard/appointments/AppointmentsPageClient";
 import { ReviewsDashboardCard } from "@/components/dashboard/reviews/ReviewsDashboardCard";
 import { NewAppointmentButton } from "@/components/dashboard/appointments/NewAppointmentButton";
@@ -51,6 +51,7 @@ export default async function AllAppointmentsPage() {
         initialAppointments={appointmentsResult.data ?? []}
         staffOptions={staffResult.data ?? []}
         showStaffFilter={isAdminRole(user.role)}
+        canCollectCash={isTillCashOperator(user)}
       />
     </div>
   );

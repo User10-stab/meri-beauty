@@ -1403,6 +1403,12 @@
         "PICKUP_PREPAID": "Pickup (paid)",
         "PICKUP_ON_SITE": "Pickup (on-site)",
         "SHIPPING_PREPAID": "Shipping"
+      },
+      "overdue": {
+        "badge": "Overdue",
+        "NOT_PREPARED": "Not prepared / shipped yet",
+        "NOT_COLLECTED": "Ready for days, never collected",
+        "NOT_CONFIRMED_DELIVERED": "Shipped, receipt never confirmed"
       }
     },
     "returns": {
@@ -1941,6 +1947,8 @@
     "main": "MAIN",
     "sidebar": {
       "dashboard": "Dashboard",
+      "notifications": "Notifications",
+      "unreadNotificationsBadge": "unread notification(s)",
       "appointments": "Appointments",
       "calendar": "Calendar",
       "allAppointments": "All appointments",

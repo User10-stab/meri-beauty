@@ -1403,6 +1403,12 @@
         "PICKUP_PREPAID": "Retrait (payé)",
         "PICKUP_ON_SITE": "Retrait (sur place)",
         "SHIPPING_PREPAID": "Livraison"
+      },
+      "overdue": {
+        "badge": "En retard",
+        "NOT_PREPARED": "Pas encore préparée / expédiée",
+        "NOT_COLLECTED": "Prête depuis plusieurs jours, jamais retirée",
+        "NOT_CONFIRMED_DELIVERED": "Expédiée, réception jamais confirmée"
       }
     },
     "returns": {
@@ -1941,6 +1947,8 @@
     "main": "PRINCIPAL",
     "sidebar": {
       "dashboard": "Tableau de bord",
+      "notifications": "Notifications",
+      "unreadNotificationsBadge": "notification(s) non lue(s)",
       "appointments": "Rendez-vous",
       "calendar": "Calendrier",
       "allAppointments": "Tous les rendez-vous",

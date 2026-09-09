@@ -188,7 +188,13 @@ test.describe("a credit note reaches the customer, not just the database", () =>
     // mode violation rather than as anything to do with delivery.
     const deliveryDialog = page.getByRole("dialog", { name: /envoyer la note de crédit/i });
     await expect(deliveryDialog).toBeVisible({ timeout: 10_000 });
-    await deliveryDialog.getByRole("button", { name: /envoyer par e-mail/i }).click();
+
+    // The card is now a channel checklist: tick "Envoyer par e-mail" (the
+    // client's own copy is on by default), then the shared "Envoyer" button,
+    // then confirm. Nothing leaves until that confirmation.
+    await deliveryDialog.getByRole("checkbox", { name: /envoyer par e-mail/i }).check();
+    await deliveryDialog.getByRole("button", { name: "Envoyer", exact: true }).click();
+    await deliveryDialog.getByRole("button", { name: "Envoyer", exact: true }).click();
 
     // ── 6. The mailbox, not the column ────────────────────────────────────
     //

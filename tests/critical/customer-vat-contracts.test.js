@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 vi.mock("@/lib/vat-validation", async (importOriginal) => {
   const actual = await importOriginal();
@@ -45,6 +45,55 @@ describe("saveCheckoutVatNumber — shared by online checkout and POS", () => {
     const result = await saveCheckoutVatNumber(client, BASE_USER, "BE0751854027");
     expect(result.success).toBe(false);
     expect(client.user.update).not.toHaveBeenCalled();
+  });
+
+  describe("VAT_VIES_OUTAGE_FALLBACK — provisional acceptance while VIES is unreachable", () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    test("still fails closed while the flag is off (default), even with a VIES_UNAVAILABLE reason", async () => {
+      verifyVatWithVies.mockResolvedValueOnce({ success: false, reason: "VIES_UNAVAILABLE", message: "VIES indisponible." });
+      const client = fakeClient(BASE_USER);
+      const result = await saveCheckoutVatNumber(client, BASE_USER, "BE0751854027");
+      expect(result.success).toBe(false);
+      expect(client.user.update).not.toHaveBeenCalled();
+    });
+
+    test("with the flag on, a checksum-valid BE number is saved provisionally, without a registry name", async () => {
+      vi.stubEnv("VAT_VIES_OUTAGE_FALLBACK", "true");
+      verifyVatWithVies.mockResolvedValueOnce({ success: false, reason: "VIES_UNAVAILABLE", message: "VIES indisponible." });
+      const client = fakeClient(BASE_USER);
+      const result = await saveCheckoutVatNumber(client, BASE_USER, "BE0751854027");
+      expect(result.success).toBe(true);
+      expect(client.user.update).toHaveBeenCalledWith({
+        where: { id: "u1" },
+        data: expect.objectContaining({
+          isCompany: true,
+          vatNumber: "BE0751854027",
+          vatValidationName: null,
+          vatValidationAddress: null,
+        }),
+      });
+    });
+
+    test("with the flag on, a non-BE number still hard-fails — foreign-EU 0% must not rest on an unverified number", async () => {
+      vi.stubEnv("VAT_VIES_OUTAGE_FALLBACK", "true");
+      verifyVatWithVies.mockResolvedValueOnce({ success: false, reason: "VIES_UNAVAILABLE", message: "VIES indisponible." });
+      const client = fakeClient(BASE_USER);
+      const result = await saveCheckoutVatNumber(client, BASE_USER, "FR40303265045");
+      expect(result.success).toBe(false);
+      expect(client.user.update).not.toHaveBeenCalled();
+    });
+
+    test("with the flag on, a failure that is not a VIES_UNAVAILABLE outage still hard-fails", async () => {
+      vi.stubEnv("VAT_VIES_OUTAGE_FALLBACK", "true");
+      verifyVatWithVies.mockResolvedValueOnce({ success: false, message: "Format de numéro de TVA invalide." });
+      const client = fakeClient(BASE_USER);
+      const result = await saveCheckoutVatNumber(client, BASE_USER, "BE0751854027");
+      expect(result.success).toBe(false);
+      expect(client.user.update).not.toHaveBeenCalled();
+    });
   });
 
   test("a VIES-valid number is persisted with its full proof — works for a brand-new customer too", async () => {

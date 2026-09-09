@@ -1825,6 +1825,12 @@ model Payment {
   promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
   discountAmount Decimal    @default(0) @db.Decimal(10, 2)
 
+  // Set only by the manual, permission-gated send (actions/payments/send-ticket-email.js).
+  // completeAppointment/settleReservation never touch this — the ticket is not
+  // auto-e-mailed any more, so this column's presence is itself the record of
+  // a deliberate human action, not a side effect of settlement.
+  ticketEmailedAt DateTime?
+
   transactions     Transaction[]
   invoice          Invoice?
   disputes         StripeDispute[]

@@ -18,6 +18,7 @@ import {
   PAYMENT_EVENT_LABELS,
   LIFECYCLE_STATUS_FILTERS,
   LIFECYCLE_STATUS_LABELS,
+  performedByLabel,
   PAYMENT_STATUS_LABELS,
 } from "@/lib/dashboard/operation-filters";
 
@@ -196,12 +197,16 @@ function describeUnifiedRow(row) {
     };
   }
   if (row.sourceType === "ORDER") {
+    // performedBy is null (not undefined) for a genuine self-service
+    // order — worth its own explicit label rather than looking like the
+    // attribution was simply never loaded.
+    const performed = performedByLabel(row.performedBy) ?? "Achat en ligne (client)";
     return {
       dateLabel: date(row.latestTransactionAt ?? row.createdAt),
       kind: "Commande",
       title: `n°${row.orderNumber}`,
       href: `/dashboard/boutique/orders/${row.id}`,
-      detail: `${row.fulfilmentMode} · ${row._count.items} article(s)`,
+      detail: `${row.fulfilmentMode} · ${row._count.items} article(s) · ${performed}`,
       lifecycleStatus: row.status,
       customer: row.user,
       customerFallback: "Client de passage",
@@ -215,12 +220,16 @@ function describeUnifiedRow(row) {
       row.sourceType === "WORKSHOP"
         ? item.type === "EVENT" ? "Événement" : "Atelier"
         : `Formation ${(TYPE_LABELS[item.type] ?? "").toLowerCase()}`.trim();
+    // Ateliers/événements deliberately carry no performedBy at all (see
+    // admin-operations.js) — nothing bridges their Animator back to a real
+    // staff account, unlike a formation assigned via the staff picker.
+    const performed = performedByLabel(row.performedBy);
     return {
       dateLabel: date(row.latestTransactionAt ?? row.createdAt),
       kind,
       title: item.title,
       href: null,
-      detail: `${row.seatsCount} place(s) · session du ${date(row.session.startDate)}`,
+      detail: `${row.seatsCount} place(s) · session du ${date(row.session.startDate)}${performed ? ` · ${performed}` : ""}`,
       lifecycleStatus: row.status,
       customer: row.customer,
       customerFallback: "—",
@@ -232,12 +241,13 @@ function describeUnifiedRow(row) {
     // APPOINTMENT: not part of the entity-grained merge — this row IS a
     // Transaction, same shape the old Transactions tab rendered.
     const customer = paymentCustomer(row.payment);
+    const performed = performedByLabel(row.performedBy);
     return {
       dateLabel: date(row.paidAt),
       kind: "Rendez-vous",
       title: paymentSource(row.payment) ?? "Paiement",
       href: null,
-      detail: `${PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType ?? "Opération"} · ${row.method ?? "—"}`,
+      detail: `${PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType ?? "Opération"} · ${row.method ?? "—"}${performed ? ` · ${performed}` : ""}`,
       lifecycleStatus: row.payment?.appointment?.status ?? null,
       customer,
       customerFallback: "—",

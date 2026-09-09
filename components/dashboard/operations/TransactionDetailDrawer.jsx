@@ -10,6 +10,7 @@ import { DocumentDeliveryDialog } from "@/components/dashboard/operations/Docume
 import { CancelAndRefundDialog } from "@/components/dashboard/operations/CancelAndRefundDialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { collectibleBalance } from "@/lib/payments/collectible-balance";
+import { performedByLabel } from "@/lib/dashboard/operation-filters";
 
 const money = (value) =>
   new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
@@ -54,6 +55,9 @@ function describeSource(payment) {
       status: payment.order.status,
       extra: payment.order.fulfilmentMode,
       customer: payment.order.user,
+      // null is a genuine self-service sale, not missing data — same
+      // fallback AdminOperationsClient.jsx uses for the list row.
+      performedByText: performedByLabel(payment.order.performedBy) ?? "Achat en ligne (client)",
     };
   }
   if (payment?.workshopReservation) {
@@ -64,6 +68,8 @@ function describeSource(payment) {
       status: r.status,
       extra: `${r.seatsCount} place(s) · session du ${dateTime(r.session.startDate)}`,
       customer: r.customer,
+      // Deliberately no performedByText — see admin-operations.js's own
+      // comment on why ateliers/événements stay out of this attribution.
     };
   }
   if (payment?.formationReservation) {
@@ -74,6 +80,7 @@ function describeSource(payment) {
       status: r.status,
       extra: `${r.seatsCount} place(s) · session du ${dateTime(r.session.startDate)}`,
       customer: r.customer,
+      performedByText: performedByLabel(r.performedBy),
     };
   }
   if (payment?.appointment) {
@@ -83,6 +90,7 @@ function describeSource(payment) {
       status: payment.appointment.status,
       extra: null,
       customer: payment.appointment.user,
+      performedByText: performedByLabel(payment.appointment.performedBy),
     };
   }
   return { kind: "—", title: "—", status: null, extra: null, customer: null };
@@ -277,6 +285,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 <Row label="Détail" value={source.extra} />
                 <Row label="Client" value={source.customer?.fullName} />
                 <Row label="E-mail" value={source.customer?.email} />
+                <Row label="Réalisé par" value={source.performedByText} />
               </div>
 
               <div>
@@ -333,8 +342,20 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                     className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
                   >
                     <Receipt size={15} />
-                    Ouvrir le reçu déjà envoyé au client
+                    Ouvrir le reçu
                   </a>
+                  {/* No auto-send exists any more; ticketEmailedAt is set
+                      only by the manual, permission-gated action in
+                      actions/payments/send-ticket-email.js — this line is
+                      what makes that visible to admins on this same
+                      transaction, independent of who sent it. */}
+                  {!payment.order && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      {payment.ticketEmailedAt
+                        ? `Ticket envoyé au client le ${dateTime(payment.ticketEmailedAt)}.`
+                        : "Ticket jamais envoyé par e-mail au client."}
+                    </p>
+                  )}
                 </div>
               )}
 

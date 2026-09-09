@@ -19,6 +19,25 @@ import { AUDIT_ACTIONS } from "@/lib/audit-log";
 const ADMIN_OPERATION_TABS = Object.freeze(["transactions", "orders", "workshops", "formations"]);
 const PAGE_SIZE = 30;
 
+/**
+ * A FormationSession's Animator is only a real staff/admin account when its
+ * e-mail matches one — resolveFormationAnimatorId() (actions/formations/
+ * create-formation.js) keeps that in lockstep for any formation assigned
+ * through the dashboard's own staff picker, same bridge getStaffPerformance()
+ * already reads for commission. Batched (one query for however many distinct
+ * e-mails a page of rows carries) rather than per-row, same shape as that
+ * action's own staffEmails lookup.
+ */
+async function resolveStaffByEmails(emails) {
+  const distinct = [...new Set(emails.filter(Boolean))];
+  if (distinct.length === 0) return new Map();
+  const staffUsers = await prisma.user.findMany({
+    where: { email: { in: distinct }, role: "STAFF" },
+    select: { email: true, fullName: true, role: true },
+  });
+  return new Map(staffUsers.map((u) => [u.email, { name: u.fullName, role: u.role }]));
+}
+
 function resolveTransactionCustomer(payment) {
   return (
     payment?.order?.user ??
@@ -314,12 +333,18 @@ async function hydrateOrders(ids) {
       user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
       payment: { select: PAYMENT_LEDGER_SELECT },
       _count: { select: { items: true } },
+      // null (not undefined) is a genuine, deliberate answer here: a
+      // customer's own online/pickup order has no staff involved at all,
+      // as opposed to a Workshop row, which never carries this field
+      // because nothing bridges its Animator back to a real account.
+      createdByStaff: { select: { fullName: true, role: true } },
     },
   });
   return rows.map((row) => ({
     ...row,
     sourceType: "ORDER",
     customerInvoiceEligible: hasInvoiceableVatIdentity(row.user),
+    performedBy: row.createdByStaff ? { name: row.createdByStaff.fullName, role: row.createdByStaff.role } : null,
     ...deriveRefundFields(row.payment),
   }));
 }
@@ -350,15 +375,25 @@ async function hydrateFormations(ids) {
     include: {
       customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
       payment: { select: PAYMENT_LEDGER_SELECT },
-      session: { select: { startDate: true, formation: { select: { title: true, type: true } } } },
+      session: { select: { startDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } },
     },
   });
-  const mapped = rows.map((row) => ({
-    ...row,
-    sourceType: "FORMATION",
-    customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
-    ...deriveRefundFields(row.payment),
-  }));
+  const staffByEmail = await resolveStaffByEmails(rows.map((row) => row.session?.animator?.email));
+  const mapped = rows.map((row) => {
+    const animator = row.session?.animator;
+    // A match means the animator IS a real staff account (see
+    // resolveStaffByEmails' doc comment); otherwise fall back to the
+    // Animator's own name, unbadged, since it may be an outside instructor
+    // this formation was never assigned to via the staff picker at all.
+    const performedBy = animator ? staffByEmail.get(animator.email) ?? { name: animator.name, role: null } : null;
+    return {
+      ...row,
+      sourceType: "FORMATION",
+      customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
+      performedBy,
+      ...deriveRefundFields(row.payment),
+    };
+  });
   return attachLastTransfer(mapped, "FormationReservation");
 }
 
@@ -393,7 +428,15 @@ async function hydrateAppointmentTransactions(ids) {
             },
           },
           transactions: { orderBy: [{ paidAt: "asc" }, { id: "asc" }], select: { id: true, amount: true, method: true, manualReference: true, paidAt: true, transactionType: true, isDeleted: true } },
-          appointment: { select: { id: true, status: true, date: true, user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } } } },
+          appointment: {
+            select: {
+              id: true,
+              status: true,
+              date: true,
+              user: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
+              staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } },
+            },
+          },
         },
       },
     },
@@ -403,10 +446,12 @@ async function hydrateAppointmentTransactions(ids) {
       transactions: row.payment?.transactions ?? [],
       invoice: row.payment?.invoice ?? null,
     });
+    const staffUser = row.payment?.appointment?.staffService?.staff?.user;
     return {
       ...row,
       sourceType: "APPOINTMENT",
       customerInvoiceEligible: hasInvoiceableVatIdentity(resolveTransactionCustomer(row.payment)),
+      performedBy: staffUser ? { name: staffUser.fullName, role: staffUser.role } : null,
       refundState: {
         remainingRefundable: refundState.remainingRefundable,
         fullyRefunded: refundState.fullyRefunded,
@@ -769,6 +814,13 @@ export async function getTransactionDetail(transactionId) {
           },
         },
         payment: {
+          // `include` (not `select`) here, so every scalar Payment column —
+          // ticketEmailedAt included — comes back automatically alongside
+          // these nested relations; only ticketEmailedAt is set exclusively
+          // by the manual, permission-gated send in
+          // actions/payments/send-ticket-email.js, never by settlement
+          // itself, so the drawer uses it to answer "was this client's
+          // ticket actually e-mailed."
           include: {
             invoice: {
               select: {
@@ -794,10 +846,10 @@ export async function getTransactionDetail(transactionId) {
             // settled at the counter are two rows against one Payment, and
             // reading either one alone misrepresents what the customer paid.
             transactions: { orderBy: { paidAt: "asc" }, select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true } },
-            order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, user: { select: { fullName: true, email: true } } } },
+            order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, user: { select: { fullName: true, email: true } }, createdByStaff: { select: { fullName: true, role: true } } } },
             workshopReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
-            formationReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
-            appointment: { select: { id: true, date: true, status: true, user: { select: { fullName: true, email: true } } } },
+            formationReservation: { select: { id: true, status: true, seatsCount: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
+            appointment: { select: { id: true, date: true, status: true, user: { select: { fullName: true, email: true } }, staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
           },
         },
       },
@@ -812,6 +864,28 @@ export async function getTransactionDetail(transactionId) {
       transactions: transaction.payment?.transactions ?? [],
       invoice: transaction.payment?.invoice ?? null,
     });
+
+    // Same "who on staff/admin side this revenue belongs to" attribution as
+    // getAdminOperations' three hydrators — see resolveStaffByEmails' doc
+    // comment for the formation animator bridge. Attached onto the specific
+    // relation describeSource() already branches on
+    // (components/dashboard/operations/TransactionDetailDrawer.jsx), rather
+    // than a new top-level field.
+    if (transaction.payment?.order) {
+      const staff = transaction.payment.order.createdByStaff;
+      transaction.payment.order.performedBy = staff ? { name: staff.fullName, role: staff.role } : null;
+    } else if (transaction.payment?.appointment) {
+      const staffUser = transaction.payment.appointment.staffService?.staff?.user;
+      transaction.payment.appointment.performedBy = staffUser ? { name: staffUser.fullName, role: staffUser.role } : null;
+    } else if (transaction.payment?.formationReservation) {
+      const animator = transaction.payment.formationReservation.session?.animator;
+      let performedBy = null;
+      if (animator) {
+        const staffByEmail = await resolveStaffByEmails([animator.email]);
+        performedBy = staffByEmail.get(animator.email) ?? { name: animator.name, role: null };
+      }
+      transaction.payment.formationReservation.performedBy = performedBy;
+    }
 
     return {
       success: true,

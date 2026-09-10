@@ -842,6 +842,7 @@
         "price": "Prijs",
         "duration": "Duur",
         "capacity": "Capaciteit",
+        "seats": "Plaatsen",
         "animator": "Animator",
         "status": "Status"
       },
@@ -875,7 +876,12 @@
       "unitLabels": {
         "minutes": "min",
         "persons": "pers.",
-        "noAnimator": "Geen animator"
+        "noAnimator": "Geen animator",
+        "full": "Volzet",
+        "noUpcomingSession": "Geen sessie gepland",
+        "seatsRemaining": "{count, plural, =0 {Volzet} one {# plaats vrij} other {# plaatsen vrij}}",
+        "sessionCapacityTooltip": "Capaciteit van de sessie: {count}",
+        "otherSessions": "+{count, plural, one {# andere sessie} other {# andere sessies}}"
       },
       "modal": {
         "editTitle": "Activiteit bewerken",
@@ -1068,6 +1074,7 @@
       "price": "Prijs",
       "duration": "Duur",
       "capacity": "Capaciteit",
+      "seats": "Plaatsen",
       "animator": "Trainer",
       "status": "Status"
     },
@@ -1098,7 +1105,12 @@
       "minutes": "min",
       "persons": "pers.",
       "noAnimator": "Geen trainer",
-      "privateCapacity": "1 pers."
+      "privateCapacity": "1 pers.",
+      "full": "Volzet",
+      "noUpcomingSession": "Geen sessie gepland",
+      "seatsRemaining": "{count, plural, =0 {Volzet} one {# plaats vrij} other {# plaatsen vrij}}",
+      "sessionCapacityTooltip": "Capaciteit van de sessie: {count}",
+      "otherSessions": "+{count, plural, one {# andere sessie} other {# andere sessies}}"
     },
     "modal": {
       "editTitle": "Opleiding bewerken",

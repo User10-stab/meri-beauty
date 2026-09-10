@@ -842,6 +842,7 @@
         "price": "Price",
         "duration": "Duration",
         "capacity": "Capacity",
+        "seats": "Seats",
         "animator": "Animator",
         "status": "Status"
       },
@@ -875,7 +876,12 @@
       "unitLabels": {
         "minutes": "min",
         "persons": "pers.",
-        "noAnimator": "No animator"
+        "noAnimator": "No animator",
+        "full": "Full",
+        "noUpcomingSession": "No upcoming session",
+        "seatsRemaining": "{count, plural, =0 {Full} one {# seat left} other {# seats left}}",
+        "sessionCapacityTooltip": "Session capacity: {count}",
+        "otherSessions": "+{count, plural, one {# other session} other {# other sessions}}"
       },
       "modal": {
         "editTitle": "Edit activity",
@@ -1068,6 +1074,7 @@
       "price": "Price",
       "duration": "Duration",
       "capacity": "Capacity",
+      "seats": "Seats",
       "animator": "Trainer",
       "status": "Status"
     },
@@ -1098,7 +1105,12 @@
       "minutes": "min",
       "persons": "pers.",
       "noAnimator": "No trainer",
-      "privateCapacity": "1 pers."
+      "privateCapacity": "1 pers.",
+      "full": "Full",
+      "noUpcomingSession": "No upcoming session",
+      "seatsRemaining": "{count, plural, =0 {Full} one {# seat left} other {# seats left}}",
+      "sessionCapacityTooltip": "Session capacity: {count}",
+      "otherSessions": "+{count, plural, one {# other session} other {# other sessions}}"
     },
     "modal": {
       "editTitle": "Edit formation",

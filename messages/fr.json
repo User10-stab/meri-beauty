@@ -842,6 +842,7 @@
         "price": "Tarif",
         "duration": "Durée",
         "capacity": "Capacité",
+        "seats": "Places",
         "animator": "Animateur",
         "status": "Statut"
       },
@@ -875,7 +876,12 @@
       "unitLabels": {
         "minutes": "min",
         "persons": "pers.",
-        "noAnimator": "Aucun animateur"
+        "noAnimator": "Aucun animateur",
+        "full": "Complet",
+        "noUpcomingSession": "Aucune séance à venir",
+        "seatsRemaining": "{count, plural, =0 {Complet} one {# place restante} other {# places restantes}}",
+        "sessionCapacityTooltip": "Capacité de la séance : {count}",
+        "otherSessions": "+{count, plural, one {# autre séance} other {# autres séances}}"
       },
       "modal": {
         "editTitle": "Modifier l'activité",
@@ -1068,6 +1074,7 @@
       "price": "Tarif",
       "duration": "Durée",
       "capacity": "Capacité",
+      "seats": "Places",
       "animator": "Formateur",
       "status": "Statut"
     },
@@ -1098,7 +1105,12 @@
       "minutes": "min",
       "persons": "pers.",
       "noAnimator": "Aucun formateur",
-      "privateCapacity": "1 pers."
+      "privateCapacity": "1 pers.",
+      "full": "Complet",
+      "noUpcomingSession": "Aucune séance à venir",
+      "seatsRemaining": "{count, plural, =0 {Complet} one {# place restante} other {# places restantes}}",
+      "sessionCapacityTooltip": "Capacité de la séance : {count}",
+      "otherSessions": "+{count, plural, one {# autre séance} other {# autres séances}}"
     },
     "modal": {
       "editTitle": "Modifier la formation",

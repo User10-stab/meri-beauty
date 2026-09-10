@@ -80,6 +80,36 @@ export function FormationRow({ row, onView, onEdit, onDelete }) {
         {row.type === "PRIVATE" ? t("unitLabels.privateCapacity") : `${row.capacity} ${t("unitLabels.persons")}`}
       </td>
 
+      {/* Seats left — next scheduled session; a PUBLIC formation can have
+          several sessions at different capacities, so this is the soonest one. */}
+      <td className="px-4 py-4 align-middle">
+        {row.nextSession ? (
+          <div className="flex flex-col gap-0.5">
+            <span
+              className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium border ${
+                row.nextSession.remainingSeats <= 0
+                  ? "bg-red-50 text-red-700 border-red-200"
+                  : row.nextSession.remainingSeats < 3
+                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
+              }`}
+              title={t("unitLabels.sessionCapacityTooltip", { count: row.nextSession.capacitySeats })}
+            >
+              {row.nextSession.remainingSeats <= 0
+                ? t("unitLabels.full")
+                : t("unitLabels.seatsRemaining", { count: row.nextSession.remainingSeats })}
+            </span>
+            {row.upcomingSessionsCount > 1 && (
+              <span className="text-[11px] text-gray-400">
+                {t("unitLabels.otherSessions", { count: row.upcomingSessionsCount - 1 })}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-gray-400 italic">{t("unitLabels.noUpcomingSession")}</span>
+        )}
+      </td>
+
       {/* Animator */}
       <td className="px-4 py-4 align-middle">
         {row.animator ? (

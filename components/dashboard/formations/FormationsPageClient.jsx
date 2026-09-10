@@ -24,6 +24,7 @@ export function FormationsPageClient({ initialFormations = [], initialStaffOptio
     { key: "price", label: t("columns.price") },
     { key: "duration", label: t("columns.duration") },
     { key: "capacity", label: t("columns.capacity") },
+    { key: "seats", label: t("columns.seats") },
     { key: "animator", label: t("columns.animator") },
     { key: "status", label: t("columns.status") },
   ];
@@ -121,6 +122,7 @@ export function FormationsPageClient({ initialFormations = [], initialStaffOptio
           { key: "price", label: t("columns.price") },
           { key: "duration", label: t("columns.duration") },
           { key: "capacity", label: t("columns.capacity") },
+          { key: "seats", label: t("columns.seats") },
           { key: "animator", label: t("columns.animator") },
           { key: "status", label: t("columns.status") },
         ]}

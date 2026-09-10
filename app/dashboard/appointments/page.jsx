@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { getAllAppointments, getStaffFilterOptions } from "@/actions/appointment/list-appointments";
 import { AppointmentsPageClient } from "@/components/dashboard/appointments/AppointmentsPageClient";
 import { NewAppointmentButton } from "@/components/dashboard/appointments/NewAppointmentButton";
@@ -97,6 +97,7 @@ export default async function AppointmentsPage() {
           initialAppointments={appointments}
           staffOptions={staffResult.data ?? []}
           showStaffFilter={isAdminRole(user.role)}
+          canCollectCash={isTillCashOperator(user)}
         />
       </Suspense>
     </div>

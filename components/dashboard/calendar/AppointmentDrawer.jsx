@@ -126,6 +126,7 @@ export function AppointmentDrawer({
   onClose,
   onAppointmentUpdated,
   isAdmin = false,
+  canCollectCash = false,
 }) {
   const t = useTranslations();
   const drawerRef = useRef(null);
@@ -192,7 +193,11 @@ export function AppointmentDrawer({
     // settled from the calendar at all, and an appointment with no Payment
     // row completed silently with the money recorded nowhere. Shared with the
     // appointments list; completeAppointment enforces the same rule.
-    if (appointmentCollectsAtCounter(appointment)) {
+    //
+    // Only Marie / an admin takes money at the counter — for everyone else the
+    // balance is recorded off-till by completeAppointment, so the payment
+    // popup is skipped and "Terminer" just closes the rendez-vous out.
+    if (canCollectCash && appointmentCollectsAtCounter(appointment)) {
       setShowPaymentDialog(true);
       return;
     }

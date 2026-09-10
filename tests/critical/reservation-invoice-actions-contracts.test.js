@@ -70,46 +70,51 @@ describe("the compact action column retains financial safety", () => {
 // the ticket on the Payment instead, computing the figures straight from it
 // when there's no Invoice to reprint.
 describe("a ticket for a rendez-vous/atelier/formation payment is available whether or not it has an invoice", () => {
+  // Ticket assembly (payment lookup, VAT policy, consolidatedTicketFields/
+  // collectionTicketFields) moved into lib/cash-book/build-payment-ticket.js
+  // so actions/payments/send-ticket-email.js can share it instead of
+  // duplicating it — the route now only authorizes and delegates.
   const route = source("app/api/payments/[id]/ticket/route.js");
+  const builder = source("lib/cash-book/build-payment-ticket.js");
 
-  test("the route is keyed on the Payment, not the Invoice", () => {
-    expect(route).toContain("prisma.payment.findUnique");
+  test("the builder is keyed on the Payment, not the Invoice", () => {
+    expect(builder).toContain("prisma.payment.findUnique");
   });
 
   test("computes the ticket straight from the Payment's own VAT policy when no Invoice exists", () => {
     // This is the exact fix for the particulier gap: no `if (!invoice) return`
     // short-circuit — the else branch always produces a renderable ticket.
-    expect(route).toContain("resolveServiceVatPolicy({ customer })");
-    expect(route).toContain("paidAmount: true");
-    expect(route).toContain("consolidatedTicketFields(id, payment.transactions, payment.invoice, ticketFields.vatRate)");
-    expect(route).toContain("collectionTicketFields(txn, payment.invoice, ticketFields.vatRate)");
-    expect(route).not.toContain("calculateVatTotals(payment.totalAmount, vatRate)");
-    expect(route).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
+    expect(builder).toContain("resolveServiceVatPolicy({ customer })");
+    expect(builder).toContain("paidAmount: true");
+    expect(builder).toContain("consolidatedTicketFields(paymentId, payment.transactions, payment.invoice, ticketFields.vatRate)");
+    expect(builder).toContain("collectionTicketFields(txn, payment.invoice, ticketFields.vatRate)");
+    expect(builder).not.toContain("calculateVatTotals(payment.totalAmount, vatRate)");
+    expect(builder).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
   });
 
   test("uses the Invoice's seller and VAT policy, but the payment's own identity and amount", () => {
-    expect(route).toContain("if (payment.invoice) {");
-    expect(route).toContain("sellerName: inv.sellerName");
-    expect(route).toContain("vatRate: inv.vatRate");
-    expect(route).toContain("consolidatedTicketFields(id, payment.transactions, payment.invoice, ticketFields.vatRate)");
-    expect(route).not.toContain("orderNumber: inv.number");
+    expect(builder).toContain("if (payment.invoice) {");
+    expect(builder).toContain("sellerName: inv.sellerName");
+    expect(builder).toContain("vatRate: inv.vatRate");
+    expect(builder).toContain("consolidatedTicketFields(paymentId, payment.transactions, payment.invoice, ticketFields.vatRate)");
+    expect(builder).not.toContain("orderNumber: inv.number");
   });
 
   test("still lets staff print one collection on its own via ?transactionId=", () => {
     expect(route).toContain('new URL(req.url).searchParams.get("transactionId")');
-    expect(route).toContain("collectionTicketFields(txn, payment.invoice, ticketFields.vatRate)");
+    expect(builder).toContain("collectionTicketFields(txn, payment.invoice, ticketFields.vatRate)");
   });
 
   test("reuses the same description helper as the close-of-session batch", () => {
-    expect(route).toContain('import { describeReservationPayment } from "@/lib/cash-book/reservation-tickets"');
+    expect(builder).toContain('import { describeReservationPayment } from "@/lib/cash-book/reservation-tickets"');
   });
 
   test("refuses a boutique-order-backed payment — that one already has its own ticket route with real line items", () => {
-    expect(route).toContain("if (payment.orderId)");
+    expect(builder).toContain("if (payment.orderId)");
   });
 
-  test("is staff/dashboard only — no client self-service download", () => {
-    expect(route).toContain("canAccessDashboard(session.user.role)");
+  test("is gated on SEND_TICKET_EMAIL — the same permission required to e-mail it, not just any dashboard role", () => {
+    expect(route).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL)");
     expect(route).not.toContain("ownerId");
   });
 
@@ -118,9 +123,9 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     expect(lib).toContain("export function describeReservationPayment(payment)");
   });
 
-  test("the ticket route remains independently authorized and invoice-free", () => {
-    expect(route).toContain("prisma.payment.findUnique");
-    expect(route).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
+  test("the ticket route delegates to the shared builder rather than re-authorizing per-invoice", () => {
+    expect(route).toContain("buildPaymentTicket(id, { transactionId })");
+    expect(builder).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
   });
 
   test("keeps tickets and PDFs behind one documents card instead of restoring an action strip", () => {

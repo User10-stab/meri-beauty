@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BookOpen, FileText } from "lucide-react";
+import { ArrowLeft, BookOpen, FileText, Mail, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { getCashBookLedger } from "@/actions/dashboard/cash-book";
 import { listSessionWithdrawals } from "@/actions/dashboard/bank-deposits";
+import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
 import { CashMovementPanel } from "@/components/dashboard/boutique/CashMovementPanel";
 import { SessionBankDepositPanel } from "@/components/dashboard/boutique/SessionBankDepositPanel";
 
@@ -45,10 +47,31 @@ function pieceNumberHref(row) {
   return null;
 }
 
-export function CashBookClient({ ledger: initialLedger, movements = [], withdrawals = [] }) {
+// A reservation ticket (never a boutique order's — that one has no e-mail
+// counterpart in this feature) that a collection or refund actually produced.
+function canEmailRow(row) {
+  return Boolean(row.paymentId) && !row.orderId && (row.kind === "SALE" || row.kind === "REFUND");
+}
+
+export function CashBookClient({ ledger: initialLedger, movements = [], withdrawals = [], canSendTicketEmail = false }) {
   const [ledger, setLedger] = useState(initialLedger);
   const [sessionWithdrawals, setSessionWithdrawals] = useState(withdrawals);
+  const [sendingRow, setSendingRow] = useState(null);
   const { session, rows, totals } = ledger;
+
+  // Deliberately Payment-scoped, unlike the N° pièce link above: the book is a
+  // per-movement register, but the client is owed the whole prestation. Sending
+  // this row's leg alone produced a receipt reading "10,00 €" for a 40 € booking
+  // settled after a counter discount — no total, no acompte, nothing tying it
+  // back. Without transactionId, buildPaymentTicket takes its consolidated
+  // branch: the real total, with the Acompte/Solde split printed underneath.
+  async function handleSendTicket(row, rowKey) {
+    setSendingRow(rowKey);
+    const result = await sendTicketByEmail(row.paymentId);
+    setSendingRow(null);
+    if (result.success) toast.success(result.message);
+    else toast.error(result.message);
+  }
 
   const reload = useCallback(() => {
     getCashBookLedger(session.id).then((result) => {
@@ -133,13 +156,19 @@ export function CashBookClient({ ledger: initialLedger, movements = [], withdraw
               <th className="whitespace-nowrap px-4 py-3 text-right">Entrées (€)</th>
               <th className="whitespace-nowrap px-4 py-3 text-right">Sorties (€)</th>
               <th className="whitespace-nowrap px-4 py-3 text-right">Solde (€)</th>
+              {canSendTicketEmail && <th className="whitespace-nowrap px-4 py-3">Ticket</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-dark-3">
             {rows.map((row, index) => {
-              const href = pieceNumberHref(row);
+              // A reservation ticket needs the same SEND_TICKET_EMAIL
+              // permission to open as it does to e-mail — see canEmailRow.
+              // A boutique order's ticket has no such gate (its own route
+              // stays open to every dashboard role), so it keeps its link.
+              const href = canEmailRow(row) && !canSendTicketEmail ? null : pieceNumberHref(row);
+              const rowKey = `${row.kind}-${row.pieceNumber ?? index}-${row.date}`;
               return (
-              <tr key={`${row.kind}-${row.pieceNumber ?? index}-${row.date}`}>
+              <tr key={rowKey}>
                 <td className="whitespace-nowrap px-4 py-3">{formatDateTime(row.date)}</td>
                 <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
                   {href ? (
@@ -162,6 +191,23 @@ export function CashBookClient({ ledger: initialLedger, movements = [], withdraw
                 <td className="whitespace-nowrap px-4 py-3 text-right font-semibold text-gray-900 dark:text-white">
                   {formatEuro(row.solde)}
                 </td>
+                {canSendTicketEmail && (
+                  <td className="whitespace-nowrap px-4 py-3">
+                    {canEmailRow(row) && (
+                      <button
+                        type="button"
+                        onClick={() => handleSendTicket(row, rowKey)}
+                        disabled={sendingRow === rowKey}
+                        title="Envoyer au client le ticket complet de la réservation (total et acompte compris), et non le seul encaissement de cette ligne"
+                        aria-label="Envoyer par e-mail"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-dark-3 dark:text-white"
+                      >
+                        {sendingRow === rowKey ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
+                        Envoyer par e-mail
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
               );
             })}

@@ -9,11 +9,14 @@ import { useCashSessionOpen } from "@/components/dashboard/boutique/counter/useC
 import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSessionGate";
 
 /** A boutique pickup order — a different world entirely (Order, not a ticket), routed to the same scan box. */
-export function PickupFiche({ order, onSettled }) {
+export function PickupFiche({ order, onSettled, canCollectCash = false }) {
   const [method, setMethod] = useState("CASH");
   const [terminalReference, setTerminalReference] = useState("");
   const [saving, setSaving] = useState(false);
   const needsPayment = !order.hasPayment;
+  // Only Marie / an admin takes money at the counter; for everyone else
+  // completeOrderPickup records it off-till, so there's no method to pick.
+  const collectsAtTill = needsPayment && canCollectCash;
   const isExternalTerminal = method === "EXTERNAL_TERMINAL";
   const { open: cashSessionOpen, markOpen: markCashSessionOpen, markClosed: markCashSessionClosed } = useCashSessionOpen();
 
@@ -23,15 +26,15 @@ export function PickupFiche({ order, onSettled }) {
   }
 
   async function handleConfirm() {
-    if (needsPayment && isExternalTerminal && !terminalReference.trim()) {
+    if (collectsAtTill && isExternalTerminal && !terminalReference.trim()) {
       toast.error("Indiquez la référence du ticket du terminal.");
       return;
     }
     setSaving(true);
     const result = await completeOrderPickup({
       orderId: order.id,
-      method: needsPayment ? method : undefined,
-      ...(needsPayment && isExternalTerminal
+      method: collectsAtTill ? method : undefined,
+      ...(collectsAtTill && isExternalTerminal
         ? { terminalApproved: true, terminalReference: terminalReference.trim() }
         : {}),
     });
@@ -67,30 +70,34 @@ export function PickupFiche({ order, onSettled }) {
         ) : needsPayment ? (
           <div className="space-y-3">
             <p className="text-sm font-medium text-dark dark:text-white">
-              À encaisser : {formatPrice(order.totalAmount)}
+              {collectsAtTill ? "À encaisser" : "À enregistrer"} : {formatPrice(order.totalAmount)}
             </p>
-            <div className="flex items-center gap-3">
-              {["CASH", "EXTERNAL_TERMINAL"].map((value) => (
-                <label key={value} className="flex items-center gap-1.5 text-sm text-dark dark:text-white">
-                  <input type="radio" checked={method === value} onChange={() => selectMethod(value)} />
-                  {value === "CASH" ? "Espèces" : "Carte — terminal"}
-                </label>
-              ))}
-            </div>
-            {isExternalTerminal && (
-              <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-stroke bg-gray-50 p-3 dark:border-dark-3 dark:bg-dark-2">
-                <input
-                  value={terminalReference}
-                  onChange={(event) => setTerminalReference(event.target.value)}
-                  maxLength={100}
-                  aria-label="Référence du ticket du terminal"
-                  placeholder="Référence du ticket du terminal"
-                  className="min-w-[220px] flex-1 rounded-[7px] border border-stroke bg-white px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-                />
-              </div>
-            )}
-            {method === "CASH" && !cashSessionOpen && (
-              <CashSessionGate onOpened={markCashSessionOpen} />
+            {collectsAtTill && (
+              <>
+                <div className="flex items-center gap-3">
+                  {["CASH", "EXTERNAL_TERMINAL"].map((value) => (
+                    <label key={value} className="flex items-center gap-1.5 text-sm text-dark dark:text-white">
+                      <input type="radio" checked={method === value} onChange={() => selectMethod(value)} />
+                      {value === "CASH" ? "Espèces" : "Carte — terminal"}
+                    </label>
+                  ))}
+                </div>
+                {isExternalTerminal && (
+                  <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-stroke bg-gray-50 p-3 dark:border-dark-3 dark:bg-dark-2">
+                    <input
+                      value={terminalReference}
+                      onChange={(event) => setTerminalReference(event.target.value)}
+                      maxLength={100}
+                      aria-label="Référence du ticket du terminal"
+                      placeholder="Référence du ticket du terminal"
+                      className="min-w-[220px] flex-1 rounded-[7px] border border-stroke bg-white px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                    />
+                  </div>
+                )}
+                {method === "CASH" && !cashSessionOpen && (
+                  <CashSessionGate onOpened={markCashSessionOpen} />
+                )}
+              </>
             )}
           </div>
         ) : (
@@ -102,14 +109,20 @@ export function PickupFiche({ order, onSettled }) {
             type="button"
             disabled={
               saving ||
-              (needsPayment && isExternalTerminal && !terminalReference.trim()) ||
-              (needsPayment && method === "CASH" && !cashSessionOpen)
+              (collectsAtTill && isExternalTerminal && !terminalReference.trim()) ||
+              (collectsAtTill && method === "CASH" && !cashSessionOpen)
             }
             onClick={handleConfirm}
             className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <CheckCircle2 className="h-4 w-4" strokeWidth={2} />
-            {saving ? "Traitement…" : needsPayment ? "Encaisser et remettre" : "Remettre la commande"}
+            {saving
+              ? "Traitement…"
+              : !needsPayment
+                ? "Remettre la commande"
+                : collectsAtTill
+                  ? "Encaisser et remettre"
+                  : "Enregistrer et remettre"}
           </button>
         )}
       </div>

@@ -49,6 +49,18 @@ import { Loader2, ShieldQuestion, UserRound } from "lucide-react";
  *   otherwise — so the composer passes false to drop the checkbox and the
  *   anonymous branch entirely; the caller's own isWalkIn simply never
  *   becomes true in that case.
+ * @param {boolean} [props.collectWalkInEmail] Default true. A nudge, not a
+ *   hard requirement any more — the e-mail input stays visible either way;
+ *   unchecking only lifts the "required to submit" gate in the caller.
+ * @param {(next: boolean) => void} [props.onCollectWalkInEmailChange]
+ * @param {boolean} [props.invoiceRequested] Default true. Only rendered when
+ *   willHaveVatInvoice is true — lets a VAT-eligible client decline the
+ *   invoice for this specific sale.
+ * @param {(next: boolean) => void} [props.onInvoiceRequestedChange]
+ * @param {boolean} [props.showInvoiceOptOut] Default true (retail till). The
+ *   composer passes false — a booking sale has no "decline the invoice" UX
+ *   of its own yet, only the retail till does, so it keeps the plain
+ *   explanatory paragraph instead of an inert checkbox.
  */
 export function CounterBuyerForm({
   customer,
@@ -69,6 +81,11 @@ export function CounterBuyerForm({
   willHaveVatInvoice,
   willBeBelgianB2B,
   allowWalkIn = true,
+  collectWalkInEmail = true,
+  onCollectWalkInEmailChange,
+  invoiceRequested = true,
+  onInvoiceRequestedChange,
+  showInvoiceOptOut = true,
 }) {
   return (
     <>
@@ -91,16 +108,27 @@ export function CounterBuyerForm({
           <p className="text-xs text-gray-500 dark:text-dark-6">
             Aucune identité n&apos;est enregistrée. Le ticket sera généré puis envoyé par e-mail — le paiement par QR n&apos;est pas disponible dans ce mode.
           </p>
+          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-dark-6">
+            <input
+              type="checkbox"
+              checked={collectWalkInEmail}
+              onChange={(event) => onCollectWalkInEmailChange?.(event.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e]"
+            />
+            Demander l&apos;e-mail du client (recommandé pour le ticket)
+          </label>
           <input
             value={walkInEmail}
             onChange={(event) => setWalkInEmail(event.target.value)}
-            placeholder="E-mail du client — obligatoire pour envoyer le ticket"
+            placeholder={collectWalkInEmail ? "E-mail du client — obligatoire pour envoyer le ticket" : "E-mail du client (facultatif)"}
             type="email"
             autoComplete="off"
             className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-3 dark:text-white"
           />
           <p className="text-xs text-gray-400 dark:text-dark-6">
-            Sans nom associé, ce n&apos;est jamais une facture nominative: seulement le ticket envoyé par e-mail.
+            {collectWalkInEmail
+              ? "Sans nom associé, ce n'est jamais une facture nominative: seulement le ticket envoyé par e-mail."
+              : "Aucun e-mail ne sera demandé — la vente sera enregistrée sans envoi de ticket."}
           </p>
           {walkInEmailMatch && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-900/10">
@@ -175,11 +203,32 @@ export function CounterBuyerForm({
 
       {!isWalkIn && (
         willHaveVatInvoice ? (
-          <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
-            {willBeBelgianB2B
-              ? "Client avec TVA belge valide — une facture sera créée et numérotée, puis transmise manuellement via Billit/Peppol depuis Opérations. Le client reçoit toujours son ticket par e-mail."
-              : "Client avec TVA VIES valide — une facture sera créée et numérotée, puis envoyée manuellement depuis Opérations. Le client reçoit toujours son ticket par e-mail."}
-          </p>
+          showInvoiceOptOut ? (
+          <div className="space-y-1.5">
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-700 dark:text-dark-6">
+              <input
+                type="checkbox"
+                checked={invoiceRequested}
+                onChange={(event) => onInvoiceRequestedChange?.(event.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e]"
+              />
+              Générer une facture pour ce client
+            </label>
+            <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
+              {invoiceRequested
+                ? willBeBelgianB2B
+                  ? "Client avec TVA belge valide — une facture sera créée et numérotée, puis transmise manuellement via Billit/Peppol depuis Opérations. Le client reçoit toujours son ticket par e-mail."
+                  : "Client avec TVA VIES valide — une facture sera créée et numérotée, puis envoyée manuellement depuis Opérations. Le client reçoit toujours son ticket par e-mail."
+                : "Aucune facture ne sera générée pour cette vente — le client recevra uniquement son ticket."}
+            </p>
+          </div>
+          ) : (
+            <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
+              {willBeBelgianB2B
+                ? "Client avec TVA belge valide — une facture sera créée et numérotée, puis transmise manuellement via Billit/Peppol depuis Opérations. Le client reçoit toujours son ticket par e-mail."
+                : "Client avec TVA VIES valide — une facture sera créée et numérotée, puis envoyée manuellement depuis Opérations. Le client reçoit toujours son ticket par e-mail."}
+            </p>
+          )
         ) : (
           <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
             Client particulier — aucune facture ne sera générée. Le ticket sera envoyé automatiquement par e-mail.

@@ -39,12 +39,56 @@ describe("saveCheckoutVatNumber — shared by online checkout and POS", () => {
     expect(client.user.update).not.toHaveBeenCalled();
   });
 
-  test("VIES being down fails closed rather than saving an unverified number", async () => {
-    verifyVatWithVies.mockResolvedValueOnce({ success: false, message: "VIES indisponible." });
+  test("a plain failure with no outage reason still fails closed (e.g. a format error from VIES)", async () => {
+    verifyVatWithVies.mockResolvedValueOnce({ success: false, message: "Format de numéro de TVA invalide." });
     const client = fakeClient(BASE_USER);
     const result = await saveCheckoutVatNumber(client, BASE_USER, "BE0751854027");
     expect(result.success).toBe(false);
     expect(client.user.update).not.toHaveBeenCalled();
+  });
+
+  describe("VIES outage — a well-formed number is accepted provisionally so the sale still completes", () => {
+    test("a checksum-valid BE number is saved provisionally, without a registry name", async () => {
+      verifyVatWithVies.mockResolvedValueOnce({ success: false, reason: "VIES_UNAVAILABLE", message: "VIES indisponible." });
+      const client = fakeClient(BASE_USER);
+      const result = await saveCheckoutVatNumber(client, BASE_USER, "BE0751854027");
+      expect(result.success).toBe(true);
+      expect(client.user.update).toHaveBeenCalledWith({
+        where: { id: "u1" },
+        data: expect.objectContaining({
+          isCompany: true,
+          vatNumber: "BE0751854027",
+          vatValidatedAt: expect.any(Date),
+          vatValidationName: null,
+          vatValidationAddress: null,
+        }),
+      });
+    });
+
+    test("a foreign-EU number is also accepted provisionally — tax-policy then applies the 0% reverse charge from the country code", async () => {
+      verifyVatWithVies.mockResolvedValueOnce({ success: false, reason: "VIES_UNAVAILABLE", message: "VIES indisponible." });
+      const client = fakeClient(BASE_USER);
+      const result = await saveCheckoutVatNumber(client, BASE_USER, "FR40303265045");
+      expect(result.success).toBe(true);
+      expect(client.user.update).toHaveBeenCalledWith({
+        where: { id: "u1" },
+        data: expect.objectContaining({
+          isCompany: true,
+          vatNumber: "FR40303265045",
+          vatValidatedAt: expect.any(Date),
+          vatValidationName: null,
+          vatValidationAddress: null,
+        }),
+      });
+    });
+
+    test("a reachable VIES that answers \"not registered\" still fails, outage handling does not touch it", async () => {
+      verifyVatWithVies.mockResolvedValueOnce({ success: true, valid: false });
+      const client = fakeClient(BASE_USER);
+      const result = await saveCheckoutVatNumber(client, BASE_USER, "BE0751854027");
+      expect(result.success).toBe(false);
+      expect(client.user.update).not.toHaveBeenCalled();
+    });
   });
 
   test("a VIES-valid number is persisted with its full proof — works for a brand-new customer too", async () => {

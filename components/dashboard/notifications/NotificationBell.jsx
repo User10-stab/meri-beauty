@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { Bell } from "lucide-react";
 import { useClickOutside } from "@/hooks/use-click-outside";
@@ -34,8 +34,7 @@ export default function NotificationBell({ user }) {
   const [loading, setLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(false);
 
-  const containerRef = useRef(null);
-  useClickOutside(containerRef, () => open && setOpen(false));
+  const containerRef = useClickOutside(() => open && setOpen(false));
 
   const fetchUnreadCount = useCallback(async () => {
     const res = await getUnreadCount();

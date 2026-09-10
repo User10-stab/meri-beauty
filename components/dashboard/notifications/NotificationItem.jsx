@@ -7,6 +7,7 @@ import {
   CalendarPlus2,
   CalendarCheck,
   CalendarX2,
+  AlertTriangle,
   BellRing,
 } from "lucide-react";
 
@@ -18,6 +19,8 @@ function getIconForType(type) {
       return CalendarCheck;
     case "APPOINTMENT_CANCELLED":
       return CalendarX2;
+    case "ORDER_FULFILMENT_OVERDUE":
+      return AlertTriangle;
     default:
       return BellRing;
   }
@@ -31,6 +34,8 @@ function getAccentForType(type) {
       return "bg-green-100 text-green-600 dark:bg-green-500/20 dark:text-green-300";
     case "APPOINTMENT_CANCELLED":
       return "bg-red-100 text-red-600 dark:bg-red-500/20 dark:text-red-300";
+    case "ORDER_FULFILMENT_OVERDUE":
+      return "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300";
     default:
       return "bg-gray-100 text-gray-600 dark:bg-gray-500/20 dark:text-gray-300";
   }
@@ -123,7 +128,7 @@ export default function NotificationItem({
           <span
             className="mt-1.5 inline-flex items-center text-[12px] font-medium text-sky-600 dark:text-sky-400"
           >
-            Voir le rendez-vous →
+            Voir les détails →
           </span>
         )}
       </div>

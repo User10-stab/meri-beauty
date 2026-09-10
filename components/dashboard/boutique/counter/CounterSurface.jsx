@@ -56,6 +56,7 @@ export function CounterSurface({
   canCreateSessionBooking = false,
   canAdjustStock = false,
   canOpenCashSession = false,
+  canCollectCash = false,
 }) {
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -253,12 +254,13 @@ export function CounterSurface({
           {ticket && (
             <div className="mt-4">
               {ticket.domain === "PICKUP" ? (
-                <PickupFiche order={ticket} onSettled={() => setTicket(null)} />
+                <PickupFiche order={ticket} onSettled={() => setTicket(null)} canCollectCash={canCollectCash} />
               ) : (
                 <CounterFiche
                   key={`${ticket.code}:${ticket.checkedInSeats}:${ticket.balanceDue}:${ticket.seatsCount}:${ticket.totalPrice}`}
                   ticket={ticket}
                   onChanged={handleTicketChanged}
+                  canCollectCash={canCollectCash}
                 />
               )}
             </div>
@@ -268,6 +270,7 @@ export function CounterSurface({
             <CounterBookingComposer
               canCreateWalkInService={canCreateWalkInService}
               canCreateSessionBooking={canCreateSessionBooking}
+              canCollectCash={canCollectCash}
               pendingService={pendingService}
               onConsumePendingService={() => setPendingService(null)}
               pendingSession={pendingSession}
@@ -280,6 +283,7 @@ export function CounterSurface({
       <CounterCart
         canAdjustStock={canAdjustStock}
         canOpenCashSession={canOpenCashSession}
+        canCollectCash={canCollectCash}
         pendingProduct={pendingProduct}
         onConsumePendingProduct={() => setPendingProduct(null)}
       />

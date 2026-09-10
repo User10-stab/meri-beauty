@@ -46,9 +46,14 @@ const emptyCustomer = {
 export function CounterCart({
   canAdjustStock = false,
   canOpenCashSession = false,
+  canCollectCash = false,
   pendingProduct,
   onConsumePendingProduct,
 }) {
+  // Only Marie / an admin rings a sale into the Livre de caisse. For everyone
+  // else completePointOfSaleSale records the sale off-till (see
+  // isTillCashOperator), so the "open the till first" gate never applies.
+  const tillGateApplies = canCollectCash;
   const router = useRouter();
   const [barcode, setBarcode] = useState("");
   const [productQuery, setProductQuery] = useState("");
@@ -60,6 +65,12 @@ export function CounterCart({
   // enforced again server-side, this is just the matching UI gate.
   const [isWalkIn, setIsWalkIn] = useState(false);
   const [walkInEmail, setWalkInEmail] = useState("");
+  // Nudge, not a hard requirement — staff can uncheck this to skip
+  // collecting an e-mail from a walk-in and still complete the sale.
+  const [collectWalkInEmail, setCollectWalkInEmail] = useState(true);
+  // Only meaningful once the buyer turns out VAT-eligible — lets a B2B
+  // client decline the invoice for this specific sale.
+  const [invoiceRequested, setInvoiceRequested] = useState(true);
   // Set once the typed walk-in address turns out to already belong to a
   // real account — surfaced as a warning instead of silently e-mailing a
   // ticket to someone who has an actual customer profile to attach it to.
@@ -538,7 +549,7 @@ export function CounterCart({
   function submitSale() {
     if (!cart.length) return toast.error("Ajoutez au moins un produit.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
-    if (isWalkIn && !walkInEmailReady) {
+    if (isWalkIn && collectWalkInEmail && !walkInEmailReady) {
       return toast.error("Indiquez l'e-mail du client pour envoyer le ticket.");
     }
     if (method === "EXTERNAL_TERMINAL" && !terminalConfirmOpen) {
@@ -555,6 +566,7 @@ export function CounterCart({
         items: cart.map((item) => ({ type: "PRODUCT", variantId: item.variantId, quantity: item.quantity })),
         method,
         attemptKey,
+        invoiceRequested,
         ...(method === "EXTERNAL_TERMINAL" ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
         ...(method === "CASH" ? { cashReceived: cashReceivedNumber } : {}),
       });
@@ -655,7 +667,7 @@ export function CounterCart({
     }
   }
 
-  if (!cashSessionOpen) {
+  if (tillGateApplies && !cashSessionOpen) {
     return (
       <div id="counter-cart" className="mx-auto max-w-md rounded-[10px] border border-stroke bg-white p-8 text-center shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
@@ -909,6 +921,10 @@ export function CounterCart({
           needsAddress={needsAddress}
           willHaveVatInvoice={willHaveVatInvoice}
           willBeBelgianB2B={willBeBelgianB2B}
+          collectWalkInEmail={collectWalkInEmail}
+          onCollectWalkInEmailChange={setCollectWalkInEmail}
+          invoiceRequested={invoiceRequested}
+          onInvoiceRequestedChange={setInvoiceRequested}
         />
 
         <div className="space-y-2 border-t border-gray-100 pt-5 dark:border-dark-3">
@@ -949,7 +965,7 @@ export function CounterCart({
             isPending ||
             !attemptKey ||
             cart.length === 0 ||
-            (isWalkIn && !walkInEmailReady) ||
+            (isWalkIn && collectWalkInEmail && !walkInEmailReady) ||
             (method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
             (!isWalkIn && needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim()))
           }

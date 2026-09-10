@@ -1,3 +1,4 @@
+import { Bell } from "lucide-react";
 import * as Icons from "../icons";
 import { ROLES, DASHBOARD_PERMISSIONS, STAFF_PERMISSIONS, canAccessStaffPermission } from "@/lib/authorization";
 
@@ -15,6 +16,18 @@ const ALL_NAV_DATA = [
         icon: Icons.HomeIcon,
         items: [],
         url: "/dashboard",
+      },
+      // badge: unread in-app notifications (reminders included, e.g. stuck
+      // pickup/delivery orders — see lib/orders/notify-stale-fulfilment.js).
+      // The bell icon in the header already exists for this; this entry just
+      // makes the full notifications page (app/dashboard/notifications)
+      // reachable from the sidebar too.
+      {
+        title: "Notifications",
+        icon: Bell,
+        items: [],
+        url: "/dashboard/notifications",
+        badge: "unreadNotifications",
       },
       {
         title: "Agenda & clients",

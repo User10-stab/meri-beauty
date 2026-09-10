@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { qrPngAttachment } from "@/lib/qrcode";
 import { CHECK_IN_KINDS, ensureCheckInCode } from "@/lib/activities/check-in-code";
-import { STAFF_PERMISSIONS, hasDashboardPermission } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator } from "@/lib/authorization";
 import { counterCustomerSchema } from "@/lib/validations/counter-customer";
 import { resolveCounterCustomer } from "@/lib/counter/resolve-counter-customer";
 import { CounterCustomerError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
@@ -169,6 +169,13 @@ export async function createCounterReservation(input) {
   const guard = await authorizeCounterBooking(data.kind);
   if (guard.error) return { success: false, message: guard.error };
 
+  // Only Marie and OWNER/ADMIN put cash into the Livre de caisse. Anyone else
+  // still creates the booking and still records the deposit/full payment, but
+  // off-till: no open-till requirement and the CASH Transaction is detached
+  // from every session, so it shows in Opérations, not in the drawer's book.
+  const offTill = !isTillCashOperator(guard.session.user);
+  const useTill = !offTill && data.payment.method === "CASH";
+
   if (data.payment.method === "EXTERNAL_TERMINAL" && !data.payment.terminalReference?.trim()) {
     return { success: false, message: "Indiquez la référence du ticket du terminal." };
   }
@@ -184,7 +191,7 @@ export async function createCounterReservation(input) {
         // transaction so the answer is authoritative, not a query made
         // moments before the actual write.
         let openCashSession = null;
-        if (data.payment.method === "CASH") {
+        if (useTill) {
           openCashSession = await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
           if (!openCashSession) throw new Error("CASH_SESSION_REQUIRED");
         }
@@ -268,7 +275,9 @@ export async function createCounterReservation(input) {
         });
 
         const series = config.seriesOf(catalogue);
-        const pieceNumber = data.payment.method === "CASH" ? await allocatePieceNumber(tx, series) : null;
+        // Piece number only for a till operator's cash — an off-till row
+        // never enters the Livre de caisse, which requires both.
+        const pieceNumber = useTill ? await allocatePieceNumber(tx, series) : null;
 
         await tx.transaction.create({
           data: {
@@ -405,7 +414,7 @@ export async function createCounterReservation(input) {
     console.error("[createCounterReservation] low-seats broadcast failed:", error)
   );
 
-  if (data.payment.method === "CASH") revalidateCaisseRoutes();
+  if (useTill) revalidateCaisseRoutes();
   revalidatePath(config.revalidatePath);
   revalidatePath("/dashboard/operations");
 

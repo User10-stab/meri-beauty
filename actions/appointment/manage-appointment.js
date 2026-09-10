@@ -3,12 +3,12 @@
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS, isTillCashOperator } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
 import { createAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-templates";
-import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
+import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines, resolveSettlementInvoice } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
@@ -17,6 +17,7 @@ import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { resolveCounterPriceAdjustment } from "@/lib/payments/counter-price-adjustment";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
+import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
 import {
   createNotificationsBulk,
   buildAppointmentCancelledNotification,
@@ -45,7 +46,7 @@ async function authorizeAppointmentAction(appointmentId) {
 
   // ADMIN/OWNER can manage any appointment
   if (isAdminRole(userRole)) {
-    return { authorized: true, userId: session.user.id, userRole };
+    return { authorized: true, userId: session.user.id, userRole, user: session.user };
   }
 
   // STAFF can only manage appointments linked to them
@@ -73,7 +74,7 @@ async function authorizeAppointmentAction(appointmentId) {
       return { authorized: false, message: "Vous n'êtes pas autorisé à gérer ce rendez-vous" };
     }
 
-    return { authorized: true, userId: session.user.id, userRole };
+    return { authorized: true, userId: session.user.id, userRole, user: session.user };
   }
 
   return { authorized: false, message: "Permissions insuffisantes" };
@@ -829,6 +830,15 @@ export async function completeAppointment(
     // settling a balance.
     const collectsMoney = hasBalanceDue || collectsOnSite;
 
+    // Only Marie and OWNER/ADMIN put cash into the Livre de caisse. Anyone
+    // else still completes the rendez-vous and still records the money, but
+    // off-till: no method choice, no attestation, no open-till requirement,
+    // and the collection Transaction is detached from every cash session so
+    // it shows in Opérations but not in the drawer's book or its X/Z report.
+    // AppointmentDrawer / FicheSettleAction hide the popup for them too.
+    const offTill = !isTillCashOperator(authCheck.user);
+    const collectsAtTill = collectsMoney && !offTill;
+
     // A card payment is only accepted as EXTERNAL_TERMINAL, which carries the
     // terminal's approval and its receipt reference. Plain "CARD" used to be
     // accepted with no evidence at all: of 29 card collections in the dev
@@ -838,7 +848,7 @@ export async function completeAppointment(
     // nothing. The boutique POS (lib/validations/point-of-sale.js) and the
     // refund path (validateManualRefundConfirmation) already required this —
     // settlement was the one place that did not.
-    if (collectsMoney && !["CASH", "EXTERNAL_TERMINAL"].includes(method)) {
+    if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL"].includes(method)) {
       return {
         success: false,
         message: hasBalanceDue
@@ -847,7 +857,7 @@ export async function completeAppointment(
         requiresPaymentConfirmation: true,
       };
     }
-    if (collectsMoney && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
+    if (collectsAtTill && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
       return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket.", requiresPaymentConfirmation: true };
     }
     // The system has no way to observe a physical cash handoff or a card
@@ -855,7 +865,9 @@ export async function completeAppointment(
     // balance paid (and the system would treat it as real, invoiceable
     // revenue) before any money actually changed hands, exactly like the
     // POS terminal-sale risk this mirrors. See docs/PRODUCTION_ISSUES.md #2.
-    if (collectsMoney && paymentConfirmed !== true) {
+    // Only asked of a till operator — an off-till collection never enters the
+    // drawer total, so there is nothing to reconcile it against.
+    if (collectsAtTill && paymentConfirmed !== true) {
       return { success: false, message: "Confirmez avoir bien reçu le paiement avant de terminer le rendez-vous.", requiresPaymentConfirmation: true };
     }
     // Cash with no till open used to be accepted and left unassigned
@@ -863,7 +875,7 @@ export async function completeAppointment(
     // forever — Transaction.pieceNumber is written once and never
     // backfilled. Fast-path check before the transaction; the authoritative
     // one is inside it, in case a session closes in the gap between the two.
-    if (collectsMoney && method === "CASH") {
+    if (collectsAtTill && method === "CASH") {
       const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
       if (!openCashSessionGate) {
         return {
@@ -891,6 +903,9 @@ export async function completeAppointment(
       }
 
       let invoice = null;
+      // Set only when a counter adjustment forced an existing invoice to be
+      // credited and reissued — see resolveSettlementInvoice.
+      let creditNote = null;
       let balance = 0;
       let collection = null;
       let updatedPayment = payment;
@@ -941,81 +956,102 @@ export async function completeAppointment(
         // check — the fast-path gate above already refused this request once
         // if no session was open, but a session can close in the gap between
         // that read and this write; re-checked here so the answer is never
-        // stale by the time the row is actually created.
-        const openCashSession =
-          method === "CASH"
-            ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
-            : null;
-        if (method === "CASH" && !openCashSession) throw new Error("APPOINTMENT_CASH_SESSION_CLOSED");
+        // stale by the time the row is actually created. Only a till
+        // operator's CASH collection joins the drawer book; an off-till
+        // collection is deliberately detached (no session, no piece number).
+        const useTill = !offTill && method === "CASH";
+        const isTerminalCard = !offTill && method === "EXTERNAL_TERMINAL";
+        const openCashSession = useTill
+          ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
+          : null;
+        if (useTill && !openCashSession) throw new Error("APPOINTMENT_CASH_SESSION_CLOSED");
         // Cash-book line number, allocated only for the CASH rows that
         // actually enter the till total — see model Transaction.pieceNumber.
-        const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.APPOINTMENT) : null;
+        const pieceNumber = useTill ? await allocatePieceNumber(tx, PIECE_SERIES.APPOINTMENT) : null;
 
         collection = await tx.transaction.create({
           data: {
             paymentId: updatedPayment.id,
             amount: balance,
-            method: method === "CASH" ? "CASH" : "CARD",
+            // A card terminal collection records as CARD; a cash handover —
+            // whether it joins the till or is taken off-till — records as CASH.
+            method: isTerminalCard ? "CARD" : "CASH",
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
-            cashSessionId: method === "CASH" ? openCashSession.id : null,
+            cashSessionId: useTill ? openCashSession.id : null,
             pieceNumber,
-            manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
+            manualReference: isTerminalCard ? terminalReference.trim() : null,
           },
         });
 
         // Same rule everywhere: a particulier never gets an invoice, only a
         // VIES-valid VAT identity does (see settleReservation).
-        if (hasInvoiceableVatIdentity(appointment.user)) {
-          const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
-          invoice = await issueInvoice(tx, {
-            paymentId: updatedPayment.id,
-            source: "APPOINTMENT",
-            totalInclVat: Number(updatedPayment.totalAmount),
-            customer: buildInvoiceCustomer(appointment.user),
-            lines: buildServiceInvoiceLines({
-              description: appointment.staffService.service?.name ?? "Prestation",
-              totalAmount: Number(updatedPayment.totalAmount),
-              discountAmount: Number(updatedPayment.discountAmount),
-              // Signed, and only when the counter actually moved the price —
-              // otherwise the document reconstructs a price that was never
-              // quoted (worst on a booking that also carried a promo code).
-              adjustmentAmount: priceAdjustment.changed
-                ? priceAdjustment.finalTotal - priceAdjustment.previousTotal
-                : 0,
-              adjustmentReason: priceAdjustment.reason,
+        const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
+        ({ invoice, creditNote } = await resolveSettlementInvoice(tx, {
+          existingInvoice: payment?.invoice ?? null,
+          priceChanged: priceAdjustment.changed,
+          adjustmentReason: priceAdjustment.reason,
+          shouldIssue: hasInvoiceableVatIdentity(appointment.user),
+          issue: (supersedesInvoiceId) =>
+            issueInvoice(tx, {
+              paymentId: updatedPayment.id,
+              source: "APPOINTMENT",
+              totalInclVat: Number(updatedPayment.totalAmount),
+              customer: buildInvoiceCustomer(appointment.user),
+              lines: buildServiceInvoiceLines({
+                description: appointment.staffService.service?.name ?? "Prestation",
+                totalAmount: Number(updatedPayment.totalAmount),
+                discountAmount: Number(updatedPayment.discountAmount),
+                // Signed, and only when the counter actually moved the price —
+                // otherwise the document reconstructs a price that was never
+                // quoted (worst on a booking that also carried a promo code).
+                adjustmentAmount: priceAdjustment.changed
+                  ? priceAdjustment.finalTotal - priceAdjustment.previousTotal
+                  : 0,
+                adjustmentReason: priceAdjustment.reason,
+              }),
+              vatRate: completionVatPolicy.vatRate,
+              vatTreatment: completionVatPolicy.vatTreatment,
+              taxCountryCode: completionVatPolicy.taxCountryCode,
+              taxNote: completionVatPolicy.taxNote,
+              supersedesInvoiceId,
             }),
-            vatRate: completionVatPolicy.vatRate,
-            vatTreatment: completionVatPolicy.vatTreatment,
-            taxCountryCode: completionVatPolicy.taxCountryCode,
-            taxNote: completionVatPolicy.taxNote,
-          });
-        }
+        }));
       }
 
-      if (
-        priceAdjustment.changed &&
-        !collectsMoney &&
-        updatedPayment &&
-        !payment?.invoice &&
-        hasInvoiceableVatIdentity(appointment.user)
-      ) {
+      // The write-off case: the adjustment closed the balance to zero, so no
+      // money changed hands and the block above never ran. An invoice already
+      // on file still has to be corrected — it states a total the Payment no
+      // longer carries.
+      if (priceAdjustment.changed && !collectsMoney && updatedPayment) {
         const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
-        invoice = await issueInvoice(tx, {
-          paymentId: updatedPayment.id,
-          source: "APPOINTMENT",
-          totalInclVat: Number(updatedPayment.totalAmount),
-          customer: buildInvoiceCustomer(appointment.user),
-          lines: buildServiceInvoiceLines({
-            description: appointment.staffService.service?.name ?? "Prestation",
-            totalAmount: Number(updatedPayment.totalAmount),
-            discountAmount: Number(updatedPayment.discountAmount ?? 0),
-          }),
-          vatRate: completionVatPolicy.vatRate,
-          vatTreatment: completionVatPolicy.vatTreatment,
-          taxCountryCode: completionVatPolicy.taxCountryCode,
-          taxNote: completionVatPolicy.taxNote,
-        });
+        ({ invoice, creditNote } = await resolveSettlementInvoice(tx, {
+          existingInvoice: payment?.invoice ?? null,
+          priceChanged: true,
+          adjustmentReason: priceAdjustment.reason,
+          shouldIssue: hasInvoiceableVatIdentity(appointment.user),
+          issue: (supersedesInvoiceId) =>
+            issueInvoice(tx, {
+              paymentId: updatedPayment.id,
+              source: "APPOINTMENT",
+              totalInclVat: Number(updatedPayment.totalAmount),
+              customer: buildInvoiceCustomer(appointment.user),
+              lines: buildServiceInvoiceLines({
+                description: appointment.staffService.service?.name ?? "Prestation",
+                totalAmount: Number(updatedPayment.totalAmount),
+                discountAmount: Number(updatedPayment.discountAmount ?? 0),
+                adjustmentAmount: supersedesInvoiceId
+                  ? priceAdjustment.finalTotal - priceAdjustment.previousTotal
+                  : 0,
+                adjustmentReason: priceAdjustment.reason,
+              }),
+              vatRate: completionVatPolicy.vatRate,
+              vatTreatment: completionVatPolicy.vatTreatment,
+              taxCountryCode: completionVatPolicy.taxCountryCode,
+              taxNote: completionVatPolicy.taxNote,
+              supersedesInvoiceId,
+            }),
+        }));
       }
 
       if (priceAdjustment.changed) {
@@ -1036,7 +1072,7 @@ export async function completeAppointment(
         });
       }
 
-      return { claimed: true, invoice, balance, collection };
+      return { claimed: true, invoice, creditNote, balance, collection };
     });
 
     if (!result.claimed) {
@@ -1044,20 +1080,38 @@ export async function completeAppointment(
     }
     const { balance } = result;
 
-    // No client-facing document or e-mail is sent for this balance
-    // collection — only the legally-required Invoice, issued above inside
-    // the transaction (and never auto-sent — Marie sends it manually from
-    // Opérations). The cash-book UI still needs a refresh for a CASH
-    // collection.
-    if (balance > 0 && method === "CASH") revalidateCaisseRoutes();
+    // Ticket e-mail is gated purely on the acting staff member's
+    // SEND_TICKET_EMAIL permission — sendTicketByEmail re-derives auth()
+    // itself and checks it internally, so no separate check is needed here.
+    // Deliberately NOT gated on !offTill/isTillCashOperator: that concept is
+    // only about whether the collection joins the cash-session/drawer book,
+    // not about whether the client should get their ticket. Fire-and-forget
+    // (never awaited, only .catch()-guarded) so a ticket failure can never
+    // turn a successful settlement into an error response — same as the
+    // legally-required Invoice, issued above inside the transaction, which
+    // is never auto-sent either (Marie sends it manually from Opérations).
+    if (balance > 0) {
+      sendTicketByEmail(result.collection.paymentId, { transactionId: result.collection.id }).catch((err) =>
+        console.error("[completeAppointment] ticket send failed", err),
+      );
+    }
+
+    // The cash-book UI needs a refresh only for a CASH collection that
+    // actually entered the till — an off-till collection never touches the
+    // Livre de caisse.
+    if (balance > 0 && !offTill && method === "CASH") revalidateCaisseRoutes();
 
     revalidatePath("/dashboard/operations");
     return {
       success: true,
       message: collectsOnSite
-        ? "Rendez-vous terminé — paiement encaissé et enregistré."
+        ? offTill
+          ? "Rendez-vous terminé — paiement enregistré."
+          : "Rendez-vous terminé — paiement encaissé et enregistré."
         : hasBalanceDue
-          ? "Rendez-vous terminé — solde encaissé et facturé."
+          ? offTill
+            ? "Rendez-vous terminé — solde enregistré et facturé."
+            : "Rendez-vous terminé — solde encaissé et facturé."
           : "Rendez-vous marqué comme terminé.",
     };
   } catch (error) {
@@ -1072,6 +1126,13 @@ export async function completeAppointment(
         success: false,
         message: "La session de caisse vient d'être clôturée. Ouvrez-la à nouveau avant d'encaisser.",
         requiresCashSession: true,
+      };
+    }
+    if (error.message === "INVOICE_REPLACEMENT_VAT_EXPIRED") {
+      return {
+        success: false,
+        message:
+          "Le numéro de TVA de ce client n'est plus valide : sa facture ne peut pas être réémise au nouveau prix. Revalidez-le sur sa fiche, puis réessayez.",
       };
     }
     console.error("[completeAppointment]", error);

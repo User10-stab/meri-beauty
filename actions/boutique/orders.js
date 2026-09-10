@@ -10,7 +10,7 @@ import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { isCheckoutAuthorized, createResumeCheckoutToken } from "@/lib/resume-checkout-token";
 import { sendEmail } from "@/lib/email";
-import { ROLES, STAFF_PERMISSIONS, hasDashboardPermission, isAdminRole } from "@/lib/authorization";
+import { ROLES, STAFF_PERMISSIONS, hasDashboardPermission, isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import {
   checkoutSchema,
   shipOrderSchema,
@@ -249,6 +249,7 @@ function serializeOrder(order) {
     collectedAt: order.collectedAt,
     pickupCode: order.pickupCode,
     pickedUpAt: order.pickedUpAt,
+    readyForPickupAt: order.readyForPickupAt,
     expiresAt: order.expiresAt,
     cancelledAt: order.cancelledAt,
     cancelReason: order.cancelReason,
@@ -1176,7 +1177,7 @@ export async function markOrderReadyForPickup(orderId) {
     // read-then-check and both fire the transition.
     const claim = await prisma.order.updateMany({
       where: { id: orderId, status: { in: ["PAID", "PENDING_PICKUP"] } },
-      data: { status: "READY_FOR_PICKUP" },
+      data: { status: "READY_FOR_PICKUP", readyForPickupAt: new Date() },
     });
     if (claim.count === 0) {
       return { success: false, message: "Cette commande ne peut pas être marquée prête pour le moment." };
@@ -1294,7 +1295,13 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     }
 
     const needsPayment = !order.payment;
-    if (needsPayment && !method) {
+    // Only Marie and OWNER/ADMIN put cash into the Livre de caisse. Anyone
+    // else still hands the goods over and still records the payment, but
+    // off-till: no method choice, no attestation, no open-till requirement,
+    // and the Transaction is detached from every cash session.
+    const offTill = !isTillCashOperator(guard.session.user);
+    const collectsAtTill = needsPayment && !offTill;
+    if (collectsAtTill && !method) {
       return { success: false, message: "Mode de paiement requis pour cette commande non prépayée." };
     }
     // A card payment is only accepted as EXTERNAL_TERMINAL, which carries the
@@ -1306,18 +1313,19 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     // nothing. The boutique POS (lib/validations/point-of-sale.js) and the
     // refund path (validateManualRefundConfirmation) already required this —
     // settlement was the one place that did not.
-    if (needsPayment && !["CASH", "EXTERNAL_TERMINAL"].includes(method)) {
+    if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL"].includes(method)) {
       return { success: false, message: "Mode de paiement invalide — espèces, ou carte via le terminal avec sa référence." };
     }
-    if (needsPayment && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
+    if (collectsAtTill && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
       return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket." };
     }
     // Cash with no till open used to be accepted and left unassigned
     // (cashSessionId: null), which is invisible from every Livre de caisse
     // forever — Transaction.pieceNumber is written once and never backfilled.
     // Fast-path check before the transaction; the authoritative one is inside
-    // it, in case a session closes in the gap between the two.
-    if (needsPayment && method === "CASH") {
+    // it, in case a session closes in the gap between the two. Only a till
+    // operator hits this — an off-till pickup never enters the drawer.
+    if (collectsAtTill && method === "CASH") {
       const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
       if (!openCashSessionGate) {
         return {
@@ -1352,25 +1360,30 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
         // if no session was open, but a session can close in the gap between
         // that read and this write; re-checked here so the answer is never
         // stale by the time the row is actually created.
-        const openCashSession =
-          method === "CASH"
-            ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
-            : null;
-        if (method === "CASH" && !openCashSession) throw new Error("PICKUP_CASH_SESSION_CLOSED");
+        // Only a till operator's CASH collection joins the drawer book; an
+        // off-till pickup is deliberately detached (no session, no piece).
+        const useTill = !offTill && method === "CASH";
+        const isTerminalCard = !offTill && method === "EXTERNAL_TERMINAL";
+        const openCashSession = useTill
+          ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
+          : null;
+        if (useTill && !openCashSession) throw new Error("PICKUP_CASH_SESSION_CLOSED");
         // Cash-book line number, allocated only for the CASH rows that
         // actually enter the till total — see model Transaction.pieceNumber.
-        const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
+        const pieceNumber = useTill ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
 
         await tx.transaction.create({
           data: {
             paymentId: payment.id,
             amount: order.totalAmount,
-            method: method === "EXTERNAL_TERMINAL" ? "CARD" : method,
+            // A card terminal collection records as CARD; a cash handover —
+            // at the till or off-till — records as CASH.
+            method: isTerminalCard ? "CARD" : "CASH",
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
-            cashSessionId: method === "CASH" ? openCashSession.id : null,
+            cashSessionId: useTill ? openCashSession.id : null,
             pieceNumber,
-            manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
+            manualReference: isTerminalCard ? terminalReference.trim() : null,
           },
         });
 
@@ -1486,7 +1499,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     }
 
     revalidatePath("/dashboard/boutique/orders");
-    if (needsPayment && method === "CASH") revalidateCaisseRoutes();
+    if (needsPayment && !offTill && method === "CASH") revalidateCaisseRoutes();
     return { success: true, message: `Commande n°${order.orderNumber} remise au client.` };
   } catch (error) {
     if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {

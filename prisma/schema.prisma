@@ -265,6 +265,7 @@ enum NotificationType {
   APPOINTMENT_REMINDER
   PAYMENT_RECEIVED
   PAYMENT_PENDING
+  ORDER_FULFILMENT_OVERDUE
   GENERAL
 }
 
@@ -1284,6 +1285,13 @@ model Order {
   customerVatNumber String?
   taxNote           String?
 
+  // Only meaningful when the resolved customer was actually VAT-eligible
+  // (hasInvoiceableVatIdentity) — null means the question never applied
+  // (B2C/walk-in). true = invoice generated (default); false = the client
+  // was eligible but staff/client declined it for this sale, so no Invoice
+  // was created despite a valid VAT identity — kept for audit/reporting.
+  invoiceRequested Boolean?
+
   // `totalAmount` above is already the post-discount figure; these two are
   // kept only so the eventual Payment row (created later, once Stripe
   // confirms or the on-site pickup is completed) can copy which code was
@@ -1328,6 +1336,12 @@ model Order {
   pickedUpAt        DateTime?
   pickedUpByStaffId String?
   pickedUpByStaff   User?     @relation("OrderPickedUpBy", fields: [pickedUpByStaffId], references: [id])
+
+  // Set the moment staff move the order to READY_FOR_PICKUP. Distinct from
+  // updatedAt (which any field touch bumps): this is what lets the stale-
+  // fulfilment reminder (lib/orders/overdue-rules.js) measure how long an
+  // order has actually been sitting ready, uncollected.
+  readyForPickupAt DateTime?
 
   // PENDING_PICKUP orders auto-cancel at this date. They do NOT auto-restock:
   // "not marked collected" and "never handed over" are different things, and
@@ -1839,6 +1853,12 @@ model Payment {
   promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
   discountAmount Decimal    @default(0) @db.Decimal(10, 2)
 
+  // Set only by the manual, permission-gated send (actions/payments/send-ticket-email.js).
+  // completeAppointment/settleReservation never touch this — the ticket is not
+  // auto-e-mailed any more, so this column's presence is itself the record of
+  // a deliberate human action, not a side effect of settlement.
+  ticketEmailedAt DateTime?
+
   transactions     Transaction[]
   invoice          Invoice?
   disputes         StripeDispute[]
@@ -2087,6 +2107,25 @@ model CreditNote {
   refundOperation RefundOperation?
 
   @@index([invoiceId])
+}
+
+// NOTIFICATION RECIPIENT
+// Global, admin-managed address book offered as extra recipients when a B2B
+// invoice or credit note is delivered by e-mail from Operations (see
+// DocumentDeliveryDialog). One shared list across every B2B send — not scoped
+// per document or per client. Nothing here is pre-selected; the admin ticks
+// whichever addresses a given send should also reach. `isDefault` only marks
+// the salon's own primary address (contact@meribeautystudio.com) so it sorts
+// first — it is not a "send automatically" flag and not a uniqueness rule.
+model NotificationRecipient {
+  id        String   @id @default(cuid())
+  // Stored trimmed + lower-cased by the server action so @unique dedupes
+  // case-insensitively.
+  email     String   @unique
+  label     String?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // CASH SESSION

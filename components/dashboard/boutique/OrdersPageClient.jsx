@@ -3,12 +3,13 @@
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, ScanLine, Camera, Package, Loader2 } from "lucide-react";
+import { Search, ScanLine, Camera, Package, Loader2, AlertTriangle } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import Button from "@/components/ui/Button";
 import { PickupScannerDialog } from "@/components/dashboard/boutique/PickupScannerDialog";
 import { Pagination } from "@/components/dashboard/Tables/Pagination";
 import { listOrders } from "@/actions/boutique/orders";
+import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
 import { useTranslations } from "next-intl";
 
 const PAGE_SIZE = 20;
@@ -228,6 +229,19 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[o.status]}`}>
                       {STATUS_LABEL[o.status]}
                     </span>
+                    {(() => {
+                      const reason = getOrderOverdueReason(o);
+                      if (!reason) return null;
+                      return (
+                        <span
+                          title={t(`overdue.${reason}`)}
+                          className="ml-1.5 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400"
+                        >
+                          <AlertTriangle size={12} />
+                          {t("overdue.badge")}
+                        </span>
+                      );
+                    })()}
                   </TableCell>
                   <TableCell>
                     <span className="font-medium text-gray-700 dark:text-dark-6">{formatPrice(o.totalAmount)}</span>

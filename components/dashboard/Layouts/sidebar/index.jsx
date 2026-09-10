@@ -28,7 +28,7 @@ function NavBadge({ count, label: describedAs }) {
   );
 }
 
-export function Sidebar({ userRole, dashboardPermissions = [], pickupsToVerifyCount = 0 }) {
+export function Sidebar({ userRole, dashboardPermissions = [], pickupsToVerifyCount = 0, unreadNotificationsCount = 0 }) {
   const t = useTranslations("dashboard");
   const pathname = usePathname();
   const { setIsOpen, isOpen, isMobile, toggleSidebar } = useSidebarContext();
@@ -37,7 +37,7 @@ export function Sidebar({ userRole, dashboardPermissions = [], pickupsToVerifyCo
   // Get navigation data filtered by user role
   const NAV_DATA = getNavDataForRole(userRole, dashboardPermissions);
   const titleKeys = {
-    "Tableau de bord": "dashboard", "Rendez-vous": "appointments", "Calendrier": "calendar",
+    "Tableau de bord": "dashboard", "Notifications": "notifications", "Rendez-vous": "appointments", "Calendrier": "calendar",
     "Tous les rendez-vous": "allAppointments", "Clients": "customers", "Services": "services",
     "Paiements": "payments", "Compte Stripe": "stripe",
     "Workshops & Événements": "workshops", "Activités": "activities", "Animateurs": "animators",
@@ -51,8 +51,10 @@ export function Sidebar({ userRole, dashboardPermissions = [], pickupsToVerifyCo
 
   // Nav items name a badge rather than carrying a number, so the data file
   // stays a plain static structure and the counts stay server-supplied.
-  const badgeCounts = { pickupsToVerify: pickupsToVerifyCount };
+  const badgeCounts = { pickupsToVerify: pickupsToVerifyCount, unreadNotifications: unreadNotificationsCount };
+  const badgeLabelKeys = { pickupsToVerify: "pickupsToVerifyBadge", unreadNotifications: "unreadNotificationsBadge" };
   const badgeFor = (item) => (item.badge ? badgeCounts[item.badge] ?? 0 : 0);
+  const badgeLabelFor = (item) => t(`sidebar.${badgeLabelKeys[item.badge] ?? "pickupsToVerifyBadge"}`);
   // A collapsed group hides its children, so it carries their total. Without
   // this the badge is only visible to someone who already opened the section
   // it is meant to send them to.
@@ -196,7 +198,7 @@ export function Sidebar({ userRole, dashboardPermissions = [], pickupsToVerifyCo
                                       <span>{label(subItem.title)}</span>
                                       <NavBadge
                                         count={badgeFor(subItem)}
-                                        label={t("sidebar.pickupsToVerifyBadge")}
+                                        label={badgeLabelFor(subItem)}
                                       />
                                     </MenuItem>
                                   </li>
@@ -227,7 +229,7 @@ export function Sidebar({ userRole, dashboardPermissions = [], pickupsToVerifyCo
                                 <span>{label(item.title)}</span>
                                 <NavBadge
                                   count={badgeFor(item)}
-                                  label={t("sidebar.pickupsToVerifyBadge")}
+                                  label={badgeLabelFor(item)}
                                 />
                               </MenuItem>
                             );

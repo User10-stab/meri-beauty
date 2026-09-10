@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { expireStaleOrders, releaseUnverifiedPickups } from "@/lib/orders/expire-stale-orders";
+import { notifyStaleOrderFulfilment } from "@/lib/orders/notify-stale-fulfilment";
 import { sendWorkshopReservationReminders } from "@/lib/reminders/send-workshop-reminders";
 import { sendFormationReservationReminders } from "@/lib/reminders/send-formation-reminders";
 import { expireStaleWorkshopHolds } from "@/lib/workshops/expire-stale-holds";
@@ -34,6 +35,7 @@ import { recordExternalJobRun } from "@/lib/background-jobs";
 const JOBS = [
   ["expireStaleOrders", expireStaleOrders],
   ["releaseUnverifiedPickups", releaseUnverifiedPickups],
+  ["notifyStaleOrderFulfilment", notifyStaleOrderFulfilment],
   ["sendWorkshopReservationReminders", sendWorkshopReservationReminders],
   ["sendFormationReservationReminders", sendFormationReservationReminders],
   ["expireStaleWorkshopHolds", expireStaleWorkshopHolds],
@@ -100,6 +102,7 @@ export async function GET(req) {
         success: !anyFailed,
         ordersExpired: results.expireStaleOrders?.expiredCount ?? null,
         unverifiedPickupsReleased: results.releaseUnverifiedPickups?.releasedCount ?? null,
+        staleFulfilmentNotified: results.notifyStaleOrderFulfilment?.notifiedCount ?? null,
         workshopRemindersSent: results.sendWorkshopReservationReminders?.sentCount ?? null,
         formationRemindersSent: results.sendFormationReservationReminders?.sentCount ?? null,
         workshopHoldsExpired: results.expireStaleWorkshopHolds?.expiredCount ?? null,

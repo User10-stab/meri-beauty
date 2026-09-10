@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE "Contract" ADD COLUMN "dueDate" TIMESTAMP(3);
+ALTER TABLE "Contract" ADD COLUMN "dueDate" TEXT;

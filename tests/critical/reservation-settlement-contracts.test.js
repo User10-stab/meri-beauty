@@ -51,8 +51,11 @@ describe("reservation settlement — collecting the on-site balance", () => {
   test("external terminal settlement requires approval and stores the terminal reference", () => {
     expect(lib).toContain('method === "EXTERNAL_TERMINAL"');
     expect(lib).toContain("terminalApproved !== true");
-    expect(lib).toContain("manualReference: method === \"EXTERNAL_TERMINAL\" ? terminalReference.trim() : null");
-    expect(lib).toContain('method: method === "CASH" ? "CASH" : "CARD"');
+    // `isTerminalCard` is `!offTill && method === "EXTERNAL_TERMINAL"` — an
+    // off-till collection always records as CASH with no reference.
+    expect(lib).toContain("const isTerminalCard = !offTill && method === \"EXTERNAL_TERMINAL\"");
+    expect(lib).toContain("manualReference: isTerminalCard ? terminalReference.trim() : null");
+    expect(lib).toContain("method: isTerminalCard ? \"CARD\" : \"CASH\"");
   });
 
   test("claims the reservation atomically before invoicing, so a double-click can't invoice twice", () => {
@@ -67,9 +70,21 @@ describe("reservation settlement — collecting the on-site balance", () => {
   });
 
   test("attaches a cash balance to the open till session so it reconciles at close", () => {
-    expect(lib).toContain('method === "CASH"');
+    // Only a till operator's cash joins the drawer — anyone else (see
+    // isTillCashOperator) settles the balance off-till, detached from every
+    // session, so it shows in Opérations but not in the Livre de caisse.
+    expect(lib).toContain("const useTill = !offTill && method === \"CASH\"");
     expect(lib).toContain("cashSession.findFirst({ where: { closedAt: null }");
-    expect(lib).toContain('cashSessionId: method === "CASH" ? openCashSession.id : null');
+    expect(lib).toContain("cashSessionId: useTill ? openCashSession.id : null");
+  });
+
+  test("a non-till-operator settles the balance off-till, never blocking on a session", () => {
+    expect(lib).toContain("import { isTillCashOperator } from \"@/lib/authorization\"");
+    expect(lib).toContain("const offTill = !isTillCashOperator(actor)");
+    // The attestation / method / open-till pre-checks only apply on the
+    // operator path.
+    expect(lib).toContain("const collectsAtTill = hasBalanceDue && !offTill");
+    expect(lib).toContain("if (collectsAtTill && paymentConfirmed !== true)");
   });
 
   // See tests/critical/till-settlement-contracts.test.js for the full

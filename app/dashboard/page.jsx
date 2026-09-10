@@ -1,7 +1,17 @@
 import Link from "next/link";
-import { CalendarDays, Euro, PackageX, UserPlus } from "lucide-react";
+import { AlertTriangle, CalendarDays, Euro, PackageX, UserPlus } from "lucide-react";
 import { getDashboardStats } from "@/actions/dashboard/get-dashboard-stats";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import { OverdueOrdersCarousel } from "@/components/dashboard/OverdueOrdersCarousel";
+
+// Mirrors messages/fr.json's dashboardBoutique.orders.overdue.* copy — this
+// page doesn't use next-intl (see ORDER_STATUS_LABEL below), so the strings
+// are duplicated here rather than wired through useTranslations.
+const OVERDUE_REASON_LABEL = {
+  NOT_PREPARED: "Pas encore préparée / expédiée",
+  NOT_COLLECTED: "Prête depuis plusieurs jours, jamais retirée",
+  NOT_CONFIRMED_DELIVERED: "Expédiée, réception jamais confirmée",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -90,7 +100,24 @@ export default async function Home() {
           value={data.lowStockCount}
           warn={data.lowStockCount > 0}
         />
+        <StatCard
+          icon={<AlertTriangle size={20} />}
+          label="Commandes à traiter"
+          value={data.overdueOrdersCount}
+          warn={data.overdueOrdersCount > 0}
+        />
       </div>
+
+      {/* ── Orders needing attention ──────────────────────────────────── */}
+      <OverdueOrdersCarousel
+        orders={data.overdueOrders.map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          customerName: o.customerName,
+          reasonLabel: OVERDUE_REASON_LABEL[o.reason] ?? o.reason,
+          sinceDateLabel: formatDate(o.sinceDate),
+        }))}
+      />
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         {/* ── Revenue trend ────────────────────────────────────────────── */}

@@ -18,14 +18,19 @@ describe("counter booking creation — createCounterReservation", () => {
     expect(action).toContain("paymentConfirmed: z.literal(true)");
   });
 
-  test("cash hard-blocks without an open till session; card never does", () => {
-    expect(action).toContain('if (data.payment.method === "CASH")');
+  test("cash hard-blocks without an open till session; card never does; off-till never does", () => {
+    // `useTill` is `!offTill && data.payment.method === "CASH"` — only a till
+    // operator's cash both requires and joins a session (see isTillCashOperator).
+    expect(action).toContain("import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator }");
+    expect(action).toContain("const offTill = !isTillCashOperator(guard.session.user)");
+    expect(action).toContain('const useTill = !offTill && data.payment.method === "CASH"');
+    expect(action).toContain("if (useTill) {");
     expect(action).toContain('throw new Error("CASH_SESSION_REQUIRED")');
     expect(action).toContain("requiresCashSession: true");
   });
 
-  test("allocates a cash-book piece number only for CASH, keyed off the activity type series", () => {
-    expect(action).toContain('data.payment.method === "CASH" ? await allocatePieceNumber(tx, series) : null');
+  test("allocates a cash-book piece number only for a till operator's CASH, keyed off the activity type series", () => {
+    expect(action).toContain("const pieceNumber = useTill ? await allocatePieceNumber(tx, series) : null");
     expect(action).toContain("seriesForActivityType(catalogue.type)");
     expect(action).toContain("PIECE_SERIES.FORMATION");
   });

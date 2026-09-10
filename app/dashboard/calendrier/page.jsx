@@ -1,5 +1,5 @@
 import { requireDashboard } from "@/lib/route-protection";
-import { isAdminRole } from "@/lib/authorization";
+import { isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { getCalendarAppointments } from "@/actions/appointment/get-calendar-appointments";
 import { getStaffForCalendar } from "@/actions/staff/get-staff-for-calendar";
 import { getSalon } from "@/actions/salon/get-salon";
@@ -73,6 +73,7 @@ export default async function CalendarPage() {
         staff={staff}
         closures={closures}
         isAdmin={isAdmin}
+        canCollectCash={isTillCashOperator(user)}
       />
     </div>
   );

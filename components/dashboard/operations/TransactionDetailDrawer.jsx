@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2, Mail, AlertTriangle } from "lucide-react";
+import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2, Mail, AlertTriangle, QrCode } from "lucide-react";
 import { getTransactionDetail } from "@/actions/dashboard/admin-operations";
 import { issueMissingRefundDocument, sendB2CRefundConfirmation } from "@/actions/dashboard/cancel-and-refund";
+import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
+import { sendCheckInEmail } from "@/actions/payments/send-checkin-email";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { CancelAndRefundDialog } from "@/components/dashboard/operations/CancelAndRefundDialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { collectibleBalance } from "@/lib/payments/collectible-balance";
+import { performedByLabel } from "@/lib/dashboard/operation-filters";
 
 const money = (value) =>
   new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
@@ -54,6 +57,9 @@ function describeSource(payment) {
       status: payment.order.status,
       extra: payment.order.fulfilmentMode,
       customer: payment.order.user,
+      // null is a genuine self-service sale, not missing data — same
+      // fallback AdminOperationsClient.jsx uses for the list row.
+      performedByText: performedByLabel(payment.order.performedBy) ?? "Achat en ligne (client)",
     };
   }
   if (payment?.workshopReservation) {
@@ -64,6 +70,8 @@ function describeSource(payment) {
       status: r.status,
       extra: `${r.seatsCount} place(s) · session du ${dateTime(r.session.startDate)}`,
       customer: r.customer,
+      // Deliberately no performedByText — see admin-operations.js's own
+      // comment on why ateliers/événements stay out of this attribution.
     };
   }
   if (payment?.formationReservation) {
@@ -74,6 +82,7 @@ function describeSource(payment) {
       status: r.status,
       extra: `${r.seatsCount} place(s) · session du ${dateTime(r.session.startDate)}`,
       customer: r.customer,
+      performedByText: performedByLabel(r.performedBy),
     };
   }
   if (payment?.appointment) {
@@ -83,6 +92,7 @@ function describeSource(payment) {
       status: payment.appointment.status,
       extra: null,
       customer: payment.appointment.user,
+      performedByText: performedByLabel(payment.appointment.performedBy),
     };
   }
   return { kind: "—", title: "—", status: null, extra: null, customer: null };
@@ -108,6 +118,8 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const [generatingNote, setGeneratingNote] = useState(false);
   const [confirmingNote, setConfirmingNote] = useState(false);
   const [sendingB2CConfirmation, setSendingB2CConfirmation] = useState(false);
+  const [sendingTicket, setSendingTicket] = useState(false);
+  const [sendingCheckIn, setSendingCheckIn] = useState(false);
   const [deliveryDocument, setDeliveryDocument] = useState(null);
   const [cancelRefundOpen, setCancelRefundOpen] = useState(false);
 
@@ -152,6 +164,32 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     if (refreshed.success) setDetail(refreshed.data);
   }
 
+  // Payment-scoped on purpose (no transactionId): the client is owed the whole
+  // prestation, and for a booking discounted to a zero balance this drawer is
+  // the only place the send can happen at all — that settlement creates no
+  // Transaction, so it never reaches the Livre de caisse's own button.
+  async function handleSendTicket() {
+    const paymentId = detail?.payment?.id;
+    if (!paymentId || sendingTicket) return;
+    setSendingTicket(true);
+    const result = await sendTicketByEmail(paymentId);
+    setSendingTicket(false);
+    if (result.success) {
+      toast.success(result.message);
+      await refreshDetail();
+    } else toast.error(result.message);
+  }
+
+  async function handleSendCheckIn() {
+    const paymentId = detail?.payment?.id;
+    if (!paymentId || sendingCheckIn) return;
+    setSendingCheckIn(true);
+    const result = await sendCheckInEmail(paymentId);
+    setSendingCheckIn(false);
+    if (result.success) toast.success(result.message);
+    else toast.error(result.message);
+  }
+
   async function handleSendB2CConfirmation() {
     const operationId = detail?.settledRefundLeg?.refundOperation?.id;
     if (!operationId || sendingB2CConfirmation) return;
@@ -194,6 +232,13 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const creditNote = detail?.creditNote ?? null;
   const siblings = (payment?.transactions ?? []).filter((t) => !t.isDeleted);
   const isRefund = detail?.transactionType === "REFUND";
+  // Both timestamps are ISO strings off the server action; getTransactionDetail
+  // only looks the adjustment up when a ticket was actually sent, so a null
+  // here means "never repriced" or "never sent" — neither is stale.
+  const ticketIsStale =
+    Boolean(payment?.ticketEmailedAt) &&
+    Boolean(detail?.lastPriceAdjustedAt) &&
+    new Date(detail.lastPriceAdjustedAt) > new Date(payment.ticketEmailedAt);
   const signedMoney = (value, refund) => `${refund ? "−" : ""}${money(value)}`;
   const canGenerateNote = isRefund && Boolean(invoice) && !creditNote;
   const refundOperation = detail?.settledRefundLeg?.refundOperation ?? null;
@@ -277,6 +322,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 <Row label="Détail" value={source.extra} />
                 <Row label="Client" value={source.customer?.fullName} />
                 <Row label="E-mail" value={source.customer?.email} />
+                <Row label="Réalisé par" value={source.performedByText} />
               </div>
 
               <div>
@@ -326,15 +372,100 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
               {payment?.id && (
                 <div>
                   <SectionTitle>Reçu / ticket de caisse</SectionTitle>
-                  <a
-                    href={payment.order ? `/api/orders/${payment.order.id}/ticket` : `/api/payments/${payment.id}/ticket`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    <Receipt size={15} />
-                    Ouvrir le reçu déjà envoyé au client
-                  </a>
+                  {/* A boutique order's ticket has no permission gate (its own
+                      route stays open to every dashboard role); a reservation's
+                      ticket needs the same SEND_TICKET_EMAIL permission to open
+                      as it does to e-mail — the route itself now enforces this,
+                      this just avoids offering a link that would 403. */}
+                  {(payment.order || detail.canSendTicketEmail) && (
+                    <a
+                      href={payment.order ? `/api/orders/${payment.order.id}/ticket` : `/api/payments/${payment.id}/ticket`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <Receipt size={15} />
+                      Ouvrir le reçu
+                    </a>
+                  )}
+                  {/* No auto-send exists any more; ticketEmailedAt is set
+                      only by the manual, permission-gated action in
+                      actions/payments/send-ticket-email.js — this line is
+                      what makes that visible to admins on this same
+                      transaction, independent of who sent it. */}
+                  {!payment.order && (
+                    <>
+                      {detail.canSendTicketEmail && (
+                        <button
+                          type="button"
+                          onClick={handleSendTicket}
+                          disabled={sendingTicket}
+                          className="ml-2 inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {sendingTicket ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
+                          {ticketIsStale ? "Renvoyer le ticket corrigé" : "Envoyer par e-mail"}
+                        </button>
+                      )}
+                      <p className="mt-2 text-xs text-gray-500">
+                        {payment.ticketEmailedAt
+                          ? `Ticket envoyé au client le ${dateTime(payment.ticketEmailedAt)}.`
+                          : "Ticket jamais envoyé par e-mail au client."}
+                      </p>
+                      {/* ticketEmailedAt says only *that* a ticket went out,
+                          never for which total. A counter adjustment after the
+                          send leaves the client holding a receipt for a price
+                          that no longer exists, and nothing else in the app
+                          would ever surface that. */}
+                      {ticketIsStale && (
+                        <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                          <AlertTriangle size={14} className="mt-px shrink-0" />
+                          <span>
+                            Le prix a été ajusté le {dateTime(detail.lastPriceAdjustedAt)}, après cet envoi : le client
+                            détient un reçu obsolète.
+                          </span>
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {detail.checkIn && (
+                <div>
+                  <SectionTitle>{detail.checkIn.kind === "ORDER_PICKUP" ? "QR code de retrait" : "Billet / QR code d'accès"}</SectionTitle>
+                  <div className="flex items-start gap-4 rounded-lg border border-gray-100 p-4">
+                    {detail.checkIn.qr ? (
+                      <img
+                        src={detail.checkIn.qr}
+                        alt="QR code envoyé au client"
+                        className="h-24 w-24 flex-shrink-0 rounded-md border border-gray-100 bg-white"
+                      />
+                    ) : (
+                      <div className="flex h-24 w-24 flex-shrink-0 items-center justify-center rounded-md border border-gray-100 bg-gray-50 text-gray-300">
+                        <QrCode size={28} />
+                      </div>
+                    )}
+                    <div className="min-w-0 space-y-1 text-sm">
+                      <p className="font-mono text-base font-bold tracking-widest text-gray-900">{detail.checkIn.code}</p>
+                      {detail.checkIn.seatsLabel && <p className="text-xs text-gray-500">{detail.checkIn.seatsLabel}</p>}
+                      <p className={detail.checkIn.usedAt ? "text-xs font-medium text-emerald-700" : "text-xs text-gray-500"}>
+                        {detail.checkIn.usedAt
+                          ? `${detail.checkIn.kind === "ORDER_PICKUP" ? "Retiré" : "Scanné"} le ${dateTime(detail.checkIn.usedAt)}.`
+                          : "Pas encore scanné."}
+                      </p>
+                      {detail.checkIn.kind !== "ORDER_PICKUP" && detail.canSendTicketEmail && (
+                        <button
+                          type="button"
+                          onClick={handleSendCheckIn}
+                          disabled={sendingCheckIn}
+                          className="mt-2 inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {sendingCheckIn ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
+                          Renvoyer par e-mail
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 

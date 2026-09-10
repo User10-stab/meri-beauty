@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
@@ -314,19 +314,28 @@ export async function completePointOfSaleSale(input) {
   const guard = await requirePointOfSaleAccess();
   if (guard.error) return { success: false, message: guard.error };
 
+  // Only Marie and OWNER/ADMIN put cash into the Livre de caisse. Anyone
+  // else still rings up the sale, but off-till: no open-till requirement and
+  // the CASH Transaction is detached from every session, so it shows in
+  // Opérations but never in the drawer's book or its X/Z reconciliation.
+  const offTill = !isTillCashOperator(guard.session.user);
+
   // Every POS sale — whatever the payment method — must belong to a till
   // session, not just CASH ones. Before this gate, a card/QR sale rung up
   // with no session open completed normally and simply carried
   // cashSessionId: null forever (see Transaction.pieceNumber allocation
   // below): unrecoverable once made. Blocking here instead of only warning
-  // means staff open the till before ringing up anything, not after.
-  const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
-  if (!openCashSessionGate) {
-    return {
-      success: false,
-      message: "Aucune session de caisse n'est ouverte. Ouvrez la caisse avant d'encaisser une vente.",
-      requiresCashSession: true,
-    };
+  // means staff open the till before ringing up anything, not after. An
+  // off-till cashier is exempt — nothing they ring up enters the till.
+  if (!offTill) {
+    const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+    if (!openCashSessionGate) {
+      return {
+        success: false,
+        message: "Aucune session de caisse n'est ouverte. Ouvrez la caisse avant d'encaisser une vente.",
+        requiresCashSession: true,
+      };
+    }
   }
 
   const parsed = pointOfSaleSaleSchema.safeParse(input);
@@ -334,7 +343,7 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived } = parsed.data;
+  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived, invoiceRequested } = parsed.data;
   if (items.some((item) => item.type === "SERVICE")) {
     return {
       success: false,
@@ -467,7 +476,11 @@ export async function completePointOfSaleSale(input) {
         saleItems.push({ ...variant, quantity, available });
       }
 
-      const shouldCreateInvoice = !isWalkIn && hasInvoiceableVatIdentity(customer);
+      const isVatEligible = !isWalkIn && hasInvoiceableVatIdentity(customer);
+      // Defaults to true (today's behavior) when omitted — the till only
+      // ever sends false when staff/the client explicitly declined it.
+      const wantsInvoice = invoiceRequested !== false;
+      const shouldCreateInvoice = isVatEligible && wantsInvoice;
       const posVatPolicy = resolveGoodsVatPolicy({ customer });
       const pricedSaleItems = saleItems.map((item) => ({
         ...item,
@@ -497,6 +510,7 @@ export async function completePointOfSaleSale(input) {
           totalExclVat: taxTotals.totalExclVat,
           totalVat: taxTotals.vatAmount,
           customerVatNumber: shouldCreateInvoice ? customer?.vatNumber ?? null : null,
+          invoiceRequested: isVatEligible ? wantsInvoice : null,
           pickedUpAt: isQrPayment ? null : new Date(),
           pickedUpByStaffId: isQrPayment ? null : guard.session.user.id,
           expiresAt: isQrPayment ? new Date(Date.now() + (POS_CHECKOUT_SECONDS + 4 * 60) * 1000) : null,
@@ -558,15 +572,23 @@ export async function completePointOfSaleSale(input) {
       // slips past the outer gate must still abort the sale rather than let
       // it complete with cashSessionId silently left null (see
       // requiresCashSession handling in the catch block below).
-      const openCashSession = await tx.cashSession.findFirst({
-        where: { closedAt: null },
-        orderBy: { openedAt: "desc" }, // matches getCurrentCashSession's tie-break — without it, findFirst's row order is unspecified
-        select: { id: true },
-      });
-      if (!openCashSession) throw new Error("POS_CASH_SESSION_CLOSED");
-      // Cash-book line number, allocated only for the CASH rows that
-      // actually enter the till total — see model Transaction.pieceNumber.
-      const pieceNumber = method === "CASH" ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
+      // A till operator's POS sale must belong to a session whatever the
+      // method (the outer gate already refused otherwise; re-checked here for
+      // the close-in-the-race-window case). An off-till cashier's sale never
+      // joins the drawer, so the session is neither required nor looked up.
+      const openCashSession = offTill
+        ? null
+        : await tx.cashSession.findFirst({
+            where: { closedAt: null },
+            orderBy: { openedAt: "desc" }, // matches getCurrentCashSession's tie-break — without it, findFirst's row order is unspecified
+            select: { id: true },
+          });
+      if (!offTill && !openCashSession) throw new Error("POS_CASH_SESSION_CLOSED");
+      // Only a till operator's CASH row enters the drawer total and gets a
+      // cash-book line number — see model Transaction.pieceNumber and the
+      // cash-book queries (lib/cash-book/*).
+      const useTill = !offTill && method === "CASH";
+      const pieceNumber = useTill ? await allocatePieceNumber(tx, PIECE_SERIES.ORDER) : null;
       await tx.transaction.create({
         data: {
           paymentId: payment.id,
@@ -579,11 +601,10 @@ export async function completePointOfSaleSale(input) {
           manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
           cashReceived: method === "CASH" ? cashReceived : null,
           changeGiven: method === "CASH" ? changeGiven : null,
-          // Only a CASH row belongs to the till total — see the cash-book
-          // queries (lib/cash-book/*), which all filter on method: "CASH"
-          // alongside cashSessionId. A session is required above regardless
-          // of method, but only CASH actually gets tagged with it.
-          cashSessionId: method === "CASH" ? openCashSession.id : null,
+          // Only a CASH row taken by a till operator belongs to the till
+          // total — see the cash-book queries (lib/cash-book/*), which all
+          // filter on method: "CASH" alongside cashSessionId + pieceNumber.
+          cashSessionId: useTill ? openCashSession.id : null,
           pieceNumber,
         },
       });
@@ -734,7 +755,7 @@ export async function completePointOfSaleSale(input) {
 
       revalidatePath("/dashboard/boutique/orders");
       revalidatePath("/dashboard/boutique/stock");
-      if (method === "CASH") revalidateCaisseRoutes();
+      if (!offTill && method === "CASH") revalidateCaisseRoutes();
       return {
         success: true,
         data: {
@@ -803,7 +824,7 @@ export async function completePointOfSaleSale(input) {
 
     revalidatePath("/dashboard/boutique/orders");
     revalidatePath("/dashboard/boutique/stock");
-    if (method === "CASH") revalidateCaisseRoutes();
+    if (!offTill && method === "CASH") revalidateCaisseRoutes();
     return {
       success: true,
       data: {

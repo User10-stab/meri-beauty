@@ -189,7 +189,7 @@ function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComp
   );
 }
 
-export function AppointmentsPageClient({ initialAppointments, staffOptions, showStaffFilter }) {
+export function AppointmentsPageClient({ initialAppointments, staffOptions, showStaffFilter, canCollectCash = false }) {
   const [appointments, setAppointments] = useState(initialAppointments);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -536,7 +536,15 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         onCancel={(row) => { setRejectionReason(""); setToReject(row); }}
                         onComplete={handleCompleteDirect}
                         onNoShow={handleNoShow}
-                        onOpenCompleteDialog={(row) => { setPaymentConfirmed(false); setToComplete(row); }}
+                        onOpenCompleteDialog={(row) =>
+                          // Only Marie / an admin takes money at the counter.
+                          // For everyone else the balance is recorded off-till
+                          // by completeAppointment, so there is no popup — the
+                          // "Terminer" click just closes it out.
+                          canCollectCash
+                            ? (setPaymentConfirmed(false), setToComplete(row))
+                            : handleCompleteDirect(row.id)
+                        }
                       />
                     </TableCell>
                   </TableRow>

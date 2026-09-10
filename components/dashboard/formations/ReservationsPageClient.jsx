@@ -23,7 +23,7 @@ const COLUMNS = [
   { key: "payment", label: "Paiement" },
 ];
 
-export function ReservationsPageClient({ initialReservations = [], userRole }) {
+export function ReservationsPageClient({ initialReservations = [], userRole, canCollectCash = false }) {
   const router = useRouter();
   const isAdmin = isAdminRole(userRole);
   const [changeModalReservation, setChangeModalReservation] = useState(null);
@@ -109,6 +109,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole }) {
         onClose={() => setToSettle(null)}
         onConfirm={handleSettle}
         loading={isSettling}
+        canCollectCash={canCollectCash}
       />
     </div>
   );

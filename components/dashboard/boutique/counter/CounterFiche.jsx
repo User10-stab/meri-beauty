@@ -7,7 +7,7 @@ import { FicheBuyerAction } from "@/components/dashboard/boutique/counter/FicheB
 import { KIND_LABEL, formatDateTime, isToday } from "@/components/dashboard/boutique/counter/counter-format";
 import { CheckCircle2, TriangleAlert } from "lucide-react";
 
-export function CounterFiche({ ticket, onChanged }) {
+export function CounterFiche({ ticket, onChanged, canCollectCash = false }) {
   const wrongDay = !isToday(ticket.sessionStartDate);
 
   return (
@@ -61,7 +61,9 @@ export function CounterFiche({ ticket, onChanged }) {
 
       <div className="space-y-3 px-6 pb-6">
         <FicheCheckInAction ticket={ticket} onChanged={onChanged} />
-        {ticket.status === "CONFIRMED" && <FicheSettleAction ticket={ticket} onChanged={() => onChanged(null)} />}
+        {ticket.status === "CONFIRMED" && (
+          <FicheSettleAction ticket={ticket} onChanged={() => onChanged(null)} canCollectCash={canCollectCash} />
+        )}
         {ticket.status === "CONFIRMED" && ticket.kind !== "appointment" && (
           <FicheSeatsAction ticket={ticket} onChanged={() => onChanged(null)} />
         )}

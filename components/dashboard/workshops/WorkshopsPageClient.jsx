@@ -28,6 +28,7 @@ export function WorkshopsPageClient({ initialActivities = [], initialAnimators =
     { key: "price", label: tActivities("columns.price") },
     { key: "duration", label: tActivities("columns.duration") },
     { key: "capacity", label: tActivities("columns.capacity") },
+    { key: "seats", label: tActivities("columns.seats") },
     { key: "animator", label: tActivities("columns.animator") },
     { key: "status", label: tActivities("columns.status") },
   ];

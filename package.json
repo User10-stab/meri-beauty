@@ -24,6 +24,7 @@
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",
     "@hookform/resolvers": "^5.4.0",
+    "@pixeldrive/peppol-toolkit": "^0.8.4",
     "@prisma/client": "^6.19.3",
     "@react-pdf/renderer": "^4.5.1",
     "@sentry/nextjs": "^10.70.0",

@@ -16,13 +16,13 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(selectIdx).toBeGreaterThan(-1);
     const select = actions.slice(selectIdx, actions.indexOf("});", selectIdx));
 
-    // billitSentAt lets the row show whether this invoice was already handed
-    // to Billit; customerType/customerVatNumber let it disable the Billit
-    // button up front for B2C or non-Belgian invoices instead of failing
-    // only after the click.
+    // peppyrusSentAt lets the row show whether this invoice was already
+    // transmitted via Peppyrus; customerType/customerVatNumber let it
+    // disable the Peppyrus button up front for B2C or non-Belgian invoices
+    // instead of failing only after the click.
     const invoiceSelectIdx = select.indexOf("invoice: {");
     const invoiceSelect = select.slice(invoiceSelectIdx, select.indexOf("},", invoiceSelectIdx));
-    for (const field of ["id: true", "number: true", "totalInclVat: true", "emailSentAt: true", "billitSentAt: true", "customerType: true", "customerVatNumber: true", "creditNotes:"]) {
+    for (const field of ["id: true", "number: true", "totalInclVat: true", "emailSentAt: true", "peppyrusSentAt: true", "customerType: true", "customerVatNumber: true", "creditNotes:"]) {
       expect(invoiceSelect, `invoice select is missing "${field}"`).toContain(field);
     }
 
@@ -30,7 +30,7 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     // a refund row there still links to exactly one credit note
     // (Transaction.creditNoteId), never to "whichever ones exist on the
     // invoice".
-    expect(actions).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
+    expect(actions).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true } }");
 
     // Without the customer on the row there is nothing to show next to the
     // amount, and the e-mail button has no visible recipient. isCompany/
@@ -98,35 +98,36 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(source("lib/audit-log.js")).toContain('INVOICE_EMAILED: "invoice.emailed"');
   });
 
-  test("the Billit button creates the order in Billit only — never auto-dispatches Peppol/e-mail", () => {
-    const send = source("actions/invoices/send-invoice-billit.js");
+  test("the Peppyrus button really transmits over the live Peppol network — POST /message, not a staging order", () => {
+    // Intentionally the OPPOSITE invariant from the old Billit contract:
+    // Billit's /v1/orders was a staging step staff finished by hand inside
+    // Billit's own dashboard; Peppyrus's POST /message IS the delivery, so
+    // this action must actually call it, with no separate "finalize" step.
+    const send = source("actions/invoices/send-invoice-peppyrus.js");
     expect(send).toContain('"use server"');
     expect(send).toContain("isAdminRole(session.user.role)");
-    // POST /v1/orders only — see lib/billit.js's own docstring for why a
-    // separate Billit "send" endpoint is deliberately never called here.
-    expect(send).toContain("createBillitOrder(payload)");
-    expect(send).not.toMatch(/commands\/send|sendInvoiceViaPeppol/);
+    expect(send).toContain("sendPeppyrusMessage(");
+    expect(send).toContain("buildInvoiceUbl(");
 
-    const billit = source("lib/billit.js");
-    expect(billit).toContain("/v1/orders");
-    expect(billit).not.toContain("/commands/send");
-    expect(billit).toContain("process.env.BILLIT_PARTY_ID");
-    expect(billit).toContain("PartyID: partyId");
+    const peppyrus = source("lib/peppyrus.js");
+    expect(peppyrus).toContain('"/message"');
+    expect(peppyrus).toContain("X-Api-Key");
+    expect(peppyrus).toContain("PEPPYRUS_API_KEY");
   });
 
-  test("a successful Billit send records when it happened and is audited", () => {
-    const send = source("actions/invoices/send-invoice-billit.js");
-    expect(send).toContain("billitOrderId:");
-    expect(send).toContain("billitSentAt: new Date()");
-    expect(send).toContain("AUDIT_ACTIONS.INVOICE_SENT_TO_BILLIT");
-    expect(source("lib/audit-log.js")).toContain('INVOICE_SENT_TO_BILLIT: "invoice.sent_to_billit"');
+  test("a successful Peppyrus send records when it happened and is audited", () => {
+    const send = source("actions/invoices/send-invoice-peppyrus.js");
+    expect(send).toContain("peppyrusMessageId:");
+    expect(send).toContain("peppyrusSentAt: new Date()");
+    expect(send).toContain("AUDIT_ACTIONS.INVOICE_SENT_TO_PEPPYRUS");
+    expect(source("lib/audit-log.js")).toContain('INVOICE_SENT_TO_PEPPYRUS: "invoice.sent_to_peppyrus"');
   });
 
-  test("Operations shows the confirmed e-mail send separately from the Billit handoff", () => {
+  test("Operations shows the confirmed e-mail send separately from the Peppyrus send", () => {
     const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
     expect(client).toContain("invoice.emailSentAt");
     expect(client).toContain("E-mail envoyé le");
-    expect(client).toContain("Créée dans Billit — à finaliser");
+    expect(client).toContain("Envoyée via Peppol le");
     expect(client).toContain("Non envoyée");
   });
 
@@ -153,31 +154,31 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     // Both channels are checkboxes on one card — either, both, or (until a box
     // is ticked) neither — not two mutually-exclusive action buttons.
     expect(delivery).toContain("Envoyer par e-mail");
-    expect(delivery).toContain("Créer dans Billit / Peppol");
-    expect(delivery).toContain("useState(false)"); // emailChecked / billitChecked default off
-    // The e-mail send now carries the dialog's recipient choices; the Billit
-    // call is unchanged.
+    expect(delivery).toContain("Envoyer via Peppol (Peppyrus)");
+    expect(delivery).toContain("useState(false)"); // emailChecked / peppyrusChecked default off
+    // The e-mail send now carries the dialog's recipient choices; the
+    // Peppyrus call is unchanged.
     expect(delivery).toContain("sendInvoiceByEmail(documentRecord.id, opts)");
-    expect(delivery).toContain("sendInvoiceToBillit(documentRecord.id)");
+    expect(delivery).toContain("sendInvoiceToPeppyrus(documentRecord.id)");
     // Nothing fires straight from a channel checkbox — a shared confirm step does.
     expect(delivery).toContain("setConfirming(true)");
     expect(delivery).toContain("onClick={deliver}");
   });
 
-  test("Billit is refused for a B2C invoice or a non-Belgian VAT number, both client-side and server-side", () => {
-    const send = source("actions/invoices/send-invoice-billit.js");
+  test("Peppyrus is refused for a B2C invoice or a non-Belgian VAT number, both client-side and server-side", () => {
+    const send = source("actions/invoices/send-invoice-peppyrus.js");
     // The server check is the one that actually matters — nothing client-side
     // can be trusted to gate a real send.
     expect(send).toContain('if (invoice.customerType !== "B2B")');
     expect(send).toContain("isBelgianVatNumber(invoice.customerVatNumber)");
 
-    const billit = source("lib/billit.js");
-    expect(billit).toContain("export function isBelgianVatNumber(vatNumber)");
+    const peppyrus = source("lib/peppyrus.js");
+    expect(peppyrus).toContain("export function isBelgianVatNumber(vatNumber)");
 
     // The button mirrors the exact same rule (same helper, not a
     // hand-rolled second regex that could silently drift from the server's).
     const delivery = source("components/dashboard/operations/DocumentDeliveryDialog.jsx");
-    expect(delivery).toContain('import { isBelgianVatNumber } from "@/lib/billit"');
+    expect(delivery).toContain('import { isBelgianVatNumber } from "@/lib/peppyrus"');
     expect(delivery).toContain('invoice?.customerType === "B2B"');
     expect(delivery).toContain("isBelgianVatNumber(invoice?.customerVatNumber)");
   });

@@ -10,7 +10,7 @@ import { notificationRecipientSchema } from "@/lib/validations/notification-reci
  * when an admin chooses to deliver a B2B invoice / credit note by e-mail.
  *
  * Admin-gated with the same inline check every sibling file in this folder
- * uses (send-invoice-email.js, send-invoice-billit.js …), not a wrapper.
+ * uses (send-invoice-email.js, send-invoice-peppyrus.js …), not a wrapper.
  * These are called straight from the dialog's local state, so there is no
  * server component to revalidate. The actual sends are what get audited —
  * mirroring admin-accounts.js, editing this list is not itself logged.

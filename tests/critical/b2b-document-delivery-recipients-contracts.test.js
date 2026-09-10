@@ -6,10 +6,13 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
 
 // 9 Sep 2026: the Operations delivery dialog gained a combined send —
-// e-mail and Billit/Peppol together in one confirm — plus a global,
+// e-mail and Peppol (Peppyrus) together in one confirm — plus a global,
 // admin-managed address book (NotificationRecipient) offered as extra
 // recipients when e-mailing a B2B invoice / credit note. Nothing is
 // pre-selected; the admin ticks channels and addresses.
+// 10 Sep 2026: migrated the Peppol channel from Billit to Peppyrus — the
+// Peppyrus send is a live Peppol transmission, not a vendor-dashboard
+// staging step, so it needed its own gating/copy contract below.
 
 describe("the managed recipient address book is admin-only and de-duped", () => {
   const actions = source("actions/invoices/notification-recipients.js");
@@ -93,23 +96,27 @@ describe("the delivery dialog fires both channels behind one confirm", () => {
 
   test("channels start unchecked and the send is gated on a real recipient", () => {
     expect(delivery).toContain("const [emailChecked, setEmailChecked] = useState(false)");
-    expect(delivery).toContain("const [billitChecked, setBillitChecked] = useState(false)");
-    expect(delivery).toContain("const canSend = !sending && (emailChecked || billitChecked) && (!emailChecked || emailHasRecipient)");
+    expect(delivery).toContain("const [peppyrusChecked, setPeppyrusChecked] = useState(false)");
+    expect(delivery).toContain("const canSend = !sending && (emailChecked || peppyrusChecked) && (!emailChecked || emailHasRecipient)");
   });
 
   test("both sends run in one deliver() and report a combined outcome", () => {
     expect(delivery).toContain("if (emailChecked) {");
-    expect(delivery).toContain("if (billitChecked) {");
+    expect(delivery).toContain("if (peppyrusChecked) {");
     expect(delivery).toContain("const succeeded = []");
     expect(delivery).toContain("const failed = []");
     // On a partial failure the card stays open and the done channel un-ticks.
     expect(delivery).toContain("if (outcomes.email?.success) setEmailChecked(false)");
-    expect(delivery).toContain("if (outcomes.billit?.success) setBillitChecked(false)");
+    expect(delivery).toContain("if (outcomes.peppyrus?.success) setPeppyrusChecked(false)");
   });
 
-  test("the Billit gate still mirrors the server helper exactly", () => {
-    expect(delivery).toContain('import { isBelgianVatNumber } from "@/lib/billit"');
+  test("the Peppyrus gate still mirrors the server helper exactly", () => {
+    expect(delivery).toContain('import { isBelgianVatNumber } from "@/lib/peppyrus"');
     expect(delivery).toContain('invoice?.customerType === "B2B"');
     expect(delivery).toContain("isBelgianVatNumber(invoice?.customerVatNumber)");
+  });
+
+  test("confirming a Peppyrus send warns that it transmits live, immediately", () => {
+    expect(delivery).toContain("transmet immédiatement le document sur le réseau Peppol réel");
   });
 });

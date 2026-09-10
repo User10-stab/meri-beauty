@@ -84,30 +84,13 @@ const nextConfig = {
     ];
   },
   images: {
-    remotePatterns: [
-      {
-        // Instagram / Facebook CDN — used for media_url and thumbnail_url
-        protocol: "https",
-        hostname: "**.cdninstagram.com",
-      },
-      {
-        // Facebook CDN (some Instagram assets are served from here)
-        protocol: "https",
-        hostname: "**.fbcdn.net",
-      },
-      {
-        // Local uploads served from /public/uploads
-        protocol: "http",
-        hostname: "localhost",
-      },
-      {
-        // Legacy product/service/gallery images imported from the original
-        // Wix site — still hotlinked from there, not re-hosted locally
-        // (see lib/wixImport.js's WIX_MEDIA_BASE).
-        protocol: "https",
-        hostname: "**.wixstatic.com",
-      },
-    ],
+    // Custom loader (./image-loader.js) — the built-in /_next/image optimizer is
+    // never reached, so `sharp` never runs on the server. Wix catalogue images
+    // are resized by Wix's own CDN; /uploads/* and /Images/* are served as-is
+    // (nginx / /public). `remotePatterns` only gates the built-in optimizer, so
+    // it's dropped here — CSP `img-src` above is what actually allows the hosts.
+    loader: "custom",
+    loaderFile: "./image-loader.js",
   },
 };
 

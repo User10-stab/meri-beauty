@@ -736,11 +736,11 @@ function StorySection() {
                 </p>
               </div>
               <div className="w-[150px] h-[150px] relative  ">
-                <Image src="/Images/signature.png" 
+                <Image src="/Images/signature.png"
                 alt=""
                  fill
                 className=""
-                sizes="width:100px " />
+                sizes="150px" />
               </div>
             </div>
           </div>
@@ -913,7 +913,7 @@ const UNIVERSE_IMAGES = {
   studio: { image: "/Images/LE STUDIO.webp", imageAltKey: "studio", href: "/reservation" },
   boutique: { image: "/Images/LA BOUTIQUE.webp", imageAltKey: "boutique", href: "/boutique" },
   formations: { image: "/Images/LES FORMATIONS.webp", imageAltKey: "formations", href: "/formations" },
-  ateliers: { image: "/Images/LES ATELIERS ET EVENEMENTS.webp", imageAltKey: "ateliers", href: "/evenements" },
+  ateliers: { image: "/Images/LES ATELIERS & EVENEMENTS.webp", imageAltKey: "ateliers", href: "/evenements" },
 };
 const UNIVERSE_KEYS = ["studio", "boutique", "formations", "ateliers"];
 
@@ -1130,7 +1130,7 @@ function HumanSection() {
             </div>
 
             <Link
-              href="/#equipe"
+              href="/animateurs"
               className="group mt-6 inline-flex items-center gap-1.5 text-[13px] font-medium tracking-[0.03em] text-[#b89664] underline decoration-[#e9ddd0] underline-offset-[5px] transition-all hover:text-[#9a8054] hover:decoration-[#b89664] sm:mt-8 sm:text-[15px]"
             >
               {t("cta")}

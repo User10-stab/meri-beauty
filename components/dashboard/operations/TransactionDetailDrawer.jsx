@@ -494,7 +494,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                         onClick={() => setDeliveryDocument({ kind: "INVOICE", document: invoice })}
                         className="mt-3 ml-2 inline-flex items-center gap-2 rounded-lg border border-[#2f3a2e] bg-white px-3 py-2 text-sm font-semibold text-[#2f3a2e] hover:bg-[#f4f7f3]"
                       >
-                        <Mail size={15} /> {invoice.emailSentAt || invoice.billitSentAt ? "Gérer l'envoi" : "Envoyer la facture"}
+                        <Mail size={15} /> {invoice.emailSentAt || invoice.peppyrusSentAt ? "Gérer l'envoi" : "Envoyer la facture"}
                       </button>
                     )}
                   </>
@@ -529,7 +529,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                         <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
                           <p className="font-medium text-amber-900">Livraison B2B</p>
                           <p className="mt-1 text-xs leading-5 text-amber-800">
-                            Ouvrez la carte de livraison pour choisir l'e-mail ou le handoff Billit / Peppol.
+                            Ouvrez la carte de livraison pour choisir l'e-mail ou l'envoi Peppol (Peppyrus).
                           </p>
                           <button
                             type="button"

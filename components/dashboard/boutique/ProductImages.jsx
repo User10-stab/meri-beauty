@@ -145,7 +145,6 @@ export function ProductImages({ value = [], onChange }) {
               alt=""
               fill
               sizes="(max-width: 640px) 50vw, 96px"
-              unoptimized
               draggable={false}
               className="select-none object-cover"
             />

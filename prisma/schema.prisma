@@ -735,7 +735,7 @@ model Salon {
   address   String? // freeform, shown on the public site (footer/contact) — not used for invoices
   vatNumber String? // legal TVA/BCE number — printed on every issued invoice
   rib       String? // bank account number / RIB
-  billitApiKey String? // Billit API Key (keybellit)
+  peppyrusApiKey String? // Peppyrus API key (X-Api-Key) — test or prod, matching PEPPYRUS_BASE_URL
 
   // Structured legal identity, required before any invoice can be issued
   // (see lib/invoicing.js#issueInvoice's seller-data gate) — kept separate
@@ -1845,6 +1845,15 @@ model Payment {
   // a deliberate human action, not a side effect of settlement.
   ticketEmailedAt DateTime?
 
+  // Marks that the one-time "finish your payment" nudge has already gone out
+  // for this Payment (lib/appointments/expire-stale-appointments.js —
+  // sendAppointmentPaymentReminders, fired ~5 minutes before the 20-minute
+  // abandoned-payment cutoff). Same dedup pattern as Appointment's
+  // reminder24hSentAt/reminder2hSentAt: without a durable marker, every
+  // 5-minute cron tick within that window would re-match the same row and
+  // re-send the email.
+  paymentReminderSentAt DateTime?
+
   transactions     Transaction[]
   invoice          Invoice?
   disputes         StripeDispute[]
@@ -1997,12 +2006,12 @@ model Invoice {
   // snapshot; this field answers the operational question "was it sent?".
   emailSentAt DateTime?
 
-  // Set once this invoice has been created as an order in Billit
-  // (POST /v1/orders — see lib/billit.js). Billit's own dashboard is where
-  // staff finish the actual Peppol/e-mail dispatch, so these two fields only
-  // ever record "was it handed to Billit", never a delivery outcome.
-  billitOrderId String?
-  billitSentAt  DateTime?
+  // Set once this invoice has been transmitted over the Peppol network via
+  // Peppyrus (POST /message — see lib/peppyrus.js). Unlike the old Billit
+  // integration, this call IS the live delivery — peppyrusSentAt records an
+  // actual transmission attempt, not a staging step.
+  peppyrusMessageId String?
+  peppyrusSentAt    DateTime?
 
   // Set once this invoice has been voided and replaced — currently only by
   // an admin session transfer that lands on an already-invoiced booking (see
@@ -2071,16 +2080,16 @@ model CreditNote {
   vatAmount       Decimal @db.Decimal(10, 2)
   totalInclVat    Decimal @db.Decimal(10, 2)
 
-  // Set once this credit note has been created as an order in Billit — same
-  // meaning as Invoice.billitOrderId/billitSentAt (see that comment). A
-  // credit note correcting a Belgian B2B invoice falls under the same 2026
-  // structured e-invoicing mandate as the invoice it corrects, so it needs
-  // the same Peppol path, not an ad-hoc PDF e-mail.
-  billitOrderId String?
-  billitSentAt  DateTime?
+  // Set once this credit note has been transmitted over the Peppol network
+  // via Peppyrus — same meaning as Invoice.peppyrusMessageId/peppyrusSentAt
+  // (see that comment). A credit note correcting a Belgian B2B invoice falls
+  // under the same 2026 structured e-invoicing mandate as the invoice it
+  // corrects, so it needs the same Peppol path, not an ad-hoc PDF e-mail.
+  peppyrusMessageId String?
+  peppyrusSentAt    DateTime?
   // Set only after the e-mail provider confirms the credit note was sent.
-  // This is distinct from billitSentAt, which only records Billit order
-  // creation and never confirms a final Peppol delivery.
+  // This is distinct from peppyrusSentAt, which records Peppol transmission,
+  // not e-mail delivery.
   emailSentAt   DateTime?
 
   returnRequest ReturnRequest?

@@ -117,7 +117,7 @@ export function CartPageClient({ initialCart, customerSession = null }) {
             <li key={item.id} className="flex gap-4 py-6">
               <Link href={`/boutique/${item.variant.product.slug}`} className="relative h-24 w-24 flex-shrink-0 overflow-hidden bg-neutral-50">
                 {item.variant.product.image ? (
-                  <Image src={item.variant.product.image} alt="" fill sizes="96px" unoptimized className="object-cover" />
+                  <Image src={item.variant.product.image} alt="" fill sizes="96px" className="object-cover" />
                 ) : null}
               </Link>
 

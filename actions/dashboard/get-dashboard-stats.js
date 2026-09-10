@@ -8,6 +8,19 @@ import { getLowStockVariants } from "@/actions/boutique/stock";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
+import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
+
+// Same candidate statuses as lib/orders/notify-stale-fulfilment.js — the only
+// statuses getOrderOverdueReason can ever flag. Keep in sync with that file.
+const OVERDUE_CANDIDATE_STATUSES = ["PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP", "SHIPPED"];
+
+// The timestamp getOrderOverdueReason actually judged each reason against —
+// mirrors the reason -> field mapping in lib/orders/overdue-rules.js.
+function overdueSinceDate(order, reason) {
+  if (reason === "NOT_COLLECTED") return order.readyForPickupAt;
+  if (reason === "NOT_CONFIRMED_DELIVERED") return order.shippedAt;
+  return order.createdAt;
+}
 
 // Revenue = money that has actually landed, regardless of a later partial/
 // full refund — a refund is its own ledger event, it doesn't erase that the
@@ -68,6 +81,7 @@ export async function getDashboardStats() {
       upcomingAppointments,
       recentOrders,
       revenueLast7Days,
+      overdueCandidates,
     ] = await Promise.all([
       isAdmin ? prisma.payment.findMany({
         where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: startOfMonth } },
@@ -132,7 +146,33 @@ export async function getDashboardStats() {
           transactions: { select: { transactionType: true, amount: true } },
         },
       }) : Promise.resolve([]),
+      canSeeOrders ? prisma.order.findMany({
+        where: { status: { in: OVERDUE_CANDIDATE_STATUSES } },
+        select: {
+          id: true,
+          orderNumber: true,
+          fulfilmentMode: true,
+          status: true,
+          createdAt: true,
+          readyForPickupAt: true,
+          shippedAt: true,
+          collectedAt: true,
+          user: { select: { fullName: true } },
+        },
+      }) : Promise.resolve([]),
     ]);
+
+    const overdueOrders = overdueCandidates
+      .map((order) => ({ order, reason: getOrderOverdueReason(order, now) }))
+      .filter(({ reason }) => reason !== null)
+      .map(({ order, reason }) => ({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        reason,
+        customerName: order.user?.fullName ?? "—",
+        sinceDate: overdueSinceDate(order, reason),
+      }))
+      .sort((a, b) => new Date(a.sinceDate).getTime() - new Date(b.sinceDate).getTime());
 
     // Bucket the last 7 days' revenue by calendar day so the trend chart
     // has one point per day even for days with zero payments.
@@ -183,6 +223,17 @@ export async function getDashboardStats() {
           name: v.name,
           availableQuantity: v.availableQuantity,
           lowStockThreshold: v.lowStockThreshold,
+        })),
+        overdueOrdersCount: overdueOrders.length,
+        // Capped well above the ~3 cards visible at once in the dashboard
+        // carousel — enough to scroll through without re-fetching, not
+        // unbounded like the underlying query.
+        overdueOrders: overdueOrders.slice(0, 24).map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          reason: o.reason,
+          customerName: o.customerName,
+          sinceDate: o.sinceDate.toISOString(),
         })),
       },
     };

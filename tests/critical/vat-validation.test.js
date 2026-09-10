@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   getVatCountryCode,
   isValidVatFormat,
+  isViesOutage,
   normalizeVatNumber,
   parseViesResponse,
   verifyVatWithVies,
@@ -149,6 +150,32 @@ describe("EU VAT validation", () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[3][0]).toContain("/rest-api/check-vat-number");
+  });
+});
+
+describe("isViesOutage — the gate for provisional acceptance at sale/booking entry points", () => {
+  it("is true when the whole registry is unreachable (SOAP retries then REST both fail)", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await verifyVatWithVies("BE0751854027");
+    expect(result).toMatchObject({ success: false, reason: "VIES_UNAVAILABLE" });
+    expect(isViesOutage(result)).toBe(true);
+  });
+
+  it("is false for a confirmed 'not registered' answer — that must still block", () => {
+    expect(isViesOutage({ success: true, valid: false })).toBe(false);
+  });
+
+  it("is false for a plain failure with no outage reason (e.g. a bad-format rejection)", () => {
+    expect(isViesOutage({ success: false, message: "Format de numéro de TVA invalide." })).toBe(false);
+  });
+
+  it("is false for a missing/empty result", () => {
+    expect(isViesOutage(undefined)).toBe(false);
+    expect(isViesOutage(null)).toBe(false);
   });
 });
 

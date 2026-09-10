@@ -20,7 +20,7 @@ import {
   buildRentalRequestSubmittedNotification,
   getRentalRequestNotificationRecipients,
 } from "@/lib/notifications";
-import { verifyVatWithVies } from "@/lib/vat-validation";
+import { isViesOutage, verifyVatWithVies } from "@/lib/vat-validation";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 // Admin/owner only — see the matching note in [id]/route.js. Any STAFF
@@ -142,12 +142,15 @@ export async function POST(request) {
   let vatValidation = null;
   if (vatNumber) {
     const viesResult = await verifyVatWithVies(vatNumber);
-    if (!viesResult.success) {
+    if (!viesResult.success && !isViesOutage(viesResult)) {
       return badRequest(viesResult.message || "Impossible de vérifier ce numéro auprès de VIES. Réessayez.");
     }
-    if (!viesResult.valid) {
+    if (viesResult.success && !viesResult.valid) {
       return badRequest("Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.");
     }
+    // VIES unreachable → the well-formed number is accepted provisionally
+    // (no name/address) so the rental request still submits; it is
+    // re-verified strictly when the renter is onboarded (createStaffFromRental).
     vatValidation = {
       vatValidatedAt: new Date(),
       vatValidationName: viesResult.name ?? null,

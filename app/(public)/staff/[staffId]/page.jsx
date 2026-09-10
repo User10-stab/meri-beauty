@@ -160,7 +160,7 @@ export default async function StaffProfilePage({ params }) {
   }
 
   const firstName = staff.user.fullName.split(" ")[0];
-  const profileImage = staff.photo || staff.user.avatar || "/Images/expert.jpg";
+  const profileImage = staff.photo || staff.user.avatar || "/Images/expert.webp";
 
   const categories = [
     ...new Set(

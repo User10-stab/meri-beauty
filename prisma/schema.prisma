@@ -1587,10 +1587,6 @@ model Staff {
   // actually be rotated if a URL ever leaks, without touching a global secret.
   calendarToken String? @unique
 
-  // Identity document scan uploaded by an admin (recto of the professional
-  // card or ID). Stored as a relative path, like Staff.photo.
-  photoCard String?
-
   // ─── ANNIVERSARY-BASED BILLING ────────────────────────────────────────────
   // For staff with FIXED_RENT contracts, nextInvoiceDate tracks when the next
   // monthly invoice should be generated. Calculated based on contract.startDate

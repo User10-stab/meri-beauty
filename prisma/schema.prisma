@@ -1573,6 +1573,19 @@ model Staff {
   // actually be rotated if a URL ever leaks, without touching a global secret.
   calendarToken String? @unique
 
+  // Identity document scan uploaded by an admin (recto of the professional
+  // card or ID). Stored as a relative path, like Staff.photo.
+  photoCard String?
+
+  // ─── ANNIVERSARY-BASED BILLING ────────────────────────────────────────────
+  // For staff with FIXED_RENT contracts, nextInvoiceDate tracks when the next
+  // monthly invoice should be generated. Calculated based on contract.startDate
+  // anniversary (e.g., staff starting on 20/09 gets invoiced on 20/10, 20/11, etc).
+  // If the day doesn't exist (e.g., 31st in February), uses the last day of month.
+  // Set to NULL if no active FIXED_RENT contract or not eligible for monthly billing.
+  // Updated after each successful billing to the next anniversary date.
+  nextInvoiceDate DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1582,6 +1595,7 @@ model Staff {
   contracts     Contract[]
   appointments  Appointment[]
   newsletters   Newsletter[]
+  monthlyInvoices StaffMonthlyInvoice[]
 }
 
 // StaffService
@@ -2002,6 +2016,7 @@ model Invoice {
   lines            InvoiceLine[]
   creditNotes      CreditNote[]
   refundOperations RefundOperation[]
+  staffMonthlyInvoice StaffMonthlyInvoice?
 
   @@index([paymentId])
 }
@@ -2519,6 +2534,87 @@ model Contract {
   updatedAt            DateTime       @updatedAt
 
   rentalRequest RentalRequest?
+
+  // ─── ANNIVERSARY-BASED BILLING ────────────────────────────────────────────
+  // For FIXED_RENT contracts, nextInvoiceDate tracks the next anniversary date
+  // when an invoice should be generated. Based on contract.startDate (e.g., if
+  // contract starts 20/09, next invoice dates are 20/10, 20/11, etc).
+  // Month-end aware: if billing day doesn't exist (31st in Feb), uses last day.
+  // Set to NULL if contract is not FIXED_RENT or has ended.
+  // Updated after each successful billing to the next anniversary date.
+  nextInvoiceDate DateTime?
+}
+
+// ─── MONTHLY STAFF BILLING ────────────────────────────────────────────────────
+//
+// Anniversary-based billing: invoices are generated based on each staff member's
+// contract start date (anniversary), not the calendar month.
+//
+// One row per staff per billing cycle. Owns the dedup guarantee:
+// the @@unique([staffId, billingYear, billingMonth]) constraint ensures the
+// daily cron job can never generate two invoices for the same billing period.
+//
+// Even though the scheduler now uses nextInvoiceDate for daily checks, the
+// unique constraint on (staffId, billingYear, billingMonth) still provides
+// strong idempotency: if somehow two invoices are attempted for the same
+// calendar month (edge case during transitions), the DB prevents duplicates.
+//
+// The row is created atomically with the Invoice inside a transaction:
+//   1. INSERT StaffMonthlyInvoice (fails on conflict if already exists)
+//   2. issueInvoice() (existing engine, STAFF_CONTRACT source)
+//   3. UPDATE nextInvoiceDate (after successful email send)
+//   4. UPDATE emailSentAt / emailError after the send attempt
+//
+// A failed email never prevents the invoice from existing — EMAIL_FAILED
+// means "invoice exists, email not delivered". The Admin dashboard can filter
+// by status EMAIL_FAILED to find rows that need a manual resend via "Renvoyer".
+//
+// nextInvoiceDate is calculated using anniversary rules:
+// - If contract starts 20/09, next invoices: 20/10, 20/11, 20/12, etc.
+// - If contract starts 31/01, next invoices: 28/02 (month-end), 31/03, 30/04, etc.
+// - After successful billing, nextInvoiceDate advances to the next anniversary.
+
+enum StaffMonthlyInvoiceStatus {
+  PENDING      // row created, invoice not yet issued (should not persist)
+  GENERATED    // invoice issued, email pending
+  SENT         // invoice issued AND email delivered
+  EMAIL_FAILED // invoice issued, email delivery failed
+  SKIPPED      // staff or contract ineligible — no invoice created
+  ERROR        // unexpected error during generation (emailError holds detail)
+}
+
+model StaffMonthlyInvoice {
+  id String @id @default(cuid())
+
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id])
+
+  // Which billing period this row covers. Using year + month integers
+  // avoids timezone ambiguity in range queries and makes the unique
+  // constraint human-readable.
+  billingYear  Int
+  billingMonth Int // 1–12
+
+  // The issued invoice — null only if status is SKIPPED or ERROR.
+  invoiceId String?  @unique
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+
+  // The contract whose fixedRent was billed. Nullable: if a staff member
+  // has no active contract we record a SKIPPED row so the admin can see it.
+  contractId String?
+
+  status       StaffMonthlyInvoiceStatus @default(PENDING)
+  emailSentAt  DateTime?
+  emailError   String? // last email delivery error message, if any
+
+  // Audit
+  generatedAt DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // One invoice per staff per month — the DB enforces idempotency.
+  @@unique([staffId, billingYear, billingMonth])
+  @@index([billingYear, billingMonth])
+  @@index([status])
 }
 
 // WORKING HOUR

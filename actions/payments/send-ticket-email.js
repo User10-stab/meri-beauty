@@ -12,13 +12,16 @@ import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 /**
  * Manually e-mails an already-generated ticket to the client it belongs to.
  *
- * Neither completeAppointment nor settleReservation auto-e-mail this any
- * more (see the doc comment on app/api/payments/[id]/ticket/route.js) — this
- * is the one deliberate exception, gated on STAFF_PERMISSIONS.SEND_TICKET_EMAIL
- * rather than a role, so most staff stay exactly where yesterday's removal
- * left them and only staff an owner/admin has opted in can put a ticket back
- * in a client's inbox. Admin/owner roles pass hasDashboardPermission
- * automatically, same as every other STAFF_PERMISSIONS check.
+ * completeAppointment/settleReservation also fire this automatically once a
+ * balance is actually collected, but only when the settling staff member
+ * holds STAFF_PERMISSIONS.SEND_TICKET_EMAIL — this action re-derives auth()
+ * and checks the permission itself, so that fire-and-forget call is gated
+ * exactly the same way a manual click is. Reprinting the same document via
+ * app/api/payments/[id]/ticket requires this same permission, not just any
+ * dashboard role — a staff member who can't put a ticket in a client's inbox
+ * can't generate it another way either. Admin/owner roles pass
+ * hasDashboardPermission automatically, same as every other STAFF_PERMISSIONS
+ * check.
  *
  * Deliberately NOT taking a recipient address from the caller, for the same
  * reason sendInvoiceByEmail doesn't: the address comes from the reservation's

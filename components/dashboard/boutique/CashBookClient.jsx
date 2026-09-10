@@ -161,7 +161,11 @@ export function CashBookClient({ ledger: initialLedger, movements = [], withdraw
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-dark-3">
             {rows.map((row, index) => {
-              const href = pieceNumberHref(row);
+              // A reservation ticket needs the same SEND_TICKET_EMAIL
+              // permission to open as it does to e-mail — see canEmailRow.
+              // A boutique order's ticket has no such gate (its own route
+              // stays open to every dashboard role), so it keeps its link.
+              const href = canEmailRow(row) && !canSendTicketEmail ? null : pieceNumberHref(row);
               const rowKey = `${row.kind}-${row.pieceNumber ?? index}-${row.date}`;
               return (
               <tr key={rowKey}>

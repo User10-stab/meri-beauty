@@ -372,15 +372,22 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
               {payment?.id && (
                 <div>
                   <SectionTitle>Reçu / ticket de caisse</SectionTitle>
-                  <a
-                    href={payment.order ? `/api/orders/${payment.order.id}/ticket` : `/api/payments/${payment.id}/ticket`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                  >
-                    <Receipt size={15} />
-                    Ouvrir le reçu
-                  </a>
+                  {/* A boutique order's ticket has no permission gate (its own
+                      route stays open to every dashboard role); a reservation's
+                      ticket needs the same SEND_TICKET_EMAIL permission to open
+                      as it does to e-mail — the route itself now enforces this,
+                      this just avoids offering a link that would 403. */}
+                  {(payment.order || detail.canSendTicketEmail) && (
+                    <a
+                      href={payment.order ? `/api/orders/${payment.order.id}/ticket` : `/api/payments/${payment.id}/ticket`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      <Receipt size={15} />
+                      Ouvrir le reçu
+                    </a>
+                  )}
                   {/* No auto-send exists any more; ticketEmailedAt is set
                       only by the manual, permission-gated action in
                       actions/payments/send-ticket-email.js — this line is

@@ -113,8 +113,8 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     expect(builder).toContain("if (payment.orderId)");
   });
 
-  test("is staff/dashboard only — no client self-service download", () => {
-    expect(route).toContain("canAccessDashboard(session.user.role)");
+  test("is gated on SEND_TICKET_EMAIL — the same permission required to e-mail it, not just any dashboard role", () => {
+    expect(route).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL)");
     expect(route).not.toContain("ownerId");
   });
 

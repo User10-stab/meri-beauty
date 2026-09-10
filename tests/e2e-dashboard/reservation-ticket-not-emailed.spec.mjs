@@ -168,19 +168,22 @@ test.describe("settling a balance e-mails the client a ticket only when the acti
   });
 });
 
-test.describe("the ticket PDF stays behind for staff, and off the client's own reach", () => {
+test.describe("the ticket PDF stays behind SEND_TICKET_EMAIL, and off the client's own reach", () => {
   test.afterAll(async () => {
     await disconnect();
   });
 
-  test("staff can still reprint it; the reservation's own owner cannot fetch or see it any more", async ({
+  test("only a staff member holding SEND_TICKET_EMAIL can reprint it; a plain staff session and the reservation's own owner cannot", async ({
     browser,
     request,
   }) => {
     test.setTimeout(120_000);
 
     const admin = await seedAdmin({ label: "ticketaccess" });
+    // Deliberately without SEND_TICKET_EMAIL — reprinting used to be open to
+    // any dashboard role; it now needs the same permission as e-mailing it.
     const staff = await seedStaff({ label: "ticketaccess-staff", permissions: ["APPOINTMENTS"] });
+    const privilegedStaff = await seedStaff({ label: "ticketaccess-privileged", permissions: ["APPOINTMENTS", "SEND_TICKET_EMAIL"] });
     const customer = await seedCustomer({ label: "ticketaccess" });
 
     // Already paid in full — a Payment with a real collection, the shape the
@@ -197,27 +200,32 @@ test.describe("the ticket PDF stays behind for staff, and off the client's own r
       price: 60,
     });
 
-    // STAFF, not admin: canAccessDashboard gates this route on role alone, so
-    // the persona that matters to prove is the one this whole change is
-    // about — a STAFF/animator session, not just an admin's.
     const staffContext = await browser.newContext();
     const staffPage = await staffContext.newPage();
     await loginAs(staffPage, staff.credentials);
+
+    const privilegedContext = await browser.newContext();
+    const privilegedPage = await privilegedContext.newPage();
+    await loginAs(privilegedPage, privilegedStaff.credentials);
 
     const customerContext = await browser.newContext();
     const customerPage = await customerContext.newPage();
     await loginAs(customerPage, customerCredentials(customer));
 
-    // ── Staff/dashboard reprint still works ────────────────────────────────
-    // A generous timeout on this first call only: react-pdf renders through a
-    // Next dev route that has to compile on its first hit, which can outrun
-    // the config's default 15s action timeout.
-    const staffResponse = await staffPage.request.get(`/api/payments/${payment.id}/ticket`, { timeout: 60_000 });
-    expect(staffResponse.status()).toBe(200);
-    expect(staffResponse.headers()["content-type"]).toMatch(PDF);
-    expect((await staffResponse.body()).subarray(0, 4).toString()).toBe("%PDF");
+    // ── A staff member without SEND_TICKET_EMAIL cannot reprint it either ──
+    const staffResponse = await staffPage.request.get(`/api/payments/${payment.id}/ticket`);
+    expect(staffResponse.status(), "a staff member without SEND_TICKET_EMAIL could still generate the ticket").toBe(403);
 
-    // ── The reservation's own owner is refused — the one thing that changed ─
+    // ── A staff member who does hold the permission still can ─────────────
+    // A generous timeout on this call only: react-pdf renders through a Next
+    // dev route that has to compile on its first hit, which can outrun the
+    // config's default 15s action timeout.
+    const privilegedResponse = await privilegedPage.request.get(`/api/payments/${payment.id}/ticket`, { timeout: 60_000 });
+    expect(privilegedResponse.status()).toBe(200);
+    expect(privilegedResponse.headers()["content-type"]).toMatch(PDF);
+    expect((await privilegedResponse.body()).subarray(0, 4).toString()).toBe("%PDF");
+
+    // ── The reservation's own owner is refused too ─────────────────────────
     const ownerResponse = await customerPage.request.get(`/api/payments/${payment.id}/ticket`);
     expect(ownerResponse.status(), "a client could still download their own ticket").toBe(403);
 
@@ -239,6 +247,7 @@ test.describe("the ticket PDF stays behind for staff, and off the client's own r
     ).toHaveCount(0);
 
     await staffContext.close();
+    await privilegedContext.close();
     await customerContext.close();
   });
 });

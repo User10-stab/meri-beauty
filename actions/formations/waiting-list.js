@@ -17,7 +17,7 @@ import {
   buildTermsAcceptanceUpdate,
   recordTermsAcceptance,
 } from "@/lib/terms-consent";
-import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
+import { isValidVatFormat, isViesOutage, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
 import { hasReusableVatValidation } from "@/lib/tax-policy";
 
 /**
@@ -100,15 +100,18 @@ export async function joinFormationWaitingList({ sessionId, customerInfo: submit
         };
       }
       if (!hasReusableVatValidation(user, vatNumber)) {
+        // While VIES is unreachable a well-formed number is accepted
+        // provisionally (isViesOutage) so the waiting-list signup still goes
+        // through; a confirmed rejection or bad format still blocks.
         const viesResult = await verifyVatWithVies(vatNumber);
-        if (!viesResult.success) {
+        if (!viesResult.success && !isViesOutage(viesResult)) {
           return {
             success: false,
             message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
             field: "vatNumber",
           };
         }
-        if (!viesResult.valid) {
+        if (viesResult.success && !viesResult.valid) {
           return {
             success: false,
             message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",

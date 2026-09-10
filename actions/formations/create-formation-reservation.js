@@ -9,7 +9,7 @@ import bcrypt from "bcrypt";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode } from "@/lib/promo-codes";
-import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
+import { isValidVatFormat, isViesOutage, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
 import { validateCustomerIdentity, validateBillingAddress } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
@@ -290,13 +290,12 @@ export async function createFormationReservation(data) {
     const phone = customerInfo.phone?.trim() || "";
     const vatNumber = customerInfo.vatNumber?.trim() ? normalizeVatNumber(customerInfo.vatNumber) : null;
     let user = authenticatedUser ?? await prisma.user.findFirst({ where: { email, isDeleted: false } });
-    // Never persist a VAT number nobody has confirmed is real — it ends up
-    // printed on the invoice as the customer's basis for a tax deduction.
-    // Same strict gate as the profile-settings save (updateMyVatNumber):
-    // VIES must actively confirm it, a network error/timeout blocks too,
-    // not just a confirmed-invalid number. Consistency across every entry
-    // point beats the alternative (silently accepting an unconfirmed number
-    // whenever VIES happens to be slow) — the customer can just retry.
+    // Never persist a VAT number VIES has actively rejected — a confirmed
+    // "not registered" answer, or a bad format, still blocks the booking.
+    // While VIES itself is unreachable (isViesOutage), a well-formed number
+    // is accepted provisionally so the booking still completes; tax then
+    // follows the country code (BE 21%, foreign-EU 0%) and VIES re-checks on
+    // the customer's next sale.
     let vatNumberToSave = null;
     // Captured alongside the number — see the identical fix in
     // actions/workshops/create-workshop-reservation.js. Storing the number
@@ -314,20 +313,22 @@ export async function createFormationReservation(data) {
       vatNumberToSave = vatNumber;
       if (!hasReusableVatValidation(user, vatNumber)) {
         const viesResult = await verifyVatWithVies(vatNumber);
-        if (!viesResult.success) {
+        if (!viesResult.success && !isViesOutage(viesResult)) {
           return {
             success: false,
             message: viesResult.message || "Impossible de vérifier ce numéro de TVA pour le moment. Réessayez.",
             field: "vatNumber",
           };
         }
-        if (!viesResult.valid) {
+        if (viesResult.success && !viesResult.valid) {
           return {
             success: false,
             message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES.",
             field: "vatNumber",
           };
         }
+        // On a VIES outage viesResult carries no name/address — the number is
+        // saved provisionally (vatValidatedAt set, name null).
         vatValidation = {
           vatValidatedAt: new Date(),
           vatValidationName: viesResult.name ?? null,

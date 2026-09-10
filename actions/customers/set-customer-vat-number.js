@@ -4,12 +4,15 @@ import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
-import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
+import { isValidVatFormat, isViesOutage, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
 import { writeAuditLog, AUDIT_ACTIONS } from "@/lib/audit-log";
 
 /**
- * Admin customer VAT editing follows the same VIES gate as self-service.
- * A number is never marked as validated from format alone.
+ * Admin customer VAT editing follows the same VIES gate as self-service:
+ * a confirmed "not registered" or a bad format is rejected. While VIES is
+ * unreachable a well-formed number is accepted provisionally (the audit log
+ * records it as VIES_OUTAGE_PROVISIONAL) and re-checked on the customer's
+ * next sale.
  *
  * @param {string} customerId
  * @param {string} vatNumber - pass "" to clear a previously saved number.
@@ -30,14 +33,16 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
   }
 
   let viesResult = null;
+  let viesUnavailable = false;
   if (trimmed) {
     viesResult = await verifyVatWithVies(trimmed);
-    if (!viesResult.success) {
+    if (!viesResult.success && !isViesOutage(viesResult)) {
       return { success: false, message: viesResult.message || "Impossible de vérifier ce numéro auprès de VIES. Réessayez." };
     }
-    if (!viesResult.valid) {
+    if (viesResult.success && !viesResult.valid) {
       return { success: false, message: "Ce numéro de TVA n'est pas reconnu comme actif par le registre européen VIES." };
     }
+    viesUnavailable = isViesOutage(viesResult);
   }
 
   try {
@@ -65,7 +70,9 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
         entityId: customerId,
         before: { vatNumber: existing.vatNumber },
         after: { vatNumber: trimmed },
-        metadata: { verificationSource: trimmed ? "VIES" : "CLEARED" },
+        metadata: {
+          verificationSource: !trimmed ? "CLEARED" : viesUnavailable ? "VIES_OUTAGE_PROVISIONAL" : "VIES",
+        },
         actor: session.user,
       });
     });
@@ -73,9 +80,11 @@ export async function setCustomerVatNumberManually(customerId, vatNumber) {
     revalidatePath("/dashboard/customers");
     return {
       success: true,
-      message: trimmed
-        ? "Numéro de TVA vérifié auprès de VIES et enregistré."
-        : "Numéro de TVA supprimé.",
+      message: !trimmed
+        ? "Numéro de TVA supprimé."
+        : viesUnavailable
+          ? "VIES est indisponible : numéro enregistré provisoirement, il sera revérifié à la prochaine vente."
+          : "Numéro de TVA vérifié auprès de VIES et enregistré.",
     };
   } catch (error) {
     console.error("[setCustomerVatNumberManually]", error);

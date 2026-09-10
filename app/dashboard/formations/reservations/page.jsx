@@ -1,5 +1,5 @@
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, isTillCashOperator } from "@/lib/authorization";
 import { getFormationReservations } from "@/actions/formations/get-reservations";
 import { ReservationsPageClient } from "@/components/dashboard/formations/ReservationsPageClient";
 
@@ -35,7 +35,11 @@ export default async function FormationReservationsPage() {
         </div>
       )}
 
-      <ReservationsPageClient initialReservations={reservations} userRole={user.role} />
+      <ReservationsPageClient
+        initialReservations={reservations}
+        userRole={user.role}
+        canCollectCash={isTillCashOperator(user)}
+      />
     </div>
   );
 }

@@ -4,7 +4,10 @@ import { collectionTicketFields, consolidatedTicketFields } from "@/lib/cash-boo
 const mocks = vi.hoisted(() => ({ payment: vi.fn(), salon: vi.fn(), auth: vi.fn(), render: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: { payment: { findUnique: mocks.payment }, salon: { findUnique: mocks.salon } } }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
-vi.mock("@/lib/authorization", () => ({ canAccessDashboard: (role) => role === "ADMIN" }));
+vi.mock("@/lib/authorization", () => ({
+  hasDashboardPermission: async (user) => user?.role === "ADMIN",
+  STAFF_PERMISSIONS: { SEND_TICKET_EMAIL: "SEND_TICKET_EMAIL" },
+}));
 vi.mock("@/lib/pdf/render", () => ({ renderTicketPdf: mocks.render }));
 vi.mock("@/lib/cash-book/reservation-tickets", () => ({ describeReservationPayment: () => "Prestation" }));
 import { GET } from "@/app/api/payments/[id]/ticket/route";
@@ -93,9 +96,10 @@ describe("consolidated receipt for a whole payment", () => {
   });
 });
 
-// Staff/dashboard reprint only — a client can no longer fetch their own
-// ticket, so every success case here authenticates as staff (ADMIN, per the
-// canAccessDashboard mock above).
+// SEND_TICKET_EMAIL-gated reprint only — a client can no longer fetch their
+// own ticket, so every success case here authenticates as staff (ADMIN, per
+// the hasDashboardPermission mock above, which passes admins the same way
+// the real implementation does).
 describe("reservation ticket reprints", () => {
   beforeEach(() => {
     mocks.auth.mockResolvedValue({ user: { id: "staff-1", role: "ADMIN" } });

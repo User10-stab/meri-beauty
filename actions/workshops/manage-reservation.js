@@ -16,6 +16,7 @@ import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-wor
 import { issueCreditNote, issueInvoice, supersedeInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
+import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
 import { changeReservationSeatsFree } from "@/lib/reservations/change-reservation-seats";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
@@ -881,10 +882,25 @@ export async function completeWorkshopReservation(
     finalTotal,
     adjustmentReason,
     actorId: session.user.id,
+    actor: session.user,
   });
 
-  if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
-  return result;
+  if (result.success) {
+    revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
+    // Gated purely on the acting staff member's SEND_TICKET_EMAIL
+    // permission — sendTicketByEmail re-derives auth() itself and checks it
+    // internally, so no separate permission check is needed here. Fire-and-
+    // forget: a ticket failure must never turn a successful settlement into
+    // an error response. Only when a balance was actually collected — a
+    // booking closed with nothing new to collect gets nothing new sent.
+    if (result.balance > 0) {
+      sendTicketByEmail(result.paymentId, { transactionId: result.transactionId }).catch((err) =>
+        console.error("[completeWorkshopReservation] ticket send failed", err),
+      );
+    }
+  }
+  const { paymentId, transactionId, balance, ...publicResult } = result;
+  return publicResult;
 }
 
 /** Records a no-show. Never refunds — the deposit is kept by design. */

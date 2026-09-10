@@ -73,11 +73,16 @@ const EMPTY_BUYER = {
 export function CounterBookingComposer({
   canCreateWalkInService = true,
   canCreateSessionBooking = true,
+  canCollectCash = false,
   pendingService,
   onConsumePendingService,
   pendingSession,
   onConsumePendingSession,
 }) {
+  // Only Marie / an admin puts cash into the Livre de caisse. For everyone
+  // else the counter payment is recorded off-till by the server (see
+  // isTillCashOperator), so the till-session gate never applies to them.
+  const tillGateApplies = canCollectCash;
   // Shared by both modes — one till, one open/closed state regardless of
   // which form (SERVICE or SESSION) is currently rendered.
   const { open: cashSessionOpen, markOpen: markCashSessionOpen, markClosed: markCashSessionClosed } = useCashSessionOpen();
@@ -439,11 +444,11 @@ export function CounterBookingComposer({
             {["CASH", "EXTERNAL_TERMINAL"].map((value) => <label key={value} className="flex items-center gap-1.5 text-sm"><input type="radio" checked={method === value} onChange={() => setMethod(value)} />{value === "CASH" ? "Espèces" : "Carte — terminal"}</label>)}
           </div>
           {method === "EXTERNAL_TERMINAL" && <input required value={terminalReference} onChange={(e) => setTerminalReference(e.target.value)} maxLength={100} placeholder="Référence du ticket du terminal" aria-label="Référence du ticket du terminal" className="h-10 w-full rounded-[7px] border border-stroke bg-white px-3 text-sm dark:border-dark-3 dark:bg-dark-2" />}
-          {method === "CASH" && !cashSessionOpen && <CashSessionGate onOpened={markCashSessionOpen} />}
+          {tillGateApplies && method === "CASH" && !cashSessionOpen && <CashSessionGate onOpened={markCashSessionOpen} />}
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke pt-3 dark:border-dark-3">
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={received} onChange={(e) => setReceived(e.target.checked)} />J&apos;ai bien reçu {money(finalTotal)}</label>
-            <button type="submit" disabled={saving || !received || (method === "CASH" && !cashSessionOpen)} className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving && <Loader2 className="h-4 w-4 animate-spin" />}{saving ? "Encaissement…" : "Encaisser et enregistrer"}</button>
+            <button type="submit" disabled={saving || !received || (tillGateApplies && method === "CASH" && !cashSessionOpen)} className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving && <Loader2 className="h-4 w-4 animate-spin" />}{saving ? "Encaissement…" : "Encaisser et enregistrer"}</button>
           </div>
         </form>
       )}
@@ -523,7 +528,7 @@ export function CounterBookingComposer({
               className="h-10 w-full rounded-[7px] border border-stroke bg-white px-3 text-sm dark:border-dark-3 dark:bg-dark-2"
             />
           )}
-          {sessionMethod === "CASH" && !cashSessionOpen && <CashSessionGate onOpened={markCashSessionOpen} />}
+          {tillGateApplies && sessionMethod === "CASH" && !cashSessionOpen && <CashSessionGate onOpened={markCashSessionOpen} />}
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke pt-3 dark:border-dark-3">
             <label className="flex items-center gap-2 text-sm">
@@ -532,7 +537,7 @@ export function CounterBookingComposer({
             </label>
             <button
               type="submit"
-              disabled={sessionSaving || !sessionReceived || (sessionMethod === "CASH" && !cashSessionOpen)}
+              disabled={sessionSaving || !sessionReceived || (tillGateApplies && sessionMethod === "CASH" && !cashSessionOpen)}
               className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
             >
               {sessionSaving && <Loader2 className="h-4 w-4 animate-spin" />}

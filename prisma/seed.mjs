@@ -146,6 +146,26 @@ async function main() {
       console.log(" Salon legal identity already complete.");
     }
   }
+
+  // ==========================
+  // Ensure default notification recipient
+  // ==========================
+  // The salon's own address, offered (never pre-selected) in the Operations
+  // delivery dialog as an extra recipient for a B2B invoice / credit note.
+  // Idempotent: created once, then left alone so an admin's later edits or
+  // deletion of this row stick.
+  const defaultRecipientEmail = "contact@meribeautystudio.com";
+  const existingRecipient = await prisma.notificationRecipient.findUnique({
+    where: { email: defaultRecipientEmail },
+  });
+  if (!existingRecipient) {
+    await prisma.notificationRecipient.create({
+      data: { email: defaultRecipientEmail, label: "Contact salon", isDefault: true },
+    });
+    console.log(" Default notification recipient created.");
+  } else {
+    console.log(" Default notification recipient already exists.");
+  }
 }
 
 main()

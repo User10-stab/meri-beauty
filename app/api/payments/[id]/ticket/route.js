@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { canAccessDashboard } from "@/lib/authorization";
+import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { buildPaymentTicket } from "@/lib/cash-book/build-payment-ticket";
 
@@ -31,12 +31,12 @@ export const runtime = "nodejs";
  * A boutique/POS order keeps its own route (app/api/orders/[id]/ticket) —
  * real per-item line items, and it must work even before any Payment exists.
  *
- * Staff/dashboard access only — no client self-service download. Neither
- * settleReservation nor completeAppointment auto-e-mail this ticket to the
- * customer any more; a staff member granted STAFF_PERMISSIONS.SEND_TICKET_EMAIL
- * can still e-mail it manually, via actions/payments/send-ticket-email.js,
- * which shares this route's ticket assembly (lib/cash-book/build-payment-ticket.js)
- * but is a deliberate, permission-gated, one-off action — not this reprint.
+ * Gated on the same STAFF_PERMISSIONS.SEND_TICKET_EMAIL permission as
+ * actions/payments/send-ticket-email.js, which shares this route's ticket
+ * assembly (lib/cash-book/build-payment-ticket.js) — a staff member who
+ * isn't allowed to put a reservation ticket in a client's inbox shouldn't be
+ * able to generate/download the same document another way either. No client
+ * self-service download.
  */
 export async function GET(req, { params }) {
   const session = await auth();
@@ -46,7 +46,7 @@ export async function GET(req, { params }) {
 
   const { id } = await params;
 
-  if (!canAccessDashboard(session.user.role)) {
+  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL))) {
     return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
   }
 

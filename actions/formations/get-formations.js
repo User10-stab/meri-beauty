@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { sessionOccupancyByIds, OCCUPANCY_KINDS } from "@/lib/reservations/session-occupancy";
 
 /**
  * Récupère toutes les formations pour le tableau de bord.
@@ -36,9 +37,12 @@ export async function getFormations() {
       orderBy: { createdAt: "desc" },
       include: {
         animator: true,
-        sessions: { include: { animator: true } },
+        sessions: { include: { animator: true }, orderBy: { startDate: "asc" } },
       },
     });
+
+    const sessionIds = formations.flatMap((formation) => formation.sessions.map((s) => s.id));
+    const occupancy = await sessionOccupancyByIds(prisma, { kind: OCCUPANCY_KINDS.FORMATION, sessionIds });
 
     const serializedData = formations.map((formation) => {
       const isAssigned = Boolean(
@@ -48,7 +52,26 @@ export async function getFormations() {
       );
       const canEdit = session.user.role !== "STAFF" || formation.createdById === session.user.id || isAssigned;
       const canDelete = session.user.role !== "STAFF" || formation.createdById === session.user.id;
-      return { ...serializeDecimalFields(formation), canEdit, canDelete };
+
+      // Prochaine séance programmée (non annulée), avec ses places restantes
+      // — une formation PUBLIC peut avoir plusieurs séances à des capacités
+      // différentes.
+      const upcoming = formation.sessions
+        .filter((s) => s.status === "SCHEDULED")
+        .map((s) => ({
+          id: s.id,
+          startDate: s.startDate,
+          capacitySeats: s.capacity,
+          remainingSeats: s.capacity - (occupancy.get(s.id) ?? 0),
+        }));
+
+      return {
+        ...serializeDecimalFields(formation),
+        canEdit,
+        canDelete,
+        nextSession: upcoming[0] ?? null,
+        upcomingSessionsCount: upcoming.length,
+      };
     });
 
     return { success: true, data: serializedData };

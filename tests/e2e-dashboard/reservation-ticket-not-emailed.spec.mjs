@@ -6,24 +6,30 @@ import { requireMailpit, assertNoEmail } from "../e2e-money/fixtures/mailpit.mjs
 import { seedAdmin, seedStaff, seedAppointment } from "./fixtures/seed-dashboard.mjs";
 
 /**
- * No client-facing "ticket" survives a balance settlement any more.
+ * By default, settling a balance stays silent for the client — but "by
+ * default" now means "when the acting staff member does not hold
+ * SEND_TICKET_EMAIL", not "always."
  *
- * Before this change, completing an appointment (or an atelier/formation) that
- * still owed money auto-e-mailed the customer a till-style "Votre ticket —
- * solde réglé" PDF — from `completeAppointment`/`settleReservation` directly,
- * and again in a once-per-till-close batch. That happened unconditionally,
- * whether the settlement was self-service or driven by staff at the counter
- * (`actions/counter/walk-in-service.js` calls straight into
- * `completeAppointment`, with nothing distinguishing who is acting). The
- * document itself — a till receipt, `lib/pdf/TicketDocument.jsx` — is kept
- * for internal cash-book/reprint purposes, but it must never reach the
- * client again: not by e-mail, and not by self-service download.
+ * `completeAppointment`/`settleReservation` both auto-e-mail a ticket after
+ * settlement again, via the same shared, permission-gated
+ * `sendTicketByEmail` (`actions/payments/send-ticket-email.js`) the manual
+ * "Envoyer par e-mail" button already used — but only when the settling
+ * staff member holds `SEND_TICKET_EMAIL` (admins/owners always pass). This
+ * spec pins the OFF side of that gate: the staff member seeded below holds
+ * only `APPOINTMENTS`, so no e-mail should go out. `send-ticket-email.spec.mjs`
+ * and `settlement-auto-ticket-email.spec.mjs` pin the ON side — a staff
+ * member who does hold the permission gets an automatic send, with no
+ * manual click needed.
  *
- * tests/critical/counter-adjustment-documents.test.js and
- * reservation-ticket-at-close-contracts.test.js pin the source-level half of
- * this (the removed code paths, by grepping for them). Neither can tell
- * whether a real settlement, run through the real dashboard, actually stays
- * silent — which is the only thing a customer would ever notice. This asks a
+ * The once-per-till-close batch sender stays permanently removed
+ * (`reservation-ticket-at-close-contracts.test.js` pins that), and the ticket
+ * PDF itself still never reaches the client by self-service download — only
+ * the automatic/manual e-mail sends changed.
+ *
+ * tests/critical/counter-adjustment-documents.test.js pins the source-level
+ * half of this contract. It cannot tell whether a real settlement, run
+ * through the real dashboard, actually stays silent for a no-permission staff
+ * member — which is the only thing a customer would ever notice. This asks a
  * running server and a real inbox.
  */
 
@@ -36,12 +42,12 @@ function rowFor(page, customerName) {
   return page.locator("tr").filter({ hasText: customerName }).first();
 }
 
-test.describe("settling a balance never e-mails the client a ticket", () => {
+test.describe("settling a balance e-mails the client a ticket only when the acting staff holds SEND_TICKET_EMAIL", () => {
   test.afterAll(async () => {
     await disconnect();
   });
 
-  test("a STAFF/animator session completing an on-site balance records the money but sends no ticket e-mail", async ({
+  test("a STAFF/animator session without SEND_TICKET_EMAIL completes an on-site balance and records the money, but no ticket e-mail goes out", async ({
     browser,
   }) => {
     test.setTimeout(180_000);
@@ -52,7 +58,8 @@ test.describe("settling a balance never e-mails the client a ticket", () => {
     // day to day. STAFF is scoped to their own book (see
     // appointment-completion-guards.spec.mjs's "a staff member's book is
     // their own"), so this appointment has to belong to the staff member who
-    // then logs in and completes it themselves.
+    // then logs in and completes it themselves. Deliberately no
+    // SEND_TICKET_EMAIL here — that's the whole point of this spec.
     const admin = await seedAdmin({ label: "ticketmail" });
     const staff = await seedStaff({ label: "ticketmail-staff", permissions: ["APPOINTMENTS"] });
     const customer = await seedCustomer({ label: "ticketmail" });
@@ -161,19 +168,22 @@ test.describe("settling a balance never e-mails the client a ticket", () => {
   });
 });
 
-test.describe("the ticket PDF stays behind for staff, and off the client's own reach", () => {
+test.describe("the ticket PDF stays behind SEND_TICKET_EMAIL, and off the client's own reach", () => {
   test.afterAll(async () => {
     await disconnect();
   });
 
-  test("staff can still reprint it; the reservation's own owner cannot fetch or see it any more", async ({
+  test("only a staff member holding SEND_TICKET_EMAIL can reprint it; a plain staff session and the reservation's own owner cannot", async ({
     browser,
     request,
   }) => {
     test.setTimeout(120_000);
 
     const admin = await seedAdmin({ label: "ticketaccess" });
+    // Deliberately without SEND_TICKET_EMAIL — reprinting used to be open to
+    // any dashboard role; it now needs the same permission as e-mailing it.
     const staff = await seedStaff({ label: "ticketaccess-staff", permissions: ["APPOINTMENTS"] });
+    const privilegedStaff = await seedStaff({ label: "ticketaccess-privileged", permissions: ["APPOINTMENTS", "SEND_TICKET_EMAIL"] });
     const customer = await seedCustomer({ label: "ticketaccess" });
 
     // Already paid in full — a Payment with a real collection, the shape the
@@ -190,27 +200,32 @@ test.describe("the ticket PDF stays behind for staff, and off the client's own r
       price: 60,
     });
 
-    // STAFF, not admin: canAccessDashboard gates this route on role alone, so
-    // the persona that matters to prove is the one this whole change is
-    // about — a STAFF/animator session, not just an admin's.
     const staffContext = await browser.newContext();
     const staffPage = await staffContext.newPage();
     await loginAs(staffPage, staff.credentials);
+
+    const privilegedContext = await browser.newContext();
+    const privilegedPage = await privilegedContext.newPage();
+    await loginAs(privilegedPage, privilegedStaff.credentials);
 
     const customerContext = await browser.newContext();
     const customerPage = await customerContext.newPage();
     await loginAs(customerPage, customerCredentials(customer));
 
-    // ── Staff/dashboard reprint still works ────────────────────────────────
-    // A generous timeout on this first call only: react-pdf renders through a
-    // Next dev route that has to compile on its first hit, which can outrun
-    // the config's default 15s action timeout.
-    const staffResponse = await staffPage.request.get(`/api/payments/${payment.id}/ticket`, { timeout: 60_000 });
-    expect(staffResponse.status()).toBe(200);
-    expect(staffResponse.headers()["content-type"]).toMatch(PDF);
-    expect((await staffResponse.body()).subarray(0, 4).toString()).toBe("%PDF");
+    // ── A staff member without SEND_TICKET_EMAIL cannot reprint it either ──
+    const staffResponse = await staffPage.request.get(`/api/payments/${payment.id}/ticket`);
+    expect(staffResponse.status(), "a staff member without SEND_TICKET_EMAIL could still generate the ticket").toBe(403);
 
-    // ── The reservation's own owner is refused — the one thing that changed ─
+    // ── A staff member who does hold the permission still can ─────────────
+    // A generous timeout on this call only: react-pdf renders through a Next
+    // dev route that has to compile on its first hit, which can outrun the
+    // config's default 15s action timeout.
+    const privilegedResponse = await privilegedPage.request.get(`/api/payments/${payment.id}/ticket`, { timeout: 60_000 });
+    expect(privilegedResponse.status()).toBe(200);
+    expect(privilegedResponse.headers()["content-type"]).toMatch(PDF);
+    expect((await privilegedResponse.body()).subarray(0, 4).toString()).toBe("%PDF");
+
+    // ── The reservation's own owner is refused too ─────────────────────────
     const ownerResponse = await customerPage.request.get(`/api/payments/${payment.id}/ticket`);
     expect(ownerResponse.status(), "a client could still download their own ticket").toBe(403);
 
@@ -232,6 +247,7 @@ test.describe("the ticket PDF stays behind for staff, and off the client's own r
     ).toHaveCount(0);
 
     await staffContext.close();
+    await privilegedContext.close();
     await customerContext.close();
   });
 });

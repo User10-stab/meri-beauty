@@ -84,6 +84,7 @@ export function CalendarPageClient({
   staff,
   closures = [],
   isAdmin,
+  canCollectCash = false,
 }) {
   // ── Translations ─────────────────────────────────────────────────────────
   const t = useTranslations();
@@ -333,6 +334,7 @@ export function CalendarPageClient({
         onClose={handleDrawerClose}
         onAppointmentUpdated={handleAppointmentUpdated}
         isAdmin={isAdmin}
+        canCollectCash={canCollectCash}
       />
 
       {/* ── Add manual appointment ───────────────────────────────────────── */}

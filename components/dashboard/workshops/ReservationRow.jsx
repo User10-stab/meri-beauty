@@ -65,6 +65,22 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow }) {
       <td className="px-4 py-4 pl-5 align-middle min-w-[200px]">
         <span className="block font-medium text-gray-800">{row.session?.workshop?.title}</span>
         <span className="text-xs text-gray-400">{formatSessionDate(row.session?.startDate)}</span>
+        {typeof row.session?.remainingSeats === "number" && (
+          <span
+            className={`mt-1 inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-medium border ${
+              row.session.remainingSeats <= 0
+                ? "bg-red-50 text-red-700 border-red-200"
+                : row.session.remainingSeats < 3
+                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+            }`}
+            title={`Capacité de la séance : ${row.session.capacitySeats}`}
+          >
+            {row.session.remainingSeats <= 0
+              ? "Complet"
+              : `${row.session.remainingSeats} place${row.session.remainingSeats > 1 ? "s" : ""} restante${row.session.remainingSeats > 1 ? "s" : ""}`}
+          </span>
+        )}
       </td>
 
       {/* Customer */}

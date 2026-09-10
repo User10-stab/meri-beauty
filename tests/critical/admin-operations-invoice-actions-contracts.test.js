@@ -144,16 +144,24 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(actions).toContain('transactions: { orderBy: { paidAt: "asc" }');
   });
 
-  test("a B2B invoice is delivered through one explicit choice card", () => {
+  test("a B2B invoice is delivered through one channel checklist plus a confirm step", () => {
     const send = source("actions/invoices/send-invoice-email.js");
     expect(send).not.toContain("isBelgianVatNumber");
     expect(send).not.toContain("pas par e-mail direct");
 
     const delivery = source("components/dashboard/operations/DocumentDeliveryDialog.jsx");
+    // Both channels are checkboxes on one card — either, both, or (until a box
+    // is ticked) neither — not two mutually-exclusive action buttons.
     expect(delivery).toContain("Envoyer par e-mail");
     expect(delivery).toContain("Créer dans Billit / Peppol");
-    expect(delivery).toContain("sendInvoiceByEmail(documentRecord.id)");
+    expect(delivery).toContain("useState(false)"); // emailChecked / billitChecked default off
+    // The e-mail send now carries the dialog's recipient choices; the Billit
+    // call is unchanged.
+    expect(delivery).toContain("sendInvoiceByEmail(documentRecord.id, opts)");
     expect(delivery).toContain("sendInvoiceToBillit(documentRecord.id)");
+    // Nothing fires straight from a channel checkbox — a shared confirm step does.
+    expect(delivery).toContain("setConfirming(true)");
+    expect(delivery).toContain("onClick={deliver}");
   });
 
   test("Billit is refused for a B2C invoice or a non-Belgian VAT number, both client-side and server-side", () => {

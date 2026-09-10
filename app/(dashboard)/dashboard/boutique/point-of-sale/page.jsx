@@ -1,6 +1,6 @@
 import { auth } from "@/auth";
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS, hasDashboardPermission } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator } from "@/lib/authorization";
 import { CounterSurface } from "@/components/dashboard/boutique/counter/CounterSurface";
 
 export const metadata = { title: "Caisse — Meri Beauty" };
@@ -40,6 +40,10 @@ export default async function PointOfSalePage() {
       canCreateSessionBooking={canWorkshops || canFormations}
       canAdjustStock={canAdjustStock}
       canOpenCashSession
+      // Only Marie / an admin takes cash into the Livre de caisse; everyone
+      // else's collection is recorded off-till, so the "espèces / carte"
+      // step is hidden from them (server enforces it regardless).
+      canCollectCash={isTillCashOperator(session.user)}
     />
   );
 }

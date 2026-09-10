@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { getDashboardPermissions } from "@/lib/authorization";
 import { countPickupsToVerify } from "@/lib/orders/count-pickups-to-verify";
+import { countUnreadUserNotifications } from "@/lib/notifications";
 
 export const metadata = {
   title: {
@@ -28,11 +29,17 @@ export default async function DashboardLayout({ children }) {
   // to make somebody open the list.
   const pickupsToVerifyCount = await countPickupsToVerify(session.user, dashboardPermissions);
 
+  // Same reasoning as pickupsToVerifyCount above: computed here so the
+  // sidebar badge is right on first paint. The bell icon keeps this in sync
+  // afterwards over Pusher, so a stale count between navigations is harmless.
+  const unreadNotificationsCount = await countUnreadUserNotifications(session.user.id);
+
   return (
     <DashboardShell
       user={session.user}
       dashboardPermissions={dashboardPermissions}
       pickupsToVerifyCount={pickupsToVerifyCount}
+      unreadNotificationsCount={unreadNotificationsCount}
     >
       {children}
     </DashboardShell>

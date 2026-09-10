@@ -36,7 +36,7 @@ describe("selecting a product from the counter search adds it straight to the ti
     // outside the `if (!cashSessionOpen) return (...)` early-return branch —
     // so a product added while the till is closed is simply invisible until
     // a session opens, not lost.
-    const closedBranchStart = cart.indexOf("if (!cashSessionOpen) {");
+    const closedBranchStart = cart.indexOf("if (tillGateApplies && !cashSessionOpen) {");
     const addProductStart = cart.indexOf("const addProductToCart = useCallback");
     expect(closedBranchStart).toBeGreaterThan(-1);
     expect(addProductStart).toBeGreaterThan(-1);

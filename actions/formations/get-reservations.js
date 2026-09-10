@@ -9,6 +9,7 @@ import {
   activityReservationStaffScope,
   getActivityReservationCapabilities,
 } from "@/lib/activity-reservation-access";
+import { sessionOccupancyByIds, OCCUPANCY_KINDS } from "@/lib/reservations/session-occupancy";
 
 /**
  * Récupère toutes les réservations de formations pour le tableau de bord.
@@ -42,9 +43,23 @@ export async function getFormationReservations() {
       getActivityReservationCapabilities(session.user),
     ]);
 
+    const sessionIds = [...new Set(reservations.map((r) => r.session?.id).filter(Boolean))];
+    const occupancy = await sessionOccupancyByIds(prisma, { kind: OCCUPANCY_KINDS.FORMATION, sessionIds });
+
     return {
       success: true,
-      data: serializeDecimalFields(reservations).map((reservation) => ({ ...reservation, ...capabilities })),
+      data: serializeDecimalFields(reservations).map((reservation) => {
+        const { session: reservationSession } = reservation;
+        const capacity = reservationSession?.capacity ?? reservationSession?.formation?.capacity ?? null;
+        const taken = reservationSession ? occupancy.get(reservationSession.id) ?? 0 : 0;
+        return {
+          ...reservation,
+          ...capabilities,
+          session: reservationSession
+            ? { ...reservationSession, capacitySeats: capacity, remainingSeats: capacity != null ? capacity - taken : null }
+            : reservationSession,
+        };
+      }),
     };
   } catch (error) {
     console.error("[getFormationReservations]", error);

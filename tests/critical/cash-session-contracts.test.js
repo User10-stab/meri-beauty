@@ -57,14 +57,18 @@ describe("cash-session wiring", () => {
   });
 
   // 1 Sep 2026: this used to never block — a sale with no till open simply
-  // carried cashSessionId: null forever. Now the counter refuses to ring up
-  // anything (any method) without an open session, closing that permanent
-  // gap; see till-settlement-contracts.test.js for the full contract.
-  test("POS attaches CASH sales to whichever session is open, and refuses to sell at all if none is", () => {
+  // carried cashSessionId: null forever. Now a *till operator's* counter sale
+  // refuses to ring up anything (any method) without an open session, closing
+  // that permanent gap; see till-settlement-contracts.test.js for the full
+  // contract. 9 Sep 2026: a non-operator cashier (see isTillCashOperator)
+  // rings the sale up off-till instead — `useTill` gates the session lookup.
+  test("a till operator's POS CASH sale attaches to the open session, and refuses to sell with none", () => {
+    expect(pos).toContain("const offTill = !isTillCashOperator(guard.session.user)");
     expect(pos).toContain("cashSession.findFirst({");
     expect(pos).toContain("where: { closedAt: null }");
-    expect(pos).toContain('cashSessionId: method === "CASH" ? openCashSession.id : null');
-    expect(pos).toContain('if (!openCashSession) throw new Error("POS_CASH_SESSION_CLOSED")');
+    expect(pos).toContain('const useTill = !offTill && method === "CASH"');
+    expect(pos).toContain("cashSessionId: useTill ? openCashSession.id : null");
+    expect(pos).toContain('if (!offTill && !openCashSession) throw new Error("POS_CASH_SESSION_CLOSED")');
   });
 
   // getCurrentCashSession already orders by openedAt desc — without the same

@@ -46,9 +46,14 @@ const emptyCustomer = {
 export function CounterCart({
   canAdjustStock = false,
   canOpenCashSession = false,
+  canCollectCash = false,
   pendingProduct,
   onConsumePendingProduct,
 }) {
+  // Only Marie / an admin rings a sale into the Livre de caisse. For everyone
+  // else completePointOfSaleSale records the sale off-till (see
+  // isTillCashOperator), so the "open the till first" gate never applies.
+  const tillGateApplies = canCollectCash;
   const router = useRouter();
   const [barcode, setBarcode] = useState("");
   const [productQuery, setProductQuery] = useState("");
@@ -662,7 +667,7 @@ export function CounterCart({
     }
   }
 
-  if (!cashSessionOpen) {
+  if (tillGateApplies && !cashSessionOpen) {
     return (
       <div id="counter-cart" className="mx-auto max-w-md rounded-[10px] border border-stroke bg-white p-8 text-center shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">

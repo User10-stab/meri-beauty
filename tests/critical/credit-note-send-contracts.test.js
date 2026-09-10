@@ -93,16 +93,18 @@ describe("credit-note delivery is a deliberate action from the operation detail"
     expect(rowActions).not.toContain("sendCreditNoteToBillit");
   });
 
-  test("opens the same explicit delivery card for the note", () => {
+  test("opens the same delivery card for the note", () => {
     expect(drawer).toContain('kind: "CREDIT_NOTE"');
     expect(drawer).toContain("Envoyer la note de crédit");
-    expect(delivery).toContain("sendCreditNoteByEmail(documentRecord.id)");
+    expect(delivery).toContain("sendCreditNoteByEmail(documentRecord.id, opts)");
     expect(delivery).toContain("sendCreditNoteToBillit(documentRecord.id)");
     expect(delivery).toContain("Créer dans Billit / Peppol");
   });
 
-  test("Billit handoff asks for confirmation and does not claim automatic Peppol dispatch", () => {
-    expect(delivery).toContain("onClick={() => setConfirmingBillit(true)}");
+  test("delivery asks for one confirmation and does not claim automatic Peppol dispatch", () => {
+    // A shared confirm step gates every send — no channel checkbox fires on its own.
+    expect(delivery).toContain("setConfirming(true)");
+    expect(delivery).toContain("onClick={deliver}");
     expect(delivery).toContain("L'envoi Peppol est ensuite finalisé manuellement dans Billit");
   });
 

@@ -115,21 +115,21 @@ describe("the server applies the same rule, and is the one that matters", () => 
     // handover or a terminal's APPROUVÉ screen. Leaving any one of them on
     // `hasBalanceDue` would let the new path record revenue nobody attested
     // to — which is the exact risk the guards were written for.
-    // A card collection is accepted only as EXTERNAL_TERMINAL, which carries
-    // the terminal's approval and its receipt reference. Bare "CARD" was
-    // accepted with no evidence at all — of 29 card collections in the dev
-    // database exactly one had a reference, so 28 could not be reconciled
-    // against the terminal's end-of-day batch. Cash at least has a piece
-    // number and an open till session behind it. The boutique POS and the
-    // refund path already refused a referenceless card; settlement was the
-    // last place that did not.
-    expect(action).toContain('if (collectsMoney && !["CASH", "EXTERNAL_TERMINAL"].includes(method))');
+    // They apply on the *till operator* path only: `collectsAtTill` is
+    // `collectsMoney && !offTill`, and an off-till collection (see
+    // isTillCashOperator) never enters the drawer, so there is nothing to
+    // attest against. A card collection is accepted only as
+    // EXTERNAL_TERMINAL, which carries the terminal's approval and its
+    // receipt reference; bare "CARD" was accepted with no evidence at all.
+    expect(action).toContain("const offTill = !isTillCashOperator(authCheck.user)");
+    expect(action).toContain("const collectsAtTill = collectsMoney && !offTill");
+    expect(action).toContain('if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL"].includes(method))');
     expect(action, "a card collection was accepted without a terminal reference").not.toContain(
       '["CASH", "CARD", "EXTERNAL_TERMINAL"]',
     );
-    expect(action).toContain('if (collectsMoney && method === "EXTERNAL_TERMINAL"');
-    expect(action).toContain("if (collectsMoney && paymentConfirmed !== true)");
-    // And none are left behind.
+    expect(action).toContain('if (collectsAtTill && method === "EXTERNAL_TERMINAL"');
+    expect(action).toContain("if (collectsAtTill && paymentConfirmed !== true)");
+    // And none are left behind on the raw balance flag.
     expect(action).not.toMatch(/if \(hasBalanceDue &&/);
   });
 

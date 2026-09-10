@@ -6,7 +6,7 @@ import { SidebarProvider } from "./sidebar/sidebar-context";
 import { OnboardingGuard } from "@/components/dashboard/onboarding/OnboardingGuard";
 import { StripeReminderBanner } from "@/components/dashboard/onboarding/StripeReminderBanner";
 
-export function DashboardShell({ user, dashboardPermissions = [], pickupsToVerifyCount = 0, children }) {
+export function DashboardShell({ user, dashboardPermissions = [], pickupsToVerifyCount = 0, unreadNotificationsCount = 0, children }) {
   return (
     <SidebarProvider>
       <OnboardingGuard userRole={user?.role} />
@@ -16,6 +16,7 @@ export function DashboardShell({ user, dashboardPermissions = [], pickupsToVerif
           userRole={user?.role}
           dashboardPermissions={dashboardPermissions}
           pickupsToVerifyCount={pickupsToVerifyCount}
+          unreadNotificationsCount={unreadNotificationsCount}
         />
 
         <div className="min-w-0 flex-1 bg-gray-2 dark:bg-[#020d1a]">

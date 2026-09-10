@@ -774,7 +774,7 @@ export async function completePointOfSaleSale(input) {
     // above (VAT purposes), staff just review and send it afterward from
     // Opérations: over Peppol for a Belgian company (mandatory — Belgium's
     // 2026 structured e-invoicing mandate — see
-    // actions/invoices/send-invoice-billit.js), or by e-mail on demand for
+    // actions/invoices/send-invoice-peppyrus.js), or by e-mail on demand for
     // anyone else (see actions/invoices/send-invoice-email.js). A private
     // customer who asked for nothing gets the same receipt for a different
     // reason: no invoice was ever created for them.

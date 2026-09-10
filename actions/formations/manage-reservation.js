@@ -541,7 +541,7 @@ export async function changeFormationReservationSession(reservationId, newSessio
           }
         }
         // Shaped for OperationDocumentsDialog/DocumentDeliveryDialog
-        // (components/dashboard/operations) — the same PDF-open/e-mail/Billit
+        // (components/dashboard/operations) — the same PDF-open/e-mail/Peppyrus
         // machinery every other invoice and credit note in Operations already
         // uses. Supersession only ever fires for an invoiceable (B2B)
         // customer, so customerType/customerVatNumber are known without an

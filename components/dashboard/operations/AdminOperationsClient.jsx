@@ -98,8 +98,8 @@ function InvoiceStatus({ invoice, customerInvoiceEligible }) {
         <span className="font-medium text-gray-700">{invoice.number}</span>
         {invoice.emailSentAt ? (
           <span className="mt-1 block text-xs text-emerald-700">E-mail envoyé le {date(invoice.emailSentAt)}</span>
-        ) : invoice.billitSentAt ? (
-          <span className="mt-1 block text-xs text-blue-700">Créée dans Billit — à finaliser</span>
+        ) : invoice.peppyrusSentAt ? (
+          <span className="mt-1 block text-xs text-emerald-700">Envoyée via Peppol le {date(invoice.peppyrusSentAt)}</span>
         ) : (
           <span className="mt-1 block text-xs text-amber-700">Non envoyée</span>
         )}
@@ -109,7 +109,7 @@ function InvoiceStatus({ invoice, customerInvoiceEligible }) {
             onClick={() => setDeliveryOpen(true)}
             className="mt-2 inline-flex rounded-lg border border-[#2f3a2e] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#2f3a2e] hover:bg-[#f4f7f3]"
           >
-            {invoice.emailSentAt || invoice.billitSentAt ? "Gérer l'envoi" : "Envoyer la facture"}
+            {invoice.emailSentAt || invoice.peppyrusSentAt ? "Gérer l'envoi" : "Envoyer la facture"}
           </button>
         )}
         {creditNotes.length > 0 && (

@@ -146,7 +146,6 @@ export function ProductDetailClient({ product, initialVariantId }) {
                   fill
                   sizes="(min-width: 1024px) 50vw, 100vw"
                   priority
-                  unoptimized
                   className="object-cover"
                 />
               ) : (
@@ -180,7 +179,7 @@ export function ProductDetailClient({ product, initialVariantId }) {
                       activeImage === i ? "border-[#C8A46A]" : "border-transparent hover:border-neutral-200"
                     }`}
                   >
-                    <Image src={img.path} alt="" fill sizes="64px" unoptimized className="object-cover" />
+                    <Image src={img.path} alt="" fill sizes="64px" className="object-cover" />
                   </button>
                 ))}
               </div>

@@ -183,7 +183,7 @@ function BusinessInfoSection({ salon, onSuccess }) {
       facebook: salon?.facebook ?? "",
       tiktok: salon?.tiktok ?? "",
       rib: salon?.rib ?? "",
-      billitApiKey: salon?.billitApiKey ?? "",
+      peppyrusApiKey: salon?.peppyrusApiKey ?? "",
     },
   });
 
@@ -367,16 +367,16 @@ function BusinessInfoSection({ salon, onSuccess }) {
               </p>
             </div>
             <div>
-              <Label icon={Key}>Clé API Billit (keybellit)</Label>
+              <Label icon={Key}>Clé API Peppyrus</Label>
               <TextInput
-                id="billitApiKey"
+                id="peppyrusApiKey"
                 placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-                error={errors.billitApiKey}
-                {...register("billitApiKey")}
+                error={errors.peppyrusApiKey}
+                {...register("peppyrusApiKey")}
               />
-              <FieldError message={errors.billitApiKey?.message} />
+              <FieldError message={errors.peppyrusApiKey?.message} />
               <p className="mt-1 text-xs text-gray-400 dark:text-dark-5">
-                Remplace la variable d&apos;environnement <code className="rounded bg-gray-100 px-1 dark:bg-dark-3">BILLIT_API_KEY</code> si renseignée.
+                Doit correspondre à l&apos;environnement actif (test ou production — voir <code className="rounded bg-gray-100 px-1 dark:bg-dark-3">PEPPYRUS_BASE_URL</code>). Remplace la variable d&apos;environnement <code className="rounded bg-gray-100 px-1 dark:bg-dark-3">PEPPYRUS_API_KEY</code> si renseignée.
               </p>
             </div>
           </div>

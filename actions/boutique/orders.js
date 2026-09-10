@@ -275,8 +275,9 @@ function serializeOrder(order) {
           issuedAt: order.payment.invoice.issuedAt,
           customerType: order.payment.invoice.customerType,
           customerVatNumber: order.payment.invoice.customerVatNumber,
+          customerEmail: order.payment.invoice.customerEmail,
           emailSentAt: order.payment.invoice.emailSentAt,
-          billitSentAt: order.payment.invoice.billitSentAt,
+          peppyrusSentAt: order.payment.invoice.peppyrusSentAt,
         }
       : null,
     creditNotes: (order.payment?.invoice?.creditNotes ?? []).map((cn) => ({
@@ -285,7 +286,7 @@ function serializeOrder(order) {
       issuedAt: cn.issuedAt,
       totalInclVat: Number(cn.totalInclVat),
       emailSentAt: cn.emailSentAt,
-      billitSentAt: cn.billitSentAt,
+      peppyrusSentAt: cn.peppyrusSentAt,
     })),
     returnRequests: (order.returnRequests ?? []).map((rr) => ({
       id: rr.id,

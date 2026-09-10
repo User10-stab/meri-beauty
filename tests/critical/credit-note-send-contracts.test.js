@@ -7,8 +7,10 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 
 // 1 Sep 2026: an already-issued credit note could only ever be downloaded —
 // there was no way to (re-)send it to the customer, by e-mail or, for a
-// Belgian B2B invoice, via Billit/Peppol. The invoice it corrects already had
+// Belgian B2B invoice, via Peppol. The invoice it corrects already had
 // both; the correcting document did not.
+// 10 Sep 2026: the Peppol channel migrated from Billit to Peppyrus — a live
+// Peppol transmission (POST /message), not a vendor-dashboard staging step.
 describe("an issued credit note can be e-mailed to the customer named on its invoice", () => {
   const send = source("actions/invoices/send-credit-note-email.js");
 
@@ -25,7 +27,7 @@ describe("an issued credit note can be e-mailed to the customer named on its inv
     expect(send).toContain("const invoice = creditNote.invoice;");
   });
 
-  test("allows e-mail for a Belgian B2B credit note as an alternative to Billit/Peppol", () => {
+  test("allows e-mail for a Belgian B2B credit note as an alternative to Peppol (Peppyrus)", () => {
     expect(send).not.toContain("isBelgianVatNumber");
     expect(send).not.toContain("pas par e-mail direct");
   });
@@ -41,14 +43,18 @@ describe("an issued credit note can be e-mailed to the customer named on its inv
   });
 });
 
-describe("a Belgian B2B credit note can be sent to Billit for Peppol delivery, like its invoice", () => {
-  const send = source("actions/invoices/send-credit-note-billit.js");
+describe("a Belgian B2B credit note can be sent to Peppyrus for live Peppol delivery, like its invoice", () => {
+  const send = source("actions/invoices/send-credit-note-peppyrus.js");
 
-  test("creates the order only — never auto-dispatches Peppol/e-mail", () => {
+  test("really transmits over Peppol — calls Peppyrus's own send, not a Billit-style order-creation stub", () => {
+    // Intentionally the OPPOSITE assertion from the old Billit contract:
+    // Billit's /v1/orders was a staging step staff finished by hand later;
+    // Peppyrus's POST /message IS the live transmission, so this action
+    // must actually call it.
     expect(send).toContain('"use server"');
     expect(send).toContain("isAdminRole(session.user.role)");
-    expect(send).toContain("createBillitOrder(payload)");
-    expect(send).not.toMatch(/commands\/send|sendInvoiceViaPeppol/);
+    expect(send).toContain("sendPeppyrusMessage(");
+    expect(send).toContain("buildCreditNoteUbl(");
   });
 
   test("refuses a B2C credit note or a non-Belgian VAT number, mirroring the invoice guard", () => {
@@ -56,29 +62,29 @@ describe("a Belgian B2B credit note can be sent to Billit for Peppol delivery, l
     expect(send).toContain("isBelgianVatNumber(invoice.customerVatNumber)");
   });
 
-  test("is typed as a CreditNote order in Billit, not another Invoice", () => {
-    expect(send).toContain('OrderType: "CreditNote"');
-    expect(send).toContain("RelatedInvoiceNumber: invoice.number");
+  test("is typed as a CreditNote document, not another Invoice", () => {
+    expect(send).toContain("PEPPYRUS_DOCUMENT_TYPE_CREDIT_NOTE");
   });
 
-  test("looks up the buyer's Peppol identifier through the same payment chain as the invoice flow", () => {
+  test("resolves the buyer's Peppol identifier via Peppyrus's own directory, falling back to the stored one", () => {
     expect(send).toContain("prisma.billingProfile.findUnique");
-    expect(send).toContain("parsePeppolIdentifier(peppolRaw)");
+    expect(send).toContain("bestMatchPeppolParticipant(");
+    expect(send).toContain("?? storedPeppolRaw");
   });
 
   test("a successful send records when it happened and is audited", () => {
-    expect(send).toContain("billitOrderId:");
-    expect(send).toContain("billitSentAt: new Date()");
-    expect(send).toContain("AUDIT_ACTIONS.CREDIT_NOTE_SENT_TO_BILLIT");
-    expect(source("lib/audit-log.js")).toContain('CREDIT_NOTE_SENT_TO_BILLIT: "credit_note.sent_to_billit"');
+    expect(send).toContain("peppyrusMessageId:");
+    expect(send).toContain("peppyrusSentAt: new Date()");
+    expect(send).toContain("AUDIT_ACTIONS.CREDIT_NOTE_SENT_TO_PEPPYRUS");
+    expect(source("lib/audit-log.js")).toContain('CREDIT_NOTE_SENT_TO_PEPPYRUS: "credit_note.sent_to_peppyrus"');
   });
 
-  test("CreditNote has its own billitOrderId/billitSentAt columns, mirroring Invoice's", () => {
+  test("CreditNote has its own peppyrusMessageId/peppyrusSentAt columns, mirroring Invoice's", () => {
     const schema = source("prisma/schema.prisma");
     const modelIdx = schema.indexOf("model CreditNote {");
     const model = schema.slice(modelIdx, schema.indexOf("\n}", modelIdx));
-    expect(model).toContain("billitOrderId String?");
-    expect(model).toContain("billitSentAt  DateTime?");
+    expect(model).toContain("peppyrusMessageId String?");
+    expect(model).toContain("peppyrusSentAt    DateTime?");
   });
 });
 
@@ -90,42 +96,64 @@ describe("credit-note delivery is a deliberate action from the operation detail"
   test("keeps the table to one management entry point", () => {
     expect(rowActions).toContain("Voir / gérer");
     expect(rowActions).not.toContain("sendCreditNoteByEmail");
-    expect(rowActions).not.toContain("sendCreditNoteToBillit");
+    expect(rowActions).not.toContain("sendCreditNoteToPeppyrus");
   });
 
   test("opens the same delivery card for the note", () => {
     expect(drawer).toContain('kind: "CREDIT_NOTE"');
     expect(drawer).toContain("Envoyer la note de crédit");
     expect(delivery).toContain("sendCreditNoteByEmail(documentRecord.id, opts)");
-    expect(delivery).toContain("sendCreditNoteToBillit(documentRecord.id)");
-    expect(delivery).toContain("Créer dans Billit / Peppol");
+    expect(delivery).toContain("sendCreditNoteToPeppyrus(documentRecord.id)");
+    expect(delivery).toContain("Envoyer via Peppol (Peppyrus)");
   });
 
-  test("delivery asks for one confirmation and does not claim automatic Peppol dispatch", () => {
+  // 10 Sep 2026: the Peppol channel is only ever offered for a Belgian B2B
+  // customer (the same rule the server enforces). It used to render disabled
+  // for everyone else; now the whole card is conditional so a non-eligible
+  // customer sees a single, unambiguous e-mail channel.
+  test("the Peppol channel is rendered only when the customer is Peppol-eligible", () => {
+    expect(delivery).toContain("canUsePeppyrus && (");
+    expect(delivery).toContain(
+      'const canUsePeppyrus = invoice?.customerType === "B2B" && isBelgianVatNumber(invoice?.customerVatNumber)',
+    );
+  });
+
+  test("the delivery dialog can reach the client's address from every entry point", () => {
+    const actions = source("actions/dashboard/admin-operations.js");
+    const orders = source("actions/boutique/orders.js");
+    // getTransactionDetail (drawer) and serializeOrder (boutique order detail)
+    // must carry customerEmail — the dialog's "envoyer aussi au client" toggle
+    // reads invoice.customerEmail and nothing else.
+    const detailIdx = actions.indexOf("async function getTransactionDetail");
+    expect(actions.slice(detailIdx, actions.indexOf("\n}\n", detailIdx))).toContain("customerEmail: true");
+    expect(orders).toContain("customerEmail: order.payment.invoice.customerEmail");
+  });
+
+  test("delivery asks for one confirmation and warns the send is live, not a vendor-dashboard staging step", () => {
     // A shared confirm step gates every send — no channel checkbox fires on its own.
     expect(delivery).toContain("setConfirming(true)");
     expect(delivery).toContain("onClick={deliver}");
-    expect(delivery).toContain("L'envoi Peppol est ensuite finalisé manuellement dans Billit");
+    expect(delivery).toContain("transmet immédiatement le document sur le réseau Peppol réel");
   });
 
   test("both the entity-grained ledger select and the appointment-transactions hydrator carry delivery timestamps", () => {
     const actions = source("actions/dashboard/admin-operations.js");
-    expect(actions).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
+    expect(actions).toContain("creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true } }");
     // Shared by orders/workshops/formations (PAYMENT_LEDGER_SELECT).
-    expect(actions).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } }");
+    expect(actions).toContain("creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true } }");
     // Appointments stay on their own, event-grained hydrator — same fields,
     // its own copy.
     const appointmentIdx = actions.indexOf("async function hydrateAppointmentTransactions");
     expect(appointmentIdx).toBeGreaterThan(-1);
     const appointmentFn = actions.slice(appointmentIdx, actions.indexOf("\n}\n", appointmentIdx));
-    expect(appointmentFn).toContain("select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true }");
+    expect(appointmentFn).toContain("select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true }");
   });
 
   test("the invoice-status column still displays prior delivery state", () => {
     const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
     expect(client).toContain("invoice.emailSentAt");
     expect(client).toContain("E-mail envoyé le");
-    expect(client).toContain("Créée dans Billit — à finaliser");
+    expect(client).toContain("Envoyée via Peppol le");
   });
 
   // 3 Sep 2026: both delivery channels moved off the row strip (which used

@@ -293,7 +293,7 @@ const PAYMENT_LEDGER_SELECT = Object.freeze({
       number: true,
       totalInclVat: true,
       emailSentAt: true,
-      billitSentAt: true,
+      peppyrusSentAt: true,
       customerType: true,
       customerVatNumber: true,
       // Lets the delivery dialog show the client's own address next to the
@@ -301,7 +301,7 @@ const PAYMENT_LEDGER_SELECT = Object.freeze({
       // DB regardless).
       customerName: true,
       customerEmail: true,
-      creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
+      creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true } },
     },
   },
 });
@@ -410,7 +410,7 @@ async function hydrateAppointmentTransactions(ids) {
   const rows = await prisma.transaction.findMany({
     where: { id: { in: ids } },
     include: {
-      creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true } },
+      creditNote: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true } },
       payment: {
         select: {
           id: true,
@@ -424,14 +424,14 @@ async function hydrateAppointmentTransactions(ids) {
               number: true,
               totalInclVat: true,
               emailSentAt: true,
-              billitSentAt: true,
+              peppyrusSentAt: true,
               customerType: true,
               customerVatNumber: true,
               customerName: true,
               customerEmail: true,
               creditNotes: {
                 orderBy: { issuedAt: "asc" },
-                select: { id: true, number: true, totalInclVat: true, emailSentAt: true, billitSentAt: true },
+                select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true },
               },
             },
           },
@@ -818,7 +818,7 @@ export async function getTransactionDetail(transactionId) {
         settledRefundLeg: {
           select: {
             refundOperation: {
-              select: { id: true, status: true, customerNotifiedAt: true, creditNote: { select: { id: true, number: true, emailSentAt: true, billitSentAt: true } } },
+              select: { id: true, status: true, customerNotifiedAt: true, creditNote: { select: { id: true, number: true, emailSentAt: true, peppyrusSentAt: true } } },
             },
           },
         },
@@ -844,6 +844,7 @@ export async function getTransactionDetail(transactionId) {
                 customerType: true,
                 customerVatNumber: true,
                 customerName: true,
+                customerEmail: true,
                 // Enough to compute fullyCredited via summarizeRefundState
                 // below — not the individual notes themselves, which the
                 // drawer never lists (it shows only this row's own

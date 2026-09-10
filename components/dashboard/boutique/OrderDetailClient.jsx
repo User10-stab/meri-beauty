@@ -350,7 +350,7 @@ export function OrderDetailClient({ order }) {
                     onClick={() => setDeliveryDoc({ kind: "INVOICE", document: order.invoice })}
                     className="flex items-center gap-1.5 rounded-lg border border-[#2f3a2e] px-3 py-2 text-xs font-semibold text-[#2f3a2e] hover:bg-[#f4f7f3]"
                   >
-                    <Mail size={14} /> {order.invoice.emailSentAt || order.invoice.billitSentAt ? "Gérer l'envoi" : "Envoyer"}
+                    <Mail size={14} /> {order.invoice.emailSentAt || order.invoice.peppyrusSentAt ? "Gérer l'envoi" : "Envoyer"}
                   </button>
                 )}
               </div>
@@ -372,7 +372,7 @@ export function OrderDetailClient({ order }) {
                       onClick={() => setDeliveryDoc({ kind: "CREDIT_NOTE", document: cn })}
                       className="flex items-center gap-1.5 rounded-lg border border-violet-200 px-3 py-2 text-xs font-semibold text-violet-900 hover:bg-violet-50"
                     >
-                      <Mail size={14} /> {cn.emailSentAt || cn.billitSentAt ? "Gérer l'envoi" : "Envoyer"}
+                      <Mail size={14} /> {cn.emailSentAt || cn.peppyrusSentAt ? "Gérer l'envoi" : "Envoyer"}
                     </button>
                   )}
                 </div>

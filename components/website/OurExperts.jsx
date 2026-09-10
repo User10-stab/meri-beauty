@@ -279,7 +279,6 @@ function ExpertCard({ stylist, index, t }) {
           alt={stylist.name}
           fill
           sizes="(max-width: 640px) 88vw, 360px"
-          unoptimized
           className={`h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.03] ${isDecorCard ? "object-center" : "object-top"}`}
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-60" />
@@ -294,10 +293,13 @@ function ExpertCard({ stylist, index, t }) {
         <h3 className="font-display text-[17px] font-semibold leading-none tracking-tight text-primary">
           {stylist.name}
         </h3>
+        <p className="mt-1.5 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-[#b89664]">
+          {role}
+        </p>
 
         <div className="mt-4">
           <Link
-            href={`/staff/${stylist.id}`}
+            href="#"
             className="inline-flex items-center gap-1.5 rounded-full border border-[#d9c9a8] px-4 py-[7px] text-[11.5px] font-medium text-[#8c6f3a] transition-all duration-200 hover:border-[#b89664] hover:bg-[#b89664] hover:text-white"
           >
             {t("expertsDiscover", { name: firstName })}

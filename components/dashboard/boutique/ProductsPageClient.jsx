@@ -184,7 +184,7 @@ export function ProductsPageClient({ initialProducts, brands, isAdmin = false })
                   <div className="flex items-center gap-3">
                     <div className="relative flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-gray-100 bg-gray-50">
                       {p.thumbnail ? (
-                        <Image src={p.thumbnail} alt="" fill sizes="40px" unoptimized className="object-cover" />
+                        <Image src={p.thumbnail} alt="" fill sizes="40px" className="object-cover" />
                       ) : (
                         <Package size={16} className="text-gray-300" />
                       )}

@@ -217,7 +217,7 @@ export function CounterBuyerForm({
             <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
               {invoiceRequested
                 ? willBeBelgianB2B
-                  ? "Client avec TVA belge valide — une facture sera créée et numérotée, puis transmise manuellement via Billit/Peppol depuis Opérations. Le client reçoit toujours son ticket par e-mail."
+                  ? "Client avec TVA belge valide — une facture sera créée et numérotée, puis envoyée via Peppol (Peppyrus) depuis Opérations. Le client reçoit toujours son ticket par e-mail."
                   : "Client avec TVA VIES valide — une facture sera créée et numérotée, puis envoyée manuellement depuis Opérations. Le client reçoit toujours son ticket par e-mail."
                 : "Aucune facture ne sera générée pour cette vente — le client recevra uniquement son ticket."}
             </p>
@@ -225,7 +225,7 @@ export function CounterBuyerForm({
           ) : (
             <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
               {willBeBelgianB2B
-                ? "Client avec TVA belge valide — une facture sera créée et numérotée, puis transmise manuellement via Billit/Peppol depuis Opérations. Le client reçoit toujours son ticket par e-mail."
+                ? "Client avec TVA belge valide — une facture sera créée et numérotée, puis envoyée via Peppol (Peppyrus) depuis Opérations. Le client reçoit toujours son ticket par e-mail."
                 : "Client avec TVA VIES valide — une facture sera créée et numérotée, puis envoyée manuellement depuis Opérations. Le client reçoit toujours son ticket par e-mail."}
             </p>
           )

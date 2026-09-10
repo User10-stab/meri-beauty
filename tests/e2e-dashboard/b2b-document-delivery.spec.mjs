@@ -8,10 +8,10 @@ import { seedAdmin, seedActivitySessionOwnedBy, seedFormationReservation } from 
 /**
  * The Operations B2B delivery dialog — the combined-channel redesign.
  *
- * The dialog is now a channel checklist (e-mail, Billit/Peppol, or both)
- * plus a global, admin-managed internal address book offered when e-mail is
- * ticked. Nothing is pre-selected; the admin ticks channels and addresses,
- * then confirms once.
+ * The dialog is now a channel checklist (e-mail, Peppol via Peppyrus, or
+ * both) plus a global, admin-managed internal address book offered when
+ * e-mail is ticked. Nothing is pre-selected; the admin ticks channels and
+ * addresses, then confirms once.
  *
  * tests/critical/b2b-document-delivery-recipients-contracts.test.js pins the
  * server contracts (admin-gating, de-dupe, "client address never comes from
@@ -19,7 +19,9 @@ import { seedAdmin, seedActivitySessionOwnedBy, seedFormationReservation } from 
  * invoice and asserts the wiring a source grep cannot see — the list loads,
  * an address can be added / edited / removed, and "Envoyer" stays disabled
  * until a real recipient is chosen. It stops at the confirm step: no send is
- * fired, so no e-mail leaves and no Billit order is created.
+ * fired, so no e-mail leaves and no Peppyrus message is transmitted (unlike
+ * the old Billit integration, a Peppyrus send IS a live Peppol
+ * transmission — see the confirmation copy assertion below).
  */
 
 const OPERATIONS_PAGE = "/dashboard/operations";
@@ -98,11 +100,11 @@ test.describe("the B2B delivery dialog offers a managed recipient list and a com
 
     // ── Nothing pre-selected ─────────────────────────────────────────────
     const emailBox = dialog.getByRole("checkbox", { name: /envoyer par e-mail/i });
-    const billitBox = dialog.getByRole("checkbox", { name: /créer dans billit/i });
+    const peppyrusBox = dialog.getByRole("checkbox", { name: /envoyer via peppol/i });
     await expect(emailBox).not.toBeChecked();
-    await expect(billitBox).not.toBeChecked();
-    // Billit is enabled here — this invoice is B2B with a Belgian VAT number.
-    await expect(billitBox).toBeEnabled();
+    await expect(peppyrusBox).not.toBeChecked();
+    // Peppyrus is enabled here — this invoice is B2B with a Belgian VAT number.
+    await expect(peppyrusBox).toBeEnabled();
 
     const sendButton = dialog.getByRole("button", { name: "Envoyer", exact: true });
     await expect(sendButton).toBeDisabled();
@@ -137,11 +139,14 @@ test.describe("the B2B delivery dialog offers a managed recipient list and a com
     await expect(dialog.locator("li").filter({ hasText: "Comptabilité" })).toBeVisible({ timeout: 10_000 });
 
     // ── Both channels -> the confirm step names both, then we stop ───────
-    await billitBox.check();
+    await peppyrusBox.check();
     await sendButton.click();
     await expect(dialog.getByText(/Confirmer l'envoi/i)).toBeVisible();
     await expect(dialog.getByText(/E-mail à :/).filter({ hasText: uniqueEmail })).toBeVisible();
-    await expect(dialog.getByText(/L'envoi Peppol est ensuite finalisé manuellement dans Billit/i)).toBeVisible();
+    // The live-send warning: unlike the old Billit copy ("finalisé
+    // manuellement"), this must be unambiguous that confirming transmits
+    // the document over the real Peppol network immediately.
+    await expect(dialog.getByText(/transmet immédiatement le document sur le réseau Peppol réel/i)).toBeVisible();
 
     // Back out — this test moves no money and sends no e-mail.
     await dialog.getByRole("button", { name: /Annuler/ }).click();
@@ -154,6 +159,6 @@ test.describe("the B2B delivery dialog offers a managed recipient list and a com
     // Nothing was ever sent.
     const invoice = await prisma.invoice.findFirst({ where: { customerVatNumber: BE_VAT }, orderBy: { issuedAt: "desc" } });
     expect(invoice.emailSentAt).toBeNull();
-    expect(invoice.billitSentAt).toBeNull();
+    expect(invoice.peppyrusSentAt).toBeNull();
   });
 });

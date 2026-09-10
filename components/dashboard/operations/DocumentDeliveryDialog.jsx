@@ -5,23 +5,25 @@ import { createPortal } from "react-dom";
 import { Check, Loader2, Mail, Pencil, Plus, Send, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { sendInvoiceByEmail } from "@/actions/invoices/send-invoice-email";
-import { sendInvoiceToBillit } from "@/actions/invoices/send-invoice-billit";
+import { sendInvoiceToPeppyrus } from "@/actions/invoices/send-invoice-peppyrus";
 import { sendCreditNoteByEmail } from "@/actions/invoices/send-credit-note-email";
-import { sendCreditNoteToBillit } from "@/actions/invoices/send-credit-note-billit";
+import { sendCreditNoteToPeppyrus } from "@/actions/invoices/send-credit-note-peppyrus";
 import {
   listNotificationRecipients,
   createNotificationRecipient,
   updateNotificationRecipient,
   deleteNotificationRecipient,
 } from "@/actions/invoices/notification-recipients";
-import { isBelgianVatNumber } from "@/lib/billit";
+import { isBelgianVatNumber } from "@/lib/peppyrus";
 
 /**
  * The one explicit delivery choice used throughout Operations. Nothing is
  * sent from a compact table row: the administrator opens this card and
  * deliberately ticks the channels a B2B invoice / credit note should go out
- * on — e-mail, the Belgian Billit/Peppol handoff, or both at once. Nothing
- * is pre-selected.
+ * on — e-mail, the Belgian Peppol (Peppyrus) handoff, or both at once.
+ * Nothing is pre-selected. Ticking Peppyrus and confirming transmits the
+ * document over the live Peppol network immediately — there is no later
+ * staging step to catch a mistake, unlike the old Billit integration.
  *
  * When e-mail is ticked, an internal address book (NotificationRecipient,
  * managed here) is offered alongside an "envoyer aussi au client" toggle:
@@ -35,11 +37,11 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
   const isCreditNote = kind === "CREDIT_NOTE";
   const label = isCreditNote ? "note de crédit" : "facture";
   const number = documentRecord?.number ?? "";
-  const canUseBillit = invoice?.customerType === "B2B" && isBelgianVatNumber(invoice?.customerVatNumber);
+  const canUsePeppyrus = invoice?.customerType === "B2B" && isBelgianVatNumber(invoice?.customerVatNumber);
   const clientEmail = invoice?.customerEmail?.trim() || "";
 
   const [emailChecked, setEmailChecked] = useState(false);
-  const [billitChecked, setBillitChecked] = useState(false);
+  const [peppyrusChecked, setPeppyrusChecked] = useState(false);
   const [includeClient, setIncludeClient] = useState(true);
 
   const [recipients, setRecipients] = useState([]);
@@ -66,7 +68,7 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
   useEffect(() => {
     if (!open) return;
     setEmailChecked(false);
-    setBillitChecked(false);
+    setPeppyrusChecked(false);
     setIncludeClient(true);
     setCheckedIds(new Set());
     setAdding(false);
@@ -102,7 +104,7 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
   );
 
   const emailHasRecipient = (includeClient && clientEmail) || selectedEmails.length > 0;
-  const canSend = !sending && (emailChecked || billitChecked) && (!emailChecked || emailHasRecipient);
+  const canSend = !sending && (emailChecked || peppyrusChecked) && (!emailChecked || emailHasRecipient);
 
   if (!open || !documentRecord || typeof documentRecord.id !== "string") return null;
 
@@ -186,10 +188,10 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
         ? sendCreditNoteByEmail(documentRecord.id, opts)
         : sendInvoiceByEmail(documentRecord.id, opts));
     }
-    if (billitChecked) {
-      outcomes.billit = await (isCreditNote
-        ? sendCreditNoteToBillit(documentRecord.id)
-        : sendInvoiceToBillit(documentRecord.id));
+    if (peppyrusChecked) {
+      outcomes.peppyrus = await (isCreditNote
+        ? sendCreditNoteToPeppyrus(documentRecord.id)
+        : sendInvoiceToPeppyrus(documentRecord.id));
     }
 
     setSending(false);
@@ -201,9 +203,9 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
       if (outcomes.email.success) succeeded.push(outcomes.email.message);
       else failed.push(`E-mail : ${outcomes.email.message}`);
     }
-    if (outcomes.billit) {
-      if (outcomes.billit.success) succeeded.push(outcomes.billit.message);
-      else failed.push(`Billit : ${outcomes.billit.message}`);
+    if (outcomes.peppyrus) {
+      if (outcomes.peppyrus.success) succeeded.push(outcomes.peppyrus.message);
+      else failed.push(`Peppyrus : ${outcomes.peppyrus.message}`);
     }
 
     if (succeeded.length) onDelivered?.();
@@ -221,7 +223,7 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
     // out so pressing "Envoyer" again doesn't re-send it.
     toast.error([...succeeded, ...failed].join(" "));
     if (outcomes.email?.success) setEmailChecked(false);
-    if (outcomes.billit?.success) setBillitChecked(false);
+    if (outcomes.peppyrus?.success) setPeppyrusChecked(false);
   }
 
   return createPortal(
@@ -243,7 +245,9 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
               Envoyer la {label} {number}
             </h2>
             <p className="mt-2 text-sm leading-6 text-gray-600">
-              Cochez les canaux d'envoi souhaités — e-mail, Billit/Peppol, ou les deux. Rien n'est envoyé avant votre confirmation.
+              {canUsePeppyrus
+                ? "Cochez les canaux d'envoi souhaités — e-mail, Peppol (Peppyrus), ou les deux. Rien n'est envoyé avant votre confirmation."
+                : "Cochez pour envoyer le document par e-mail. Rien n'est envoyé avant votre confirmation."}
             </p>
           </div>
           <button
@@ -466,33 +470,34 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
             )}
           </div>
 
-          {/* ── Billit / Peppol channel ────────────────────────────────── */}
+          {/* ── Peppol (Peppyrus) channel ─────────────────────────────── */}
+          {/* Only offered for a Belgian B2B customer — the same rule the
+              server enforces. Hidden (not merely disabled) for anyone else so
+              the card shows a single, unambiguous channel. */}
+          {canUsePeppyrus && (
           <div className="rounded-xl border border-gray-200">
             <label
-              className={`flex items-start gap-3 p-4 ${canUseBillit ? "cursor-pointer" : "cursor-not-allowed"}`}
-              title={
-                canUseBillit
-                  ? "Créer dans Billit pour une livraison Peppol belge"
-                  : "Billit / Peppol est réservé aux clients B2B avec TVA belge."
-              }
+              className="flex cursor-pointer items-start gap-3 p-4"
+              title="Envoyer sur le réseau Peppol via Peppyrus"
             >
               <input
                 type="checkbox"
-                checked={billitChecked}
-                onChange={(e) => setBillitChecked(e.target.checked)}
-                disabled={!canUseBillit || sending}
+                checked={peppyrusChecked}
+                onChange={(e) => setPeppyrusChecked(e.target.checked)}
+                disabled={sending}
                 className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e]"
               />
               <span>
                 <span className="flex items-center gap-2 font-semibold text-gray-900">
-                  <Send size={17} className="text-[#2f3a2e]" /> Créer dans Billit / Peppol
+                  <Send size={17} className="text-[#2f3a2e]" /> Envoyer via Peppol (Peppyrus)
                 </span>
                 <span className="mt-0.5 block text-xs text-gray-500">
-                  Disponible uniquement pour une TVA belge; finalisez ensuite l'envoi Peppol dans Billit.
+                  Disponible uniquement pour une TVA belge; l'envoi transmet immédiatement le document sur le réseau Peppol réel.
                 </span>
               </span>
             </label>
           </div>
+          )}
         </div>
 
         {/* ── Confirm / send ───────────────────────────────────────────── */}
@@ -502,9 +507,9 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
             {emailChecked && (
               <p className="mt-1 text-xs leading-5 text-amber-900">E-mail à : {recipientSummary || "—"}</p>
             )}
-            {billitChecked && (
+            {peppyrusChecked && (
               <p className="mt-1 text-xs leading-5 text-amber-900">
-                Créer dans Billit — vérifiez le client et la TVA. L'envoi Peppol est ensuite finalisé manuellement dans Billit.
+                Cet envoi transmet immédiatement le document sur le réseau Peppol réel — vérifiez le client et la TVA avant de confirmer.
               </p>
             )}
             <div className="mt-3 flex justify-end gap-2">

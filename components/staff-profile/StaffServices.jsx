@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { Clock, Euro, ArrowRight } from "lucide-react";
 import { BotanicalBranch, BotanicalSprig, LeftBotanical } from "@/components/botanical-decorations";
+import QuickBookingModal from "@/components/reservation/QuickBookingModal";
 
 function useInView(threshold = 0.15) {
   const ref = useRef(null);
@@ -41,9 +42,10 @@ function formatPrice(price) {
   return num % 1 === 0 ? `${num} \u20ac` : `${num.toFixed(2)} \u20ac`;
 }
 
-export default function StaffServices({ services, staffId, firstName, categories }) {
+export default function StaffServices({ services, staffId, firstName, categories, staffName, customerSession = null }) {
   const [sectionRef, sectionInView] = useInView();
   const [activeCategory, setActiveCategory] = useState(null);
+  const [quickBooking, setQuickBooking] = useState(null);
 
   if (!services || services.length === 0) {
     return null;
@@ -68,13 +70,13 @@ export default function StaffServices({ services, staffId, firstName, categories
         />
         
         {/* Top right botanical branch */}
-        <BotanicalBranch className="absolute -top-12 -right-16 w-48 h-64 text-[#b89664]/10 transform rotate-12" />
+        <BotanicalBranch className="absolute -top-12 -right-16 w-48 h-64 text-[#b89664]/40 transform rotate-12" />
         
         {/* Bottom left botanical sprig */}
-        <BotanicalSprig className="absolute -bottom-20 -left-12 w-32 h-48 text-[#b89664]/8 transform -rotate-12" />
+        <BotanicalSprig className="absolute -bottom-20 -left-12 w-32 h-48 text-[#b89664]/40 transform -rotate-12" />
         
         {/* Left side botanical accent */}
-        <LeftBotanical className="absolute top-1/3 -left-8 w-20 h-48 text-[#b89664]/8" />
+        <LeftBotanical className="absolute top-1/3 -left-8 w-20 h-48 text-[#b89664]/40" />
         
         {/* Floating decorative circles */}
         <div className="absolute -top-20 -right-20 h-64 w-64 rounded-full border border-[#b89664]/10" />
@@ -106,13 +108,13 @@ export default function StaffServices({ services, staffId, firstName, categories
                 D&eacute;couvrez ses services et r&eacute;servez votre moment beaut&eacute;
               </p>
             </div>
-            <Link
+            {/* <Link
               href="/nos-services"
               className="group inline-flex items-center gap-1.5 text-sm font-medium text-[#2F3A2E] transition-colors hover:text-[#b89664]"
             >
               Toutes les prestations
               <ArrowRight size={16} className="transition-transform group-hover:translate-x-1" />
-            </Link>
+            </Link> */}
           </div>
 
           {/* Category filter pills */}
@@ -189,13 +191,14 @@ export default function StaffServices({ services, staffId, firstName, categories
 
                   {/* CTA */}
                   <div className="mt-6">
-                    <Link
-                      href={`/reservation?staff=${staffId}&service=${service.id}`}
+                    <button
+                      type="button"
+                      onClick={() => setQuickBooking({ serviceId: service.id, serviceName: service.name })}
                       className="group/btn flex w-full items-center justify-between gap-2 rounded-full bg-gradient-to-r from-[#2F3A2E] to-[#1a2419] px-6 py-3 text-sm font-semibold text-white transition-all duration-300 hover:shadow-lg hover:from-[#212a20] hover:to-[#151c14] hover:-translate-y-0.5"
                     >
                       Réserver
                       <ArrowRight size={16} className="transition-transform group-hover/btn:translate-x-1" />
-                    </Link>
+                    </button>
                   </div>
                 </article>
               );
@@ -203,6 +206,18 @@ export default function StaffServices({ services, staffId, firstName, categories
           </div>
         </div>
       </div>
+
+      {quickBooking && (
+        <QuickBookingModal
+          open={Boolean(quickBooking)}
+          onClose={() => setQuickBooking(null)}
+          staffId={staffId}
+          serviceId={quickBooking.serviceId}
+          serviceName={quickBooking.serviceName}
+          staffName={staffName}
+          customerSession={customerSession}
+        />
+      )}
     </section>
   );
 }

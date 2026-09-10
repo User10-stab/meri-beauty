@@ -357,7 +357,9 @@ export async function createCheckoutSession(reservationData) {
       ? paymentDecision.totalAmount
       : paymentDecision.depositAmount;
 
-    const { user: customerUser, isNewUser } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id);
+    const authenticatedCustomerId =
+      authSession?.user?.role === "CUSTOMER" ? authSession.user.id : undefined;
+    const { user: customerUser, isNewUser } = await resolveOrCreateCustomer(customerInfo, authenticatedCustomerId);
     // A full online payment can settle before its webhook creates the VAT
     // invoice. Do not send a VAT-validated customer to Stripe unless the
     // buyer data that issueInvoice requires already exists; otherwise a
@@ -529,8 +531,8 @@ export async function createCheckoutSession(reservationData) {
             },
           ],
           mode: "payment",
-          success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation/success?session_id={CHECKOUT_SESSION_ID}&payment_id=${payment.id}`,
-          cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/reservation?canceled=true`,
+          success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation/success?session_id={CHECKOUT_SESSION_ID}&payment_id=${payment.id}${reservationData.origin ? `&origin=${encodeURIComponent(reservationData.origin)}` : ""}`,
+          cancel_url:  `${process.env.NEXT_PUBLIC_APP_URL}/reservation?canceled=true${reservationData.origin ? `&origin=${encodeURIComponent(reservationData.origin)}` : ""}`,
           customer_email: customerInfo.email,
           payment_intent_data: {
             metadata,

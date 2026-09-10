@@ -14,6 +14,8 @@ import CustomerInfoStep from "./steps/CustomerInfoStep";
 import ReviewStep from "./steps/ReviewStep";
 import PaymentStep from "./steps/PaymentStep";
 import { computePaymentDecision } from "@/lib/reservation-payment";
+import ReservationStatusModal from "./ReservationStatusModal";
+import { useRouter } from "next/navigation";
 
 function isStepValid(stepId, reservationData) {
   switch (stepId) {
@@ -57,7 +59,7 @@ const ALL_STEPS = [
 ];
 
 // ─── Persistent Summary ───────────────────────────────────────────────
-function SummarySidebar({ data, onEdit }) {
+function SummarySidebar({ data, onEdit, readOnly = false }) {
   const drafts = data.appointmentDrafts ?? [];
   const hasDrafts = drafts.length > 0;
   const hasCategory = Boolean(data.category);
@@ -104,7 +106,7 @@ function SummarySidebar({ data, onEdit }) {
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Catégorie</p>
                   <p className="text-sm font-medium text-[#2F3A2E]">{data.category.name}</p>
                 </div>
-                <button onClick={() => onEdit(1)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>
+                {!readOnly && <button onClick={() => onEdit(1)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>}
               </div>
             )}
             {hasService && (
@@ -113,7 +115,7 @@ function SummarySidebar({ data, onEdit }) {
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Prestation</p>
                   <p className="text-sm font-medium text-[#2F3A2E] leading-tight">{data.service.name}</p>
                 </div>
-                <button onClick={() => onEdit(2)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>
+                {!readOnly && <button onClick={() => onEdit(2)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>}
               </div>
             )}
             {hasStaff && (
@@ -122,7 +124,7 @@ function SummarySidebar({ data, onEdit }) {
                   <p className="text-[10px] font-semibold uppercase tracking-widest text-[#9a9590]">Experte</p>
                   <p className="text-sm font-medium text-[#2F3A2E]">{data.staff?.user?.fullName ?? "—"}</p>
                 </div>
-                <button onClick={() => onEdit(3)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>
+                {!readOnly && <button onClick={() => onEdit(3)} className="text-[11px] font-medium text-[#b89664] hover:text-[#2F3A2E]">Modifier</button>}
               </div>
             )}
           </>
@@ -151,7 +153,7 @@ function SummarySidebar({ data, onEdit }) {
   );
 }
 
-function MobileSummary({ data, onEdit }) {
+function MobileSummary({ data, onEdit, readOnly = false }) {
   const [open, setOpen] = useState(false);
   const drafts = data.appointmentDrafts ?? [];
   const count = drafts.length || (data.category ? 1 : 0);
@@ -177,7 +179,7 @@ function MobileSummary({ data, onEdit }) {
       <AnimatePresence>
         {open && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-            <div className="mt-3"><SummarySidebar data={data} onEdit={onEdit} /></div>
+            <div className="mt-3"><SummarySidebar data={data} onEdit={onEdit} readOnly={readOnly} /></div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -185,17 +187,48 @@ function MobileSummary({ data, onEdit }) {
   );
 }
 
-export default function ReservationForm({ customerSession = null }) {
+export default function ReservationForm({ customerSession = null, initialPreset = null, quickMode = false, origin = "/reservation", onCompleted }) {
   const t = useTranslations();
+  const router = useRouter();
   const isAuthenticated = Boolean(customerSession);
+  const preset = quickMode ? initialPreset : null;
 
   const [currentStep, setCurrentStep] = useState(1);
+  const [statusResult, setStatusResult] = useState(null);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const showStatus = (result) => {
+    setStatusResult(result);
+    setStatusOpen(true);
+  };
+  const handleStatusClose = () => {
+    setStatusOpen(false);
+    // Return to origin after status is acknowledged. Preserve exact staff profile for quick mode.
+    if (onCompleted) onCompleted(statusResult);
+    else if (origin) router.push(origin);
+  };
+  const handleStatusRetry = () => {
+    const retry = statusResult?.onRetry;
+    setStatusOpen(false);
+    setStatusResult(null);
+    if (typeof retry === "function") retry();
+  };
   const [reservationData, setReservationData] = useState({
-    category: null,
-    service: null,
-    staff: null,
-    staffService: null,
-    appointmentDrafts: [],
+    category: preset?.category ?? null,
+    service: preset?.service ?? null,
+    staff: preset?.staff ?? null,
+    staffService: preset?.staffService ?? null,
+    appointmentDrafts: preset?.staffService
+      ? [
+          {
+            category: preset.category,
+            service: preset.service,
+            staff: preset.staff,
+            staffService: preset.staffService,
+            duration: preset.staffService?.duration ?? null,
+            price: preset.staffService?.price ?? null,
+          },
+        ]
+      : [],
     date: null,
     time: null,
     schedulingMode: "same-day",
@@ -218,11 +251,14 @@ export default function ReservationForm({ customerSession = null }) {
   const STEPS = useMemo(() => {
     const { requiresPaymentStep } = computePaymentDecision({ drafts: reservationData.appointmentDrafts });
     return ALL_STEPS.filter((s) => {
+      // Réservation rapide : catégorie + staff + service déjà sélectionnés,
+      // le parcours commence directement aux créneaux disponibles.
+      if (quickMode && (s.id === 1 || s.id === 2 || s.id === 3 || s.draftStep)) return false;
       if (s.guestOnly && isAuthenticated) return false;
       if (s.paymentStep && !requiresPaymentStep) return false;
       return true;
     });
-  }, [isAuthenticated, reservationData.appointmentDrafts]);
+  }, [isAuthenticated, reservationData.appointmentDrafts, quickMode]);
 
   const updateReservationData = (data) => setReservationData((prev) => ({ ...prev, ...data }));
   const draftStepNumber = STEPS.findIndex((s) => s.draftStep) + 1;
@@ -231,6 +267,8 @@ export default function ReservationForm({ customerSession = null }) {
   const prevStep = () => { if (currentStep > 1) setCurrentStep((prev) => prev - 1); };
   const goToStep = (step) => { if (step < currentStep) setCurrentStep(step); };
   const goToStepById = (id) => {
+    // En mode rapide, les étapes 1-4 n'existent pas : ignorer toute navigation vers elles.
+    if (quickMode && id <= 4) return;
     const idx = STEPS.findIndex((s) => s.id === id);
     if (idx !== -1) setCurrentStep(idx + 1);
   };
@@ -250,7 +288,10 @@ export default function ReservationForm({ customerSession = null }) {
     setCurrentStep(draftStepNumber);
   };
 
-  const handleAddAnother = () => setCurrentStep(1);
+  const handleAddAnother = () => {
+    if (quickMode) return;
+    setCurrentStep(1);
+  };
   const handleContinueToDates = () => setCurrentStep(draftStepNumber + 1);
   const handleRemoveDraft = (index) => {
     setReservationData((prev) => {
@@ -286,7 +327,7 @@ export default function ReservationForm({ customerSession = null }) {
           <div className="min-w-0 flex-1">
             {showSidebar && (
               <div className="mb-4">
-                <MobileSummary data={reservationData} onEdit={goToStepById} />
+                <MobileSummary data={reservationData} onEdit={goToStepById} readOnly={quickMode} />
               </div>
             )}
 
@@ -309,6 +350,9 @@ export default function ReservationForm({ customerSession = null }) {
                     prevStep={prevStep}
                     customerSession={customerSession}
                     goToStep={goToStepById}
+                    lockPreset={quickMode}
+                    origin={origin}
+                    showStatus={showStatus}
                   />
                 )}
               </motion.div>
@@ -350,6 +394,12 @@ export default function ReservationForm({ customerSession = null }) {
 
         </div>
       </div>
+      <ReservationStatusModal
+        open={statusOpen}
+        onClose={handleStatusClose}
+        onRetry={statusResult?.onRetry ? handleStatusRetry : undefined}
+        result={statusResult}
+      />
     </div>
   );
 }

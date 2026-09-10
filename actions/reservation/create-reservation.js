@@ -318,9 +318,15 @@ export async function createReservation(data) {
     }
 
     // ── 5. Resolve or create the customer user ───────────────────────────────
+    // Only reuse the authenticated session when the actor is a CUSTOMER
+    // booking for themselves. When an Admin/Staff is logged in and creates a
+    // reservation for a client via the public form, the session must NOT be
+    // used as the customer — the entered client info must be respected.
+    const authenticatedCustomerId =
+      authSession?.user?.role === "CUSTOMER" ? authSession.user.id : undefined;
     let user, isNewUser, temporaryPassword;
     try {
-      ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id));
+      ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authenticatedCustomerId));
       // Returning customer, or an account predating consent tracking.
       await recordTermsAcceptance(prisma, user.id);
     } catch (err) {
@@ -1012,9 +1018,11 @@ export async function createMultipleReservations(data) {
     }
 
     // ── 5. Resolve or create the customer user (once) ─────────────────────
+    const authenticatedCustomerIdForMulti =
+      authSession?.user?.role === "CUSTOMER" ? authSession.user.id : undefined;
     let user, isNewUser, temporaryPassword;
     try {
-      ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authSession?.user?.id));
+      ({ user, isNewUser, temporaryPassword } = await resolveOrCreateCustomer(customerInfo, authenticatedCustomerIdForMulti));
       // Returning customer, or an account predating consent tracking.
       await recordTermsAcceptance(prisma, user.id);
     } catch (err) {

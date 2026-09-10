@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
 import StaffProfileHero from "@/components/staff-profile/StaffProfileHero";
 import StaffServices from "@/components/staff-profile/StaffServices";
 import Breadcrumb from "@/components/staff-profile/Breadcrumb";
@@ -147,17 +148,19 @@ export async function generateMetadata({ params }) {
 
 export default async function StaffProfilePage({ params }) {
   const { staffId } = await params;
-  const [staff, salonSocial] = await Promise.all([
+  const [staff, salonSocial, session] = await Promise.all([
     getStaffProfile(staffId),
     getSalonSocialLinks(),
+    auth(),
   ]);
+  const customerSession = session?.user?.role === "CUSTOMER" ? session.user : null;
 
   if (!staff) {
     notFound();
   }
 
   const firstName = staff.user.fullName.split(" ")[0];
-  const profileImage = staff.photo || staff.user.avatar || "/Images/expert.jpg";
+  const profileImage = staff.photo || staff.user.avatar || "/Images/expert.webp";
 
   const categories = [
     ...new Set(
@@ -203,6 +206,8 @@ export default async function StaffProfilePage({ params }) {
           staffId={staff.id}
           firstName={firstName}
           categories={categories}
+          staffName={staff.user.fullName}
+          customerSession={customerSession}
         />
       )}
 
@@ -217,7 +222,7 @@ export default async function StaffProfilePage({ params }) {
           <BotanicalSprig className="absolute -bottom-20 -right-16 w-32 h-48 text-[#b89664]/8 transform rotate-12" />
           
           {/* Center large botanical */}
-          <Botanical className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-80 text-[#b89664]/5" />
+          <Botanical className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-80 text-[#b89664]/10" />
           
           {/* Floating decorative circles */}
           <div className="absolute -top-32 -left-32 h-64 w-64 rounded-full border border-[#b89664]/10" />

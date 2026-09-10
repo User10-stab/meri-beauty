@@ -177,11 +177,16 @@ function MultiAppointmentNotice({ totalAmount }) {
   );
 }
 
-export default function ReviewStep({ data, nextStep, customerSession, goToStep }) {
+export default function ReviewStep({ data, nextStep, customerSession, goToStep, lockPreset = false, origin = "/reservation", showStatus }) {
   const t = useTranslations("reservationSteps");
   const [processing, setProcessing] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const router = useRouter();
+
+  const primaryDraft = data.appointmentDrafts?.[0] ?? null;
+  const primaryServiceName = primaryDraft?.service?.name ?? data.service?.name ?? null;
+  const primaryStaffName = primaryDraft?.staff?.user?.fullName ?? data.staff?.user?.fullName ?? null;
+  const primaryDateLabel = data.date ? `${new Date(data.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" })} • ${data.time ?? ""}` : null;
 
   const drafts = data.appointmentDrafts ?? [];
   const isMultiDraft = drafts.length > 1;
@@ -207,25 +212,73 @@ export default function ReviewStep({ data, nextStep, customerSession, goToStep }
         const apptInputs = buildMultiDraftInputs(data);
         const result = await createMultipleReservations({ appointments: apptInputs, customerInfo, paymentMethod: null, notes: data.notes, isManualMode: false, termsAccepted: acceptedTerms });
         toast.dismiss(loadingToastId);
-        if (!result.success) { toast.error(result.message || t("review.reservationFailed")); setProcessing(false); return; }
+        if (!result.success) {
+          setProcessing(false);
+          const retry = () => handleDirectBooking();
+          if (showStatus) showStatus({ success: false, message: result.message || t("review.reservationFailed"), paymentStatus: "FAILED", serviceName: primaryServiceName, staffName: primaryStaffName, dateLabel: primaryDateLabel, onRetry: retry });
+          else toast.error(result.message || t("review.reservationFailed"));
+          return;
+        }
         if (customerSession) toast.success(t("review.reservationsSaved"));
         else await handleAutoSignIn(result.data?.isNewUser, result.data?.autologinToken, result.data?.user?.email, false);
-      } else {
-        const draft = drafts[0];
-        const staffServiceId = draft?.staffService?.id ?? data.staffService?.id;
-        const { createReservation } = await import("@/actions/reservation/create-reservation");
-        const result = await createReservation({ staffServiceId, date: formatLocalDateKey(data.date), time: data.time, customerInfo, paymentMethod: null, notes: data.notes, isManualMode: isManualMode, termsAccepted: acceptedTerms });
-        toast.dismiss(loadingToastId);
-        if (!result.success) { toast.error(result.message || t("review.reservationFailed")); setProcessing(false); return; }
-        if (customerSession) toast.success(isManualMode ? t("review.requestSent") : t("review.reservationConfirmed"));
-        else await handleAutoSignIn(result.data?.isNewUser, result.data?.autologinToken, result.data?.user?.email, isManualMode);
+        setProcessing(false);
+        if (showStatus) {
+          showStatus({
+            success: true,
+            appointmentStatus: "PENDING",
+            paymentStatus: null,
+            paymentType: "ON_SITE",
+            totalAmount,
+            isManualMode: false,
+            isMulti: true,
+            serviceName: primaryServiceName,
+            staffName: primaryStaffName,
+            dateLabel: primaryDateLabel,
+          });
+        } else setTimeout(() => router.push(origin), 1200);
+        return;
       }
-      setTimeout(() => router.push("/"), 2000);
+      const draft = drafts[0];
+      const staffServiceId = draft?.staffService?.id ?? data.staffService?.id;
+      const { createReservation } = await import("@/actions/reservation/create-reservation");
+      const result = await createReservation({ staffServiceId, date: formatLocalDateKey(data.date), time: data.time, customerInfo, paymentMethod: null, notes: data.notes, isManualMode: isManualMode, termsAccepted: acceptedTerms });
+      toast.dismiss(loadingToastId);
+      if (!result.success) {
+        setProcessing(false);
+        const retry = () => handleDirectBooking();
+        if (showStatus) showStatus({ success: false, message: result.message || t("review.reservationFailed"), paymentStatus: "FAILED", serviceName: primaryServiceName, staffName: primaryStaffName, dateLabel: primaryDateLabel, onRetry: retry });
+        else toast.error(result.message || t("review.reservationFailed"));
+        return;
+      }
+      const appointmentStatus = result.data?.appointment?.status ?? (isManualMode ? "PENDING" : "CONFIRMED");
+      const payment = result.data?.payment ?? null;
+      if (customerSession) toast.success(isManualMode ? t("review.requestSent") : t("review.reservationConfirmed"));
+      else await handleAutoSignIn(result.data?.isNewUser, result.data?.autologinToken, result.data?.user?.email, isManualMode);
+      setProcessing(false);
+      if (showStatus) {
+        showStatus({
+          success: true,
+          appointmentStatus,
+          paymentStatus: payment?.status ?? null,
+          paymentType: payment?.paymentType ?? (isManualMode ? null : paymentDecision.paymentType ?? "ON_SITE"),
+          totalAmount: payment?.totalAmount ?? totalAmount,
+          depositAmount: payment?.depositAmount ?? paymentDecision.depositAmount ?? 0,
+          depositPercentage: paymentDecision.depositPercentage ?? 0,
+          allowedPaymentMethods: draft?.staffService?.staff?.allowedPaymentMethods ?? null,
+          isManualMode,
+          isMulti: false,
+          serviceName: primaryServiceName,
+          staffName: primaryStaffName,
+          dateLabel: primaryDateLabel,
+        });
+      } else setTimeout(() => router.push(origin), 1200);
+      return;
     } catch (err) {
       console.error("[ReviewStep] handleDirectBooking:", err);
       toast.dismiss(loadingToastId);
-      toast.error(t("customer.genericError"));
       setProcessing(false);
+      if (showStatus) showStatus({ success: false, message: t("customer.genericError"), paymentStatus: "FAILED", serviceName: primaryServiceName, staffName: primaryStaffName, dateLabel: primaryDateLabel, onRetry: () => handleDirectBooking() });
+      else toast.error(t("customer.genericError"));
     }
   };
 
@@ -259,7 +312,7 @@ export default function ReviewStep({ data, nextStep, customerSession, goToStep }
       </div>
 
       <div className="space-y-5">
-        {isMultiDraft ? (<MultiServiceCard drafts={drafts} onEdit={goToStep} />) : (<SingleServiceCard data={data} onEdit={goToStep} />)}
+        {isMultiDraft ? (<MultiServiceCard drafts={drafts} onEdit={lockPreset ? null : goToStep} />) : (<SingleServiceCard data={data} onEdit={lockPreset ? null : goToStep} />)}
         <CustomerCard data={data} customerSession={customerSession} onEdit={goToStep ? () => goToStep(6) : null} />
         {isMultiDraft && (<MultiAppointmentNotice totalAmount={totalAmount} />)}
         {!isMultiDraft && isManualMode && !requiresPaymentStep && <ManualModeNotice />}

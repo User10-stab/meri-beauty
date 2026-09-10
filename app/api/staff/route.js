@@ -32,7 +32,7 @@ export async function GET() {
         speciality: staff.bio ?? "Expertise beauté",
         experience: staff.yearsOfExperience ?? 0,
         rating: 4.9,
-        image: staff.photo ?? staff.user.avatar ?? "/Images/expert.jpg",
+        image: staff.photo ?? staff.user.avatar ?? "/Images/expert.webp",
       }))
     );
   } catch (error) {

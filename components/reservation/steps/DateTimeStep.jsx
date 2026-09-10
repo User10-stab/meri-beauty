@@ -19,7 +19,13 @@ async function validateSlotAvailability(staffServiceId, date, time, t) {
     const msg = UNAVAILABLE_REASON_KEYS[result.data.reason] ? t(`dateTime.unavailableReasons.${UNAVAILABLE_REASON_KEYS[result.data.reason]}`) : t("dateTime.dayUnavailable");
     toast.error(msg); return false;
   }
-  const ok = hasReservationWindow(result.data.reservationWindows ?? [], time);
+  // After the allTimeSlots fix, `available` mirrors reservationWindows, so either
+  // check is equivalent. Prefer the visual source (allTimeSlots) when present
+  // so the client-side validation can never disagree with what was shown as enabled.
+  const visualSlots = result.data.allTimeSlots
+    ? result.data.allTimeSlots.filter((s) => s.available !== false)
+    : result.data.reservationWindows ?? [];
+  const ok = hasReservationWindow(visualSlots, time);
   if (!ok) { toast.error(t("dateTime.slotUnavailable")); return false; }
   return true;
 }

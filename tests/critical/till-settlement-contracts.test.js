@@ -79,7 +79,7 @@ describe("every on-site payment lands in the open till session, or is refused un
     // so it shows in Opérations but never in the Livre de caisse.
     expect(pos).toContain("const offTill = !isTillCashOperator(guard.session.user)");
     expect(pos).toContain("if (!offTill) {");
-    expect(pos).toContain("const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }");
+    expect(pos).toContain("const openCashSessionGate = await ensureCashSessionOpen(prisma)");
     expect(pos).toContain("requiresCashSession: true");
     // A till operator's sale still requires a session for every method;
     // only an off-till sale skips it.

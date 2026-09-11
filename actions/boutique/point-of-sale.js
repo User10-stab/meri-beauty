@@ -10,6 +10,7 @@ import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole, isTillCashOpera
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
+import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
 import { sendEmail } from "@/lib/email";
@@ -328,7 +329,7 @@ export async function completePointOfSaleSale(input) {
   // means staff open the till before ringing up anything, not after. An
   // off-till cashier is exempt — nothing they ring up enters the till.
   if (!offTill) {
-    const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+    const openCashSessionGate = await ensureCashSessionOpen(prisma);
     if (!openCashSessionGate) {
       return {
         success: false,

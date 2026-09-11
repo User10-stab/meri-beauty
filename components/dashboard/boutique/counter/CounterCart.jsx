@@ -19,7 +19,7 @@ import {
   searchPointOfSaleProducts,
 } from "@/actions/boutique/point-of-sale";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
-import { isCashSessionOpen, getSuggestedOpeningFloat, openCashSession } from "@/actions/dashboard/cash-sessions";
+import { isCashSessionOpen, getSuggestedOpeningFloat, openCashSession, tryAutoOpenCashSession } from "@/actions/dashboard/cash-sessions";
 import { createBrowserUuid } from "@/lib/browser-uuid";
 import { CounterBuyerForm } from "@/components/dashboard/boutique/counter/CounterBuyerForm";
 
@@ -149,9 +149,22 @@ export function CounterCart({
     let interval = null;
 
     function check() {
-      isCashSessionOpen().then((result) => {
+      isCashSessionOpen().then(async (result) => {
         if (cancelled) return;
-        const open = Boolean(result.success && result.data);
+        let open = Boolean(result.success && result.data);
+
+        // Before falling back to the blocking manual form, try the same
+        // silent auto-open every cash-taking action gets: carry the last
+        // closed session's counted total forward when it's a usable
+        // positive amount, instead of waiting on the cron's own interval.
+        // Only worth attempting for someone who could act on the manual
+        // form anyway — a cashier without CASH_REGISTER would just fail
+        // this call's own permission check.
+        if (!open && canOpenCashSession) {
+          const autoOpened = await tryAutoOpenCashSession().catch(() => null);
+          if (autoOpened?.success && autoOpened.data) open = true;
+        }
+
         setCashSessionOpen(open);
         if (open && interval) {
           clearInterval(interval);

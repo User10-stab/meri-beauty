@@ -17,6 +17,7 @@ import { issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { allocatePieceNumber, PIECE_SERIES, seriesForActivityType } from "@/lib/cash-book/piece-number";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
+import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { workshopReservationConfirmationEmail, formationReservationConfirmationEmail } from "@/lib/email-templates";
 import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
 import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
@@ -178,6 +179,19 @@ export async function createCounterReservation(input) {
 
   if (data.payment.method === "EXTERNAL_TERMINAL" && !data.payment.terminalReference?.trim()) {
     return { success: false, message: "Indiquez la référence du ticket du terminal." };
+  }
+
+  // Fast-path check before the transaction opens — the authoritative one is
+  // the inner tx.cashSession.findFirst below, in case a session closes in
+  // the gap between the two. ensureCashSessionOpen auto-opens on the spot
+  // (carrying the last closed session's counted total forward) when that
+  // float is usable, instead of leaving a brand-new cash sale to wait on the
+  // cron or a manual "Ouvrir la caisse" click.
+  if (useTill) {
+    const openCashSessionGate = await ensureCashSessionOpen(prisma);
+    if (!openCashSessionGate) {
+      return { success: false, message: errorMessage("CASH_SESSION_REQUIRED"), requiresCashSession: true };
+    }
   }
 
   let result;

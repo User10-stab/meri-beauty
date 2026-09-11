@@ -15,6 +15,7 @@ import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
+import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { resolveCounterPriceAdjustment } from "@/lib/payments/counter-price-adjustment";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
@@ -876,7 +877,7 @@ export async function completeAppointment(
     // backfilled. Fast-path check before the transaction; the authoritative
     // one is inside it, in case a session closes in the gap between the two.
     if (collectsAtTill && method === "CASH") {
-      const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+      const openCashSessionGate = await ensureCashSessionOpen(prisma);
       if (!openCashSessionGate) {
         return {
           success: false,

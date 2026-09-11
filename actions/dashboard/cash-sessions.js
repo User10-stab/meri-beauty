@@ -4,7 +4,13 @@ import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasDashboardPermission, canAccessDashboard, STAFF_PERMISSIONS } from "@/lib/authorization";
-import { openCashSessionInternal, closeCashSessionInternal, SESSION_INCLUDE } from "@/lib/cash-book/session-lifecycle";
+import {
+  openCashSessionInternal,
+  closeCashSessionInternal,
+  ensureCashSessionOpen,
+  getLastClosedCountedCash,
+  SESSION_INCLUDE,
+} from "@/lib/cash-book/session-lifecycle";
 
 /**
  * A daily till open/close boundary. Before this, every CASH POS sale was
@@ -111,12 +117,29 @@ export async function getSuggestedOpeningFloat() {
   const guard = await requireCashSessionOpeningAccess();
   if (guard.error) return { success: false, message: guard.error, data: null };
 
-  const lastClosed = await prisma.cashSession.findFirst({
-    where: { closedAt: { not: null } },
-    orderBy: { closedAt: "desc" },
-    select: { countedCash: true },
-  });
-  return { success: true, data: lastClosed?.countedCash == null ? null : Number(lastClosed.countedCash) };
+  return { success: true, data: await getLastClosedCountedCash(prisma) };
+}
+
+/**
+ * The auto-open a screen tries the instant it finds no till open, before
+ * ever falling back to the manual "Ouvrir la caisse" form — see
+ * ensureCashSessionOpen (lib/cash-book/session-lifecycle.js) for the actual
+ * rule: it silently carries the last closed session's counted total forward
+ * when that amount is usable (> 0), and returns null (asking the caller to
+ * show the manual form instead) when it's 0, negative, or there is no prior
+ * session to carry forward from — those cases need a human to look at the
+ * float before money starts moving again.
+ */
+export async function tryAutoOpenCashSession() {
+  const guard = await requireCashSessionOpeningAccess();
+  if (guard.error) return { success: false, message: guard.error, data: null };
+
+  const session = await ensureCashSessionOpen(prisma);
+  if (!session) return { success: true, data: null };
+
+  revalidateCaisseRoutes();
+  const full = await prisma.cashSession.findUnique({ where: { id: session.id }, include: SESSION_INCLUDE });
+  return { success: true, data: full ? serializeCashSession(full) : null };
 }
 
 export async function openCashSession(openingFloat) {

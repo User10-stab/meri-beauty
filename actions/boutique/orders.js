@@ -22,6 +22,7 @@ import {
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote, buildInvoiceCustomer, isSellerLegalDataComplete } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
+import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { renderCreditNotePdf, renderTicketPdf } from "@/lib/pdf/render";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { formatSalonAddress } from "@/lib/format-address";
@@ -1327,7 +1328,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     // it, in case a session closes in the gap between the two. Only a till
     // operator hits this — an off-till pickup never enters the drawer.
     if (collectsAtTill && method === "CASH") {
-      const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+      const openCashSessionGate = await ensureCashSessionOpen(prisma);
       if (!openCashSessionGate) {
         return {
           success: false,

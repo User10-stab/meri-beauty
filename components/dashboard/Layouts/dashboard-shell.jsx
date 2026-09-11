@@ -12,15 +12,19 @@ export function DashboardShell({ user, dashboardPermissions = [], pickupsToVerif
       <OnboardingGuard userRole={user?.role} />
       {user?.role === "STAFF" && <StripeReminderBanner />}
       <div className="dashboard-scope flex min-h-screen overflow-x-hidden">
-        <Sidebar
-          userRole={user?.role}
-          dashboardPermissions={dashboardPermissions}
-          pickupsToVerifyCount={pickupsToVerifyCount}
-          unreadNotificationsCount={unreadNotificationsCount}
-        />
+        <div className="print:hidden">
+          <Sidebar
+            userRole={user?.role}
+            dashboardPermissions={dashboardPermissions}
+            pickupsToVerifyCount={pickupsToVerifyCount}
+            unreadNotificationsCount={unreadNotificationsCount}
+          />
+        </div>
 
         <div className="min-w-0 flex-1 bg-gray-2 dark:bg-[#020d1a]">
-          <Header user={user} />
+          <div className="print:hidden">
+            <Header user={user} />
+          </div>
 
           <main className="mx-auto min-w-0 max-w-(--breakpoint-2xl) overflow-x-hidden p-3 sm:p-4 md:p-6 2xl:p-10">
             {children}

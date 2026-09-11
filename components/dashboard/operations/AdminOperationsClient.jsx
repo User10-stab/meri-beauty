@@ -713,6 +713,7 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer }) {
                     transaction={transaction ? { ...transaction, hasInvoice: Boolean(invoice) } : null}
                     paymentId={row.payment?.id ?? null}
                     remainingRefundable={row.refundState?.remainingRefundable ?? null}
+                    refundInFlight={Boolean(row.refundInFlight)}
                     onOpenDetail={transaction ? () => onOpenDetail(transaction.id) : undefined}
                   />
                 )}

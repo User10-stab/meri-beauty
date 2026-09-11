@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
-import { CalendarRange, RotateCcw, Tag } from "lucide-react";
+import { CalendarRange, Calendar, RotateCcw, Tag } from "lucide-react";
 import {
   RECETTES_METHODS,
   RECETTES_CATEGORIES,
@@ -27,6 +27,34 @@ export function RecettesFilterBar({ filters }) {
   const to = filters?.to ?? "";
   const method = filters?.method ?? "ALL";
   const category = filters?.category ?? "ALL";
+
+  function toDateOnlyString(date) {
+    const year = date.getFullYear();
+    const monthStr = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${monthStr}-${day}`;
+  }
+
+  /**
+   * The two month pickers below double as both a single-month shortcut (pick
+   * the same month in both) and a month-to-month range (pick a different
+   * start and end month) — each just sets its own end of the from/to range
+   * to that month's boundary, so picking one never resets the other.
+   */
+  function applyFromMonth(monthValue) {
+    if (!monthValue) return;
+    const [year, month] = monthValue.split("-").map(Number);
+    setParams({ from: toDateOnlyString(new Date(year, month - 1, 1)) });
+  }
+
+  function applyToMonth(monthValue) {
+    if (!monthValue) return;
+    const [year, month] = monthValue.split("-").map(Number);
+    const now = new Date();
+    const isCurrentMonth = now.getFullYear() === year && now.getMonth() === month - 1;
+    const lastDay = isCurrentMonth ? now : new Date(year, month, 0);
+    setParams({ to: toDateOnlyString(lastDay) });
+  }
 
   function setParams(next) {
     const params = new URLSearchParams(searchParams.toString());
@@ -79,6 +107,38 @@ export function RecettesFilterBar({ filters }) {
           value={to}
           min={from || undefined}
           onChange={(event) => setParams({ to: event.target.value })}
+          className="rounded-[7px] border border-stroke bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor="recettes-from-month"
+          className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6"
+        >
+          <Calendar className="h-3.5 w-3.5" strokeWidth={2} />
+          Du mois
+        </label>
+        <input
+          id="recettes-from-month"
+          type="month"
+          onChange={(event) => applyFromMonth(event.target.value)}
+          className="rounded-[7px] border border-stroke bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor="recettes-to-month"
+          className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6"
+        >
+          <Calendar className="h-3.5 w-3.5" strokeWidth={2} />
+          Au mois
+        </label>
+        <input
+          id="recettes-to-month"
+          type="month"
+          onChange={(event) => applyToMonth(event.target.value)}
           className="rounded-[7px] border border-stroke bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
         />
       </div>

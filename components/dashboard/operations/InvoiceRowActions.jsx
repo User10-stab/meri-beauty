@@ -10,17 +10,24 @@ import { OperationDocumentsDialog } from "@/components/dashboard/operations/Oper
  * its status and consequential work opens its own card; this component keeps
  * the final column to one contextual entry point.
  */
-export function InvoiceRowActions({ invoice = null, creditNote = null, creditNotes = null, transaction = null, paymentId = null, remainingRefundable = null, onOpenDetail }) {
+export function InvoiceRowActions({ invoice = null, creditNote = null, creditNotes = null, transaction = null, paymentId = null, remainingRefundable = null, refundInFlight = false, onOpenDetail }) {
   const [cancelRefundOpen, setCancelRefundOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   const notes = creditNotes ?? (creditNote ? [creditNote] : []);
   const creditNotesTotal = notes.reduce((sum, note) => sum + Number(note.totalInclVat ?? 0), 0);
   const invoiceFullyCredited = Boolean(invoice) && creditNotesTotal + 0.01 >= Number(invoice.totalInclVat ?? 0);
+  // `refundInFlight` mirrors TransactionDetailDrawer's identical guard: an
+  // operation already open on this payment can only be resumed, never
+  // duplicated, so offering the action again would do nothing. Load-bearing
+  // beyond the credited/refundable test below, because this app never
+  // refunds by itself — no REFUND row is written until a human settles the
+  // leg, so `remainingRefundable` stays at full value in the meantime.
   const canCancelAndRefund =
     Boolean(paymentId) &&
     ["DEPOSIT", "FINAL_PAYMENT"].includes(transaction?.transactionType) &&
     !invoiceFullyCredited &&
-    Number(remainingRefundable) > 0.01;
+    Number(remainingRefundable) > 0.01 &&
+    !refundInFlight;
 
   const canManageDocuments = Boolean(invoice) || notes.length > 0 || Boolean(paymentId);
 

@@ -59,7 +59,7 @@ const ALL_NAV_DATA = [
           { title: "Opérations", url: "/dashboard/operations", roles: [ROLES.OWNER, ROLES.ADMIN] },
           { title: "Livre de recettes", url: "/dashboard/livre-de-recettes", roles: [ROLES.OWNER, ROLES.ADMIN] },
           { title: "Caisse", url: "/dashboard/boutique/point-of-sale", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.POINT_OF_SALE },
-          { title: "Clôture de caisse", url: "/dashboard/boutique/caisse", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.CASH_REGISTER },
+          { title: "Livre de caisse", url: "/dashboard/boutique/caisse", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.CASH_REGISTER },
           // Staff: read-only catalogue browsing (no cost/margin data) + stock adjustments.
           { title: "Produits", url: "/dashboard/boutique/products", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK, permission: STAFF_PERMISSIONS.BOUTIQUE_STOCK },
           { title: "Catégories", url: "/dashboard/boutique/categories", roles: DASHBOARD_PERMISSIONS.BOUTIQUE }, // Admin only — structural CRUD

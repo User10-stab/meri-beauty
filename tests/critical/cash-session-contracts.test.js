@@ -42,17 +42,21 @@ describe("cash-session variance math", () => {
 
 describe("cash-session wiring", () => {
   const actions = source("actions/dashboard/cash-sessions.js");
+  const lifecycle = source("lib/cash-book/session-lifecycle.js");
   const pos = source("actions/boutique/point-of-sale.js");
   const schema = source("prisma/schema.prisma");
 
+  // The transactional bodies moved to lib/cash-book/session-lifecycle.js so
+  // the auto-open/auto-close job (no auth() session) can call the exact
+  // same logic — see lib/cash-book/auto-session.js.
   test("closing is an atomic claim gated on the session still being open", () => {
-    expect(actions).toContain("cashSession.updateMany");
-    expect(actions).toContain("where: { id: sessionId, closedAt: null }");
-    expect(actions).toContain("if (claim.count === 0)");
+    expect(lifecycle).toContain("cashSession.updateMany");
+    expect(lifecycle).toContain("where: { id: sessionId, closedAt: null }");
+    expect(lifecycle).toContain("if (claim.count === 0) return null;");
   });
 
   test("opening refuses a second concurrently-open session", () => {
-    expect(actions).toContain("findFirst({ where: { closedAt: null } })");
+    expect(lifecycle).toContain("findFirst({ where: { closedAt: null } })");
     expect(actions).toContain("Une session de caisse est déjà ouverte");
   });
 
@@ -83,7 +87,7 @@ describe("cash-session wiring", () => {
   // read "no open session" before either commits. The advisory lock
   // serializes it the same way refund reconciliation does elsewhere.
   test("opening a session is serialized against a concurrent open via an advisory lock", () => {
-    expect(actions).toContain("pg_advisory_xact_lock(hashtext('cash-session-open'))");
+    expect(lifecycle).toContain("pg_advisory_xact_lock(hashtext('cash-session-open'))");
   });
 
   test("CashSession is modeled with the expected/counted/variance breakdown", () => {
@@ -91,5 +95,18 @@ describe("cash-session wiring", () => {
     expect(schema).toContain("expectedCash Decimal?");
     expect(schema).toContain("countedCash  Decimal?");
     expect(schema).toContain("variance     Decimal?");
+  });
+
+  // 11 Sep 2026: provenance can't be told apart from identity alone — the
+  // auto-open/auto-close job acts as the same till-operator account a human
+  // would use — so these flags are the only signal the UI has.
+  test("CashSession tracks whether it was opened/closed automatically", () => {
+    expect(schema).toContain("isAutoOpened Boolean @default(false)");
+    expect(schema).toContain("isAutoClosed Boolean @default(false)");
+  });
+
+  test("open/close accept an isAutoOpened/isAutoClosed flag", () => {
+    expect(lifecycle).toContain("openCashSessionInternal(prisma, { userId, openingFloat, isAutoOpened = false })");
+    expect(lifecycle).toContain("closeCashSessionInternal(prisma, { sessionId, userId, countedCash, isAutoClosed = false })");
   });
 });

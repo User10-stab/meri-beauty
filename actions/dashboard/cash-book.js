@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { buildCashBookLedger } from "@/lib/cash-book/build-ledger";
-import { buildDayReport } from "@/lib/cash-book/build-day-report";
+import { buildRangeReport } from "@/lib/cash-book/build-day-report";
+import { normalizeCashBookParams } from "@/lib/cash-book/filters";
 
 async function requireCashBookAccess() {
   const session = await auth();
@@ -15,32 +16,24 @@ async function requireCashBookAccess() {
   return { session };
 }
 
-/** The "livre de caisse" for one till session — same permission as the till itself. */
-export async function getCashBookLedger(sessionId) {
+/** The Livre de caisse ledger over an arbitrary date range — see lib/cash-book/build-ledger.js. */
+export async function getCashBookLedger({ from, to } = {}) {
   const guard = await requireCashBookAccess();
   if (guard.error) return { success: false, message: guard.error, data: null };
 
-  if (typeof sessionId !== "string" || !sessionId) {
-    return { success: false, message: "Session de caisse introuvable.", data: null };
-  }
+  const params = normalizeCashBookParams({ from, to });
+  const ledger = await buildCashBookLedger(prisma, params);
 
-  const ledger = await buildCashBookLedger(prisma, sessionId);
-  if (!ledger) return { success: false, message: "Session de caisse introuvable.", data: null };
-
-  return { success: true, data: ledger };
+  return { success: true, data: { ...ledger, filters: params } };
 }
 
-/** The end-of-day report ("X" while open, "Z" once closed) for one till session. */
-export async function getDayReport(sessionId) {
+/** The "Rapport" — every payment method's revenue plus the cash reconciliation, over the same range. */
+export async function getCashReport({ from, to } = {}) {
   const guard = await requireCashBookAccess();
   if (guard.error) return { success: false, message: guard.error, data: null };
 
-  if (typeof sessionId !== "string" || !sessionId) {
-    return { success: false, message: "Session de caisse introuvable.", data: null };
-  }
+  const params = normalizeCashBookParams({ from, to });
+  const report = await buildRangeReport(prisma, params);
 
-  const report = await buildDayReport(prisma, sessionId);
-  if (!report) return { success: false, message: "Session de caisse introuvable.", data: null };
-
-  return { success: true, data: report };
+  return { success: true, data: { ...report, filters: params } };
 }

@@ -116,36 +116,40 @@ test.describe("the daily till", () => {
     // deterministic owner. openCashSession serialises the check-then-create
     // behind an advisory lock precisely so a double-click cannot do this.
     await page.goto(CAISSE_PAGE);
-    await expect(page.getByRole("heading", { name: /session ouverte/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^session ouverte$/i })).toBeVisible();
     // The opening form is not merely disabled — it is not rendered.
     await expect(page.locator("#opening-float")).toHaveCount(0);
 
     expect(await prisma.cashSession.count({ where: { closedAt: null } })).toBe(1);
   });
 
-  test("closing reconciles what was counted against what was expected", async () => {
+  // Since the 11 Sep 2026 redesign, closing is automatic (always at
+  // midnight — see lib/cash-book/auto-session.js) and there is no manual
+  // "Clôturer la caisse" button left in the UI to click. What staff can
+  // still do by hand is a "Vérifier le solde" recount, layered on top of
+  // whatever closing figures already exist — this is the UI surface that
+  // replaces the old manual-close flow in this suite.
+  test("Vérifier le solde records a recount without touching the session's open state", async () => {
     const counted = OPENING_FLOAT + 5;
 
     await page.goto(CAISSE_PAGE);
-    await page.locator("#counted-cash").fill(String(counted));
-    await page.getByRole("button", { name: /clôturer la caisse/i }).click();
+    // The session dropdown already defaults to the one currently open
+    // session (this spec's own), so nothing to pick before filling the count.
+    await page.locator("#verify-amount").fill(String(counted));
+    await page.getByRole("button", { name: /enregistrer la vérification/i }).click();
 
-    await expect(page.getByRole("heading", { name: /aucune session ouverte/i })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/vérification enregistrée/i)).toBeVisible({ timeout: 20_000 });
 
-    const closed = await prisma.cashSession.findUnique({
+    const session = await prisma.cashSession.findUnique({
       where: { id: openedSessionId },
-      select: { closedAt: true, closedById: true, expectedCash: true, countedCash: true, variance: true },
+      select: { closedAt: true, verifiedAt: true, verifiedById: true, verifiedVariance: true },
     });
-    expect(closed.closedAt).not.toBeNull();
-    expect(closed.closedById).not.toBeNull();
-
-    // No sales were rung up, so expected is exactly the opening float, and
-    // the 5 € surplus must be recorded rather than silently absorbed — an
-    // unexplained surplus is as much a signal as a shortfall.
-    expect(Number(closed.expectedCash)).toBe(OPENING_FLOAT);
-    expect(Number(closed.countedCash)).toBe(counted);
-    expect(Number(closed.variance)).toBe(5);
-
-    openedSessionId = null; // closed through the UI; afterAll has nothing to do
+    // Still open — a recount is not a close.
+    expect(session.closedAt).toBeNull();
+    expect(session.verifiedAt).not.toBeNull();
+    expect(session.verifiedById).not.toBeNull();
+    // No sales were rung up, so expected == opening float; the 5 € surplus
+    // must be recorded rather than silently absorbed.
+    expect(Number(session.verifiedVariance)).toBe(5);
   });
 });

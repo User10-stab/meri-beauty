@@ -190,6 +190,16 @@ enum RefundTrigger {
   FINANCIAL_CORRECTION
   // Boutique return, after the goods physically came back.
   SHOP_RETURN
+  // A completed transaction turns out to have been priced or documented
+  // wrong (wrong price charged, wrong data on the invoice/ticket). Unlike
+  // every trigger above, this one is explicitly allowed through the
+  // COMPLETED/shipped guards in authorize.js — but only for the dedicated
+  // orchestrator in lib/refunds/correct-completed-transaction.js, which
+  // always fully voids the original invoice (never a partial credit note)
+  // and always cancels the underlying item. See that file for the full
+  // contract. Deliberately a new value rather than reviving
+  // FINANCIAL_CORRECTION, which stays retired.
+  POST_COMPLETION_CORRECTION
 }
 
 // Lifecycle of the whole operation, derived from its legs — never set by
@@ -231,6 +241,10 @@ enum CashMovementType {
   CASH_IN
   // Cash taken OUT to the safe or the bank. Also "X" — it is the mirror of
   // CASH_IN, and the pair reads better in the book under one letter.
+  // Covers both a trip to the safe and a bank transfer ("Transfert de
+  // banque" in the UI) — the BankDeposit bundling/reconciliation workflow
+  // that used to sit on top of bank-bound withdrawals was removed in favor
+  // of recording the transfer as one plain movement like CASH_IN/EXPENSE.
   WITHDRAWAL
 }
 
@@ -884,6 +898,7 @@ model User {
   billingProfile                 BillingProfile?
   openedCashSessions             CashSession[]          @relation("CashSessionOpenedBy")
   closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
+  verifiedCashSessions           CashSession[]          @relation("CashSessionVerifiedBy")
   recordedCashMovements          CashMovement[]         @relation("CashMovementRecordedBy")
   declaredBankDeposits           BankDeposit[]          @relation("BankDepositDeclaredBy")
   submittedCancellationRequests  AppointmentCancellationRequest[] @relation("CancellationRequestSubmittedBy")
@@ -2157,6 +2172,27 @@ model CashSession {
   variance     Decimal?  @db.Decimal(10, 2)
   note         String?
 
+  // True when the daily background job opened/closed this session rather
+  // than a person clicking a button. Can't be inferred from openedById /
+  // closedById alone — the automated job acts as the same till-operator
+  // account a human would use, so the account on its own says nothing about
+  // who (or what) actually triggered the action.
+  isAutoOpened Boolean @default(false)
+  isAutoClosed Boolean @default(false)
+
+  // A closed session is never reopened (see closeCashSession), but the
+  // count it closed with can still be wrong — most routinely because an
+  // auto-close at midnight assumes countedCash == expectedCash (nobody is
+  // physically at the till to count it). This is a later, optional, real
+  // count layered on top, deliberately NOT overwriting closedById /
+  // countedCash / variance so the auto-close's synthetic figures stay
+  // distinguishable from an actual recount.
+  verifiedAt       DateTime?
+  verifiedById     String?
+  verifiedBy       User?     @relation("CashSessionVerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedVariance Decimal?  @db.Decimal(10, 2)
+  verificationNote String?
+
   transactions Transaction[]
   movements    CashMovement[]
   // Cash handed back to a customer is booked against the session that was
@@ -2234,6 +2270,12 @@ model CashMovement {
 // claim was never a real check — just an extra click standing between the
 // cashier and the record. What still matters, and is still captured, is
 // that a human said what the bank received and when — see `declaredAt`.
+//
+// @deprecated (2026-09-xx): the bundling/declare workflow this model backed
+// was removed from the Livre de caisse redesign in favor of recording a
+// bank transfer as one plain CashMovement (WITHDRAWAL), same as any other
+// movement. Nothing writes new rows here anymore — the model and its data
+// are kept only so historical bank-deposit trips remain queryable.
 model BankDeposit {
   id String @id @default(cuid())
 

@@ -23,8 +23,8 @@ export default async function LivreDeRecettesPage({ searchParams }) {
   });
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-1">
+    <div className="space-y-6 print:space-y-4">
+      <div className="flex flex-col gap-1 print:hidden">
         <h1 className="text-2xl font-bold text-dark dark:text-white">Livre de recettes</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
           Journal chronologique de toutes les recettes encaissées — espèces, carte et en ligne, y compris
@@ -33,7 +33,9 @@ export default async function LivreDeRecettesPage({ searchParams }) {
         </p>
       </div>
 
-      <RecettesFilterBar filters={result.data?.filters} />
+      <div className="print:hidden">
+        <RecettesFilterBar filters={result.data?.filters} />
+      </div>
 
       {!result.success ? (
         <div

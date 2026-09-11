@@ -142,8 +142,9 @@ export function CounterCart({
     // session open used to complete normally and carry cashSessionId: null
     // forever (Transaction.cashSessionId is set once, at sale time, never
     // backfilled). Checked on mount, then polled every 10s only while
-    // actually blocked — the moment a teammate opens the till from the
-    // Clôture de caisse page, this screen unblocks itself without a reload.
+    // actually blocked — the moment the till opens (auto-open, or a
+    // teammate opening it from the Livre de caisse page), this screen
+    // unblocks itself without a reload.
     let cancelled = false;
     let interval = null;
 

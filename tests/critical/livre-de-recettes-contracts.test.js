@@ -8,6 +8,7 @@ import {
   MAX_RANGE_DAYS,
   RECETTES_METHODS,
 } from "@/lib/livre-de-recettes/filters";
+import { groupRowsByDay } from "@/lib/livre-de-recettes/day-groups";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
@@ -132,22 +133,53 @@ describe("buildRecettesJournal", () => {
     expect(where).not.toHaveProperty("payment");
   });
 
-  it("backs HT and VAT out of each amount at its invoice rate", async () => {
+  it("backs HT and VAT out of each amount at its invoice rate once one exists", async () => {
     const client = clientMock([
       txn({ id: "a", amount: 121, payment: { order: { orderNumber: 1 }, invoice: { number: "2026-000001", vatRate: 21 } } }),
     ]);
     const journal = await buildRecettesJournal(client, RANGE);
-    expect(journal.rows[0]).toMatchObject({ amountTtc: 121, amountHt: 100, amountVat: 21, vatRate: 21 });
-    expect(journal.summary.byVatRate).toEqual([{ rate: 21, netAmount: 100, vatAmount: 21, grossAmount: 121 }]);
+    expect(journal.rows[0]).toMatchObject({ amountTtc: 121, amountHt: 100, amountVat: 21, vatRate: 21, vatSource: "invoice" });
   });
 
-  it("puts a not-yet-invoiced payment in a null-rate bucket instead of dropping it", async () => {
+  it("applies the domestic 21% policy to a not-yet-invoiced payment instead of leaving HT/TVA blank", async () => {
     const client = clientMock([
-      txn({ id: "a", amount: 50, method: "ONLINE", transactionType: "DEPOSIT", payment: { order: { orderNumber: 1 }, invoice: null } }),
+      txn({ id: "a", amount: 121, method: "ONLINE", transactionType: "DEPOSIT", payment: { order: { orderNumber: 1 }, invoice: null } }),
     ]);
     const journal = await buildRecettesJournal(client, RANGE);
-    expect(journal.rows[0]).toMatchObject({ amountHt: null, amountVat: null, vatRate: null });
-    expect(journal.summary.byVatRate).toEqual([{ rate: null, netAmount: 0, vatAmount: 0, grossAmount: 50 }]);
+    expect(journal.rows[0]).toMatchObject({ amountTtc: 121, amountHt: 100, amountVat: 21, vatRate: 21, vatSource: "estimated" });
+  });
+
+  it("applies the 0% reverse-charge policy to a not-yet-invoiced payment from a VIES-validated foreign-EU company", async () => {
+    const frenchCompany = {
+      fullName: "Société Test",
+      email: "achats@societe-test.fr",
+      isCompany: true,
+      vatNumber: "FR40303265045",
+      vatValidatedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+    };
+    const client = clientMock([
+      txn({
+        id: "a",
+        amount: 100,
+        method: "ONLINE",
+        transactionType: "DEPOSIT",
+        payment: { order: { orderNumber: 1, user: frenchCompany }, invoice: null },
+      }),
+    ]);
+    const journal = await buildRecettesJournal(client, RANGE);
+    expect(journal.rows[0]).toMatchObject({ amountTtc: 100, amountHt: 100, amountVat: 0, vatRate: 0, vatSource: "estimated" });
+  });
+
+  it("falls back to the service VAT policy (not the goods one) for a non-order category", async () => {
+    const client = clientMock([
+      txn({
+        id: "a",
+        amount: 121,
+        payment: { appointment: { staffService: { service: { name: "Soin" } } }, invoice: null },
+      }),
+    ]);
+    const journal = await buildRecettesJournal(client, RANGE);
+    expect(journal.rows[0]).toMatchObject({ vatRate: 21, vatSource: "estimated" });
   });
 
   it("the last row's running total equals the summary total (ALL / ALL)", async () => {
@@ -225,10 +257,46 @@ describe("normalizeRecettesParams — a hand-edited query string cannot widen th
   });
 });
 
+describe("groupRowsByDay — shared by the screen and the PDF", () => {
+  function dayRow(overrides = {}) {
+    return {
+      id: "r1",
+      paidAt: new Date("2026-08-10T10:00:00Z"),
+      isRefund: false,
+      amountHt: 100,
+      amountVat: 21,
+      amountTtc: 121,
+      runningTotal: 121,
+      ...overrides,
+    };
+  }
+
+  it("buckets rows into one group per Brussels-local calendar day", () => {
+    const groups = groupRowsByDay([
+      dayRow({ id: "a", paidAt: new Date("2026-08-10T08:00:00Z") }),
+      dayRow({ id: "b", paidAt: new Date("2026-08-10T20:00:00Z") }),
+      dayRow({ id: "c", paidAt: new Date("2026-08-11T08:00:00Z") }),
+    ]);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].rows.map((r) => r.id)).toEqual(["a", "b"]);
+    expect(groups[1].rows.map((r) => r.id)).toEqual(["c"]);
+  });
+
+  it("sums a day's HT/TVA/TTC across its rows, netting a refund off the same day", () => {
+    const groups = groupRowsByDay([
+      dayRow({ id: "a", amountHt: 100, amountVat: 21, amountTtc: 121, runningTotal: 121 }),
+      dayRow({ id: "b", isRefund: true, amountHt: 20, amountVat: 4.2, amountTtc: 24.2, runningTotal: 96.8 }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ totalHt: 80, totalVat: 16.8, totalTtc: 96.8, closingBalance: 96.8 });
+  });
+});
+
 describe("wiring", () => {
   const action = source("actions/dashboard/get-recettes-journal.js");
   const page = source("app/dashboard/livre-de-recettes/page.jsx");
   const route = source("app/api/recettes/export/route.js");
+  const pdfRoute = source("app/api/recettes/pdf/route.js");
   const client = source("components/dashboard/recettes/RecettesJournalClient.jsx");
   const filters = source("lib/livre-de-recettes/filters.js");
 
@@ -264,5 +332,19 @@ describe("wiring", () => {
     expect(client).toContain("text/csv;charset=utf-8");
     expect(client).toContain("function downloadRecettesCsv(data)");
     expect(client).toContain("/api/recettes/export?");
+  });
+
+  test("the PDF route re-runs the guarded action, runs on Node, and streams inline", () => {
+    expect(pdfRoute).toContain('export const runtime = "nodejs"');
+    expect(pdfRoute).toContain("getRecettesJournal(");
+    expect(pdfRoute).toContain("renderRecettesJournalPdf(");
+    expect(pdfRoute).toContain("application/pdf");
+    expect(pdfRoute).toContain('"Content-Disposition": `inline;');
+    expect(pdfRoute).toContain('"Cache-Control": "private, no-store"');
+  });
+
+  test("the client's print button opens the filtered PDF route in a new tab", () => {
+    expect(client).toContain("/api/recettes/pdf?");
+    expect(client).toContain('target="_blank"');
   });
 });

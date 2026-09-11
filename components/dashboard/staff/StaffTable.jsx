@@ -19,12 +19,14 @@ import {
   Clock,
   CreditCard,
   AlertCircle,
+  Settings,
 } from "lucide-react";
 import { deleteIndependentStaff } from "@/actions/staff/delete-independent-staff";
 import { updateIndependentStaff } from "@/actions/staff/update-independent-staff";
 import { checkStaffReservationReadiness } from "@/lib/reservation-compliance";
 import { EditStaffModal } from "./EditStaffModal";
 import { WorkingHoursModal } from "./WorkingHoursModal";
+import { StaffSettingsModal } from "./StaffSettingsModal";
 import { WarningTooltip } from "../shared/WarningTooltip";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -265,6 +267,7 @@ function RowActions({ row, onEdit, onDelete, isPending }) {
           <MenuBtn icon={Eye} label="Voir le profil" onClick={() => { close(); onEdit(row, "view"); }} />
           <MenuBtn icon={Pencil} label="Modifier" onClick={() => { close(); onEdit(row, "edit"); }} />
           <MenuBtn icon={Clock} label="Horaires de travail" onClick={() => { close(); onEdit(row, "hours"); }} />
+          <MenuBtn icon={Settings} label="Paramètres" onClick={() => { close(); onEdit(row, "settings"); }} />
           <MenuBtn icon={row.isActive ? ShieldOff : ShieldCheck} label={row.isActive ? "Désactiver" : "Activer"} onClick={() => { close(); onEdit(row, "toggle"); }} />
           <div className="my-1 border-t border-gray-100" role="separator" />
           <MenuBtn icon={Trash2} label="Supprimer" danger onClick={() => { close(); onDelete(row); }} />
@@ -360,6 +363,7 @@ export function StaffTable({ data, isLoading = false, services = [] }) {
   const [editTarget, setEditTarget] = useState(null);   // { staff, mode: "view"|"edit" }
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [workingHoursTarget, setWorkingHoursTarget] = useState(null);
+  const [settingsTarget, setSettingsTarget] = useState(null);
 
   const [isPending, startTransition] = useTransition();
 
@@ -416,6 +420,10 @@ export function StaffTable({ data, isLoading = false, services = [] }) {
   function handleRowAction(staff, mode) {
     if (mode === "hours") {
       setWorkingHoursTarget(staff);
+      return;
+    }
+    if (mode === "settings") {
+      setSettingsTarget(staff);
       return;
     }
     if (mode === "toggle") {
@@ -530,6 +538,14 @@ export function StaffTable({ data, isLoading = false, services = [] }) {
         <WorkingHoursModal
           staff={workingHoursTarget}
           onClose={() => setWorkingHoursTarget(null)}
+        />
+      )}
+
+      {/* Per-staff settings modal */}
+      {settingsTarget && (
+        <StaffSettingsModal
+          staff={settingsTarget}
+          onClose={() => setSettingsTarget(null)}
         />
       )}
 

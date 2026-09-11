@@ -55,12 +55,19 @@ function formatSessionDate(date) {
   });
 }
 
-export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow }) {
+/**
+ * @param {boolean} [props.highlighted] - Notification deep-link focus ring.
+ * @param {object} [props.rowRef] - Ref attached to the row for scroll-into-view.
+ */
+export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, highlighted = false, rowRef }) {
   const priceFormatted = (value) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
 
   return (
-    <tr className="group border-b border-gray-100 transition-colors hover:bg-gray-50/70">
+    <tr
+      ref={rowRef}
+      className={`group  border-gray-100 transition-colors hover:bg-gray-50/70 ${highlighted ? "bg-indigo-50/60 ring-2 ring-inset ring-indigo-500 dark:bg-indigo-900/20" : ""}`}
+    >
       {/* Activity */}
       <td className="px-4 py-4 pl-5 align-middle min-w-[200px]">
         <span className="block font-medium text-gray-800">{row.session?.workshop?.title}</span>

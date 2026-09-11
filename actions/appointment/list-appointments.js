@@ -10,8 +10,19 @@ import { getCurrentStaffId } from "@/lib/route-protection";
  * (scoped server-side, same rule as authorizeAppointmentAction in
  * manage-appointment.js) — the staffId filter param only has any effect for
  * OWNER/ADMIN.
+ *
+ * `statuses` (array) and `month` ("YYYY-MM") extend the single `status` /
+ * `date` filters so dashboard cards can deep-link their exact counts
+ * (e.g. today's active reservations for one staff member).
+ *
+ * `appointmentId` focuses one exact row (notification deep-links). It stays
+ * under the same ownership scope — STAFF only ever resolve their own rows —
+ * and takes precedence over the other filters.
  */
-export async function getAllAppointments({ status, staffId, search, date } = {}) {
+const KNOWN_APPOINTMENT_STATUSES = ["PENDING", "ACCEPTED", "CONFIRMED", "COMPLETED", "CANCELLED", "REJECTED", "NO_SHOW"];
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+export async function getAllAppointments({ status, statuses, staffId, search, date, month, appointmentId } = {}) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié.", data: [] };
   if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS))) {
@@ -38,14 +49,39 @@ export async function getAllAppointments({ status, staffId, search, date } = {})
         end.setHours(23, 59, 59, 999);
         dateFilter = { startTime: { gte: start, lte: end } };
       }
+    } else if (typeof month === "string" && MONTH_RE.test(month)) {
+      const [year, monthNumber] = month.split("-").map(Number);
+      dateFilter = {
+        startTime: {
+          gte: new Date(year, monthNumber - 1, 1),
+          lt: new Date(year, monthNumber, 1),
+        },
+      };
     }
+
+    // statuses[] wins over the single status when both are given; unknown
+    // values are dropped so a hand-edited query string can't 500 the page.
+    const statusList = Array.isArray(statuses)
+      ? statuses.filter((s) => KNOWN_APPOINTMENT_STATUSES.includes(s))
+      : [];
+
+    const staffScope = staffScopeId
+      ? { staffService: { staffId: staffScopeId } }
+      : staffId ? { staffService: { staffId } } : {};
 
     const appointments = await prisma.appointment.findMany({
       where: {
         isDeleted: false,
-        ...dateFilter,
-        ...(staffScopeId ? { staffService: { staffId: staffScopeId } } : staffId ? { staffService: { staffId } } : {}),
-        ...(status ? { status } : {}),
+        // Ownership scope ALWAYS applies — including in focus mode, so a
+        // staff member can never resolve another member's row by id.
+        ...staffScope,
+        ...(typeof appointmentId === "string" && appointmentId
+          // Focus mode: exactly this row; other filters are ignored.
+          ? { id: appointmentId }
+          : {
+              ...dateFilter,
+              ...(statusList.length ? { status: { in: statusList } } : status ? { status } : {}),
+            }),
         ...(search
           ? {
               OR: [

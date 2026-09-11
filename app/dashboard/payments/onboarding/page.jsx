@@ -26,6 +26,13 @@ export default function StripeOnboardingPage() {
 
   const isSuccess = searchParams.get("success") === "true";
   const isRefresh = searchParams.get("refresh") === "true";
+  // Present only when an OWNER/ADMIN runs onboarding for a staff member
+  // (see createAccountLink) — keeps them on that member's payments page.
+  // Absent in staff self flows (existing behavior, unchanged).
+  const viewStaffId = searchParams.get("staffId");
+  const backUrl = viewStaffId
+    ? `/dashboard/payments?staffId=${encodeURIComponent(viewStaffId)}`
+    : "/dashboard/payments";
 
   useEffect(() => {
     // ── Success: user completed Stripe onboarding ─────────────────────────
@@ -37,10 +44,10 @@ export default function StripeOnboardingPage() {
       // status, but relying on it alone here left this page redirecting
       // back to the settings page before the DB was updated — pulling the
       // latest status directly from Stripe closes that race.
-      refreshStripeStatus()
+      refreshStripeStatus(viewStaffId ?? undefined)
         .catch((err) => console.error("[StripeOnboardingPage] refreshStripeStatus failed:", err))
         .finally(() => {
-          router.push("/dashboard/payments");
+          router.push(backUrl);
         });
 
       return;
@@ -52,15 +59,15 @@ export default function StripeOnboardingPage() {
       setIcon("refresh");
 
       const timer = setTimeout(() => {
-        router.push("/dashboard/payments");
+        router.push(backUrl);
       }, 1500);
 
       return () => clearTimeout(timer);
     }
 
     // ── No valid query parameter — redirect directly ──────────────────────
-    router.push("/dashboard/payments");
-  }, [isSuccess, isRefresh, router]);
+    router.push(backUrl);
+  }, [isSuccess, isRefresh, router, backUrl, viewStaffId]);
 
   // If neither success nor refresh, we're redirecting — show nothing
   if (!isSuccess && !isRefresh) {

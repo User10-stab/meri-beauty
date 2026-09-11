@@ -1580,6 +1580,11 @@ model Staff {
   stripeAccountType    String?
   stripeChargesEnabled Boolean @default(false)
   stripePayoutsEnabled Boolean @default(false)
+  // Permission granted by the staff member allowing an OWNER/ADMIN to open
+  // and manage their Stripe Express dashboard (via a platform-generated
+  // login link). ON by default. Enforced server-side in
+  // actions/stripe/admin-stripe-accounts.js — never trust the UI alone.
+  allowAdminStripeAccess Boolean @default(true)
 
   // Calendar sync — a revocable random token gating the iCal subscription
   // feed (app/api/calendar-feed/[token]). Null until the staff member first

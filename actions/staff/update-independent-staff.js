@@ -1,10 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import bcrypt from "bcrypt";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { updateIndependentStaffSchema } from "@/lib/validations/independent-staff";
+import { sendVerificationEmail } from "@/actions/auth/verify-email";
+
+const BCRYPT_SALT_ROUNDS = 12;
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
 
@@ -12,7 +16,7 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  * Full update of an independent staff member and its related records.
  *
  * Editable fields:
- *   User  → fullName, phone, address (addressLine1/2, city, postalCode, country)
+ *   User  → fullName, email, password, phone, address (addressLine1/2, city, postalCode, country)
  *   Staff → photo, bio, languages, yearsOfExperience, hireDate, isActive
  *   Services → replaces the full StaffService assignment set
  *   Contract → upserts the active FIXED_RENT contract
@@ -38,6 +42,8 @@ export async function updateIndependentStaff(input) {
       message: "Veuillez corriger les erreurs dans le formulaire.",
       errors: {
         fullName:          fe.fullName?.[0]          ?? null,
+        email:             fe.email?.[0]             ?? null,
+        password:          fe.password?.[0]          ?? null,
         phone:             fe.phone?.[0]             ?? null,
         addressLine1:      fe.addressLine1?.[0]      ?? null,
         addressLine2:      fe.addressLine2?.[0]      ?? null,
@@ -60,6 +66,8 @@ export async function updateIndependentStaff(input) {
   const {
     id,
     fullName,
+    email,
+    password,
     phone,
     addressLine1,
     addressLine2,
@@ -103,6 +111,24 @@ export async function updateIndependentStaff(input) {
   // the transaction without an extra round-trip after the fact.
   const wasActive = existing.isActive;
 
+  // ── 2b. Email uniqueness (ignore soft-deleted users so a deleted account
+  // can be re-created cleanly; ignore the staff member's own user row) ────
+  let emailChanged = false;
+  if (email !== undefined && email !== existing.user.email) {
+    emailChanged = true;
+    const emailExists = await prisma.user.findFirst({
+      where: { email, isDeleted: false, id: { not: existing.userId } },
+      select: { id: true },
+    });
+    if (emailExists) {
+      return {
+        success: false,
+        message: "Cette adresse e-mail est déjà utilisée.",
+        errors: { email: "Cet e-mail est déjà utilisé." },
+      };
+    }
+  }
+
   // ── 3. Validate service IDs exist (before entering transaction) ──────────
   const newServiceIds = serviceIds ?? [];
   if (newServiceIds.length > 0) {
@@ -127,6 +153,15 @@ export async function updateIndependentStaff(input) {
       const userUpdate = {};
       if (fullName !== undefined) userUpdate.fullName = fullName;
       if (phone    !== undefined) userUpdate.phone    = phone;
+      if (emailChanged) {
+        userUpdate.email = email;
+        // An unproven new address must not inherit the verified status —
+        // same rule as the self-service update (update-personal-info.js).
+        userUpdate.emailVerified = false;
+      }
+      if (password) {
+        userUpdate.password = await bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+      }
       // Address: empty strings are treated as "not provided" so a partial
       // payload (e.g. the StaffTable active-toggle) can never wipe the
       // billing address with "". addressLine2 is the nullable optional part.
@@ -141,11 +176,16 @@ export async function updateIndependentStaff(input) {
       // On deactivation, bump sessionVersion as well — this immediately
       // invalidates any live JWT on the staff member's next authenticated
       // request instead of waiting for the 5-minute revalidation window.
+      // A password change or a deactivation must invalidate live JWTs
+      // (auth.js compares token.sessionVersion against the DB).
+      const needsSessionBump =
+        (isActive !== undefined && isActive !== wasActive && !isActive) ||
+        Boolean(password);
       if (isActive !== undefined && isActive !== wasActive) {
         userUpdate.isActive = isActive;
-        if (!isActive) {
-          userUpdate.sessionVersion = { increment: 1 };
-        }
+      }
+      if (needsSessionBump) {
+        userUpdate.sessionVersion = { increment: 1 };
       }
 
       if (Object.keys(userUpdate).length > 0) {
@@ -269,9 +309,21 @@ export async function updateIndependentStaff(input) {
 
     revalidatePath(REVALIDATE_PATH);
 
+    if (emailChanged) {
+      // Non-blocking — a failed email must not roll back the update.
+      sendVerificationEmail({
+        email,
+        fullName: fullName ?? existing.user.fullName,
+      }).catch((err) =>
+        console.error("[updateIndependentStaff] verification email failed:", err)
+      );
+    }
+
     return {
       success: true,
-      message: `Le profil de ${existing.user.fullName} a été mis à jour avec succès.`,
+      message: emailChanged
+        ? `Le profil de ${existing.user.fullName} a été mis à jour avec succès. Un e-mail de vérification a été envoyé à la nouvelle adresse.`
+        : `Le profil de ${existing.user.fullName} a été mis à jour avec succès.`,
     };
   } catch (error) {
     if (error.code === "P2002") {

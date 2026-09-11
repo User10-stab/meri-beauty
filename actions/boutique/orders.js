@@ -42,6 +42,7 @@ import {
   getSalonAdminNotificationRecipients,
 } from "@/lib/notifications";
 import { getOrderPaymentMethod, refundMethodLabel } from "@/lib/payments/refund-method";
+import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
 
@@ -1085,11 +1086,47 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
 
 const DEFAULT_PAGE_SIZE = 20;
 
-export async function listOrders({ status, fulfilmentMode, search, page = 1, pageSize = DEFAULT_PAGE_SIZE } = {}) {
+// Same candidate statuses as the dashboard "commandes à traiter" card
+// (actions/dashboard/get-dashboard-stats.js) — the only statuses
+// getOrderOverdueReason can ever flag.
+const OVERDUE_CANDIDATE_STATUSES = ["PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP", "SHIPPED"];
+
+// Mirrors overdueSinceDate in get-dashboard-stats.js: the timestamp each
+// overdue reason is judged against.
+function overdueSinceDate(order, reason) {
+  if (reason === "NOT_COLLECTED") return order.readyForPickupAt;
+  if (reason === "NOT_CONFIRMED_DELIVERED") return order.shippedAt;
+  return order.createdAt;
+}
+
+export async function listOrders({ status, fulfilmentMode, search, page = 1, pageSize = DEFAULT_PAGE_SIZE, overdueOnly = false } = {}) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page: 1, pageSize };
 
   try {
+    // "Commandes à traiter" deep-link (dashboard card): same overdue
+    // computation as the card, paginated here instead of capped.
+    if (overdueOnly) {
+      const now = new Date();
+      const candidates = await prisma.order.findMany({
+        where: { status: { in: OVERDUE_CANDIDATE_STATUSES } },
+        include: {
+          user: { select: { id: true, fullName: true, email: true, phone: true } },
+          payment: { select: { id: true, transactionReference: true, status: true, transactions: { select: { method: true, transactionType: true } } } },
+          items: true,
+        },
+      });
+      const flagged = candidates
+        .map((order) => ({ order, reason: getOrderOverdueReason(order, now) }))
+        .filter(({ reason }) => reason !== null)
+        .sort((a, b) => new Date(overdueSinceDate(a.order, a.reason)).getTime() - new Date(overdueSinceDate(b.order, b.reason)).getTime());
+      const totalCount = flagged.length;
+      const data = flagged
+        .slice((page - 1) * pageSize, page * pageSize)
+        .map(({ order }) => serializeOrder(order));
+      return { success: true, data, totalCount, page, pageSize };
+    }
+
     const where = {
       ...(status ? { status } : {}),
       ...(fulfilmentMode ? { fulfilmentMode } : {}),

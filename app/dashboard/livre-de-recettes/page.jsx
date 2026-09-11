@@ -20,6 +20,9 @@ export default async function LivreDeRecettesPage({ searchParams }) {
     to: typeof params?.to === "string" ? params.to : undefined,
     method: typeof params?.method === "string" ? params.method : undefined,
     category: typeof params?.category === "string" ? params.category : undefined,
+    // Deep-link preset from a dashboard revenue card (validated inside the
+    // action — unknown ids are ignored, never widen the journal).
+    staffId: typeof params?.staffId === "string" ? params.staffId : undefined,
   });
 
   return (

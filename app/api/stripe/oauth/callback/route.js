@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
+import { isAdminRole } from "@/lib/authorization";
 import {
   verifyStripeOAuthState,
   OAUTH_STATE_PURPOSE,
@@ -56,6 +57,7 @@ const ERROR_KEYS = {
   UNSUPPORTED_TYPE: "unsupported_type",
   EXCHANGE_FAILED: "exchange_failed",
   UNEXPECTED: "unexpected",
+  NO_ACCESS: "no_access",
 };
 
 // ─── Redirect helper ──────────────────────────────────────────────────────────
@@ -66,11 +68,19 @@ const ERROR_KEYS = {
  * Success uses `?success=true` so the existing PaymentsSettingsClient effect
  * that refreshes on success keeps working. Errors use `?stripeOAuthError=<key>`
  * which the UI maps to a user-facing message.
+ *
+ * When an OWNER/ADMIN completes the flow on a staff member's behalf,
+ * `viewStaffId` keeps the `?staffId=` context so they land back on that
+ * staff member's page instead of their own. Staff self flows omit it
+ * (existing behavior, unchanged).
  */
-function redirectToPayments(request, { success = false, error = null } = {}) {
+function redirectToPayments(request, { success = false, error = null, viewStaffId = null } = {}) {
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? request.nextUrl.origin;
   const url = new URL("/dashboard/payments", baseUrl);
 
+  if (viewStaffId) {
+    url.searchParams.set("staffId", viewStaffId);
+  }
   if (success) {
     url.searchParams.set("success", "true");
   }
@@ -114,8 +124,13 @@ export async function GET(request) {
     return redirectToPayments(request, { error: ERROR_KEYS.SESSION_MISMATCH });
   }
 
+  // An OWNER/ADMIN completing the flow for a staff member stays on that
+  // member's page afterwards. Staff self flows keep the existing redirect.
+  const completingAsAdmin = isAdminRole(session.user.role);
+  const viewStaffId = completingAsAdmin ? staffId : null;
+
   if (!code) {
-    return redirectToPayments(request, { error: ERROR_KEYS.NO_CODE });
+    return redirectToPayments(request, { error: ERROR_KEYS.NO_CODE, viewStaffId });
   }
 
   // ── 3. Staff must still exist and be connectable ───────────────────────
@@ -126,14 +141,26 @@ export async function GET(request) {
       isActive: true,
       isDeleted: true,
       stripeAccountId: true,
+      userId: true,
+      allowAdminStripeAccess: true,
     },
   });
 
   if (!staff) {
-    return redirectToPayments(request, { error: ERROR_KEYS.STAFF_NOT_FOUND });
+    return redirectToPayments(request, { error: ERROR_KEYS.STAFF_NOT_FOUND, viewStaffId });
   }
   if (staff.isDeleted || !staff.isActive) {
-    return redirectToPayments(request, { error: ERROR_KEYS.STAFF_INACTIVE });
+    return redirectToPayments(request, { error: ERROR_KEYS.STAFF_INACTIVE, viewStaffId });
+  }
+
+  // The permission may have been revoked while the admin was on Stripe's
+  // pages — re-check before writing anything to the staff member's row.
+  if (
+    completingAsAdmin &&
+    staff.userId !== session.user.id &&
+    staff.allowAdminStripeAccess !== true
+  ) {
+    return redirectToPayments(request, { error: ERROR_KEYS.NO_ACCESS, viewStaffId });
   }
 
   // ── 4. Exchange the authorization code for tokens ──────────────────────
@@ -145,13 +172,13 @@ export async function GET(request) {
     });
   } catch (err) {
     console.error("[GET /api/stripe/oauth/callback] Token exchange failed:", err);
-    return redirectToPayments(request, { error: ERROR_KEYS.EXCHANGE_FAILED });
+    return redirectToPayments(request, { error: ERROR_KEYS.EXCHANGE_FAILED, viewStaffId });
   }
 
   const stripeUserId = token?.stripe_user_id;
   if (!stripeUserId) {
     console.warn("[GET /api/stripe/oauth/callback] Missing stripe_user_id");
-    return redirectToPayments(request, { error: ERROR_KEYS.EXCHANGE_FAILED });
+    return redirectToPayments(request, { error: ERROR_KEYS.EXCHANGE_FAILED, viewStaffId });
   }
 
   // ── 5. Retrieve the connected account ──────────────────────────────────
@@ -160,7 +187,7 @@ export async function GET(request) {
     account = await stripe.accounts.retrieve(stripeUserId);
   } catch (err) {
     console.error("[GET /api/stripe/oauth/callback] Account retrieve failed:", err);
-    return redirectToPayments(request, { error: ERROR_KEYS.UNEXPECTED });
+    return redirectToPayments(request, { error: ERROR_KEYS.UNEXPECTED, viewStaffId });
   }
 
   // ── 6. Do not silently replace an existing connection ──────────────────
@@ -168,7 +195,7 @@ export async function GET(request) {
   // clear message instead of overwriting it. Future "Replace Stripe account"
   // support will branch from this check.
   if (staff.stripeAccountId && staff.stripeAccountId !== stripeUserId) {
-    return redirectToPayments(request, { error: ERROR_KEYS.ALREADY_CONNECTED });
+    return redirectToPayments(request, { error: ERROR_KEYS.ALREADY_CONNECTED, viewStaffId });
   }
 
   // ── 7. Duplicate protection across staff members ───────────────────────
@@ -181,7 +208,7 @@ export async function GET(request) {
   });
 
   if (owner && owner.id !== staffId) {
-    return redirectToPayments(request, { error: ERROR_KEYS.DUPLICATE_ACCOUNT });
+    return redirectToPayments(request, { error: ERROR_KEYS.DUPLICATE_ACCOUNT, viewStaffId });
   }
 
   // ── 8. Validate the account type ───────────────────────────────────────
@@ -196,10 +223,10 @@ export async function GET(request) {
     const isOurs = Boolean(owner) || account.metadata?.staffId === staffId;
 
     if (!isOurs) {
-      return redirectToPayments(request, { error: ERROR_KEYS.FOREIGN_EXPRESS });
+      return redirectToPayments(request, { error: ERROR_KEYS.FOREIGN_EXPRESS, viewStaffId });
     }
   } else if (account.type !== "standard") {
-    return redirectToPayments(request, { error: ERROR_KEYS.UNSUPPORTED_TYPE });
+    return redirectToPayments(request, { error: ERROR_KEYS.UNSUPPORTED_TYPE, viewStaffId });
   }
 
   // ── 9. Save the connection and synchronize capabilities ────────────────
@@ -216,7 +243,7 @@ export async function GET(request) {
   } catch (err) {
     // Unique constraint violation — another staff grabbed the account first.
     if (err.code === "P2002") {
-      return redirectToPayments(request, { error: ERROR_KEYS.DUPLICATE_ACCOUNT });
+      return redirectToPayments(request, { error: ERROR_KEYS.DUPLICATE_ACCOUNT, viewStaffId });
     }
     throw err;
   }
@@ -226,5 +253,5 @@ export async function GET(request) {
     `Stripe account ${stripeUserId} (${account.type})`
   );
 
-  return redirectToPayments(request, { success: true });
+  return redirectToPayments(request, { success: true, viewStaffId });
 }

@@ -3,12 +3,16 @@
 import { stripe } from "@/lib/stripe";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveStripeTargetStaff } from "@/lib/stripe-view-as";
 
 /**
  * Fetches the latest Stripe account status directly from the Stripe API
  * and updates the local database with the latest charges_enabled and
  * payouts_enabled values.
  *
+ * @param {string|null} [viewStaffId] - When provided by an OWNER/ADMIN,
+ *   refreshes THAT staff member's account instead (permission-gated in
+ *   resolveStripeTargetStaff). Staff self calls omit it (existing behavior).
  * @returns {Promise<{
  *   success: boolean,
  *   data?: {
@@ -20,7 +24,7 @@ import { prisma } from "@/lib/prisma";
  *   message?: string
  * }>}
  */
-export async function refreshStripeStatus() {
+export async function refreshStripeStatus(viewStaffId = null) {
   try {
     const session = await auth();
 
@@ -28,8 +32,13 @@ export async function refreshStripeStatus() {
       return { success: false, message: "Authentification requise." };
     }
 
+    const resolved = await resolveStripeTargetStaff(session, viewStaffId);
+    if (resolved.error) {
+      return { success: false, message: resolved.error };
+    }
+
     const staff = await prisma.staff.findUnique({
-      where: { userId: session.user.id },
+      where: { id: resolved.staffId },
       select: { id: true, stripeAccountId: true },
     });
 

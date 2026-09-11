@@ -15,11 +15,18 @@ export async function generateMetadata() {
   };
 }
 
-export default async function OrdersPage() {
+export default async function OrdersPage({ searchParams }) {
   await requireDashboardPermission(STAFF_PERMISSIONS.ORDERS);
   const t = await getTranslations("dashboardBoutique.orders");
 
-  const [result, pickupsToVerify] = await Promise.all([listOrders(), listPickupsToVerify()]);
+  // Deep-link preset from the dashboard "commandes à traiter" card.
+  const params = await searchParams;
+  const overdueOnly = params?.overdue === "1";
+
+  const [result, pickupsToVerify] = await Promise.all([
+    listOrders({ overdueOnly }),
+    listPickupsToVerify(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -39,7 +46,11 @@ export default async function OrdersPage() {
 
       <PickupsToVerify orders={pickupsToVerify.data ?? []} />
 
-      <OrdersPageClient initialOrders={result.data ?? []} initialTotalCount={result.totalCount ?? 0} />
+      <OrdersPageClient
+        initialOrders={result.data ?? []}
+        initialTotalCount={result.totalCount ?? 0}
+        initialOverdueOnly={overdueOnly}
+      />
     </div>
   );
 }

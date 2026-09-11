@@ -131,7 +131,7 @@ export async function rescheduleAppointment(appointmentId, { date, time }) {
             type: "GENERAL",
             title: "Rendez-vous déplacé",
             message: `Rendez-vous${serviceName ? ` (${serviceName})` : ""} déplacé du ${previousDate.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} vers le ${appointmentDate.toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })} à ${time}${customerName ? ` — ${customerName}` : ""}.`,
-            actionUrl: "/dashboard/appointments",
+            actionUrl: `/dashboard/appointments?appointmentId=${encodeURIComponent(appointment.id)}`,
             status: "PENDING",
           }))
         );

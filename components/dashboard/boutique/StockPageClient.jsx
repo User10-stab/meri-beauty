@@ -8,11 +8,15 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { StockAdjustDialog } from "@/components/dashboard/boutique/StockAdjustDialog";
 import { StockHistoryDrawer } from "@/components/dashboard/boutique/StockHistoryDrawer";
 
-export function StockPageClient({ initialVariants, initialSearch = "", userRole = null }) {
+/**
+ * @param {boolean} [props.initialLowStockOnly] - Deep-link preset from the
+ *   dashboard "stock bas" card: the checkbox starts ticked.
+ */
+export function StockPageClient({ initialVariants, initialSearch = "", initialLowStockOnly = false, userRole = null }) {
   const router = useRouter();
   const [search, setSearch] = useState(initialSearch);
   const [scannedCode, setScannedCode] = useState("");
-  const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [lowStockOnly, setLowStockOnly] = useState(initialLowStockOnly);
   const [adjusting, setAdjusting] = useState(null);
   const [historyFor, setHistoryFor] = useState(null);
 

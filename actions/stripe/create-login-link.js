@@ -3,18 +3,22 @@
 import { stripe } from "@/lib/stripe";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { resolveStripeTargetStaff } from "@/lib/stripe-view-as";
 
 /**
  * Creates a Stripe Express Dashboard login link for the connected account.
  * This allows users to access their Stripe Express Dashboard to manage their account.
  *
+ * @param {string|null} [viewStaffId] - When provided by an OWNER/ADMIN, creates
+ *   the link for THAT staff member's account instead (permission-gated in
+ *   resolveStripeTargetStaff). Staff self calls omit it (existing behavior).
  * @returns {Promise<{
  *   success: boolean,
  *   data?: { url: string },
  *   message?: string
  * }>}
  */
-export async function createLoginLink() {
+export async function createLoginLink(viewStaffId = null) {
   try {
     const session = await auth();
 
@@ -22,8 +26,13 @@ export async function createLoginLink() {
       return { success: false, message: "Authentification requise." };
     }
 
+    const resolved = await resolveStripeTargetStaff(session, viewStaffId);
+    if (resolved.error) {
+      return { success: false, message: resolved.error };
+    }
+
     const staff = await prisma.staff.findUnique({
-      where: { userId: session.user.id },
+      where: { id: resolved.staffId },
       select: { id: true, stripeAccountId: true },
     });
 

@@ -27,6 +27,8 @@ export function RecettesFilterBar({ filters }) {
   const to = filters?.to ?? "";
   const method = filters?.method ?? "ALL";
   const category = filters?.category ?? "ALL";
+  const staffId = filters?.staffId ?? "";
+  const staffName = filters?.staffName ?? null;
 
   function setParams(next) {
     const params = new URLSearchParams(searchParams.toString());
@@ -39,7 +41,7 @@ export function RecettesFilterBar({ filters }) {
     });
   }
 
-  const hasFilters = method !== "ALL" || category !== "ALL" || Boolean(searchParams.get("from")) || Boolean(searchParams.get("to"));
+  const hasFilters = method !== "ALL" || category !== "ALL" || Boolean(staffId) || Boolean(searchParams.get("from")) || Boolean(searchParams.get("to"));
 
   return (
     <div
@@ -121,6 +123,20 @@ export function RecettesFilterBar({ filters }) {
           ))}
         </select>
       </div>
+
+      {staffId && (
+        <div className="flex items-center gap-2 rounded-[7px] border border-indigo-200 bg-indigo-50/50 px-3 py-2 text-xs font-semibold text-indigo-800 dark:border-indigo-900/40 dark:bg-indigo-900/10 dark:text-indigo-300">
+          <span>Prestataire : {staffName ?? "filtré"}</span>
+          <button
+            type="button"
+            onClick={() => setParams({ staffId: "" })}
+            aria-label="Retirer le filtre prestataire"
+            className="font-bold hover:text-indigo-950 dark:hover:text-white"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {hasFilters && (
         <button

@@ -18,7 +18,7 @@ import { buildRecettesJournal } from "@/lib/livre-de-recettes/build-recettes-jou
  * than trusting the page that called it — a hand-edited query string must
  * not widen the window.
  *
- * @param {{ from?: string, to?: string, method?: string, category?: string }} [params]
+ * @param {{ from?: string, to?: string, method?: string, category?: string, staffId?: string }} [params]
  */
 export async function getRecettesJournal(params = {}) {
   const session = await auth();
@@ -29,8 +29,24 @@ export async function getRecettesJournal(params = {}) {
 
   const normalized = normalizeRecettesParams(params);
 
+  // Optional staff scope (dashboard revenue-card deep-link): validated here
+  // — an unknown or deleted id is ignored rather than widening the journal.
+  // This page is OWNER/ADMIN-only, so no per-staff ownership check applies.
+  let staffName = null;
+  if (normalized.staffId) {
+    const target = await prisma.staff.findUnique({
+      where: { id: normalized.staffId },
+      select: { id: true, isDeleted: true, user: { select: { fullName: true } } },
+    });
+    if (target && !target.isDeleted) {
+      staffName = target.user.fullName;
+    } else {
+      normalized.staffId = "";
+    }
+  }
+
   try {
-    const data = await buildRecettesJournal(prisma, normalized);
+    const data = await buildRecettesJournal(prisma, { ...normalized, staffName });
     return { success: true, data: serializeDecimalFields(data) };
   } catch (error) {
     console.error("[getRecettesJournal]", error);

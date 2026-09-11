@@ -1,18 +1,38 @@
 import { Suspense } from "react";
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, isAdminRole } from "@/lib/authorization";
+import { prisma } from "@/lib/prisma";
 import { getCustomers } from "@/actions/customers/get-customers";
 import { CustomersPageClient } from "@/components/dashboard/customers/CustomersPageClient";
 import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
-export default async function CustomersPage() {
+export default async function CustomersPage({ searchParams }) {
   const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.CUSTOMERS);
   const userRole = user.role;
   const t = await getTranslations("dashboard.customers");
 
-  const customersResult = await getCustomers();
+  // Deep-link presets (e.g. from a dashboard card) — re-validated inside
+  // getCustomers. staffId is honored for admins only.
+  const params = await searchParams;
+  const createdMonth = typeof params?.createdMonth === "string" ? params.createdMonth : "";
+  const isAdmin = isAdminRole(userRole);
+  const staffIdParam = isAdmin && typeof params?.staffId === "string" ? params.staffId : "";
+
+  const customersResult = await getCustomers({
+    createdMonth: createdMonth || undefined,
+    staffId: staffIdParam || undefined,
+  });
+
+  let staffName = null;
+  if (staffIdParam) {
+    const target = await prisma.staff.findUnique({
+      where: { id: staffIdParam },
+      select: { user: { select: { fullName: true } } },
+    });
+    staffName = target?.user?.fullName ?? null;
+  }
 
   const customers = customersResult.data ?? [];
   const totalCount = customersResult.totalCount ?? customers.length;
@@ -53,7 +73,14 @@ export default async function CustomersPage() {
 
       {/* ── Client shell ───────────────────────────────────────────────── */}
       <Suspense fallback={<CustomersTableSkeleton />}>
-        <CustomersPageClient initialCustomers={customers} initialTotalCount={totalCount} userRole={userRole} />
+        <CustomersPageClient
+          initialCustomers={customers}
+          initialTotalCount={totalCount}
+          userRole={userRole}
+          initialCreatedMonth={createdMonth}
+          initialStaffId={staffName ? staffIdParam : ""}
+          initialStaffName={staffName}
+        />
       </Suspense>
     </div>
   );

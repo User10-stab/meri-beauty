@@ -12,10 +12,16 @@ import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
  * - OWNER/ADMIN: See all customers
  * - STAFF: See only customers linked to their appointments or formations
  *
+ * `createdMonth` ("YYYY-MM") and `staffId` extend the listing so dashboard
+ * cards can deep-link their exact counts (e.g. new customers of one month
+ * for one staff member). `staffId` is OWNER/ADMIN-only — a STAFF caller
+ * stays scoped to their own rows even if they pass another id.
+ *
  * @returns {{ success: boolean, data: Array<{ id, fullName, nickName, email, phone, avatar, isActive, createdAt }>, totalCount: number, page: number, pageSize: number, message?: string }}
  */const DEFAULT_CUSTOMERS_PAGE_SIZE = 20;
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
-export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOMERS_PAGE_SIZE } = {}) {
+export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOMERS_PAGE_SIZE, createdMonth, staffId } = {}) {
   try {
     const session = await auth();
 
@@ -28,24 +34,49 @@ export async function getCustomers({ search, page = 1, pageSize = DEFAULT_CUSTOM
     }
 
     const userRole = session.user.role;
+    const isAdmin = userRole === ROLES.ADMIN || userRole === ROLES.OWNER;
     let userWhere = {
       role: "CUSTOMER",
       isDeleted: false,
     };
 
-    let staffRelationshipFilters = null;
+    // Viewed staff: admins may target any existing member; staff callers
+    // are forced back onto their own row.
+    let scopeStaffId = null;
+    let scopeStaffUserId = session.user.id;
     if (userRole === ROLES.STAFF) {
-      const staffId = await getCurrentStaffId();
+      scopeStaffId = await getCurrentStaffId();
 
-      if (!staffId) {
+      if (!scopeStaffId) {
         return { success: false, data: [], totalCount: 0, page: 1, pageSize, message: "Profil staff introuvable" };
       }
+    } else if (isAdmin && staffId) {
+      const target = await prisma.staff.findUnique({
+        where: { id: staffId },
+        select: { id: true, userId: true, isDeleted: true },
+      });
+      if (target && !target.isDeleted) {
+        scopeStaffId = target.id;
+        scopeStaffUserId = target.userId;
+      }
+    }
 
+    let staffRelationshipFilters = null;
+    if (scopeStaffId) {
       staffRelationshipFilters = staffCustomerRelationshipFilters({
-        staffId,
-        staffUserId: session.user.id,
+        staffId: scopeStaffId,
+        staffUserId: scopeStaffUserId,
       });
       userWhere.AND = [{ OR: staffRelationshipFilters }];
+    }
+
+    // Signup-month window (validated — a hand-edited value is ignored).
+    if (typeof createdMonth === "string" && MONTH_RE.test(createdMonth)) {
+      const [year, monthNumber] = createdMonth.split("-").map(Number);
+      userWhere.AND = [
+        ...(userWhere.AND ?? []),
+        { createdAt: { gte: new Date(year, monthNumber - 1, 1), lt: new Date(year, monthNumber, 1) } },
+      ];
     }
 
     if (search) {

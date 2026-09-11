@@ -2062,7 +2062,8 @@
         "foreign_express": "Dit Stripe Express-account is door een ander platform gemaakt en kan niet worden verbonden met Meri Beauty. Maak een nieuw Stripe-account of verbind een Standard-account.",
         "unsupported_type": "Dit type Stripe-account wordt niet ondersteund door het platform.",
         "exchange_failed": "Kan Stripe-autorisatie niet bevestigen. Probeer het opnieuw.",
-        "unexpected": "Er is een onverwachte fout opgetreden tijdens de Stripe-verbinding. Probeer het opnieuw."
+        "unexpected": "Er is een onverwachte fout opgetreden tijdens de Stripe-verbinding. Probeer het opnieuw.",
+        "no_access": "U hebt geen toegang tot deze pagina."
       }
     },
     "stripe": "Stripe-account",

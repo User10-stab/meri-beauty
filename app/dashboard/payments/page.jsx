@@ -1,16 +1,130 @@
 import { Suspense } from "react";
+import { requireRole } from "@/lib/route-protection";
+import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { prisma } from "@/lib/prisma";
 import { getStripeStatus } from "@/actions/stripe/get-stripe-status";
 import { PaymentsSettingsClient } from "@/components/dashboard/payments/PaymentsSettingsClient";
 import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Staff Stripe payment-management page.
+ *
+ * Two modes, same page and same logic:
+ *   - Self mode (`/dashboard/payments`) — the staff member's own account
+ *     (existing behavior, unchanged).
+ *   - Admin view-as mode (`/dashboard/payments?staffId=<id>`) — an
+ *     OWNER/ADMIN opens a staff member's account. Requires
+ *     STAFF_MANAGEMENT and the member's explicit permission
+ *     (Staff.allowAdminStripeAccess); otherwise "Vous n'avez pas accès à
+ *     cette page." is displayed and no data is loaded. Every action on the
+ *     page carries the staffId explicitly, so the admin can never
+ *     accidentally see or modify their own Stripe account here.
+ */
 export default async function PaymentsPage({ searchParams }) {
   const params = await searchParams;
+  const viewStaffId = params?.staffId ?? null;
   const oauthError = params?.stripeOAuthError;
   const oauthSuccess = params?.success === "true";
   const t = await getTranslations("dashboard.payments");
 
+  // ── Admin view-as mode ────────────────────────────────────────────────
+  if (viewStaffId) {
+    // OWNER/ADMIN only — getStripeStatus(viewStaffId) re-checks server-side.
+    await requireRole(DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT);
+
+    const target = await prisma.staff.findUnique({
+      where: { id: viewStaffId },
+      select: {
+        id: true,
+        isDeleted: true,
+        allowAdminStripeAccess: true,
+        user: { select: { fullName: true, email: true } },
+      },
+    });
+
+    if (!target || target.isDeleted || target.allowAdminStripeAccess !== true) {
+      return (
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold text-dark dark:text-white">
+              {t("title")}
+            </h1>
+            <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
+              {t("subtitle")}
+            </p>
+          </div>
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
+          >
+            <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
+            Vous n’avez pas accès à cette page.
+          </div>
+        </div>
+      );
+    }
+
+    const result = await getStripeStatus(target.id);
+    const settings = result.success ? result.data : null;
+
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold text-dark dark:text-white">
+            {t("title")}
+          </h1>
+          <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
+            {t("subtitle")}
+          </p>
+        </div>
+
+        {result.message && !result.success && (
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
+          >
+            <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
+            {result.message}
+          </div>
+        )}
+
+        {oauthError && (
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/10 dark:text-red-400"
+          >
+            <span className="mt-0.5 flex-shrink-0 text-lg leading-none">⚠</span>
+            {t(`oauthErrors.${oauthError}`) ?? t("oauthErrors.unexpected")}
+          </div>
+        )}
+
+        {oauthSuccess && !oauthError && (
+          <div
+            role="status"
+            className="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/10 dark:text-green-400"
+          >
+            <span className="mt-0.5 flex-shrink-0 text-lg leading-none">✓</span>
+            {t("stripeConnected")}
+          </div>
+        )}
+
+        <Suspense fallback={<SettingsSkeleton />}>
+          <PaymentsSettingsClient
+            initialData={settings}
+            viewAs={{
+              staffId: target.id,
+              fullName: target.user.fullName,
+              email: target.user.email,
+            }}
+          />
+        </Suspense>
+      </div>
+    );
+  }
+
+  // ── Self mode (existing staff behavior) ───────────────────────────────
   const result = await getStripeStatus();
 
   const settings = result.success ? result.data : null;

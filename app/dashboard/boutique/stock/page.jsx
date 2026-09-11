@@ -26,7 +26,9 @@ export default async function StockPage({ searchParams }) {
   // The counter's "corriger le stock" shortcut (see PointOfSaleClient's product
   // search) opens this page in a new tab already filtered to the product that
   // came up empty, so staff don't retype a name they just searched.
-  const { search: initialSearch = "" } = (await searchParams) ?? {};
+  // The dashboard "stock bas" card deep-links with ?lowStock=1 the same way.
+  const { search: initialSearch = "", lowStock: lowStockParam } = (await searchParams) ?? {};
+  const initialLowStockOnly = lowStockParam === "1";
 
   const result = await getAllVariants();
   const variants = result.data ?? [];
@@ -56,7 +58,12 @@ export default async function StockPage({ searchParams }) {
         </div>
       )}
 
-      <StockPageClient initialVariants={variants} initialSearch={initialSearch} userRole={session?.user?.role} />
+      <StockPageClient
+        initialVariants={variants}
+        initialSearch={initialSearch}
+        initialLowStockOnly={initialLowStockOnly}
+        userRole={session?.user?.role}
+      />
     </div>
   );
 }

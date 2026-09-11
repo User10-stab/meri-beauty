@@ -8,7 +8,7 @@ import {
   ok,
   serverError,
 } from "@/lib/api-response";
-import { requireRole, ROLES } from "@/lib/authorization";
+import { requireRole, ROLES, isAdminRole } from "@/lib/authorization";
 import { buildStripeOAuthUrl } from "@/lib/stripe-oauth";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -108,6 +108,8 @@ export async function GET(request) {
       isActive: true,
       isDeleted: true,
       stripeAccountId: true,
+      userId: true,
+      allowAdminStripeAccess: true,
     },
   });
 
@@ -119,6 +121,17 @@ export async function GET(request) {
   }
   if (!staff.isActive) {
     return badRequest("Le staff n'est pas actif.");
+  }
+
+  // An OWNER/ADMIN starting the OAuth flow for another staff member needs
+  // that member's explicit permission. STAFF callers are forced onto their
+  // own row above, so they are unaffected.
+  if (
+    isAdminRole(session.user.role) &&
+    staff.userId !== session.user.id &&
+    staff.allowAdminStripeAccess !== true
+  ) {
+    return forbidden("Vous n'avez pas accès à cette page.");
   }
 
   // ── 4. Check the staff can connect another account ─────────────────────

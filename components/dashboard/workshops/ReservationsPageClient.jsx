@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { DataTable } from "../Tables/DataTable";
@@ -23,7 +23,12 @@ const COLUMNS = [
   { key: "payment", label: "Paiement" },
 ];
 
-export function ReservationsPageClient({ initialReservations = [], userRole, canCollectCash = false }) {
+/**
+ * @param {string|null} [props.focusReservationId] - Notification deep-link:
+ *   filters the table to that exact reservation, highlights and scrolls to
+ *   it. Cleared with the notice bar — the full list is already loaded.
+ */
+export function ReservationsPageClient({ initialReservations = [], userRole, canCollectCash = false, focusReservationId = null }) {
   const router = useRouter();
   const isAdmin = isAdminRole(userRole);
   const [isCancelling, startCancel] = useTransition();
@@ -31,6 +36,21 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
   const [toCancel, setToCancel] = useState(null);
   const [toSettle, setToSettle] = useState(null);
   const [isSettling, startSettle] = useTransition();
+  const [focusedId, setFocusedId] = useState(focusReservationId);
+  const focusRowRef = useRef(null);
+
+  const focusRow = focusedId
+    ? initialReservations.find((r) => r.id === focusedId) ?? null
+    : null;
+  // Show only the linked reservation while focused (falls back to the full
+  // list when the id is unknown or outside the viewer's scope).
+  const displayedReservations = focusedId && focusRow ? [focusRow] : initialReservations;
+
+  useEffect(() => {
+    if (focusedId && focusRow && focusRowRef.current) {
+      focusRowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [focusedId, focusRow]);
 
   function handleSettle({ method, paymentConfirmed }) {
     startSettle(async () => {
@@ -70,12 +90,36 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
     });
   }
 
+  function renderFocusedRow(props) {
+    return (
+      <ReservationRow
+        {...props}
+        highlighted={props.row.id === focusedId}
+        rowRef={props.row.id === focusedId ? focusRowRef : undefined}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
+      {focusedId && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-indigo-200 bg-indigo-50/50 px-4 py-2.5 text-xs text-indigo-800 dark:border-indigo-900/40 dark:bg-indigo-900/10 dark:text-indigo-300">
+          <span className="font-medium">
+            {focusRow ? "Réservation liée à la notification" : "Réservation introuvable ou inaccessible"}
+          </span>
+          <button
+            type="button"
+            onClick={() => setFocusedId(null)}
+            className="rounded-md border border-indigo-200 bg-white px-2 py-1 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-900/40 dark:bg-transparent dark:text-indigo-300"
+          >
+            Effacer
+          </button>
+        </div>
+      )}
       <DataTable
-        data={initialReservations}
+        data={displayedReservations}
         columns={COLUMNS}
-        renderRow={ReservationRow}
+        renderRow={renderFocusedRow}
         onEdit={isAdmin ? (row) => setChangeModalReservation(row) : undefined}
         onDelete={isAdmin ? (row) => setToCancel(row) : undefined}
         onSettle={(row) => setToSettle(row)}

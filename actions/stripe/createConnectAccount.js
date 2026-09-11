@@ -77,6 +77,14 @@ export async function createConnectAccount(staffId) {
       return { success: false, message: "Le staff n'est pas actif." };
     }
 
+    // An OWNER/ADMIN creating a Stripe account on another staff member's
+    // behalf needs that member's explicit permission
+    // (Staff.allowAdminStripeAccess). STAFF callers are auto-scoped to their
+    // own row above, so they are unaffected.
+    if (isAdminRole(session.user.role) && staff.userId !== session.user.id && staff.allowAdminStripeAccess !== true) {
+      return { success: false, message: "Vous n'avez pas accès à cette page." };
+    }
+
     // ── 2. Check if a Stripe account already exists ─────────────────────────
     // If the account already exists, return it rather than creating a duplicate.
     if (staff.stripeAccountId) {

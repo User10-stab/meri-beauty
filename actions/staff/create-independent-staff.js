@@ -147,19 +147,40 @@ export async function createIndependentStaff(input) {
     }
   }
 
-  // A staff member already active under this email blocks re-creation; a
-  // soft-deleted one does not (see createStaffFromRental for the case where
-  // the Staff row itself must be reactivated instead of duplicated).
-  const existingUser = await prisma.user.findFirst({
-    where: { email },
-    select: { staff: { select: { isDeleted: true } } },
+  // Email/phone must be unique among active (non-deleted) users. Soft-deleted
+  // accounts free their email/phone — the partial unique indexes
+  // user_active_email_idx / user_active_phone_idx enforce this at the DB
+  // level for concurrent requests (P2002 fallback below); this pre-check
+  // gives the admin a clear field-level message before the transaction.
+  const emailOwner = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: "insensitive" }, isDeleted: false },
+    select: { id: true },
   });
-  if (existingUser?.staff && !existingUser.staff.isDeleted) {
+  if (emailOwner) {
     return {
       success: false,
-      message: "Un membre du personnel avec cette adresse e-mail existe déjà.",
-      errors: { email: "Un membre du personnel avec cette adresse e-mail existe déjà." },
+      message: "Cet email est déjà utilisé par un autre staff.",
+      errors: { email: "Cet email est déjà utilisé par un autre staff." },
     };
+  }
+
+  // Phone must be unique among active (non-deleted) STAFF only — scoped to
+  // users linked to a non-deleted Staff profile. Soft-deleted staff
+  // (Staff.deletedAt set / isDeleted) free their number, and non-staff
+  // accounts (e.g. customers) never block staff creation. Email stays
+  // global to active users: it is the login identifier.
+  if (phone) {
+    const phoneOwner = await prisma.user.findFirst({
+      where: { phone, isDeleted: false, staff: { isDeleted: false } },
+      select: { id: true },
+    });
+    if (phoneOwner) {
+      return {
+        success: false,
+        message: "Ce numéro de téléphone est déjà utilisé par un autre staff.",
+        errors: { phone: "Ce numéro de téléphone est déjà utilisé par un autre staff." },
+      };
+    }
   }
 
   if (vatNumber) {
@@ -319,27 +340,31 @@ export async function createIndependentStaff(input) {
     };
   } catch (error) {
     if (error?.code === "P2002") {
-      const fields = error.meta?.target ?? [];
+      // Concurrent-request guard: the partial unique indexes
+      // (user_active_email_idx / user_active_phone_idx /
+      // staff_active_vat_number_idx) report the index name in meta.target,
+      // not the field name — match by substring so both shapes are covered.
+      const targetStr = JSON.stringify(error.meta?.target ?? "").toLowerCase();
 
-      if (fields.includes("email")) {
+      if (targetStr.includes("email")) {
         return {
           success: false,
-          message: "Cette adresse e-mail est déjà utilisée.",
-          errors: { email: "Cette adresse e-mail est déjà utilisée." },
+          message: "Cet email est déjà utilisé par un autre staff.",
+          errors: { email: "Cet email est déjà utilisé par un autre staff." },
         };
       }
-      if (fields.includes("vatNumber")) {
+      if (targetStr.includes("phone")) {
+        return {
+          success: false,
+          message: "Ce numéro de téléphone est déjà utilisé par un autre staff.",
+          errors: { phone: "Ce numéro de téléphone est déjà utilisé par un autre staff." },
+        };
+      }
+      if (targetStr.includes("vat")) {
         return {
           success: false,
           message: "Ce numéro de TVA est déjà utilisé.",
           errors: { vatNumber: "Ce numéro de TVA est déjà utilisé." },
-        };
-      }
-      if (fields.includes("phone")) {
-        return {
-          success: false,
-          message: "Ce numéro de téléphone est déjà utilisé.",
-          errors: { phone: "Ce numéro de téléphone est déjà utilisé." },
         };
       }
 

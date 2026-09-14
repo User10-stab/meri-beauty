@@ -69,9 +69,12 @@ export async function resendPaymentEmail(appointmentId) {
     }
 
     // ── Verify Stripe Connect account ───────────────────────────────────────
+    // Same DB-cache guard as the client checkout path: an inactive
+    // card_payments capability surfaces as chargesEnabled=false, blocked
+    // here with a clear staff-facing message instead of a raw Stripe error.
     const staff = payment.appointment.staffService.staff;
     if (!staff?.stripeAccountId || !staff.stripeChargesEnabled || !staff.stripePayoutsEnabled) {
-      return { success: false, message: "Le compte Stripe du professionnel n'est pas prêt." };
+      return { success: false, message: "Le paiement par carte est temporairement indisponible pour ce prestataire (compte Stripe non activé — vérifiez les colonnes « Compte (live) » et « Carte » des Comptes Stripe)." };
     }
 
     if (!(await isSellerLegalDataComplete())) {
@@ -156,6 +159,7 @@ export async function resendPaymentEmail(appointmentId) {
     return { success: true, message: "Email de paiement renvoyé avec succès." };
   } catch (error) {
     console.error("[resendPaymentEmail]", error);
-    return { success: false, message: "Erreur lors de l'envoi. Veuillez réessayer." };
+    const { mapStripeCapabilityError } = await import("@/lib/stripe-connect-status");
+    return { success: false, message: mapStripeCapabilityError(error) ?? "Erreur lors de l'envoi. Veuillez réessayer." };
   }
 }

@@ -65,10 +65,12 @@ export async function updatePersonalInfo(input) {
     }
 
     // Check unique constraints for email and phone if they are being changed.
-    // Ignore soft-deleted users so a deleted account can be re-created cleanly.
-    if (email && email !== user.email) {
+    // Ignore soft-deleted users so a deleted account can be re-created cleanly,
+    // and ignore the staff member's own row. DB partial unique indexes
+    // (user_active_email_idx / user_active_phone_idx) guard concurrent requests.
+    if (email && email.toLowerCase() !== user.email.toLowerCase()) {
       const emailExists = await prisma.user.findFirst({
-        where: { email, isDeleted: false },
+        where: { email: { equals: email, mode: "insensitive" }, isDeleted: false, id: { not: user.id } },
         select: { id: true },
       });
       if (emailExists) {
@@ -82,7 +84,7 @@ export async function updatePersonalInfo(input) {
 
     if (phone && phone !== user.phone) {
       const phoneExists = await prisma.user.findFirst({
-        where: { phone, isDeleted: false },
+        where: { phone, isDeleted: false, id: { not: user.id } },
         select: { id: true },
       });
       if (phoneExists) {
@@ -94,7 +96,7 @@ export async function updatePersonalInfo(input) {
       }
     }
 
-    const emailChanged = email !== undefined && email !== user.email;
+    const emailChanged = email !== undefined && email.toLowerCase() !== (user.email ?? "").toLowerCase();
 
     // Build update data
     const updateData = {};
@@ -141,11 +143,13 @@ export async function updatePersonalInfo(input) {
     };
   } catch (error) {
     if (error?.code === "P2002") {
-      const target = error.meta?.target;
-      if (target?.includes("email")) {
+      // Partial unique indexes report the index name
+      // (user_active_email_idx / user_active_phone_idx) — match by substring.
+      const targetStr = JSON.stringify(error.meta?.target ?? "").toLowerCase();
+      if (targetStr.includes("email")) {
         return { success: false, message: "Cet email est déjà utilisé.", errors: { email: "Cet email est déjà utilisé." } };
       }
-      if (target?.includes("phone")) {
+      if (targetStr.includes("phone")) {
         return { success: false, message: "Ce numéro de téléphone est déjà utilisé.", errors: { phone: "Ce numéro est déjà utilisé." } };
       }
     }

@@ -13,6 +13,7 @@ import { resolveStripeTargetStaff } from "@/lib/stripe-view-as";
  * @returns {Promise<{
  *   success: boolean,
  *   data?: {
+ *     id: string,
  *     stripeAccountId: string | null,
  *     stripeAccountType: string | null,
  *     stripeChargesEnabled: boolean,
@@ -54,6 +55,10 @@ export async function getStripeStatus(viewStaffId = null) {
     return {
       success: true,
       data: {
+        // Exposed so the client can load the live card_payments section for
+        // this exact row (own id for staff self, target id for admin view-as
+        // — both already known server-side, no extra disclosure).
+        id: staff.id,
         stripeAccountId: staff.stripeAccountId,
         stripeAccountType: staff.stripeAccountType,
         stripeChargesEnabled: staff.stripeChargesEnabled,

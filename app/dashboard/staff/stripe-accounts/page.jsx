@@ -24,10 +24,13 @@ export default async function StripeAccountsPage() {
           <h1 className="text-2xl font-bold text-dark dark:text-white">
             Comptes Stripe
           </h1>
-          <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            Comptes Stripe connectés des professionnels. Le bouton « Voir le compte »
+          {/* <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
+            Comptes Stripe Express connectés des professionnels. Les colonnes
+            « Compte (live) » (🟢 Actif, 🟠 Limité, 🔴 Désactivé) et « Carte »
+            (🟢 activés, 🟠 en cours, 🔴 non activés) vérifient en direct si le
+            compte peut accepter les paiements par carte. Le bouton « Voir le compte »
             n&apos;apparaît que si le professionnel a autorisé l&apos;accès.
-          </p>
+          </p> */}
         </div>
 
         <div className="flex items-center gap-3">

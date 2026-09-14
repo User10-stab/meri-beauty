@@ -102,17 +102,19 @@ export async function resumeReservationPayment(paymentId) {
       };
     }
 
+    // Same DB-cache guard as createCheckoutSession: blocks an inactive
+    // card_payments capability with a clear message before any Stripe call.
     if (!staff.stripeChargesEnabled) {
       return {
         success: false,
-        message: "Le compte Stripe de ce membre du staff n'est pas encore activé. Veuillez réessayer ultérieurement.",
+        message: "Le paiement par carte est temporairement indisponible pour ce prestataire.",
       };
     }
 
     if (!staff.stripePayoutsEnabled) {
       return {
         success: false,
-        message: "Le compte Stripe de ce membre du staff n'est pas encore en mesure d'effectuer des virements. Veuillez réessayer ultérieurement.",
+        message: "Le compte Stripe de ce professionnel n'est pas encore en mesure d'effectuer des virements (configuration en cours). Veuillez réessayer ultérieurement.",
       };
     }
 
@@ -217,9 +219,10 @@ export async function resumeReservationPayment(paymentId) {
     };
   } catch (error) {
     console.error("[resumeReservationPayment]", error);
+    const { mapStripeCapabilityError } = await import("@/lib/stripe-connect-status");
     return {
       success: false,
-      message: "Erreur lors de la création de la session de paiement. Veuillez réessayer.",
+      message: mapStripeCapabilityError(error) ?? "Erreur lors de la création de la session de paiement. Veuillez réessayer.",
     };
   }
 }

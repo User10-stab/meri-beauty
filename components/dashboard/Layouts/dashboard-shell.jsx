@@ -4,13 +4,13 @@ import { Header } from "./header";
 import { Sidebar } from "./sidebar";
 import { SidebarProvider } from "./sidebar/sidebar-context";
 import { OnboardingGuard } from "@/components/dashboard/onboarding/OnboardingGuard";
-import { StripeReminderBanner } from "@/components/dashboard/onboarding/StripeReminderBanner";
+// import { StripeReminderBanner } from "@/components/dashboard/onboarding/StripeReminderBanner";
 
 export function DashboardShell({ user, dashboardPermissions = [], pickupsToVerifyCount = 0, unreadNotificationsCount = 0, children }) {
   return (
     <SidebarProvider>
       <OnboardingGuard userRole={user?.role} />
-      {user?.role === "STAFF" && <StripeReminderBanner />}
+      {/* {user?.role === "STAFF" && <StripeReminderBanner />} */}
       <div className="dashboard-scope flex min-h-screen overflow-x-hidden">
         <Sidebar
           userRole={user?.role}

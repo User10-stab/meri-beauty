@@ -1,9 +1,13 @@
 "use server";
 
-import { stripe } from "@/lib/stripe";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveStripeTargetStaff } from "@/lib/stripe-view-as";
+import {
+  getCardPaymentsStatus,
+  getStripeAccountLevel,
+} from "@/lib/stripe-connect-status";
+import { fetchLiveStripeStatus } from "./_fetch-live-status";
 
 /**
  * Fetches the latest Stripe account status directly from the Stripe API
@@ -20,6 +24,20 @@ import { resolveStripeTargetStaff } from "@/lib/stripe-view-as";
  *     payoutsEnabled: boolean,
  *     detailsSubmitted: boolean,
  *     currentlyDue: string[],
+ *     pastDue: string[],
+ *     errors: Array<object>,
+ *     pendingVerification: string[],
+ *     disabledReason: string|null,
+ *     cardPayments: string,
+ *     cardRequested: boolean,
+ *     cardRequestedAt: number|null,
+ *     accountLevel: "active"|"limited"|"disabled",
+ *     accountLabel: string,
+ *     level: "ready"|"pending"|"action_required",
+ *     canRequest: boolean,
+ *     actionNeeded: boolean,
+ *     label: string,
+ *     detail: string,
  *   },
  *   message?: string
  * }>}
@@ -53,21 +71,26 @@ export async function refreshStripeStatus(viewStaffId = null) {
       };
     }
 
-    // ── Retrieve the latest account data from Stripe ──────────────────
-    const account = await stripe.accounts.retrieve(staff.stripeAccountId);
+    // ── Retrieve the latest account + REAL card_payments capability ──
+    // One batched live read (shared fetcher — same call pattern as
+    // getStripeAccountDetails, so refreshes never stack duplicate calls).
+    const { account, capability } = await fetchLiveStripeStatus(staff.stripeAccountId);
 
-    const chargesEnabled = account.charges_enabled ?? false;
-    const payoutsEnabled = account.payouts_enabled ?? false;
-    const detailsSubmitted = account.details_submitted ?? false;
-    const currentlyDue = account.requirements?.currently_due ?? [];
+    // Stripe stays the source of truth: the live capability +
+    // requirements snapshot is derived via the shared helper and returned
+    // to the caller. Only the pre-existing cache columns
+    // (stripeAccountType/Charges/PayoutsEnabled) are persisted — no new DB
+    // field is introduced.
+    const accountLevel = getStripeAccountLevel(account);
+    const live = getCardPaymentsStatus(account, capability);
 
     // ── Update the database with the latest values ────────────────────
     await prisma.staff.update({
       where: { id: staff.id },
       data: {
         stripeAccountType: account.type,
-        stripeChargesEnabled: chargesEnabled,
-        stripePayoutsEnabled: payoutsEnabled,
+        stripeChargesEnabled: live.chargesEnabled,
+        stripePayoutsEnabled: live.payoutsEnabled,
       },
     });
 
@@ -75,10 +98,24 @@ export async function refreshStripeStatus(viewStaffId = null) {
       success: true,
       data: {
         accountType: account.type,
-        chargesEnabled,
-        payoutsEnabled,
-        detailsSubmitted,
-        currentlyDue,
+        accountLevel: accountLevel.accountLevel,
+        accountLabel: accountLevel.label,
+        chargesEnabled: live.chargesEnabled,
+        payoutsEnabled: live.payoutsEnabled,
+        detailsSubmitted: live.detailsSubmitted,
+        currentlyDue: live.currentlyDue,
+        pastDue: live.pastDue,
+        errors: live.errors,
+        pendingVerification: live.pendingVerification,
+        disabledReason: live.disabledReason,
+        cardPayments: live.cardPayments,
+        cardRequested: live.cardRequested,
+        cardRequestedAt: live.cardRequestedAt,
+        level: live.level,
+        canRequest: live.canRequest,
+        actionNeeded: live.actionNeeded,
+        label: live.label,
+        detail: live.detail,
       },
     };
   } catch (error) {

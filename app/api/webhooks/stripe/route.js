@@ -62,8 +62,10 @@ const UNDERPAYMENT_EPSILON = 0.01;
  *     an advisory lock; this handler only confirms the amount and flips
  *     their status. Appointment payments are Stripe Connect direct charges
  *     on the staff member's own connected account.
- *   - `account.updated` — Stripe Connect status changes for staff payout
- *     accounts (onboarding completed, charges/payouts enabled toggled).
+ *   - `account.updated` / `capability.updated` — Stripe Connect status
+ *     changes for staff payout accounts (onboarding completed,
+ *     charges/payouts enabled toggled, card_payments requested/activated).
+ *     Both resync the same Staff cache columns — one system, not two.
  *   - `payment_intent.payment_failed` — cancels the appointment tied to a
  *     failed direct-charge payment intent so it doesn't sit PENDING forever.
  *
@@ -132,6 +134,23 @@ export async function POST(req) {
   if (event.type === "account.updated") {
     try {
       await handleAccountUpdated(event.data.object);
+      return NextResponse.json({ received: true });
+    } catch (err) {
+      captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
+      return NextResponse.json({ error: "Processing failed" }, { status: 500 });
+    }
+  }
+
+  // A capability change (e.g. card_payments requested → pending → active,
+  // or new requirements) fires capability.updated, sometimes WITHOUT an
+  // accompanying account.updated — without this the Staff cache (and the
+  // admin "Carte" column) could keep showing 🟢 Activé while Stripe already
+  // reports 🔴 Inactif, or vice versa. Same route, same cache sync: the
+  // capability payload carries no charges_enabled flag, so the account is
+  // re-read once (webhooks are infrequent — no hot-path cost).
+  if (event.type === "capability.updated") {
+    try {
+      await handleCapabilityUpdated(event.data.object);
       return NextResponse.json({ received: true });
     } catch (err) {
       captureCriticalError(err, { area: "stripe-webhook", eventType: event.type, eventId: event.id });
@@ -315,7 +334,7 @@ export async function POST(req) {
  * or when their account capabilities change.
  */
 async function handleAccountUpdated(account) {
-  const { id: stripeAccountId, charges_enabled, payouts_enabled } = account;
+  const { id: stripeAccountId, charges_enabled, payouts_enabled, type } = account;
 
   if (!stripeAccountId) {
     console.warn("[stripe-webhook] account.updated event missing account ID");
@@ -337,6 +356,12 @@ async function handleAccountUpdated(account) {
   await prisma.staff.update({
     where: { id: staff.id },
     data: {
+      // Same three pre-existing cache columns refreshStripeStatus()
+      // persists — type included for consistency (it used to be skipped
+      // here, leaving the cache stale for accounts created before the
+      // column existed). No cardPayments-style field is ever stored:
+      // capabilities stay Stripe-side, read live on demand.
+      ...(type ? { stripeAccountType: type } : null),
       stripeChargesEnabled: charges_enabled ?? false,
       stripePayoutsEnabled: payouts_enabled ?? false,
     },
@@ -345,6 +370,51 @@ async function handleAccountUpdated(account) {
   console.log(
     `[stripe-webhook] Updated staff ${staff.id}: ` +
     `charges_enabled=${charges_enabled}, payouts_enabled=${payouts_enabled}`
+  );
+}
+
+/**
+ * Handle stripe.capability.updated event (same route, same cache — not a
+ * second webhook system). The capability object itself ({ id:
+ * "card_payments", account: "acct_…", status }) carries no charges_enabled
+ * flag, so the account is re-read once and the same cache columns are
+ * synced. Naturally idempotent — it always overwrites with the latest
+ * snapshot.
+ */
+async function handleCapabilityUpdated(capability) {
+  const stripeAccountId = capability?.account;
+
+  if (!stripeAccountId) {
+    console.warn("[stripe-webhook] capability.updated event missing account ID");
+    return;
+  }
+
+  const staff = await prisma.staff.findUnique({
+    where: { stripeAccountId },
+    select: { id: true },
+  });
+
+  if (!staff) {
+    console.warn(
+      `[stripe-webhook] No staff found for Stripe account: ${stripeAccountId}`
+    );
+    return;
+  }
+
+  const account = await stripe.accounts.retrieve(stripeAccountId);
+
+  await prisma.staff.update({
+    where: { id: staff.id },
+    data: {
+      ...(account.type ? { stripeAccountType: account.type } : null),
+      stripeChargesEnabled: account.charges_enabled ?? false,
+      stripePayoutsEnabled: account.payouts_enabled ?? false,
+    },
+  });
+
+  console.log(
+    `[stripe-webhook] Capability ${capability?.id ?? "?"} (${capability?.status ?? "?"}) ` +
+    `on ${stripeAccountId} → staff ${staff.id} cache resynced`
   );
 }
 

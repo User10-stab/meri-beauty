@@ -367,11 +367,14 @@ function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
     );
   }
 
-  // Group by day
+  // Group by day in Europe/Brussels using the authoritative startTime
+  // (fallback to date). Slicing the raw UTC ISO string would group a
+  // midnight-Brussels `date` ("...T22:00:00.000Z") under the previous UTC day.
   const byDay = {};
   for (const appt of appointments) {
-    if (!appt.date) continue;
-    const key = appt.date.slice(0, 10); // "YYYY-MM-DD"
+    const raw = appt.startTime ?? appt.date;
+    if (!raw) continue;
+    const key = new Date(raw).toLocaleDateString("en-CA", { timeZone: "Europe/Brussels" }); // "YYYY-MM-DD"
     if (!byDay[key]) byDay[key] = [];
     byDay[key].push(appt);
   }

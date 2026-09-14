@@ -115,7 +115,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
 
   // ── 3. Check if user already exists ──────────────────────────────────────
   const existingUser = await prisma.user.findFirst({
-    where: { email, isDeleted: false },
+    where: { email: { equals: email, mode: "insensitive" }, isDeleted: false },
     select: {
       id: true,
       fullName: true,
@@ -132,11 +132,28 @@ export async function createStaffFromRental(input, rentalRequestId) {
   if (existingUser?.staff && !existingUser.staff.isDeleted) {
     return {
       success: false,
-      message: "Un membre du personnel avec cette adresse e-mail existe déjà.",
-      errors: { email: "Un membre du personnel avec cette adresse e-mail existe déjà." },
+      message: "Cet email est déjà utilisé par un autre staff.",
+      errors: { email: "Cet email est déjà utilisé par un autre staff." },
     };
   }
   const deletedStaffId = existingUser?.staff?.isDeleted ? existingUser.staff.id : null;
+
+  // Phone must be unique among active (non-deleted) STAFF only, excluding
+  // the applicant's own row (which is about to be updated). Soft-deleted
+  // staff free their phone, and non-staff accounts never block creation.
+  if (phone) {
+    const phoneOwner = await prisma.user.findFirst({
+      where: { phone, isDeleted: false, staff: { isDeleted: false } },
+      select: { id: true },
+    });
+    if (phoneOwner && phoneOwner.id !== existingUser?.id) {
+      return {
+        success: false,
+        message: "Ce numéro de téléphone est déjà utilisé par un autre staff.",
+        errors: { phone: "Ce numéro de téléphone est déjà utilisé par un autre staff." },
+      };
+    }
+  }
 
   // ── 4. Transaction ───────────────────────────────────────────────────────
   try {
@@ -363,9 +380,20 @@ export async function createStaffFromRental(input, rentalRequestId) {
     }
 
     if (error.code === "P2002") {
-      const fields = error.meta?.target ?? [];
+      // Concurrent-request guard: partial unique indexes report the index
+      // name (user_active_email_idx / user_active_phone_idx /
+      // staff_active_vat_number_idx) in meta.target — match by substring.
+      const targetStr = JSON.stringify(error.meta?.target ?? "").toLowerCase();
 
-      if (fields.includes("vatNumber")) {
+      if (targetStr.includes("email")) {
+        return {
+          success: false,
+          message: "Cet email est déjà utilisé par un autre staff.",
+          errors: { email: "Cet email est déjà utilisé par un autre staff." },
+        };
+      }
+
+      if (targetStr.includes("vat")) {
         return {
           success: false,
           message: "Ce numéro de TVA est déjà utilisé.",
@@ -373,11 +401,11 @@ export async function createStaffFromRental(input, rentalRequestId) {
         };
       }
 
-      if (fields.includes("phone")) {
+      if (targetStr.includes("phone")) {
         return {
           success: false,
-          message: "Ce numéro de téléphone est déjà utilisé.",
-          errors: { phone: "Ce numéro de téléphone est déjà utilisé." },
+          message: "Ce numéro de téléphone est déjà utilisé par un autre staff.",
+          errors: { phone: "Ce numéro de téléphone est déjà utilisé par un autre staff." },
         };
       }
       return {

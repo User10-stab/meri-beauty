@@ -20,6 +20,8 @@ import {
 import Button from "@/components/ui/Button";
 import { createLoginLink } from "@/actions/stripe/create-login-link";
 import { updateStripeAdminAccess } from "@/actions/stripe/update-stripe-admin-access";
+import { getCardCapabilityBadge } from "@/lib/stripe-connect-status";
+import { StripeCardStatusSection } from "./StripeCardStatusSection";
 import { User } from "../Layouts/sidebar/icons";
 
 // ─── State Constants ─────────────────────────────────────────────────────────
@@ -87,6 +89,10 @@ export function PaymentsSettingsClient({ initialData, viewAs = null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [data, setData] = useState(initialData);
+  // Live card_payments state (level + raw capability status) pushed up by
+  // StripeCardStatusSection's automatic Stripe read — the single source for
+  // every "Paiements par carte" display on this page.
+  const [liveCard, setLiveCard] = useState(null);
   const [isConnecting, startConnecting] = useTransition();
   const [isConnectingExisting, startConnectingExisting] = useTransition();
   const [isOnboarding, startOnboarding] = useTransition();
@@ -96,6 +102,36 @@ export function PaymentsSettingsClient({ initialData, viewAs = null }) {
 
   const connectionState = getConnectionState(data);
   const isConnected = connectionState === STATE.CONNECTED;
+
+  // Badge for the "Paiements par carte" capability item — derived from the
+  // SAME live Stripe level as the dedicated card section below, never from
+  // `charges_enabled` or `stripeAccountId` existence (a connected account
+  // with charges enabled can still have card_payments inactive). While the
+  // automatic live read is in flight, show a neutral loading badge rather
+  // than the stale cache value.
+  const cardBadge = liveCard
+    ? getCardCapabilityBadge(liveCard.level)
+    : data?.stripeAccountId
+      ? "loading"
+      : "inactive";
+
+  // Stable across renders (only stable setState functions inside) — passed
+  // to StripeCardStatusSection, whose mount effect depends on it. An inline
+  // closure here would change identity every render and re-trigger the
+  // Stripe fetch in an infinite render → fetch → setState loop.
+  const handleLiveChange = useCallback((live) => {
+    if (!live || live.connected === false) return;
+    setLiveCard({ level: live.level, cardPayments: live.cardPayments });
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            stripeChargesEnabled: live.chargesEnabled,
+            stripePayoutsEnabled: live.payoutsEnabled,
+          }
+        : prev
+    );
+  }, []);
 
   // ── Connect Stripe ─────────────────────────────────────────────────────
   function handleConnect() {
@@ -278,11 +314,26 @@ export function PaymentsSettingsClient({ initialData, viewAs = null }) {
             />
           )}
 
-          {/* Capabilities */}
+          {/* Capabilities — the card item reads the live card_payments
+              status (same source as the section below); payouts stay on the
+              DB cache, synced by webhook/refresh. */}
           <CapabilitiesCard
-            chargesEnabled={data.stripeChargesEnabled}
+            cardBadge={cardBadge}
             payoutsEnabled={data.stripePayoutsEnabled}
           />
+
+          {/* Live card_payments capability + account level, Stripe-side.
+              Single live read on mount; onLiveChange resyncs the cached
+              banner above so it never contradicts the fresh state, and feeds
+              the CapabilitiesCard item above with the same live level. */}
+          {(viewingAs ? viewAs.staffId : data?.id) && data?.stripeAccountId && (
+            <StripeCardStatusSection
+              staffId={viewingAs ? viewAs.staffId : data.id}
+              isAdmin={viewingAs}
+              allowAdminAccess={data.allowAdminStripeAccess ?? true}
+              onLiveChange={handleLiveChange}
+            />
+          )}
 
           {/* Action Buttons */}
           <ActionArea
@@ -496,7 +547,7 @@ function ProgressTimeline({ isConnected, connectionState }) {
 
 // ─── Capabilities Card ──────────────────────────────────────────────────────
 
-function CapabilitiesCard({ chargesEnabled, payoutsEnabled }) {
+function CapabilitiesCard({ cardBadge, payoutsEnabled }) {
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-800/30">
       <h3 className="mb-3 text-xs font-semibold text-gray-700 dark:text-gray-300">
@@ -506,26 +557,43 @@ function CapabilitiesCard({ chargesEnabled, payoutsEnabled }) {
         <CapabilityItem
           icon={CreditCard}
           label="Paiements par carte"
-          enabled={chargesEnabled}
+          status={cardBadge}
         />
         <CapabilityItem
           icon={Landmark}
           label="Virements bancaires"
-          enabled={payoutsEnabled}
+          status={payoutsEnabled ? "active" : "inactive"}
         />
       </div>
     </div>
   );
 }
 
-function CapabilityItem({ icon: Icon, label, enabled }) {
+function CapabilityItem({ icon: Icon, label, status }) {
+  // status: "active" | "pending" | "inactive" | "loading" — the card item
+  // receives the live card_payments badge, so it always matches the
+  // dedicated "Paiements par carte" section.
   let badge;
 
-  if (enabled) {
+  if (status === "active") {
     badge = (
       <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/20 dark:text-green-400">
         <CheckCircle2 size={10} />
         Activé
+      </span>
+    );
+  } else if (status === "pending") {
+    badge = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+        <Clock size={10} />
+        En cours
+      </span>
+    );
+  } else if (status === "loading") {
+    badge = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+        <Loader2 size={10} className="animate-spin" />
+        Vérification…
       </span>
     );
   } else {

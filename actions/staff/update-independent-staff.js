@@ -96,7 +96,7 @@ export async function updateIndependentStaff(input) {
       isDeleted: true,
       isActive:  true,
       userId:    true,
-      user:      { select: { id: true, fullName: true, email: true } },
+      user:      { select: { id: true, fullName: true, email: true, phone: true } },
     },
   });
 
@@ -111,20 +111,37 @@ export async function updateIndependentStaff(input) {
   // the transaction without an extra round-trip after the fact.
   const wasActive = existing.isActive;
 
-  // ── 2b. Email uniqueness (ignore soft-deleted users so a deleted account
-  // can be re-created cleanly; ignore the staff member's own user row) ────
+  // ── 2b. Email/phone uniqueness among active (non-deleted) users, ignoring
+  // soft-deleted accounts (so a deleted account can be re-created cleanly)
+  // and the staff member's own user row. The partial unique indexes
+  // user_active_email_idx / user_active_phone_idx enforce this at the DB
+  // level for concurrent requests (P2002 fallback below). ────
   let emailChanged = false;
-  if (email !== undefined && email !== existing.user.email) {
+  if (email !== undefined && email.toLowerCase() !== existing.user.email.toLowerCase()) {
     emailChanged = true;
     const emailExists = await prisma.user.findFirst({
-      where: { email, isDeleted: false, id: { not: existing.userId } },
+      where: { email: { equals: email, mode: "insensitive" }, isDeleted: false, id: { not: existing.userId } },
       select: { id: true },
     });
     if (emailExists) {
       return {
         success: false,
-        message: "Cette adresse e-mail est déjà utilisée.",
-        errors: { email: "Cet e-mail est déjà utilisé." },
+        message: "Cet email est déjà utilisé par un autre staff.",
+        errors: { email: "Cet email est déjà utilisé par un autre staff." },
+      };
+    }
+  }
+
+  if (phone !== undefined && phone !== existing.user.phone) {
+    const phoneExists = await prisma.user.findFirst({
+      where: { phone, isDeleted: false, id: { not: existing.userId } },
+      select: { id: true },
+    });
+    if (phoneExists) {
+      return {
+        success: false,
+        message: "Ce numéro de téléphone est déjà utilisé par un autre staff.",
+        errors: { phone: "Ce numéro de téléphone est déjà utilisé par un autre staff." },
       };
     }
   }
@@ -327,19 +344,22 @@ export async function updateIndependentStaff(input) {
     };
   } catch (error) {
     if (error.code === "P2002") {
-      const fields = error.meta?.target ?? [];
-      if (fields.includes("phone")) {
+      // Concurrent-request guard: partial unique indexes report the index
+      // name (user_active_email_idx / user_active_phone_idx) in meta.target
+      // — match by substring so both field- and index-shaped targets work.
+      const targetStr = JSON.stringify(error.meta?.target ?? "").toLowerCase();
+      if (targetStr.includes("phone")) {
         return {
           success: false,
-          message: "Ce numéro de téléphone est déjà utilisé.",
-          errors: { phone: "Ce numéro est déjà utilisé." },
+          message: "Ce numéro de téléphone est déjà utilisé par un autre staff.",
+          errors: { phone: "Ce numéro de téléphone est déjà utilisé par un autre staff." },
         };
       }
-      if (fields.includes("email")) {
+      if (targetStr.includes("email")) {
         return {
           success: false,
-          message: "Cette adresse e-mail est déjà utilisée.",
-          errors: { email: "Cet e-mail est déjà utilisé." },
+          message: "Cet email est déjà utilisé par un autre staff.",
+          errors: { email: "Cet email est déjà utilisé par un autre staff." },
         };
       }
     }

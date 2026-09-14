@@ -202,17 +202,21 @@ export async function createCheckoutSession(reservationData) {
       };
     }
 
+    // Guard kept on the DB cache (no live Stripe call in the booking hot
+    // path). charges_enabled is false while card_payments is pending/inactive
+    // or requirements are open, so an inactive card capability is already
+    // blocked here with a clear message — never a raw Stripe error.
     if (!staff.stripeChargesEnabled) {
       return {
         success: false,
-        message: "Le compte Stripe de ce membre du staff n'est pas encore activé pour recevoir des paiements. Veuillez réessayer ultérieurement.",
+        message: "Le paiement par carte est temporairement indisponible pour ce prestataire.",
       };
     }
 
     if (!staff.stripePayoutsEnabled) {
       return {
         success: false,
-        message: "Le compte Stripe de ce membre du staff n'est pas encore en mesure d'effectuer des virements. Veuillez réessayer ultérieurement.",
+        message: "Le compte Stripe de ce professionnel n'est pas encore en mesure d'effectuer des virements (configuration en cours). Veuillez réessayer ultérieurement.",
       };
     }
 
@@ -577,9 +581,14 @@ export async function createCheckoutSession(reservationData) {
     } catch {
       errorMessage = "Erreur inconnue";
     }
+    // Last line of defence against a stale cache (webhook not yet received):
+    // if Stripe itself refuses because card_payments / capabilities are not
+    // active, translate the technical error into a clear customer message.
+    const { mapStripeCapabilityError } = await import("@/lib/stripe-connect-status");
+    const friendly = mapStripeCapabilityError(error);
     return {
       success: false,
-      message: "Erreur lors de la création de la session de paiement Stripe",
+      message: friendly ?? "Erreur lors de la création de la session de paiement Stripe",
       error: errorMessage,
     };
   }

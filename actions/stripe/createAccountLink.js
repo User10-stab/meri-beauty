@@ -31,7 +31,7 @@ export async function createAccountLink(staffId) {
     // ── 1. Fetch staff record from the database ────────────────────────────
     const staff = await prisma.staff.findUnique({
       where: { id: staffId },
-      select: { stripeAccountId: true, userId: true, isDeleted: true },
+      select: { stripeAccountId: true, userId: true, isDeleted: true, allowAdminStripeAccess: true },
     });
 
     if (!staff) {
@@ -41,6 +41,13 @@ export async function createAccountLink(staffId) {
     const canManage = isAdminRole(session.user.role)
       || (session.user.role === ROLES.STAFF && staff.userId === session.user.id);
     if (!canManage || staff.isDeleted) return { success: false, message: "Acces non autorise." };
+
+    // An admin acting on another staff member's account needs that member's
+    // explicit permission (Staff.allowAdminStripeAccess). Staff self calls
+    // (staff.userId === session.user.id) are unaffected.
+    if (isAdminRole(session.user.role) && staff.userId !== session.user.id && staff.allowAdminStripeAccess !== true) {
+      return { success: false, message: "Vous n'avez pas accès à cette page." };
+    }
 
     if (!staff.stripeAccountId) {
       return {
@@ -63,10 +70,18 @@ export async function createAccountLink(staffId) {
     }
 
     // ── 4. Generate the Account Link ───────────────────────────────────────
+    // When an OWNER/ADMIN generates the link for another staff member, the
+    // staff context travels in the return URLs so the onboarding page can
+    // send them back to that member's /dashboard/payments?staffId=… page.
+    // Staff self flows keep the existing URLs (behavior unchanged).
+    const viewAsSuffix =
+      isAdminRole(session.user.role) && staff.userId !== session.user.id
+        ? `&staffId=${staffId}`
+        : "";
     const accountLink = await stripe.accountLinks.create({
       account: staff.stripeAccountId,
-      refresh_url: `${appUrl}/dashboard/payments/onboarding?refresh=true`,
-      return_url: `${appUrl}/dashboard/payments/onboarding?success=true`,
+      refresh_url: `${appUrl}/dashboard/payments/onboarding?refresh=true${viewAsSuffix}`,
+      return_url: `${appUrl}/dashboard/payments/onboarding?success=true${viewAsSuffix}`,
       type: "account_onboarding",
     });
 

@@ -189,12 +189,33 @@ function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComp
   );
 }
 
-export function AppointmentsPageClient({ initialAppointments, staffOptions, showStaffFilter, canCollectCash = false }) {
+/**
+ * @param {object} props
+ * @param {object} [props.initialFilters] - Deep-link presets (e.g. from a
+ *   dashboard card): { status, staffId, date, month, statuses }. Applied to
+ *   the initial state AND every server refetch, so the page shows exactly
+ *   the linked data until the user changes a visible control.
+ */
+export function AppointmentsPageClient({ initialAppointments, staffOptions, showStaffFilter, canCollectCash = false, initialFilters = {} }) {
   const [appointments, setAppointments] = useState(initialAppointments);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [staffFilter, setStaffFilter] = useState("");
-  const [dateFilter, setDateFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState(initialFilters.status ?? "");
+  const [staffFilter, setStaffFilter] = useState(initialFilters.staffId ?? "");
+  const [dateFilter, setDateFilter] = useState(initialFilters.date ?? "");
+  // Multi-status + month presets have no dedicated visible control — they
+  // only ever come from a deep link and are shown in the notice bar below.
+  const [statusesFilter, setStatusesFilter] = useState(initialFilters.statuses ?? []);
+  const [monthFilter, setMonthFilter] = useState(initialFilters.month ?? "");
+  // Notification deep-link: focuses one exact reservation (the server
+  // already scoped it to rows the caller may see).
+  const [focusedId, setFocusedId] = useState(initialFilters.appointmentId ?? "");
+  const focusRowRef = useRef(null);
+
+  useEffect(() => {
+    if (focusedId && focusRowRef.current) {
+      focusRowRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [focusedId, appointments]);
   const [toReject, setToReject] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [toComplete, setToComplete] = useState(null);
@@ -223,6 +244,11 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         if (!hay.includes(q)) return false;
       }
       if (statusFilter && a.status !== statusFilter) return false;
+      // While a reservation is focused, preset lists are suspended so the
+      // linked row can never be hidden by a stale combined URL.
+      if (!focusedId) {
+        if (statusesFilter.length > 0 && !statusesFilter.includes(a.status)) return false;
+      }
       if (staffFilter && a.staffId !== staffFilter) return false;
       if (dateFilter) {
         const d = new Date(dateFilter);
@@ -230,6 +256,11 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         const end = new Date(d); end.setHours(23, 59, 59, 999);
         const apptTime = new Date(a.startTime || a.date || 0).getTime();
         if (apptTime < start.getTime() || apptTime > end.getTime()) return false;
+      }
+      if (!focusedId && monthFilter) {
+        const t = new Date(a.startTime || a.date || 0);
+        const key = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+        if (key !== monthFilter) return false;
       }
       return true;
     });
@@ -240,30 +271,54 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
       const dateB = new Date(b.startTime || b.date || 0).getTime();
       return dateB - dateA;
     });
-  }, [appointments, search, statusFilter, staffFilter, dateFilter]);
+  }, [appointments, search, statusFilter, statusesFilter, staffFilter, dateFilter, monthFilter, focusedId]);
 
   function refetch(next) {
     const params = {
       search: next.search ?? search,
       status: next.status !== undefined ? next.status : statusFilter,
+      statuses: next.statuses !== undefined ? next.statuses : statusesFilter,
       staffId: next.staffId !== undefined ? next.staffId : staffFilter,
       date: next.date !== undefined ? next.date : dateFilter,
+      month: next.month !== undefined ? next.month : monthFilter,
+      appointmentId: next.appointmentId !== undefined ? next.appointmentId : focusedId,
     };
     startTransition(async () => {
       const result = await getAllAppointments({
         search: params.search || undefined,
         status: params.status || undefined,
+        statuses: params.statuses.length > 0 ? params.statuses : undefined,
         staffId: params.staffId || undefined,
         date: params.date || undefined,
+        month: params.month || undefined,
+        appointmentId: params.appointmentId || undefined,
       });
       if (result.success) setAppointments(result.data);
       else toast.error(result.message);
     });
   }
 
+  // A deep-linked preset (no visible control of its own) is shown in the
+  // notice bar below until the user picks a visible control, which takes
+  // over: single status replaces the preset list, a picked date replaces
+  // the preset month, anything typed/changed drops a focused reservation.
+  function clearLinkedFilters() {
+    setStatusesFilter([]);
+    setMonthFilter("");
+    setFocusedId("");
+    refetch({ statuses: [], month: "", appointmentId: "" });
+  }
+
+  // Leaving focus mode when the user filters explicitly.
+  function unfocus(next) {
+    if (!focusedId) return next;
+    setFocusedId("");
+    return { ...next, appointmentId: "" };
+  }
+
   function handleSearchSubmit(e) {
     e.preventDefault();
-    refetch({});
+    refetch(unfocus({}));
   }
 
   async function handleConfirm(appointmentId) {
@@ -372,7 +427,9 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
           value={statusFilter}
           onChange={(e) => {
             setStatusFilter(e.target.value);
-            refetch({ status: e.target.value });
+            // The visible control takes over from a deep-linked preset list.
+            setStatusesFilter([]);
+            refetch(unfocus({ status: e.target.value, statuses: [] }));
           }}
           className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
         >
@@ -389,7 +446,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               value={staffFilter}
               onChange={(e) => {
                 setStaffFilter(e.target.value);
-                refetch({ staffId: e.target.value });
+                refetch(unfocus({ staffId: e.target.value }));
               }}
               className="h-9 w-full max-w-[220px] truncate rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white sm:w-auto"
               title={staffFilter ? staffOptions?.find((s) => s.id === staffFilter)?.fullName ?? "" : "Tous les prestataires"}
@@ -408,7 +465,9 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
           value={dateFilter}
           onChange={(e) => {
             setDateFilter(e.target.value);
-            refetch({ date: e.target.value });
+            // A picked date takes over from a deep-linked preset month.
+            setMonthFilter("");
+            refetch(unfocus({ date: e.target.value, month: "" }));
           }}
           aria-label="Filtrer par date du rendez-vous"
           title="Filtrer par date du rendez-vous"
@@ -419,7 +478,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
             type="button"
             onClick={() => {
               setDateFilter("");
-              refetch({ date: "" });
+              refetch(unfocus({ date: "" }));
             }}
             className="h-9 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6"
             title="Réinitialiser la date"
@@ -428,6 +487,21 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
           </button>
         )}
       </div>
+
+      {/* Deep-linked presets from a dashboard card — no dedicated control,
+          so they are shown here until cleared or superseded above. */}
+      {(statusesFilter.length > 0 || monthFilter || focusedId) && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-stroke bg-indigo-50/50 px-4 py-2.5 text-xs text-indigo-800 dark:border-dark-3 dark:bg-indigo-900/10 dark:text-indigo-300 sm:px-6">
+          <span className="font-medium">Filtres liés{focusedId ? " · réservation liée" : ""}{monthFilter ? ` · mois : ${monthFilter}` : ""}{statusesFilter.length > 0 ? ` · statuts : ${statusesFilter.map((s) => STATUS_LABEL[s] ?? s).join(", ")}` : ""}</span>
+          <button
+            type="button"
+            onClick={clearLinkedFilters}
+            className="rounded-md border border-indigo-200 bg-white px-2 py-1 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-900/40 dark:bg-transparent dark:text-indigo-300"
+          >
+            Effacer
+          </button>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
@@ -455,7 +529,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               </TableHeader>
               <TableBody>
                 {filtered.map((a) => (
-                  <TableRow key={a.id}>
+                  <TableRow key={a.id} ref={a.id === focusedId ? focusRowRef : undefined} className={a.id === focusedId ? 'bg-indigo-50/60 ring-2 ring-inset ring-indigo-500 dark:bg-indigo-900/20' : undefined}>
                     <TableCell className="pl-6">
                       {a.customerName || a.customer?.fullName ? (
                         <>

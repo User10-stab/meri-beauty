@@ -24,13 +24,37 @@ function countByStatus(appointments, status) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default async function AppointmentsPage() {
+export default async function AppointmentsPage({ searchParams }) {
   // Auth guard — accessible to Admin, Owner and Staff
   const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.APPOINTMENTS);
 
+  // Deep-link presets (e.g. from a dashboard card) — re-validated inside
+  // getAllAppointments, and STAFF callers stay scoped to their own rows.
+  const params = await searchParams;
+  const initialFilters = {
+    status: typeof params?.status === "string" ? params.status : "",
+    staffId: typeof params?.staffId === "string" ? params.staffId : "",
+    date: typeof params?.date === "string" ? params.date : "",
+    month: typeof params?.month === "string" ? params.month : "",
+    statuses:
+      typeof params?.statuses === "string" && params.statuses
+        ? params.statuses.split(",").map((s) => s.trim()).filter(Boolean)
+        : [],
+    // Notification deep-link: focuses one exact reservation (scoped
+    // server-side — staff only ever resolve their own rows).
+    appointmentId: typeof params?.appointmentId === "string" ? params.appointmentId : "",
+  };
+
   const t = await getTranslations();
   const [result, staffResult] = await Promise.all([
-    getAllAppointments(),
+    getAllAppointments({
+      status: initialFilters.status || undefined,
+      statuses: initialFilters.statuses.length > 0 ? initialFilters.statuses : undefined,
+      staffId: initialFilters.staffId || undefined,
+      date: initialFilters.date || undefined,
+      month: initialFilters.month || undefined,
+      appointmentId: initialFilters.appointmentId || undefined,
+    }),
     isAdminRole(user.role) ? getStaffFilterOptions() : Promise.resolve({ success: true, data: [] }),
   ]);
   const appointments = result.data ?? [];
@@ -98,6 +122,7 @@ export default async function AppointmentsPage() {
           staffOptions={staffResult.data ?? []}
           showStaffFilter={isAdminRole(user.role)}
           canCollectCash={isTillCashOperator(user)}
+          initialFilters={initialFilters}
         />
       </Suspense>
     </div>

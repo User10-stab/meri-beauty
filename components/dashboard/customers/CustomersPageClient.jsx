@@ -24,7 +24,16 @@ const CUSTOMERS_COLUMNS = [
 
 const PAGE_SIZE = 20;
 
-export function CustomersPageClient({ initialCustomers, initialTotalCount, userRole }) {
+/**
+ * @param {object} props
+ * @param {string} [props.initialCreatedMonth] - Deep-link preset ("YYYY-MM",
+ *   e.g. from the dashboard "new customers" card): only customers created
+ *   in that month are listed until cleared.
+ * @param {string} [props.initialStaffId] - Deep-link preset: scope to one
+ *   staff member's customers (admins only — enforced server-side).
+ * @param {string|null} [props.initialStaffName] - Display name for the preset.
+ */
+export function CustomersPageClient({ initialCustomers, initialTotalCount, userRole, initialCreatedMonth = "", initialStaffId = "", initialStaffName = null }) {
   const isAdmin = userRole === "OWNER" || userRole === "ADMIN";
   // Edit is allowed for any dashboard user who can view customers (OWNER/ADMIN always,
   // STAFF when they hold the CUSTOMERS capability — the page itself is already gated
@@ -36,15 +45,23 @@ export function CustomersPageClient({ initialCustomers, initialTotalCount, userR
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [search, setSearch] = useState("");
+  const [createdMonth, setCreatedMonth] = useState(initialCreatedMonth);
+  const [staffId, setStaffId] = useState(initialStaffId);
   const [isLoading, startTransition] = useTransition();
   const [viewingCustomerId, setViewingCustomerId] = useState(null);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [deletingCustomer, setDeletingCustomer] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  function fetchPage({ nextPage = page, nextPageSize = pageSize, nextSearch = search } = {}) {
+  function fetchPage({ nextPage = page, nextPageSize = pageSize, nextSearch = search, nextCreatedMonth = createdMonth, nextStaffId = staffId } = {}) {
     startTransition(async () => {
-      const result = await getCustomers({ search: nextSearch || undefined, page: nextPage, pageSize: nextPageSize });
+      const result = await getCustomers({
+        search: nextSearch || undefined,
+        page: nextPage,
+        pageSize: nextPageSize,
+        createdMonth: nextCreatedMonth || undefined,
+        staffId: nextStaffId || undefined,
+      });
       if (result.success) {
         setCustomers(result.data);
         setTotalCount(result.totalCount);
@@ -100,8 +117,31 @@ export function CustomersPageClient({ initialCustomers, initialTotalCount, userR
     }
   }
 
+  function clearLinkedFilters() {
+    setCreatedMonth("");
+    setStaffId("");
+    fetchPage({ nextPage: 1, nextCreatedMonth: "", nextStaffId: "" });
+  }
+
+  const hasLinkedFilters = Boolean(createdMonth || staffId);
+
   return (
     <>
+      {/* Deep-linked presets from a dashboard card, shown until cleared. */}
+      {/* {hasLinkedFilters && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-[10px] border border-indigo-200 bg-indigo-50/50 px-4 py-2.5 text-xs text-indigo-800 dark:border-indigo-900/40 dark:bg-indigo-900/10 dark:text-indigo-300">
+          <span className="font-medium">
+            Filtres liés{createdMonth ? ` · inscrits en ${createdMonth}` : ""}{staffId ? ` · ${initialStaffName ?? "prestataire filtré"}` : ""}
+          </span>
+          <button
+            type="button"
+            onClick={clearLinkedFilters}
+            className="rounded-md border border-indigo-200 bg-white px-2 py-1 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-900/40 dark:bg-transparent dark:text-indigo-300"
+          >
+            Effacer
+          </button>
+        </div>
+      )} */}
       <DataTable
         data={customers}
         isLoading={isLoading}

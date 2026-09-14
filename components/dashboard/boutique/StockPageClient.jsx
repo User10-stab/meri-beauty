@@ -9,30 +9,15 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { StockAdjustDialog } from "@/components/dashboard/boutique/StockAdjustDialog";
 import { StockHistoryDrawer } from "@/components/dashboard/boutique/StockHistoryDrawer";
 
-// Mirrors StockHistoryDrawer's French movement-type labels — this file
-// hardcodes its copy in French throughout (like the newer Livre de recettes
-// components) rather than going through next-intl, so the new column follows
-// the same convention as every other string already on this page.
-const MOVEMENT_TYPE_LABELS = {
-  SALE: "Vente",
-  RESTOCK: "Réappro.",
-  RETURN: "Retour",
-  LOSS: "Perte",
-  ADJUSTMENT: "Correction",
-  SALON_USAGE: "Prestation",
-};
-
-function formatShortDate(value) {
-  return new Intl.DateTimeFormat("fr-BE", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "Europe/Brussels" }).format(
-    new Date(value)
-  );
-}
-
-export function StockPageClient({ initialVariants, initialSearch = "", userRole = null }) {
+/**
+ * @param {boolean} [props.initialLowStockOnly] - Deep-link preset from the
+ *   dashboard "stock bas" card: the checkbox starts ticked.
+ */
+export function StockPageClient({ initialVariants, initialSearch = "", initialLowStockOnly = false, userRole = null }) {
   const router = useRouter();
   const [search, setSearch] = useState(initialSearch);
   const [scannedCode, setScannedCode] = useState("");
-  const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [lowStockOnly, setLowStockOnly] = useState(initialLowStockOnly);
   const [adjusting, setAdjusting] = useState(null);
   const [historyFor, setHistoryFor] = useState(null);
 

@@ -29,18 +29,25 @@ export async function getCalendarAppointments({ from, to }) {
     const { role } = session.user;
 
     // ── Base filter ────────────────────────────────────────────────────────
+    // Filter on the authoritative interval (startTime/endTime), not the
+    // denormalized `date` midnight stamp. `date` is midnight Brussels
+    // (22:00Z prev day in summer) while `from`/`to` are built with the
+    // server/device local midnight — a 1h DST gap (e.g. server UTC+1 vs
+    // Brussels UTC+2) pushes `date` just below `from` and hides the whole
+    // day. Interval overlap is also what getCalendarEvents,
+    // findConflictingAppointment and get-available-slots use, and it stays
+    // correct even when `date` drifts from `startTime` after a reschedule.
+    // `to` already arrives as end-of-day from calendarUtils, so no
+    // server-local setHours() re-application (that re-anchors the instant
+    // in the server TZ and shifts it again).
     const fromDate = new Date(from);
     const toDate = new Date(to);
-    // Include end of toDate (23:59:59)
-    toDate.setHours(23, 59, 59, 999);
 
     let where = {
       isDeleted: false,
       status: "CONFIRMED",
-      date: {
-        gte: fromDate,
-        lte: toDate,
-      },
+      startTime: { lt: toDate },
+      endTime: { gt: fromDate },
     };
 
     // ── Role filter ────────────────────────────────────────────────────────
@@ -60,7 +67,7 @@ export async function getCalendarAppointments({ from, to }) {
     // ── Query ──────────────────────────────────────────────────────────────
     const appointments = await prisma.appointment.findMany({
       where,
-      orderBy: [{ date: "asc" }, { startTime: "asc" }],
+      orderBy: [{ startTime: "asc" }],
       include: {
         user: {
           select: {

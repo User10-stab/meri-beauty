@@ -30,7 +30,12 @@ function formatPrice(n) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(n);
 }
 
-export function OrdersPageClient({ initialOrders, initialTotalCount }) {
+/**
+ * @param {boolean} [props.initialOverdueOnly] - Deep-link preset from the
+ *   dashboard "commandes à traiter" card: only overdue orders are listed
+ *   (server-side, so pagination stays exact) until cleared.
+ */
+export function OrdersPageClient({ initialOrders, initialTotalCount, initialOverdueOnly = false }) {
   const router = useRouter();
   const t = useTranslations("dashboardBoutique.orders");
   const [orders, setOrders] = useState(initialOrders);
@@ -39,6 +44,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [modeFilter, setModeFilter] = useState("");
+  const [overdueOnly, setOverdueOnly] = useState(initialOverdueOnly);
   const [pickupLookup, setPickupLookup] = useState("");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -66,6 +72,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
       search: next.search !== undefined ? next.search : search,
       status: next.status !== undefined ? next.status : statusFilter,
       mode: next.mode !== undefined ? next.mode : modeFilter,
+      overdueOnly: next.overdueOnly !== undefined ? next.overdueOnly : overdueOnly,
       page: next.page !== undefined ? next.page : 1,
     };
     startTransition(async () => {
@@ -73,6 +80,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
         search: params.search || undefined,
         status: params.status || undefined,
         fulfilmentMode: params.mode || undefined,
+        overdueOnly: params.overdueOnly || undefined,
         page: params.page,
         pageSize: PAGE_SIZE,
       });
@@ -119,8 +127,26 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
     lookupByPickupCode(code);
   }
 
+  function clearOverdueOnly() {
+    setOverdueOnly(false);
+    refetch({ overdueOnly: false });
+  }
+
   return (
     <div className="space-y-4">
+      {/* Deep-linked preset from the dashboard "commandes à traiter" card. */}
+      {overdueOnly && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-indigo-200 bg-indigo-50/50 px-4 py-2.5 text-xs text-indigo-800 dark:border-indigo-900/40 dark:bg-indigo-900/10 dark:text-indigo-300">
+          <span className="font-medium">Filtre lié : commandes à traiter uniquement</span>
+          <button
+            type="button"
+            onClick={clearOverdueOnly}
+            className="rounded-md border border-indigo-200 bg-white px-2 py-1 text-xs font-medium text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-900/40 dark:bg-transparent dark:text-indigo-300"
+          >
+            Effacer
+          </button>
+        </div>
+      )}
       {/* Pickup code quick-lookup — manual entry or camera scan of the customer's QR */}
       <div className="flex items-center gap-3 rounded-[10px] border border-stroke bg-white p-4 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <ScanLine size={18} className="flex-shrink-0 text-[#2f3a2e]" />

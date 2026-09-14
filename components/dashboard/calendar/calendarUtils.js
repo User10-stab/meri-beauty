@@ -392,9 +392,14 @@ function localDateKey(date) {
 }
 
 /**
- * Return only appointments whose `date` field falls on `targetDate`,
+ * Return only appointments whose day falls on `targetDate`,
  * comparing calendar days in Europe/Brussels regardless of the viewer's
  * device timezone.
+ *
+ * Uses the authoritative `startTime` interval (what the calendar query
+ * filters on) with fallback to the legacy denormalized `date` field, so
+ * grouping can never drift from the query when `date` and `startTime`
+ * disagree (e.g. after a reschedule that only moved `startTime`).
  *
  * @param {Array<object>} appointments
  * @param {Date} targetDate
@@ -403,8 +408,9 @@ export function appointmentsForDay(appointments, targetDate) {
   const targetKey = localDateKey(targetDate);
 
   return appointments.filter((appt) => {
-    if (!appt.date) return false;
-    return brusselsDateKey(new Date(appt.date)) === targetKey;
+    const raw = appt.startTime ?? appt.date;
+    if (!raw) return false;
+    return brusselsDateKey(new Date(raw)) === targetKey;
   });
 }
 

@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/route-protection";
 import { getIndependentStaff } from "@/actions/staff/get-independent-staff";
 import { getServices } from "@/actions/services/get-services";
 import { StaffPageClient } from "@/components/dashboard/staff/StaffPageClient";
+import { getStaffStripeDisplayState } from "@/lib/stripe-connect-status";
 import { getTranslations } from "next-intl/server";
 
 export const dynamic = "force-dynamic";
@@ -54,7 +55,7 @@ export default async function AutoEntrepreneurPage() {
           />
           <StatBadge
             label={t("stripeNotConnectedLabel")}
-            value={staffList.filter((s) => !s.stripeChargesEnabled || !s.stripePayoutsEnabled).length}
+            value={staffList.filter((s) => getStaffStripeDisplayState(s) === "not_connected").length}
             color="bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
           />
           <StatBadge

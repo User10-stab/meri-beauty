@@ -10,8 +10,15 @@ export const metadata = {
 
 export const dynamic = "force-dynamic";
 
-export default async function WorkshopReservationsPage() {
+export default async function WorkshopReservationsPage({ searchParams }) {
   const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS);
+
+  // Notification deep-link: focuses one exact reservation in the client.
+  const params = await searchParams;
+  const focusReservationId =
+    typeof params?.reservationId === "string" && params.reservationId
+      ? params.reservationId
+      : null;
 
   const result = await getWorkshopReservations();
   const reservations = result.data ?? [];
@@ -39,6 +46,7 @@ export default async function WorkshopReservationsPage() {
         initialReservations={reservations}
         userRole={user.role}
         canCollectCash={isTillCashOperator(user)}
+        focusReservationId={focusReservationId}
       />
     </div>
   );

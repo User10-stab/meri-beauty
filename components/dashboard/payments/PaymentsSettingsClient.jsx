@@ -19,6 +19,10 @@ import {
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { createLoginLink } from "@/actions/stripe/create-login-link";
+import { updateStripeAdminAccess } from "@/actions/stripe/update-stripe-admin-access";
+import { getCardCapabilityBadge } from "@/lib/stripe-connect-status";
+import { StripeCardStatusSection } from "./StripeCardStatusSection";
+import { User } from "../Layouts/sidebar/icons";
 
 // ─── State Constants ─────────────────────────────────────────────────────────
 
@@ -73,17 +77,61 @@ function getConnectionState(data) {
 
 // ─── Main Export ───────────────────────────────────────────────────────────
 
-export function PaymentsSettingsClient({ initialData }) {
+/**
+ * @param {{ initialData: object|null, viewAs?: { staffId: string, fullName: string, email: string }|null }} props
+ * When `viewAs` is set, an authorized admin manages THAT staff member's
+ * account: every call below carries the staffId explicitly (all server
+ * counterparts re-check the staff-granted permission), and the
+ * staff-owned permission toggle is hidden so the admin can never
+ * self-grant access. Without `viewAs`, staff self behavior is unchanged.
+ */
+export function PaymentsSettingsClient({ initialData, viewAs = null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [data, setData] = useState(initialData);
+  // Live card_payments state (level + raw capability status) pushed up by
+  // StripeCardStatusSection's automatic Stripe read — the single source for
+  // every "Paiements par carte" display on this page.
+  const [liveCard, setLiveCard] = useState(null);
   const [isConnecting, startConnecting] = useTransition();
   const [isConnectingExisting, startConnectingExisting] = useTransition();
   const [isOnboarding, startOnboarding] = useTransition();
   const [isManagingDashboard, startManagingDashboard] = useTransition();
 
+  const viewingAs = Boolean(viewAs?.staffId);
+
   const connectionState = getConnectionState(data);
   const isConnected = connectionState === STATE.CONNECTED;
+
+  // Badge for the "Paiements par carte" capability item — derived from the
+  // SAME live Stripe level as the dedicated card section below, never from
+  // `charges_enabled` or `stripeAccountId` existence (a connected account
+  // with charges enabled can still have card_payments inactive). While the
+  // automatic live read is in flight, show a neutral loading badge rather
+  // than the stale cache value.
+  const cardBadge = liveCard
+    ? getCardCapabilityBadge(liveCard.level)
+    : data?.stripeAccountId
+      ? "loading"
+      : "inactive";
+
+  // Stable across renders (only stable setState functions inside) — passed
+  // to StripeCardStatusSection, whose mount effect depends on it. An inline
+  // closure here would change identity every render and re-trigger the
+  // Stripe fetch in an infinite render → fetch → setState loop.
+  const handleLiveChange = useCallback((live) => {
+    if (!live || live.connected === false) return;
+    setLiveCard({ level: live.level, cardPayments: live.cardPayments });
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            stripeChargesEnabled: live.chargesEnabled,
+            stripePayoutsEnabled: live.payoutsEnabled,
+          }
+        : prev
+    );
+  }, []);
 
   // ── Connect Stripe ─────────────────────────────────────────────────────
   function handleConnect() {
@@ -92,7 +140,7 @@ export function PaymentsSettingsClient({ initialData }) {
         const res = await fetch("/api/stripe/connect", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify(viewingAs ? { staffId: viewAs.staffId } : {}),
         });
 
         const json = await res.json();
@@ -121,7 +169,11 @@ export function PaymentsSettingsClient({ initialData }) {
   function handleConnectExisting() {
     startConnectingExisting(async () => {
       try {
-        const res = await fetch("/api/stripe/oauth/authorize");
+        const res = await fetch(
+          viewingAs
+            ? `/api/stripe/oauth/authorize?staffId=${encodeURIComponent(viewAs.staffId)}`
+            : "/api/stripe/oauth/authorize"
+        );
 
         const json = await res.json();
 
@@ -156,7 +208,7 @@ export function PaymentsSettingsClient({ initialData }) {
         const res = await fetch("/api/stripe/onboarding", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify(viewingAs ? { staffId: viewAs.staffId } : {}),
         });
 
         const json = await res.json();
@@ -178,7 +230,7 @@ export function PaymentsSettingsClient({ initialData }) {
   function handleDashboard() {
     startManagingDashboard(async () => {
       try {
-        const result = await createLoginLink();
+        const result = await createLoginLink(viewingAs ? viewAs.staffId : undefined);
 
         if (!result.success) {
           toast.error(result.message);
@@ -221,6 +273,26 @@ export function PaymentsSettingsClient({ initialData }) {
 
   return (
     <div className="mx-auto max-w-[60vw] space-y-6">
+      {/* ── Admin view-as banner ───────────────────────────────────────── */}
+      {viewingAs && (
+        <div
+          role="status"
+          className="flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 dark:border-indigo-900/40 dark:bg-indigo-900/10 dark:text-indigo-300"
+        >
+          <Shield size={16} className="mt-0.5 flex-shrink-0" />
+          <p>
+            Vous consultez le compte Stripe de <strong>{viewAs.fullName}</strong>
+            {viewAs.email ? ` (${viewAs.email})` : ""}. Toutes les actions sur
+            cette page sont effectuées pour ce professionnel.
+          </p>
+        </div>
+      )}
+
+      {/* ── Admin access permission (staff self mode only — an admin must
+           never be able to grant themselves access from the staff page) ── */}
+      {User.role=="staff" && !viewingAs && (
+        <AdminAccessSection initialAllowed={data.allowAdminStripeAccess ?? true} />
+      )}
       {/* ── Connection Status ──────────────────────────────────────────── */}
       <SectionCard
         icon={CreditCard}
@@ -242,11 +314,26 @@ export function PaymentsSettingsClient({ initialData }) {
             />
           )}
 
-          {/* Capabilities */}
+          {/* Capabilities — the card item reads the live card_payments
+              status (same source as the section below); payouts stay on the
+              DB cache, synced by webhook/refresh. */}
           <CapabilitiesCard
-            chargesEnabled={data.stripeChargesEnabled}
+            cardBadge={cardBadge}
             payoutsEnabled={data.stripePayoutsEnabled}
           />
+
+          {/* Live card_payments capability + account level, Stripe-side.
+              Single live read on mount; onLiveChange resyncs the cached
+              banner above so it never contradicts the fresh state, and feeds
+              the CapabilitiesCard item above with the same live level. */}
+          {(viewingAs ? viewAs.staffId : data?.id) && data?.stripeAccountId && (
+            <StripeCardStatusSection
+              staffId={viewingAs ? viewAs.staffId : data.id}
+              isAdmin={viewingAs}
+              allowAdminAccess={data.allowAdminStripeAccess ?? true}
+              onLiveChange={handleLiveChange}
+            />
+          )}
 
           {/* Action Buttons */}
           <ActionArea
@@ -460,7 +547,7 @@ function ProgressTimeline({ isConnected, connectionState }) {
 
 // ─── Capabilities Card ──────────────────────────────────────────────────────
 
-function CapabilitiesCard({ chargesEnabled, payoutsEnabled }) {
+function CapabilitiesCard({ cardBadge, payoutsEnabled }) {
   return (
     <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-4 dark:border-gray-800 dark:bg-gray-800/30">
       <h3 className="mb-3 text-xs font-semibold text-gray-700 dark:text-gray-300">
@@ -470,26 +557,43 @@ function CapabilitiesCard({ chargesEnabled, payoutsEnabled }) {
         <CapabilityItem
           icon={CreditCard}
           label="Paiements par carte"
-          enabled={chargesEnabled}
+          status={cardBadge}
         />
         <CapabilityItem
           icon={Landmark}
           label="Virements bancaires"
-          enabled={payoutsEnabled}
+          status={payoutsEnabled ? "active" : "inactive"}
         />
       </div>
     </div>
   );
 }
 
-function CapabilityItem({ icon: Icon, label, enabled }) {
+function CapabilityItem({ icon: Icon, label, status }) {
+  // status: "active" | "pending" | "inactive" | "loading" — the card item
+  // receives the live card_payments badge, so it always matches the
+  // dedicated "Paiements par carte" section.
   let badge;
 
-  if (enabled) {
+  if (status === "active") {
     badge = (
       <span className="inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/20 dark:text-green-400">
         <CheckCircle2 size={10} />
         Activé
+      </span>
+    );
+  } else if (status === "pending") {
+    badge = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+        <Clock size={10} />
+        En cours
+      </span>
+    );
+  } else if (status === "loading") {
+    badge = (
+      <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-[11px] font-medium text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+        <Loader2 size={10} className="animate-spin" />
+        Vérification…
       </span>
     );
   } else {
@@ -607,5 +711,85 @@ function ActionArea({ state, accountType, isConnecting, isConnectingExisting, is
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Admin access permission ────────────────────────────────────────────────
+// Staff-owned toggle: when ON, an OWNER/ADMIN may open and manage this staff
+// member's Stripe payment page via a platform-generated login link. Stored in
+// the DB (Staff.allowAdminStripeAccess) and enforced server-side — the UI
+// only reflects the flag.
+
+function AdminAccessSection({ initialAllowed }) {
+  const [allowed, setAllowed] = useState(initialAllowed);
+  const [isPending, startTransition] = useTransition();
+
+  useEffect(() => {
+    setAllowed(initialAllowed);
+  }, [initialAllowed]);
+
+  function handleToggle() {
+    const next = !allowed;
+    setAllowed(next);
+    startTransition(async () => {
+      try {
+        const result = await updateStripeAdminAccess({ allowAdminAccess: next });
+        if (!result.success) {
+          setAllowed(!next);
+          toast.error(result.message);
+          return;
+        }
+        toast.success(result.message);
+      } catch {
+        setAllowed(!next);
+        toast.error("Erreur de connexion au serveur.");
+      }
+    });
+  }
+
+  return (
+    <SectionCard
+      icon={Shield}
+      title="Accès administrateur"
+      description="Contrôlez l'accès de l'administrateur à votre page de paiement."
+    >
+      <div
+        className={`flex items-center justify-between gap-4 rounded-lg border px-4 py-3.5 transition-colors dark:border-gray-800 ${
+          allowed
+            ? "border-red-300 bg-red-50 dark:border-red-900/40 dark:bg-red-900/15"
+            : "border-gray-100 bg-gray-50/50 dark:bg-gray-800/30"
+        }`}
+      >
+        <div className="min-w-0">
+          <p className={`text-sm font-medium ${allowed ? "text-red-700 dark:text-red-300" : "text-gray-900 dark:text-white"}`}>
+            Donner la permission à l’administrateur de voir et gérer votre page de paiement
+          </p>
+          <p className={`mt-0.5 text-xs ${allowed ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+            {allowed
+              ? "Activé — l’administrateur peut actuellement accéder à votre page de paiement Stripe."
+              : "Désactivé — l’administrateur ne peut pas accéder à votre page de paiement Stripe."}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={allowed}
+          aria-label="Autoriser l'administrateur à gérer ma page de paiement"
+          onClick={handleToggle}
+          disabled={isPending}
+          className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50 ${
+            allowed ? "bg-red-600" : "bg-gray-200 dark:bg-gray-700"
+          }`}
+        >
+          <span
+            className={`inline-flex h-4 w-4 transform items-center justify-center rounded-full bg-white shadow transition-transform ${
+              allowed ? "translate-x-6" : "translate-x-1"
+            }`}
+          >
+            {isPending && <Loader2 size={10} className="animate-spin text-gray-500" />}
+          </span>
+        </button>
+      </div>
+    </SectionCard>
   );
 }

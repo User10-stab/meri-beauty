@@ -19,6 +19,10 @@ import {
   Info,
   Crop,
   MapPin,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { CountrySelect } from "@/components/shared/CountrySelect";
 import { updateIndependentStaff } from "@/actions/staff/update-independent-staff";
@@ -355,6 +359,7 @@ function ViewContent({ staff }) {
 
 function EditForm({ staff, services, onSuccess, onCancel }) {
   const [addContract, setAddContract] = useState(!!staff.contract);
+  const [showPassword, setShowPassword] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   const {
@@ -367,6 +372,8 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
     defaultValues: {
       id:                staff.id,
       fullName:          staff.user.fullName,
+      email:             staff.user.email ?? "",
+      password:          "",
       phone:             staff.user.phone,
       addressLine1:      staff.user.addressLine1 ?? "",
       addressLine2:      staff.user.addressLine2 ?? "",
@@ -447,6 +454,39 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
               <Label htmlFor="editPhone" icon={Phone} required>Téléphone</Label>
               <TextInput id="editPhone" type="tel" placeholder="+33 6 12 34 56 78" error={errors.phone} {...register("phone")} />
               <FieldError message={errors.phone?.message} />
+            </div>
+            <div>
+              <Label htmlFor="editEmail" icon={Mail} required>E-mail</Label>
+              <TextInput id="editEmail" type="email" placeholder="exemple@email.com" autoComplete="off" error={errors.email} {...register("email")} />
+              <FieldError message={errors.email?.message} />
+              <p className="mt-1 text-[11px] text-gray-400">
+                Un e-mail de vérification sera envoyé à la nouvelle adresse si elle est modifiée.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="editPassword" icon={Lock}>Nouveau mot de passe</Label>
+              <div className="relative">
+                <TextInput
+                  id="editPassword"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Laisser vide pour conserver l'actuel"
+                  autoComplete="new-password"
+                  error={errors.password}
+                  {...register("password")}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((p) => !p)}
+                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 transition-colors hover:text-gray-600"
+                >
+                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+              <FieldError message={errors.password?.message} />
+              <p className="mt-1 text-[11px] text-gray-400">
+                Minimum 8 caractères. Vide = mot de passe inchangé.
+              </p>
             </div>
           </div>
         </div>

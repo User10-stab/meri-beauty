@@ -34,6 +34,11 @@ const betaniaPatmos = Betania_Patmos({
   subsets: ["latin"],
   variable: "--font-betania-patmos",
   display: "swap",
+  // Next has no automatic fallback metrics for this font, which logs
+  // "Failed to find font override values ... Skipping generating a fallback font".
+  // Disable it and provide a manual serif fallback instead.
+  adjustFontFallback: false,
+  fallback: ["Georgia", "serif"],
 });
 
 const SITE_DESCRIPTION =

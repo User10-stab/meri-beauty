@@ -740,7 +740,7 @@ function StorySection() {
                 alt=""
                  fill
                 className=""
-                sizes="150px" />
+                 sizes="width:100px " />
               </div>
             </div>
           </div>
@@ -910,10 +910,10 @@ function AtmosphereSection() {
 // ─────────────────────────────────────────────────────────────
 
 const UNIVERSE_IMAGES = {
-  studio: { image: "/Images/LE STUDIO.webp", imageAltKey: "studio", href: "/reservation" },
+  studio: { image: "/Images/LE STUDIO.webp", imageAltKey: "studio", href: "/reservation#booking"},
   boutique: { image: "/Images/LA BOUTIQUE.webp", imageAltKey: "boutique", href: "/boutique" },
   formations: { image: "/Images/LES FORMATIONS.webp", imageAltKey: "formations", href: "/formations" },
-  ateliers: { image: "/Images/LES ATELIERS & EVENEMENTS.webp", imageAltKey: "ateliers", href: "/evenements" },
+  ateliers: { image: "/Images/LES ATELIERS ET EVENEMENTS.webp", imageAltKey: "ateliers", href: "/evenements" },
 };
 const UNIVERSE_KEYS = ["studio", "boutique", "formations", "ateliers"];
 

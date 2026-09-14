@@ -50,6 +50,9 @@ export default function NotificationItem({
   const Icon = getIconForType(notification.type);
   const accentClass = getAccentForType(notification.type);
   const isUnread = !notification.isRead;
+  // Only rows with a destination navigate — others keep a static cursor so
+  // they don't look clickable when they aren't.
+  const isActionable = Boolean(notification.actionUrl);
 
   const handleRowClick = async (e) => {
     if (e.target.closest("[data-notif-action]")) return;
@@ -85,7 +88,7 @@ export default function NotificationItem({
         isUnread
           ? "bg-sky-50/50 hover:bg-sky-50 dark:bg-sky-500/5 dark:hover:bg-sky-500/10"
           : "hover:bg-gray-50 dark:hover:bg-white/5",
-        compact ? "rounded-lg cursor-pointer" : "cursor-pointer",
+        compact ? `rounded-lg ${isActionable ? "cursor-pointer" : "cursor-default"}` : isActionable ? "cursor-pointer" : "cursor-default",
       ].join(" ")}
       data-testid={`notification-row-${notification.id}`}
     >

@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Loader2, Mail, Pencil, Plus, Send, Trash2, X } from "lucide-react";
+import { Check, Eye, Loader2, Mail, Pencil, Plus, Send, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { sendInvoiceByEmail } from "@/actions/invoices/send-invoice-email";
 import { sendInvoiceToPeppyrus } from "@/actions/invoices/send-invoice-peppyrus";
 import { sendCreditNoteByEmail } from "@/actions/invoices/send-credit-note-email";
 import { sendCreditNoteToPeppyrus } from "@/actions/invoices/send-credit-note-peppyrus";
+import { previewInvoicePeppyrusDocument, previewCreditNotePeppyrusDocument } from "@/actions/invoices/preview-peppyrus";
 import {
   listNotificationRecipients,
   createNotificationRecipient,
@@ -65,6 +66,13 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
 
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewSummary, setPreviewSummary] = useState(null);
+  const [previewXml, setPreviewXml] = useState("");
+  const [showRawXml, setShowRawXml] = useState(false);
+
   useEffect(() => {
     if (!open) return;
     setEmailChecked(false);
@@ -79,6 +87,12 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
     setConfirming(false);
     setSending(false);
     setRecipientsError("");
+    setPreviewOpen(false);
+    setPreviewLoading(false);
+    setPreviewError("");
+    setPreviewSummary(null);
+    setPreviewXml("");
+    setShowRawXml(false);
 
     let cancelled = false;
     setLoadingRecipients(true);
@@ -175,6 +189,24 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
     } else toast.error(res?.message ?? "Impossible de supprimer cette adresse.");
   }
 
+  async function openPreview() {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewSummary(null);
+    setPreviewXml("");
+    const res = await (isCreditNote
+      ? previewCreditNotePeppyrusDocument(documentRecord.id)
+      : previewInvoicePeppyrusDocument(documentRecord.id));
+    setPreviewLoading(false);
+    if (res?.success) {
+      setPreviewSummary(res.summary);
+      setPreviewXml(res.xml);
+    } else {
+      setPreviewError(res?.message ?? "Impossible de générer l'aperçu du document.");
+    }
+  }
+
   async function deliver() {
     if (sending) return;
     setSending(true);
@@ -226,7 +258,9 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
     if (outcomes.peppyrus?.success) setPeppyrusChecked(false);
   }
 
-  return createPortal(
+  return (
+    <>
+    {createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
       role="presentation"
@@ -496,6 +530,16 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
                 </span>
               </span>
             </label>
+            <div className="border-t border-gray-100 px-4 py-2">
+              <button
+                type="button"
+                onClick={openPreview}
+                disabled={sending}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#2f3a2e] hover:underline disabled:opacity-50"
+              >
+                <Eye size={14} /> Aperçu du document avant envoi
+              </button>
+            </div>
           </div>
           )}
         </div>
@@ -546,5 +590,148 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
       </section>
     </div>,
     document.body,
+    )}
+    {previewOpen &&
+      createPortal(
+        <div
+          className="fixed inset-0 z-70 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          role="presentation"
+          onClick={(event) => event.target === event.currentTarget && setPreviewOpen(false)}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="preview-title"
+            className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl bg-white p-6 shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Aperçu — rien n'est envoyé</p>
+                <h2 id="preview-title" className="mt-1 text-lg font-semibold text-gray-900">
+                  Document Peppol {number}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(false)}
+                aria-label="Fermer l'aperçu"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mt-4 flex-1 overflow-y-auto">
+              {previewLoading && (
+                <p className="flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 size={15} className="animate-spin" /> Génération de l'aperçu…
+                </p>
+              )}
+
+              {!previewLoading && previewError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                  {previewError}
+                </div>
+              )}
+
+              {!previewLoading && previewSummary && (
+                <div className="space-y-4 text-sm">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-xl border border-gray-200 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Émetteur</p>
+                      <p className="mt-1 font-semibold text-gray-900">{previewSummary.seller.name}</p>
+                      <p className="text-xs text-gray-600">{previewSummary.seller.address}</p>
+                      <p className="mt-1 text-xs text-gray-600">TVA : {previewSummary.seller.vatNumber}</p>
+                      <p className="text-xs text-gray-600">N° entreprise : {previewSummary.seller.companyRegistrationNo}</p>
+                    </div>
+                    <div className="rounded-xl border border-gray-200 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Client</p>
+                      <p className="mt-1 font-semibold text-gray-900">{previewSummary.buyer.name}</p>
+                      <p className="text-xs text-gray-600">{previewSummary.buyer.address}</p>
+                      <p className="mt-1 text-xs text-gray-600">TVA : {previewSummary.buyer.vatNumber}</p>
+                      <p className="text-xs text-gray-600">N° entreprise : {previewSummary.buyer.companyRegistrationNo}</p>
+                      <p className="mt-1 truncate text-xs text-gray-500" title={previewSummary.buyer.peppolParticipantId}>
+                        Peppol : {previewSummary.buyer.peppolParticipantId}
+                      </p>
+                      {previewSummary.buyer.recipientWarning && (
+                        <p className="mt-1 text-xs font-medium text-amber-700">{previewSummary.buyer.recipientWarning}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-200 text-gray-500">
+                          <th className="p-2 text-left font-semibold">Description</th>
+                          <th className="p-2 text-right font-semibold">Qté</th>
+                          <th className="p-2 text-right font-semibold">PU HT</th>
+                          <th className="p-2 text-right font-semibold">TVA</th>
+                          <th className="p-2 text-right font-semibold">Total HT</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewSummary.lines.map((line, i) => (
+                          <tr key={i} className="border-b border-gray-100 last:border-0">
+                            <td className="p-2 text-gray-800">{line.description}</td>
+                            <td className="p-2 text-right text-gray-600">{line.quantity}</td>
+                            <td className="p-2 text-right text-gray-600">{line.unitPriceExclVat.toFixed(2)} €</td>
+                            <td className="p-2 text-right text-gray-600">{line.vatRate}%</td>
+                            <td className="p-2 text-right text-gray-800">{line.lineTotalExclVat.toFixed(2)} €</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="space-y-1 border-t border-gray-200 p-3 text-right text-xs">
+                      <p className="text-gray-600">Sous-total HT : {previewSummary.subtotalExclVat.toFixed(2)} €</p>
+                      <p className="text-gray-600">TVA ({previewSummary.vatRate}%) : {previewSummary.vatAmount.toFixed(2)} €</p>
+                      <p className="font-semibold text-gray-900">Total TTC : {previewSummary.totalInclVat.toFixed(2)} €</p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-200 p-3 text-xs text-gray-600">
+                    <p>Référence acheteur : {previewSummary.buyerReference}</p>
+                    {previewSummary.dueDate ? (
+                      <p>Échéance : {previewSummary.dueDate}</p>
+                    ) : (
+                      <p>Conditions de paiement : {previewSummary.paymentTermsNote}</p>
+                    )}
+                    {previewSummary.relatesToInvoiceNumber && (
+                      <p>Facture d'origine : {previewSummary.relatesToInvoiceNumber}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowRawXml((v) => !v)}
+                      className="text-xs font-semibold text-[#2f3a2e] hover:underline"
+                    >
+                      {showRawXml ? "Masquer le XML brut" : "Afficher le XML brut (UBL)"}
+                    </button>
+                    {showRawXml && (
+                      <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-gray-900 p-3 text-[10px] leading-4 text-gray-100">
+                        {previewXml}
+                      </pre>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(false)}
+                className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1f291f]"
+              >
+                Fermer
+              </button>
+            </div>
+          </section>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }

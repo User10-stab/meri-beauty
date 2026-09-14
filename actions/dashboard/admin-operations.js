@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import {
+  isAdminRole,
+  canSendTicketEmail as canSendTicketEmailOperator,
+  getTillCashOperatorUserId,
+  canAccessDashboard,
+} from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import {
   TYPE_FILTERS,
@@ -94,7 +99,17 @@ async function requireAdminOperationsAccess() {
 // parameters) don't need it — Postgres resolves an in-line string literal's
 // type from context.
 
-async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, paymentEvent, skip, take }) {
+// actorIds, when given (a non-empty array), scopes every arm to what THOSE
+// users personally recorded — Order/Workshop/Formation via an EXISTS against
+// their Payment's Transaction.recordedById (mirroring the existing
+// paymentEvent EXISTS clauses below), Appointment directly on its own
+// Transaction row, and Adjustment/Transfer (both AuditLog-sourced, no
+// Transaction behind them) on AuditLog.actorId instead. Usually one id (the
+// caller's own), but the admin/owner "Opérations" page also widens this to
+// include the exempted till-cash-operator account — see getAdminOperations.
+// Omitted/empty (never reachable from a real UI any more, only tests) leaves
+// every arm unfiltered.
+async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, paymentEvent, actorIds, skip, take }) {
   const includeOrders = !sourceTypes || sourceTypes.includes("ORDER");
   const includeWorkshops = !sourceTypes || sourceTypes.includes("WORKSHOP");
   const includeFormations = !sourceTypes || sourceTypes.includes("FORMATION");
@@ -142,6 +157,14 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
               )`
             : Prisma.empty
         }
+        ${
+          actorIds?.length
+            ? Prisma.sql`AND EXISTS (
+                SELECT 1 FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+                WHERE p."orderId" = o.id AND t."isDeleted" = false AND t."recordedById" = ANY(${actorIds})
+              )`
+            : Prisma.empty
+        }
     `);
   }
 
@@ -162,6 +185,14 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
             ? Prisma.sql`AND EXISTS (
                 SELECT 1 FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
                 WHERE p."workshopReservationId" = wr.id AND t."isDeleted" = false AND t."transactionType"::text = ${paymentEvent}
+              )`
+            : Prisma.empty
+        }
+        ${
+          actorIds?.length
+            ? Prisma.sql`AND EXISTS (
+                SELECT 1 FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+                WHERE p."workshopReservationId" = wr.id AND t."isDeleted" = false AND t."recordedById" = ANY(${actorIds})
               )`
             : Prisma.empty
         }
@@ -188,6 +219,14 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
               )`
             : Prisma.empty
         }
+        ${
+          actorIds?.length
+            ? Prisma.sql`AND EXISTS (
+                SELECT 1 FROM "Payment" p JOIN "Transaction" t ON t."paymentId" = p.id
+                WHERE p."formationReservationId" = fr.id AND t."isDeleted" = false AND t."recordedById" = ANY(${actorIds})
+              )`
+            : Prisma.empty
+        }
     `);
   }
 
@@ -203,6 +242,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
         AND p."appointmentId" IS NOT NULL
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND a."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${paymentEvent !== "ALL" ? Prisma.sql`AND t."transactionType"::text = ${paymentEvent}` : Prisma.empty}
+        ${actorIds?.length ? Prisma.sql`AND t."recordedById" = ANY(${actorIds})` : Prisma.empty}
     `);
   }
 
@@ -211,6 +251,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
       SELECT al.id AS id, 'ADJUSTMENT' AS "sourceType", al."createdAt" AS "sortAt"
       FROM "AuditLog" al
       WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_PRICE_ADJUSTED}
+        ${actorIds?.length ? Prisma.sql`AND al."actorId" = ANY(${actorIds})` : Prisma.empty}
     `);
   }
 
@@ -225,6 +266,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
         AND al."entityType" = 'WorkshopReservation'
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND wr."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${type !== "ALL" ? Prisma.sql`AND w."type"::text = ${type}` : Prisma.empty}
+        ${actorIds?.length ? Prisma.sql`AND al."actorId" = ANY(${actorIds})` : Prisma.empty}
     `);
   }
 
@@ -239,6 +281,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
         AND al."entityType" = 'FormationReservation'
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND fr."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${type !== "ALL" ? Prisma.sql`AND f."type"::text = ${type}` : Prisma.empty}
+        ${actorIds?.length ? Prisma.sql`AND al."actorId" = ANY(${actorIds})` : Prisma.empty}
     `);
   }
 
@@ -350,9 +393,7 @@ async function hydrateOrders(ids) {
       payment: { select: PAYMENT_LEDGER_SELECT },
       _count: { select: { items: true } },
       // null (not undefined) is a genuine, deliberate answer here: a
-      // customer's own online/pickup order has no staff involved at all,
-      // as opposed to a Workshop row, which never carries this field
-      // because nothing bridges its Animator back to a real account.
+      // customer's own online/pickup order has no staff involved at all.
       createdByStaff: { select: { fullName: true, role: true } },
     },
   });
@@ -372,15 +413,25 @@ async function hydrateWorkshops(ids) {
     include: {
       customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
       payment: { select: PAYMENT_LEDGER_SELECT },
-      session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } },
+      session: { select: { startDate: true, workshop: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } },
     },
   });
-  const mapped = rows.map((row) => ({
-    ...row,
-    sourceType: "WORKSHOP",
-    customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
-    ...deriveRefundFields(row.payment),
-  }));
+  const staffByEmail = await resolveStaffByEmails(rows.map((row) => row.session?.animator?.email));
+  const mapped = rows.map((row) => {
+    const animator = row.session?.animator;
+    // Same bridge as hydrateFormations: a match means the animator IS a real
+    // staff account; otherwise fall back to the Animator's own name,
+    // unbadged, since it may be an outside instructor never assigned via the
+    // staff picker at all.
+    const performedBy = animator ? staffByEmail.get(animator.email) ?? { name: animator.name, role: null } : null;
+    return {
+      ...row,
+      sourceType: "WORKSHOP",
+      customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
+      performedBy,
+      ...deriveRefundFields(row.payment),
+    };
+  });
   return attachLastTransfer(mapped, "WorkshopReservation");
 }
 
@@ -734,13 +785,20 @@ async function hydrateTransfers(ids) {
  * preset, exactly as before unification.
  */
 export async function getAdminOperations(params = {}) {
-  if (!(await requireAdminOperationsAccess())) {
+  const session = await requireAdminOperationsAccess();
+  if (!session) {
     return { success: false, message: "Non autorisé.", data: [], totalCount: 0, page: 1, pageSize: PAGE_SIZE };
   }
 
   const { tab, page, type, lifecycleStatus, paymentEvent } = normalizeParams(params);
   const skip = (page - 1) * PAGE_SIZE;
   const sourceTypes = OPERATION_PRESETS[tab]?.sourceTypes ?? null;
+  // Not even the owner sees another staff member's transactions here any
+  // more — always scoped to the viewer's own, widened by exactly one
+  // exemption: the till-cash-operator account (see getTillCashOperatorUserId)
+  // stays visible to every admin/owner, one-way — see lib/authorization.js.
+  const exemptUserId = await getTillCashOperatorUserId();
+  const actorIds = [session.user.id, ...(exemptUserId && exemptUserId !== session.user.id ? [exemptUserId] : [])];
 
   try {
     const { ids: idRows, totalCount } = await listUnifiedOperationIds({
@@ -748,6 +806,7 @@ export async function getAdminOperations(params = {}) {
       type,
       lifecycleStatus,
       paymentEvent,
+      actorIds,
       skip,
       take: PAGE_SIZE,
     });
@@ -801,16 +860,97 @@ export async function getAdminOperations(params = {}) {
 }
 
 /**
+ * "Mes opérations" — the same unified ledger as getAdminOperations, but
+ * reachable by every dashboard role (STAFF included, not just ADMIN/OWNER)
+ * and ALWAYS scoped to the caller's own recorded activity, with no
+ * till-cash-operator widening (that one-way exemption only applies to what
+ * ADMIN/OWNER see on the /dashboard/operations page, not to what the
+ * exempted account itself sees — see getAdminOperations and
+ * lib/authorization.js#isTillCashOperator).
+ */
+export async function getMyOperations(params = {}) {
+  const session = await auth();
+  if (!session?.user || !canAccessDashboard(session.user.role)) {
+    return { success: false, message: "Non autorisé.", data: [], totalCount: 0, page: 1, pageSize: PAGE_SIZE };
+  }
+
+  const { tab, page, type, lifecycleStatus, paymentEvent } = normalizeParams(params);
+  const skip = (page - 1) * PAGE_SIZE;
+  const sourceTypes = OPERATION_PRESETS[tab]?.sourceTypes ?? null;
+  const actorIds = [session.user.id];
+
+  try {
+    const { ids: idRows, totalCount } = await listUnifiedOperationIds({
+      sourceTypes,
+      type,
+      lifecycleStatus,
+      paymentEvent,
+      actorIds,
+      skip,
+      take: PAGE_SIZE,
+    });
+
+    const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [], ADJUSTMENT: [], TRANSFER: [] };
+    for (const row of idRows) idsBySource[row.sourceType]?.push(row.id);
+
+    const [orders, workshops, formations, appointments, adjustments, transfers] = await Promise.all([
+      hydrateOrders(idsBySource.ORDER),
+      hydrateWorkshops(idsBySource.WORKSHOP),
+      hydrateFormations(idsBySource.FORMATION),
+      hydrateAppointmentTransactions(idsBySource.APPOINTMENT),
+      hydrateAdjustments(idsBySource.ADJUSTMENT),
+      hydrateTransfers(idsBySource.TRANSFER),
+    ]);
+
+    const byId = new Map();
+    for (const row of [...orders, ...workshops, ...formations, ...appointments, ...adjustments, ...transfers]) {
+      byId.set(row.id, row);
+    }
+    const data = idRows.map((row) => byId.get(row.id)).filter(Boolean);
+
+    return {
+      success: true,
+      tab,
+      page,
+      type,
+      lifecycleStatus,
+      paymentEvent,
+      pageSize: PAGE_SIZE,
+      totalCount,
+      data: serializeDecimalFields(data),
+    };
+  } catch (error) {
+    console.error("[getMyOperations]", error);
+    return {
+      success: false,
+      tab,
+      page,
+      type,
+      lifecycleStatus,
+      paymentEvent,
+      pageSize: PAGE_SIZE,
+      totalCount: 0,
+      data: [],
+      message: "Impossible de charger vos opérations.",
+    };
+  }
+}
+
+/**
  * Everything the operations table cannot fit on one row, for the detail
  * drawer: the full payment context, its sibling transactions, and the
  * invoice if one was issued.
+ *
+ * Reachable from both /dashboard/operations and /dashboard/mes-operations —
+ * any dashboard role may call this now, not just ADMIN/OWNER; the real
+ * boundary is the recordedById ownership check below, not the role gate.
  *
  * A separate round trip rather than more `include` on the list query — the
  * list renders 30 rows per page and only ever one of them gets opened.
  */
 export async function getTransactionDetail(transactionId) {
-  const session = await requireAdminOperationsAccess();
-  if (!session) {
+  const session = await auth();
+  if (!session?.user || !canAccessDashboard(session.user.role)) {
     return { success: false, message: "Non autorisé." };
   }
   if (typeof transactionId !== "string" || !transactionId) {
@@ -892,7 +1032,7 @@ export async function getTransactionDetail(transactionId) {
             // reading either one alone misrepresents what the customer paid.
             transactions: { orderBy: { paidAt: "asc" }, select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true } },
             order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, pickupCode: true, pickedUpAt: true, user: { select: { fullName: true, email: true } }, createdByStaff: { select: { fullName: true, role: true } } } },
-            workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
+            workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             formationReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             appointment: { select: { id: true, date: true, status: true, checkInCode: true, checkedInAt: true, user: { select: { fullName: true, email: true } }, staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
           },
@@ -901,6 +1041,17 @@ export async function getTransactionDetail(transactionId) {
     });
 
     if (!transaction) return { success: false, message: "Transaction introuvable." };
+
+    // A list already pre-filtered to the viewer's own transactions (plus,
+    // for an admin/owner, the exempted till operator) is not, on its own,
+    // proof against a direct id guess/URL edit — re-checked here so this
+    // detail fetch can't be used to bypass that scoping. The exemption only
+    // widens what ADMIN/OWNER may see, same as getAdminOperations.
+    const exemptUserId = isAdminRole(session.user.role) ? await getTillCashOperatorUserId() : null;
+    const visibleActorIds = new Set([session.user.id, exemptUserId].filter(Boolean));
+    if (!visibleActorIds.has(transaction.recordedById)) {
+      return { success: false, message: "Transaction introuvable." };
+    }
 
     // Drives the drawer's "Annuler et rembourser" gate — same formula
     // InvoiceRowActions uses for the Transactions-tab row, computed here via
@@ -922,6 +1073,14 @@ export async function getTransactionDetail(transactionId) {
     } else if (transaction.payment?.appointment) {
       const staffUser = transaction.payment.appointment.staffService?.staff?.user;
       transaction.payment.appointment.performedBy = staffUser ? { name: staffUser.fullName, role: staffUser.role } : null;
+    } else if (transaction.payment?.workshopReservation) {
+      const animator = transaction.payment.workshopReservation.session?.animator;
+      let performedBy = null;
+      if (animator) {
+        const staffByEmail = await resolveStaffByEmails([animator.email]);
+        performedBy = staffByEmail.get(animator.email) ?? { name: animator.name, role: null };
+      }
+      transaction.payment.workshopReservation.performedBy = performedBy;
     } else if (transaction.payment?.formationReservation) {
       const animator = transaction.payment.formationReservation.session?.animator;
       let performedBy = null;
@@ -935,13 +1094,11 @@ export async function getTransactionDetail(transactionId) {
     // The drawer is the only surface that can e-mail a ticket for a booking
     // whose balance was discounted to zero: no Transaction is created for that
     // settlement, so it never reaches the Livre de caisse, which is where the
-    // only other send button lives. Resolved through the permission rather than
-    // assumed from this action's admin-only gate, so narrowing that gate later
-    // cannot silently hand the button to someone without SEND_TICKET_EMAIL.
-    const canSendTicketEmail = await hasDashboardPermission(
-      session.user,
-      STAFF_PERMISSIONS.SEND_TICKET_EMAIL,
-    );
+    // only other send button lives. Resolved through canSendTicketEmail()
+    // rather than assumed from this action's admin-only gate, so narrowing
+    // that gate later cannot silently hand the button to someone who
+    // shouldn't have it.
+    const canSendTicketEmail = await canSendTicketEmailOperator(session.user);
 
     // ticketEmailedAt records only *that* a ticket went out, never for which
     // price. A counter adjustment after a send leaves the client holding a
@@ -1055,7 +1212,8 @@ async function resolveLastPriceAdjustment(payment) {
  * TransferDetailModal renders an identical shape either way it was opened.
  */
 export async function getTransferDetail(auditLogId) {
-  if (!(await requireAdminOperationsAccess())) {
+  const session = await auth();
+  if (!session?.user || !canAccessDashboard(session.user.role)) {
     return { success: false, message: "Non autorisé." };
   }
   if (typeof auditLogId !== "string" || !auditLogId) {
@@ -1063,6 +1221,18 @@ export async function getTransferDetail(auditLogId) {
   }
 
   try {
+    // A list already pre-filtered to the viewer's own transfers (plus, for
+    // an admin/owner, the exempted till operator) is not, on its own, proof
+    // against a direct id guess/URL edit — re-checked here, same reasoning
+    // as getTransactionDetail.
+    const log = await prisma.auditLog.findUnique({ where: { id: auditLogId }, select: { actorId: true } });
+    if (!log) return { success: false, message: "Transfert introuvable." };
+    const exemptUserId = isAdminRole(session.user.role) ? await getTillCashOperatorUserId() : null;
+    const visibleActorIds = new Set([session.user.id, exemptUserId].filter(Boolean));
+    if (!visibleActorIds.has(log.actorId)) {
+      return { success: false, message: "Transfert introuvable." };
+    }
+
     const [transfer] = await hydrateTransfers([auditLogId]);
     if (!transfer) return { success: false, message: "Transfert introuvable." };
     return { success: true, data: serializeDecimalFields(transfer) };

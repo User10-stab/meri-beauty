@@ -4,6 +4,7 @@ import { buildRentalPeriodLabel, shortContractRef } from "@/lib/invoicing";
 import { InvoiceDocument, CreditNoteDocument } from "./InvoiceDocument";
 import { TicketDocument } from "./TicketDocument";
 import { RecettesJournalDocument } from "./RecettesJournalDocument";
+import { CashBookDocument } from "./CashBookDocument";
 import { InventorySnapshotDocument } from "./InventorySnapshotDocument";
 import { StockMovementsDocument } from "./StockMovementsDocument";
 import { getSellerContact } from "./seller-contact";
@@ -128,6 +129,17 @@ export async function renderCreditNotePdf(creditNote, invoice) {
  */
 export async function renderRecettesJournalPdf(journal) {
   return renderToBuffer(<RecettesJournalDocument journal={journal} />);
+}
+
+/**
+ * The Livre de caisse's PDF is the journal only (day-by-day entrées/sorties/
+ * solde) — the inline "Rapport" section is a screen-only view, never printed
+ * (see CashBookDocument.jsx's module doc for why). The ledger already
+ * returns plain Numbers, not Prisma Decimals (see build-ledger.js), so no
+ * serialization step is needed before it hits the render tree.
+ */
+export async function renderCashBookPdf({ ledger, generatedAt = new Date() }) {
+  return renderToBuffer(<CashBookDocument ledger={ledger} generatedAt={generatedAt} />);
 }
 
 /**

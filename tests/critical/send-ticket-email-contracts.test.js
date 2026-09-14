@@ -6,16 +6,25 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
 
 // 1f2e90b removed every client-facing send of the till-style ticket. This is
-// the one deliberate reopening: a manual, permission-gated action, not a
-// role check and not a restoration of the old auto-send. These contracts pin
-// the authorization boundary and the audit trail at the source level, since
-// a running-server test can only prove "a permitted staff member could send
-// it" — it can't prove there is no OTHER path in that skips the gate.
-describe("sendTicketByEmail stays a deliberate, permission-gated exception", () => {
+// the one deliberate reopening: a manual, gated action, not a plain role
+// check and not a restoration of the old unconditional auto-send. These
+// contracts pin the authorization boundary and the audit trail at the source
+// level, since a running-server test can only prove "a permitted staff
+// member could send it" — it can't prove there is no OTHER path in that
+// skips the gate.
+//
+// 14 Sep 2026 — briefly hardcoded the same way as the till cash operator
+// (isTillCashOperator): admins/owners always pass, plus exactly one staff
+// account. Reverted the same day — it's back to being a normal, grantable
+// STAFF_PERMISSIONS.SEND_TICKET_EMAIL permission, checked by default for a
+// newly created staff account (see DEFAULT_STAFF_PERMISSIONS), same as every
+// other STAFF_PERMISSIONS entry. See canSendTicketEmail() in
+// lib/authorization.js.
+describe("sendTicketByEmail stays a deliberate, gated exception", () => {
   const action = source("actions/payments/send-ticket-email.js");
 
-  test("is gated on the new SEND_TICKET_EMAIL permission, not a role", () => {
-    expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL)");
+  test("is gated on canSendTicketEmail(), awaited since the permission check is async", () => {
+    expect(action).toContain("await canSendTicketEmail(session.user)");
   });
 
   test("never takes the recipient address from the caller — same reasoning as sendInvoiceByEmail", () => {
@@ -40,18 +49,18 @@ describe("sendTicketByEmail stays a deliberate, permission-gated exception", () 
   });
 });
 
-describe("the new permission stays opt-in, not granted to every staff member by default", () => {
+describe("ticket-sending is a normal, grantable staff permission, on by default", () => {
   const authz = source("lib/authorization.js");
 
-  test("SEND_TICKET_EMAIL is a real permission key, listed for owners/admins to grant", () => {
-    expect(authz).toContain("SEND_TICKET_EMAIL: \"SEND_TICKET_EMAIL\"");
-    expect(authz).toContain("STAFF_PERMISSIONS.SEND_TICKET_EMAIL, label:");
+  test("canSendTicketEmail delegates to hasDashboardPermission, admin-inclusive by construction", () => {
+    expect(authz).toContain("export async function canSendTicketEmail(user)");
+    expect(authz).toContain("return hasDashboardPermission(user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL)");
   });
 
-  test("it is not in DEFAULT_STAFF_PERMISSIONS — existing staff keep today's behaviour until opted in", () => {
-    const defaultsIdx = authz.indexOf("export const DEFAULT_STAFF_PERMISSIONS");
-    const defaults = authz.slice(defaultsIdx, authz.indexOf("]);", defaultsIdx));
-    expect(defaults).not.toContain("SEND_TICKET_EMAIL");
+  test("SEND_TICKET_EMAIL exists as a permission key, a checkbox option, and a default", () => {
+    expect(authz).toContain("SEND_TICKET_EMAIL: \"SEND_TICKET_EMAIL\"");
+    expect(authz).toContain("key: STAFF_PERMISSIONS.SEND_TICKET_EMAIL");
+    expect(authz).toContain("STAFF_PERMISSIONS.SEND_TICKET_EMAIL,\n]);");
   });
 });
 
@@ -75,13 +84,12 @@ describe("the Livre de caisse has no send-ticket-by-email action", () => {
   });
 });
 
-describe("Operations keeps the send action, permission-gated the same way", () => {
+describe("Operations keeps the send action, gated the same way", () => {
   const actions = source("actions/dashboard/admin-operations.js");
   const drawer = source("components/dashboard/operations/TransactionDetailDrawer.jsx");
 
-  test("the transaction detail data computes the permission server-side", () => {
-    expect(actions).toContain("hasDashboardPermission(");
-    expect(actions).toContain("STAFF_PERMISSIONS.SEND_TICKET_EMAIL");
+  test("the transaction detail data computes the check server-side", () => {
+    expect(actions).toMatch(/import \{[^}]*\bcanSendTicketEmail\b[^}]*\} from "@\/lib\/authorization"/);
     expect(actions).toContain("canSendTicketEmail,");
   });
 

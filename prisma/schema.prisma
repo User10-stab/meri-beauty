@@ -567,8 +567,8 @@ model WorkshopReservation {
   checkedInById  String?
   checkedInBy    User?     @relation("WorkshopReservationCheckedInBy", fields: [checkedInById], references: [id])
 
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   cancellationRequest ReservationCancellationRequest?
 
@@ -723,8 +723,8 @@ model FormationReservation {
   checkedInById  String?
   checkedInBy    User?     @relation("FormationReservationCheckedInBy", fields: [checkedInById], references: [id])
 
-  createdAt         DateTime                   @default(now())
-  updatedAt         DateTime                   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   cancellationRequest ReservationCancellationRequest?
 
@@ -745,7 +745,7 @@ model Salon {
   coverImage  String?
 
   phone     String
-  email     String
+  email          String
   address   String? // freeform, shown on the public site (footer/contact) — not used for invoices
   vatNumber String? // legal TVA/BCE number — printed on every issued invoice
   rib       String? // bank account number / RIB
@@ -813,12 +813,12 @@ model User {
   id                       String    @id @default(cuid())
   fullName                 String
   nickName                 String?
-  email                    String    
+  email                    String
   password                 String
   // A counter sale needs a receipt email, but a phone number is optional.
   // Online checkout and booking forms still require it at their own
   // validation boundary.
-  phone                    String?  
+  phone                    String?
   role                     UserRole
   avatar                   String?
   emailVerified            Boolean   @default(false)
@@ -867,17 +867,17 @@ model User {
   updatedAt                DateTime  @updatedAt
 
   staff                          Staff?
-  appointments                   Appointment[]
+  appointments                             Appointment[]
   reviews                        Review[]
-  notifications                  Notification[]
+  notifications                            Notification[]
   newsletterRecipients           NewsletterRecipient[]
   createdStaffServices           StaffService[]         @relation("CreatedBy")
   rentalRequests                 RentalRequest[]
-  workshopReservations           WorkshopReservation[]
+  workshopReservations                     WorkshopReservation[]
   waitingListEntries             WaitingListEntry[]
   createdActivities              Activity[]             @relation("ActivityCreatedBy")
   cancelledReservations          WorkshopReservation[]  @relation("ReservationCancelledBy")
-  formationReservations          FormationReservation[]
+  formationReservations                    FormationReservation[]
   cancelledFormationReservations FormationReservation[] @relation("FormationReservationCancelledBy")
   checkedInWorkshopReservations  WorkshopReservation[]  @relation("WorkshopReservationCheckedInBy")
   checkedInFormationReservations FormationReservation[] @relation("FormationReservationCheckedInBy")
@@ -892,6 +892,7 @@ model User {
   pickedUpOrders                 Order[]                @relation("OrderPickedUpBy")
   stockReleasedOrders            Order[]                @relation("OrderStockReleasedBy")
   createdPointOfSaleOrders       Order[]                @relation("OrderCreatedByStaff")
+  recordedTransactions                     Transaction[]                    @relation("TransactionRecordedBy")
   processedReturns               ReturnRequest[]        @relation("ReturnProcessedBy")
   auditLogs                      AuditLog[]             @relation("AuditActor")
   assignedDisputes               StripeDispute[]        @relation("DisputeAssignee")
@@ -1256,6 +1257,13 @@ model Order {
   id          String @id @default(cuid())
   orderNumber Int    @unique @default(autoincrement())
 
+  // The global, gapless, year-reset ticket sequence shared with Payment (see
+  // lib/tickets/allocate-ticket-number.js) — the number on the printed/emailed
+  // receipt. Distinct from orderNumber above, which is this order's own
+  // always-present internal reference regardless of payment state.
+  ticketNumber String?    @unique
+  ticketKind   TicketKind @default(ORDER)
+
   // Null for an anonymous POS "client de passage" sale — no account is
   // created for a walk-in counter sale, see completePointOfSaleSale's
   // isWalkIn branch. Every other order source always sets this.
@@ -1393,7 +1401,7 @@ model Order {
   updatedAt DateTime @updatedAt
 
   items          OrderItem[]
-  payment        Payment?
+  payment             Payment?
   returnRequests ReturnRequest[]
   cancellationRequest OrderCancellationRequest?
 
@@ -1553,13 +1561,13 @@ model Staff {
   type              StaffType
   rythme            StaffRythme?
   languages         String[]
-  bio               String?
-  isActive          Boolean   @default(true)
+  bio                         String?
+  isActive                    Boolean                     @default(true)
   photo             String?
   hireDate          DateTime?
   yearsOfExperience Int
-  isDeleted         Boolean   @default(false)
-  deletedAt         DateTime?
+  isDeleted                   Boolean                     @default(false)
+  deletedAt                   DateTime?
   vatNumber         String?   
   // Dashboard modules explicitly granted by an OWNER/ADMIN. Kept as stable
   // string capability keys so new permissions can be added without a DB enum migration.
@@ -1614,12 +1622,12 @@ model Staff {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  staffServices StaffService[]
+  staffServices   StaffService[]
   workingHours  WorkingHour[]
   timeOffs      TimeOff[]
   contracts     Contract[]
-  appointments  Appointment[]
-  newsletters   Newsletter[]
+  appointments    Appointment[]
+  newsletters     Newsletter[]
   monthlyInvoices StaffMonthlyInvoice[]
 }
 
@@ -1637,10 +1645,10 @@ model StaffService {
   createdBy   User   @relation("CreatedBy", fields: [createdById], references: [id])
 
   price    Decimal
-  duration Int
+  duration      Int
   margin   Decimal?
   photo    String
-  isActive Boolean  @default(true)
+  isActive      Boolean   @default(true)
   // Days of the week this staff member is allowed to perform THIS specific
   // service. Defaults to every day (no restriction); an explicitly narrowed
   // list restricts booking availability (see lib/slot-availability.js).
@@ -1688,13 +1696,13 @@ model Appointment {
   cancellationReason String?
   cancellationSource AppointmentCancellationSource?
 
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  isDeleted     Boolean        @default(false)
-  deletedAt     DateTime?
-  payment       Payment?
+  createdAt            DateTime                         @default(now())
+  updatedAt            DateTime                         @updatedAt
+  isDeleted            Boolean                          @default(false)
+  deletedAt            DateTime?
+  payment              Payment?
   review        Review?
-  notifications Notification[]
+  notifications        Notification[]
   cancellationRequests AppointmentCancellationRequest[]
 
   // Dedup markers for the reminder cron (mirrors reservations'
@@ -1728,7 +1736,7 @@ model Appointment {
 model AppointmentCancellationRequest {
   id String @id @default(cuid())
 
-  appointmentId String @unique
+  appointmentId String      @unique
   appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
 
   requestedByUserId String
@@ -1870,6 +1878,15 @@ model Payment {
   // a deliberate human action, not a side effect of settlement.
   ticketEmailedAt DateTime?
 
+  // Same global ticket sequence as Order.ticketNumber (see
+  // lib/tickets/allocate-ticket-number.js) — allocated once, when this
+  // Payment first reaches a fully-settled PAID state (not on a deposit).
+  // Nullable: a PARTIALLY_PAID deposit-only payment has no ticket yet.
+  // ticketKind distinguishes WORKSHOP from EVENT (both share this table),
+  // stored explicitly rather than re-derived from Activity.type on every read.
+  ticketNumber String?     @unique
+  ticketKind   TicketKind?
+
   // Marks that the one-time "finish your payment" nudge has already gone out
   // for this Payment (lib/appointments/expire-stale-appointments.js —
   // sendAppointmentPaymentReminders, fired ~5 minutes before the 20-minute
@@ -1879,16 +1896,25 @@ model Payment {
   // re-send the email.
   paymentReminderSentAt DateTime?
 
-  transactions     Transaction[]
+  transactions          Transaction[]
   invoice          Invoice?
   disputes         StripeDispute[]
   // Historical list, not "the current one": a failed operation stays on the
   // record beside the one that later succeeded. At most one may be in
   // flight at a time, enforced by a partial unique index — see
   // model RefundOperation's closing comment.
-  refundOperations RefundOperation[]
+  refundOperations      RefundOperation[]
 
   @@index([promoCodeId])
+  @@index([ticketKind])
+}
+
+enum TicketKind {
+  ORDER
+  APPOINTMENT
+  WORKSHOP
+  EVENT
+  FORMATION
 }
 
 enum DisputeStatus {
@@ -1993,7 +2019,7 @@ model Invoice {
 
   paymentId   String?  @unique
   payment     Payment? @relation(fields: [paymentId], references: [id])
-  contractId  String?  @unique
+  contractId String?   @unique
   dueDate     DateTime?
 
   issuedAt DateTime @default(now())
@@ -2055,7 +2081,7 @@ model Invoice {
 
   lines            InvoiceLine[]
   creditNotes      CreditNote[]
-  refundOperations RefundOperation[]
+  refundOperations              RefundOperation[]
   staffMonthlyInvoice StaffMonthlyInvoice?
 
   @@index([paymentId])
@@ -2096,15 +2122,15 @@ model CreditNote {
   invoiceId String
   invoice   Invoice @relation(fields: [invoiceId], references: [id])
 
-  reason       String?
-  issuedAt     DateTime @default(now())
+  reason          String?
+  issuedAt        DateTime @default(now())
   // HT/TVA/TTC breakdown of the credited amount, at the original invoice's
   // rate — a partial credit needs its own visible split, not just a TTC
   // figure (spec: "préciser motif, ... HT, TVA, TTC et taux").
-  subtotalExclVat Decimal @db.Decimal(10, 2)
+  subtotalExclVat Decimal  @db.Decimal(10, 2)
   vatRate         Decimal @db.Decimal(4, 2)
-  vatAmount       Decimal @db.Decimal(10, 2)
-  totalInclVat    Decimal @db.Decimal(10, 2)
+  vatAmount       Decimal  @db.Decimal(10, 2)
+  totalInclVat    Decimal  @db.Decimal(10, 2)
 
   // Set once this credit note has been transmitted over the Peppol network
   // via Peppyrus — same meaning as Invoice.peppyrusMessageId/peppyrusSentAt
@@ -2116,7 +2142,7 @@ model CreditNote {
   // Set only after the e-mail provider confirms the credit note was sent.
   // This is distinct from peppyrusSentAt, which records Peppol transmission,
   // not e-mail delivery.
-  emailSentAt   DateTime?
+  emailSentAt       DateTime?
 
   returnRequest ReturnRequest?
   // Plural since the RefundOperation migration: one global correction of a
@@ -2374,6 +2400,16 @@ model Transaction {
   isDeleted               Boolean           @default(false)
   deletedAt               DateTime?
 
+  // Who personally rang up / recorded this money movement — the actor every
+  // self-only "Mes opérations" view and personal cash-book/recettes/ticket
+  // scoping is filtered against. Null for a genuine customer self-checkout
+  // (online order/deposit paid via Stripe with no staff involved), same
+  // reasoning as Order.createdByStaffId being null for a non-POS order. No
+  // bulk backfill was attempted for rows created before this field existed —
+  // same precedent as pieceNumber's own migration.
+  recordedById String?
+  recordedBy   User?   @relation("TransactionRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
   // A refund leg reads its ORIGINAL payment row through this (which method,
   // which payment_intent, how much is left on it) — many legs may point at
   // one original in a partial-refund history, so it is a list.
@@ -2384,6 +2420,7 @@ model Transaction {
 
   @@index([paymentId])
   @@index([creditNoteId])
+  @@index([recordedById])
 }
 
 // REFUND OPERATION
@@ -2431,8 +2468,8 @@ model RefundOperation {
   // A credit note is the legal correction of an invoice. B2C refunds get no
   // financial document; a staff member may manually send a plain refund
   // confirmation after settlement.
-  creditNoteId String?     @unique
-  creditNote   CreditNote? @relation(fields: [creditNoteId], references: [id])
+  creditNoteId        String?     @unique
+  creditNote          CreditNote? @relation(fields: [creditNoteId], references: [id])
   // Historical receipt number only. New operations never allocate it; keep
   // the persisted field until shared migration history permits its cleanup.
   refundReceiptNumber String? @unique
@@ -2510,10 +2547,10 @@ model RefundLeg {
   sourceTransactionId String?
   sourceTransaction   Transaction? @relation("RefundLegSourceTransaction", fields: [sourceTransactionId], references: [id], onDelete: SetNull)
 
-  method TransactionMethod
+  method        TransactionMethod
   // What SHOULD go back, computed by planRefund at open time. Never mutated
   // afterwards — it is the record of the decision.
-  amount Decimal           @db.Decimal(10, 2)
+  amount        Decimal           @db.Decimal(10, 2)
   // What ACTUALLY came back, filled in at settlement. Normally identical to
   // `amount` and therefore null; set only when the two differ.
   //
@@ -2586,9 +2623,9 @@ model ManualRefundCase {
   stripeCheckoutSessionId String @unique
   stripePaymentIntentId  String @unique
   stripeAccountId        String?
-  amount                 Decimal @db.Decimal(10, 2)
+  amount                  Decimal @db.Decimal(10, 2)
   currency               String  @default("eur")
-  reason                 String
+  reason                  String
 
   resolvedAt DateTime?
   resolutionReference String?
@@ -2690,12 +2727,12 @@ model StaffMonthlyInvoice {
   contractId String?
 
   status       StaffMonthlyInvoiceStatus @default(PENDING)
-  emailSentAt  DateTime?
+  emailSentAt DateTime?
   emailError   String? // last email delivery error message, if any
 
   // Audit
   generatedAt DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  updatedAt   DateTime @updatedAt
 
   // One invoice per staff per month — the DB enforces idempotency.
   @@unique([staffId, billingYear, billingMonth])
@@ -2723,10 +2760,10 @@ model TimeOff {
   staffId String
   staff   Staff  @relation(fields: [staffId], references: [id])
 
-  startDate  DateTime
+  startDate DateTime
   endDate    DateTime
   isFullDay  Boolean @default(false)
-  reason     String?
+  reason    String?
 }
 
 // REVIEW

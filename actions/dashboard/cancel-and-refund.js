@@ -32,6 +32,11 @@ import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting
  * of them are.
  */
 
+// Deliberately NOT scoped by actor/recordedById like the rest of the
+// dashboard's per-staff isolation (see admin-operations.js#getMyOperations).
+// Outstanding refunds are a financial-integrity worklist, not personal
+// activity — every admin/owner sees every staff member's stuck refunds, on
+// purpose, so nothing gets lost to a colleague nobody else can see.
 async function requireAdmin() {
   const session = await auth();
   if (!session?.user || !isAdminRole(session.user.role)) return null;

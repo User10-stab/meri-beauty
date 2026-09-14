@@ -8,6 +8,7 @@ import { Search, AlertTriangle, Boxes, History, ScanLine, ListOrdered, Printer }
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { StockAdjustDialog } from "@/components/dashboard/boutique/StockAdjustDialog";
 import { StockHistoryDrawer } from "@/components/dashboard/boutique/StockHistoryDrawer";
+import { StockSnapshotDateFilter } from "@/components/dashboard/boutique/StockSnapshotDateFilter";
 
 // Mirrors StockHistoryDrawer's French movement-type labels — this file
 // hardcodes its copy in French throughout (like the newer Livre de recettes
@@ -28,6 +29,13 @@ function formatShortDate(value) {
   );
 }
 
+function todayDateOnly() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
 export function StockPageClient({ initialVariants, initialSearch = "", userRole = null }) {
   const router = useRouter();
   const [search, setSearch] = useState(initialSearch);
@@ -35,6 +43,15 @@ export function StockPageClient({ initialVariants, initialSearch = "", userRole 
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [adjusting, setAdjusting] = useState(null);
   const [historyFor, setHistoryFor] = useState(null);
+  const today = useMemo(() => todayDateOnly(), []);
+  // Drives only the "état du stock" print link below — the on-screen table
+  // stays live (getAllVariants has no historical mode: réservé/disponible
+  // aren't recorded over time, so a past-date table would be misleading).
+  const [snapshotDate, setSnapshotDate] = useState(today);
+  const snapshotHref =
+    snapshotDate && snapshotDate !== today
+      ? `/api/stock/inventory-pdf?asOf=${snapshotDate}`
+      : "/api/stock/inventory-pdf";
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -76,14 +93,15 @@ export function StockPageClient({ initialVariants, initialSearch = "", userRole 
           <ListOrdered className="h-3.5 w-3.5" strokeWidth={2} />
           Mouvements de stock
         </Link>
+        <StockSnapshotDateFilter value={snapshotDate} today={today} onChange={setSnapshotDate} />
         <a
-          href="/api/stock/inventory-pdf"
+          href={snapshotHref}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 rounded-[7px] border border-stroke bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6"
         >
           <Printer className="h-3.5 w-3.5" strokeWidth={2} />
-          Imprimer l'état du stock (PDF)
+          {snapshotDate !== today ? `Imprimer l'état du stock au ${formatShortDate(snapshotDate)} (PDF)` : "Imprimer l'état du stock (PDF)"}
         </a>
       </div>
       <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 lg:flex-row lg:items-center">

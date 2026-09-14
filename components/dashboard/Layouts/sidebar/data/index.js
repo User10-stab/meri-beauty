@@ -57,7 +57,8 @@ const ALL_NAV_DATA = [
         icon: Icons.ShoppingBagIcon,
         items: [
           { title: "Opérations", url: "/dashboard/operations", roles: [ROLES.OWNER, ROLES.ADMIN] },
-          { title: "Livre de recettes", url: "/dashboard/livre-de-recettes", roles: [ROLES.OWNER, ROLES.ADMIN] },
+          { title: "Mes opérations", url: "/dashboard/mes-operations", roles: [ROLES.OWNER, ROLES.ADMIN, ROLES.STAFF] },
+          { title: "Livre de recettes", url: "/dashboard/livre-de-recettes", roles: [ROLES.OWNER, ROLES.ADMIN, ROLES.STAFF], permission: STAFF_PERMISSIONS.MY_RECEIPTS },
           { title: "Caisse", url: "/dashboard/boutique/point-of-sale", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.POINT_OF_SALE },
           { title: "Livre de caisse", url: "/dashboard/boutique/caisse", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.CASH_REGISTER },
           // Staff: read-only catalogue browsing (no cost/margin data) + stock adjustments.

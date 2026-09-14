@@ -33,10 +33,22 @@ export default async function OperationsPage({ searchParams }) {
       <div>
         <h1 className="text-2xl font-bold text-dark dark:text-white">Opérations</h1>
         <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-          Toutes les transactions, commandes et réservations de la boutique, des ateliers, événements et formations.
+          Vos propres transactions, commandes et réservations — comme sur "Mes opérations" pour un membre du
+          personnel, plus celles de l'opérateur caisse désigné. Personne, y compris la direction, ne voit ici
+          les opérations d'un autre membre de l'équipe.
         </p>
       </div>
       {result.message ? <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{result.message}</div> : null}
+      {/* Deliberately NOT scoped by actor, unlike the ledger below — these
+          are financial-integrity alerts (stuck webhooks, un-refunded
+          cancellations), not personal activity, so they intentionally cover
+          every staff member's tills. Removing that visibility wouldn't
+          improve anyone's privacy, only make a stuck payment invisible to
+          the one tool that catches it. */}
+      <p className="text-xs font-medium text-gray-400 dark:text-dark-6">
+        Les alertes ci-dessous couvrent l'ensemble du personnel — elles restent visibles uniquement par les
+        administrateurs et la direction pour des raisons de sécurité financière.
+      </p>
       {/* Above the ledger on purpose: money already promised to a customer
           and not yet handed over is the most time-sensitive thing on this
           screen, and every one of these blocks a closing e-mail. */}

@@ -32,7 +32,9 @@ it("renders a multi-collection PDF and a standalone boutique ticket", async () =
     },
     // TicketDocument still tolerates an array (one page per element).
     [ticket, { ...ticket, ticketNumber: "T-balance" }],
-    { ...ticket, ticketNumber: undefined, orderNumber: 123 },
+    // A boutique order ticket carries its own real ticketNumber alongside
+    // orderNumber — no fallback string is ever computed at render time.
+    { ...ticket, ticketNumber: "T-2026-000123", orderNumber: 123 },
     // CARD/ONLINE never gets a piece number — the conditional render must
     // not choke on its absence.
     { ...ticket, pieceNumber: null },
@@ -60,5 +62,13 @@ describe("the acompte/solde breakdown only prints for a multi-leg payment", () =
   it("is gated on payments.length > 1 — a one-shot payment keeps the old layout", () => {
     expect(template).toContain("payments.length > 1 ? (");
     expect(template).toContain("{p.label} du {formatDate(p.issuedAt)}");
+  });
+});
+
+describe("ticketNumber is always a real, persisted value", () => {
+  const template = source("lib/pdf/TicketDocument.jsx");
+
+  it("no longer synthesizes T-C-<orderNumber> at render time", () => {
+    expect(template).not.toContain("`T-C-${ticket.orderNumber}`");
   });
 });

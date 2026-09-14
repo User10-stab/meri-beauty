@@ -316,9 +316,10 @@ describe("wiring", () => {
     expect(page).toContain("getRecettesJournal(");
   });
 
-  test("the page is gated at the reports tier and the action re-checks it", () => {
-    expect(page).toContain("requireRole(DASHBOARD_PERMISSIONS.REPORTS)");
-    expect(action).toContain("hasPermission(session.user.role, DASHBOARD_PERMISSIONS.REPORTS)");
+  test("the page is gated on MY_RECEIPTS and the action re-checks it, always scoped to the caller", () => {
+    expect(page).toContain("requireDashboardPermission(STAFF_PERMISSIONS.MY_RECEIPTS)");
+    expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.MY_RECEIPTS)");
+    expect(action).toContain("actorId: session.user.id");
   });
 
   test("the Excel route re-runs the guarded action and streams an attachment", () => {

@@ -22,18 +22,18 @@ export async function getCashBookLedger({ from, to } = {}) {
   if (guard.error) return { success: false, message: guard.error, data: null };
 
   const params = normalizeCashBookParams({ from, to });
-  const ledger = await buildCashBookLedger(prisma, params);
+  const ledger = await buildCashBookLedger(prisma, { ...params, actorId: guard.session.user.id });
 
   return { success: true, data: { ...ledger, filters: params } };
 }
 
-/** The "Rapport" — every payment method's revenue plus the cash reconciliation, over the same range. */
+/** The "Rapport" — cash-only revenue (category + VAT) plus the cash reconciliation, over the same range. */
 export async function getCashReport({ from, to } = {}) {
   const guard = await requireCashBookAccess();
   if (guard.error) return { success: false, message: guard.error, data: null };
 
   const params = normalizeCashBookParams({ from, to });
-  const report = await buildRangeReport(prisma, params);
+  const report = await buildRangeReport(prisma, { ...params, actorId: guard.session.user.id });
 
   return { success: true, data: { ...report, filters: params } };
 }

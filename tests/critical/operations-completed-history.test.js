@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   workshops: vi.fn(),
   formations: vi.fn(),
   auditLogs: vi.fn(),
+  userFindFirst: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -17,6 +18,9 @@ vi.mock("@/lib/prisma", () => ({ prisma: {
   workshopReservation: { findMany: mocks.workshops },
   formationReservation: { findMany: mocks.formations },
   auditLog: { findMany: mocks.auditLogs },
+  // Resolved by getTillCashOperatorUserId() — getAdminOperations widens
+  // ADMIN/OWNER's own actorIds with this account's id, if any exists.
+  user: { findFirst: mocks.userFindFirst },
 } }));
 import { getAdminOperations } from "@/actions/dashboard/admin-operations";
 
@@ -26,6 +30,8 @@ beforeEach(() => {
   // hydrateWorkshops/hydrateFormations cross-link each row to its most
   // recent transfer (attachLastTransfer) — no transfer history by default.
   mocks.auditLogs.mockResolvedValue([]);
+  // No till-cash-operator account in this fixture — actorIds stays just the caller's own id.
+  mocks.userFindFirst.mockResolvedValue(null);
 });
 
 it("retains the deposit and final payment when filtering completed appointments", async () => {

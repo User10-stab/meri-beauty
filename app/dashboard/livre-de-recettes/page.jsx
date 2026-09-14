@@ -1,18 +1,19 @@
-import { requireRole } from "@/lib/route-protection";
-import { DASHBOARD_PERMISSIONS } from "@/lib/authorization";
+import { requireDashboardPermission } from "@/lib/route-protection";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getRecettesJournal } from "@/actions/dashboard/get-recettes-journal";
 import { RecettesFilterBar } from "@/components/dashboard/recettes/RecettesFilterBar";
 import { RecettesJournalClient } from "@/components/dashboard/recettes/RecettesJournalClient";
 
 export const metadata = {
-  title: "Livre de recettes — Dashboard",
-  description: "Journal chronologique de toutes les recettes, tous moyens de paiement.",
+  title: "Mes recettes — Dashboard",
+  description: "Journal chronologique des recettes que vous avez personnellement encaissées, tous moyens de paiement.",
 };
 
 export const dynamic = "force-dynamic";
 
 export default async function LivreDeRecettesPage({ searchParams }) {
-  await requireRole(DASHBOARD_PERMISSIONS.REPORTS); // OWNER/ADMIN only — getRecettesJournal() re-checks server-side
+  // OWNER/ADMIN always pass; STAFF needs MY_RECEIPTS granted — getRecettesJournal() re-checks server-side.
+  await requireDashboardPermission(STAFF_PERMISSIONS.MY_RECEIPTS);
   const params = await searchParams;
 
   const result = await getRecettesJournal({
@@ -25,11 +26,11 @@ export default async function LivreDeRecettesPage({ searchParams }) {
   return (
     <div className="space-y-6 print:space-y-4">
       <div className="flex flex-col gap-1 print:hidden">
-        <h1 className="text-2xl font-bold text-dark dark:text-white">Livre de recettes</h1>
+        <h1 className="text-2xl font-bold text-dark dark:text-white">Mes recettes</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Journal chronologique de toutes les recettes encaissées — espèces, carte et en ligne, y compris
-          les espèces perçues hors caisse. Ne se rapproche pas 1:1 du Livre de caisse, qui ne couvre qu'une
-          session de caisse.
+          Journal chronologique des recettes que vous avez personnellement encaissées — espèces, carte et en
+          ligne, y compris les espèces perçues hors caisse. Ne montre que vos propres encaissements, pas ceux
+          du reste de l'équipe, et ne se rapproche donc pas 1:1 du Livre de caisse.
         </p>
       </div>
 

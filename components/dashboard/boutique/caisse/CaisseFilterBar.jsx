@@ -11,15 +11,18 @@ function toDateOnlyString(date) {
   return `${year}-${month}-${day}`;
 }
 
+const BASE_PATH = "/dashboard/boutique/caisse";
+
 /**
  * Date-range filter for the Livre de caisse — same URL-driven pattern and
  * layout as RecettesFilterBar (components/dashboard/recettes/RecettesFilterBar.jsx):
  * day pickers plus month pickers for a day-to-day or month-to-month range,
  * simplified to drop the method/category pills since the book has none (it's
- * cash-only by definition). `basePath` lets the report page
- * (/dashboard/boutique/caisse/rapport) reuse this same bar against its own URL.
+ * cash-only by definition). The journal and its "Rapport" section render on
+ * this one page and share this same filter, so there is only one URL to
+ * drive.
  */
-export function CaisseFilterBar({ filters, basePath = "/dashboard/boutique/caisse" }) {
+export function CaisseFilterBar({ filters }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -34,7 +37,7 @@ export function CaisseFilterBar({ filters, basePath = "/dashboard/boutique/caiss
       else params.delete(key);
     }
     startTransition(() => {
-      router.push(`${basePath}?${params.toString()}`, { scroll: false });
+      router.push(`${BASE_PATH}?${params.toString()}`, { scroll: false });
     });
   }
 
@@ -138,7 +141,7 @@ export function CaisseFilterBar({ filters, basePath = "/dashboard/boutique/caiss
       {hasFilters && (
         <button
           type="button"
-          onClick={() => startTransition(() => router.push(basePath, { scroll: false }))}
+          onClick={() => startTransition(() => router.push(BASE_PATH, { scroll: false }))}
           className="inline-flex items-center gap-1.5 rounded-[7px] border border-stroke px-3 py-2 text-sm font-semibold text-gray-500 hover:border-primary hover:text-primary dark:border-dark-3 dark:text-dark-6"
         >
           <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />

@@ -46,7 +46,7 @@ describe("a boutique order carries its pickup QR", () => {
     // channel (see pos-receipt-vs-invoice-contracts.test.js).
     const fulfil = source("lib/orders/fulfill-order-payment.js");
     const block = fulfil.slice(fulfil.indexOf("const emailAttachments = ["));
-    expect(block).toContain("ticketPdf ? [{ filename: `ticket-${order.orderNumber}.pdf`");
+    expect(block).toContain("ticketPdf ? [{ filename: `${ticketNumber}.pdf`");
     expect(block).toContain("pickupQr ? [pickupQr] : []");
   });
 

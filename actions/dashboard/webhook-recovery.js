@@ -12,6 +12,11 @@ import { captureError, captureCriticalError } from "@/lib/monitoring";
 // nothing.
 const RECONCILIATION_PATH = "/dashboard/operations";
 
+// Deliberately NOT scoped by actor/recordedById like the rest of the
+// dashboard's per-staff isolation (see admin-operations.js#getMyOperations)
+// — a stuck webhook payment is a system/financial-integrity fact, not one
+// staff member's personal activity, so every admin/owner sees every one of
+// these regardless of whose till it originated from.
 async function requireReconciliationAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };

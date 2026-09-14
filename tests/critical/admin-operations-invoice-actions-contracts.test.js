@@ -60,12 +60,13 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(client).toContain("N° TVA");
   });
 
-  test("the detail action is admin-gated like the list it belongs to", () => {
+  test("the detail action is reachable by any dashboard role, but ownership-gated on recordedById", () => {
     const actions = source("actions/dashboard/admin-operations.js");
     const fnIdx = actions.indexOf("export async function getTransactionDetail");
     expect(fnIdx).toBeGreaterThan(-1);
-    const fn = actions.slice(fnIdx);
-    expect(fn).toContain("requireAdminOperationsAccess()");
+    const fn = actions.slice(fnIdx, actions.indexOf("export async function getTransferDetail"));
+    expect(fn).toContain("canAccessDashboard(session.user.role)");
+    expect(fn).toContain("visibleActorIds.has(transaction.recordedById)");
     // Decimals must not cross into the client tree unconverted.
     expect(fn).toContain("serializeDecimalFields({");
     // Drives the drawer's "Annuler et rembourser" gate — computed via the

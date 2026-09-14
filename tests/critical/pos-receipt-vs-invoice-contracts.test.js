@@ -33,7 +33,11 @@ describe("a named customer always gets a receipt at the till; the invoice itself
   const posSource = source("actions/boutique/point-of-sale.js");
 
   test("invoice creation is gated on a reusable VIES identity — never on isCompany or a checkbox", () => {
-    expect(posSource).toContain("const shouldCreateInvoice = !isWalkIn && hasInvoiceableVatIdentity(customer)");
+    expect(posSource).toContain("const isVatEligible = !isWalkIn && hasInvoiceableVatIdentity(customer)");
+    // Also gated on !offTill — a non-privileged staff actor (see
+    // isTillCashOperator) can never issue an Invoice directly, VIES-valid
+    // customer or not; the sale still completes, it simply never gets one.
+    expect(posSource).toContain("const shouldCreateInvoice = isVatEligible && wantsInvoice && !offTill");
     expect(posSource).toContain("const invoice = !shouldCreateInvoice");
     expect(posSource).not.toContain("requestInvoice");
   });
@@ -77,7 +81,8 @@ describe("a named customer always gets a receipt at the till; the invoice itself
     const fulfillment = source("lib/orders/fulfill-order-payment.js");
     // `!isPointOfSale ||` used to make this always true for a plain online
     // order too, bypassing the VIES gate entirely — fixed 2026-09-01.
-    expect(fulfillment).toContain("const shouldCreateInvoice = hasInvoiceableVatIdentity(invoiceCustomerUser)");
+    expect(fulfillment).toContain("const isVatEligible = hasInvoiceableVatIdentity(invoiceCustomerUser)");
+    expect(fulfillment).toContain("const shouldCreateInvoice = isVatEligible && !isStaffActor");
     expect(fulfillment).toContain("Votre ticket est joint à cet e-mail");
     expect(fulfillment).toContain("[fulfillOrderPayment] POS ticket email failed");
   });

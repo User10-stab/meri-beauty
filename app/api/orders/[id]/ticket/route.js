@@ -39,6 +39,7 @@ export async function GET(req, { params }) {
       select: {
         userId: true,
         orderNumber: true,
+        ticketNumber: true,
         payment: {
           select: {
             invoice: { select: { number: true } },
@@ -97,6 +98,7 @@ export async function GET(req, { params }) {
 
   const pdf = await renderTicketPdf({
     orderNumber: order.orderNumber,
+    ticketNumber: order.ticketNumber,
     pieceNumber: piece,
     invoiceNumber: order.payment?.invoice?.number ?? null,
     issuedAt: order.createdAt,
@@ -119,7 +121,7 @@ export async function GET(req, { params }) {
       "Content-Type": "application/pdf",
       // inline so the browser's print dialog opens straight from the tab —
       // the cashier is standing at the counter, not filing a download.
-      "Content-Disposition": `inline; filename="recu-${order.orderNumber}.pdf"`,
+      "Content-Disposition": `inline; filename="${order.ticketNumber ?? `recu-${order.orderNumber}`}.pdf"`,
     },
   });
 }

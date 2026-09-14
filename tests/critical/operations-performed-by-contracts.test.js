@@ -7,12 +7,11 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 
 /**
  * "Réalisé par" — which staff/admin account this revenue belongs to, shown
- * on Opérations rows and the transaction drawer. Three sources have a real
- * link to a staff/admin account (Order.createdByStaff, Appointment via
- * StaffService.staff, Formation via the Animator/staff e-mail bridge
- * resolveFormationAnimatorId already maintains); Workshops deliberately
- * don't, since nothing bridges their Animator back to a real account —
- * same reasoning getStaffPerformance() already documents for commission.
+ * on Opérations rows and the transaction drawer. Order uses
+ * Order.createdByStaff; Appointment uses StaffService.staff; Workshop and
+ * Formation both resolve their session's Animator e-mail against a real
+ * staff account via the same resolveStaffByEmails bridge
+ * resolveFormationAnimatorId already maintains for formations.
  */
 describe("operations attribution: who on staff/admin side this revenue belongs to", () => {
   const actions = source("actions/dashboard/admin-operations.js");
@@ -57,31 +56,39 @@ describe("operations attribution: who on staff/admin side this revenue belongs t
     expect(fn).toContain("prisma.user.findMany");
   });
 
-  test("getTransactionDetail attaches the same attribution the list rows carry", () => {
+  test("hydrateWorkshops resolves the Animator e-mail against real staff accounts, same bridge as formations", () => {
+    const fnIdx = actions.indexOf("async function hydrateWorkshops");
+    const fn = actions.slice(fnIdx, actions.indexOf("\n}\n", fnIdx));
+    expect(fn).toContain("animator: { select: { name: true, email: true } }");
+    expect(fn).toContain("resolveStaffByEmails(rows.map((row) => row.session?.animator?.email))");
+    expect(fn).toContain("performedBy");
+  });
+
+  test("getTransactionDetail attaches the same attribution the list rows carry, for every source", () => {
     const fnIdx = actions.indexOf("export async function getTransactionDetail");
     const fn = actions.slice(fnIdx);
     expect(fn).toContain("createdByStaff: { select: { fullName: true, role: true } }");
     expect(fn).toContain("staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } }");
-    expect(fn).toContain("animator: { select: { name: true, email: true } }");
-    expect(fn).toContain("resolveStaffByEmails([animator.email])");
+    // Workshop and Formation both carry this select and both resolve the
+    // bridge — the workshop branch was the historical gap (fixed alongside
+    // this test), so this must not match only the formation branch.
+    expect(fn.match(/animator: \{ select: \{ name: true, email: true \} \}/g)?.length).toBe(2);
+    expect(fn.match(/resolveStaffByEmails\(\[animator\.email\]\)/g)?.length).toBe(2);
+    expect(fn).toContain("transaction.payment.workshopReservation.performedBy");
+    expect(fn).toContain("transaction.payment.formationReservation.performedBy");
   });
 
-  test("Workshops carry no performedBy anywhere — the deliberate exclusion", () => {
-    const fnIdx = actions.indexOf("async function hydrateWorkshops");
-    const fn = actions.slice(fnIdx, actions.indexOf("\n}\n", fnIdx));
-    expect(fn).not.toContain("performedBy");
-    expect(fn).not.toContain("animator");
-    expect(drawer).toContain("Deliberately no performedByText");
-  });
-
-  test("AdminOperationsClient renders it inline on Order/Formation/Appointment rows, not a new column", () => {
+  test("AdminOperationsClient renders it inline on every entity-grained row, not a new column", () => {
     expect(client).toContain('performedByLabel(row.performedBy) ?? "Achat en ligne (client)"');
     expect(client).toContain("performedByLabel(row.performedBy)");
     expect(client).not.toContain('<TableHead>Réalisé par</TableHead>');
   });
 
-  test("TransactionDetailDrawer shows a Réalisé par row fed by the same helper", () => {
+  test("TransactionDetailDrawer shows a Réalisé par row fed by the same helper, including workshops", () => {
     expect(drawer).toContain('<Row label="Réalisé par" value={source.performedByText} />');
     expect(drawer).toContain("performedByLabel(payment.order.performedBy) ?? \"Achat en ligne (client)\"");
+    const workshopIdx = drawer.indexOf("if (payment?.workshopReservation)");
+    const workshopBlock = drawer.slice(workshopIdx, drawer.indexOf("if (payment?.formationReservation)", workshopIdx));
+    expect(workshopBlock).toContain("performedByText: performedByLabel(r.performedBy)");
   });
 });

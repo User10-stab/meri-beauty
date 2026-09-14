@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
   grandTotalRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
   grandTotalLabel: { fontSize: 9, fontWeight: 700 },
   grandTotalValue: { fontSize: 11, fontWeight: 700, color: COLORS.brand },
-  notice: { fontSize: 6.5, color: COLORS.faint, textAlign: "center", marginTop: 10 },
+  notice: { fontSize: 5.5, color: COLORS.faint, textAlign: "center", marginTop: 10 },
   thanks: { fontSize: 8, fontWeight: 700, color: COLORS.brand, textAlign: "center", marginTop: 10 },
 });
 
@@ -80,7 +80,7 @@ function estimateTicketHeight(lines, payments = []) {
 function TicketPage({ ticket, contact = null }) {
   const payments = Array.isArray(ticket.payments) ? ticket.payments : [];
   const pageHeight = estimateTicketHeight(ticket.lines, payments);
-  const ticketNumber = ticket.ticketNumber ?? `T-C-${ticket.orderNumber}`;
+  const ticketNumber = ticket.ticketNumber;
 
   return (
       <Page size={[WIDTH, pageHeight]} style={styles.page}>

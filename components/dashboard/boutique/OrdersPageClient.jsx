@@ -226,7 +226,12 @@ export function OrdersPageClient({ initialOrders, initialTotalCount }) {
                     {o.cancelReason ? (
                       <span className="text-red-600 dark:text-red-400">{o.cancelReason}</span>
                     ) : (
-                      <span className="text-gray-600 dark:text-dark-6">{MODE_LABEL[o.fulfilmentMode]}</span>
+                      <>
+                        <span className="text-gray-600 dark:text-dark-6">{MODE_LABEL[o.fulfilmentMode]}</span>
+                        {o.payment?.paymentMethodLabel && (
+                          <span className="block text-xs text-gray-400">{o.payment.paymentMethodLabel}</span>
+                        )}
+                      </>
                     )}
                   </TableCell>
                   <TableCell>

@@ -48,7 +48,7 @@ describe("completePointOfSaleSale wires the walk-in e-mail without creating an i
   test("the ticket, not an Invoice, is what gets attached and sent", () => {
     const walkInBlockStart = posSource.indexOf("if (isWalkIn) {");
     const emailCallIndex = posSource.indexOf("sendEmail(ticketEmail)");
-    const attachmentIndex = posSource.indexOf("filename: `ticket-${result.order.orderNumber}.pdf`");
+    const attachmentIndex = posSource.indexOf("filename: `${result.order.ticketNumber}.pdf`");
     expect(walkInBlockStart).toBeGreaterThan(-1);
     expect(emailCallIndex).toBeGreaterThan(walkInBlockStart);
     expect(attachmentIndex).toBeGreaterThan(walkInBlockStart);

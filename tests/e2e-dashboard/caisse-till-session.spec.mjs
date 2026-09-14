@@ -125,31 +125,8 @@ test.describe("the daily till", () => {
 
   // Since the 11 Sep 2026 redesign, closing is automatic (always at
   // midnight — see lib/cash-book/auto-session.js) and there is no manual
-  // "Clôturer la caisse" button left in the UI to click. What staff can
-  // still do by hand is a "Vérifier le solde" recount, layered on top of
-  // whatever closing figures already exist — this is the UI surface that
-  // replaces the old manual-close flow in this suite.
-  test("Vérifier le solde records a recount without touching the session's open state", async () => {
-    const counted = OPENING_FLOAT + 5;
-
-    await page.goto(CAISSE_PAGE);
-    // The session dropdown already defaults to the one currently open
-    // session (this spec's own), so nothing to pick before filling the count.
-    await page.locator("#verify-amount").fill(String(counted));
-    await page.getByRole("button", { name: /enregistrer la vérification/i }).click();
-
-    await expect(page.getByText(/vérification enregistrée/i)).toBeVisible({ timeout: 20_000 });
-
-    const session = await prisma.cashSession.findUnique({
-      where: { id: openedSessionId },
-      select: { closedAt: true, verifiedAt: true, verifiedById: true, verifiedVariance: true },
-    });
-    // Still open — a recount is not a close.
-    expect(session.closedAt).toBeNull();
-    expect(session.verifiedAt).not.toBeNull();
-    expect(session.verifiedById).not.toBeNull();
-    // No sales were rung up, so expected == opening float; the 5 € surplus
-    // must be recorded rather than silently absorbed.
-    expect(Number(session.verifiedVariance)).toBe(5);
-  });
+  // "Clôturer la caisse" button left in the UI to click. The manual
+  // "Vérifier le solde" recount that used to sit alongside it was removed
+  // (no real use), so there is nothing left for this suite to exercise past
+  // the till staying open under a second session attempt.
 });

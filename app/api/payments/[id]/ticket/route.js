@@ -1,11 +1,36 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { canSendTicketEmail } from "@/lib/authorization";
+import { escapeHtml } from "@/lib/email-templates";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { buildPaymentTicket } from "@/lib/cash-book/build-payment-ticket";
 
 // react-pdf needs Node APIs — not edge-compatible.
 export const runtime = "nodejs";
+
+/**
+ * Every caller opens this route in a new tab, so a JSON body is rendered to
+ * staff as raw text: a deposit-only reservation answered
+ * `{"error":"Ce paiement n'est pas encore clôturé — pas de ticket avant le
+ * solde."}`, which reads as a crash rather than as the rule it is. The status
+ * codes are unchanged — only the presentation is, and it covers every entry
+ * point at once (the operations drawer, the livre de caisse, the documents
+ * dialog, and any stale tab or bookmark).
+ */
+function ticketError(message, status) {
+  return new NextResponse(
+    `<!doctype html><html lang="fr"><head><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<title>Ticket indisponible</title></head>` +
+      `<body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;` +
+      `font:15px/1.6 system-ui,-apple-system,'Segoe UI',sans-serif;color:#2f3a2e;background:#faf9f7">` +
+      `<main style="max-width:32rem;padding:2rem;text-align:center">` +
+      `<h1 style="margin:0 0 .75rem;font-size:1.1rem">Ticket indisponible</h1>` +
+      `<p style="margin:0;color:#6b7280">${escapeHtml(message)}</p>` +
+      `</main></body></html>`,
+    { status, headers: { "Content-Type": "text/html; charset=utf-8" } }
+  );
+}
 
 /**
  * Reprint the till-style ticket for a rendez-vous/atelier/événement/formation
@@ -41,13 +66,13 @@ export const runtime = "nodejs";
 export async function GET(req, { params }) {
   const session = await auth();
   if (!session?.user) {
-    return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
+    return ticketError("Vous devez être connecté pour ouvrir ce ticket.", 401);
   }
 
   const { id } = await params;
 
   if (!(await canSendTicketEmail(session.user))) {
-    return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
+    return ticketError("Votre rôle ne permet pas d'ouvrir ce ticket.", 403);
   }
 
   const transactionId = new URL(req.url).searchParams.get("transactionId");
@@ -60,10 +85,10 @@ export async function GET(req, { params }) {
   try {
     result = await buildPaymentTicket(id, { transactionId });
   } catch (error) {
-    return NextResponse.json({ error: error.message }, { status: 409 });
+    return ticketError(error.message, 409);
   }
   if (result.error) {
-    return NextResponse.json({ error: result.error.message }, { status: result.error.status });
+    return ticketError(result.error.message, result.error.status);
   }
 
   const { ticket } = result;

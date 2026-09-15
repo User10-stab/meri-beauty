@@ -260,6 +260,12 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     Boolean(payment?.ticketEmailedAt) &&
     Boolean(detail?.lastPriceAdjustedAt) &&
     new Date(detail.lastPriceAdjustedAt) > new Date(payment.ticketEmailedAt);
+  // A reservation gets its ticket at settlement, never on a deposit — the route
+  // refuses anything else (lib/cash-book/build-payment-ticket.js, "pas de ticket
+  // avant le solde"). Offering the link regardless opened a tab of raw JSON,
+  // which is how staff found out. Mirror the server's own guard instead of
+  // re-deriving it from the balance, so the two can never drift apart.
+  const ticketExists = Boolean(payment?.order) || payment?.status === "PAID";
   const signedMoney = (value, refund) => `${refund ? "−" : ""}${money(value)}`;
   // A credit note is written against the REFUND row, so the cancelled sale's
   // own transaction carries none — which is exactly the row an admin opens
@@ -453,7 +459,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                       ticket needs the same canSendTicketEmail() check to open
                       as it does to e-mail — the route itself now enforces this,
                       this just avoids offering a link that would 403. */}
-                  {(payment.order || detail.canSendTicketEmail) && (
+                  {(payment.order || (detail.canSendTicketEmail && ticketExists)) && (
                     <a
                       href={payment.order ? `/api/orders/${payment.order.id}/ticket` : `/api/payments/${payment.id}/ticket`}
                       target="_blank"
@@ -464,12 +470,18 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                       Ouvrir le reçu
                     </a>
                   )}
+                  {!payment.order && !ticketExists && (
+                    <p className="text-sm text-gray-500">
+                      Pas encore de ticket — il est émis à l&apos;encaissement du solde, pas sur l&apos;acompte. Reste dû
+                      : {money(amountStillDue(payment, source.status))}.
+                    </p>
+                  )}
                   {/* No auto-send exists any more; ticketEmailedAt is set
                       only by the manual, permission-gated action in
                       actions/payments/send-ticket-email.js — this line is
                       what makes that visible to admins on this same
                       transaction, independent of who sent it. */}
-                  {!payment.order && (
+                  {!payment.order && ticketExists && (
                     <>
                       {detail.canSendTicketEmail && (
                         <button

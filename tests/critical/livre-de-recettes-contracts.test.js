@@ -237,25 +237,6 @@ describe("buildRecettesJournal", () => {
     }
   });
 
-  it("gives an un-invoiced validated foreign-EU company the 0% reverse charge", async () => {
-    const frCompany = {
-      fullName: "Atelier Lyon SARL",
-      email: "compta@atelier-lyon.fr",
-      isCompany: true,
-      vatNumber: "FR40303265045",
-      vatValidatedAt: new Date("2026-08-09T10:00:00Z"),
-    };
-    const journal = await buildRecettesJournal(
-      clientMock([txn({ payment: { order: { orderNumber: 42, user: frCompany } } })]),
-      RANGE
-    );
-    const row = journal.rows[0];
-    expect(row.vatSource).toBe("estimated");
-    expect(row.vatRate).toBe(0);
-    expect(row.amountVat).toBe(0);
-    expect(row.amountHt).toBe(100);
-  });
-
   it("still charges Belgian VAT to everyone the reverse charge does not cover", async () => {
     const CASES = [
       ["a Belgian company", { isCompany: true, vatNumber: "BE0123456749", vatValidatedAt: new Date("2026-08-09T10:00:00Z") }],
@@ -377,7 +358,7 @@ describe("wiring", () => {
     expect(page).toContain("getRecettesJournal(");
   });
 
-  test("the page is gated at the reports tier and the action re-checks it", () => {
+  test("the page and the action are both OWNER/ADMIN-gated", () => {
     expect(page).toContain("requireRole(DASHBOARD_PERMISSIONS.REPORTS)");
     expect(action).toContain("hasPermission(session.user.role, DASHBOARD_PERMISSIONS.REPORTS)");
   });

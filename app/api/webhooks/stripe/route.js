@@ -39,6 +39,7 @@ import {
 } from "@/lib/payments/reconcile-reservation-refund";
 import { captureCriticalError } from "@/lib/monitoring";
 import { flagPaymentForManualRefund } from "@/lib/payments/flag-payment-for-manual-refund";
+import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
 import {
   isForeignCheckoutSession,
   getDeploymentId,
@@ -1076,6 +1077,10 @@ async function processAppointmentCheckoutSession(session, connectedAccountId = n
         stripePaymentIntentId: paymentIntentId,
       },
     });
+
+    if (nextPaymentStatus === "PAID") {
+      await allocatePaymentTicketNumber(tx, paymentId, "APPOINTMENT");
+    }
 
     // Full online payments are invoiced in the same transaction as settlement
     // so the gapless Belgian invoice number is never consumed on rollback.

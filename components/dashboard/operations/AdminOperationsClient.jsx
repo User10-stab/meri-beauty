@@ -220,9 +220,9 @@ function describeUnifiedRow(row) {
       row.sourceType === "WORKSHOP"
         ? item.type === "EVENT" ? "Événement" : "Atelier"
         : `Formation ${(TYPE_LABELS[item.type] ?? "").toLowerCase()}`.trim();
-    // Ateliers/événements deliberately carry no performedBy at all (see
-    // admin-operations.js) — nothing bridges their Animator back to a real
-    // staff account, unlike a formation assigned via the staff picker.
+    // Same animator→staff-account bridge as formations (see
+    // resolveStaffByEmails in admin-operations.js) — null only when the
+    // session has no animator, or the animator isn't a real staff account.
     const performed = performedByLabel(row.performedBy);
     return {
       dateLabel: date(row.latestTransactionAt ?? row.createdAt),

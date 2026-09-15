@@ -72,8 +72,7 @@ function describeSource(payment) {
       status: r.status,
       extra: `${r.seatsCount} place(s) · session du ${dateTime(r.session.startDate)}`,
       customer: r.customer,
-      // Deliberately no performedByText — see admin-operations.js's own
-      // comment on why ateliers/événements stay out of this attribution.
+      performedByText: performedByLabel(r.performedBy),
     };
   }
   if (payment?.formationReservation) {
@@ -451,7 +450,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                   <SectionTitle>Reçu / ticket de caisse</SectionTitle>
                   {/* A boutique order's ticket has no permission gate (its own
                       route stays open to every dashboard role); a reservation's
-                      ticket needs the same SEND_TICKET_EMAIL permission to open
+                      ticket needs the same canSendTicketEmail() check to open
                       as it does to e-mail — the route itself now enforces this,
                       this just avoids offering a link that would 403. */}
                   {(payment.order || detail.canSendTicketEmail) && (

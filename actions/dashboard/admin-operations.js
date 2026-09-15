@@ -4,7 +4,10 @@ import { revalidatePath } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import {
+  isAdminRole,
+  canSendTicketEmail as canSendTicketEmailOperator,
+} from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import {
   TYPE_FILTERS,
@@ -350,9 +353,7 @@ async function hydrateOrders(ids) {
       payment: { select: PAYMENT_LEDGER_SELECT },
       _count: { select: { items: true } },
       // null (not undefined) is a genuine, deliberate answer here: a
-      // customer's own online/pickup order has no staff involved at all,
-      // as opposed to a Workshop row, which never carries this field
-      // because nothing bridges its Animator back to a real account.
+      // customer's own online/pickup order has no staff involved at all.
       createdByStaff: { select: { fullName: true, role: true } },
     },
   });
@@ -372,15 +373,25 @@ async function hydrateWorkshops(ids) {
     include: {
       customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
       payment: { select: PAYMENT_LEDGER_SELECT },
-      session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } },
+      session: { select: { startDate: true, workshop: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } },
     },
   });
-  const mapped = rows.map((row) => ({
-    ...row,
-    sourceType: "WORKSHOP",
-    customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
-    ...deriveRefundFields(row.payment),
-  }));
+  const staffByEmail = await resolveStaffByEmails(rows.map((row) => row.session?.animator?.email));
+  const mapped = rows.map((row) => {
+    const animator = row.session?.animator;
+    // Same bridge as hydrateFormations: a match means the animator IS a real
+    // staff account; otherwise fall back to the Animator's own name,
+    // unbadged, since it may be an outside instructor never assigned via the
+    // staff picker at all.
+    const performedBy = animator ? staffByEmail.get(animator.email) ?? { name: animator.name, role: null } : null;
+    return {
+      ...row,
+      sourceType: "WORKSHOP",
+      customerInvoiceEligible: hasInvoiceableVatIdentity(row.customer),
+      performedBy,
+      ...deriveRefundFields(row.payment),
+    };
+  });
   return attachLastTransfer(mapped, "WorkshopReservation");
 }
 
@@ -892,7 +903,7 @@ export async function getTransactionDetail(transactionId) {
             // reading either one alone misrepresents what the customer paid.
             transactions: { orderBy: { paidAt: "asc" }, select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true } },
             order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, pickupCode: true, pickedUpAt: true, user: { select: { fullName: true, email: true } }, createdByStaff: { select: { fullName: true, role: true } } } },
-            workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } }, customer: { select: { fullName: true, email: true } } } },
+            workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             formationReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             appointment: { select: { id: true, date: true, status: true, checkInCode: true, checkedInAt: true, user: { select: { fullName: true, email: true } }, staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
           },
@@ -922,6 +933,14 @@ export async function getTransactionDetail(transactionId) {
     } else if (transaction.payment?.appointment) {
       const staffUser = transaction.payment.appointment.staffService?.staff?.user;
       transaction.payment.appointment.performedBy = staffUser ? { name: staffUser.fullName, role: staffUser.role } : null;
+    } else if (transaction.payment?.workshopReservation) {
+      const animator = transaction.payment.workshopReservation.session?.animator;
+      let performedBy = null;
+      if (animator) {
+        const staffByEmail = await resolveStaffByEmails([animator.email]);
+        performedBy = staffByEmail.get(animator.email) ?? { name: animator.name, role: null };
+      }
+      transaction.payment.workshopReservation.performedBy = performedBy;
     } else if (transaction.payment?.formationReservation) {
       const animator = transaction.payment.formationReservation.session?.animator;
       let performedBy = null;
@@ -935,13 +954,11 @@ export async function getTransactionDetail(transactionId) {
     // The drawer is the only surface that can e-mail a ticket for a booking
     // whose balance was discounted to zero: no Transaction is created for that
     // settlement, so it never reaches the Livre de caisse, which is where the
-    // only other send button lives. Resolved through the permission rather than
-    // assumed from this action's admin-only gate, so narrowing that gate later
-    // cannot silently hand the button to someone without SEND_TICKET_EMAIL.
-    const canSendTicketEmail = await hasDashboardPermission(
-      session.user,
-      STAFF_PERMISSIONS.SEND_TICKET_EMAIL,
-    );
+    // only other send button lives. Resolved through canSendTicketEmail()
+    // rather than assumed from this action's admin-only gate, so narrowing
+    // that gate later cannot silently hand the button to someone who
+    // shouldn't have it.
+    const canSendTicketEmail = await canSendTicketEmailOperator(session.user);
 
     // ticketEmailedAt records only *that* a ticket went out, never for which
     // price. A counter adjustment after a send leaves the client holding a

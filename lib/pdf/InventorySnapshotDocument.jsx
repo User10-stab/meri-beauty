@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
   colThreshold: { flex: 1, textAlign: "right" },
 });
 
-function Letterhead() {
+function Letterhead({ isHistorical, asOf }) {
   return (
     <View style={styles.header} fixed>
       <View style={styles.headerBrand}>
@@ -98,7 +98,9 @@ function Letterhead() {
         <Image src={LOGO_BUFFER} style={styles.logo} />
         <View style={styles.headerBrandText}>
           <Text style={styles.headerTitle}>Meri Beauty</Text>
-          <Text style={styles.headerSubtitle}>État du stock</Text>
+          <Text style={styles.headerSubtitle}>
+            {isHistorical ? `État du stock au ${formatDate(asOf)}` : "État du stock"}
+          </Text>
         </View>
       </View>
     </View>
@@ -117,13 +119,13 @@ function Footer({ generatedAt }) {
   );
 }
 
-function TableHead() {
+function TableHead({ isHistorical }) {
   return (
     <View style={styles.tableHead} fixed>
       <Text style={[styles.tableHeadCell, styles.colProduct]}>PRODUIT</Text>
       <Text style={[styles.tableHeadCell, styles.colVariant]}>DÉCLINAISON</Text>
       <Text style={[styles.tableHeadCell, styles.colSku]}>RÉFÉRENCE</Text>
-      <Text style={[styles.tableHeadCell, styles.colStock]}>STOCK</Text>
+      <Text style={[styles.tableHeadCell, styles.colStock]}>{isHistorical ? "STOCK (ce jour)" : "STOCK"}</Text>
       <Text style={[styles.tableHeadCell, styles.colReserved]}>RÉSERVÉ</Text>
       <Text style={[styles.tableHeadCell, styles.colAvailable]}>DISPO.</Text>
       <Text style={[styles.tableHeadCell, styles.colThreshold]}>SEUIL BAS</Text>
@@ -131,16 +133,24 @@ function TableHead() {
   );
 }
 
+// A historical reconstruction has no record of reservations (never logged as
+// InventoryMovement rows — see build-inventory-snapshot.js), so those two
+// columns come back null for a past date and print as "—" rather than a
+// misleading 0; the low-stock colour then applies to STOCK itself since
+// there is no DISPO. figure to carry it.
 function DataRow({ row }) {
+  const highlightCol = row.availableQuantity == null ? styles.colStock : styles.colAvailable;
   return (
     <View style={[styles.dataRow, row.isLowStock && styles.dataRowLow]} wrap={false}>
       <Text style={styles.colProduct}>{truncate(row.productName, 40)}</Text>
       <Text style={styles.colVariant}>{truncate(row.variantName, 28)}</Text>
       <Text style={styles.colSku}>{truncate(row.sku, 22)}</Text>
-      <Text style={styles.colStock}>{row.stockQuantity}</Text>
-      <Text style={styles.colReserved}>{row.reservedQuantity}</Text>
-      <Text style={[styles.colAvailable, row.isLowStock && { color: COLORS.credit, fontWeight: 700 }]}>
-        {row.availableQuantity}
+      <Text style={[styles.colStock, row.isLowStock && highlightCol === styles.colStock && { color: COLORS.credit, fontWeight: 700 }]}>
+        {row.stockQuantity}
+      </Text>
+      <Text style={styles.colReserved}>{row.reservedQuantity ?? "—"}</Text>
+      <Text style={[styles.colAvailable, row.isLowStock && highlightCol === styles.colAvailable && { color: COLORS.credit, fontWeight: 700 }]}>
+        {row.availableQuantity ?? "—"}
       </Text>
       <Text style={styles.colThreshold}>{row.lowStockThreshold}</Text>
     </View>
@@ -149,13 +159,23 @@ function DataRow({ row }) {
 
 /** @param {ReturnType<typeof import("@/lib/stock/build-inventory-snapshot").buildInventorySnapshot>} snapshot */
 export function InventorySnapshotDocument({ snapshot }) {
-  const { rows, summary, generatedAt } = snapshot;
+  const { rows, summary, generatedAt, isHistorical, asOf } = snapshot;
+  const title = isHistorical ? `État du stock au ${formatDate(asOf)} — Meri Beauty` : "État du stock — Meri Beauty";
 
   return (
-    <Document title="État du stock — Meri Beauty" author="Meri Beauty" subject="Inventaire courant">
+    <Document title={title} author="Meri Beauty" subject={isHistorical ? "Inventaire reconstitué" : "Inventaire courant"}>
       <Page size="A4" orientation="landscape" style={styles.page}>
-        <Letterhead />
+        <Letterhead isHistorical={isHistorical} asOf={asOf} />
         <Footer generatedAt={generatedAt} />
+
+        {isHistorical && (
+          <View style={{ marginBottom: 10, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: COLORS.panel }}>
+            <Text style={{ fontSize: 7, color: COLORS.muted }}>
+              Quantités reconstituées à partir de l'historique des mouvements de stock. Le réservé et le disponible ne
+              sont pas conservés dans le temps et ne peuvent pas être reconstitués pour une date passée.
+            </Text>
+          </View>
+        )}
 
         <View style={styles.synthesis}>
           <View style={styles.synthesisItem}>
@@ -172,7 +192,7 @@ export function InventorySnapshotDocument({ snapshot }) {
           </View>
         </View>
 
-        <TableHead />
+        <TableHead isHistorical={isHistorical} />
         {rows.length === 0 ? (
           <Text style={{ paddingVertical: 20, textAlign: "center", color: COLORS.muted }}>
             Aucune déclinaison.

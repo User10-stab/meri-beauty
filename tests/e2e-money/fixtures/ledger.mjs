@@ -219,3 +219,56 @@ export async function assertNumberingContiguous(model, prefix) {
 
   return { prefix, count: sorted.length, first: sorted[0], last: sorted.at(-1) };
 }
+
+/**
+ * Same invariant as assertNumberingContiguous, for the global ticket
+ * sequence (lib/tickets/allocate-ticket-number.js) — except this one series
+ * is shared across two tables (Order.ticketNumber and Payment.ticketNumber),
+ * so unlike a single-model number there is nothing in Postgres itself
+ * stopping a future allocator bug from handing out the same T-2026-000047 to
+ * both an Order and a Payment. Checked here explicitly, on top of the same
+ * gap scan, rather than trusting the shared NumberingCounter row lock alone.
+ *
+ * @param {string} prefix e.g. "T-2026-"
+ */
+export async function assertTicketNumberingContiguous(prefix) {
+  const [orders, payments] = await Promise.all([
+    prisma.order.findMany({ where: { ticketNumber: { startsWith: prefix } }, select: { id: true, ticketNumber: true } }),
+    prisma.payment.findMany({ where: { ticketNumber: { startsWith: prefix } }, select: { id: true, ticketNumber: true } }),
+  ]);
+  const rows = [...orders, ...payments];
+  if (rows.length === 0) return { prefix, count: 0 };
+
+  const byNumber = new Map();
+  for (const row of rows) {
+    if (!byNumber.has(row.ticketNumber)) byNumber.set(row.ticketNumber, []);
+    byNumber.get(row.ticketNumber).push(row.id);
+  }
+  const duplicated = [...byNumber.entries()].filter(([, ids]) => ids.length > 1);
+  if (duplicated.length > 0) {
+    throw new Error(
+      `Ticket number issued more than once: ${duplicated.map(([number, ids]) => `${number} (${ids.join(", ")})`).join("; ")}. ` +
+        "A single shared sequence produced a cross-table collision.",
+    );
+  }
+
+  const seen = new Set(
+    rows
+      .map((row) => Number.parseInt(row.ticketNumber.slice(prefix.length), 10))
+      .filter((value) => Number.isFinite(value)),
+  );
+  const sorted = [...seen].sort((a, b) => a - b);
+
+  const missing = [];
+  for (let expected = sorted[0]; expected <= sorted.at(-1); expected += 1) {
+    if (!seen.has(expected)) missing.push(`${prefix}${String(expected).padStart(6, "0")}`);
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `Gap in the ticket numbering series ${prefix}: ${missing.join(", ")}. ` +
+        "A number was allocated and its Order/Payment never committed.",
+    );
+  }
+
+  return { prefix, count: sorted.length, first: sorted[0], last: sorted.at(-1) };
+}

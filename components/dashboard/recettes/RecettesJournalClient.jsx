@@ -66,7 +66,7 @@ function csvRow(values) {
 function downloadRecettesCsv(data) {
   const { filters, summary, rows } = data;
   const lines = [
-    ["Livre de recettes — Meri Beauty"],
+    ["Mes recettes — Meri Beauty"],
     ["Période", `du ${filters.from} au ${filters.to}`],
     ["Moyen de paiement", filters.methodLabel],
     ["Catégorie", filters.categoryLabel],
@@ -290,13 +290,24 @@ function DayGroup({ group, isOpen, onToggle, expandedRow, onToggleRow }) {
   );
 }
 
+// Whole-row tint by money direction, same convention as the Livre de
+// caisse's Apport (green) / Dépense (red) rows: a normal recette (DEPOSIT/
+// FINAL_PAYMENT) brings money in, a REFUND sends it back out — the amounts
+// were already signed negative for refunds via `sign`, this just makes the
+// direction readable across the whole line instead of only the TTC cell.
+const ROW_TINT = "bg-emerald-50 dark:bg-emerald-500/10";
+const ROW_TINT_REFUND = "bg-red-50 dark:bg-red-500/10";
+const ROW_TEXT = "text-emerald-700 dark:text-emerald-400";
+const ROW_TEXT_REFUND = "text-red-700 dark:text-red-400";
+
 function FragmentRow({ row, isOpen, onToggle }) {
   const sign = row.isRefund ? -1 : 1;
-  const amountClass = row.isRefund ? "text-red-600 dark:text-red-400" : "text-dark dark:text-white";
+  const rowTint = row.isRefund ? ROW_TINT_REFUND : ROW_TINT;
+  const textTint = row.isRefund ? ROW_TEXT_REFUND : ROW_TEXT;
 
   return (
     <>
-      <TableRow className="cursor-pointer" onClick={onToggle} data-state={isOpen ? "selected" : undefined}>
+      <TableRow className={`cursor-pointer ${rowTint}`} onClick={onToggle} data-state={isOpen ? "selected" : undefined}>
         <TableCell className="pr-0 text-gray-400" />
         <TableCell className="whitespace-nowrap tabular-nums">{formatDateTime(row.paidAt)}</TableCell>
         <TableCell className="whitespace-nowrap text-gray-500 dark:text-dark-6">
@@ -315,13 +326,13 @@ function FragmentRow({ row, isOpen, onToggle }) {
             )}
           </span>
         </TableCell>
-        <TableCell className="text-right tabular-nums text-gray-500 dark:text-dark-6">
+        <TableCell className={`text-right tabular-nums ${textTint}`}>
           {row.amountHt == null ? "—" : formatEuro(sign * row.amountHt)}
         </TableCell>
-        <TableCell className="text-right tabular-nums text-gray-500 dark:text-dark-6">
+        <TableCell className={`text-right tabular-nums ${textTint}`}>
           {row.amountVat == null ? "—" : formatEuro(sign * row.amountVat)}
         </TableCell>
-        <TableCell className={`text-right font-semibold tabular-nums ${amountClass}`}>
+        <TableCell className={`text-right font-semibold tabular-nums ${textTint}`}>
           {formatEuro(sign * row.amountTtc)}
         </TableCell>
         <TableCell className="text-right tabular-nums text-dark dark:text-white">{formatEuro(row.runningTotal)}</TableCell>

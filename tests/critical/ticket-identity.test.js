@@ -5,8 +5,7 @@ const mocks = vi.hoisted(() => ({ payment: vi.fn(), salon: vi.fn(), auth: vi.fn(
 vi.mock("@/lib/prisma", () => ({ prisma: { payment: { findUnique: mocks.payment }, salon: { findUnique: mocks.salon } } }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/authorization", () => ({
-  hasDashboardPermission: async (user) => user?.role === "ADMIN",
-  STAFF_PERMISSIONS: { SEND_TICKET_EMAIL: "SEND_TICKET_EMAIL" },
+  canSendTicketEmail: (user) => user?.role === "ADMIN",
 }));
 vi.mock("@/lib/pdf/render", () => ({ renderTicketPdf: mocks.render }));
 vi.mock("@/lib/cash-book/reservation-tickets", () => ({ describeReservationPayment: () => "Prestation" }));
@@ -16,19 +15,21 @@ const deposit = { id: "deposit-1", transactionType: "DEPOSIT", amount: 60.5, pai
 const balance = { id: "balance-1", transactionType: "FINAL_PAYMENT", amount: 60.5, paidAt: new Date("2026-09-05T10:00:00Z"), pieceNumber: "R0008" };
 const invoice = { number: "F-2026-000065", vatRate: 21, totalInclVat: 121, sellerName: "Salon" };
 
+const TICKET = "T-2026-000047";
+
 describe("receipt identity and invoice association", () => {
   it("keeps the identity/date when the invoice is added later", () => {
-    const before = collectionTicketFields(deposit, null, 21);
-    const after = collectionTicketFields(deposit, invoice);
+    const before = collectionTicketFields(deposit, TICKET, null, 21);
+    const after = collectionTicketFields(deposit, TICKET, invoice);
     expect(after.ticketNumber).toBe(before.ticketNumber);
     expect(after.issuedAt).toEqual(deposit.paidAt);
     expect(before.invoiceNumber).toBeNull();
     expect(after.invoiceNumber).toBe(invoice.number);
     expect(after.ticketNumber).not.toBe(invoice.number);
   });
-  it("issues distinct deposit/balance receipts linked to one invoice", () => {
-    const first = collectionTicketFields(deposit, invoice);
-    const second = collectionTicketFields(balance, invoice);
+  it("issues distinct deposit/balance receipts when each has its own ticket number", () => {
+    const first = collectionTicketFields(deposit, "T-2026-000001", invoice);
+    const second = collectionTicketFields(balance, "T-2026-000002", invoice);
     expect(first.ticketNumber).not.toBe(second.ticketNumber);
     expect(first.totalInclVat).toBe(60.5);
     expect(second.totalInclVat).toBe(60.5);
@@ -43,22 +44,25 @@ describe("receipt identity and invoice association", () => {
     { ...deposit, isDeleted: true },
     { ...deposit, id: null },
   ])("does not invent a collection receipt for invalid data", (row) => {
-    expect(() => collectionTicketFields(row, invoice)).toThrow();
+    expect(() => collectionTicketFields(row, TICKET, invoice)).toThrow();
+  });
+  it("refuses a ticket for a payment not yet fully settled", () => {
+    expect(() => collectionTicketFields(deposit, null, invoice)).toThrow();
   });
 
   // The cash-book line this collection produced (see lib/cash-book/piece-number.js) —
   // CARD/ONLINE transactions never get one, so the ticket must not invent one either.
   it("carries the transaction's own piece number onto the ticket, cash-only", () => {
-    expect(collectionTicketFields(deposit, invoice).pieceNumber).toBe("R0007");
-    expect(collectionTicketFields({ ...deposit, pieceNumber: null }, invoice).pieceNumber).toBeNull();
-    expect(collectionTicketFields({ ...deposit, pieceNumber: undefined }, invoice).pieceNumber).toBeNull();
+    expect(collectionTicketFields(deposit, TICKET, invoice).pieceNumber).toBe("R0007");
+    expect(collectionTicketFields({ ...deposit, pieceNumber: null }, TICKET, invoice).pieceNumber).toBeNull();
+    expect(collectionTicketFields({ ...deposit, pieceNumber: undefined }, TICKET, invoice).pieceNumber).toBeNull();
   });
 });
 
 describe("consolidated receipt for a whole payment", () => {
   it("sums the legs under one payment-scoped identity", () => {
-    const receipt = consolidatedTicketFields("payment-1", [deposit, balance], invoice);
-    expect(receipt.ticketNumber).toBe("T-payment-1");
+    const receipt = consolidatedTicketFields("payment-1", TICKET, [deposit, balance], invoice);
+    expect(receipt.ticketNumber).toBe(TICKET);
     expect(receipt.totalInclVat).toBe(121);
     expect(receipt.subtotalExclVat).toBe(100);
     expect(receipt.vatAmount).toBe(21);
@@ -69,14 +73,14 @@ describe("consolidated receipt for a whole payment", () => {
     expect(receipt.pieceNumber).toBe("R0008");
   });
   it("prints an acompte/solde breakdown, ordered by date", () => {
-    const receipt = consolidatedTicketFields("payment-1", [balance, deposit], invoice);
+    const receipt = consolidatedTicketFields("payment-1", TICKET, [balance, deposit], invoice);
     expect(receipt.payments.map((p) => p.label)).toEqual(["Acompte", "Solde"]);
     expect(receipt.payments.map((p) => p.amount)).toEqual([60.5, 60.5]);
     expect(receipt.payments[0].issuedAt).toEqual(deposit.paidAt);
   });
   it("collapses to a single leg for a full one-shot payment", () => {
-    const receipt = consolidatedTicketFields("payment-1", [deposit], invoice);
-    expect(receipt.ticketNumber).toBe("T-payment-1");
+    const receipt = consolidatedTicketFields("payment-1", TICKET, [deposit], invoice);
+    expect(receipt.ticketNumber).toBe(TICKET);
     expect(receipt.totalInclVat).toBe(60.5);
     expect(receipt.payments).toHaveLength(1);
   });
@@ -85,14 +89,17 @@ describe("consolidated receipt for a whole payment", () => {
       { ...deposit, pieceNumber: null },
       { ...balance, pieceNumber: null },
     ];
-    expect(consolidatedTicketFields("payment-1", online, invoice).pieceNumber).toBeNull();
+    expect(consolidatedTicketFields("payment-1", TICKET, online, invoice).pieceNumber).toBeNull();
   });
   it.each([
     ["no legs", "payment-1", []],
     ["falsy payment id", "", [deposit]],
     ["only refunds", "payment-1", [{ ...deposit, transactionType: "REFUND" }]],
   ])("throws rather than inventing a receipt: %s", (_label, paymentId, rows) => {
-    expect(() => consolidatedTicketFields(paymentId, rows, invoice)).toThrow();
+    expect(() => consolidatedTicketFields(paymentId, TICKET, rows, invoice)).toThrow();
+  });
+  it("refuses a ticket for a payment not yet fully settled", () => {
+    expect(() => consolidatedTicketFields("payment-1", null, [deposit], invoice)).toThrow();
   });
 });
 
@@ -103,7 +110,7 @@ describe("consolidated receipt for a whole payment", () => {
 describe("reservation ticket reprints", () => {
   beforeEach(() => {
     mocks.auth.mockResolvedValue({ user: { id: "staff-1", role: "ADMIN" } });
-    mocks.payment.mockResolvedValue({ invoice, appointment: { user: {} }, transactions: [deposit, balance] });
+    mocks.payment.mockResolvedValue({ ticketNumber: TICKET, invoice, appointment: { user: {} }, transactions: [deposit, balance] });
     mocks.render.mockResolvedValue(Buffer.from("pdf"));
   });
   const request = (query = "") => GET(new Request(`http://localhost/api/payments/payment-1/ticket${query}`), { params: Promise.resolve({ id: "payment-1" }) });
@@ -111,7 +118,7 @@ describe("reservation ticket reprints", () => {
     expect((await request()).status).toBe(200);
     const ticket = mocks.render.mock.calls[0][0];
     expect(Array.isArray(ticket)).toBe(false);
-    expect(ticket.ticketNumber).toBe("T-payment-1");
+    expect(ticket.ticketNumber).toBe(TICKET);
     expect(ticket.totalInclVat).toBe(121);
     expect(ticket.payments.map((p) => p.label)).toEqual(["Acompte", "Solde"]);
     expect(ticket.issuedAt).toEqual(balance.paidAt);
@@ -120,7 +127,7 @@ describe("reservation ticket reprints", () => {
     expect((await request("?transactionId=deposit-1")).status).toBe(200);
     const ticket = mocks.render.mock.calls[0][0];
     expect(Array.isArray(ticket)).toBe(false);
-    expect(ticket.ticketNumber).toBe("T-deposit-1");
+    expect(ticket.ticketNumber).toBe(TICKET);
     expect(ticket.payments).toBeUndefined();
   });
   it("rejects a transaction not belonging to this payment", async () => {
@@ -134,10 +141,10 @@ describe("reservation ticket reprints", () => {
     expect(mocks.payment).not.toHaveBeenCalled();
   });
   it("reprints a B2C payment without requiring an invoice", async () => {
-    mocks.payment.mockResolvedValue({ invoice: null, appointment: { user: {} }, transactions: [deposit] });
+    mocks.payment.mockResolvedValue({ ticketNumber: TICKET, invoice: null, appointment: { user: {} }, transactions: [deposit] });
     mocks.salon.mockResolvedValue({ legalName: "Salon" });
     expect((await request()).status).toBe(200);
-    expect(mocks.render.mock.calls[0][0]).toMatchObject({ ticketNumber: "T-payment-1", invoiceNumber: null, totalInclVat: 60.5 });
+    expect(mocks.render.mock.calls[0][0]).toMatchObject({ ticketNumber: TICKET, invoiceNumber: null, totalInclVat: 60.5 });
   });
   it("does not fabricate receipts for an unpaid reservation", async () => {
     mocks.payment.mockResolvedValue({ invoice, appointment: { user: {} }, transactions: [] });

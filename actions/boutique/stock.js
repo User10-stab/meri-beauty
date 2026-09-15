@@ -375,16 +375,19 @@ export async function getStockMovements(variantId, { take = 50 } = {}) {
 }
 
 /**
- * Current inventory snapshot — every active variant's stock levels right
- * now, printable so a stock controller can be handed valid, up-to-date
- * figures. See lib/stock/build-inventory-snapshot.js.
+ * Inventory snapshot — every active variant's stock levels right now (or, if
+ * `asOf` is given, reconstructed as of the close of that past day), printable
+ * so a stock controller can be handed valid figures for the period they're
+ * checking. See lib/stock/build-inventory-snapshot.js.
+ *
+ * @param {{ asOf?: string }} [params]
  */
-export async function getInventorySnapshot() {
+export async function getInventorySnapshot(params = {}) {
   const guard = await requireStockAccess();
   if (guard.error) return { success: false, message: guard.error };
 
   try {
-    const data = await buildInventorySnapshot(prisma);
+    const data = await buildInventorySnapshot(prisma, params);
     return { success: true, data };
   } catch (error) {
     console.error("[getInventorySnapshot]", error);

@@ -60,11 +60,11 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(client).toContain("N° TVA");
   });
 
-  test("the detail action is admin-gated like the list it belongs to", () => {
+  test("the detail action is admin-gated", () => {
     const actions = source("actions/dashboard/admin-operations.js");
     const fnIdx = actions.indexOf("export async function getTransactionDetail");
     expect(fnIdx).toBeGreaterThan(-1);
-    const fn = actions.slice(fnIdx);
+    const fn = actions.slice(fnIdx, actions.indexOf("export async function getTransferDetail"));
     expect(fn).toContain("requireAdminOperationsAccess()");
     // Decimals must not cross into the client tree unconverted.
     expect(fn).toContain("serializeDecimalFields({");

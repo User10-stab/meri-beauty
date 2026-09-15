@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { STAFF_PERMISSIONS, hasDashboardPermission } from "@/lib/authorization";
+import { canSendTicketEmail } from "@/lib/authorization";
 import { sendEmail } from "@/lib/email";
 import { ticketEmail } from "@/lib/email-templates";
 import { renderTicketPdf } from "@/lib/pdf/render";
@@ -14,14 +14,14 @@ import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
  *
  * completeAppointment/settleReservation also fire this automatically once a
  * balance is actually collected, but only when the settling staff member
- * holds STAFF_PERMISSIONS.SEND_TICKET_EMAIL — this action re-derives auth()
- * and checks the permission itself, so that fire-and-forget call is gated
- * exactly the same way a manual click is. Reprinting the same document via
- * app/api/payments/[id]/ticket requires this same permission, not just any
+ * passes canSendTicketEmail() — this action re-derives auth() and checks it
+ * itself, so that fire-and-forget call is gated exactly the same way a
+ * manual click is. Reprinting the same document via
+ * app/api/payments/[id]/ticket requires this same check, not just any
  * dashboard role — a staff member who can't put a ticket in a client's inbox
- * can't generate it another way either. Admin/owner roles pass
- * hasDashboardPermission automatically, same as every other STAFF_PERMISSIONS
- * check.
+ * can't generate it another way either. Admin/owner roles always pass; any
+ * other staff account needs STAFF_PERMISSIONS.SEND_TICKET_EMAIL — see
+ * canSendTicketEmail in lib/authorization.js.
  *
  * Deliberately NOT taking a recipient address from the caller, for the same
  * reason sendInvoiceByEmail doesn't: the address comes from the reservation's
@@ -32,7 +32,7 @@ export async function sendTicketByEmail(paymentId, { transactionId = null } = {}
   if (!session?.user) {
     return { success: false, message: "Non autorisé." };
   }
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL))) {
+  if (!(await canSendTicketEmail(session.user))) {
     return { success: false, message: "Non autorisé." };
   }
   if (typeof paymentId !== "string" || !paymentId) {

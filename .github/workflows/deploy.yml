@@ -41,8 +41,16 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # - name: Tests
-      #   run: npm test
+      - name: Run critical tests
+        env:
+          # Deliberately overrides the job-level real secrets above for this
+          # step only. test:critical is meant to be fast/mocked, but at least
+          # one contract test (staff-anniversary-billing) makes an unmocked
+          # Prisma call — a placeholder keeps CI from ever touching a real
+          # database, same reasoning as deploy-staging.yml's own gate.
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci?schema=public"
+          STRIPE_SECRET_KEY: "sk_test_ci_placeholder"
+        run: npm run test:critical
 
       - name: Production build
         run: npm run build

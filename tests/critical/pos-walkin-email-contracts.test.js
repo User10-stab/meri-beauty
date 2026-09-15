@@ -14,15 +14,21 @@ const baseSale = {
   cashReceived: 10,
 };
 
-describe("the walk-in ticket e-mail is mandatory and format-checked", () => {
-  test("no e-mail at all is rejected because every POS ticket must be mailed", () => {
+describe("the walk-in ticket e-mail is optional but format-checked when given", () => {
+  // Reversed from mandatory on purpose — staff can uncheck the till's
+  // "collect e-mail" nudge and send an empty string; the sale still
+  // completes with no ticket e-mailed. See walkInEmailSchema's own comment
+  // in lib/validations/point-of-sale.js.
+  test("no e-mail at all is accepted — a walk-in customer isn't required to leave one", () => {
     const result = pointOfSaleSaleSchema.safeParse(baseSale);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.data.walkInEmail).toBe("");
   });
 
-  test("a blank string is rejected the same way", () => {
+  test("a blank string is accepted the same way", () => {
     const result = pointOfSaleSaleSchema.safeParse({ ...baseSale, walkInEmail: "" });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.data.walkInEmail).toBe("");
   });
 
   test("a well-formed e-mail is normalised and kept", () => {

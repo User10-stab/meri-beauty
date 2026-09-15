@@ -55,8 +55,13 @@ describe("staff can add a manual appointment to the calendar", () => {
   });
 
   test("it reuses the race-safe customer resolver instead of duplicating it", () => {
-    expect(action).toContain(
-      'import { resolveOrCreateCustomer } from "@/actions/reservation/create-reservation"'
+    // A regex, not toContain(exact import line): the action also imports
+    // sendWelcomeEmailIfNew from the same module on the same line, and an
+    // exact-string match breaks the moment an unrelated second import joins
+    // it. What actually matters is that resolveOrCreateCustomer is imported
+    // from this specific module, not the full line's punctuation.
+    expect(action).toMatch(
+      /import\s*\{[^}]*\bresolveOrCreateCustomer\b[^}]*\}\s*from\s*"@\/actions\/reservation\/create-reservation"/
     );
   });
 

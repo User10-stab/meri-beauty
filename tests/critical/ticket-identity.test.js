@@ -178,8 +178,18 @@ describe("reservation ticket reprints", () => {
       mocks.payment.mockResolvedValue({ status, ticketNumber: null, invoice, appointment: { user: {} }, transactions: [deposit] });
       const response = await request();
       expect(response.status).toBe(409);
-      expect((await response.json()).error).toMatch(/pas de ticket avant le solde/);
+      // Staff open this route in a tab, so the refusal has to be a page they
+      // can read, not a JSON body rendered as raw text.
+      expect(response.headers.get("content-type")).toMatch(/text\/html/);
+      expect(await response.text()).toMatch(/pas de ticket avant le solde/);
       expect(mocks.render).not.toHaveBeenCalled();
     },
   );
+
+  it("escapes the refusal text rather than interpolating it into the page raw", async () => {
+    mocks.payment.mockRejectedValue(new Error("<img src=x onerror=alert(1)>"));
+    const body = await (await request()).text();
+    expect(body).not.toContain("<img src=x");
+    expect(body).toContain("&lt;img src=x");
+  });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, test, vi, beforeEach } from "vitest";
+import { describe, expect, test, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -23,6 +23,42 @@ import { expireStalePendingAppointments } from "@/lib/appointments/expire-stale-
 beforeEach(() => {
   mocks.findMany.mockClear();
   mocks.findMany.mockResolvedValue([]);
+  // The job ships OFF (Marie, 2026-09-15 — staff resolves a PENDING request or
+  // nobody does). The rule assertions below are about whether the rules are
+  // still correct should it ever be switched back on, so they opt in
+  // explicitly; the kill switch itself is covered in its own describe block.
+  process.env.APPOINTMENT_AUTO_EXPIRY = "on";
+});
+
+afterEach(() => {
+  delete process.env.APPOINTMENT_AUTO_EXPIRY;
+});
+
+describe("the auto-expiry kill switch", () => {
+  test("does nothing at all unless APPOINTMENT_AUTO_EXPIRY is exactly 'on'", async () => {
+    for (const value of [undefined, "", "off", "false", "true", "ON", "1", "yes"]) {
+      mocks.findMany.mockClear();
+      if (value === undefined) delete process.env.APPOINTMENT_AUTO_EXPIRY;
+      else process.env.APPOINTMENT_AUTO_EXPIRY = value;
+
+      const result = await expireStalePendingAppointments();
+
+      // Not merely "expired nothing" — it must not even reach the database,
+      // so a future query bug cannot throw from a job nobody wants running.
+      expect(mocks.findMany, `APPOINTMENT_AUTO_EXPIRY=${String(value)}`).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ success: true, expiredCount: 0 });
+    }
+  });
+
+  test("the runners still report a disabled run as a clean zero, not a failure", async () => {
+    delete process.env.APPOINTMENT_AUTO_EXPIRY;
+    const result = await expireStalePendingAppointments();
+    // Both schedulers branch on `?.expiredCount` for their summary line and on
+    // a rejected promise for failedJobs — a falsy count and no throw is the
+    // shape that keeps a disabled job out of both.
+    expect(result.success).toBe(true);
+    expect(result.expiredCount).toBeFalsy();
+  });
 });
 
 // The job filtered on `payment: { status, createdAt }`, but Payment has no

@@ -51,7 +51,17 @@ export async function GET(req, { params }) {
   }
 
   const transactionId = new URL(req.url).searchParams.get("transactionId");
-  const result = await buildPaymentTicket(id, { transactionId });
+
+  // buildPaymentTicket's assembly helpers throw rather than return null, so
+  // a settlement path can keep them inside its post-commit .catch(). A
+  // reprint has no such wrapper: an escaped throw became a bare HTTP 500
+  // with no body, which staff saw as the download silently doing nothing.
+  let result;
+  try {
+    result = await buildPaymentTicket(id, { transactionId });
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 409 });
+  }
   if (result.error) {
     return NextResponse.json({ error: result.error.message }, { status: result.error.status });
   }
@@ -62,7 +72,10 @@ export async function GET(req, { params }) {
   return new NextResponse(pdf, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${ticket.ticketNumber}.pdf"`,
+      // A payment settled before ticket numbering existed has no number to
+      // name the file after — fall back to the payment id, the way the
+      // boutique route falls back to recu-<orderNumber>.
+      "Content-Disposition": `inline; filename="${ticket.ticketNumber ?? `ticket-${id}`}.pdf"`,
     },
   });
 }

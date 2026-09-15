@@ -409,12 +409,15 @@ function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
             {/* Appointments */}
             <div className="divide-y divide-gray-100 dark:divide-gray-700/30">
               {dayAppts.map((appt) => {
-                const color = getStaffColor(appt.staffId);
+                const isCompleted = appt.status === "COMPLETED";
+                const color = isCompleted
+                  ? { border: "#D1D5DB" }
+                  : getStaffColor(appt.staffId);
                 return (
                   <button
                     key={appt.id}
                     onClick={() => onAppointmentClick(appt)}
-                    className="relative flex w-full items-start gap-4 px-4 py-3 text-left transition-colors hover:bg-gray-50/60 dark:hover:bg-gray-800/50"
+                    className={`relative flex w-full items-start gap-4 px-4 py-3 text-left transition-colors hover:bg-gray-50/60 dark:hover:bg-gray-800/50 ${isCompleted ? "opacity-70" : ""}`}
                     style={{
                       borderLeftWidth: "3px",
                       borderLeftColor: color.border,
@@ -442,9 +445,15 @@ function AgendaView({ appointments, view, currentDate, onAppointmentClick }) {
                         <p className="truncate text-[13px] font-semibold text-gray-800 dark:text-gray-100">
                           {appt.serviceName}
                         </p>
-                        <span className="flex-shrink-0 rounded bg-gray-100 px-1.5 py-px text-[8px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-700 dark:text-gray-400">
-                          RDV
-                        </span>
+                        {isCompleted ? (
+                          <span className="flex-shrink-0 rounded bg-gray-200 px-1.5 py-px text-[8px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                            Terminé
+                          </span>
+                        ) : (
+                          <span className="flex-shrink-0 rounded bg-gray-100 px-1.5 py-px text-[8px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                            RDV
+                          </span>
+                        )}
                       </div>
                       <p className="truncate text-[12px] text-gray-500 dark:text-gray-400">{appt.customerName}</p>
                       <p className="truncate text-[11px] text-gray-400 dark:text-gray-500">{appt.staffName}</p>

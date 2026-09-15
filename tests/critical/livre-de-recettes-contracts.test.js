@@ -209,6 +209,48 @@ describe("buildRecettesJournal", () => {
     await buildRecettesJournal(client, RANGE);
     expect(client.transaction.findMany.mock.calls[0][0].take).toBe(MAX_JOURNAL_ROWS + 1);
   });
+
+  // Regression: CUSTOMER_SELECT once shipped as { fullName, email } only.
+  // The rate is derived from the customer whenever no invoice exists yet, and
+  // resolveForeignEuVatPolicy reads isCompany/vatNumber/vatValidatedAt off
+  // that object — omitting any of the three cannot produce a wrong 21% (that
+  // is the fallback either way), it silently makes the 0% reverse charge
+  // unreachable.
+  //
+  // This has to be asserted on the QUERY, not on a built row: clientMock
+  // hands back whatever fixture it is given and never applies the select, so
+  // the behavioural tests below stay green even with the fields missing.
+  // Every customer path is checked — the four carry one shared constant
+  // today, and narrowing it in one place only would be just as silent.
+  it("selects the VAT fields the rate depends on, on every customer path", async () => {
+    const client = clientMock();
+    await buildRecettesJournal(client, RANGE);
+    const payment = client.transaction.findMany.mock.calls[0][0].include.payment.include;
+    const customerSelects = {
+      order: payment.order.select.user.select,
+      appointment: payment.appointment.select.user.select,
+      workshopReservation: payment.workshopReservation.select.customer.select,
+      formationReservation: payment.formationReservation.select.customer.select,
+    };
+    for (const [path, select] of Object.entries(customerSelects)) {
+      expect(select, path).toMatchObject({ isCompany: true, vatNumber: true, vatValidatedAt: true });
+    }
+  });
+
+  it("still charges Belgian VAT to everyone the reverse charge does not cover", async () => {
+    const CASES = [
+      ["a Belgian company", { isCompany: true, vatNumber: "BE0123456749", vatValidatedAt: new Date("2026-08-09T10:00:00Z") }],
+      ["an EU private customer", { isCompany: false, vatNumber: null, vatValidatedAt: null }],
+      ["a non-EU company", { isCompany: true, vatNumber: "CHE116281420", vatValidatedAt: new Date("2026-08-09T10:00:00Z") }],
+    ];
+    for (const [label, vat] of CASES) {
+      const journal = await buildRecettesJournal(
+        clientMock([txn({ payment: { order: { orderNumber: 42, user: { fullName: "X", email: "x@example.com", ...vat } } } })]),
+        RANGE
+      );
+      expect(journal.rows[0].vatRate, label).toBe(21);
+    }
+  });
 });
 
 describe("normalizeRecettesParams — a hand-edited query string cannot widen the journal", () => {

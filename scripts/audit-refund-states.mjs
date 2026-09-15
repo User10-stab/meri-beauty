@@ -1,4 +1,18 @@
 /**
+ * RUN IT WITH THE NPM SCRIPT, not bare `node`:
+ *
+ *   npm run audit:refund-states -- --json
+ *
+ * This file is ESM (.mjs) and imports a lib module that is a plain `.js`
+ * under a package.json with no `"type"`, i.e. CommonJS as far as Node's
+ * resolver is concerned. Node >= 22.7 detects the ESM syntax and reparses
+ * it; production runs Node 20.16, which does not, and fails outright with
+ * "Named export ... not found. The requested module ... is a CommonJS
+ * module". The npm script passes --experimental-detect-module, which is
+ * what makes Node 20 behave like Node 22 here. Verified on both.
+ */
+
+/**
  * Read-only audit of every payment that already carries a refund or a
  * credit note, classified into the "cas historiques et reprise" branches.
  *

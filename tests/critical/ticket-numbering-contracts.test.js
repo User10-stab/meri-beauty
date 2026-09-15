@@ -120,3 +120,36 @@ describe("TicketDocument no longer synthesizes an identity at render time", () =
     expect(ticketDocument).toContain("const ticketNumber = ticket.ticketNumber;");
   });
 });
+
+// 15/09/2026: the backfill had never actually been runnable on the server it
+// exists for. It is ESM (.mjs) importing lib/tickets/allocate-ticket-number.js,
+// a `.js` in a package with no "type" — CommonJS to Node's resolver. Node
+// >= 22.7 (a dev machine) detects the ESM syntax and reparses; production's
+// Node 20.16 does not, and dies with "Named export 'allocateOrderTicketNumber'
+// not found". Both scripts that reach into lib/ this way must therefore ship a
+// runner carrying --experimental-detect-module, or they are dev-only toys.
+describe("the lib-importing scripts stay runnable on production's Node", () => {
+  const pkg = JSON.parse(source("package.json"));
+
+  test.each([
+    ["backfill:tickets", "scripts/backfill-ticket-numbers.mjs"],
+    ["audit:refund-states", "scripts/audit-refund-states.mjs"],
+  ])("npm run %s passes the flag that Node 20 needs", (name, scriptPath) => {
+    const command = pkg.scripts[name];
+    expect(command, `package.json has no "${name}" script`).toBeDefined();
+    expect(command).toContain("--experimental-detect-module");
+    expect(command).toContain(scriptPath);
+  });
+
+  test("every .mjs script that imports from lib/ has a runner in package.json", () => {
+    const runners = Object.values(pkg.scripts).join("\n");
+    const scripts = fs.readdirSync(path.join(process.cwd(), "scripts")).filter((f) => f.endsWith(".mjs"));
+    const importingLib = scripts.filter((f) => /from "\.\.\/lib\//.test(source(`scripts/${f}`)));
+    // Guards against a third one being added later without a runner — which
+    // is exactly how these two went unnoticed until someone tried prod.
+    expect(importingLib.length).toBeGreaterThan(0);
+    for (const file of importingLib) {
+      expect(runners, `scripts/${file} imports lib/ but no npm script runs it`).toContain(`scripts/${file}`);
+    }
+  });
+});

@@ -1,5 +1,21 @@
 import { afterAll, beforeAll, describe, expect, test, vi } from "vitest";
-import { prisma } from "@/lib/prisma";
+
+// test:critical is meant to be fast and DB-free (see this file's own
+// "Actual ... is tested in database migration tests" placeholders below) —
+// sendDailyStaffInvoices() made a real, unmocked prisma.contract.findMany()
+// call, the one test in the whole suite that did. Mocked to the "nothing due
+// today" shape the test itself already describes ("even if no staff to
+// bill"), same vi.hoisted + vi.mock("@/lib/prisma") pattern used elsewhere
+// in this suite (see cash-book-auto-session.test.js).
+const mocks = vi.hoisted(() => ({
+  prisma: {
+    contract: { findMany: vi.fn().mockResolvedValue([]) },
+    staff: { findMany: vi.fn().mockResolvedValue([]) },
+  },
+}));
+
+vi.mock("@/lib/prisma", () => ({ prisma: mocks.prisma }));
+
 import {
   calculateNextAnniversaryDate,
   todayInBrussels,

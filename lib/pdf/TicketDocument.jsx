@@ -99,7 +99,10 @@ function TicketPage({ ticket, contact = null }) {
         {/* Cash-only: the livre de caisse line this collection produced.
             Absent for CARD/ONLINE, which never enter that book. */}
         {ticket.pieceNumber ? <Text style={styles.meta}>N° pièce {ticket.pieceNumber}</Text> : null}
-        {ticket.orderNumber != null ? <Text style={styles.meta}>Commande n° {ticket.orderNumber}</Text> : null}
+        {/* No order number by design — T-<year>-<seq> is the only reference a
+            customer is ever shown, so the two sequences can never be read as
+            contradicting each other. The return lookup accepts both, so a
+            receipt printed before this change still works. */}
 
         <Rule />
 

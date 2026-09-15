@@ -172,7 +172,13 @@ function OrderCard({ order }) {
     <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-bold text-ink">Commande #{order.orderNumber}</p>
+          {/* Two forms, never two numbers at once: once the sale is settled the
+              ticket number is the customer's only reference, but an order
+              awaiting payment at the counter has no ticket yet — it cannot be
+              given one without burning a fiscal number if it is never collected. */}
+          <p className="text-sm font-bold text-ink">
+            {order.ticketNumber ? `Ticket ${order.ticketNumber}` : `Réservation n° ${order.orderNumber}`}
+          </p>
           <p className="mt-0.5 text-xs text-ink/45">{formatDate(order.createdAt)} · {FULFILMENT_LABELS[order.fulfilmentMode] ?? order.fulfilmentMode}</p>
         </div>
         <StatusBadge status={order.status} labels={ORDER_STATUS_LABELS} />
@@ -204,7 +210,7 @@ function OrderCard({ order }) {
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={order.pickupQr}
-            alt={`QR code de retrait de la commande ${order.orderNumber}`}
+            alt={`QR code de retrait de la réservation n° ${order.orderNumber}`}
             width={160}
             height={160}
             className="h-40 w-40 shrink-0 rounded-lg bg-white p-1"

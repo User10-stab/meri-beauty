@@ -138,10 +138,14 @@ const styles = StyleSheet.create({
   colCategory: { flex: 1.1, overflow: "hidden" },
   colMethod: { flex: 1.1, overflow: "hidden" },
   colLabel: { flex: 6.2 },
+  // The day header row has no other columns in it (see DayBlock) — this
+  // widens the label to the row's full width instead of leaving it capped
+  // at colLabel's own share, which would strand blank space where the
+  // now-removed duplicate totals used to sit.
+  dayRowLabel: { flex: 1 },
   colHt: { flex: 1, textAlign: "right" },
   colVat: { flex: 1, textAlign: "right" },
   colTtc: { flex: 1.1, textAlign: "right" },
-  colBalance: { flex: 1.2, textAlign: "right" },
 });
 
 function Letterhead({ filters }) {
@@ -153,7 +157,7 @@ function Letterhead({ filters }) {
         <Image src={LOGO_BUFFER} style={styles.logo} />
         <View style={styles.headerBrandText}>
           <Text style={styles.headerTitle}>Meri Beauty</Text>
-          <Text style={styles.headerSubtitle}>Livre de recettes</Text>
+          <Text style={styles.headerSubtitle}>Mes recettes</Text>
         </View>
       </View>
       <View style={styles.headerMeta}>
@@ -197,7 +201,6 @@ function TableHead() {
       <Text style={[styles.tableHeadCell, styles.colHt]}>HT</Text>
       <Text style={[styles.tableHeadCell, styles.colVat]}>TVA</Text>
       <Text style={[styles.tableHeadCell, styles.colTtc]}>TTC</Text>
-      <Text style={[styles.tableHeadCell, styles.colBalance]}>SOLDE CUMULÉ</Text>
     </View>
   );
 }
@@ -226,7 +229,6 @@ function DataRow({ row }) {
       <Text style={styles.colHt}>{money(sign * row.amountHt)}</Text>
       <Text style={styles.colVat}>{money(sign * row.amountVat)}</Text>
       <Text style={[styles.colTtc, row.isRefund && { color: COLORS.credit }]}>{money(sign * row.amountTtc)}</Text>
-      <Text style={styles.colBalance}>{money(row.runningTotal)}</Text>
     </View>
   );
 }
@@ -234,14 +236,13 @@ function DataRow({ row }) {
 function DayBlock({ group }) {
   return (
     <View>
+      {/* Day header carries only the label — the totals used to be repeated
+          here AND on "Total du jour" below, printing the same four numbers
+          twice for every day and reading as if the two rows disagreed. */}
       <View style={styles.dayRow} wrap={false}>
-        <Text style={[styles.colLabel, styles.bold]}>
+        <Text style={[styles.colLabel, styles.bold, styles.dayRowLabel]}>
           {formatDayLabel(group.date)} ({group.rows.length} écriture{group.rows.length > 1 ? "s" : ""})
         </Text>
-        <Text style={[styles.colHt, styles.bold]}>{money(group.totalHt)}</Text>
-        <Text style={[styles.colVat, styles.bold]}>{money(group.totalVat)}</Text>
-        <Text style={[styles.colTtc, styles.bold]}>{money(group.totalTtc)}</Text>
-        <Text style={[styles.colBalance, styles.bold]}>{money(group.closingBalance)}</Text>
       </View>
       {group.rows.map((row) => (
         <DataRow key={row.id} row={row} />
@@ -251,7 +252,6 @@ function DayBlock({ group }) {
         <Text style={[styles.colHt, styles.bold]}>{money(group.totalHt)}</Text>
         <Text style={[styles.colVat, styles.bold]}>{money(group.totalVat)}</Text>
         <Text style={[styles.colTtc, styles.bold]}>{money(group.totalTtc)}</Text>
-        <Text style={[styles.colBalance, styles.bold]}>{money(group.closingBalance)}</Text>
       </View>
     </View>
   );
@@ -263,7 +263,7 @@ export function RecettesJournalDocument({ journal }) {
   const dayGroups = groupRowsByDay(rows);
 
   return (
-    <Document title="Livre de recettes — Meri Beauty" author="Meri Beauty" subject="Journal chronologique des recettes">
+    <Document title="Mes recettes — Meri Beauty" author="Meri Beauty" subject="Journal chronologique des recettes personnellement encaissées">
       <Page size="A4" orientation="landscape" style={styles.page}>
         <Letterhead filters={filters} />
         <Footer generatedAt={generatedAt} />

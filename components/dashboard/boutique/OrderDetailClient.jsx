@@ -169,7 +169,11 @@ export function OrderDetailClient({ order }) {
           {STATUS_LABEL[order.status]}
         </span>
       </div>
-      <p className="-mt-4 text-sm text-gray-500">{MODE_LABEL[order.fulfilmentMode]} · {formatDate(order.createdAt)}</p>
+      <p className="-mt-4 text-sm text-gray-500">
+        {MODE_LABEL[order.fulfilmentMode]}
+        {order.payment?.paymentMethodLabel && ` · Payé par : ${order.payment.paymentMethodLabel}`}
+        {" · "}{formatDate(order.createdAt)}
+      </p>
 
       {order.cancelReason && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

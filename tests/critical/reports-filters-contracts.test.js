@@ -230,9 +230,9 @@ describe("the till history can be windowed and totalled", () => {
   // (CaisseFilterBar) rather than component state, and every mutating action
   // just calls router.refresh() — the URL, and therefore the filter, is
   // untouched by a refresh, unlike a router.push to a fresh path.
-  test("refreshing after opening, recording a movement, or verifying keeps the current filter", () => {
+  test("refreshing after opening or recording a movement keeps the current filter", () => {
     const client = source("components/dashboard/boutique/caisse/CaisseClient.jsx");
-    expect(client.match(/router\.refresh\(\)/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(client.match(/router\.refresh\(\)/g)?.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -254,7 +254,7 @@ describe("a counter receipt can be reprinted", () => {
   });
 
   test("it opens inline so the print dialog is one click away", () => {
-    expect(route).toContain('"Content-Disposition": `inline; filename="recu-${order.orderNumber}.pdf"`');
+    expect(route).toContain('"Content-Disposition": `inline; filename="${order.ticketNumber ?? `recu-${order.orderNumber}`}.pdf"`');
   });
 
   test("a missing order is a 404, not a crash", () => {

@@ -38,6 +38,7 @@ import { buildAppointmentWindow, findConflictingAppointment, validateAppointment
 import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
 import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
+import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -791,6 +792,8 @@ export async function confirmPayment(paymentId, transactionReference = null) {
           transactionReference,
         },
       });
+
+      await allocatePaymentTicketNumber(tx, paymentId, "APPOINTMENT");
 
       // Attach to whichever till session is open so the counter cash is
       // reconcilable at close (see lib/cash-sessions.js). Never blocks the

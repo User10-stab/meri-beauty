@@ -32,6 +32,9 @@ import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting
  * of them are.
  */
 
+// Outstanding refunds are a financial-integrity worklist — every
+// admin/owner sees every staff member's stuck refunds, on
+// purpose, so nothing gets lost to a colleague nobody else can see.
 async function requireAdmin() {
   const session = await auth();
   if (!session?.user || !isAdminRole(session.user.role)) return null;

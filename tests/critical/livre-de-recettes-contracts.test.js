@@ -316,7 +316,7 @@ describe("wiring", () => {
     expect(page).toContain("getRecettesJournal(");
   });
 
-  test("the page is gated at the reports tier and the action re-checks it", () => {
+  test("the page and the action are both OWNER/ADMIN-gated", () => {
     expect(page).toContain("requireRole(DASHBOARD_PERMISSIONS.REPORTS)");
     expect(action).toContain("hasPermission(session.user.role, DASHBOARD_PERMISSIONS.REPORTS)");
   });

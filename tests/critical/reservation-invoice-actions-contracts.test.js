@@ -86,8 +86,8 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     // short-circuit — the else branch always produces a renderable ticket.
     expect(builder).toContain("resolveServiceVatPolicy({ customer })");
     expect(builder).toContain("paidAmount: true");
-    expect(builder).toContain("consolidatedTicketFields(paymentId, payment.transactions, payment.invoice, ticketFields.vatRate)");
-    expect(builder).toContain("collectionTicketFields(txn, payment.invoice, ticketFields.vatRate)");
+    expect(builder).toContain("consolidatedTicketFields(paymentId, payment.ticketNumber, payment.transactions, payment.invoice, ticketFields.vatRate)");
+    expect(builder).toContain("collectionTicketFields(txn, payment.ticketNumber, payment.invoice, ticketFields.vatRate)");
     expect(builder).not.toContain("calculateVatTotals(payment.totalAmount, vatRate)");
     expect(builder).not.toMatch(/if \(!payment\.invoice\)\s*{\s*return NextResponse\.json/);
   });
@@ -96,13 +96,13 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     expect(builder).toContain("if (payment.invoice) {");
     expect(builder).toContain("sellerName: inv.sellerName");
     expect(builder).toContain("vatRate: inv.vatRate");
-    expect(builder).toContain("consolidatedTicketFields(paymentId, payment.transactions, payment.invoice, ticketFields.vatRate)");
+    expect(builder).toContain("consolidatedTicketFields(paymentId, payment.ticketNumber, payment.transactions, payment.invoice, ticketFields.vatRate)");
     expect(builder).not.toContain("orderNumber: inv.number");
   });
 
   test("still lets staff print one collection on its own via ?transactionId=", () => {
     expect(route).toContain('new URL(req.url).searchParams.get("transactionId")');
-    expect(builder).toContain("collectionTicketFields(txn, payment.invoice, ticketFields.vatRate)");
+    expect(builder).toContain("collectionTicketFields(txn, payment.ticketNumber, payment.invoice, ticketFields.vatRate)");
   });
 
   test("reuses the same description helper as the close-of-session batch", () => {
@@ -113,8 +113,8 @@ describe("a ticket for a rendez-vous/atelier/formation payment is available whet
     expect(builder).toContain("if (payment.orderId)");
   });
 
-  test("is gated on SEND_TICKET_EMAIL — the same permission required to e-mail it, not just any dashboard role", () => {
-    expect(route).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL)");
+  test("is gated on canSendTicketEmail() — the same check required to e-mail it, not just any dashboard role", () => {
+    expect(route).toContain("await canSendTicketEmail(session.user)");
     expect(route).not.toContain("ownerId");
   });
 

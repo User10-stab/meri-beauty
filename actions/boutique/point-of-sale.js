@@ -10,6 +10,7 @@ import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole, isTillCashOpera
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
+import { allocateOrderTicketNumber } from "@/lib/tickets/allocate-ticket-number";
 import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
@@ -481,7 +482,11 @@ export async function completePointOfSaleSale(input) {
       // Defaults to true (today's behavior) when omitted — the till only
       // ever sends false when staff/the client explicitly declined it.
       const wantsInvoice = invoiceRequested !== false;
-      const shouldCreateInvoice = isVatEligible && wantsInvoice;
+      // A non-privileged staff member (offTill) can never cause an Invoice
+      // to be created, regardless of VAT eligibility or customer request —
+      // see isTillCashOperator. The sale still completes normally either
+      // way; it simply never gets an invoice from this till.
+      const shouldCreateInvoice = isVatEligible && wantsInvoice && !offTill;
       const posVatPolicy = resolveGoodsVatPolicy({ customer });
       const pricedSaleItems = saleItems.map((item) => ({
         ...item,
@@ -610,6 +615,8 @@ export async function completePointOfSaleSale(input) {
         },
       });
 
+      const ticketNumber = await allocateOrderTicketNumber(tx, order.id, new Date(), offTill);
+
       // A POS invoice is reserved for a customer whose VAT identity is
       // currently VIES-valid. Everyone else, including particuliers and
       // company-looking accounts without reusable VIES proof, gets only the
@@ -664,7 +671,7 @@ export async function completePointOfSaleSale(input) {
         },
       });
 
-      return { order, invoice, customer };
+      return { order: { ...order, ticketNumber }, invoice, customer };
     // A counter sale does a VIES call, a row-locked stock check, invoice
     // numbering and a per-item stock/audit loop — all sequential DB round
     // trips. Prisma's 5000ms default interactive-transaction timeout was
@@ -703,6 +710,7 @@ export async function completePointOfSaleSale(input) {
       });
       const ticketPdf = await renderTicketPdf({
         orderNumber: result.order.orderNumber,
+        ticketNumber: result.order.ticketNumber,
         issuedAt: result.order.createdAt,
         sellerName: salon?.legalName || "Meri Beauty",
         sellerAddress: formatSalonAddress(salon),
@@ -724,7 +732,7 @@ export async function completePointOfSaleSale(input) {
           subject: `Votre ticket de caisse — Commande n°${result.order.orderNumber} — Meri Beauty`,
           text: `Bonjour,\n\nMerci pour votre achat en magasin. Votre ticket de caisse pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est joint à cet e-mail.\n\nL'équipe Meri Beauty`,
           html: `<p>Bonjour,</p><p>Merci pour votre achat en magasin.</p><p>Votre ticket de caisse pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p><p>L'équipe Meri Beauty</p>`,
-          attachments: [{ filename: `ticket-${result.order.orderNumber}.pdf`, content: ticketPdf }],
+          attachments: [{ filename: `${result.order.ticketNumber}.pdf`, content: ticketPdf }],
         };
         let ticketEmailResult = await sendEmail(ticketEmail);
         // One immediate retry, same as the nominative receipt below — the
@@ -762,6 +770,7 @@ export async function completePointOfSaleSale(input) {
         data: {
           orderId: result.order.id,
           orderNumber: result.order.orderNumber,
+          ticketNumber: result.order.ticketNumber,
           walkIn: true,
           ticketPdfBase64: ticketPdf ? ticketPdf.toString("base64") : null,
           ticketEmailSent,
@@ -786,6 +795,7 @@ export async function completePointOfSaleSale(input) {
     });
     const receiptPdf = await renderTicketPdf({
       orderNumber: result.order.orderNumber,
+      ticketNumber: result.order.ticketNumber,
       invoiceNumber: result.invoice?.number ?? null,
       issuedAt: result.order.createdAt,
       sellerName: salon?.legalName || "Meri Beauty",
@@ -811,7 +821,7 @@ export async function completePointOfSaleSale(input) {
       subject: `Votre reçu — Commande n°${result.order.orderNumber} — Meri Beauty`,
       text: `Bonjour ${result.customer.fullName},\n\nMerci pour votre achat en magasin. Votre reçu pour la commande n°${result.order.orderNumber} (${Number(result.order.totalAmount).toFixed(2)} €) est joint à cet e-mail.${pendingInvoiceNote}\n\nL'équipe Meri Beauty`,
       html: `<p>Bonjour ${result.customer.fullName},</p><p>Merci pour votre achat en magasin.</p><p>Votre reçu pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p>${pendingInvoiceNote ? `<p>${pendingInvoiceNote.trim()}</p>` : ""}<p>L'équipe Meri Beauty</p>`,
-      ...(receiptPdf ? { attachments: [{ filename: `recu-${result.order.orderNumber}.pdf`, content: receiptPdf }] } : {}),
+      ...(receiptPdf ? { attachments: [{ filename: `${result.order.ticketNumber}.pdf`, content: receiptPdf }] } : {}),
     };
     let receiptEmailResult = await sendEmail(receiptEmail);
     if (!receiptEmailResult?.success) receiptEmailResult = await sendEmail(receiptEmail);
@@ -831,6 +841,7 @@ export async function completePointOfSaleSale(input) {
       data: {
         orderId: result.order.id,
         orderNumber: result.order.orderNumber,
+        ticketNumber: result.order.ticketNumber,
         documentType: !result.invoice ? "receipt" : holdsInvoiceForPeppol ? "invoice_pending_peppol" : "invoice_pending_manual_send",
         invoiceNumber: result.invoice ? result.invoice.number : null,
         ticketPdfBase64: receiptPdf ? receiptPdf.toString("base64") : null,

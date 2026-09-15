@@ -32,6 +32,7 @@ describe("granular staff dashboard permissions", () => {
       STAFF_PERMISSIONS.FORMATION_RESERVATIONS,
       STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS,
       STAFF_PERMISSIONS.NEWSLETTER,
+      STAFF_PERMISSIONS.SEND_TICKET_EMAIL,
     ]);
   });
 
@@ -80,7 +81,7 @@ describe("granular staff dashboard permissions", () => {
   });
 
   it("persists the permission list on Staff", () => {
-    expect(read("prisma/schema.prisma")).toContain("dashboardPermissions String[]");
+    expect(read("prisma/schema.prisma")).toMatch(/dashboardPermissions\s+String\[\]/);
     expect(read("actions/staff/update-independent-staff.js")).toContain("dashboardPermissions");
     expect(read("components/dashboard/staff/StaffPermissionsField.jsx")).toContain("Les droits non cochés sont masqués");
   });

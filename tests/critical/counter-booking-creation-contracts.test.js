@@ -36,9 +36,10 @@ describe("counter booking creation — createCounterReservation", () => {
   });
 
   test("a deposit is never invoiced; only a full payment from an invoiceable customer is", () => {
-    const start = action.indexOf("const invoice =");
-    const block = action.slice(start, start + 400);
-    expect(block).toContain("isFullPayment && hasInvoiceableVatIdentity(user)");
+    // A non-privileged staff actor (offTill) can never issue an invoice at
+    // all — see isTillCashOperator — the reservation still completes, it
+    // simply never gets an invoice.
+    expect(action).toContain("const invoiceDue = isFullPayment && hasInvoiceableVatIdentity(user) && !offTill;");
   });
 
   test("session capacity is re-checked under a row lock before the seat count is trusted", () => {

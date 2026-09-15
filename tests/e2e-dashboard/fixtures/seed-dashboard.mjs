@@ -591,7 +591,7 @@ export async function seedOrder({
       ...(status === "EXPIRED"
         ? {
             cancelledAt: cancelledAt ?? new Date(),
-            cancelReason: "Retrait non effectué dans le délai imparti",
+            cancelReason: "Retrait non effectué dans le délai.",
           }
         : {}),
       items: {

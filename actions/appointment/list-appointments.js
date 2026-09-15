@@ -126,6 +126,12 @@ export async function getAllAppointments({ status, statuses, staffId, search, da
         serviceName: a.staffService.service.name,
         staffId: a.staffService.staff?.id ?? null,
         staffName: a.staffService.staff?.user?.fullName ?? "—",
+        // Needed even with no Payment row: it is what the counter collects
+        // for an appointment booked "payer au salon". Without it,
+        // appointmentCollectsAtCounter() reads a price of 0 and the
+        // "collect payment" dialog never opens — see
+        // lib/appointments/counter-collection.js.
+        servicePrice: a.staffService.price != null ? Number(a.staffService.price) : 0,
         payment: a.payment
           ? {
               id: a.payment.id,

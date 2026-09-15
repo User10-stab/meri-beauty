@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { canSendTicketEmail } from "@/lib/authorization";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { buildPaymentTicket } from "@/lib/cash-book/build-payment-ticket";
 
@@ -31,7 +31,7 @@ export const runtime = "nodejs";
  * A boutique/POS order keeps its own route (app/api/orders/[id]/ticket) —
  * real per-item line items, and it must work even before any Payment exists.
  *
- * Gated on the same STAFF_PERMISSIONS.SEND_TICKET_EMAIL permission as
+ * Gated on the same canSendTicketEmail() check as
  * actions/payments/send-ticket-email.js, which shares this route's ticket
  * assembly (lib/cash-book/build-payment-ticket.js) — a staff member who
  * isn't allowed to put a reservation ticket in a client's inbox shouldn't be
@@ -46,7 +46,7 @@ export async function GET(req, { params }) {
 
   const { id } = await params;
 
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL))) {
+  if (!(await canSendTicketEmail(session.user))) {
     return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
   }
 

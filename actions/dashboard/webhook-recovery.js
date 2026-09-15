@@ -12,6 +12,9 @@ import { captureError, captureCriticalError } from "@/lib/monitoring";
 // nothing.
 const RECONCILIATION_PATH = "/dashboard/operations";
 
+// A stuck webhook payment is a system/financial-integrity fact, not one
+// staff member's personal activity, so every admin/owner sees every one of
+// these regardless of whose till it originated from.
 async function requireReconciliationAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };

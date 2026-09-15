@@ -1,9 +1,7 @@
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS, isTillCashOperator, isAdminRole } from "@/lib/authorization";
-import { getCashBookLedger } from "@/actions/dashboard/cash-book";
+import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { getCashBookLedger, getCashReport } from "@/actions/dashboard/cash-book";
 import { getCurrentCashSession, getSuggestedOpeningFloat } from "@/actions/dashboard/cash-sessions";
-import { refreshSalonBranding } from "@/lib/email-templates";
-import { getAbsoluteUrl } from "@/lib/site-url";
 import { CaisseClient } from "@/components/dashboard/boutique/caisse/CaisseClient";
 
 export const metadata = { title: "Livre de caisse — Meri Beauty" };
@@ -11,39 +9,37 @@ export const metadata = { title: "Livre de caisse — Meri Beauty" };
 export const dynamic = "force-dynamic";
 
 export default async function CaissePage({ searchParams }) {
-  const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.CASH_REGISTER);
+  await requireDashboardPermission(STAFF_PERMISSIONS.CASH_REGISTER);
   const params = await searchParams;
   const filterInput = {
     from: typeof params?.from === "string" ? params.from : undefined,
     to: typeof params?.to === "string" ? params.to : undefined,
   };
 
-  // The detailed "Rapport" (revenue by method/category/VAT) now lives on its
-  // own route (CaisseRapportPage) with its own data fetch — this page only
-  // needs the journal-facing data. No per-row "send ticket by email" action
-  // here — that stays an Operations-only capability (TransactionDetailDrawer).
-  const [ledger, currentSession, suggestedFloat, branding] = await Promise.all([
+  // The "Rapport" (cash-only revenue by category/VAT + reconciliation) is
+  // fetched here alongside the journal and rendered inline by CaisseClient —
+  // it used to live on its own route, but that meant a click away from the
+  // book it describes for no real benefit. No per-row "send ticket by email"
+  // action here — that stays an Operations-only capability
+  // (TransactionDetailDrawer). No salon-branding fetch either: printing goes
+  // through the generated PDF route (/api/caisse/pdf), which draws its own
+  // fixed letterhead the same way the Livre de recettes' PDF does, not a
+  // dashboard-screen print.
+  const [ledger, report, currentSession, suggestedFloat] = await Promise.all([
     getCashBookLedger(filterInput),
+    getCashReport(filterInput),
     getCurrentCashSession(),
     getSuggestedOpeningFloat(),
-    refreshSalonBranding(),
   ]);
-
-  const logoUrl = branding?.logo
-    ? branding.logo.startsWith("http")
-      ? branding.logo
-      : getAbsoluteUrl(branding.logo)
-    : null;
 
   return (
     <CaisseClient
       ledger={ledger.success ? ledger.data : null}
       ledgerError={ledger.success ? null : ledger.message}
+      report={report.success ? report.data : null}
+      reportError={report.success ? null : report.message}
       currentSession={currentSession.success ? currentSession.data : null}
       suggestedOpeningFloat={suggestedFloat.success ? suggestedFloat.data : null}
-      canVerify={isTillCashOperator(user) || isAdminRole(user.role)}
-      salonName={branding?.name ?? "Meri Beauty"}
-      logoUrl={logoUrl}
     />
   );
 }

@@ -1,11 +1,22 @@
 "use client";
 
+import { Check } from "lucide-react";
 import { getStaffColor } from "./staffColors";
+
+// Muted palette for finished reservations — immediately distinguishable
+// from upcoming ones while staying consistent with the dashboard UI.
+const COMPLETED_STYLE = {
+  bg: "#F3F4F6",
+  border: "#D1D5DB",
+  text: "#6B7280",
+};
 
 /**
  * Appointment card for the calendar time grid - Admin Calendar optimized.
  * Clean design with colored background matching reference image.
- * Displays: Service name, time range, staff member.
+ * Displays: Service name, time range, staff member, and current status.
+ * COMPLETED reservations render muted with a "Terminé" check badge so a
+ * finished reservation is instantly recognizable.
  *
  * @param {{
  *   appointment: object,
@@ -14,7 +25,8 @@ import { getStaffColor } from "./staffColors";
  * }} props
  */
 export function AppointmentCard({ appointment, onClick, compact = false }) {
-  const color = getStaffColor(appointment.staffId);
+  const isCompleted = appointment.status === "COMPLETED";
+  const color = isCompleted ? COMPLETED_STYLE : getStaffColor(appointment.staffId);
 
   const startLabel = appointment.startTime
     ? new Date(appointment.startTime).toLocaleTimeString("fr-FR", {
@@ -42,7 +54,7 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
         backgroundColor: color.bg,
         border: `1px solid ${color.border}`,
       }}
-      aria-label={`${appointment.serviceName} — ${appointment.customerName} — ${appointment.staffName} — ${timeRange}`}
+      aria-label={`${appointment.serviceName} — ${appointment.customerName} — ${appointment.staffName} — ${timeRange}${isCompleted ? " — Terminé" : ""}`}
     >
       <div
         className={`relative flex min-w-0 flex-1 flex-col ${
@@ -60,12 +72,23 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
           >
             {appointment.serviceName}
           </h4>
-          <span
-            className="flex-shrink-0 rounded bg-white/50 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider shadow-sm"
-            style={{ color: color.text }}
-          >
-            RDV
-          </span>
+          {isCompleted ? (
+            <span
+              className="flex flex-shrink-0 items-center gap-0.5 rounded bg-white/70 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider shadow-sm"
+              style={{ color: color.text }}
+              title="Réservation terminée"
+            >
+              <Check size={9} strokeWidth={3} />
+              Terminé
+            </span>
+          ) : (
+            <span
+              className="flex-shrink-0 rounded bg-white/50 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider shadow-sm"
+              style={{ color: color.text }}
+            >
+              RDV
+            </span>
+          )}
         </div>
 
         {/* Time range */}

@@ -6,10 +6,11 @@ import { isAdminRole, ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@
 import { getCurrentStaffId } from "@/lib/route-protection";
 
 /**
- * Fetch CONFIRMED appointments for the calendar within a date range.
+ * Fetch CONFIRMED + COMPLETED appointments for the calendar within a date
+ * range, so each reservation displays with its current status.
  *
- * - ADMIN / OWNER  → every confirmed appointment in the salon
- * - STAFF          → only confirmed appointments assigned to themselves
+ * - ADMIN / OWNER  → every confirmed/completed appointment in the salon
+ * - STAFF          → only confirmed/completed appointments assigned to themselves
  *
  * @param {{ from: string, to: string }} range  ISO date strings (inclusive)
  * @returns {Promise<{ success: boolean, data?: Array<CalendarAppointment>, message?: string }>}
@@ -43,9 +44,12 @@ export async function getCalendarAppointments({ from, to }) {
     const fromDate = new Date(from);
     const toDate = new Date(to);
 
+    // Display-only scope: upcoming (CONFIRMED) + finished (COMPLETED) so
+    // the calendar can show each reservation with its current status.
+    // Cancelled/rejected/no-show rows stay excluded. No status logic changes.
     let where = {
       isDeleted: false,
-      status: "CONFIRMED",
+      status: { in: ["CONFIRMED", "COMPLETED"] },
       startTime: { lt: toDate },
       endTime: { gt: fromDate },
     };

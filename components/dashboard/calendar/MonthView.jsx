@@ -9,7 +9,7 @@ import {
   isToday,
   isClosureDay,
 } from "./calendarUtils";
-import { Lock } from "lucide-react";
+import { Check, Lock } from "lucide-react";
 
 const MAX_VISIBLE = 3;
 
@@ -159,6 +159,7 @@ export function MonthView({
                             timeZone: "Europe/Brussels",
                           })
                         : "";
+                      const isCompleted = item.status === "COMPLETED";
 
                       return (
                         <button
@@ -167,13 +168,26 @@ export function MonthView({
                             e.stopPropagation();
                             onAppointmentClick(item);
                           }}
-                          className="flex w-full items-center justify-between gap-1 truncate rounded-md border border-gray-200/60 bg-white px-2 py-1 text-left text-[10px] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all hover:shadow-[0_2px_4px_rgba(0,0,0,0.06)] relative z-10 dark:border-gray-700/60 dark:bg-gray-800"
-                          title={`${timeLabel} — ${item.serviceName} — ${item.customerName}`}
+                          className={`flex w-full items-center justify-between gap-1 truncate rounded-md border px-2 py-1 text-left text-[10px] font-medium shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition-all hover:shadow-[0_2px_4px_rgba(0,0,0,0.06)] relative z-10 ${
+                            isCompleted
+                              ? "border-gray-200 bg-gray-100/80 dark:border-gray-700/60 dark:bg-gray-800/60"
+                              : "border-gray-200/60 bg-white dark:border-gray-700/60 dark:bg-gray-800"
+                          }`}
+                          title={`${timeLabel} — ${item.serviceName} — ${item.customerName}${isCompleted ? " — Terminé" : ""}`}
                         >
-                          <span className="truncate font-semibold text-gray-800 dark:text-white">{item.serviceName}</span>
-                          <span className="flex-shrink-0 rounded bg-gray-100 px-1 py-px text-[7px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-700 dark:text-gray-400">
-                            RDV
+                          <span className={`truncate font-semibold ${isCompleted ? "text-gray-500 dark:text-gray-400" : "text-gray-800 dark:text-white"}`}>
+                            {isCompleted && <Check size={9} strokeWidth={3} className="mr-1 inline text-gray-400 dark:text-gray-500" />}
+                            {item.serviceName}
                           </span>
+                          {isCompleted ? (
+                            <span className="flex-shrink-0 rounded bg-gray-200 px-1 py-px text-[7px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                              Terminé
+                            </span>
+                          ) : (
+                            <span className="flex-shrink-0 rounded bg-gray-100 px-1 py-px text-[7px] font-bold uppercase tracking-wider text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                              RDV
+                            </span>
+                          )}
                         </button>
                       );
                     }
@@ -236,6 +250,12 @@ export function MonthView({
         <div className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
           <span className="font-medium">Confirmé</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="flex h-3.5 w-3.5 items-center justify-center rounded border border-gray-300 bg-gray-100 dark:border-gray-600 dark:bg-gray-800">
+            <Check size={8} className="text-gray-500" />
+          </span>
+          <span className="font-medium">Terminé</span>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="flex h-3.5 w-3.5 items-center justify-center rounded border border-dashed border-violet-300 bg-violet-50 dark:border-violet-600 dark:bg-violet-900/20">

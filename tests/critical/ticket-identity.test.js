@@ -46,8 +46,12 @@ describe("receipt identity and invoice association", () => {
   ])("does not invent a collection receipt for invalid data", (row) => {
     expect(() => collectionTicketFields(row, TICKET, invoice)).toThrow();
   });
-  it("refuses a ticket for a payment not yet fully settled", () => {
-    expect(() => collectionTicketFields(deposit, null, invoice)).toThrow();
+  // A sale settled before ticket numbering shipped has no number and must
+  // still be reprintable — "not settled yet" is Payment.status's job now, not
+  // a missing number's. See buildPaymentTicket.
+  it("still builds a receipt for a collection that predates ticket numbering", () => {
+    expect(collectionTicketFields(deposit, null, invoice).ticketNumber).toBeNull();
+    expect(collectionTicketFields(deposit, undefined, invoice).totalInclVat).toBe(60.5);
   });
 
   // The cash-book line this collection produced (see lib/cash-book/piece-number.js) —
@@ -98,8 +102,10 @@ describe("consolidated receipt for a whole payment", () => {
   ])("throws rather than inventing a receipt: %s", (_label, paymentId, rows) => {
     expect(() => consolidatedTicketFields(paymentId, TICKET, rows, invoice)).toThrow();
   });
-  it("refuses a ticket for a payment not yet fully settled", () => {
-    expect(() => consolidatedTicketFields("payment-1", null, [deposit], invoice)).toThrow();
+  it("still builds a receipt for a payment that predates ticket numbering", () => {
+    const receipt = consolidatedTicketFields("payment-1", null, [deposit], invoice);
+    expect(receipt.ticketNumber).toBeNull();
+    expect(receipt.totalInclVat).toBe(60.5);
   });
 });
 
@@ -110,7 +116,7 @@ describe("consolidated receipt for a whole payment", () => {
 describe("reservation ticket reprints", () => {
   beforeEach(() => {
     mocks.auth.mockResolvedValue({ user: { id: "staff-1", role: "ADMIN" } });
-    mocks.payment.mockResolvedValue({ ticketNumber: TICKET, invoice, appointment: { user: {} }, transactions: [deposit, balance] });
+    mocks.payment.mockResolvedValue({ status: "PAID", ticketNumber: TICKET, invoice, appointment: { user: {} }, transactions: [deposit, balance] });
     mocks.render.mockResolvedValue(Buffer.from("pdf"));
   });
   const request = (query = "") => GET(new Request(`http://localhost/api/payments/payment-1/ticket${query}`), { params: Promise.resolve({ id: "payment-1" }) });
@@ -141,14 +147,39 @@ describe("reservation ticket reprints", () => {
     expect(mocks.payment).not.toHaveBeenCalled();
   });
   it("reprints a B2C payment without requiring an invoice", async () => {
-    mocks.payment.mockResolvedValue({ ticketNumber: TICKET, invoice: null, appointment: { user: {} }, transactions: [deposit] });
+    mocks.payment.mockResolvedValue({ status: "PAID", ticketNumber: TICKET, invoice: null, appointment: { user: {} }, transactions: [deposit] });
     mocks.salon.mockResolvedValue({ legalName: "Salon" });
     expect((await request()).status).toBe(200);
     expect(mocks.render.mock.calls[0][0]).toMatchObject({ ticketNumber: TICKET, invoiceNumber: null, totalInclVat: 60.5 });
   });
   it("does not fabricate receipts for an unpaid reservation", async () => {
-    mocks.payment.mockResolvedValue({ invoice, appointment: { user: {} }, transactions: [] });
+    mocks.payment.mockResolvedValue({ status: "PAID", invoice, appointment: { user: {} }, transactions: [] });
     expect((await request()).status).toBe(404);
     expect(mocks.render).not.toHaveBeenCalled();
   });
+
+  // 15/09/2026: every reservation ticket taken before the numbering system
+  // shipped 500'd on reprint — ticketNumber was null, the assembly helper
+  // threw, and nothing between it and the route caught the throw. 53 of 53
+  // prod payments were in that state. Both halves are asserted here: the
+  // reprint works, and an unsettled payment is still refused — now on the
+  // status the allocation paths actually set, with a readable message
+  // instead of a blank 500 page.
+  it("reprints a settled payment that predates ticket numbering, with no number", async () => {
+    mocks.payment.mockResolvedValue({ status: "PAID", ticketNumber: null, invoice: null, appointment: { user: {} }, transactions: [deposit] });
+    mocks.salon.mockResolvedValue({ legalName: "Salon" });
+    expect((await request()).status).toBe(200);
+    expect(mocks.render.mock.calls[0][0]).toMatchObject({ ticketNumber: null, totalInclVat: 60.5 });
+  });
+
+  it.each(["PENDING", "PARTIALLY_PAID", "FAILED"])(
+    "refuses a ticket for a %s payment — readably, never as a 500",
+    async (status) => {
+      mocks.payment.mockResolvedValue({ status, ticketNumber: null, invoice, appointment: { user: {} }, transactions: [deposit] });
+      const response = await request();
+      expect(response.status).toBe(409);
+      expect((await response.json()).error).toMatch(/pas de ticket avant le solde/);
+      expect(mocks.render).not.toHaveBeenCalled();
+    },
+  );
 });

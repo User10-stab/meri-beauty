@@ -275,6 +275,9 @@ function deriveRefundFields(payment) {
       remainingRefundable: refundState.remainingRefundable,
       fullyCredited: refundState.fullyCredited,
     },
+    // A cancellation already open on this payment: a second one cannot be
+    // created, only resumed, so the row must stop offering it.
+    refundInFlight: (payment?.refundOperations ?? []).length > 0,
     latestTransactionId: latest?.id ?? null,
     latestTransactionType: latest?.transactionType ?? null,
     latestTransactionAt: latest?.paidAt ?? null,
@@ -303,6 +306,13 @@ const PAYMENT_LEDGER_SELECT = Object.freeze({
       customerEmail: true,
       creditNotes: { select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true } },
     },
+  },
+  // Same in-flight guard getTransactionDetail selects — see its comment.
+  // Carried on the list row too so the row's own cancel affordance can never
+  // disagree with the drawer's about whether this sale is already spent.
+  refundOperations: {
+    where: { status: { in: ["PENDING", "PARTIALLY_REFUNDED"] } },
+    select: { id: true },
   },
 });
 
@@ -845,12 +855,37 @@ export async function getTransactionDetail(transactionId) {
                 customerVatNumber: true,
                 customerName: true,
                 customerEmail: true,
-                // Enough to compute fullyCredited via summarizeRefundState
-                // below — not the individual notes themselves, which the
-                // drawer never lists (it shows only this row's own
-                // creditNote, per the comment above).
-                creditNotes: { select: { id: true, totalInclVat: true } },
+                // Feeds summarizeRefundState's fullyCredited below AND the
+                // drawer's own "Note de crédit" section. Both are needed:
+                // the note that cancels a sale hangs off the REFUND row, so
+                // opening the cancelled sale's own transaction would
+                // otherwise show no note at all — nothing to download, and
+                // no way to send it to the client.
+                creditNotes: {
+                  select: {
+                    id: true,
+                    number: true,
+                    issuedAt: true,
+                    reason: true,
+                    totalInclVat: true,
+                    emailSentAt: true,
+                    peppyrusSentAt: true,
+                  },
+                  orderBy: { issuedAt: "asc" },
+                },
               },
+            },
+            // "Is a cancellation already open on this payment?" — the same
+            // question openRefundOperation asks before resuming instead of
+            // creating a second operation. The drawer needs it to stop
+            // offering its two cancel buttons once a credit note has already
+            // been issued: a second click can only ever resume the existing
+            // operation (no second note), which reads as the button doing
+            // nothing. Deliberately only the in-flight statuses, so a
+            // settled partial return still leaves the rest refundable.
+            refundOperations: {
+              where: { status: { in: ["PENDING", "PARTIALLY_REFUNDED"] } },
+              select: { id: true, status: true },
             },
             // Sibling transactions: a 50 % acompte followed by a balance
             // settled at the counter are two rows against one Payment, and

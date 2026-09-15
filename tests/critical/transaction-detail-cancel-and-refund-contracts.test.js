@@ -50,9 +50,17 @@ describe("the transaction detail drawer can actually cancel and refund", () => {
     expect(fnIdx).toBeGreaterThan(-1);
     const fn = actions.slice(fnIdx, actions.indexOf("\n}\n", fnIdx));
 
-    // Needed for summarizeRefundState to compute fullyCredited correctly
-    // when several partial notes already exist against the invoice.
-    expect(fn).toContain("creditNotes: { select: { id: true, totalInclVat: true } }");
+    // id + totalInclVat let summarizeRefundState compute fullyCredited when
+    // several partial notes already stand against the invoice. `number` is
+    // load-bearing too: the note that cancels a sale hangs off the REFUND
+    // row, so the drawer falls back to the invoice's notes to give the
+    // cancelled sale's own transaction something to download and send.
+    const creditNotesIdx = fn.indexOf("creditNotes: {");
+    expect(creditNotesIdx).toBeGreaterThan(-1);
+    const creditNotesSelect = fn.slice(creditNotesIdx, fn.indexOf("},", creditNotesIdx));
+    for (const field of ["id", "number", "totalInclVat"]) {
+      expect(creditNotesSelect).toContain(`${field}: true`);
+    }
     expect(fn).toContain("summarizeRefundState({");
     expect(fn).toContain("remainingRefundable: refundState.remainingRefundable");
     expect(fn).toContain("fullyCredited: refundState.fullyCredited");

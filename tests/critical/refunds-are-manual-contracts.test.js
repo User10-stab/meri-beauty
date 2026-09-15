@@ -270,6 +270,41 @@ describe("completed services cannot be refunded through Operations", () => {
   });
 });
 
+describe("post-completion correction: the one deliberate, narrow exception", () => {
+  // "Générer note de crédit" is deliberately NOT a new orchestrator — it is
+  // the exact same previewCancelAndRefund/cancelAndRefund machinery as
+  // "Annuler et rembourser", just with one new trigger that authorize.js
+  // lets through the COMPLETED/shipped guards. See
+  // components/dashboard/operations/GenerateCreditNoteDialog.jsx.
+
+  test("only POST_COMPLETION_CORRECTION is let through the COMPLETED/shipped guards", () => {
+    const authorization = source("lib/refunds/authorize.js");
+    expect(authorization).toContain('trigger === "POST_COMPLETION_CORRECTION"');
+    // Every carve-out must return before reaching the generic deny — proven
+    // by the deny lines still being present and unconditional afterwards
+    // (checked above), not by removing them.
+    expect(authorization.match(/trigger === "POST_COMPLETION_CORRECTION"/g)?.length).toBe(3);
+    expect(authorization).not.toContain("FINANCIAL_CORRECTION");
+  });
+
+  test("the new trigger reuses cancelAndRefund verbatim — no bespoke orchestrator, no partial-amount input", () => {
+    expect(existsSync(`${root}lib/refunds/correct-completed-transaction.js`)).toBe(false);
+    const dialog = source("components/dashboard/operations/GenerateCreditNoteDialog.jsx");
+    expect(dialog).toContain('import { cancelAndRefund, previewCancelAndRefund } from "@/actions/dashboard/cancel-and-refund"');
+    expect(dialog).toContain('const TRIGGER = "POST_COMPLETION_CORRECTION"');
+    expect(dialog).not.toContain("requestedAmount");
+  });
+
+  test("cancelling a COMPLETED appointment/reservation is reachable only via the new trigger, never widened generally", () => {
+    const operation = source("lib/refunds/open-refund-operation.js");
+    expect(operation).toContain('trigger === "POST_COMPLETION_CORRECTION"');
+    // The default (every other trigger) status set must still exclude
+    // COMPLETED — only the widened branch may include it.
+    expect(operation).toContain('["PENDING", "ACCEPTED", "CONFIRMED"]');
+    expect(operation).toContain('["PENDING_DEPOSIT", "CONFIRMED"]');
+  });
+});
+
 describe("converting a legacy path redirects its refund, never just deletes it", () => {
   // The danger when removing a stripe.refunds.create call is doing only
   // that: the booking still cancels, the credit note still issues, and the

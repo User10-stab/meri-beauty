@@ -249,7 +249,11 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
                     <span className="block text-xs text-gray-400">{o.user?.email}</span>
                   </TableCell>
                   <TableCell>
-                    <span className="text-gray-600 dark:text-dark-6">{MODE_LABEL[o.fulfilmentMode]}</span>
+                    {o.cancelReason ? (
+                      <span className="text-red-600 dark:text-red-400">{o.cancelReason}</span>
+                    ) : (
+                      <span className="text-gray-600 dark:text-dark-6">{MODE_LABEL[o.fulfilmentMode]}</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[o.status]}`}>

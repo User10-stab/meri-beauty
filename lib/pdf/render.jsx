@@ -3,6 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { buildRentalPeriodLabel, shortContractRef } from "@/lib/invoicing";
 import { InvoiceDocument, CreditNoteDocument } from "./InvoiceDocument";
 import { TicketDocument } from "./TicketDocument";
+import { RecettesJournalDocument } from "./RecettesJournalDocument";
+import { InventorySnapshotDocument } from "./InventorySnapshotDocument";
+import { StockMovementsDocument } from "./StockMovementsDocument";
 import { getSellerContact } from "./seller-contact";
 
 /**
@@ -116,6 +119,29 @@ export async function renderCreditNotePdf(creditNote, invoice) {
       invoice={serializeInvoice(invoice)}
     />
   );
+}
+
+/**
+ * The Livre de recettes journal (lib/livre-de-recettes/build-recettes-journal.js)
+ * already returns plain Numbers, not Prisma Decimals — no serialization step
+ * needed before it hits the render tree.
+ */
+export async function renderRecettesJournalPdf(journal) {
+  return renderToBuffer(<RecettesJournalDocument journal={journal} />);
+}
+
+/**
+ * Both stock builders (lib/stock/build-inventory-snapshot.js,
+ * lib/stock/build-stock-movements-report.js) already return plain Numbers —
+ * InventoryMovement/ProductVariant carry no Decimal fields — so no
+ * serialization step is needed before either hits the render tree.
+ */
+export async function renderInventorySnapshotPdf(snapshot) {
+  return renderToBuffer(<InventorySnapshotDocument snapshot={snapshot} />);
+}
+
+export async function renderStockMovementsPdf(report) {
+  return renderToBuffer(<StockMovementsDocument report={report} />);
 }
 
 // Refund receipts are intentionally not rendered: B2C refund communication is plain e-mail only.

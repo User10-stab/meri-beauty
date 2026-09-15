@@ -14,6 +14,9 @@
 /coverage
 /test-results
 
+# security scanner output (may contain secret values / infra details)
+/security-reports/
+
 # next.js
 /.next/
 /out/
@@ -80,6 +83,7 @@ mailpit.exe
 
 # local AI/dev assistant state
 .claude/
+.opencode/
 
 # GitHub Actions SSH keys
 github-actions

@@ -1,7 +1,7 @@
 import { describe, expect, it, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { buildDayReport } from "@/lib/cash-book/build-day-report";
+import { buildDayReport, buildRangeReport } from "@/lib/cash-book/build-day-report";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
@@ -196,27 +196,119 @@ describe("buildDayReport", () => {
   });
 });
 
+/**
+ * Same aggregate-faking approach as clientMock above, but for the
+ * range-based report: cashSession.findMany replaces findUnique, and
+ * transactions are shared across however many sessions are in range —
+ * computeSessionCashTotals is called once per session, so cashIn/cashOut
+ * aggregates are filtered by cashSessionId too.
+ */
+function rangeClientMock({ sessions, transactions = [], movements = [] }) {
+  return {
+    cashSession: { findMany: vi.fn().mockResolvedValue(sessions) },
+    transaction: {
+      findMany: vi.fn().mockResolvedValue(transactions),
+      aggregate: vi.fn(({ where }) => {
+        const matches = transactions.filter((t) => {
+          if (where.cashSessionId && t.cashSessionId !== where.cashSessionId) return false;
+          if (where.method && t.method !== where.method) return false;
+          if (typeof where.transactionType === "string" && t.transactionType !== where.transactionType) return false;
+          if (where.transactionType?.not && t.transactionType === where.transactionType.not) return false;
+          return true;
+        });
+        const sum = matches.reduce((acc, t) => acc + Number(t.amount), 0);
+        return Promise.resolve({ _sum: { amount: matches.length ? sum : null } });
+      }),
+    },
+    cashMovement: {
+      findMany: vi.fn(({ where }) => Promise.resolve(movements.filter((m) => m.cashSessionId === where.cashSessionId))),
+    },
+  };
+}
+
+describe("buildRangeReport", () => {
+  const RANGE = { fromDate: new Date("2026-08-01T00:00:00"), toDate: new Date("2026-08-01T23:59:59.999") };
+
+  it("a range with no sessions is not final — nothing to finalize", async () => {
+    const report = await buildRangeReport(rangeClientMock({ sessions: [] }), RANGE);
+    expect(report.isFinal).toBe(false);
+    expect(report.expectedCash).toBeNull();
+  });
+
+  it("is final once every session in range is closed", async () => {
+    const client = rangeClientMock({
+      sessions: [{ id: "s1", openingFloat: 100, closedAt: new Date("2026-08-01T19:00:00Z"), countedCash: 100, variance: 0, isAutoOpened: false, isAutoClosed: true }],
+    });
+    const report = await buildRangeReport(client, RANGE);
+    expect(report.isFinal).toBe(true);
+  });
+
+  it("stays provisional while any session in range is still open", async () => {
+    const client = rangeClientMock({
+      sessions: [
+        { id: "s1", openingFloat: 100, closedAt: new Date("2026-08-01T12:00:00Z"), countedCash: 150, variance: 0, isAutoOpened: false, isAutoClosed: false },
+        { id: "s2", openingFloat: 150, closedAt: null, countedCash: null, variance: null, isAutoOpened: true, isAutoClosed: false },
+      ],
+    });
+    const report = await buildRangeReport(client, RANGE);
+    expect(report.isFinal).toBe(false);
+  });
+
+  // Period totals (apports/sorties) sum across every session, but
+  // expectedCash is the LAST session's own figure, not a sum — see the
+  // module doc comment on double-counting.
+  it("sums cash movements across every session in range, but expectedCash is only the most recent session's", async () => {
+    const client = rangeClientMock({
+      sessions: [
+        { id: "s1", openingFloat: 100, closedAt: new Date("2026-08-01T12:00:00Z"), countedCash: 100, variance: 0, isAutoOpened: false, isAutoClosed: false },
+        { id: "s2", openingFloat: 100, closedAt: null, countedCash: null, variance: null, isAutoOpened: true, isAutoClosed: false },
+      ],
+      movements: [
+        { cashSessionId: "s1", type: "CASH_IN", amount: 20 },
+        { cashSessionId: "s2", type: "EXPENSE", amount: 15 },
+      ],
+    });
+    const report = await buildRangeReport(client, RANGE);
+    expect(report.cashMovements).toEqual({ in: 20, out: 15 });
+    // Second session: 100 (opening) - 15 (expense) = 85, independent of s1.
+    expect(report.expectedCash).toBe(85);
+  });
+});
+
 describe("day-report wiring", () => {
   const actions = source("actions/dashboard/cash-book.js");
-  const reportClient = source("components/dashboard/boutique/DayReportClient.jsx");
-  const bookClient = source("components/dashboard/boutique/CashBookClient.jsx");
+  const client = source("components/dashboard/boutique/caisse/CaisseRapportClient.jsx");
 
-  test("getDayReport is guarded by the same permission as the till itself", () => {
-    const start = actions.indexOf("export async function getDayReport");
+  test("getCashReport is guarded by the same permission as the till itself", () => {
+    const start = actions.indexOf("export async function getCashReport");
     expect(start).toBeGreaterThan(-1);
     expect(actions.slice(start, start + 300)).toContain("requireCashBookAccess()");
   });
 
-  // A closed CashSession is already immutable elsewhere in this codebase
-  // (closeCashSession only ever acts on closedAt: null, nothing reopens
-  // one) — the Z label is only honest if the screen keys off that same
-  // field instead of inventing its own "finalized" flag.
-  test("the Z/X label is driven by isFinal, which the builder derives from session.closedAt", () => {
-    expect(reportClient).toContain("isFinal ? \"Z\" : \"X\"");
+  // 11 Sep 2026 redesign: no more "X"/"Z" jargon in the UI (client's
+  // explicit ask), labeled by isFinal alone. Revised 11 Sep 2026 (same day):
+  // the report moved to its own /rapport route (CaisseRapportClient) because
+  // the combined journal+report page had grown too long — CaisseClient.jsx
+  // now only links to it.
+  test("the report is labeled Définitif/Provisoire, driven by isFinal, not X/Z jargon", () => {
+    expect(client).toContain('report.isFinal');
+    expect(client).toContain('"Définitif"');
+    expect(client).toContain('"Provisoire"');
+    expect(client).not.toMatch(/isFinal \? "Z" : "X"/);
   });
 
-  test("the cash-book page links to the report, keyed off the same closedAt", () => {
-    expect(bookClient).toContain("/rapport`");
-    expect(bookClient).toContain('Rapport {session.closedAt ? "Z" : "X"}');
+  test("the report lives on its own route, linked from the journal page rather than inlined", () => {
+    const page = source("app/dashboard/boutique/caisse/rapport/page.jsx");
+    expect(page).toContain("getCashReport(filterInput)");
+    const journalClient = source("components/dashboard/boutique/caisse/CaisseClient.jsx");
+    expect(journalClient).toContain("/dashboard/boutique/caisse/rapport");
+  });
+
+  // Superseded by the "lives on its own route" test above (11 Sep 2026, same
+  // day as the redesign it originally pinned) — the report was moved out of
+  // CaisseClient.jsx into its own page once the combined page grew too long.
+  test("the report page is reachable and guarded the same way the journal page is", () => {
+    const page = source("app/dashboard/boutique/caisse/rapport/page.jsx");
+    expect(page).toContain("requireDashboardPermission(STAFF_PERMISSIONS.CASH_REGISTER)");
   });
 });

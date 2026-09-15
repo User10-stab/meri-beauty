@@ -1,12 +1,16 @@
 "use server";
 
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
-import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasDashboardPermission, canAccessDashboard, STAFF_PERMISSIONS } from "@/lib/authorization";
-import { computeCashVariance } from "@/lib/cash-sessions";
-import { computeSessionCashTotals } from "@/lib/cash-book/session-totals";
+import {
+  openCashSessionInternal,
+  closeCashSessionInternal,
+  ensureCashSessionOpen,
+  getLastClosedCountedCash,
+  SESSION_INCLUDE,
+} from "@/lib/cash-book/session-lifecycle";
 
 /**
  * A daily till open/close boundary. Before this, every CASH POS sale was
@@ -45,11 +49,6 @@ async function requireCashSessionOpeningAccess() {
   return { session };
 }
 
-const SESSION_INCLUDE = {
-  openedBy: { select: { id: true, fullName: true } },
-  closedBy: { select: { id: true, fullName: true } },
-};
-
 /**
  * "Is any till session open" — deliberately open to any dashboard role
  * (staff or admin), unlike every other export here (CASH_REGISTER only).
@@ -85,6 +84,12 @@ function serializeCashSession(session) {
     countedCash: session.countedCash == null ? null : Number(session.countedCash),
     variance: session.variance == null ? null : Number(session.variance),
     note: session.note,
+    isAutoOpened: Boolean(session.isAutoOpened),
+    isAutoClosed: Boolean(session.isAutoClosed),
+    verifiedAt: session.verifiedAt ?? null,
+    verifiedBy: session.verifiedBy ? { id: session.verifiedBy.id, fullName: session.verifiedBy.fullName } : null,
+    verifiedVariance: session.verifiedVariance == null ? null : Number(session.verifiedVariance),
+    verificationNote: session.verificationNote ?? null,
   };
 }
 
@@ -103,22 +108,38 @@ export async function getCurrentCashSession() {
 
 /**
  * The opening float a fresh "Ouvrir la caisse" form should be pre-filled
- * with — the previous session's own counted total, same logic
- * CashSessionClient's lastCountedCash already applies from the full history
- * it has loaded. Exposed separately so any screen that can open a session
- * (the till page, or the POS blocking gate below) can pre-fill it without
- * fetching the whole session history first.
+ * with — the previous session's own counted total. Also what the daily
+ * auto-open job carries forward (see lib/cash-book/auto-session.js's
+ * suggestedOpeningFloat, which duplicates this exact fallback chain since
+ * it has no auth() session to call this export with).
  */
 export async function getSuggestedOpeningFloat() {
   const guard = await requireCashSessionOpeningAccess();
   if (guard.error) return { success: false, message: guard.error, data: null };
 
-  const lastClosed = await prisma.cashSession.findFirst({
-    where: { closedAt: { not: null } },
-    orderBy: { closedAt: "desc" },
-    select: { countedCash: true },
-  });
-  return { success: true, data: lastClosed?.countedCash == null ? null : Number(lastClosed.countedCash) };
+  return { success: true, data: await getLastClosedCountedCash(prisma) };
+}
+
+/**
+ * The auto-open a screen tries the instant it finds no till open, before
+ * ever falling back to the manual "Ouvrir la caisse" form — see
+ * ensureCashSessionOpen (lib/cash-book/session-lifecycle.js) for the actual
+ * rule: it silently carries the last closed session's counted total forward
+ * when that amount is usable (> 0), and returns null (asking the caller to
+ * show the manual form instead) when it's 0, negative, or there is no prior
+ * session to carry forward from — those cases need a human to look at the
+ * float before money starts moving again.
+ */
+export async function tryAutoOpenCashSession() {
+  const guard = await requireCashSessionOpeningAccess();
+  if (guard.error) return { success: false, message: guard.error, data: null };
+
+  const session = await ensureCashSessionOpen(prisma);
+  if (!session) return { success: true, data: null };
+
+  revalidateCaisseRoutes();
+  const full = await prisma.cashSession.findUnique({ where: { id: session.id }, include: SESSION_INCLUDE });
+  return { success: true, data: full ? serializeCashSession(full) : null };
 }
 
 export async function openCashSession(openingFloat) {
@@ -134,21 +155,12 @@ export async function openCashSession(openingFloat) {
   // double-click, or two staff opening the till around the same moment)
   // can both read "no open session" before either commits, and both create
   // one — leaving two simultaneously-open sessions with no deterministic
-  // way to say which CASH sales belong to which. The advisory lock
-  // serializes this exactly like the refund-reconciliation code does for
-  // its own "read then decide" step.
-  const session = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext('cash-session-open'))`);
-
-    const existing = await tx.cashSession.findFirst({ where: { closedAt: null } });
-    if (existing) {
-      throw new Error("CASH_SESSION_ALREADY_OPEN");
-    }
-
-    return tx.cashSession.create({
-      data: { openedById: guard.session.user.id, openingFloat: Math.round(amount * 100) / 100 },
-      include: SESSION_INCLUDE,
-    });
+  // way to say which CASH sales belong to which. The advisory lock in
+  // openCashSessionInternal serializes this exactly like the
+  // refund-reconciliation code does for its own "read then decide" step.
+  const session = await openCashSessionInternal(prisma, {
+    userId: guard.session.user.id,
+    openingFloat: amount,
   }).catch((err) => {
     if (err.message === "CASH_SESSION_ALREADY_OPEN") return null;
     throw err;
@@ -171,47 +183,18 @@ export async function closeCashSession(sessionId, countedCash) {
     return { success: false, message: "Le montant compté doit être un montant positif ou nul." };
   }
 
-  const session = await prisma.cashSession.findUnique({ where: { id: sessionId } });
-  if (!session) return { success: false, message: "Session de caisse introuvable." };
-  if (session.closedAt) return { success: false, message: "Cette session est déjà clôturée." };
-
-  // Shared with the withdrawal guard and the X/Z day report — computing
-  // "expected cash" three different ways is how a report ends up
-  // contradicting the closure it describes. expected = opening float + CASH
-  // sales - CASH refunds +/- non-sale drawer movements (see model
-  // CashMovement).
-  const { cashIn, cashOut, movementsIn, movementsOut } = await computeSessionCashTotals(
-    prisma,
+  // Atomic claim, gated on still being open inside closeCashSessionInternal —
+  // a double-submit (double-click, two tabs) can't close the same session
+  // twice and overwrite the first closure's figures with a second count.
+  const updated = await closeCashSessionInternal(prisma, {
     sessionId,
-    session.openingFloat
-  );
-  const { expectedCash, countedCash: roundedCounted, variance } = computeCashVariance({
-    openingFloat: session.openingFloat,
-    cashIn,
-    cashOut,
-    movementsIn,
-    movementsOut,
-    counted,
+    userId: guard.session.user.id,
+    countedCash: counted,
   });
-
-  // Atomic claim, gated on still being open — a double-submit (double-click,
-  // two tabs) can't close the same session twice and overwrite the first
-  // closure's figures with a second count.
-  const claim = await prisma.cashSession.updateMany({
-    where: { id: sessionId, closedAt: null },
-    data: {
-      closedAt: new Date(),
-      closedById: guard.session.user.id,
-      expectedCash,
-      countedCash: roundedCounted,
-      variance,
-    },
-  });
-  if (claim.count === 0) {
-    return { success: false, message: "Cette session vient d'être clôturée par quelqu'un d'autre." };
+  if (!updated) {
+    return { success: false, message: "Session de caisse introuvable, ou déjà clôturée par quelqu'un d'autre." };
   }
 
-  const updated = await prisma.cashSession.findUnique({ where: { id: sessionId }, include: SESSION_INCLUDE });
   revalidateCaisseRoutes();
   return { success: true, data: serializeCashSession(updated) };
 }

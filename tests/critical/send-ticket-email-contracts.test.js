@@ -55,19 +55,38 @@ describe("the new permission stays opt-in, not granted to every staff member by 
   });
 });
 
-describe("the Livre de caisse hides the send action from staff without the permission", () => {
-  const client = source("components/dashboard/boutique/CashBookClient.jsx");
-  const page = source("app/(dashboard)/dashboard/boutique/caisse/[sessionId]/page.jsx");
+// 11 Sep 2026: the per-row "Envoyer" ticket-email button was dropped from the
+// Livre de caisse (client's explicit ask — the journal already links each
+// row's N° pièce to the ticket itself, no email action needed there). The
+// capability lives only in Operations now, via TransactionDetailDrawer.
+describe("the Livre de caisse has no send-ticket-by-email action", () => {
+  const client = source("components/dashboard/boutique/caisse/CaisseClient.jsx");
+  const page = source("app/dashboard/boutique/caisse/page.jsx");
 
-  test("the page computes the permission server-side and passes it down as a prop", () => {
-    expect(page).toContain("hasDashboardPermission(user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL)");
-    expect(page).toContain("canSendTicketEmail={canSendTicketEmail}");
+  test("the caisse page does not compute or pass the permission", () => {
+    expect(page).not.toContain("SEND_TICKET_EMAIL");
+    expect(page).not.toContain("canSendTicketEmail");
   });
 
-  test("the button only renders under that prop, and only for a reservation payment row", () => {
-    expect(client).toContain("canSendTicketEmail = false");
-    expect(client).toContain("{canSendTicketEmail && (");
-    expect(client).toContain("function canEmailRow(row)");
-    expect(client).toContain("!row.orderId");
+  test("the journal client has no send-ticket action, but still links N° pièce to the ticket", () => {
+    expect(client).not.toContain("sendTicketByEmail");
+    expect(client).not.toContain("canSendTicketEmail");
+    expect(client).toContain("function pieceNumberHref(row)");
+  });
+});
+
+describe("Operations keeps the send action, permission-gated the same way", () => {
+  const actions = source("actions/dashboard/admin-operations.js");
+  const drawer = source("components/dashboard/operations/TransactionDetailDrawer.jsx");
+
+  test("the transaction detail data computes the permission server-side", () => {
+    expect(actions).toContain("hasDashboardPermission(");
+    expect(actions).toContain("STAFF_PERMISSIONS.SEND_TICKET_EMAIL");
+    expect(actions).toContain("canSendTicketEmail,");
+  });
+
+  test("the drawer only renders the action under that flag", () => {
+    expect(drawer).toContain("detail.canSendTicketEmail");
+    expect(drawer).toContain("sendTicketByEmail(paymentId)");
   });
 });

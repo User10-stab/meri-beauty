@@ -6,6 +6,8 @@ import { auth } from "@/auth";
 import { STAFF_PERMISSIONS, hasDashboardPermission, ROLES } from "@/lib/authorization";
 import { stockAdjustmentSchema, stockCountSchema } from "@/lib/validations/boutique";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
+import { buildInventorySnapshot } from "@/lib/stock/build-inventory-snapshot";
+import { buildStockMovementsReport } from "@/lib/stock/build-stock-movements-report";
 
 /**
  * Stock movements.
@@ -226,48 +228,87 @@ export async function recordStockCount(input) {
   }
 }
 
+/**
+ * One row per variant, chosen by ORDER BY "variantId", "createdAt" DESC —
+ * the idiomatic Postgres way to get "the latest row per group" in one query
+ * instead of N+1 lookups or a Prisma groupBy (which can only aggregate, not
+ * return the whole latest row). Variants with zero movements simply have no
+ * entry, rather than a query error.
+ */
+async function fetchLatestMovementsByVariant() {
+  const rows = await prisma.$queryRaw`
+    SELECT DISTINCT ON (m."variantId")
+      m."variantId", m.type, m.quantity, m."previousStock", m."newStock", m.reason, m."createdAt"
+    FROM "InventoryMovement" m
+    ORDER BY m."variantId", m."createdAt" DESC
+  `;
+  return Object.fromEntries(rows.map((r) => [r.variantId, r]));
+}
+
+/**
+ * Latest movement per variant, standalone — used by a caller that only needs
+ * this (not the full variant listing) and must go through the same
+ * permission gate everything else in this module does.
+ */
+export async function getLatestMovementsByVariant() {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error, data: {} };
+
+  try {
+    const data = await fetchLatestMovementsByVariant();
+    return { success: true, data };
+  } catch (error) {
+    console.error("[getLatestMovementsByVariant]", error);
+    return { success: false, message: "Impossible de charger les derniers mouvements.", data: {} };
+  }
+}
+
 /** Flat, variant-centric inventory listing — the Stock page's main table. */
 export async function getAllVariants({ search, lowStockOnly = false } = {}) {
   const guard = await requireStockAccess();
   if (guard.error) return { success: false, message: guard.error, data: [] };
 
   try {
-    const variants = await prisma.productVariant.findMany({
-      where: {
-        isDeleted: false,
-        product: { isDeleted: false },
-        ...(search
-          ? {
-              OR: [
-                { sku: { contains: search, mode: "insensitive" } },
-                { barcode: { contains: search, mode: "insensitive" } },
-                { name: { contains: search, mode: "insensitive" } },
-                { product: { name: { contains: search, mode: "insensitive" } } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: [{ product: { name: "asc" } }, { position: "asc" }],
-      // Explicit select — price/costPrice/comparePrice are Decimal and this
-      // list goes straight to a client component, which can't serialize
-      // Prisma's Decimal instances. Leave them out rather than convert them,
-      // since the Stock page has no use for price.
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        barcode: true,
-        stockQuantity: true,
-        reservedQuantity: true,
-        lowStockThreshold: true,
-        product: { select: { id: true, name: true } },
-      },
-    });
+    const [variants, latestByVariant] = await Promise.all([
+      prisma.productVariant.findMany({
+        where: {
+          isDeleted: false,
+          product: { isDeleted: false },
+          ...(search
+            ? {
+                OR: [
+                  { sku: { contains: search, mode: "insensitive" } },
+                  { barcode: { contains: search, mode: "insensitive" } },
+                  { name: { contains: search, mode: "insensitive" } },
+                  { product: { name: { contains: search, mode: "insensitive" } } },
+                ],
+              }
+            : {}),
+        },
+        orderBy: [{ product: { name: "asc" } }, { position: "asc" }],
+        // Explicit select — price/costPrice/comparePrice are Decimal and this
+        // list goes straight to a client component, which can't serialize
+        // Prisma's Decimal instances. Leave them out rather than convert them,
+        // since the Stock page has no use for price.
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          barcode: true,
+          stockQuantity: true,
+          reservedQuantity: true,
+          lowStockThreshold: true,
+          product: { select: { id: true, name: true } },
+        },
+      }),
+      fetchLatestMovementsByVariant(),
+    ]);
 
     const withAvailability = variants.map((v) => ({
       ...v,
       availableQuantity: v.stockQuantity - v.reservedQuantity,
       isLowStock: v.stockQuantity - v.reservedQuantity <= v.lowStockThreshold,
+      lastMovement: latestByVariant[v.id] ?? null,
     }));
 
     return {
@@ -330,5 +371,48 @@ export async function getStockMovements(variantId, { take = 50 } = {}) {
   } catch (error) {
     console.error("[getStockMovements]", error);
     return { success: false, message: "Impossible de charger l'historique.", data: [] };
+  }
+}
+
+/**
+ * Current inventory snapshot — every active variant's stock levels right
+ * now, printable so a stock controller can be handed valid, up-to-date
+ * figures. See lib/stock/build-inventory-snapshot.js.
+ */
+export async function getInventorySnapshot() {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  try {
+    const data = await buildInventorySnapshot(prisma);
+    return { success: true, data };
+  } catch (error) {
+    console.error("[getInventorySnapshot]", error);
+    return { success: false, message: "Impossible de charger l'état du stock." };
+  }
+}
+
+/**
+ * Cross-variant movement ledger — every InventoryMovement (including
+ * ADJUSTMENT) across the whole catalogue over a date range. This is where
+ * an adjustment made from StockAdjustDialog actually becomes visible outside
+ * the single-variant history drawer. See lib/stock/build-stock-movements-report.js.
+ *
+ * Every export of a "use server" file is a public endpoint in its own right,
+ * so params are re-normalized by the builder rather than trusted as-is — a
+ * hand-edited query string must not widen the window.
+ *
+ * @param {{ from?: string, to?: string, type?: string }} [params]
+ */
+export async function getStockMovementsReport(params = {}) {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  try {
+    const data = await buildStockMovementsReport(prisma, params);
+    return { success: true, data };
+  } catch (error) {
+    console.error("[getStockMovementsReport]", error);
+    return { success: false, message: "Impossible de charger les mouvements de stock." };
   }
 }

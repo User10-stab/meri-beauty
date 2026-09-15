@@ -517,7 +517,13 @@ export async function createManualAppointment(input) {
       };
     }
 
-    // ── Case 2: staff does NOT require an acompte → keep existing CONFIRMED flow ─
+    // ── Case 2: staff does NOT require an acompte now → status still comes
+    // from paymentDecision, not a literal. Currently always resolves to
+    // CONFIRMED for this call site (every PENDING outcome of
+    // getReservationPaymentDecision's isManualReservation branch requires
+    // online payment now, so it's caught by Case 1 above) — but deriving it
+    // keeps that true by construction instead of by two branches staying in
+    // sync by hand.
     const appointment = await prisma.appointment.create({
       data: {
         userId: user.id,
@@ -526,7 +532,7 @@ export async function createManualAppointment(input) {
         date: appointmentDate,
         startTime,
         endTime,
-        status: "CONFIRMED",
+        status: paymentDecision.appointmentStatusBeforePayment,
         notes: notes || null,
       },
     });

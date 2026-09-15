@@ -109,9 +109,12 @@ describe("every appointment confirmation path carries an R-ticket", () => {
 describe("the e-mail body carries the code, not just the attachment", () => {
   const templates = source("lib/email-templates.js");
 
-  test("appointments and both activity confirmations render the ticket block", () => {
+  test("appointments, both activity confirmations, and the check-in reminder render the ticket block", () => {
     expect(templates).toContain("function checkInTicketBlock(code)");
-    expect(templates.match(/\$\{checkInTicketBlock\(checkInCode\)\}/g) ?? []).toHaveLength(3);
+    // reservationConfirmedEmail, workshop/formationReservationConfirmationEmail,
+    // and checkInReminderEmail — the reminder sent closer to the event also
+    // needs the code front and center, not just the original confirmation.
+    expect(templates.match(/\$\{checkInTicketBlock\(checkInCode\)\}/g) ?? []).toHaveLength(4);
   });
 
   test("the block disappears entirely when no code was minted", () => {
@@ -129,7 +132,7 @@ describe("the e-mail body carries the code, not just the attachment", () => {
   test("the plain-text part is not left behind", () => {
     // Missing or thin text parts raise spam scoring, and some clients show
     // only that half.
-    expect(templates.match(/Le QR code correspondant est joint/g) ?? []).toHaveLength(3);
+    expect(templates.match(/Le QR code correspondant est joint/g) ?? []).toHaveLength(4);
   });
 });
 

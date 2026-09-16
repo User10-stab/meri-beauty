@@ -10,7 +10,7 @@ import { OperationDocumentsDialog } from "@/components/dashboard/operations/Oper
  * its status and consequential work opens its own card; this component keeps
  * the final column to one contextual entry point.
  */
-export function InvoiceRowActions({ invoice = null, creditNote = null, creditNotes = null, transaction = null, paymentId = null, remainingRefundable = null, refundInFlight = false, onOpenDetail }) {
+export function InvoiceRowActions({ invoice = null, creditNote = null, creditNotes = null, transaction = null, paymentId = null, paymentStatus = null, remainingRefundable = null, refundInFlight = false, onOpenDetail }) {
   const [cancelRefundOpen, setCancelRefundOpen] = useState(false);
   const [documentsOpen, setDocumentsOpen] = useState(false);
   const notes = creditNotes ?? (creditNote ? [creditNote] : []);
@@ -29,7 +29,12 @@ export function InvoiceRowActions({ invoice = null, creditNote = null, creditNot
     Number(remainingRefundable) > 0.01 &&
     !refundInFlight;
 
-  const canManageDocuments = Boolean(invoice) || notes.length > 0 || Boolean(paymentId);
+  // A reservation's ticket is minted at settlement, never on an acompte, so
+  // before that it is not a document this dialog can offer — the route would
+  // refuse it. The dialog uses paymentId for nothing else, so withholding it
+  // both removes the link and keeps the entry point from opening empty.
+  const ticketPaymentId = paymentStatus === "PAID" ? paymentId : null;
+  const canManageDocuments = Boolean(invoice) || notes.length > 0 || Boolean(ticketPaymentId);
 
   if (!onOpenDetail && !canCancelAndRefund && !canManageDocuments) return <span className="text-xs text-gray-400">—</span>;
 
@@ -73,7 +78,7 @@ export function InvoiceRowActions({ invoice = null, creditNote = null, creditNot
         onClose={() => setDocumentsOpen(false)}
         invoice={invoice}
         creditNotes={notes}
-        paymentId={paymentId}
+        paymentId={ticketPaymentId}
       />
     </div>
   );

@@ -712,6 +712,7 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer }) {
                     creditNotes={invoice?.creditNotes ?? []}
                     transaction={transaction ? { ...transaction, hasInvoice: Boolean(invoice) } : null}
                     paymentId={row.payment?.id ?? null}
+                    paymentStatus={row.payment?.status ?? null}
                     remainingRefundable={row.refundState?.remainingRefundable ?? null}
                     refundInFlight={Boolean(row.refundInFlight)}
                     onOpenDetail={transaction ? () => onOpenDetail(transaction.id) : undefined}

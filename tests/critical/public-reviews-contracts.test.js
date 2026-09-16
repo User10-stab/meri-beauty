@@ -70,17 +70,16 @@ describe("the public reviews query stays honest", () => {
 });
 
 describe("the legal pages match what the code actually does", () => {
-  test("CGV no longer advertises Bancontact, which checkout does not offer", () => {
+  test("CGV advertises Bancontact, which checkout offers", () => {
     const cgv = source("app/(public)/cgv/page.jsx");
-    expect(cgv).not.toContain("Bancontact");
-    // Every checkout session is card-only — Marie's explicit decision.
+    expect(cgv).toContain("Bancontact");
     const flows = [
       "actions/boutique/orders.js",
       "actions/workshops/create-workshop-reservation.js",
       "actions/formations/create-formation-reservation.js",
     ];
     for (const flow of flows) {
-      expect(source(flow)).toContain('payment_method_types: ["card"]');
+      expect(source(flow)).toContain('"bancontact"');
     }
   });
 

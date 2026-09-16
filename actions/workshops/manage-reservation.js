@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
 import { workshopCancellationEmail, workshopSessionChangeEmail } from "@/lib/email-templates";
-import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { isAdminRole, isTillCashOperator, STAFF_PERMISSIONS } from "@/lib/authorization";
 import {
   ACTIVITY_RESERVATION_KINDS,
   authorizeActivityReservationOperation,
@@ -16,7 +16,7 @@ import { checkWorkshopSessionAvailability } from "@/actions/workshops/create-wor
 import { issueCreditNote, issueInvoice, supersedeInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
-import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
+import { sendSettlementEmail } from "@/lib/payments/send-settlement-email";
 import { changeReservationSeatsFree } from "@/lib/reservations/change-reservation-seats";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
@@ -772,7 +772,7 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     const amountToCharge = changeFeeAmount + priceDelta;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"], // Bancontact disabled for now — see docs/QUESTIONS_FOR_MARIE.md
+      payment_method_types: ["card", "bancontact", "ideal"],
       line_items: [
         {
           price_data: {
@@ -847,6 +847,8 @@ export async function changeWorkshopReservationSeatsFree(reservationId, { newSea
     newSeatsCount,
     reason,
     actorId: session.user.id,
+    // Replacing an invoice is the salon's act alone (admin + Marie).
+    canReplaceInvoice: isTillCashOperator(session.user),
   });
 
   if (result.success) revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
@@ -887,14 +889,14 @@ export async function completeWorkshopReservation(
 
   if (result.success) {
     revalidatePath(RESERVATION_KINDS.WORKSHOP.revalidatePath);
-    // Gated purely on the acting staff member passing canSendTicketEmail() —
-    // sendTicketByEmail re-derives auth() itself and checks it internally, so
-    // no separate check is needed here. Fire-and-forget: a ticket failure
+    // The salon (admin or Marie) sends the ticket; an independent's sale has
+    // no salon ticket, so the client gets a ticket-free payment confirmation
+    // instead — see lib/payments/send-settlement-email.js. Fire-and-forget: a ticket failure
     // must never turn a successful settlement into an error response. Only
     // when a balance was actually collected — a
     // booking closed with nothing new to collect gets nothing new sent.
     if (result.balance > 0) {
-      sendTicketByEmail(result.paymentId, { transactionId: result.transactionId }).catch((err) =>
+      sendSettlementEmail(session.user, result.paymentId, { transactionId: result.transactionId }).catch((err) =>
         console.error("[completeWorkshopReservation] ticket send failed", err),
       );
     }

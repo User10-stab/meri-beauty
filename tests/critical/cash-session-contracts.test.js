@@ -109,4 +109,16 @@ describe("cash-session wiring", () => {
     expect(lifecycle).toContain("openCashSessionInternal(prisma, { userId, openingFloat, isAutoOpened = false })");
     expect(lifecycle).toContain("closeCashSessionInternal(prisma, { sessionId, userId, countedCash, isAutoClosed = false })");
   });
+
+  // 16 Sep 2026: a free-text opening-float field with no guard is exactly
+  // what broke the ledger's carry-forward chain on 11/09 — two manual opens
+  // typed 0 € instead of the suggested 790,42 €, and every auto-open/close
+  // since kept computing a consistent but wrong running total. A manual open
+  // that diverges from the last counted balance must be confirmed explicitly
+  // rather than accepted on the first submit.
+  test("a manual open diverging from the carried-forward suggestion requires an explicit confirmDivergence", () => {
+    expect(actions).toContain("export async function openCashSession(openingFloat, { confirmDivergence = false } = {})");
+    expect(actions).toContain('code: "OPENING_FLOAT_MISMATCH"');
+    expect(actions).toContain("Math.abs(amount - suggested) > 0.01");
+  });
 });

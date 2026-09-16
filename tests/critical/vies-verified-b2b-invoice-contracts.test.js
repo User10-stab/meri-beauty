@@ -115,6 +115,22 @@ describe("a VIES-validated company is a real B2B invoice, no BillingProfile requ
     expect(invoice.vatTreatment).toBe("EU_REVERSE_CHARGE");
   });
 
+  test("a sole trader with a VAT number but no company name or company flag gets a B2B invoice in her own name", async () => {
+    // e.g. a staff member's rent invoice: an independent with her own VAT
+    // number, no BillingProfile, account not flagged as a company.
+    const tx = invoicingTx();
+    const invoice = await issueInvoice(tx, {
+      monthlyInvoiceId: "smi-1",
+      source: "STAFF_CONTRACT",
+      totalInclVat: 100,
+      customer: { fullName: "bounagat", email: "bounagat@example.test", vatNumber: "BE 0403227515", isCompany: false, legalName: null },
+      lines: [{ description: "Location", quantity: 1, unitPrice: 100 }],
+    });
+    expect(invoice.customerType).toBe("B2B");
+    expect(invoice.customerLegalName).toBe("bounagat");
+    expect(invoice.customerVatNumber).toBe("BE 0403227515");
+  });
+
   test("every select() that feeds buildInvoiceCustomer also loads vatValidationName", () => {
     // Sites that `include` the full user/customer row (no restrictive select)
     // already get every scalar column — only the ones with an explicit,

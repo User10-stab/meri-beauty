@@ -19,7 +19,7 @@ import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { resolveCounterPriceAdjustment } from "@/lib/payments/counter-price-adjustment";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
-import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
+import { sendSettlementEmail } from "@/lib/payments/send-settlement-email";
 import {
   createNotificationsBulk,
   buildAppointmentCancelledNotification,
@@ -1099,18 +1099,16 @@ export async function completeAppointment(
     }
     const { balance } = result;
 
-    // Ticket e-mail is gated purely on the acting staff member passing
-    // canSendTicketEmail() — sendTicketByEmail re-derives auth() itself and
-    // checks it internally, so no separate check is needed here.
-    // Deliberately NOT gated on !offTill/isTillCashOperator: that concept is
-    // only about whether the collection joins the cash-session/drawer book,
-    // not about whether the client should get their ticket. Fire-and-forget
+    // Who collected decides what the client receives: the salon (admin or
+    // Marie) sends the ticket; an independent's sale has no salon ticket, so
+    // the client gets a ticket-free payment confirmation instead — see
+    // lib/payments/send-settlement-email.js. Fire-and-forget
     // (never awaited, only .catch()-guarded) so a ticket failure can never
     // turn a successful settlement into an error response — same as the
     // legally-required Invoice, issued above inside the transaction, which
     // is never auto-sent either (Marie sends it manually from Opérations).
     if (balance > 0) {
-      sendTicketByEmail(result.collection.paymentId, { transactionId: result.collection.id }).catch((err) =>
+      sendSettlementEmail(authCheck.user, result.collection.paymentId, { transactionId: result.collection.id }).catch((err) =>
         console.error("[completeAppointment] ticket send failed", err),
       );
     }

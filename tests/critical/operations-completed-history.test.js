@@ -9,6 +9,13 @@ const mocks = vi.hoisted(() => ({
   formations: vi.fn(),
   auditLogs: vi.fn(),
   userFindFirst: vi.fn(),
+  // resolveSalonScope: who the salon is, in ids. The default view is scoped
+  // to it, so the ledger no longer counts an independent's takings as the
+  // salon's — see lib/authorization/salon-scope.js.
+  userFindMany: vi.fn(),
+  staffFindMany: vi.fn(),
+  staffFindFirst: vi.fn(),
+  staffFindUnique: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -18,7 +25,8 @@ vi.mock("@/lib/prisma", () => ({ prisma: {
   workshopReservation: { findMany: mocks.workshops },
   formationReservation: { findMany: mocks.formations },
   auditLog: { findMany: mocks.auditLogs },
-  user: { findFirst: mocks.userFindFirst },
+  user: { findFirst: mocks.userFindFirst, findMany: mocks.userFindMany },
+  staff: { findMany: mocks.staffFindMany, findFirst: mocks.staffFindFirst, findUnique: mocks.staffFindUnique },
 } }));
 import { getAdminOperations } from "@/actions/dashboard/admin-operations";
 
@@ -29,6 +37,13 @@ beforeEach(() => {
   // recent transfer (attachLastTransfer) — no transfer history by default.
   mocks.auditLogs.mockResolvedValue([]);
   mocks.userFindFirst.mockResolvedValue(null);
+  // The ADMIN account (no Staff row) and Marie — STAFF role, salon VAT
+  // number, and the Staff.id her appointments key on.
+  mocks.userFindMany.mockResolvedValue([
+    { id: "admin", staff: null },
+    { id: "marie", staff: { id: "staff_marie" } },
+  ]);
+  mocks.staffFindMany.mockResolvedValue([]);
 });
 
 it("retains the deposit and final payment when filtering completed appointments", async () => {

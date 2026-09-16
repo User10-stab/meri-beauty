@@ -133,7 +133,7 @@ async function authorizeCounterBooking(kind) {
   if (!session?.user) return { error: "Non authentifié." };
   const config = COUNTER_CREATE_KINDS[kind];
   const [canUseTill, canReserve] = await Promise.all([
-    hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE),
+    isTillCashOperator(session.user),
     hasDashboardPermission(session.user, config.reservationPermission),
   ]);
   if (!canUseTill || !canReserve) return { error: "Accès non autorisé." };

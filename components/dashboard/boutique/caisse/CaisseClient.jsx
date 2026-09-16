@@ -16,7 +16,6 @@ import {
   BarChart3,
   ArrowUpRight,
   ArrowDownRight,
-  History,
 } from "lucide-react";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
@@ -576,57 +575,6 @@ export function CaisseClient({
                   </table>
                 </div>
               </div>
-
-              {report.sessions.length > 0 && (
-                <div>
-                  <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-gray-900 dark:text-white">
-                    <History size={15} />
-                    Sessions de caisse
-                  </h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm">
-                      <thead className="border-b border-stroke text-xs uppercase text-gray-400 dark:border-dark-3">
-                        <tr>
-                          <th className="py-2 pr-4">Ouverture</th>
-                          <th className="py-2 pr-4">Clôture</th>
-                          <th className="py-2 pr-4 text-right">Fond initial</th>
-                          <th className="py-2 pr-4 text-right">Compté</th>
-                          <th className="py-2 pr-4 text-right">Écart</th>
-                          <th className="py-2 pr-4">Type</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100 dark:divide-dark-3">
-                        {report.sessions.map((session) => (
-                          <tr key={session.id}>
-                            <td className="whitespace-nowrap py-2 pr-4">{formatDateTime(session.openedAt)}</td>
-                            <td className="whitespace-nowrap py-2 pr-4">
-                              {session.closedAt ? (
-                                formatDateTime(session.closedAt)
-                              ) : (
-                                <span className="font-medium text-emerald-600 dark:text-emerald-400">En cours</span>
-                              )}
-                            </td>
-                            <td className="py-2 pr-4 text-right">{formatEuro(session.openingFloat)}</td>
-                            <td className="py-2 pr-4 text-right">
-                              {session.countedCash != null ? formatEuro(session.countedCash) : "—"}
-                            </td>
-                            <td
-                              className={`py-2 pr-4 text-right font-medium ${
-                                session.variance ? (session.variance < 0 ? "text-red-600" : "text-emerald-600") : ""
-                              }`}
-                            >
-                              {session.variance != null ? formatEuro(session.variance) : "—"}
-                            </td>
-                            <td className="py-2 pr-4 text-xs text-gray-400">
-                              {!session.closedAt ? "—" : session.isAutoClosed ? "Auto" : "Manuel"}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )

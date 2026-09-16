@@ -461,10 +461,22 @@ describe("day-report wiring", () => {
   // per-category/per-rate transaction counts, and a per-session breakdown
   // (open/close, counted vs. expected, écart) that build-day-report.js
   // already computed but nothing used to render.
-  test("the client renders a previous-period comparison, transaction counts, and a session-by-session breakdown", () => {
+  test("the client renders a previous-period comparison and transaction counts", () => {
     expect(client).toContain("report.previousPeriod");
     expect(client).toContain("DeltaBadge");
     expect(client).toContain("byCategoryCounts");
-    expect(client).toContain("Sessions de caisse");
+  });
+
+  // 16 Sep 2026: the on-screen "Sessions de caisse" table was pulled — a
+  // stale manual close (Compté forced to 0 against a much larger Attendu,
+  // see build-ledger.js's continuation-vs-mismatch fix) rendered as a
+  // confusing, unexplained "Écart" on a page staff check daily. The
+  // underlying report still computes report.sessions (build-day-report.js is
+  // untouched) and the CSV export still lists it — only the visible table is
+  // gone, same pattern as the PDF route's own SessionsTable exclusion above.
+  test("the on-screen session-by-session table is gone, but the CSV export still lists it", () => {
+    expect(client).not.toContain("<History");
+    expect(client).not.toContain("session.variance");
+    expect(client).toContain('["Sessions de caisse", "Ouverture", "Clôture", "Fond initial (€)", "Compté (€)", "Écart (€)", "Type"]');
   });
 });

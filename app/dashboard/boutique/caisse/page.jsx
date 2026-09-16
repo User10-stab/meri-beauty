@@ -1,5 +1,4 @@
-import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { requireTillCashOperator } from "@/lib/route-protection";
 import { getCashBookLedger, getCashReport } from "@/actions/dashboard/cash-book";
 import { getCurrentCashSession, getSuggestedOpeningFloat } from "@/actions/dashboard/cash-sessions";
 import { CaisseClient } from "@/components/dashboard/boutique/caisse/CaisseClient";
@@ -9,7 +8,7 @@ export const metadata = { title: "Livre de caisse — Meri Beauty" };
 export const dynamic = "force-dynamic";
 
 export default async function CaissePage({ searchParams }) {
-  await requireDashboardPermission(STAFF_PERMISSIONS.CASH_REGISTER);
+  await requireTillCashOperator();
   const params = await searchParams;
   const filterInput = {
     from: typeof params?.from === "string" ? params.from : undefined,

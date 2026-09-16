@@ -19,9 +19,9 @@ import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
  * manual click is. Reprinting the same document via
  * app/api/payments/[id]/ticket requires this same check, not just any
  * dashboard role — a staff member who can't put a ticket in a client's inbox
- * can't generate it another way either. Admin/owner roles always pass; any
- * other staff account needs STAFF_PERMISSIONS.SEND_TICKET_EMAIL — see
- * canSendTicketEmail in lib/authorization.js.
+ * can't generate it another way either. Only the salon's own accounts pass:
+ * admin/owner, plus Marie Mercier, whose VAT number is the salon's despite
+ * her STAFF role — see canSendTicketEmail in lib/authorization.js.
  *
  * Deliberately NOT taking a recipient address from the caller, for the same
  * reason sendInvoiceByEmail doesn't: the address comes from the reservation's
@@ -46,6 +46,22 @@ export async function sendTicketByEmail(paymentId, { transactionId = null } = {}
     }
 
     const { ticket, customer } = result;
+
+    // No number, no ticket to send. Since 16/09/2026 a sale collected by an
+    // independent allocates none at all (lib/tickets/allocate-ticket-number.js)
+    // — it is her sale, under her own VAT number, and the salon has nothing
+    // to put in the client's inbox on its behalf. The same guard covers the
+    // sales settled before ticket numbering shipped, which would otherwise
+    // go out titled "Votre ticket null" with a "null.pdf" attached. The
+    // document itself stays reprintable from app/api/payments/[id]/ticket,
+    // which names the file after the payment when there is no number.
+    if (!ticket.ticketNumber) {
+      return {
+        success: false,
+        message: "Ce paiement n'a pas de numéro de ticket — aucun ticket au nom du salon ne peut être envoyé pour cette vente.",
+      };
+    }
+
     const recipient = customer?.email?.trim();
     if (!recipient) {
       return {

@@ -91,6 +91,7 @@ export function CounterCart({
   const [method, setMethod] = useState("CARD_QR");
   const [cashSessionOpen, setCashSessionOpen] = useState(true); // optimistic until the first check resolves
   const [openingFloatInput, setOpeningFloatInput] = useState("");
+  const [openingFloatMismatch, setOpeningFloatMismatch] = useState(null);
   const [openingSessionPending, setOpeningSessionPending] = useState(false);
   const [attemptKey, setAttemptKey] = useState(null);
   const [terminalConfirmOpen, setTerminalConfirmOpen] = useState(false);
@@ -190,16 +191,20 @@ export function CounterCart({
     };
   }, [canOpenCashSession]);
 
-  function handleOpenSessionFromPos() {
+  function handleOpenSessionFromPos(confirmDivergence = false) {
     const amount = Number(openingFloatInput);
     if (!Number.isFinite(amount) || amount < 0) {
       toast.error("Indiquez un fond de caisse valide.");
       return;
     }
     setOpeningSessionPending(true);
-    openCashSession(amount).then(async (result) => {
+    openCashSession(amount, { confirmDivergence }).then(async (result) => {
       setOpeningSessionPending(false);
       if (!result.success) {
+        if (result.code === "OPENING_FLOAT_MISMATCH") {
+          setOpeningFloatMismatch(result);
+          return;
+        }
         // With two terminals, a teammate opening the till at the same
         // moment wins the race (openCashSession's advisory lock allows only
         // one) — the loser sees "déjà ouverte", not a crash, and should
@@ -213,6 +218,7 @@ export function CounterCart({
         toast.error(result.message);
         return;
       }
+      setOpeningFloatMismatch(null);
       setCashSessionOpen(true);
       toast.success("Caisse ouverte.");
     });
@@ -704,18 +710,31 @@ export function CounterCart({
                   step="0.01"
                   min="0"
                   value={openingFloatInput}
-                  onChange={(event) => setOpeningFloatInput(event.target.value)}
+                  onChange={(event) => { setOpeningFloatInput(event.target.value); setOpeningFloatMismatch(null); }}
                   placeholder="0.00"
                   className="h-10 w-32 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
                 />
               </div>
-              <Button onClick={handleOpenSessionFromPos} disabled={openingSessionPending}>
+              <Button onClick={() => handleOpenSessionFromPos(false)} disabled={openingSessionPending}>
                 <Wallet size={16} />
                 {openingSessionPending ? "Ouverture…" : "Ouvrir la caisse"}
               </Button>
             </div>
-            {openingFloatInput !== "" && (
+            {openingFloatInput !== "" && !openingFloatMismatch && (
               <p className="mt-2 text-xs text-gray-400">Repris du dernier comptage — modifiable.</p>
+            )}
+            {openingFloatMismatch && (
+              <div className="mx-auto mt-3 max-w-xs space-y-1.5 rounded-lg border border-red-300 bg-red-50 p-3 text-left dark:border-red-700 dark:bg-red-950">
+                <p className="text-xs text-red-800 dark:text-red-300">{openingFloatMismatch.message}</p>
+                <button
+                  type="button"
+                  onClick={() => handleOpenSessionFromPos(true)}
+                  disabled={openingSessionPending}
+                  className="text-xs font-semibold text-red-800 underline hover:no-underline dark:text-red-300"
+                >
+                  Ouvrir avec {Number(openingFloatInput).toFixed(2)} € quand même
+                </button>
+              </div>
             )}
           </>
         ) : (

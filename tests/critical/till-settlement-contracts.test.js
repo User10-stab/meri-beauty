@@ -165,7 +165,8 @@ describe("the till lists what is still owed without re-implementing settlement",
   });
 
   test("running the till is not enough — each kind needs its own permission", () => {
-    expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE)");
+    // The till itself is the salon's (admin + Marie), not a permission.
+    expect(action).toContain("if (!isTillCashOperator(session.user)) {");
     expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS)");
     expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS)");
     expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS)");

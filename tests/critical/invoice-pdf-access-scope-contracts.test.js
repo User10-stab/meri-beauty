@@ -32,8 +32,8 @@ const APPOINTMENT_PAYMENT = {
 const WORKSHOP_PAYMENT = { workshopReservation: { customerId: "customer_1" } };
 const FORMATION_PAYMENT = { formationReservation: { customerId: "customer_1" } };
 
-function asStaff(permissions, { staffId = "staff_owner" } = {}) {
-  mocks.auth.mockResolvedValue({ user: { id: "user_staff", role: "STAFF" } });
+function asStaff(permissions, { staffId = "staff_owner", email = "independante@example.com" } = {}) {
+  mocks.auth.mockResolvedValue({ user: { id: "user_staff", role: "STAFF", email } });
   mocks.prisma.staff.findFirst.mockResolvedValue({ dashboardPermissions: permissions });
   mocks.prisma.staff.findUnique.mockResolvedValue(staffId ? { id: staffId } : null);
 }
@@ -61,31 +61,36 @@ describe("staff invoice access is scoped to the work they are authorised for", (
     expect(mocks.renderInvoicePdf).not.toHaveBeenCalled();
   });
 
-  test("an orders staff member can", async () => {
-    asStaff(["ORDERS"]);
+  test("the salon's own staff account — Marie — can, without any grant", async () => {
+    // Boutique and counter sales are the salon's: since 16/09/2026 there is no
+    // ORDERS or POINT_OF_SALE permission to grant, only the account decides.
+    asStaff([], { email: "contact@meribeautystudio.com" });
     mocks.prisma.invoice.findUnique.mockResolvedValue(invoiceFor(ORDER_PAYMENT));
 
     expect((await GET(request, { params })).status).toBe(200);
   });
 
-  test("so can a cashier who only has the till", async () => {
-    // A counter sale's invoice has to be printable by whoever took the money.
-    asStaff(["POINT_OF_SALE"]);
+  test("but an independent still carrying an old ORDERS or till grant cannot", async () => {
+    asStaff(["ORDERS", "POINT_OF_SALE"]);
     mocks.prisma.invoice.findUnique.mockResolvedValue(invoiceFor(ORDER_PAYMENT));
 
-    expect((await GET(request, { params })).status).toBe(200);
+    expect((await GET(request, { params })).status).toBe(403);
   });
 
-  test("an appointment invoice is readable only by the staff member whose appointment it is", async () => {
+  test("an independent cannot read even the invoice of her own rendez-vous", async () => {
+    // Since 16/09/2026 an invoice is the salon's document alone: no
+    // independent generates, sends or reprints one, whatever she holds.
     asStaff(["APPOINTMENTS"], { staffId: "staff_owner" });
     mocks.prisma.invoice.findUnique.mockResolvedValue(invoiceFor(APPOINTMENT_PAYMENT));
-    expect((await GET(request, { params })).status).toBe(200);
-
-    vi.clearAllMocks();
-    mocks.renderInvoicePdf.mockResolvedValue(Buffer.from("%PDF-1.4"));
-    asStaff(["APPOINTMENTS"], { staffId: "staff_someone_else" });
-    mocks.prisma.invoice.findUnique.mockResolvedValue(invoiceFor(APPOINTMENT_PAYMENT));
     expect((await GET(request, { params })).status).toBe(403);
+  });
+
+  test("Marie reads rendez-vous, atelier and formation invoices", async () => {
+    for (const payment of [APPOINTMENT_PAYMENT, WORKSHOP_PAYMENT, FORMATION_PAYMENT]) {
+      asStaff([], { email: "contact@meribeautystudio.com" });
+      mocks.prisma.invoice.findUnique.mockResolvedValue(invoiceFor(payment));
+      expect((await GET(request, { params })).status).toBe(200);
+    }
   });
 
   test("a staff member with no staff profile gets nothing rather than everything", async () => {
@@ -95,17 +100,13 @@ describe("staff invoice access is scoped to the work they are authorised for", (
     expect((await GET(request, { params })).status).toBe(403);
   });
 
-  test("atelier and formation invoices follow their own reservation permissions", async () => {
-    asStaff(["WORKSHOP_RESERVATIONS"]);
+  test("atelier and formation invoices are closed to independents too", async () => {
+    asStaff(["WORKSHOP_RESERVATIONS", "FORMATION_RESERVATIONS"]);
     mocks.prisma.invoice.findUnique.mockResolvedValue(invoiceFor(WORKSHOP_PAYMENT));
-    expect((await GET(request, { params })).status).toBe(200);
+    expect((await GET(request, { params })).status).toBe(403);
 
     mocks.prisma.invoice.findUnique.mockResolvedValue(invoiceFor(FORMATION_PAYMENT));
     expect((await GET(request, { params })).status).toBe(403);
-
-    asStaff(["FORMATION_RESERVATIONS"]);
-    mocks.prisma.invoice.findUnique.mockResolvedValue(invoiceFor(FORMATION_PAYMENT));
-    expect((await GET(request, { params })).status).toBe(200);
   });
 
   test("a payment with no recognisable source is refused, not allowed through", async () => {

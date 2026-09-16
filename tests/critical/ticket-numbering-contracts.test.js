@@ -1,6 +1,10 @@
 import fs from "fs";
 import path from "path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import {
+  allocateOrderTicketNumber,
+  allocatePaymentTicketNumber,
+} from "@/lib/tickets/allocate-ticket-number";
 
 function source(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
@@ -111,6 +115,70 @@ describe("every hook point that settles a sale allocates a ticket number", () =>
   });
 });
 
+// 16/09/2026 — every practitioner at Meri Beauty is legally independent, with
+// her own VAT number. A sale she collects is hers to document; the salon
+// issues nothing for it. `isStaffActor` was already resolved at every call
+// site as `!isTillCashOperator(actor)`, so the ADMIN account and Marie
+// Mercier (STAFF role, salon VAT number) arrive here as false and are
+// ticketed exactly as before — which is the half worth testing, because it
+// is the half a future refactor would quietly break.
+describe("a non-privileged staff actor gets no ticket number at all", () => {
+  const MAY = new Date("2026-05-04T10:00:00Z");
+
+  function txMock({ existing = null, next = 7 } = {}) {
+    return {
+      order: {
+        findUnique: vi.fn(() => Promise.resolve({ ticketNumber: existing })),
+        update: vi.fn(() => Promise.resolve({})),
+      },
+      payment: {
+        findUnique: vi.fn(() => Promise.resolve({ ticketNumber: existing })),
+        update: vi.fn(() => Promise.resolve({})),
+      },
+      $queryRaw: vi.fn(() => Promise.resolve([{ lastNumber: next }])),
+    };
+  }
+
+  test("allocateOrderTicketNumber returns null and burns no number", async () => {
+    const tx = txMock();
+    await expect(allocateOrderTicketNumber(tx, "order_1", MAY, true)).resolves.toBeNull();
+    // Not merely "no number returned": the counter must not advance and the
+    // row must not be stamped, or the gapless series grows silent holes.
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  test("allocatePaymentTicketNumber returns null and burns no number", async () => {
+    const tx = txMock();
+    await expect(
+      allocatePaymentTicketNumber(tx, "pay_1", "APPOINTMENT", null, MAY, true)
+    ).resolves.toBeNull();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.payment.update).not.toHaveBeenCalled();
+  });
+
+  test("the salon's own accounts still get one, on the ordinary T- series", async () => {
+    const orderTx = txMock({ next: 7 });
+    await expect(allocateOrderTicketNumber(orderTx, "order_1", MAY, false)).resolves.toBe("T-2026-000007");
+    expect(orderTx.order.update).toHaveBeenCalled();
+
+    const paymentTx = txMock({ next: 8 });
+    await expect(
+      allocatePaymentTicketNumber(paymentTx, "pay_1", "APPOINTMENT", null, MAY, false)
+    ).resolves.toBe("T-2026-000008");
+    expect(paymentTx.payment.update).toHaveBeenCalled();
+  });
+
+  test("the guard runs before the idempotency check, so a pre-existing number is not handed back either", async () => {
+    // The salon never allocated one for her sale; anything already on the row
+    // would predate this rule, and returning it would put the salon's
+    // letterhead back on an independent's receipt.
+    const tx = txMock({ existing: "T-2026-000003" });
+    await expect(allocateOrderTicketNumber(tx, "order_1", MAY, true)).resolves.toBeNull();
+    expect(tx.order.findUnique).not.toHaveBeenCalled();
+  });
+});
+
 describe("TicketDocument no longer synthesizes an identity at render time", () => {
   test("the T-C-<orderNumber> fallback string is gone", () => {
     expect(ticketDocument).not.toContain("`T-C-${ticket.orderNumber}`");
@@ -118,6 +186,59 @@ describe("TicketDocument no longer synthesizes an identity at render time", () =
 
   test("ticketNumber is read straight off the ticket object", () => {
     expect(ticketDocument).toContain("const ticketNumber = ticket.ticketNumber;");
+  });
+});
+
+
+// 16/09/2026 — both ticket scripts silently wrote to the wrong database.
+// `import` is hoisted and evaluated before any statement in a module body,
+// and @prisma/client loads `.env` into process.env as it initialises; dotenv
+// refuses to overwrite a variable that is already set. So the obvious
+// spelling — dotenv first in the import list, `config(...)` underneath — has
+// no effect whatsoever, and the script uses `.env` even though `.env.local`
+// overrides it everywhere else in this app. Nothing about it looks wrong at
+// runtime: it connects, it reports, it writes. It just renumbers the wrong
+// rows. These contracts pin the three moving parts.
+describe("a maintenance script cannot silently pick the wrong database", () => {
+  const resolver = source("scripts/resolve-database-url.mjs");
+  const SCRIPTS = ["scripts/backfill-ticket-numbers.mjs", "scripts/renumber-tickets-2026.mjs"];
+
+  test("the resolver snapshots the caller's DATABASE_URL at module load", () => {
+    // Read any later and it is indistinguishable from the value Prisma put
+    // there — which is the whole bug.
+    expect(resolver).toContain("const CALLER_URL = process.env.DATABASE_URL;");
+    // The files are parsed directly, never read back out of process.env.
+    expect(resolver).toContain('for (const file of [".env.local", ".env"])');
+    expect(resolver).toContain("dotenv.parse(readFileSync(file))");
+  });
+
+  test.each(SCRIPTS)("%s imports the resolver BEFORE @prisma/client", (path) => {
+    const code = source(path);
+    const resolverAt = code.indexOf('from "./resolve-database-url.mjs"');
+    const prismaAt = code.indexOf('from "@prisma/client"');
+    expect(resolverAt, "does not use the shared resolver").toBeGreaterThan(-1);
+    expect(prismaAt).toBeGreaterThan(-1);
+    // Import order is evaluation order. Swap these two lines and the
+    // snapshot above captures Prisma's own value instead of the caller's.
+    expect(resolverAt, "resolver must be imported first").toBeLessThan(prismaAt);
+  });
+
+  test.each(SCRIPTS)("%s hands the resolved url to PrismaClient explicitly", (path) => {
+    const code = source(path);
+    expect(code).toMatch(/new PrismaClient\(\{\s*datasources: \{ db: \{ url/);
+    // A bare `new PrismaClient()` re-reads the polluted process.env and
+    // throws the whole resolution away.
+    expect(code).not.toMatch(/new PrismaClient\(\s*\)/);
+  });
+
+  test.each(SCRIPTS)("%s no longer calls dotenv config() below its imports", (path) => {
+    expect(source(path)).not.toContain('config({ path: [".env.local", ".env"]');
+  });
+
+  test.each(SCRIPTS)("%s prints the target, and where it came from", (path) => {
+    const code = source(path);
+    expect(code).toContain("describeTarget(");
+    expect(code).toMatch(/source\s*:?\s*\$\{(DATABASE_URL_SOURCE|from)\}/);
   });
 });
 

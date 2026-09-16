@@ -8,6 +8,7 @@ import {
   getStaffId,
   hasDashboardPermission,
   isAdminRole,
+  isTillCashOperator,
 } from "@/lib/authorization";
 
 /**
@@ -40,7 +41,7 @@ const RESULT_LIMIT = 40;
 async function resolveScope() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE))) {
+  if (!isTillCashOperator(session.user)) {
     return { error: "Accès non autorisé." };
   }
 

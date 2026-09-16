@@ -14,6 +14,7 @@ import {
   markWorkshopReservationNoShow,
 } from "@/actions/workshops/manage-reservation";
 import { isAdminRole } from "@/lib/authorization";
+import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
 
 const COLUMNS = [
   { key: "activity", label: "Activité & Séance" },
@@ -63,6 +64,12 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
         toast.error(result.message);
       }
     });
+  }
+
+  async function handleSendCheckIn(row) {
+    const result = await resendCheckInQr({ kind: "WORKSHOP", id: row.id });
+    if (result.success) toast.success(result.message);
+    else toast.error(result.message);
   }
 
   function handleNoShow(row) {
@@ -124,6 +131,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
         onDelete={isAdmin ? (row) => setToCancel(row) : undefined}
         onSettle={(row) => setToSettle(row)}
         onNoShow={handleNoShow}
+        onSendCheckIn={handleSendCheckIn}
         searchPlaceholder="Rechercher une réservation..."
         searchFilter={(row, query) =>
           row.session?.workshop?.title?.toLowerCase().includes(query) ||

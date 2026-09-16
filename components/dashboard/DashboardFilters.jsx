@@ -8,6 +8,12 @@ import { CalendarDays, ChevronDown, RotateCcw, Users } from "lucide-react";
  * (?staffId=…&month=YYYY-MM) so the server component refetches and every
  * statistic is recalculated server-side — the two filters combine naturally.
  *
+ * The staff axis is not "all vs. one". It is "the salon vs. one
+ * practitioner": the unfiltered figure is the salon's own revenue, and each
+ * named option is an independent's own. Marie Mercier appears in the list
+ * like anyone else — the difference is that her takings are already inside
+ * the salon figure, because her VAT number is the salon's.
+ *
  * @param {{ staffOptions: Array<{ id: string, fullName: string }>,
  *   activeStaffId: string, activeMonth: string, maxMonth: string }} props
  */
@@ -40,7 +46,14 @@ export function DashboardFilters({ staffOptions, activeStaffId, activeMonth, max
             aria-label="Filtrer par professionnel"
             className="h-9 cursor-pointer appearance-none rounded-md border border-gray-200 bg-white py-1 pl-3 pr-8 text-sm text-gray-700 outline-none transition-colors focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
           >
-            <option value="">Tous les Staff</option>
+            {/* NOT "Tous les Staff". Every practitioner here is legally
+                independent, with her own VAT number — summing them into one
+                revenue figure describes no real entity at all. The empty
+                value is the SALON: the administration and Marie Mercier
+                (STAFF role, salon VAT number), plus the online sales nobody
+                rang up and the salon's own ateliers and formations. See
+                lib/authorization/salon-scope.js. */}
+            <option value="">Le salon</option>
             {staffOptions.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.fullName}

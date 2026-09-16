@@ -1,12 +1,12 @@
 import { auth } from "@/auth";
-import { requireDashboardPermission } from "@/lib/route-protection";
+import { requireTillCashOperator } from "@/lib/route-protection";
 import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator } from "@/lib/authorization";
 import { CounterSurface } from "@/components/dashboard/boutique/counter/CounterSurface";
 
 export const metadata = { title: "Caisse — Meri Beauty" };
 
 export default async function PointOfSalePage() {
-  await requireDashboardPermission(STAFF_PERMISSIONS.POINT_OF_SALE);
+  await requireTillCashOperator();
 
   const session = await auth();
 
@@ -28,7 +28,7 @@ export default async function PointOfSalePage() {
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS),
-    hasDashboardPermission(session.user, STAFF_PERMISSIONS.ORDERS),
+    isTillCashOperator(session.user),
   ]);
 
   return (

@@ -90,6 +90,8 @@ export function DataTable({
   // handlers above — a row that doesn't use them simply ignores them.
   onSettle,
   onNoShow,
+  // Re-sends a booking's check-in QR to its client.
+  onSendCheckIn,
   renderRow: CustomRow,
   searchPlaceholder,
   searchFilter,
@@ -260,6 +262,7 @@ export function DataTable({
                         onReject={handleReject}
                         onSettle={onSettle}
                         onNoShow={onNoShow}
+                        onSendCheckIn={onSendCheckIn}
                       />
                     ) : (
                       <TableRow

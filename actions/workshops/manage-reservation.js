@@ -772,7 +772,7 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     const amountToCharge = changeFeeAmount + priceDelta;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      payment_method_types: ["card", "bancontact", "ideal"],
       line_items: [
         {
           price_data: {

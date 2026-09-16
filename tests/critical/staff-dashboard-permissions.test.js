@@ -32,7 +32,10 @@ describe("granular staff dashboard permissions", () => {
       STAFF_PERMISSIONS.FORMATION_RESERVATIONS,
       STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS,
       STAFF_PERMISSIONS.NEWSLETTER,
-      STAFF_PERMISSIONS.SEND_TICKET_EMAIL,
+      // SEND_TICKET_EMAIL was a default until 16/09/2026. A ticket carries
+      // the salon's name and VAT number, and every practitioner here is
+      // legally independent — her sale is hers to document. See
+      // canSendTicketEmail(), which no longer reads this list at all.
     ]);
   });
 

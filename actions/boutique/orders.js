@@ -1505,7 +1505,9 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
         where: { id: "main-salon" },
         select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
       });
-      const ticketPdf = await renderTicketPdf({
+      // No number means an independent collected this balance: her sale, her
+      // VAT number, no salon ticket (lib/tickets/allocate-ticket-number.js).
+      const ticketPdf = !ticketNumber ? null : await renderTicketPdf({
         orderNumber: order.orderNumber,
         ticketNumber,
         invoiceNumber: invoice?.number ?? null,
@@ -1530,7 +1532,9 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
         ? ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
         : ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément par e-mail.`;
 
-      sendEmail({
+      // The e-mail's only payload is that ticket, and its body says it is
+      // attached — so it goes only when there is one.
+      if (ticketNumber) sendEmail({
         to: order.user.email,
         subject: `Votre ticket – Commande n°${order.orderNumber} – Meri Beauty`,
         text:

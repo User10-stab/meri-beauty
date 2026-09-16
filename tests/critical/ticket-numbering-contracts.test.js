@@ -1,6 +1,10 @@
 import fs from "fs";
 import path from "path";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import {
+  allocateOrderTicketNumber,
+  allocatePaymentTicketNumber,
+} from "@/lib/tickets/allocate-ticket-number";
 
 function source(relativePath) {
   return fs.readFileSync(path.join(process.cwd(), relativePath), "utf8");
@@ -108,6 +112,70 @@ describe("every hook point that settles a sale allocates a ticket number", () =>
     ]) {
       expect(source(file)).toContain("isTillCashOperator");
     }
+  });
+});
+
+// 16/09/2026 — every practitioner at Meri Beauty is legally independent, with
+// her own VAT number. A sale she collects is hers to document; the salon
+// issues nothing for it. `isStaffActor` was already resolved at every call
+// site as `!isTillCashOperator(actor)`, so the ADMIN account and Marie
+// Mercier (STAFF role, salon VAT number) arrive here as false and are
+// ticketed exactly as before — which is the half worth testing, because it
+// is the half a future refactor would quietly break.
+describe("a non-privileged staff actor gets no ticket number at all", () => {
+  const MAY = new Date("2026-05-04T10:00:00Z");
+
+  function txMock({ existing = null, next = 7 } = {}) {
+    return {
+      order: {
+        findUnique: vi.fn(() => Promise.resolve({ ticketNumber: existing })),
+        update: vi.fn(() => Promise.resolve({})),
+      },
+      payment: {
+        findUnique: vi.fn(() => Promise.resolve({ ticketNumber: existing })),
+        update: vi.fn(() => Promise.resolve({})),
+      },
+      $queryRaw: vi.fn(() => Promise.resolve([{ lastNumber: next }])),
+    };
+  }
+
+  test("allocateOrderTicketNumber returns null and burns no number", async () => {
+    const tx = txMock();
+    await expect(allocateOrderTicketNumber(tx, "order_1", MAY, true)).resolves.toBeNull();
+    // Not merely "no number returned": the counter must not advance and the
+    // row must not be stamped, or the gapless series grows silent holes.
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.order.update).not.toHaveBeenCalled();
+  });
+
+  test("allocatePaymentTicketNumber returns null and burns no number", async () => {
+    const tx = txMock();
+    await expect(
+      allocatePaymentTicketNumber(tx, "pay_1", "APPOINTMENT", null, MAY, true)
+    ).resolves.toBeNull();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.payment.update).not.toHaveBeenCalled();
+  });
+
+  test("the salon's own accounts still get one, on the ordinary T- series", async () => {
+    const orderTx = txMock({ next: 7 });
+    await expect(allocateOrderTicketNumber(orderTx, "order_1", MAY, false)).resolves.toBe("T-2026-000007");
+    expect(orderTx.order.update).toHaveBeenCalled();
+
+    const paymentTx = txMock({ next: 8 });
+    await expect(
+      allocatePaymentTicketNumber(paymentTx, "pay_1", "APPOINTMENT", null, MAY, false)
+    ).resolves.toBe("T-2026-000008");
+    expect(paymentTx.payment.update).toHaveBeenCalled();
+  });
+
+  test("the guard runs before the idempotency check, so a pre-existing number is not handed back either", async () => {
+    // The salon never allocated one for her sale; anything already on the row
+    // would predate this rule, and returning it would put the salon's
+    // letterhead back on an independent's receipt.
+    const tx = txMock({ existing: "T-2026-000003" });
+    await expect(allocateOrderTicketNumber(tx, "order_1", MAY, true)).resolves.toBeNull();
+    expect(tx.order.findUnique).not.toHaveBeenCalled();
   });
 });
 

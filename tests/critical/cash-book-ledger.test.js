@@ -63,7 +63,8 @@ describe("buildCashBookLedger", () => {
     const openingRows = result.rows.filter((r) => r.kind === "OPENING");
     expect(openingRows).toHaveLength(2);
     expect(openingRows[0].label).toMatch(/^Solde initial — /);
-    expect(openingRows[1].label).toMatch(/^Solde initial — /);
+    // A float that doesn't continue the previous balance is an écart, named as such.
+    expect(openingRows[1].label).toMatch(/^Écart de caisse — /);
     // sess_1 here is never actually closed (no countedCash on the fixture),
     // so sess_2's whole 720 float reads as a genuine mismatch against "the
     // previous session carried forward 0" — see the dedicated continuation
@@ -114,6 +115,75 @@ describe("buildCashBookLedger", () => {
     });
     const openingRows = result.rows.filter((r) => r.kind === "OPENING");
     expect(openingRows[1]).toMatchObject({ entree: 0, sortie: 1289.85, solde: 0 });
+  });
+
+  // 16 Sep 2026, the real 11/09 case: the session was closed counted 0 €
+  // against 1 289,85 € expected, and the next one opened at that 0. Measured
+  // against the counted amount the gap disappeared from the journal, whose
+  // Solde then disagreed with "Attendu en caisse". Measured against the
+  // expected cash it is a visible écart, and both figures agree.
+  it("a closing count that misses the expected cash shows as an écart, so the journal Solde equals the drawer's expected cash", async () => {
+    const client = clientMock({
+      sessions: [
+        { ...BASE_SESSION, openingFloat: 150, closedAt: new Date("2026-08-02T00:00:00Z"), expectedCash: 1289.85, countedCash: 0 },
+        { id: "sess_2", openedAt: new Date("2026-08-02T08:07:00Z"), closedAt: null, openingFloat: 0, isAutoOpened: false, isAutoClosed: false },
+      ],
+      transactions: [
+        { id: "t1", amount: 1139.85, method: "CASH", transactionType: "FINAL_PAYMENT", paidAt: new Date("2026-08-01T10:00:00Z"), pieceNumber: "V0001", payment: null },
+      ],
+    });
+    const result = await buildCashBookLedger(client, {
+      fromDate: new Date("2026-08-01T00:00:00"),
+      toDate: new Date("2026-08-02T23:59:59.999"),
+    });
+    const openingRows = result.rows.filter((r) => r.kind === "OPENING");
+    expect(openingRows[1]).toMatchObject({ entree: 0, sortie: 1289.85, solde: 0 });
+    expect(openingRows[1].label).toMatch(/^Écart de caisse — /);
+    expect(result.totals.finalBalance).toBe(0); // = the open session's float, i.e. "Attendu en caisse"
+  });
+
+  it("a closure counted exactly as expected carries on silently", async () => {
+    const client = clientMock({
+      sessions: [
+        { ...BASE_SESSION, openingFloat: 150, closedAt: new Date("2026-08-02T00:00:00Z"), expectedCash: 1289.85, countedCash: 1289.85 },
+        { id: "sess_2", openedAt: new Date("2026-08-02T08:07:00Z"), closedAt: null, openingFloat: 1289.85, isAutoOpened: true, isAutoClosed: false },
+      ],
+      transactions: [
+        { id: "t1", amount: 1139.85, method: "CASH", transactionType: "FINAL_PAYMENT", paidAt: new Date("2026-08-01T10:00:00Z"), pieceNumber: "V0001", payment: null },
+      ],
+    });
+    const result = await buildCashBookLedger(client, {
+      fromDate: new Date("2026-08-01T00:00:00"),
+      toDate: new Date("2026-08-02T23:59:59.999"),
+    });
+    const openingRows = result.rows.filter((r) => r.kind === "OPENING");
+    expect(openingRows[1]).toMatchObject({ entree: 0, sortie: 0, label: expect.stringMatching(/^Solde initial — /) });
+    expect(result.totals.finalBalance).toBe(1289.85);
+  });
+
+  // 16 Sep 2026: September starts inside the 28/08→11/09 session. Seeding
+  // with that session's float alone dropped the August sales it had already
+  // taken, so the September Solde disagreed with "Attendu en caisse".
+  it("a range starting inside a session seeds the balance with the float plus that session's cash before the range", async () => {
+    const aggregate = vi.fn()
+      .mockResolvedValueOnce({ _sum: { amount: 426.43 } }) // sales before fromDate
+      .mockResolvedValueOnce({ _sum: { amount: null } }); // refunds before fromDate
+    const client = {
+      cashSession: {
+        findMany: vi.fn().mockResolvedValue([{ ...BASE_SESSION, openedAt: new Date("2026-07-28T10:11:00Z"), openingFloat: 150 }]),
+      },
+      transaction: {
+        aggregate,
+        findMany: vi.fn().mockResolvedValue([
+          { id: "t1", amount: 73, method: "CASH", transactionType: "FINAL_PAYMENT", paidAt: new Date("2026-08-01T09:14:00Z"), pieceNumber: "V0003", payment: null },
+        ]),
+      },
+      cashMovement: { findMany: vi.fn().mockResolvedValue([]) },
+    };
+    const result = await buildCashBookLedger(client, RANGE);
+    expect(aggregate.mock.calls[0][0].where).toMatchObject({ cashSessionId: "sess_1", paidAt: { lt: RANGE.fromDate } });
+    expect(result.rows.map((r) => r.solde)).toEqual([649.43]); // 150 + 426,43 + 73
+    expect(result.totals.finalBalance).toBe(649.43);
   });
 
   // Mirrors the example cash book: two produit sales, two expenses, running

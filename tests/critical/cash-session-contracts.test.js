@@ -120,5 +120,24 @@ describe("cash-session wiring", () => {
     expect(actions).toContain("export async function openCashSession(openingFloat, { confirmDivergence = false } = {})");
     expect(actions).toContain('code: "OPENING_FLOAT_MISMATCH"');
     expect(actions).toContain("Math.abs(amount - suggested) > 0.01");
+    // A last count of 0 € is no exemption — it's what a mistaken close-to-zero leaves.
+    expect(actions).toContain("if (suggested != null && !confirmDivergence && Math.abs(amount - suggested) > 0.01)");
+  });
+
+  // 16 Sep 2026: the 11/09 test closure counted 0 € against 1 289,85 €
+  // expected and went through on the first submit; every later session then
+  // carried 0. A count that misses the expected cash must be confirmed.
+  test("a close whose count differs from the expected cash requires an explicit confirmDivergence", () => {
+    const close = actions.slice(actions.indexOf("export async function closeCashSession("));
+    expect(close).toContain("export async function closeCashSession(sessionId, countedCash, { confirmDivergence = false } = {})");
+    expect(close).toContain("computeSessionCashTotals(prisma, sessionId, open.openingFloat)");
+    expect(close).toContain('code: "CLOSING_COUNT_MISMATCH"');
+    expect(close.indexOf("CLOSING_COUNT_MISMATCH")).toBeLessThan(close.indexOf("closeCashSessionInternal("));
+  });
+
+  test("the Livre de caisse's own open button can confirm a diverging float", () => {
+    const client = source("components/dashboard/boutique/caisse/CaisseClient.jsx");
+    expect(client).toContain('result.code === "OPENING_FLOAT_MISMATCH" && window.confirm(result.message)');
+    expect(client).toContain("openCashSession(amount, { confirmDivergence: true })");
   });
 });

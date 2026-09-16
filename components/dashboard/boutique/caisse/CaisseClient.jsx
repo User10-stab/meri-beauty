@@ -14,8 +14,6 @@ import {
   Landmark,
   ChevronRight,
   BarChart3,
-  ArrowUpRight,
-  ArrowDownRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
@@ -33,11 +31,6 @@ function formatEuro(value) {
 function formatDateTime(iso) {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" });
-}
-
-function formatDateOnly(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("fr-FR", { dateStyle: "medium", timeZone: "Europe/Brussels" });
 }
 
 function escapeCsv(value) {
@@ -137,13 +130,7 @@ function downloadCaisseCsv({ ledger, report }) {
       ["Réconciliation caisse", "Montant (€)"],
       ["Mouvements — apports", report.cashMovements.in],
       ["Mouvements — sorties", -report.cashMovements.out],
-      ...(report.expectedCash != null ? [["Attendu en caisse", report.expectedCash]] : []),
-      [],
-      ["Comparaison", `du ${formatDateOnly(report.previousPeriod.from)} au ${formatDateOnly(report.previousPeriod.to)}`],
-      ["Ventes espèces — période précédente", report.previousPeriod.totalSales],
-      ["Entrées — période précédente", report.previousPeriod.entrees],
-      ["Sorties — période précédente", report.previousPeriod.sorties],
-      ["Solde — période précédente", report.previousPeriod.finalBalance]
+      ...(report.expectedCash != null ? [["Attendu en caisse", report.expectedCash]] : [])
     );
 
     if (report.sessions.length > 0) {
@@ -243,7 +230,12 @@ export function CaisseClient({
     const amount = Number(openingFloat);
     if (!Number.isFinite(amount) || amount < 0) return toast.error("Indiquez un fond de caisse valide.");
     startTransition(async () => {
-      const result = await openCashSession(amount);
+      let result = await openCashSession(amount);
+      // A float that differs from the last count needs an explicit yes —
+      // before, this screen only toasted the message and could never confirm.
+      if (!result.success && result.code === "OPENING_FLOAT_MISMATCH" && window.confirm(result.message)) {
+        result = await openCashSession(amount, { confirmDivergence: true });
+      }
       if (!result.success) return toast.error(result.message);
       toast.success("Caisse ouverte.");
       router.refresh();
@@ -426,19 +418,16 @@ export function CaisseClient({
               icon={<ArrowUpCircle size={20} />}
               label="Total entrées"
               value={formatEuro(ledger.totals.entrees)}
-              delta={report && <DeltaBadge current={ledger.totals.entrees} previous={report.previousPeriod.entrees} />}
             />
             <StatCard
               icon={<ArrowDownCircle size={20} />}
               label="Total sorties"
               value={formatEuro(ledger.totals.sorties)}
-              delta={report && <DeltaBadge current={ledger.totals.sorties} previous={report.previousPeriod.sorties} invert />}
             />
             <StatCard
               icon={<Wallet size={20} />}
               label="Solde"
               value={formatEuro(ledger.totals.finalBalance)}
-              delta={report && <DeltaBadge current={ledger.totals.finalBalance} previous={report.previousPeriod.finalBalance} />}
             />
           </div>
 
@@ -497,9 +486,6 @@ export function CaisseClient({
               </div>
               <span className="text-right text-sm text-gray-500 dark:text-dark-6 print:hidden">
                 <span className="block">Ventes espèces uniquement — même période que le journal</span>
-                <span className="block text-xs text-gray-400">
-                  vs. du {formatDateOnly(report.previousPeriod.from)} au {formatDateOnly(report.previousPeriod.to)}
-                </span>
               </span>
             </div>
 
@@ -521,7 +507,6 @@ export function CaisseClient({
                           label="Total ventes espèces"
                           value={report.totalSales}
                           emphasis
-                          delta={<DeltaBadge current={report.totalSales} previous={report.previousPeriod.totalSales} />}
                         />
                       </div>
                     </>
@@ -583,17 +568,14 @@ export function CaisseClient({
   );
 }
 
-function SummaryRow({ label, value, emphasis = false, count, delta }) {
+function SummaryRow({ label, value, emphasis = false, count }) {
   return (
     <div className={`flex items-center justify-between py-1.5 text-sm ${emphasis ? "font-semibold text-gray-900 dark:text-white" : "text-gray-600 dark:text-dark-6"}`}>
       <span>
         {label}
         {count != null && <span className="ml-1.5 text-xs font-normal text-gray-400">({count})</span>}
       </span>
-      <span className="inline-flex items-center gap-2">
-        {formatEuro(value)}
-        {delta}
-      </span>
+      <span>{formatEuro(value)}</span>
     </div>
   );
 }
@@ -662,57 +644,17 @@ function DayGroup({ group, isOpen, onToggle }) {
   );
 }
 
-function StatCard({ icon, label, value, delta }) {
+function StatCard({ icon, label, value }) {
   return (
     <div className="flex items-center gap-4 rounded-[10px] border border-stroke bg-white p-5 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card print:gap-2 print:p-2 print:shadow-none">
       <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white print:hidden">
         {icon}
       </div>
       <div className="min-w-0">
-        <div className="flex items-baseline gap-2">
-          <p className="text-xl font-bold text-dark dark:text-white print:text-base">{value}</p>
-          {delta}
-        </div>
+        <p className="text-xl font-bold text-dark dark:text-white print:text-base">{value}</p>
         <p className="truncate text-sm text-gray-500 dark:text-dark-6">{label}</p>
       </div>
     </div>
   );
 }
 
-/**
- * A small % vs. période précédente indicator, reused across the top stat
- * cards and the Rapport's own "Total ventes espèces" row — same
- * previousPeriod figures (lib/cash-book/build-day-report.js), one at-a-glance
- * convention instead of each caller inventing its own.
- * `invert` flips the color story for metrics where "up" is unwelcome
- * (Sorties: more cash going out is not the good direction).
- */
-function DeltaBadge({ current, previous, invert = false }) {
-  if (current == null || previous == null) return null;
-  if (previous === 0) {
-    if (current === 0) return null;
-    return (
-      <span className="inline-flex items-center gap-0.5 whitespace-nowrap text-xs font-medium text-emerald-600 print:hidden dark:text-emerald-400">
-        <ArrowUpRight size={12} />
-        nouveau
-      </span>
-    );
-  }
-  const pct = ((current - previous) / Math.abs(previous)) * 100;
-  if (Math.abs(pct) < 0.5) {
-    return <span className="whitespace-nowrap text-xs font-medium text-gray-400 print:hidden">stable</span>;
-  }
-  const isIncrease = pct > 0;
-  const isPositive = invert ? !isIncrease : isIncrease;
-  const Icon = isIncrease ? ArrowUpRight : ArrowDownRight;
-  return (
-    <span
-      className={`inline-flex items-center gap-0.5 whitespace-nowrap text-xs font-medium print:hidden ${
-        isPositive ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
-      }`}
-    >
-      <Icon size={12} />
-      {Math.abs(pct).toFixed(0)}%
-    </span>
-  );
-}

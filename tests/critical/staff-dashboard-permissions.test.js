@@ -76,9 +76,9 @@ describe("granular staff dashboard permissions", () => {
     );
     const openSession = cashSessions.slice(
       cashSessions.indexOf("export async function openCashSession("),
-      cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash)")
+      cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash, { confirmDivergence = false } = {})")
     );
-    const closeSession = cashSessions.slice(cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash)"));
+    const closeSession = cashSessions.slice(cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash, { confirmDivergence = false } = {})"));
 
     expect(openingGuard).toContain("isTillCashOperator(session.user)");
     expect(openSession).toContain("requireCashSessionOpeningAccess()");

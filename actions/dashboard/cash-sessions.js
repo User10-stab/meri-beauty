@@ -138,13 +138,32 @@ export async function tryAutoOpenCashSession() {
   return { success: true, data: full ? serializeCashSession(full) : null };
 }
 
-export async function openCashSession(openingFloat) {
+export async function openCashSession(openingFloat, { confirmDivergence = false } = {}) {
   const guard = await requireCashSessionOpeningAccess();
   if (guard.error) return { success: false, message: guard.error };
 
   const amount = Number(openingFloat);
   if (!Number.isFinite(amount) || amount < 0) {
     return { success: false, message: "Le fond de caisse doit être un montant positif ou nul." };
+  }
+
+  // A free-text field that silently accepted any typed amount is exactly how
+  // the ledger's carry-forward chain got broken on 11/09/2026: two manual
+  // opens in a row with 0 € instead of the suggested (and correct) 790,42 €
+  // permanently detached every following auto-open/auto-close's "expected
+  // cash" from the till's true balance — the book kept computing a
+  // technically-consistent but wrong running total for days before anyone
+  // noticed. This blocks that silent break: a manual open that diverges from
+  // the carried-forward suggestion needs one extra explicit confirmation
+  // instead of going through on the first submit.
+  const suggested = await getLastClosedCountedCash(prisma);
+  if (suggested != null && suggested > 0 && !confirmDivergence && Math.abs(amount - suggested) > 0.01) {
+    return {
+      success: false,
+      code: "OPENING_FLOAT_MISMATCH",
+      suggested,
+      message: `Le solde attendu (dernier comptage) est de ${suggested.toFixed(2)} €. Confirmez si vous voulez vraiment ouvrir avec ${amount.toFixed(2)} €.`,
+    };
   }
 
   // Check-then-create on its own is a race: two concurrent calls (a

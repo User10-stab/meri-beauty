@@ -64,9 +64,56 @@ describe("buildCashBookLedger", () => {
     expect(openingRows).toHaveLength(2);
     expect(openingRows[0].label).toMatch(/^Solde initial — /);
     expect(openingRows[1].label).toMatch(/^Solde initial — /);
-    // The second session's float already carries the first session's
-    // countedCash forward — the running balance is continuous, not reset.
+    // sess_1 here is never actually closed (no countedCash on the fixture),
+    // so sess_2's whole 720 float reads as a genuine mismatch against "the
+    // previous session carried forward 0" — see the dedicated continuation
+    // test below for the real day-to-day case (openingFloat === previous
+    // countedCash), which must NOT add anything to the balance.
     expect(result.rows.map((r) => r.solde)).toEqual([500, 1220]);
+  });
+
+  // 16 Sep 2026: the daily auto-close/auto-open cycle carries the exact same
+  // money forward every night — session N+1's openingFloat is set to session
+  // N's own countedCash (see session-lifecycle.js's getLastClosedCountedCash).
+  // That money is already reflected in the running balance from session N's
+  // last row, so re-adding the full openingFloat here would grow the balance
+  // by that amount every single day the till sits untouched, even with zero
+  // real sales — the exact bug reported: "Solde initial 13,50 €" reappearing
+  // and inflating the total two days running with no transaction in between.
+  it("a session opened with exactly the previous session's counted total is a silent continuation — no phantom entrée", async () => {
+    const client = clientMock({
+      sessions: [
+        { ...BASE_SESSION, openingFloat: 803.92, closedAt: new Date("2026-08-02T00:00:00Z"), countedCash: 803.92 },
+        { id: "sess_2", openedAt: new Date("2026-08-02T17:41:00Z"), closedAt: null, openingFloat: 803.92, isAutoOpened: true, isAutoClosed: false },
+      ],
+    });
+    const result = await buildCashBookLedger(client, {
+      fromDate: new Date("2026-08-01T00:00:00"),
+      toDate: new Date("2026-08-02T23:59:59.999"),
+    });
+    const openingRows = result.rows.filter((r) => r.kind === "OPENING");
+    expect(openingRows[1]).toMatchObject({ entree: 0, sortie: 0, solde: 803.92 });
+    expect(result.totals.finalBalance).toBe(803.92);
+  });
+
+  // The 11/09/2026 incident this guards against in reverse: a session closed
+  // by a manual recount/reset that does NOT match its own expected total, so
+  // the next session's openingFloat genuinely diverges from what was carried
+  // forward. That real difference must still be visible — as a sortie when
+  // money effectively left the chain — rather than silently ignored.
+  it("a genuine mismatch between the carried float and the previous session's counted total shows as the difference, not the full float", async () => {
+    const client = clientMock({
+      sessions: [
+        { ...BASE_SESSION, openingFloat: 1289.85, closedAt: new Date("2026-08-02T00:00:00Z"), countedCash: 1289.85 },
+        { id: "sess_2", openedAt: new Date("2026-08-02T08:07:00Z"), closedAt: null, openingFloat: 0, isAutoOpened: false, isAutoClosed: false },
+      ],
+    });
+    const result = await buildCashBookLedger(client, {
+      fromDate: new Date("2026-08-01T00:00:00"),
+      toDate: new Date("2026-08-02T23:59:59.999"),
+    });
+    const openingRows = result.rows.filter((r) => r.kind === "OPENING");
+    expect(openingRows[1]).toMatchObject({ entree: 0, sortie: 1289.85, solde: 0 });
   });
 
   // Mirrors the example cash book: two produit sales, two expenses, running
@@ -397,5 +444,14 @@ describe("groupLedgerRowsByDay — powers the journal's collapsible day groups",
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ totalEntrees: 100, totalSorties: 15, closingBalance: 185 });
+  });
+
+  it("excludes OPENING (Solde initial) rows from the day's Entrées total — the float carried forward is not that day's income", () => {
+    const groups = groupLedgerRowsByDay([
+      ledgerRow({ kind: "OPENING", entree: 803.92, sortie: 0, solde: 803.92 }),
+      ledgerRow({ kind: "SALE", entree: 13.5, sortie: 0, solde: 817.42 }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ totalEntrees: 13.5, totalSorties: 0, closingBalance: 817.42 });
   });
 });

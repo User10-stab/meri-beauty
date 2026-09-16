@@ -61,6 +61,9 @@ const ALL_NAV_DATA = [
           // redirected from it to the full Opérations above anyway.
           { title: "Mes opérations", url: "/dashboard/mes-operations", roles: [ROLES.STAFF] },
           { title: "Livre de recettes", url: "/dashboard/livre-de-recettes", roles: [ROLES.OWNER, ROLES.ADMIN] },
+          // Every issued invoice + its delivery (e-mail / Peppol) and credit
+          // notes. Admin only, like the send actions it calls.
+          { title: "Factures", url: "/dashboard/factures", roles: [ROLES.OWNER, ROLES.ADMIN] },
           { title: "Caisse", url: "/dashboard/boutique/point-of-sale", salonOnly: true },
           { title: "Livre de caisse", url: "/dashboard/boutique/caisse", salonOnly: true },
           // Staff: read-only catalogue browsing (no cost/margin data) + stock adjustments.

@@ -11,6 +11,7 @@ import {
   styles,
 } from "./theme";
 import { REVERSE_CHARGE_NOTE } from "@/lib/tax-policy";
+import { creditNoteLines } from "@/lib/credit-notes/credit-note-lines";
 
 /**
  * Printed on the footer of every invoice and credit note — B2C and B2B,
@@ -149,6 +150,20 @@ export function CreditNoteDocument({ creditNote, invoice, contact = null }) {
           <View style={styles.partyGutter} />
           <BuyerBlock invoice={invoice} title="ÉMISE À L'ATTENTION DE" />
         </View>
+
+        {/* What is being credited — the products/services of the corrected
+            invoice (see lib/credit-notes/credit-note-lines.js). Negated like
+            the totals below, so every figure reads as money going back. */}
+        <LineItemsTable
+          title="DÉTAIL CRÉDITÉ"
+          lines={creditNoteLines(creditNote, invoice).map((line) => ({
+            ...line,
+            unitPrice: -line.unitPrice,
+            lineTotal: -line.lineTotal,
+            unitPriceExclVat: -line.unitPriceExclVat,
+            lineTotalExclVat: -line.lineTotalExclVat,
+          }))}
+        />
 
         <View style={styles.bottom}>
           <TermsBlock

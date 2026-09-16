@@ -11,6 +11,7 @@ import {
 } from "@/lib/peppyrus";
 import { buildInvoiceUbl, buildCreditNoteUbl } from "@/lib/peppyrus/build-ubl";
 import { normalizeVatNumber } from "@/lib/vat-validation";
+import { creditNoteLines } from "@/lib/credit-notes/credit-note-lines";
 
 /**
  * Read-only counterpart to sendInvoiceToPeppyrus/sendCreditNoteToPeppyrus:
@@ -213,15 +214,15 @@ export async function previewCreditNotePeppyrusDocument(creditNoteId) {
 
     const xml = buildCreditNoteUbl({ creditNote, invoice, salon, buyerParticipantId: resolvedParticipantId });
 
-    const lines = [
-      {
-        description: creditNote.reason?.trim() || `Note de crédit relative à la facture ${invoice.number}`,
-        quantity: 1,
-        unitPriceExclVat: Number(creditNote.subtotalExclVat),
-        lineTotalExclVat: Number(creditNote.subtotalExclVat),
-        vatRate: Number(invoice.vatRate),
-      },
-    ];
+    // Same credited lines the UBL above carries (products/services of the
+    // corrected invoice), so the preview shows what will actually be sent.
+    const lines = creditNoteLines(creditNote, invoice).map((line) => ({
+      description: line.description,
+      quantity: line.quantity,
+      unitPriceExclVat: line.unitPriceExclVat,
+      lineTotalExclVat: line.lineTotalExclVat,
+      vatRate: Number(invoice.vatRate),
+    }));
 
     return {
       success: true,

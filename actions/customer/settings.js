@@ -43,8 +43,9 @@ export async function getMySettings() {
 
 /**
  * Lets a company customer (isCompany) set/update their B2B legal identity —
- * companyLegalName presence is what makes issueInvoice() emit a B2B invoice
- * instead of B2C (see lib/invoicing.js). No password confirmation, same
+ * the company name printed on their invoices. The invoice is B2B either way
+ * once the buyer has a VAT number (see lib/invoicing.js); without this name
+ * it simply prints the buyer's own name. No password confirmation, same
  * reasoning as updateMyVatNumber()/updateMyAddress().
  */
 export async function updateMyBillingProfile(input) {

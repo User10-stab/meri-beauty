@@ -32,7 +32,7 @@ import { isBelgianVatNumber } from "@/lib/peppyrus";
  * be omitted when only internal copies are wanted. The client's address is
  * always the one frozen on the document — it is never retyped here.
  */
-export function DocumentDeliveryDialog({ open, onClose, document: documentRecord, invoice, kind = "INVOICE", onDelivered }) {
+export function DocumentDeliveryDialog({ open, onClose, document: documentRecord, invoice, kind = "INVOICE", onDelivered, initialChannel = null }) {
   const closeRef = useRef(null);
 
   const isCreditNote = kind === "CREDIT_NOTE";
@@ -75,8 +75,11 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
 
   useEffect(() => {
     if (!open) return;
-    setEmailChecked(false);
-    setPeppyrusChecked(false);
+    // Opérations opens the card with nothing ticked. The Factures page has
+    // one explicit button per channel (`initialChannel`), so that click
+    // pre-ticks its own channel — the shared confirm step still gates the send.
+    setEmailChecked(initialChannel === "EMAIL");
+    setPeppyrusChecked(initialChannel === "PEPPYRUS" && canUsePeppyrus);
     setIncludeClient(true);
     setCheckedIds(new Set());
     setAdding(false);
@@ -110,7 +113,8 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
       cancelled = true;
       cancelAnimationFrame(frame);
     };
-  }, [open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the card opens
+  }, [open, initialChannel]);
 
   const selectedEmails = useMemo(
     () => recipients.filter((r) => checkedIds.has(r.id)).map((r) => r.email),

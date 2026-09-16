@@ -103,3 +103,33 @@ describe("TILL_CASH_OPERATOR_EMAIL — the default is load-bearing", () => {
     expect(isTillCashOperator({ role: "STAFF", email: "julieschoemans@gmail.com" })).toBe(false);
   });
 });
+
+// Every book and every headline figure the salon publishes about itself has
+// to be scoped the same way, from the same module. A screen that quietly
+// keeps summing everyone is the whole problem restated.
+describe("every salon-wide figure resolves its scope from the one module", () => {
+  const CONSUMERS = [
+    ["the livre de recettes", "lib/livre-de-recettes/build-recettes-journal.js"],
+    ["Opérations", "actions/dashboard/admin-operations.js"],
+    ["the dashboard revenue card", "actions/dashboard/get-dashboard-stats.js"],
+  ];
+
+  test.each(CONSUMERS)("%s imports resolveSalonScope rather than re-deriving it", (_label, path) => {
+    const code = source(path);
+    expect(code).toContain('import { resolveSalonScope } from "@/lib/authorization/salon-scope"');
+    // The two id spaces are not interchangeable: an Order is stamped with a
+    // User.id, an Appointment with a Staff.id. Every consumer keys on both.
+    expect(code).toContain("salonUserIds");
+    expect(code).toContain("salonStaffIds");
+  });
+
+  test("the dashboard filter no longer calls the unfiltered figure « Tous les Staff »", () => {
+    // It never was everyone's total in any meaningful sense, and now it is
+    // explicitly one entity's: the salon.
+    const filters = source("components/dashboard/DashboardFilters.jsx");
+    // Comments here name the old label to explain why it went; strip them.
+    const rendered = filters.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(rendered).not.toContain("Tous les Staff");
+    expect(rendered).toContain('<option value="">Le salon</option>');
+  });
+});

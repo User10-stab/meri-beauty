@@ -8,6 +8,7 @@ import { getLowStockVariants } from "@/actions/boutique/stock";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
+import { resolveSalonScope } from "@/lib/authorization/salon-scope";
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
 
 // Same candidate statuses as lib/orders/notify-stale-fulfilment.js — the only
@@ -122,14 +123,49 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
       ? staffCustomerRelationshipFilters({ staffId: ownStaffId, staffUserId: session.user.id })
       : null;
 
-  // Staff revenue = appointment (reservation) payments for that member's
-  // services. Boutique/order payments are salon-wide and excluded here —
-  // the boutique/order sections are hidden in staff view for the same reason.
+  // Two different questions, and they must not be conflated.
+  //
+  // Staff view: that member's own appointment (reservation) payments.
+  // Boutique/order payments are salon-wide and excluded — the boutique/order
+  // sections are hidden in staff view for the same reason.
+  //
+  // Default view: the SALON's revenue, not everyone's. Every practitioner
+  // here is legally independent with her own VAT number, so summing all of
+  // them into one "chiffre d'affaires" card overstates what the salon
+  // actually earned. The scope is the ADMIN/OWNER accounts plus Marie
+  // Mercier (whose VAT number is the salon's, despite her STAFF role), plus
+  // the sales nobody rang up — a customer's own online purchase — and the
+  // salon's own ateliers and formations. Same arms, same reasoning, as
+  // lib/livre-de-recettes/build-recettes-journal.js; never re-derive the
+  // rule, see lib/authorization/salon-scope.js.
+  const salonScope = staffView || !isAdmin ? null : await resolveSalonScope(prisma);
   const revenueWhere = {
     isDeleted: false,
     status: { in: REVENUE_STATUSES },
     paidAt: { gte: monthStart, lt: monthEnd },
-    ...(staffView ? { appointment: { staffService: { staffId: viewedStaff.id } } } : {}),
+    ...(staffView
+      ? { appointment: { staffService: { staffId: viewedStaff.id } } }
+      : salonScope
+        ? {
+            OR: [
+              // Order.createdByStaffId → User.id ; Appointment.staffId →
+              // Staff.id. The two id spaces are not interchangeable.
+              { order: { createdByStaffId: { in: salonScope.salonUserIds } } },
+              { order: { createdByStaffId: null } },
+              { appointment: { staffId: { in: salonScope.salonStaffIds } } },
+              { workshopReservationId: { not: null } },
+              { formationReservationId: { not: null } },
+              // Attached to none of the four sources: no owner to hand it to,
+              // so it stays the salon's — same reasoning as an unstamped order.
+              {
+                orderId: null,
+                appointmentId: null,
+                workshopReservationId: null,
+                formationReservationId: null,
+              },
+            ],
+          }
+        : {}),
   };
 
   // "Today" only exists in the current month — for another month the card

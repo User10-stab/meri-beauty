@@ -353,25 +353,12 @@ describe("buildRangeReport", () => {
     expect(report.byVatRate).toEqual([{ rate: 21, netAmount: 200, vatAmount: 42, grossAmount: 242, count: 2 }]);
   });
 
-  // previousPeriod is a pure function of the requested window (see
-  // previousPeriodWindow in build-day-report.js) — a same-length range
-  // immediately preceding it, for the report's "vs. période précédente"
-  // comparison.
-  it("previousPeriod is a same-length window immediately before the requested range", async () => {
+  // 16 Sep 2026: the "vs. période précédente" comparison (the % badges) was
+  // removed at the client's request — the report no longer computes it.
+  it("the report carries no previous-period comparison", async () => {
     const client = rangeClientMock({ sessions: [] });
     const report = await buildRangeReport(client, RANGE);
-    const previousTo = new Date(report.previousPeriod.to).getTime();
-    const previousFrom = new Date(report.previousPeriod.from).getTime();
-    expect(previousTo).toBe(RANGE.fromDate.getTime() - 1);
-    expect(previousTo - previousFrom).toBe(RANGE.toDate.getTime() - RANGE.fromDate.getTime());
-    expect(report.previousPeriod).toEqual(
-      expect.objectContaining({
-        entrees: expect.any(Number),
-        sorties: expect.any(Number),
-        finalBalance: expect.any(Number),
-        totalSales: expect.any(Number),
-      })
-    );
+    expect(report).not.toHaveProperty("previousPeriod");
   });
 });
 
@@ -461,9 +448,9 @@ describe("day-report wiring", () => {
   // per-category/per-rate transaction counts, and a per-session breakdown
   // (open/close, counted vs. expected, écart) that build-day-report.js
   // already computed but nothing used to render.
-  test("the client renders a previous-period comparison and transaction counts", () => {
-    expect(client).toContain("report.previousPeriod");
-    expect(client).toContain("DeltaBadge");
+  test("the client renders transaction counts, and no % vs. période précédente", () => {
+    expect(client).not.toContain("previousPeriod");
+    expect(client).not.toContain("DeltaBadge");
     expect(client).toContain("byCategoryCounts");
   });
 

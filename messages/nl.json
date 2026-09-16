@@ -560,6 +560,28 @@
     "performance": "Prestaties",
     "noContract": "Geen contract"
   },
+  "staffProfile": {
+    "breadcrumb": "Broodkruimelpad",
+    "home": "Home",
+    "team": "Ons team",
+    "profile": "Profiel",
+    "professional": "Schoonheidsexpert",
+    "defaultBio": "Met passie voor schoonheid en oog voor details biedt {firstName} elke klant een persoonlijke aanpak.",
+    "experience": "{count} jaar ervaring",
+    "languages": "Gesproken talen",
+    "follow": "Volg ons",
+    "workRhythm": "Werkritme",
+    "workingHours": "Werkuren",
+    "workingHoursNote": "Gebruikelijke uren",
+    "closed": "Gesloten",
+    "servicesEyebrow": "Behandelingen",
+    "services": "Aangeboden diensten",
+    "servicesSubtitle": "Ontdek de diensten en boek jouw beautymoment.",
+    "all": "Alle",
+    "book": "Boeken",
+    "rhythm": { "ONE_DAY_PER_WEEK": "1 dag per week", "TWO_DAYS_PER_WEEK": "2 dagen per week", "THREE_DAYS_PER_WEEK": "3 dagen per week", "FULL_WEEK": "De hele week" },
+    "days": { "MONDAY": "Maandag", "TUESDAY": "Dinsdag", "WEDNESDAY": "Woensdag", "THURSDAY": "Donderdag", "FRIDAY": "Vrijdag", "SATURDAY": "Zaterdag", "SUNDAY": "Zondag" }
+  },
   "payments": {
     "title": "Betalingen",
     "stripe": "Stripe-account",

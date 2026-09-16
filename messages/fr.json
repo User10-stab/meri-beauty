@@ -560,6 +560,28 @@
     "performance": "Performance",
     "noContract": "Aucun contrat"
   },
+  "staffProfile": {
+    "breadcrumb": "Fil d’Ariane",
+    "home": "Accueil",
+    "team": "Notre équipe",
+    "profile": "Profil",
+    "professional": "Experte beauté",
+    "defaultBio": "Passionnée par la beauté et les détails qui font toute la différence, {firstName} accompagne chaque cliente avec une approche personnalisée.",
+    "experience": "{count} ans d’expérience",
+    "languages": "Langues parlées",
+    "follow": "Suivez-nous",
+    "workRhythm": "Rythme de travail",
+    "workingHours": "Horaires de travail",
+    "workingHoursNote": "Horaires habituels",
+    "closed": "Fermé",
+    "servicesEyebrow": "Prestations",
+    "services": "Services proposés",
+    "servicesSubtitle": "Découvrez ses services et réservez votre moment beauté.",
+    "all": "Tous",
+    "book": "Réserver",
+    "rhythm": { "ONE_DAY_PER_WEEK": "1 jour par semaine", "TWO_DAYS_PER_WEEK": "2 jours par semaine", "THREE_DAYS_PER_WEEK": "3 jours par semaine", "FULL_WEEK": "Toute la semaine" },
+    "days": { "MONDAY": "Lundi", "TUESDAY": "Mardi", "WEDNESDAY": "Mercredi", "THURSDAY": "Jeudi", "FRIDAY": "Vendredi", "SATURDAY": "Samedi", "SUNDAY": "Dimanche" }
+  },
   "payments": {
     "title": "Paiements",
     "stripe": "Compte Stripe",

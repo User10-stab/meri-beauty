@@ -3,18 +3,6 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import StaffProfileHero from "@/components/staff-profile/StaffProfileHero";
 import StaffServices from "@/components/staff-profile/StaffServices";
-import Breadcrumb from "@/components/staff-profile/Breadcrumb";
-import { BotanicalBranch, BotanicalSprig, Botanical } from "@/components/botanical-decorations";
-
-const DAY_ABBREVS = {
-  MONDAY: "Lun",
-  TUESDAY: "Mar",
-  WEDNESDAY: "Mer",
-  THURSDAY: "Jeu",
-  FRIDAY: "Ven",
-  SATURDAY: "Sam",
-  SUNDAY: "Dim",
-};
 
 async function getStaffProfile(staffId) {
   try {
@@ -168,102 +156,42 @@ export default async function StaffProfilePage({ params }) {
     ),
   ];
 
-  const workingSchedule = staff.workingHours
-    .filter((wh) => !wh.isClosed)
-    .map((wh) => ({
-      day: DAY_ABBREVS[wh.day],
-      dayFull: wh.day,
-      startTime: wh.startTime,
-      endTime: wh.endTime,
-    }))
-    .filter(Boolean);
-
-  const rythmeDays = workingSchedule.map(ws => ws.day);
-
   return (
-    <div className="w-full bg-[#fdf8f0]">
-      <Breadcrumb staffName={staff.user.fullName} />
-
-      <StaffProfileHero
-        name={staff.user.fullName}
-        firstName={firstName}
-        bio={staff.bio}
-        yearsOfExperience={staff.yearsOfExperience}
-        languages={staff.languages}
-        rythme={staff.rythme}
-        rythmeDays={rythmeDays}
-        workingSchedule={workingSchedule}
-        image={profileImage}
-        staffId={staff.id}
-        socialLinks={salonSocial}
-      />
-
-     
-
-      {staff.staffServices.length > 0 && (
-        <StaffServices
-          services={staff.staffServices}
-          staffId={staff.id}
-          firstName={firstName}
-          categories={categories}
-          staffName={staff.user.fullName}
-          customerSession={customerSession}
-        />
-      )}
-
-      {/* Closing CTA section with decorative elements */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-white to-[#fdf8f0] py-20 sm:py-24">
-        {/* Decorative background */}
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          {/* Top left botanical branch */}
-          <BotanicalBranch className="absolute -top-16 -left-20 w-48 h-64 text-[#b89664]/10 transform -rotate-12" />
-          
-          {/* Bottom right botanical sprig */}
-          <BotanicalSprig className="absolute -bottom-20 -right-16 w-32 h-48 text-[#b89664]/8 transform rotate-12" />
-          
-          {/* Center large botanical */}
-          <Botanical className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-80 text-[#b89664]/10" />
-          
-          {/* Floating decorative circles */}
-          <div className="absolute -top-32 -left-32 h-64 w-64 rounded-full border border-[#b89664]/10" />
-          <div className="absolute -bottom-24 -right-24 h-48 w-48 rounded-full border border-[#b89664]/8" />
+    // Standalone two-section layout: the page itself never scrolls
+    // (h-dvh + overflow-hidden). The hero stays fixed while only the
+    // services column scrolls, so there is a single scrollbar.
+    <div className="h-dvh w-full overflow-hidden bg-[#fdf8f0]">
+      <div className="mx-auto flex h-full min-h-0 max-w-[1700px] flex-col overflow-hidden px-4 py-4 sm:px-6 lg:flex-row lg:gap-10 lg:px-10 lg:py-6 xl:gap-14">
+        {/* Fixed hero — never scrolls at page level; its own scrollbar is
+            hidden so only the services column shows a scrollbar. */}
+        <div className="flex items-center max-h-[44dvh] shrink-0 overflow-hidden lg:sticky lg:top-0 lg:h-full lg:max-h-none lg:w-[500px] lg:overflow-y-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden ">
+          <StaffProfileHero
+            name={staff.user.fullName}
+            firstName={firstName}
+            bio={staff.bio}
+            yearsOfExperience={staff.yearsOfExperience}
+            languages={staff.languages}
+            rythme={staff.rythme}
+            workingHours={staff.workingHours}
+            image={profileImage}
+            socialLinks={salonSocial}
+            categories={categories}
+          />
         </div>
 
-        <div className="relative mx-auto max-w-[700px] px-4 text-center sm:px-6">
-          <div className="mb-6 inline-flex items-center gap-2">
-            <span className="h-px w-8 bg-[#b89664]/40" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b89664]/60">
-              Meri Beauty
-            </span>
-            <span className="h-px w-8 bg-[#b89664]/40" />
-          </div>
-
-          <h2 className="font-display text-[1.8rem] font-semibold leading-tight tracking-tight text-[#2F3A2E] sm:text-[2.2rem]">
-            Pr&ecirc;t(e) &agrave; prendre soin de vous ?
-          </h2>
-
-          <p className="mx-auto mt-5 max-w-lg text-sm leading-relaxed text-[#6f6a64] sm:text-base">
-            R&eacute;servez votre prochain rendez-vous avec {firstName} et offrez-vous un moment de beaut&eacute; personnalis&eacute;.
-          </p>
-
-          <div className="mt-8">
-            <a
-              href={`/reservation?staff=${staff.id}`}
-              className="group inline-flex items-center gap-2 rounded-full bg-[#2F3A2E] px-8 py-3.5 text-sm font-semibold text-white transition-all duration-300 hover:bg-[#212a20] hover:shadow-lg hover:-translate-y-0.5"
-            >
-              Prendre rendez-vous
-              <span className="transition-transform group-hover:translate-x-1">&rarr;</span>
-            </a>
-          </div>
-
-          {/* Decorative bottom element */}
-          <div className="mt-12 flex items-center justify-center gap-3 text-[#b89664]/30">
-            <span className="h-px w-12 bg-current" />
-            <span className="h-1.5 w-1.5 rotate-45 border border-current" />
-            <span className="h-px w-12 bg-current" />
-          </div>
+        {/* The only scrollable area on the page — scrollbar hidden, scrolling intact. */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 pt-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden lg:pt-1">
+          {staff.staffServices.length > 0 && (
+            <StaffServices
+              services={staff.staffServices}
+              staffId={staff.id}
+              categories={categories}
+              staffName={staff.user.fullName}
+              customerSession={customerSession}
+            />
+          )}
         </div>
-      </section>
+      </div>
     </div>
   );
 }

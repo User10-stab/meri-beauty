@@ -61,18 +61,6 @@ function useInView(threshold = 0.15) {
   return [ref, inView];
 }
 
-function ChevronIcon({ direction = "right", className = "w-5 h-5" }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className={className} aria-hidden="true">
-      {direction === "left" ? (
-        <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-      ) : (
-        <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-      )}
-    </svg>
-  );
-}
-
 /* ── Botanical sprigs for card bottom-right (thin gold line art) ── */
 function SprigOne({ className = "w-14 h-20" }) {
   return (
@@ -140,8 +128,6 @@ export default function OurExperts() {
   const [isLoading, setIsLoading] = useState(true);
   const [headerRef, headerInView] = useInView();
   const [cardsRef, cardsInView] = useInView();
-  const scrollRef = useRef(null);
-  const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
     async function loadExperts() {
@@ -161,28 +147,7 @@ export default function OurExperts() {
     loadExperts();
   }, []);
 
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const onScroll = () => {
-      const cardWidth = el.firstElementChild ? el.firstElementChild.getBoundingClientRect().width + 20 : 340;
-      const idx = Math.round(el.scrollLeft / cardWidth);
-      const max = Math.max(0, stylists.length - 3);
-      setActiveIndex(Math.min(Math.max(idx, 0), max));
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [stylists.length]);
-
-  const scrollLeft = () => {
-    scrollRef.current?.scrollBy({ left: -360, behavior: "smooth" });
-  };
-  const scrollRight = () => {
-    scrollRef.current?.scrollBy({ left: 360, behavior: "smooth" });
-  };
-
   const list = isLoading ? FALLBACK_STYLISTS : stylists;
-  const dotCount = Math.max(1, Math.min(list.length, 4));
 
   return (
     <section id="equipe" className="relative w-full overflow-hidden bg-[#fdf8f0]">
@@ -206,56 +171,16 @@ export default function OurExperts() {
               {t("expertsBody")}
             </p>
           </div>
-
-          <div className="hidden items-center gap-3 sm:flex">
-            <button
-              onClick={scrollLeft}
-              aria-label={t("expertsLeft")}
-              className="flex h-10 w-10 items-center justify-center rounded-full border border-gold/30 text-gold transition-all duration-200 hover:bg-gold hover:text-white"
-            >
-              <ChevronIcon direction="left" className="h-4 w-4" />
-            </button>
-            <button
-              onClick={scrollRight}
-              aria-label={t("expertsRight")}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-gold text-white shadow-sm transition-all duration-200 hover:bg-gold/90"
-            >
-              <ChevronIcon direction="right" className="h-4 w-4" />
-            </button>
-          </div>
         </div>
 
-        {/* Cards */}
+        {/* Cards grid */}
         <div
           ref={cardsRef}
-          className={`relative transition-all duration-700 ease-out delay-150 ${cardsInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
+          className={`grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4 transition-all duration-700 ease-out delay-150 ${cardsInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
         >
-          <div
-            ref={scrollRef}
-            className="flex gap-5 overflow-x-auto pb-4 snap-x snap-mandatory scrollbar-hide"
-            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
-          >
-            {list.map((stylist, index) => (
-              <ExpertCard key={stylist.id ?? index} stylist={stylist} index={index} t={t} />
-            ))}
-          </div>
-
-          {/* Dots */}
-          <div className="mt-6 flex items-center justify-center gap-2">
-            {Array.from({ length: dotCount }).map((_, i) => (
-              <button
-                key={i}
-                aria-label={`${t("reviewsSlide")} ${i + 1}`}
-                onClick={() => {
-                  const el = scrollRef.current;
-                  if (!el || !el.firstElementChild) return;
-                  const w = el.firstElementChild.getBoundingClientRect().width + 20;
-                  el.scrollTo({ left: i * w, behavior: "smooth" });
-                }}
-                className={`h-1.5 rounded-full transition-all duration-300 ${i === activeIndex ? "w-2 bg-[#b89664]" : "w-1.5 bg-[#e8ddd0]"}`}
-              />
-            ))}
-          </div>
+          {list.map((stylist, index) => (
+            <ExpertCard key={stylist.id ?? index} stylist={stylist} index={index} t={t} />
+          ))}
         </div>
       </div>
     </section>
@@ -264,40 +189,35 @@ export default function OurExperts() {
 
 function ExpertCard({ stylist, index, t }) {
   const firstName = stylist.name.split(" ")[0];
-  const role = stylist.specialityKey ? t(stylist.specialityKey) : stylist.speciality || "";
   const Sprig = SPRIGS[index % SPRIGS.length];
-  // Decor images for first & third fallback to match screenshot vibe when portrait missing
-  const isDecorCard = index === 0 || index === 2;
-  // Use a warm decor fallback for those two if image is generic expert.jpg
   const imageSrc = stylist.image || "/Images/expert.jpg";
 
   return (
-    <article className="group relative flex w-[88%] sm:w-[340px] md:w-[360px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)]">
-      <div className="relative aspect-[1.45/1] w-full overflow-hidden bg-[#f5ece0]">
+    <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)]">
+      <div className="relative max-h-[380px] aspect-[9/16] w-full overflow-hidden bg-[#f5ece0]">
         <Image
           src={imageSrc}
           alt={stylist.name}
           fill
-          sizes="(max-width: 640px) 88vw, 360px"
-          className={`h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.03] ${isDecorCard ? "object-center" : "object-top"}`}
+          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+          className="h-full w-full object-cover object-center transition-transform duration-700 group-hover:scale-[1.03]"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-60" />
       </div>
 
-      <div className="relative flex flex-1 flex-col px-6 pb-5 pt-5">
-        {/* botanical sprig on the right */}
+      <div className="relative flex flex-1 flex-col px-7 pb-7 pt-6 sm:px-6">
         <div className="pointer-events-none absolute bottom-2 right-3 text-[#c9b99a]/70">
-          <Sprig className="h-[76px] w-[52px]" />
+          <Sprig className="h-[64px] w-[44px]" />
         </div>
 
-        <h3 className="font-display text-[17px] font-semibold leading-none tracking-tight text-primary">
+        <h3 className="font-display text-[20px] font-semibold leading-none tracking-tight text-primary sm:text-[20px]">
           {stylist.name}
         </h3>
-       
-        <div className="mt-4">
+
+        <div className="mt-3">
           <Link
             href={`/staff/${stylist.id}`}
-            className="inline-flex items-center gap-1.5 rounded-full border border-[#d9c9a8] px-4 py-[7px] text-[11.5px] font-medium text-[#8c6f3a] transition-all duration-200 hover:border-[#b89664] hover:bg-[#b89664] hover:text-white"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#d9c9a8] px-4 py-[7px] text-[12px] font-medium text-[#8c6f3a] transition-all duration-200 hover:border-[#b89664] hover:bg-[#b89664] hover:text-white"
           >
             {t("expertsDiscover", { name: firstName })}
             <ArrowIcon className="h-3 w-3" />

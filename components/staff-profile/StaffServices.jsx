@@ -1,10 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Image from "next/image";
-import Link from "next/link";
 import { Clock, Euro, ArrowRight } from "lucide-react";
-import { BotanicalBranch, BotanicalSprig, LeftBotanical } from "@/components/botanical-decorations";
+import { useTranslations } from "next-intl";
 import QuickBookingModal from "@/components/reservation/QuickBookingModal";
 
 function useInView(threshold = 0.15) {
@@ -42,10 +40,11 @@ function formatPrice(price) {
   return num % 1 === 0 ? `${num} \u20ac` : `${num.toFixed(2)} \u20ac`;
 }
 
-export default function StaffServices({ services, staffId, firstName, categories, staffName, customerSession = null }) {
+export default function StaffServices({ services, staffId, categories, staffName, customerSession = null }) {
   const [sectionRef, sectionInView] = useInView();
   const [activeCategory, setActiveCategory] = useState(null);
   const [quickBooking, setQuickBooking] = useState(null);
+  const t = useTranslations("staffProfile");
 
   if (!services || services.length === 0) {
     return null;
@@ -57,34 +56,8 @@ export default function StaffServices({ services, staffId, firstName, categories
     : services;
 
   return (
-    <section className="relative w-full overflow-hidden bg-gradient-to-b from-white to-[#fdf8f0] py-16 sm:py-20 md:py-24">
-      {/* Decorative background elements */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {/* Subtle diagonal lines pattern */}
-        <div
-          aria-hidden="true"
-          className="absolute inset-0 opacity-[0.02]"
-          style={{
-            backgroundImage: "repeating-linear-gradient(45deg, #b89664 0px, #b89664 1px, transparent 1px, transparent 80px)",
-          }}
-        />
-        
-        {/* Top right botanical branch */}
-        <BotanicalBranch className="absolute -top-12 -right-16 w-48 h-64 text-[#b89664]/40 transform rotate-12" />
-        
-        {/* Bottom left botanical sprig */}
-        <BotanicalSprig className="absolute -bottom-20 -left-12 w-32 h-48 text-[#b89664]/40 transform -rotate-12" />
-        
-        {/* Left side botanical accent */}
-        <LeftBotanical className="absolute top-1/3 -left-8 w-20 h-48 text-[#b89664]/40" />
-        
-        {/* Floating decorative circles */}
-        <div className="absolute -top-20 -right-20 h-64 w-64 rounded-full border border-[#b89664]/10" />
-        <div className="absolute top-40 -left-16 h-48 w-48 rounded-full border border-[#b89664]/8" />
-        <div className="absolute bottom-20 right-1/4 h-32 w-32 rounded-full bg-gradient-to-br from-[#b89664]/5 to-transparent blur-2xl" />
-      </div>
-
-      <div className="relative mx-auto max-w-[1200px] px-4 sm:px-6 md:px-10 lg:px-14">
+    <section className="relative">
+      <div>
         <div
           ref={sectionRef}
           className={`transition-all duration-700 ease-out ${
@@ -97,15 +70,15 @@ export default function StaffServices({ services, staffId, firstName, categories
               <div className="mb-3 inline-flex items-center gap-2">
                 <span className="h-px w-8 bg-[#b89664]" />
                 <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b89664]">
-                  Prestations
+                  {t("servicesEyebrow")}
                 </span>
                 <span className="h-px w-8 bg-[#b89664]" />
               </div>
-              <h2 className="font-display text-[2rem] font-semibold leading-tight tracking-tight text-[#2F3A2E] sm:text-[2.5rem]">
-                Ses prestations
+              <h2 className="font-display text-[1rem] font-semibold leading-tight tracking-tight text-[#2F3A2E] sm:text-[2rem]">
+                {t("services")}
               </h2>
-              <p className="mt-3 max-w-xl text-sm leading-relaxed text-[#6f6a64] sm:text-base">
-                D&eacute;couvrez ses services et r&eacute;servez votre moment beaut&eacute;
+              <p className="mt-1 max-w-xl text-[11px] leading-relaxed text-[#6f6a64] sm:text-[14px]">
+                {t("servicesSubtitle")}
               </p>
             </div>
             {/* <Link
@@ -128,7 +101,7 @@ export default function StaffServices({ services, staffId, firstName, categories
                     : "border-[#ede5d8] bg-white text-[#6f6a64] hover:border-[#d9c9a8] hover:text-[#2F3A2E]"
                 }`}
               >
-                Tous
+                {t("all")}
               </button>
               {allCategories.map((cat) => (
                 <button
@@ -147,7 +120,7 @@ export default function StaffServices({ services, staffId, firstName, categories
           )}
 
           {/* Services Grid */}
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
             {filteredServices.map((staffService) => {
               const service = staffService.service;
               const price = Number(staffService.price || 0);
@@ -196,7 +169,7 @@ export default function StaffServices({ services, staffId, firstName, categories
                       onClick={() => setQuickBooking({ serviceId: service.id, serviceName: service.name })}
                       className="group/btn flex w-full items-center justify-between gap-2 rounded-full bg-gradient-to-r from-[#2F3A2E] to-[#1a2419] px-6 py-3 text-sm font-semibold text-white transition-all duration-300 hover:shadow-lg hover:from-[#212a20] hover:to-[#151c14] hover:-translate-y-0.5"
                     >
-                      Réserver
+                      {t("book")}
                       <ArrowRight size={16} className="transition-transform group-hover/btn:translate-x-1" />
                     </button>
                   </div>

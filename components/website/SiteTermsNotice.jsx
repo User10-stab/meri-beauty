@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 
 const STORAGE_KEY = "meri-beauty:terms-accepted";
@@ -13,6 +14,7 @@ const STORAGE_KEY = "meri-beauty:terms-accepted";
  * doesn't use non-essential cookies, see the Politique de confidentialité).
  * Persisted in localStorage so it only ever shows once per browser. */
 export default function SiteTermsNotice() {
+  const pathname = usePathname();
   const t = useTranslations("siteTermsNotice");
   const [visible, setVisible] = useState(false);
 
@@ -37,6 +39,9 @@ export default function SiteTermsNotice() {
   }
 
   if (!visible) return null;
+
+  // Keep staff profile pages to their standalone two-section layout.
+  if (pathname?.startsWith("/staff/")) return null;
 
   return (
     <div

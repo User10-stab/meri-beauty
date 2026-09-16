@@ -560,6 +560,28 @@
     "performance": "Performance",
     "noContract": "No contract"
   },
+  "staffProfile": {
+    "breadcrumb": "Breadcrumb",
+    "home": "Home",
+    "team": "Our team",
+    "profile": "Profile",
+    "professional": "Beauty expert",
+    "defaultBio": "Passionate about beauty and the details that make all the difference, {firstName} offers every client a personalised approach.",
+    "experience": "{count} years’ experience",
+    "languages": "Languages spoken",
+    "follow": "Follow us",
+    "workRhythm": "Working rhythm",
+    "workingHours": "Working hours",
+    "workingHoursNote": "Usual hours",
+    "closed": "Closed",
+    "servicesEyebrow": "Treatments",
+    "services": "Services offered",
+    "servicesSubtitle": "Discover the available services and book your beauty moment.",
+    "all": "All",
+    "book": "Book now",
+    "rhythm": { "ONE_DAY_PER_WEEK": "1 day per week", "TWO_DAYS_PER_WEEK": "2 days per week", "THREE_DAYS_PER_WEEK": "3 days per week", "FULL_WEEK": "All week" },
+    "days": { "MONDAY": "Monday", "TUESDAY": "Tuesday", "WEDNESDAY": "Wednesday", "THURSDAY": "Thursday", "FRIDAY": "Friday", "SATURDAY": "Saturday", "SUNDAY": "Sunday" }
+  },
   "payments": {
     "title": "Payments",
     "stripe": "Stripe account",

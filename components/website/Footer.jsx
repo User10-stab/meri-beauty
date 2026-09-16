@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { useSession, signIn } from "next-auth/react";
 import { toggleNewsletterSubscription } from "@/actions/newsletter/toggle-subscription";
@@ -156,6 +157,7 @@ function BotanicalRight() {
 }
 
 export default function Footer({ salon }) {
+  const pathname = usePathname();
   const t = useTranslations("footer");
   const { status } = useSession();
   const isPending = status === "loading";
@@ -237,6 +239,12 @@ export default function Footer({ salon }) {
     { label: t("sunday"), hours: t("closed"), isClosed: true },
   ];
   const displayHours = groupedHours ?? fallbackGrouped;
+
+  // Staff profile pages render a standalone layout (fixed hero + scrollable
+  // services) without the site footer.
+  if (pathname?.startsWith("/staff/")) {
+    return null;
+  }
 
   return (
     <footer className="relative w-full overflow-hidden bg-primary">

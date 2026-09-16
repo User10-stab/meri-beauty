@@ -2,12 +2,13 @@
 
 import { useMemo, useState, useTransition, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2, RefreshCw } from "lucide-react";
+import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2, RefreshCw, QrCode } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
 import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
 import { resendPaymentEmail } from "@/actions/payment/resend-payment-email";
+import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
 
 const STATUS_LABEL = {
@@ -61,7 +62,7 @@ function formatDateTime(date, startTime) {
 // boutons multiples côte à côte. Réutilise le même shell que
 // components/dashboard/Tables/RowActions.jsx et AppointmentRow.jsx.
 function getAppointmentMenuItems(row, handlers) {
-  const { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog } = handlers;
+  const { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr } = handlers;
   switch (row.status) {
     case "PENDING":
       return [
@@ -87,6 +88,8 @@ function getAppointmentMenuItems(row, handlers) {
       };
       return [
         { key: "complete", label: "Terminer", icon: CheckCircle2, variant: "success", onClick: handleComplete },
+        // A client who paid must always be able to get their entry pass back.
+        { key: "resend-qr", label: "Renvoyer le QR code", icon: QrCode, onClick: () => onResendQr(row.id) },
         { key: "divider-1", divider: true },
         { key: "noshow", label: "Marquer absente", icon: UserX, variant: "warning", onClick: () => onNoShow(row.id) },
         { key: "cancel", label: "Annuler", icon: X, variant: "danger", onClick: () => onCancel(row) },
@@ -104,7 +107,7 @@ const MENU_VARIANT_CLASSES = {
   danger: "text-red-600 hover:bg-red-50",
 };
 
-function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog }) {
+function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr }) {
   const [open, setOpen] = useState(false);
   const [loadingKey, setLoadingKey] = useState(null);
   const ref = useRef(null);
@@ -125,7 +128,7 @@ function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComp
     };
   }, [open]);
 
-  const items = getAppointmentMenuItems(row, { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog });
+  const items = getAppointmentMenuItems(row, { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr });
 
   if (items.length === 0) {
     return <span className="flex justify-end text-gray-300" aria-hidden="true">—</span>;
@@ -342,6 +345,12 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     } else {
       toast.error(result.message);
     }
+  }
+
+  async function handleResendQr(appointmentId) {
+    const result = await resendCheckInQr({ kind: "APPOINTMENT", id: appointmentId });
+    if (result.success) toast.success(result.message);
+    else toast.error(result.message);
   }
 
   async function handleCompleteDirect(appointmentId) {
@@ -610,6 +619,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         onCancel={(row) => { setRejectionReason(""); setToReject(row); }}
                         onComplete={handleCompleteDirect}
                         onNoShow={handleNoShow}
+                        onResendQr={handleResendQr}
                         onOpenCompleteDialog={(row) =>
                           // Only Marie / an admin takes money at the counter.
                           // For everyone else the balance is recorded off-till

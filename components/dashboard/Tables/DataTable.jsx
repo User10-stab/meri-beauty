@@ -100,7 +100,7 @@ export function DataTable({
   onSearchChange,
 }) {
   const [search, setSearch] = useState("");
-  const [perPage, setPerPage] = useState(serverPagination?.pageSize ?? 5);
+  const [perPage, setPerPage] = useState(serverPagination?.pageSize ?? 10);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState(null); // "asc" | "desc"

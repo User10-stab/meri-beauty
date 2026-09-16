@@ -1237,3 +1237,89 @@ export async function getAppointmentById(appointmentId) {
     };
   }
 }
+
+/**
+ * Permanently removes (soft-deletes) an appointment from the system.
+ *
+ * For CANCELLED appointments, the associated Payment record (if any) is also
+ * soft-deleted in the same transaction — a cancelled booking's financial trail
+ * is no longer operationally needed.
+ *
+ * For all other statuses, if a Payment record exists, deletion is refused to
+ * preserve financial integrity for active/completed bookings.
+ *
+ * The appointment is soft-deleted (isDeleted=true) rather than hard-deleted
+ * so that any orphaned references (notifications, cancellation requests)
+ * don't break. The row becomes invisible in all queries.
+ *
+ * @param {string} appointmentId
+ * @returns {Promise<{ success: boolean, message?: string }>}
+ */
+export async function deleteAppointment(appointmentId) {
+  try {
+    if (!appointmentId) {
+      return { success: false, message: "ID de rendez-vous manquant" };
+    }
+
+    const authCheck = await authorizeAppointmentAction(appointmentId);
+    if (!authCheck.authorized) {
+      return { success: false, message: authCheck.message };
+    }
+
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: appointmentId, isDeleted: false },
+      select: {
+        id: true,
+        status: true,
+        payment: { select: { id: true } },
+      },
+    });
+
+    if (!appointment) {
+      return { success: false, message: "Rendez-vous introuvable" };
+    }
+
+    const hasPayment = Boolean(appointment.payment);
+    const isCancelled = appointment.status === "CANCELLED";
+
+    // Non-cancelled appointments with a payment must not be deleted —
+    // financial records must be preserved for active/completed bookings.
+    if (hasPayment && !isCancelled) {
+      return {
+        success: false,
+        message: "Ce rendez-vous est lié à un paiement et ne peut pas être supprimé. Utilisez l'annulation plutôt que la suppression.",
+      };
+    }
+
+    // Cancelled appointments: soft-delete both the appointment and its
+    // payment (if any) in a single transaction for consistency.
+    if (hasPayment && isCancelled) {
+      await prisma.$transaction(async (tx) => {
+        await tx.payment.update({
+          where: { id: appointment.payment.id },
+          data: { isDeleted: true, deletedAt: new Date() },
+        });
+        await tx.appointment.update({
+          where: { id: appointmentId },
+          data: { isDeleted: true, deletedAt: new Date() },
+        });
+      });
+    } else {
+      await prisma.appointment.update({
+        where: { id: appointmentId },
+        data: { isDeleted: true, deletedAt: new Date() },
+      });
+    }
+
+    revalidatePath("/dashboard/appointments");
+    revalidatePath("/dashboard/calendrier");
+
+    return { success: true, message: "Rendez-vous supprimé avec succès." };
+  } catch (error) {
+    console.error("[deleteAppointment]", error);
+    return {
+      success: false,
+      message: "Erreur lors de la suppression du rendez-vous.",
+    };
+  }
+}

@@ -2,11 +2,12 @@
 
 import { useMemo, useState, useTransition, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2, RefreshCw, QrCode } from "lucide-react";
+import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2, RefreshCw, QrCode, Trash2 } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
+import { ActionMenu, ActionMenuDivider, ActionMenuItem, ActionMenuTrigger } from "@/components/dashboard/Tables/ActionMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
-import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow, deleteAppointment } from "@/actions/appointment/manage-appointment";
 import { resendPaymentEmail } from "@/actions/payment/resend-payment-email";
 import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
@@ -62,17 +63,20 @@ function formatDateTime(date, startTime) {
 // boutons multiples côte à côte. Réutilise le même shell que
 // components/dashboard/Tables/RowActions.jsx et AppointmentRow.jsx.
 function getAppointmentMenuItems(row, handlers) {
-  const { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr } = handlers;
+  const { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr, onDelete } = handlers;
+  const hasPayment = Boolean(row.payment);
   switch (row.status) {
     case "PENDING":
       return [
         { key: "accept", label: "Accepter", icon: Check, variant: "success", onClick: () => onConfirm(row.id) },
         { key: "divider-1", divider: true },
         { key: "refuse", label: "Refuser", icon: X, variant: "danger", onClick: () => onCancel(row) },
+        ...(!hasPayment ? [{ key: "divider-delete", divider: true }, { key: "delete", label: "Supprimer", icon: Trash2, variant: "danger", onClick: () => onDelete(row) }] : []),
       ];
     case "ACCEPTED":
       return [
         { key: "cancel", label: "Annuler", icon: X, variant: "danger", onClick: () => onCancel(row) },
+        ...(!hasPayment ? [{ key: "divider-delete", divider: true }, { key: "delete", label: "Supprimer", icon: Trash2, variant: "danger", onClick: () => onDelete(row) }] : []),
       ];
     case "CONFIRMED": {
       // Also covers an appointment with no Payment row at all — booked
@@ -93,8 +97,15 @@ function getAppointmentMenuItems(row, handlers) {
         { key: "divider-1", divider: true },
         { key: "noshow", label: "Marquer absente", icon: UserX, variant: "warning", onClick: () => onNoShow(row.id) },
         { key: "cancel", label: "Annuler", icon: X, variant: "danger", onClick: () => onCancel(row) },
+        ...(!hasPayment ? [{ key: "divider-delete", divider: true }, { key: "delete", label: "Supprimer", icon: Trash2, variant: "danger", onClick: () => onDelete(row) }] : []),
       ];
     }
+    case "CANCELLED":
+      // Cancelled reservations can always be deleted, even if a payment
+      // record exists — the delete action will cascade-remove the payment.
+      return [
+        { key: "delete", label: "Supprimer", icon: Trash2, variant: "danger", onClick: () => onDelete(row) },
+      ];
     default:
       return [];
   }
@@ -107,28 +118,12 @@ const MENU_VARIANT_CLASSES = {
   danger: "text-red-600 hover:bg-red-50",
 };
 
-function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr }) {
+function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr, onDelete }) {
   const [open, setOpen] = useState(false);
   const [loadingKey, setLoadingKey] = useState(null);
-  const ref = useRef(null);
+  const triggerRef = useRef(null);
 
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    }
-    function handleKey(e) {
-      if (e.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [open]);
-
-  const items = getAppointmentMenuItems(row, { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr });
+  const items = getAppointmentMenuItems(row, { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr, onDelete });
 
   if (items.length === 0) {
     return <span className="flex justify-end text-gray-300" aria-hidden="true">—</span>;
@@ -148,46 +143,47 @@ function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComp
   const isBusy = loadingKey !== null || rowLoadingId === row.id;
 
   return (
-    <div ref={ref} className="relative flex justify-end">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
+    <div className="flex justify-end">
+      <ActionMenuTrigger
+        triggerRef={triggerRef}
+        open={open}
+        onToggle={() => setOpen((v) => !v)}
+        label="Actions du rendez-vous"
         disabled={isBusy}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Actions du rendez-vous"
-        title="Actions du rendez-vous"
-        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:opacity-60"
       >
         {isBusy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={14} />}
-      </button>
-      {open && (
-        <div
-          role="menu"
-          aria-label="Actions du rendez-vous"
-          className="absolute right-0 top-full z-40 mt-1 w-48 origin-top-right rounded-lg border border-gray-100 bg-white py-1 shadow-lg shadow-gray-200/60 animate-in fade-in-0 zoom-in-95"
-        >
-          {items.map((item) => {
-            if (item.divider) return <div key={item.key} className="my-1 border-t border-gray-100" role="separator" />;
-            const Icon = item.icon;
-            const cls = MENU_VARIANT_CLASSES[item.variant] ?? MENU_VARIANT_CLASSES.default;
-            return (
-              <button
-                key={item.key}
-                role="menuitem"
-                type="button"
-                onClick={() => handleItemClick(item)}
-                disabled={!!loadingKey}
-                title={item.label}
-                className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors focus-visible:bg-gray-50 focus-visible:outline-none disabled:opacity-40 ${cls}`}
-              >
-                <Icon size={14} />
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      </ActionMenuTrigger>
+      <ActionMenu
+        triggerRef={triggerRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        label="Actions du rendez-vous"
+        width={192}
+      >
+        {items.map((item) => {
+          if (item.divider) return <ActionMenuDivider key={item.key} />;
+          const Icon = item.icon;
+          // Danger keeps the shared red tone; success/warning keep their
+          // existing appointment-specific tones.
+          const cls =
+            item.variant === "success"
+              ? MENU_VARIANT_CLASSES.success
+              : item.variant === "warning"
+                ? MENU_VARIANT_CLASSES.warning
+                : "";
+          return (
+            <ActionMenuItem
+              key={item.key}
+              icon={Icon}
+              label={item.label}
+              danger={item.variant === "danger"}
+              disabled={!!loadingKey}
+              onSelect={() => handleItemClick(item)}
+              className={cls}
+            />
+          );
+        })}
+      </ActionMenu>
     </div>
   );
 }
@@ -221,6 +217,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   }, [focusedId, appointments]);
   const [toReject, setToReject] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
+  const [toDelete, setToDelete] = useState(null);
   const [toComplete, setToComplete] = useState(null);
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
@@ -408,6 +405,22 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
       setRowLoadingId(null);
       setToReject(null);
       setRejectionReason("");
+      if (result.success) {
+        toast.success(result.message);
+        refetch({});
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
+
+  function handleDelete() {
+    if (!toDelete) return;
+    setRowLoadingId(toDelete.id);
+    startTransition(async () => {
+      const result = await deleteAppointment(toDelete.id);
+      setRowLoadingId(null);
+      setToDelete(null);
       if (result.success) {
         toast.success(result.message);
         refetch({});
@@ -620,6 +633,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         onComplete={handleCompleteDirect}
                         onNoShow={handleNoShow}
                         onResendQr={handleResendQr}
+                        onDelete={(row) => setToDelete(row)}
                         onOpenCompleteDialog={(row) =>
                           // Only Marie / an admin takes money at the counter.
                           // For everyone else the balance is recorded off-till
@@ -664,6 +678,23 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
           className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-red-300 focus:ring-2 focus:ring-red-100"
         />
       </ConfirmDialog>
+
+      <ConfirmDialog
+        open={!!toDelete}
+        title="Supprimer ce rendez-vous ?"
+        message={toDelete ? (() => {
+          const base = `Le rendez-vous de ${toDelete.customer?.fullName ?? toDelete.customerName} sera définitivement supprimé.`;
+          if (toDelete.status === "CANCELLED" && toDelete.payment) {
+            return `${base} Le paiement associé sera également supprimé. Cette action est irréversible.`;
+          }
+          return `${base} Cette action est irréversible.`;
+        })() : ""}
+        confirmLabel="Supprimer"
+        danger
+        loading={isPending}
+        onConfirm={handleDelete}
+        onCancel={() => setToDelete(null)}
+      />
 
       {toComplete && (
         <div

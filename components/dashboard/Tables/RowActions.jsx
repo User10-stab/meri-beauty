@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { MoreHorizontal, Eye, Pencil, Trash2 } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import { Eye, Pencil, Trash2 } from "lucide-react";
+import { ActionMenu, ActionMenuItem, ActionMenuTrigger } from "./ActionMenu";
 
 const MENU_ITEMS = [
   { label: "View", icon: Eye, display: "Voir plus" },
@@ -10,6 +11,10 @@ const MENU_ITEMS = [
 ];
 
 /**
+ * Shared row-action menu. Renders through the portal ActionMenu so it is
+ * never clipped by table overflow containers and flips upward when there
+ * isn't enough space below (e.g. last rows).
+ *
  * @param {object} props
  * @param {object} props.row - the row data passed to action handlers
  * @param {(row: object) => void} [props.onView]
@@ -18,33 +23,8 @@ const MENU_ITEMS = [
  */
 export function RowActions({ row, onView, onEdit, onDelete }) {
   const [open, setOpen] = useState(false);
-  const containerRef = useRef(null);
   const triggerRef = useRef(null);
-
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
-
-  // Close on Escape
-  useEffect(() => {
-    if (!open) return;
-    function handleKey(e) {
-      if (e.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [open]);
+  const close = useCallback(() => setOpen(false), []);
 
   const handlers = {
     View: onView,
@@ -58,57 +38,30 @@ export function RowActions({ row, onView, onEdit, onDelete }) {
   }
 
   return (
-    <div ref={containerRef} className="relative flex justify-end">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Row actions"
-        className="
-          flex h-7 w-7 items-center justify-center rounded-md text-gray-400
-          transition-colors hover:bg-gray-100 hover:text-gray-700
-          focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500
-        "
+    <div className="flex justify-end">
+      <ActionMenuTrigger
+        triggerRef={triggerRef}
+        open={open}
+        onToggle={() => setOpen((prev) => !prev)}
+      />
+      <ActionMenu
+        triggerRef={triggerRef}
+        open={open}
+        onClose={close}
+        width={144}
       >
-        <MoreHorizontal size={16} />
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          aria-label="Row action menu"
-          className="
-            absolute right-0 top-full z-40 mt-1 w-36 origin-top-right
-            rounded-lg border border-gray-100 bg-white py-1
-            shadow-lg shadow-gray-200/60
-            animate-in fade-in-0 zoom-in-95
-          "
-        >
-          {MENU_ITEMS.filter(({ label }) => handlers[label]).map(({ label, display, icon: Icon, danger }) => (
-            <button
+        {MENU_ITEMS.filter(({ label }) => handlers[label]).map(
+          ({ label, display, icon: Icon, danger }) => (
+            <ActionMenuItem
               key={label}
-              role="menuitem"
-              type="button"
-              onClick={() => handleAction(label)}
-              className={`
-                flex w-full items-center gap-2.5 px-3 py-2 text-sm
-                transition-colors focus-visible:bg-gray-50
-                focus-visible:outline-none
-                ${
-                  danger
-                    ? "text-red-500 hover:bg-red-50"
-                    : "text-gray-700 hover:bg-gray-50"
-                }
-              `}
-            >
-              <Icon size={14} />
-              {display ?? label}
-            </button>
-          ))}
-        </div>
-      )}
+              icon={Icon}
+              label={display ?? label}
+              danger={danger}
+              onSelect={() => handleAction(label)}
+            />
+          ),
+        )}
+      </ActionMenu>
     </div>
   );
 }

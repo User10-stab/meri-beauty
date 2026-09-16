@@ -73,7 +73,7 @@ const ALL_NAV_DATA = [
           { title: "Commandes", url: "/dashboard/boutique/orders", salonOnly: true, badge: "pickupsToVerify" },
           { title: "Retours", url: "/dashboard/boutique/returns", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.RETURNS },
           { title: "Codes promo", url: "/dashboard/promo-codes", roles: DASHBOARD_PERMISSIONS.PROMO_CODES },
-          { title: "Compte Stripe", url: "/dashboard/payments" },
+        { title: "Compte Stripe", url: "/dashboard/payments", roles:[ROLES.STAFF] },
           { title: "Litiges Stripe", url: "/dashboard/payments/disputes", roles: DASHBOARD_PERMISSIONS.STRIPE_DISPUTES },
         ],
       },
@@ -81,8 +81,8 @@ const ALL_NAV_DATA = [
         title: "Activités & formations",
         icon: Icons.Calendar,
         items: [
-          { title: "Activités", url: "/dashboard/workshops/activities", roles: DASHBOARD_PERMISSIONS.WORKSHOPS, permission: STAFF_PERMISSIONS.WORKSHOPS },
-          { title: "Animateurs", url: "/dashboard/workshops/animators", roles: DASHBOARD_PERMISSIONS.WORKSHOPS, permission: STAFF_PERMISSIONS.WORKSHOPS },
+          { title: "Activités et Animateurs", url: "/dashboard/workshops/activities", roles: DASHBOARD_PERMISSIONS.WORKSHOPS, permission: STAFF_PERMISSIONS.WORKSHOPS },
+          // { title: "Animateurs", url: "/dashboard/workshops/animators", roles: DASHBOARD_PERMISSIONS.WORKSHOPS, permission: STAFF_PERMISSIONS.WORKSHOPS },
           { title: "Réservations ateliers", url: "/dashboard/workshops/reservations", roles: DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS, permission: STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS },
           { title: "Liste d'attente", url: "/dashboard/workshops/waiting-list", roles: DASHBOARD_PERMISSIONS.WORKSHOP_RESERVATIONS, permission: STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS },
           // Shared queue for atelier AND formation cancellation requests.

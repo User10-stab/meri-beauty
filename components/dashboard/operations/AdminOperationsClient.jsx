@@ -607,7 +607,14 @@ function TransferCrossLink({ logId, transferredAt }) {
   );
 }
 
-function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer }) {
+/**
+ * `readOnly` is the /dashboard/mes-operations rendering: a practitioner
+ * reading her own lines. Every action on this table (the detail drawer,
+ * InvoiceRowActions' send/refund/credit-note) is backed by an admin-only
+ * server action, so offering them would only produce "Non autorisé" — and
+ * the documents they reach are the salon's, not hers.
+ */
+function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer, readOnly = false }) {
   return (
     <Table>
       <TableHeader>
@@ -679,13 +686,20 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer }) {
                   <details className="mt-2 min-w-[220px] text-xs">
                     <summary className="cursor-pointer font-medium text-[#2f3a2e]">Historique des transactions</summary>
                     <ul className="mt-2 space-y-2">
-                      {(row.payment?.transactions ?? []).filter((event) => !event.isDeleted).map((event) => (
-                        <li key={event.id}>
-                          <button type="button" onClick={() => onOpenDetail(event.id)} className="text-left underline underline-offset-2">
-                            {date(event.paidAt)} · {PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · {event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : "En ligne"} · {event.transactionType === "REFUND" ? "−" : ""}{money(event.amount)}
-                          </button>
-                        </li>
-                      ))}
+                      {(row.payment?.transactions ?? []).filter((event) => !event.isDeleted).map((event) => {
+                        const label = `${date(event.paidAt)} · ${PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · ${event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : "En ligne"} · ${event.transactionType === "REFUND" ? "−" : ""}${money(event.amount)}`;
+                        return (
+                          <li key={event.id}>
+                            {readOnly ? (
+                              <span className="text-left">{label}</span>
+                            ) : (
+                              <button type="button" onClick={() => onOpenDetail(event.id)} className="text-left underline underline-offset-2">
+                                {label}
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   </details>
                 )}
@@ -698,7 +712,9 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer }) {
                 {described.amountNote && <span className="block max-w-28 text-xs font-normal text-gray-400">{described.amountNote}</span>}
               </TableCell>
               <TableCell className="pr-6">
-                {row.operationOnly ? (
+                {readOnly ? (
+                  <span className="text-xs text-gray-400">—</span>
+                ) : row.operationOnly ? (
                   <button
                     type="button"
                     onClick={() => onOpenTransfer(row)}
@@ -761,7 +777,56 @@ function FilterPills({ label, options, labels, active, buildHref }) {
   );
 }
 
-export function AdminOperationsClient({ result }) {
+/**
+ * The "qui" axis, and the only filter here that is a dropdown rather than a
+ * pill row: it lists every practitioner, so pills would wrap into a wall.
+ *
+ * "Le salon" is not "everyone". It is the ADMIN/OWNER accounts plus Marie
+ * Mercier, whose VAT number is the salon's despite her STAFF role — plus the
+ * rows nobody stamped, and the salon's own ateliers and formations. Marie is
+ * in the list below like anyone else; the difference is that her lines are
+ * already in the default view, and nobody else's are.
+ */
+function StaffFilter({ basePath, options, active, buildHref }) {
+  const router = useRouter();
+  if (!options?.length) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-stroke px-4 py-3 text-sm">
+      <span className="mr-1 font-medium text-gray-500">Qui</span>
+      <select
+        value={active}
+        aria-label="Filtrer par membre du personnel"
+        onChange={(event) => router.push(buildHref(event.target.value))}
+        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700"
+      >
+        <option value="">Le salon</option>
+        {options.map((staff) => (
+          <option key={staff.id} value={staff.id}>
+            {staff.fullName}
+            {staff.isActive ? "" : " (inactive)"}
+          </option>
+        ))}
+      </select>
+      {active ? (
+        <Link href={buildHref("")} className="text-xs font-medium text-[#2f3a2e] hover:underline">
+          Revenir au salon
+        </Link>
+      ) : null}
+      <span className="text-xs text-gray-400">
+        {active
+          ? "Ateliers et formations exclus — ils n'ont aucun lien de personnel en base."
+          : "Le salon : l'administration et Marie, plus les ventes en ligne et les activités du salon."}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * `basePath` is what makes /dashboard/mes-operations work off the same
+ * component: read-only, no "qui" filter (the server forces the reader's own
+ * id whatever the query string says), same table.
+ */
+export function AdminOperationsClient({ result, basePath = "/dashboard/operations" }) {
   const {
     tab = "transactions",
     data = [],
@@ -771,6 +836,9 @@ export function AdminOperationsClient({ result }) {
     type = "ALL",
     lifecycleStatus = "ALL",
     paymentEvent = "ALL",
+    staffId = "",
+    staffOptions = [],
+    readOnly = false,
   } = result ?? {};
   const [detailId, setDetailId] = useState(null);
   const [transferDetail, setTransferDetail] = useState(null);
@@ -791,12 +859,17 @@ export function AdminOperationsClient({ result }) {
     nextType = tab === nextTab ? type : "ALL",
     nextLifecycleStatus = tab === nextTab ? lifecycleStatus : "ALL",
     nextPaymentEvent = tab === nextTab ? paymentEvent : "ALL",
+    // Unlike the other axes, "qui" survives a tab change: having picked a
+    // practitioner, switching from Transactions to Commandes means "her
+    // commandes", not everyone's.
+    nextStaffId = staffId,
   } = {}) {
     const search = new URLSearchParams({ tab: nextTab, page: String(nextPage) });
     if (nextType !== "ALL") search.set("type", nextType);
     if (nextLifecycleStatus !== "ALL") search.set("lifecycleStatus", nextLifecycleStatus);
     if (nextPaymentEvent !== "ALL") search.set("paymentEvent", nextPaymentEvent);
-    return `/dashboard/operations?${search.toString()}`;
+    if (nextStaffId) search.set("staffId", nextStaffId);
+    return `${basePath}?${search.toString()}`;
   }
 
   return (
@@ -826,6 +899,14 @@ export function AdminOperationsClient({ result }) {
           irrelevant-to-each-other pill row, so it's hidden there — pick
           Commandes / Ateliers & événements / Formations to filter by status.
           None renders when it has nothing to offer on the current tab. */}
+      {readOnly ? null : (
+        <StaffFilter
+          basePath={basePath}
+          options={staffOptions}
+          active={staffId}
+          buildHref={(value) => href({ nextStaffId: value })}
+        />
+      )}
       <FilterPills
         label="Type"
         options={TYPE_FILTERS[tab]}
@@ -859,7 +940,7 @@ export function AdminOperationsClient({ result }) {
         {data.length === 0 ? (
           <div className="px-6 py-16 text-center text-sm text-gray-500">Aucune donnée dans cette catégorie.</div>
         ) : (
-          <UnifiedOperationsTable rows={data} onOpenDetail={setDetailId} onOpenTransfer={setTransferDetail} />
+          <UnifiedOperationsTable rows={data} onOpenDetail={setDetailId} onOpenTransfer={setTransferDetail} readOnly={readOnly} />
         )}
       </div>
 

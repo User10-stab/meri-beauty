@@ -23,6 +23,10 @@ export default async function OperationsPage({ searchParams }) {
       type: params?.type,
       lifecycleStatus: params?.lifecycleStatus,
       paymentEvent: params?.paymentEvent,
+      // Empty means the salon — the administration and Marie, plus the
+      // unattributed online sales and the salon's own activities. Validated
+      // server-side: an unknown id is an error, never a silent widening.
+      staffId: params?.staffId,
     }),
     getOutstandingRefundLegs(),
     listStuckPayments(),

@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { canAccessDashboard } from "@/lib/authorization";
+import { canAccessDashboard, isTillCashOperator } from "@/lib/authorization";
 import { renderCreditNotePdf } from "@/lib/pdf/render";
 
 export const runtime = "nodejs";
 
 export async function GET(req, { params }) {
   const session = await auth();
-  if (!session?.user || !canAccessDashboard(session.user.role)) {
+  // A credit note is the salon's document: admin and Marie only
+  // (isTillCashOperator), never an independent practitioner.
+  if (!session?.user || !canAccessDashboard(session.user.role) || !isTillCashOperator(session.user)) {
     return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
   }
 

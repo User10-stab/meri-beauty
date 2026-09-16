@@ -60,19 +60,35 @@
  *   node scripts/backfill-ticket-numbers.mjs            # report only
  *   node scripts/backfill-ticket-numbers.mjs --apply    # write
  *   DATABASE_URL=<prod-url> node scripts/backfill-ticket-numbers.mjs --apply
+ *   node scripts/backfill-ticket-numbers.mjs --database-url=<url>
+ *
+ * The target database is printed, with where it was resolved from, before
+ * the first query. Read that line every time — until 16/09/2026 this script
+ * ignored `.env.local` entirely and silently used `.env`, because its dotenv
+ * call sat below the hoisted imports (see scripts/resolve-database-url.mjs).
  *
  * Exit code is 0 on a clean report/apply, 1 if the post-run invariant check
  * (zero gaps, zero duplicates, no previously-set ticketNumber changed) fails.
  */
 
-import { config } from "dotenv";
+// MUST stay above the @prisma/client import: it snapshots the caller's
+// DATABASE_URL before Prisma loads `.env` over it. See that module's header —
+// this script used to call dotenv after the imports, which never had any
+// effect, so it silently ignored `.env.local` and numbered whatever `.env`
+// pointed at.
+import { resolveDatabaseUrl, describeTarget } from "./resolve-database-url.mjs";
 import { PrismaClient } from "@prisma/client";
 import { allocateOrderTicketNumber, allocatePaymentTicketNumber, ticketYear } from "../lib/tickets/allocate-ticket-number.js";
 
-config({ path: [".env.local", ".env"], quiet: true });
-
 const apply = process.argv.includes("--apply");
-const prisma = new PrismaClient();
+const { url: DATABASE_URL, from: DATABASE_URL_SOURCE } = resolveDatabaseUrl();
+if (!DATABASE_URL) {
+  console.error("Abandon : aucune DATABASE_URL (ni --database-url=, ni $DATABASE_URL, ni .env.local, ni .env).");
+  process.exit(1);
+}
+// Explicit, or PrismaClient re-reads the process.env that Prisma itself
+// polluted and the resolution above is wasted.
+const prisma = new PrismaClient({ datasources: { db: { url: DATABASE_URL } } });
 
 // Each row costs two round trips inside the allocator (find + update) against
 // a remote Neon connection — Prisma's 5s default interactive-transaction
@@ -179,6 +195,11 @@ async function assertContiguous() {
 }
 
 async function main() {
+  // Before the first query, not after: by the time a row count has been
+  // printed, the connection has already been made to whatever this resolved
+  // to, and the operator reading the output has no way to tell which.
+  console.log(`Target database : ${describeTarget(DATABASE_URL)}   [source: ${DATABASE_URL_SOURCE}]`);
+
   const before = apply
     ? await prisma.$transaction([
         prisma.order.findMany({ where: { ticketNumber: { not: null } }, select: { id: true, ticketNumber: true } }),

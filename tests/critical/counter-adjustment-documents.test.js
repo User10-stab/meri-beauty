@@ -129,11 +129,12 @@ describe("a ticket is e-mailed after settlement only when the acting staff holds
     }
   });
 
-  test("manage-appointment.js sends the ticket only when a balance was actually collected", () => {
+  test("manage-appointment.js sends the settlement e-mail only when a balance was actually collected", () => {
     const code = source("actions/appointment/manage-appointment.js");
-    expect(code).toContain('import { sendTicketByEmail } from "@/actions/payments/send-ticket-email"');
+    expect(code).toContain('import { sendSettlementEmail } from "@/lib/payments/send-settlement-email"');
     expect(code).toContain("if (balance > 0) {");
-    expect(code).toContain("sendTicketByEmail(result.collection.paymentId");
+    // The acting user decides ticket vs. ticket-free confirmation.
+    expect(code).toContain("sendSettlementEmail(authCheck.user, result.collection.paymentId");
   });
 
   test("settle-reservation.js stays free of any send/permission code — it only exposes paymentId/transactionId/balance for its callers", () => {
@@ -143,13 +144,14 @@ describe("a ticket is e-mailed after settlement only when the acting staff holds
     expect(lib).toContain("transactionId: result.collection?.id ?? null");
   });
 
-  test("both reservation wrappers call sendTicketByEmail gated on a collected balance, and never leak the internal fields to the client", () => {
+  test("both reservation wrappers call sendSettlementEmail gated on a collected balance, and never leak the internal fields to the client", () => {
     for (const path of [
       "actions/workshops/manage-reservation.js",
       "actions/formations/manage-reservation.js",
     ]) {
       const code = source(path);
-      expect(code, path).toContain('import { sendTicketByEmail } from "@/actions/payments/send-ticket-email"');
+      expect(code, path).toContain('import { sendSettlementEmail } from "@/lib/payments/send-settlement-email"');
+      expect(code, path).toContain("sendSettlementEmail(session.user, result.paymentId");
       expect(code, path).toContain("if (result.balance > 0) {");
       expect(code, path).toContain("const { paymentId, transactionId, balance, ...publicResult } = result;");
     }

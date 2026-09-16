@@ -2,13 +2,14 @@
 
 import { useMemo, useState, useTransition, useEffect, useRef } from "react";
 import { toast } from "sonner";
-import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2, RefreshCw, Trash2 } from "lucide-react";
+import { Search, Loader2, CalendarX, Check, X, MoreHorizontal, UserX, CheckCircle2, RefreshCw, QrCode, Trash2 } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { ActionMenu, ActionMenuDivider, ActionMenuItem, ActionMenuTrigger } from "@/components/dashboard/Tables/ActionMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
 import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow, deleteAppointment } from "@/actions/appointment/manage-appointment";
 import { resendPaymentEmail } from "@/actions/payment/resend-payment-email";
+import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
 
 const STATUS_LABEL = {
@@ -62,7 +63,7 @@ function formatDateTime(date, startTime) {
 // boutons multiples côte à côte. Réutilise le même shell que
 // components/dashboard/Tables/RowActions.jsx et AppointmentRow.jsx.
 function getAppointmentMenuItems(row, handlers) {
-  const { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onDelete } = handlers;
+  const { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr, onDelete } = handlers;
   const hasPayment = Boolean(row.payment);
   switch (row.status) {
     case "PENDING":
@@ -91,6 +92,8 @@ function getAppointmentMenuItems(row, handlers) {
       };
       return [
         { key: "complete", label: "Terminer", icon: CheckCircle2, variant: "success", onClick: handleComplete },
+        // A client who paid must always be able to get their entry pass back.
+        { key: "resend-qr", label: "Renvoyer le QR code", icon: QrCode, onClick: () => onResendQr(row.id) },
         { key: "divider-1", divider: true },
         { key: "noshow", label: "Marquer absente", icon: UserX, variant: "warning", onClick: () => onNoShow(row.id) },
         { key: "cancel", label: "Annuler", icon: X, variant: "danger", onClick: () => onCancel(row) },
@@ -115,12 +118,12 @@ const MENU_VARIANT_CLASSES = {
   danger: "text-red-600 hover:bg-red-50",
 };
 
-function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onDelete }) {
+function AppointmentActionsCell({ row, rowLoadingId, onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr, onDelete }) {
   const [open, setOpen] = useState(false);
   const [loadingKey, setLoadingKey] = useState(null);
   const triggerRef = useRef(null);
 
-  const items = getAppointmentMenuItems(row, { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onDelete });
+  const items = getAppointmentMenuItems(row, { onConfirm, onCancel, onComplete, onNoShow, onOpenCompleteDialog, onResendQr, onDelete });
 
   if (items.length === 0) {
     return <span className="flex justify-end text-gray-300" aria-hidden="true">—</span>;
@@ -339,6 +342,12 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     } else {
       toast.error(result.message);
     }
+  }
+
+  async function handleResendQr(appointmentId) {
+    const result = await resendCheckInQr({ kind: "APPOINTMENT", id: appointmentId });
+    if (result.success) toast.success(result.message);
+    else toast.error(result.message);
   }
 
   async function handleCompleteDirect(appointmentId) {
@@ -623,6 +632,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                         onCancel={(row) => { setRejectionReason(""); setToReject(row); }}
                         onComplete={handleCompleteDirect}
                         onNoShow={handleNoShow}
+                        onResendQr={handleResendQr}
                         onDelete={(row) => setToDelete(row)}
                         onOpenCompleteDialog={(row) =>
                           // Only Marie / an admin takes money at the counter.

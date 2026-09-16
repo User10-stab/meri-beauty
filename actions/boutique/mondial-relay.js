@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { STAFF_PERMISSIONS, hasDashboardPermission } from "@/lib/authorization";
+import { isTillCashOperator } from "@/lib/authorization";
 import { createShipmentLabel } from "@/lib/mondial-relay";
 
 // MONDIAL_RELAY_API_LOGIN / _API_PASSWORD / _CUSTOMER_ID are the "Connect"
@@ -40,7 +40,7 @@ function missingConfig() {
 
 export async function generateShippingLabel(orderId) {
   const session = await auth();
-  if (!session?.user || !(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.ORDERS))) {
+  if (!session?.user || !isTillCashOperator(session.user)) {
     return { success: false, message: "Accès non autorisé." };
   }
 

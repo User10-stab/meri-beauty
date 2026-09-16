@@ -23,6 +23,7 @@ import { isCashSessionOpen, getSuggestedOpeningFloat, openCashSession } from "@/
 export function CashSessionGate({ onOpened }) {
   const [openingFloat, setOpeningFloat] = useState("");
   const [pending, setPending] = useState(false);
+  const [mismatch, setMismatch] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,16 +33,20 @@ export function CashSessionGate({ onOpened }) {
     return () => { cancelled = true; };
   }, []);
 
-  async function handleOpen() {
+  async function handleOpen(confirmDivergence = false) {
     const amount = Number(openingFloat);
     if (!Number.isFinite(amount) || amount < 0) {
       toast.error("Indiquez un fond de caisse valide.");
       return;
     }
     setPending(true);
-    const result = await openCashSession(amount);
+    const result = await openCashSession(amount, { confirmDivergence });
     setPending(false);
     if (!result.success) {
+      if (result.code === "OPENING_FLOAT_MISMATCH") {
+        setMismatch(result);
+        return;
+      }
       // Two terminals, one till: a colleague opening it in the same instant
       // wins the race (openCashSession's advisory lock allows only one) —
       // that's a success for this screen too, not an error to surface.
@@ -54,6 +59,7 @@ export function CashSessionGate({ onOpened }) {
       toast.error(result.message);
       return;
     }
+    setMismatch(null);
     toast.success("Caisse ouverte.");
     onOpened();
   }
@@ -70,14 +76,14 @@ export function CashSessionGate({ onOpened }) {
           step="0.01"
           min="0"
           value={openingFloat}
-          onChange={(event) => setOpeningFloat(event.target.value)}
+          onChange={(event) => { setOpeningFloat(event.target.value); setMismatch(null); }}
           placeholder="Fond de caisse"
           aria-label="Fond de caisse"
           className="h-9 w-32 rounded-[7px] border border-amber-300 bg-white px-2 text-sm outline-none focus:border-amber-500 dark:border-amber-700 dark:bg-dark-2 dark:text-white"
         />
         <button
           type="button"
-          onClick={handleOpen}
+          onClick={() => handleOpen(false)}
           disabled={pending}
           className="inline-flex items-center gap-1.5 rounded-[7px] bg-amber-800 px-3 py-1.5 text-xs font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-amber-300 dark:text-amber-950"
         >
@@ -85,6 +91,19 @@ export function CashSessionGate({ onOpened }) {
           {pending ? "Ouverture…" : "Ouvrir la caisse"}
         </button>
       </div>
+      {mismatch && (
+        <div className="space-y-1.5 rounded-[7px] border border-red-300 bg-red-50 px-2.5 py-2 dark:border-red-700 dark:bg-red-950">
+          <p className="text-xs text-red-800 dark:text-red-300">{mismatch.message}</p>
+          <button
+            type="button"
+            onClick={() => handleOpen(true)}
+            disabled={pending}
+            className="text-xs font-semibold text-red-800 underline hover:no-underline dark:text-red-300"
+          >
+            Ouvrir avec {Number(openingFloat).toFixed(2)} € quand même
+          </button>
+        </div>
+      )}
     </div>
   );
 }

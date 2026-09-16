@@ -15,11 +15,16 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 //
 // 14 Sep 2026 — briefly hardcoded the same way as the till cash operator
 // (isTillCashOperator): admins/owners always pass, plus exactly one staff
-// account. Reverted the same day — it's back to being a normal, grantable
-// STAFF_PERMISSIONS.SEND_TICKET_EMAIL permission, checked by default for a
-// newly created staff account (see DEFAULT_STAFF_PERMISSIONS), same as every
-// other STAFF_PERMISSIONS entry. See canSendTicketEmail() in
-// lib/authorization.js.
+// account. Reverted the same day, back to a grantable permission.
+//
+// 16 Sep 2026 — hardcoded again, and this time on purpose. A ticket carries
+// the salon's name and VAT number; every practitioner here is legally
+// independent and documents her own sales under her own VAT number, so only
+// the salon's own accounts may put one in a client's inbox. Dropping
+// SEND_TICKET_EMAIL from DEFAULT_STAFF_PERMISSIONS is necessary but nowhere
+// near sufficient — every staff account created before today still carries
+// the key in Staff.dashboardPermissions, so a permission check would hand it
+// straight back. See canSendTicketEmail() in lib/authorization.js.
 describe("sendTicketByEmail stays a deliberate, gated exception", () => {
   const action = source("actions/payments/send-ticket-email.js");
 
@@ -49,18 +54,38 @@ describe("sendTicketByEmail stays a deliberate, gated exception", () => {
   });
 });
 
-describe("ticket-sending is a normal, grantable staff permission, on by default", () => {
+describe("ticket-sending belongs to the salon, not to whoever holds a permission", () => {
   const authz = source("lib/authorization.js");
 
-  test("canSendTicketEmail delegates to hasDashboardPermission, admin-inclusive by construction", () => {
+  test("canSendTicketEmail is the salon predicate, not a dashboard-permission lookup", () => {
     expect(authz).toContain("export async function canSendTicketEmail(user)");
-    expect(authz).toContain("return hasDashboardPermission(user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL)");
+    expect(authz).toContain("return isAdminRole(user.role) || isTillCashOperator(user);");
+    // The stored permission key is what would otherwise have re-opened this
+    // for every staff account created while it was still a default.
+    expect(authz).not.toContain("hasDashboardPermission(user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL)");
   });
 
-  test("SEND_TICKET_EMAIL exists as a permission key, a checkbox option, and a default", () => {
-    expect(authz).toContain("SEND_TICKET_EMAIL: \"SEND_TICKET_EMAIL\"");
-    expect(authz).toContain("key: STAFF_PERMISSIONS.SEND_TICKET_EMAIL");
-    expect(authz).toContain("STAFF_PERMISSIONS.SEND_TICKET_EMAIL,\n]);");
+  test("Marie passes on the operator predicate alone, and another independent does not", async () => {
+    const { canSendTicketEmail, TILL_CASH_OPERATOR_EMAIL } = await import("@/lib/authorization");
+
+    // Role STAFF — an isAdminRole test on its own would lock the salon out of
+    // its own documents, which is exactly the mistake this guards against.
+    await expect(canSendTicketEmail({ role: "STAFF", email: TILL_CASH_OPERATOR_EMAIL })).resolves.toBe(true);
+    await expect(canSendTicketEmail({ role: "ADMIN", email: "admin@meribeauty.com" })).resolves.toBe(true);
+    await expect(canSendTicketEmail({ role: "STAFF", email: "julieschoemans@gmail.com" })).resolves.toBe(false);
+    await expect(canSendTicketEmail(null)).resolves.toBe(false);
+  });
+
+  test("SEND_TICKET_EMAIL no longer exists — not a key, not a checkbox, not a default", () => {
+    // Deleted 16/09/2026: canSendTicketEmail decides from the account alone.
+    expect(authz).not.toContain("SEND_TICKET_EMAIL: \"SEND_TICKET_EMAIL\"");
+    expect(authz).not.toContain("key: STAFF_PERMISSIONS.SEND_TICKET_EMAIL");
+    expect(authz).not.toContain("STAFF_PERMISSIONS.SEND_TICKET_EMAIL,\n]);");
+  });
+
+  test("a stored grant cannot re-open it — it is not even a default any more", async () => {
+    const { DEFAULT_STAFF_PERMISSIONS, STAFF_PERMISSIONS } = await import("@/lib/authorization");
+    expect(DEFAULT_STAFF_PERMISSIONS).not.toContain(STAFF_PERMISSIONS.SEND_TICKET_EMAIL);
   });
 });
 

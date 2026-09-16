@@ -5,7 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { formationCancellationEmail } from "@/lib/email-templates";
-import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { isAdminRole, isTillCashOperator, STAFF_PERMISSIONS } from "@/lib/authorization";
 import {
   ACTIVITY_RESERVATION_KINDS,
   authorizeActivityReservationOperation,
@@ -14,7 +14,7 @@ import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting
 import { issueCreditNote, issueInvoice, supersedeInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { settleReservation, markReservationNoShow, RESERVATION_KINDS } from "@/lib/reservations/settle-reservation";
-import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
+import { sendSettlementEmail } from "@/lib/payments/send-settlement-email";
 import { changeReservationSeatsFree } from "@/lib/reservations/change-reservation-seats";
 import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
@@ -704,6 +704,8 @@ export async function changeFormationReservationSeatsFree(reservationId, { newSe
     newSeatsCount,
     reason,
     actorId: session.user.id,
+    // Replacing an invoice is the salon's act alone (admin + Marie).
+    canReplaceInvoice: isTillCashOperator(session.user),
   });
 
   if (result.success) revalidatePath(RESERVATION_KINDS.FORMATION.revalidatePath);
@@ -744,14 +746,14 @@ export async function completeFormationReservation(
 
   if (result.success) {
     revalidatePath(RESERVATION_KINDS.FORMATION.revalidatePath);
-    // Gated purely on the acting staff member passing canSendTicketEmail() —
-    // sendTicketByEmail re-derives auth() itself and checks it internally, so
-    // no separate check is needed here. Fire-and-forget: a ticket failure
+    // The salon (admin or Marie) sends the ticket; an independent's sale has
+    // no salon ticket, so the client gets a ticket-free payment confirmation
+    // instead — see lib/payments/send-settlement-email.js. Fire-and-forget: a ticket failure
     // must never turn a successful settlement into
     // an error response. Only when a balance was actually collected — a
     // booking closed with nothing new to collect gets nothing new sent.
     if (result.balance > 0) {
-      sendTicketByEmail(result.paymentId, { transactionId: result.transactionId }).catch((err) =>
+      sendSettlementEmail(session.user, result.paymentId, { transactionId: result.transactionId }).catch((err) =>
         console.error("[completeFormationReservation] ticket send failed", err),
       );
     }

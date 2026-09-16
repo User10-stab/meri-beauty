@@ -8,6 +8,7 @@ import {
   isAdminRole,
   canSendTicketEmail as canSendTicketEmailOperator,
 } from "@/lib/authorization";
+import { resolveSalonScope } from "@/lib/authorization/salon-scope";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import {
   TYPE_FILTERS,
@@ -59,7 +60,73 @@ function normalizeParams(params = {}) {
   const lifecycleOptions = LIFECYCLE_STATUS_FILTERS[tab === "transactions" ? "all" : tab] ?? [];
   const lifecycleStatus = lifecycleOptions.includes(params.lifecycleStatus) ? params.lifecycleStatus : "ALL";
   const paymentEvent = PAYMENT_EVENT_FILTERS.includes(params.paymentEvent) ? params.paymentEvent : "ALL";
-  return { tab, page, type, lifecycleStatus, paymentEvent };
+  // Validated against the database, not here — see resolveOperationsScope,
+  // which rejects an unknown id rather than letting it widen the ledger back
+  // to everyone, the same way get-reports-data.js does.
+  const staffId = typeof params.staffId === "string" ? params.staffId.trim() : "";
+  return { tab, page, type, lifecycleStatus, paymentEvent, staffId };
+}
+
+/**
+ * Who this ledger is being read for, resolved ONCE before the UNION arms are
+ * built — attribution has to travel down into the SQL. Doing it during
+ * hydration instead would leave `totalCount` and the pagination counting rows
+ * the reader never sees: page 2 of a 4-row result, and a "30 éléments" header
+ * over an empty table.
+ *
+ * Two modes:
+ *
+ *   SALON (the default) — the salon's own activity: the ADMIN/OWNER accounts
+ *   plus Marie Mercier, whose VAT number is the salon's despite her STAFF
+ *   role (resolveSalonScope). Rows nobody stamped (a customer's own online
+ *   order, a system audit entry) belong to the salon too, and ateliers and
+ *   formations are the salon's own events, so both arms come through whole.
+ *
+ *   STAFF — one practitioner, chosen from the filter or forced to the reader
+ *   herself on /dashboard/mes-operations. Ateliers and formations drop out
+ *   entirely: the animator is matched by e-mail with no foreign key, so there
+ *   is no honest way to attribute one, and showing everyone's next to
+ *   filtered figures would be worse than showing none. Same call
+ *   get-reports-data.js makes.
+ *
+ * Marie is selectable in the filter like anyone else; the difference is that
+ * her rows are already in the default view.
+ *
+ * @returns {Promise<null|{ mode: string, staffId: string, staffName: string|null,
+ *   userIds: string[], staffIds: string[], includeUnattributed: boolean,
+ *   includeActivities: boolean }>} null when `staffId` names nobody.
+ */
+async function resolveOperationsScope(staffId) {
+  if (!staffId) {
+    const { salonUserIds, salonStaffIds } = await resolveSalonScope(prisma);
+    return {
+      mode: "SALON",
+      staffId: "",
+      staffName: null,
+      userIds: salonUserIds,
+      staffIds: salonStaffIds,
+      includeUnattributed: true,
+      includeActivities: true,
+    };
+  }
+
+  const staff = await prisma.staff.findUnique({
+    where: { id: staffId },
+    select: { id: true, isDeleted: true, user: { select: { id: true, fullName: true } } },
+  });
+  // An unknown or deleted id must not silently widen the ledger back to the
+  // whole salon — the caller turns this into an error, not a default.
+  if (!staff || staff.isDeleted) return null;
+
+  return {
+    mode: "STAFF",
+    staffId: staff.id,
+    staffName: staff.user.fullName,
+    userIds: [staff.user.id],
+    staffIds: [staff.id],
+    includeUnattributed: false,
+    includeActivities: false,
+  };
 }
 
 async function requireAdminOperationsAccess() {
@@ -97,10 +164,37 @@ async function requireAdminOperationsAccess() {
 // parameters) don't need it — Postgres resolves an in-line string literal's
 // type from context.
 
-async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, paymentEvent, skip, take }) {
+async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStatus, paymentEvent, skip, take }) {
+  // Attribution lives HERE, in the arms, and nowhere else. Postgres has no
+  // empty `IN ()` — it is a syntax error, not a match-nothing — so every
+  // list below is guarded before it is injected, and an empty scope becomes
+  // an explicit `false` rather than a 500.
+  const ownedBy = (column, ids) =>
+    ids.length === 0
+      ? Prisma.sql`AND false`
+      : scope.includeUnattributed
+      ? Prisma.sql`AND (${column} IN (${Prisma.join(ids)}) OR ${column} IS NULL)`
+      : Prisma.sql`AND ${column} IN (${Prisma.join(ids)})`;
+
+  // An Order is stamped with a User.id (Order.createdByStaffId → User), an
+  // Appointment with a Staff.id (the denormalized, indexed Appointment.staffId
+  // — never the three-hop join through StaffService). The two id spaces are
+  // not interchangeable: crossing them matches nothing, silently.
+  const orderScope = ownedBy(Prisma.sql`o."createdByStaffId"`, scope.userIds);
+  const appointmentScope =
+    scope.staffIds.length === 0
+      ? Prisma.sql`AND false`
+      : Prisma.sql`AND a."staffId" IN (${Prisma.join(scope.staffIds)})`;
+  // Adjustments and transfers are audit rows, and an audit row already knows
+  // who did it — the cheapest honest attribution on this screen.
+  const actorScope = ownedBy(Prisma.sql`al."actorId"`, scope.userIds);
+
   const includeOrders = !sourceTypes || sourceTypes.includes("ORDER");
-  const includeWorkshops = !sourceTypes || sourceTypes.includes("WORKSHOP");
-  const includeFormations = !sourceTypes || sourceTypes.includes("FORMATION");
+  // Ateliers and formations carry no staff link in the schema at all, so
+  // there is nothing to filter them by — they are the salon's own events,
+  // included whole in salon mode and dropped in staff mode.
+  const includeWorkshops = (!sourceTypes || sourceTypes.includes("WORKSHOP")) && scope.includeActivities;
+  const includeFormations = (!sourceTypes || sourceTypes.includes("FORMATION")) && scope.includeActivities;
   // Appointments are only ever reachable from the unrestricted (transactions)
   // preset — Commandes/Ateliers/Formations never showed them before either.
   const includeAppointments = !sourceTypes;
@@ -136,6 +230,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
       )) AS "sortAt"
       FROM "Order" o
       WHERE 1=1
+        ${orderScope}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND o."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${
           paymentEvent !== "ALL"
@@ -204,6 +299,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
       JOIN "Appointment" a ON a.id = p."appointmentId"
       WHERE t."isDeleted" = false
         AND p."appointmentId" IS NOT NULL
+        ${appointmentScope}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND a."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${paymentEvent !== "ALL" ? Prisma.sql`AND t."transactionType"::text = ${paymentEvent}` : Prisma.empty}
     `);
@@ -214,6 +310,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
       SELECT al.id AS id, 'ADJUSTMENT' AS "sourceType", al."createdAt" AS "sortAt"
       FROM "AuditLog" al
       WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_PRICE_ADJUSTED}
+        ${actorScope}
     `);
   }
 
@@ -226,6 +323,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
       JOIN "workshops" w ON w.id = ws."workshopId"
       WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_SESSION_TRANSFERRED}
         AND al."entityType" = 'WorkshopReservation'
+        ${actorScope}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND wr."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${type !== "ALL" ? Prisma.sql`AND w."type"::text = ${type}` : Prisma.empty}
     `);
@@ -240,6 +338,7 @@ async function listUnifiedOperationIds({ sourceTypes, type, lifecycleStatus, pay
       JOIN "formations" f ON f.id = fs."formationId"
       WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_SESSION_TRANSFERRED}
         AND al."entityType" = 'FormationReservation'
+        ${actorScope}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND fr."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${type !== "ALL" ? Prisma.sql`AND f."type"::text = ${type}` : Prisma.empty}
     `);
@@ -745,23 +844,67 @@ async function hydrateTransfers(ids) {
  * preset, exactly as before unification.
  */
 export async function getAdminOperations(params = {}) {
-  if (!(await requireAdminOperationsAccess())) {
+  const session = await auth();
+  if (!session?.user) {
     return { success: false, message: "Non autorisé.", data: [], totalCount: 0, page: 1, pageSize: PAGE_SIZE };
   }
 
-  const { tab, page, type, lifecycleStatus, paymentEvent } = normalizeParams(params);
+  const { tab, page, type, lifecycleStatus, paymentEvent, staffId } = normalizeParams(params);
   const skip = (page - 1) * PAGE_SIZE;
   const sourceTypes = OPERATION_PRESETS[tab]?.sourceTypes ?? null;
 
-  try {
-    const { ids: idRows, totalCount } = await listUnifiedOperationIds({
-      sourceTypes,
+  // A practitioner reads this through /dashboard/mes-operations and sees her
+  // own lines and nothing else: her own id is FORCED here, server-side,
+  // whatever the query string asked for — the route guard on
+  // /dashboard/operations is unchanged and still admin-only, and every
+  // export of a "use server" module is a public endpoint in its own right.
+  const isAdmin = isAdminRole(session.user.role);
+  let requestedStaffId = staffId;
+  if (!isAdmin) {
+    const own = await prisma.staff.findFirst({
+      where: { userId: session.user.id, isDeleted: false },
+      select: { id: true },
+    });
+    if (!own) {
+      return { success: false, message: "Non autorisé.", data: [], totalCount: 0, page: 1, pageSize: PAGE_SIZE };
+    }
+    requestedStaffId = own.id;
+  }
+
+  const scope = await resolveOperationsScope(requestedStaffId);
+  if (!scope) {
+    return {
+      success: false,
+      message: "Membre du personnel introuvable.",
+      tab,
+      page,
       type,
       lifecycleStatus,
       paymentEvent,
-      skip,
-      take: PAGE_SIZE,
-    });
+      staffId: requestedStaffId,
+      staffOptions: [],
+      pageSize: PAGE_SIZE,
+      totalCount: 0,
+      data: [],
+    };
+  }
+
+  try {
+    const [{ ids: idRows, totalCount }, staffOptions] = await Promise.all([
+      listUnifiedOperationIds({
+        scope,
+        sourceTypes,
+        type,
+        lifecycleStatus,
+        paymentEvent,
+        skip,
+        take: PAGE_SIZE,
+      }),
+      // Only an admin gets a filter to drive; the personal view has none.
+      // Marie appears in it like anyone else — the difference is that her
+      // rows are already in the default, unfiltered view.
+      isAdmin ? listOperationsStaffOptions() : Promise.resolve([]),
+    ]);
 
     const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [], ADJUSTMENT: [], TRANSFER: [] };
     for (const row of idRows) idsBySource[row.sourceType]?.push(row.id);
@@ -790,6 +933,10 @@ export async function getAdminOperations(params = {}) {
       type,
       lifecycleStatus,
       paymentEvent,
+      staffId: scope.staffId,
+      staffName: scope.staffName,
+      staffOptions,
+      readOnly: !isAdmin,
       pageSize: PAGE_SIZE,
       totalCount,
       data: serializeDecimalFields(data),
@@ -803,12 +950,30 @@ export async function getAdminOperations(params = {}) {
       type,
       lifecycleStatus,
       paymentEvent,
+      staffId: scope.staffId,
+      staffName: scope.staffName,
+      staffOptions: [],
+      readOnly: !isAdmin,
       pageSize: PAGE_SIZE,
       totalCount: 0,
       data: [],
       message: "Impossible de charger les opérations.",
     };
   }
+}
+
+/**
+ * The staff directory behind the Opérations filter — same shape and same
+ * ordering as getReportsData's own, so the two screens offer the same names
+ * in the same order. Marie is in it like every other practitioner.
+ */
+async function listOperationsStaffOptions() {
+  const staffList = await prisma.staff.findMany({
+    where: { isDeleted: false, user: { isDeleted: false } },
+    orderBy: { user: { fullName: "asc" } },
+    select: { id: true, isActive: true, user: { select: { fullName: true } } },
+  });
+  return staffList.map((s) => ({ id: s.id, fullName: s.user.fullName, isActive: s.isActive }));
 }
 
 /**

@@ -271,6 +271,7 @@ describe("the worklist is visible enough to be worked", () => {
   test("staff who cannot open the orders screen get no count and no query", () => {
     const counter = source("lib/orders/count-pickups-to-verify.js");
     expect(counter).toContain("DASHBOARD_PERMISSIONS.ORDERS.includes(role)");
-    expect(counter).toContain("STAFF_PERMISSIONS.ORDERS");
+    // Boutique orders are the salon's own screen since 16/09/2026.
+    expect(counter).toContain("if (!isTillCashOperator(user)) return 0;");
   });
 });

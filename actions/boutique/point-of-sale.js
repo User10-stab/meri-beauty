@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole, isTillCashOperator } from "@/lib/authorization";
+import { isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
@@ -34,7 +34,7 @@ const POS_CHECKOUT_SECONDS = 31 * 60;
 async function requirePointOfSaleAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE))) {
+  if (!isTillCashOperator(session.user)) {
     return { error: "Accès non autorisé." };
   }
   return { session };
@@ -708,7 +708,11 @@ export async function completePointOfSaleSale(input) {
         where: { id: "main-salon" },
         select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
       });
-      const ticketPdf = await renderTicketPdf({
+      // No ticket number means an independent rang this sale up: it is her
+      // sale, under her own VAT number, so the salon issues no ticket for it
+      // — see lib/tickets/allocate-ticket-number.js. The e-mail below is
+      // already conditional on a PDF existing, so it stops with it.
+      const ticketPdf = !result.order.ticketNumber ? null : await renderTicketPdf({
         orderNumber: result.order.orderNumber,
         ticketNumber: result.order.ticketNumber,
         issuedAt: result.order.createdAt,
@@ -793,7 +797,9 @@ export async function completePointOfSaleSale(input) {
       where: { id: "main-salon" },
       select: { legalName: true, vatNumber: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
     });
-    const receiptPdf = await renderTicketPdf({
+    // Same rule as the walk-in branch: an independent's sale gets no ticket
+    // number, so the salon produces no receipt document for it.
+    const receiptPdf = !result.order.ticketNumber ? null : await renderTicketPdf({
       orderNumber: result.order.orderNumber,
       ticketNumber: result.order.ticketNumber,
       invoiceNumber: result.invoice?.number ?? null,
@@ -823,9 +829,14 @@ export async function completePointOfSaleSale(input) {
       html: `<p>Bonjour ${result.customer.fullName},</p><p>Merci pour votre achat en magasin.</p><p>Votre reçu pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p>${pendingInvoiceNote ? `<p>${pendingInvoiceNote.trim()}</p>` : ""}<p>L'équipe Meri Beauty</p>`,
       ...(receiptPdf ? { attachments: [{ filename: `${result.order.ticketNumber}.pdf`, content: receiptPdf }] } : {}),
     };
-    let receiptEmailResult = await sendEmail(receiptEmail);
-    if (!receiptEmailResult?.success) receiptEmailResult = await sendEmail(receiptEmail);
-    if (!receiptEmailResult?.success) {
+    // This e-mail exists only to deliver that receipt, and its body says so
+    // ("est joint à cet e-mail") — sending it with nothing attached for
+    // every independent's sale would be a standing lie, so it goes only when
+    // there is a document to carry. A render failure keeps its old
+    // behaviour: the attempt is still made, and still reported.
+    let receiptEmailResult = result.order.ticketNumber ? await sendEmail(receiptEmail) : null;
+    if (result.order.ticketNumber && !receiptEmailResult?.success) receiptEmailResult = await sendEmail(receiptEmail);
+    if (result.order.ticketNumber && !receiptEmailResult?.success) {
       captureError(new Error(receiptEmailResult?.error || "POS receipt email failed"), {
         area: "point-of-sale",
         orderId: result.order.id,

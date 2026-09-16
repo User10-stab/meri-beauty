@@ -59,7 +59,7 @@ function formatSessionDate(date) {
  * @param {boolean} [props.highlighted] - Notification deep-link focus ring.
  * @param {object} [props.rowRef] - Ref attached to the row for scroll-into-view.
  */
-export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, highlighted = false, rowRef }) {
+export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSendCheckIn, highlighted = false, rowRef }) {
   const priceFormatted = (value) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
 
@@ -164,6 +164,18 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, high
               title="Le client n'est pas venu — aucun remboursement"
             >
               Absent
+            </button>
+          )}
+          {/* Any viewer of a confirmed booking can put the entry pass back
+              in the client's inbox — a paid booking must stay provable. */}
+          {row.status === "CONFIRMED" && onSendCheckIn && (
+            <button
+              type="button"
+              onClick={() => onSendCheckIn(row)}
+              className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+              title="Renvoyer le QR code d'accès au client par e-mail"
+            >
+              QR code
             </button>
           )}
           <RowActions row={row} onEdit={onEdit} onDelete={onDelete} />

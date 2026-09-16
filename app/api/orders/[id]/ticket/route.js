@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { canAccessDashboard } from "@/lib/authorization";
+import { canAccessDashboard, isTillCashOperator } from "@/lib/authorization";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
 
@@ -22,7 +22,7 @@ export const runtime = "nodejs";
  * this stays available for it anyway, since a customer at the till usually
  * just wants the slip.
  *
- * Dashboard roles may reprint any receipt. A logged-in customer may reprint
+ * The salon's own accounts (admin + Marie) may reprint any receipt. A logged-in customer may reprint
  * only a receipt for their own named order; anonymous walk-in sales keep the
  * dashboard-only restriction because there is no owner to authenticate.
  */
@@ -85,6 +85,10 @@ export async function GET(req, { params }) {
     if (order.userId !== session.user.id || !order.payment?.transactions.length) {
       return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
     }
+  } else if (!isTillCashOperator(session.user)) {
+    // On the dashboard side, a ticket is the salon's document: only the admin
+    // and Marie reprint one — never an independent practitioner.
+    return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
   }
 
   // CASH-only, and only ever set by the same allocatePieceNumber call that

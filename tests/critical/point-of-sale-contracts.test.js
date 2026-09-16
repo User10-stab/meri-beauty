@@ -8,9 +8,9 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8");
 describe("point-of-sale security contracts", () => {
   const pos = source("actions/boutique/point-of-sale.js");
 
-  test("requires the dedicated point-of-sale permission", () => {
-    expect(pos).toContain("STAFF_PERMISSIONS.POINT_OF_SALE");
-    expect(pos).toContain("hasDashboardPermission");
+  test("is reserved to the salon's own accounts (admin + Marie), not a grantable permission", () => {
+    expect(pos).toContain("if (!isTillCashOperator(session.user)) {");
+    expect(pos).not.toContain("STAFF_PERMISSIONS.POINT_OF_SALE");
     expect(pos).toContain("requirePointOfSaleAccess");
   });
 

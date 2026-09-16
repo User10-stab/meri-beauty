@@ -12,6 +12,7 @@ import {
   markFormationReservationNoShow,
 } from "@/actions/formations/manage-reservation";
 import { isAdminRole } from "@/lib/authorization";
+import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
 import { CancelReservationDialog } from "@/components/dashboard/workshops/CancelReservationDialog";
 import { SettleReservationDialog } from "@/components/dashboard/reservations/SettleReservationDialog";
 
@@ -63,6 +64,12 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
         toast.error(result.message);
       }
     });
+  }
+
+  async function handleSendCheckIn(row) {
+    const result = await resendCheckInQr({ kind: "FORMATION", id: row.id });
+    if (result.success) toast.success(result.message);
+    else toast.error(result.message);
   }
 
   function handleNoShow(row) {
@@ -127,6 +134,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
         onDelete={isAdmin ? setToCancel : undefined}
         onSettle={(row) => setToSettle(row)}
         onNoShow={handleNoShow}
+        onSendCheckIn={handleSendCheckIn}
         searchPlaceholder="Rechercher une réservation..."
         searchFilter={(row, query) =>
           row.session?.formation?.title?.toLowerCase().includes(query) ||

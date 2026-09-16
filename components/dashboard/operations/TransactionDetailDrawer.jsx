@@ -10,9 +10,11 @@ import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
 import { sendCheckInEmail } from "@/actions/payments/send-checkin-email";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { CancelAndRefundDialog } from "@/components/dashboard/operations/CancelAndRefundDialog";
+import { GenerateCreditNoteDialog } from "@/components/dashboard/operations/GenerateCreditNoteDialog";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import { performedByLabel } from "@/lib/dashboard/operation-filters";
+import { SHIPPED_ORDER_STATUSES } from "@/lib/refunds/authorize";
 
 const money = (value) =>
   new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
@@ -70,8 +72,7 @@ function describeSource(payment) {
       status: r.status,
       extra: `${r.seatsCount} place(s) · session du ${dateTime(r.session.startDate)}`,
       customer: r.customer,
-      // Deliberately no performedByText — see admin-operations.js's own
-      // comment on why ateliers/événements stay out of this attribution.
+      performedByText: performedByLabel(r.performedBy),
     };
   }
   if (payment?.formationReservation) {
@@ -122,6 +123,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const [sendingCheckIn, setSendingCheckIn] = useState(false);
   const [deliveryDocument, setDeliveryDocument] = useState(null);
   const [cancelRefundOpen, setCancelRefundOpen] = useState(false);
+  const [generateCreditNoteOpen, setGenerateCreditNoteOpen] = useState(false);
 
   useEffect(() => {
     if (!transactionId) {
@@ -162,6 +164,25 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     if (!transactionId) return;
     const refreshed = await getTransactionDetail(transactionId);
     if (refreshed.success) setDetail(refreshed.data);
+  }
+
+  // After "Générer note de crédit" succeeds, go straight to the same
+  // delivery card an invoice already uses (e-mail / Peppyrus / both) — the
+  // whole point of the button per the handoff was "generate, then send",
+  // not a second trip back into this drawer to find the note.
+  //
+  // The credit note comes from the action's own result, not from refetching
+  // this transaction's detail: it belongs to the newly created REFUND
+  // transaction, not the DEPOSIT/FINAL_PAYMENT one this drawer is open on,
+  // so `refreshed.data.creditNote` would always be empty here.
+  async function handleCreditNoteGenerated(result) {
+    if (transactionId) {
+      const refreshed = await getTransactionDetail(transactionId);
+      if (refreshed.success) setDetail(refreshed.data);
+    }
+    if (result?.creditNote) {
+      setDeliveryDocument({ kind: "CREDIT_NOTE", document: result.creditNote });
+    }
   }
 
   // Payment-scoped on purpose (no transactionId): the client is owed the whole
@@ -239,18 +260,68 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     Boolean(payment?.ticketEmailedAt) &&
     Boolean(detail?.lastPriceAdjustedAt) &&
     new Date(detail.lastPriceAdjustedAt) > new Date(payment.ticketEmailedAt);
+  // A reservation gets its ticket at settlement, never on a deposit — the route
+  // refuses anything else (lib/cash-book/build-payment-ticket.js, "pas de ticket
+  // avant le solde"). Offering the link regardless opened a tab of raw JSON,
+  // which is how staff found out. Mirror the server's own guard instead of
+  // re-deriving it from the balance, so the two can never drift apart.
+  const ticketExists = Boolean(payment?.order) || payment?.status === "PAID";
   const signedMoney = (value, refund) => `${refund ? "−" : ""}${money(value)}`;
-  const canGenerateNote = isRefund && Boolean(invoice) && !creditNote;
+  // A credit note is written against the REFUND row, so the cancelled sale's
+  // own transaction carries none — which is exactly the row an admin opens
+  // after cancelling. Fall back to every note standing against this payment's
+  // invoice so the document is reachable (download / send) from either side.
+  const creditNotes = creditNote ? [creditNote] : (invoice?.creditNotes ?? []);
+  // The third way to mint a note (issueMissingRefundDocument, for a refund
+  // that moved money but never got its paperwork). Tested against the whole
+  // list, not just this row's own note, so an invoice that already carries
+  // one is never offered a second.
+  const canGenerateNote = isRefund && Boolean(invoice) && creditNotes.length === 0;
   const refundOperation = detail?.settledRefundLeg?.refundOperation ?? null;
   const hasB2CCustomer = isRefund && refundOperation?.status === "COMPLETED" && !creditNote && !invoice;
-  // Same formula InvoiceRowActions.jsx uses for the Transactions-tab row —
-  // kept identical so "can this be cancelled and refunded" never disagrees
-  // depending on which door an admin walked through to get here.
+  // A cancellation already opened on this payment means both buttons below
+  // are spent: openRefundOperation resumes that operation rather than
+  // creating a second one, so clicking again issues no new credit note and
+  // just reports "opération déjà reprise". Only the in-flight statuses
+  // count, so a settled partial return still leaves the rest refundable —
+  // and an item cancelled through some other screen with no operation at all
+  // still offers the reprise these buttons exist for.
+  const refundInFlight = (payment?.refundOperations ?? []).length > 0;
+  // Mirrors InvoiceRowActions.jsx's formula for the Transactions-tab row,
+  // plus the guard above. The row component's own cancel button sits in its
+  // `!onOpenDetail` branch, which AdminOperationsClient never reaches for a
+  // row that has a transaction — this drawer is the live surface.
   const canCancelAndRefund =
     Boolean(payment?.id) &&
     ["DEPOSIT", "FINAL_PAYMENT"].includes(detail?.transactionType) &&
     !detail?.refundState?.fullyCredited &&
-    Number(detail?.refundState?.remainingRefundable) > 0.01;
+    Number(detail?.refundState?.remainingRefundable) > 0.01 &&
+    !refundInFlight;
+  // "Générer note de crédit" only ever succeeds through authorize.js's one
+  // exception for POST_COMPLETION_CORRECTION — a COMPLETED appointment/
+  // reservation, or a COMPLETED/SHIPPED order. Offering it on anything still
+  // active (CONFIRMED, PENDING…) used to be possible: the click would reach
+  // the server and get refused with REQUEST_REQUIRED — "le client doit
+  // d'abord envoyer une demande écrite" — a written-customer-request message
+  // that makes no sense for a price correction, because that denial exists
+  // for a completely different situation. Mirrored here so the button is
+  // simply absent until the item is actually eligible; "Annuler et
+  // rembourser" (already offered whenever canCancelAndRefund is true) is the
+  // correct action for anything still active.
+  const isPostCompletionEligible = payment?.order
+    ? SHIPPED_ORDER_STATUSES.has(source.status)
+    : source.status === "COMPLETED";
+  // Deliberately not gated on remainingRefundable/fullyCredited beyond that
+  // — those describe whether the OTHER button applies, not this one.
+  // refundInFlight still applies: cancelUnderlyingItem sets every source's
+  // status to CANCELLED, and clicking again past that point only resumes the
+  // existing operation (no second credit note), which reads to an admin as
+  // the button silently doing nothing.
+  const canGenerateCreditNote =
+    Boolean(payment?.id) &&
+    ["DEPOSIT", "FINAL_PAYMENT"].includes(detail?.transactionType) &&
+    isPostCompletionEligible &&
+    !refundInFlight;
 
   return createPortal(
     <div
@@ -332,15 +403,26 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 <Row label="Montant total" value={payment ? money(payment.totalAmount) : null} />
                 <Row label="Déjà réglé" value={payment ? money(payment.paidAmount) : null} />
                 <Row label="Solde restant" value={payment ? money(amountStillDue(payment, source.status)) : null} />
-                {canCancelAndRefund && (
-                  <button
-                    type="button"
-                    onClick={() => setCancelRefundOpen(true)}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
-                  >
-                    <AlertTriangle size={14} /> Annuler et rembourser
-                  </button>
-                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {canCancelAndRefund && (
+                    <button
+                      type="button"
+                      onClick={() => setCancelRefundOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                    >
+                      <AlertTriangle size={14} /> Annuler et rembourser
+                    </button>
+                  )}
+                  {canGenerateCreditNote && (
+                    <button
+                      type="button"
+                      onClick={() => setGenerateCreditNoteOpen(true)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50"
+                    >
+                      <FilePlus2 size={14} /> Générer note de crédit
+                    </button>
+                  )}
+                </div>
               </div>
 
               {siblings.length > 1 && (
@@ -374,10 +456,10 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                   <SectionTitle>Reçu / ticket de caisse</SectionTitle>
                   {/* A boutique order's ticket has no permission gate (its own
                       route stays open to every dashboard role); a reservation's
-                      ticket needs the same SEND_TICKET_EMAIL permission to open
+                      ticket needs the same canSendTicketEmail() check to open
                       as it does to e-mail — the route itself now enforces this,
                       this just avoids offering a link that would 403. */}
-                  {(payment.order || detail.canSendTicketEmail) && (
+                  {(payment.order || (detail.canSendTicketEmail && ticketExists)) && (
                     <a
                       href={payment.order ? `/api/orders/${payment.order.id}/ticket` : `/api/payments/${payment.id}/ticket`}
                       target="_blank"
@@ -388,12 +470,18 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                       Ouvrir le reçu
                     </a>
                   )}
+                  {!payment.order && !ticketExists && (
+                    <p className="text-sm text-gray-500">
+                      Pas encore de ticket — il est émis à l&apos;encaissement du solde, pas sur l&apos;acompte. Reste dû
+                      : {money(amountStillDue(payment, source.status))}.
+                    </p>
+                  )}
                   {/* No auto-send exists any more; ticketEmailedAt is set
                       only by the manual, permission-gated action in
                       actions/payments/send-ticket-email.js — this line is
                       what makes that visible to admins on this same
                       transaction, independent of who sent it. */}
-                  {!payment.order && (
+                  {!payment.order && ticketExists && (
                     <>
                       {detail.canSendTicketEmail && (
                         <button
@@ -505,41 +593,46 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 )}
               </div>
 
-              {(creditNote || canGenerateNote) && (
+              {(creditNotes.length > 0 || canGenerateNote) && (
                 <div>
                   <SectionTitle>Note de crédit</SectionTitle>
-                  {creditNote ? (
-                    <div className="space-y-3 rounded-lg border border-gray-100 px-4 py-3 text-sm">
-                      <div className="flex items-center justify-between">
-                        <span className="text-gray-600">
-                          {creditNote.number} · {dateTime(creditNote.issuedAt)}
-                          {creditNote.reason && <span className="block text-xs text-gray-400">{creditNote.reason}</span>}
-                        </span>
-                        <span className="font-medium text-red-600">{money(-creditNote.totalInclVat)}</span>
-                      </div>
-                      <a
-                        href={`/api/credit-notes/${creditNote.id}/pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
-                      >
-                        <FileMinus size={16} /> Télécharger la note de crédit
-                      </a>
-                      {invoice?.customerType === "B2B" && (
-                        <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
-                          <p className="font-medium text-amber-900">Livraison B2B</p>
-                          <p className="mt-1 text-xs leading-5 text-amber-800">
-                            Ouvrez la carte de livraison pour choisir l'e-mail ou l'envoi Peppol (Peppyrus).
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => setDeliveryDocument({ kind: "CREDIT_NOTE", document: creditNote })}
-                            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                  {creditNotes.length > 0 ? (
+                    <div className="space-y-3">
+                      {creditNotes.map((note) => (
+                        <div key={note.id} className="space-y-3 rounded-lg border border-gray-100 px-4 py-3 text-sm">
+                          <div className="flex items-center justify-between">
+                            <span className="text-gray-600">
+                              {note.number} · {dateTime(note.issuedAt)}
+                              {note.reason && <span className="block text-xs text-gray-400">{note.reason}</span>}
+                            </span>
+                            <span className="font-medium text-red-600">{money(-note.totalInclVat)}</span>
+                          </div>
+                          <a
+                            href={`/api/credit-notes/${note.id}/pdf`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600 transition-colors hover:bg-red-100"
                           >
-                            <Mail size={13} /> Envoyer la note de crédit
-                          </button>
+                            <FileMinus size={16} /> Télécharger la note de crédit
+                          </a>
+                          {invoice?.customerType === "B2B" && (
+                            <div className="rounded-lg border border-amber-100 bg-amber-50/60 p-3">
+                              <p className="font-medium text-amber-900">Livraison B2B</p>
+                              <p className="mt-1 text-xs leading-5 text-amber-800">
+                                Ouvrez la carte de livraison pour choisir l'e-mail ou l'envoi Peppol (Peppyrus).
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => setDeliveryDocument({ kind: "CREDIT_NOTE", document: note })}
+                                className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                              >
+                                <Mail size={13} />
+                                {note.emailSentAt || note.peppyrusSentAt ? "Gérer l'envoi" : "Envoyer la note de crédit"}
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
                   ) : (
                     <div className="flex items-center justify-between rounded-lg border border-gray-100 px-4 py-2.5 text-sm">
@@ -608,6 +701,14 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
                 setCancelRefundOpen(false);
                 refreshDetail();
               }}
+            />
+          )}
+          {canGenerateCreditNote && (
+            <GenerateCreditNoteDialog
+              open={generateCreditNoteOpen}
+              paymentId={payment?.id}
+              onClose={() => setGenerateCreditNoteOpen(false)}
+              onGenerated={handleCreditNoteGenerated}
             />
           )}
         </div>

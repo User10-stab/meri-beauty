@@ -16,7 +16,9 @@ import { resolveCounterPriceAdjustment } from "@/lib/payments/counter-price-adju
 import { issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/lib/invoicing";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { allocatePieceNumber, PIECE_SERIES, seriesForActivityType } from "@/lib/cash-book/piece-number";
+import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
+import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { workshopReservationConfirmationEmail, formationReservationConfirmationEmail } from "@/lib/email-templates";
 import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
 import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
@@ -180,6 +182,19 @@ export async function createCounterReservation(input) {
     return { success: false, message: "Indiquez la référence du ticket du terminal." };
   }
 
+  // Fast-path check before the transaction opens — the authoritative one is
+  // the inner tx.cashSession.findFirst below, in case a session closes in
+  // the gap between the two. ensureCashSessionOpen auto-opens on the spot
+  // (carrying the last closed session's counted total forward) when that
+  // float is usable, instead of leaving a brand-new cash sale to wait on the
+  // cron or a manual "Ouvrir la caisse" click.
+  if (useTill) {
+    const openCashSessionGate = await ensureCashSessionOpen(prisma);
+    if (!openCashSessionGate) {
+      return { success: false, message: errorMessage("CASH_SESSION_REQUIRED"), requiresCashSession: true };
+    }
+  }
+
   let result;
   try {
     result = await prisma.$transaction(
@@ -274,6 +289,17 @@ export async function createCounterReservation(input) {
           },
         });
 
+        if (payment.status === "PAID") {
+          await allocatePaymentTicketNumber(
+            tx,
+            payment.id,
+            data.kind,
+            data.kind === "WORKSHOP" ? catalogue.type : null,
+            new Date(),
+            offTill
+          );
+        }
+
         const series = config.seriesOf(catalogue);
         // Piece number only for a till operator's cash — an off-till row
         // never enters the Livre de caisse, which requires both.
@@ -295,20 +321,23 @@ export async function createCounterReservation(input) {
         // A deposit is never invoiced — the legally-required invoice is
         // issued once the full amount is settled, exactly like every other
         // reservation (see settleReservation). Full payment invoices
-        // immediately, same rule as the online full-payment path.
-        const invoice =
-          isFullPayment && hasInvoiceableVatIdentity(user)
-            ? await issueInvoice(tx, {
-                paymentId: payment.id,
-                source: config.invoiceSource,
-                totalInclVat: total,
-                customer: buildInvoiceCustomer(user),
-                lines: buildServiceInvoiceLines({
-                  description: `${catalogue.title} (${data.seatsCount} place${data.seatsCount > 1 ? "s" : ""})`,
-                  totalAmount: total,
-                }),
-              })
-            : null;
+        // immediately, same rule as the online full-payment path. A
+        // non-privileged staff member (offTill) can never cause an Invoice
+        // to be created — see isTillCashOperator — the reservation still
+        // completes, it simply never gets an invoice.
+        const invoiceDue = isFullPayment && hasInvoiceableVatIdentity(user) && !offTill;
+        const invoice = invoiceDue
+          ? await issueInvoice(tx, {
+              paymentId: payment.id,
+              source: config.invoiceSource,
+              totalInclVat: total,
+              customer: buildInvoiceCustomer(user),
+              lines: buildServiceInvoiceLines({
+                description: `${catalogue.title} (${data.seatsCount} place${data.seatsCount > 1 ? "s" : ""})`,
+                totalAmount: total,
+              }),
+            })
+          : null;
 
         await tx.auditLog.create({
           data: {

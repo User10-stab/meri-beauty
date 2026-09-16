@@ -49,7 +49,7 @@ const styles = StyleSheet.create({
   grandTotalRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 4 },
   grandTotalLabel: { fontSize: 9, fontWeight: 700 },
   grandTotalValue: { fontSize: 11, fontWeight: 700, color: COLORS.brand },
-  notice: { fontSize: 6.5, color: COLORS.faint, textAlign: "center", marginTop: 10 },
+  notice: { fontSize: 5.5, color: COLORS.faint, textAlign: "center", marginTop: 10 },
   thanks: { fontSize: 8, fontWeight: 700, color: COLORS.brand, textAlign: "center", marginTop: 10 },
 });
 
@@ -80,7 +80,7 @@ function estimateTicketHeight(lines, payments = []) {
 function TicketPage({ ticket, contact = null }) {
   const payments = Array.isArray(ticket.payments) ? ticket.payments : [];
   const pageHeight = estimateTicketHeight(ticket.lines, payments);
-  const ticketNumber = ticket.ticketNumber ?? `T-C-${ticket.orderNumber}`;
+  const ticketNumber = ticket.ticketNumber;
 
   return (
       <Page size={[WIDTH, pageHeight]} style={styles.page}>
@@ -91,11 +91,18 @@ function TicketPage({ ticket, contact = null }) {
         <Rule />
 
         <Text style={styles.title}>TICKET DE CAISSE</Text>
-        <Text style={styles.meta}>N° {ticketNumber} — {formatDate(ticket.issuedAt)}</Text>
+        {/* A sale settled before ticket numbering shipped (15/09/2026) carries
+            no number until scripts/backfill-ticket-numbers.mjs runs. Printing the
+            label regardless produced "N° — 15 septembre 2026", which reads as if
+            the date were the number. Drop the label, keep the issue date. */}
+        <Text style={styles.meta}>{ticketNumber ? `N° ${ticketNumber} — ` : ""}{formatDate(ticket.issuedAt)}</Text>
         {/* Cash-only: the livre de caisse line this collection produced.
             Absent for CARD/ONLINE, which never enter that book. */}
         {ticket.pieceNumber ? <Text style={styles.meta}>N° pièce {ticket.pieceNumber}</Text> : null}
-        {ticket.orderNumber != null ? <Text style={styles.meta}>Commande n° {ticket.orderNumber}</Text> : null}
+        {/* No order number by design — T-<year>-<seq> is the only reference a
+            customer is ever shown, so the two sequences can never be read as
+            contradicting each other. The return lookup accepts both, so a
+            receipt printed before this change still works. */}
 
         <Rule />
 

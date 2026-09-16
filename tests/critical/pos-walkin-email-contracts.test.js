@@ -14,15 +14,21 @@ const baseSale = {
   cashReceived: 10,
 };
 
-describe("the walk-in ticket e-mail is mandatory and format-checked", () => {
-  test("no e-mail at all is rejected because every POS ticket must be mailed", () => {
+describe("the walk-in ticket e-mail is optional but format-checked when given", () => {
+  // Reversed from mandatory on purpose — staff can uncheck the till's
+  // "collect e-mail" nudge and send an empty string; the sale still
+  // completes with no ticket e-mailed. See walkInEmailSchema's own comment
+  // in lib/validations/point-of-sale.js.
+  test("no e-mail at all is accepted — a walk-in customer isn't required to leave one", () => {
     const result = pointOfSaleSaleSchema.safeParse(baseSale);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.data.walkInEmail).toBe("");
   });
 
-  test("a blank string is rejected the same way", () => {
+  test("a blank string is accepted the same way", () => {
     const result = pointOfSaleSaleSchema.safeParse({ ...baseSale, walkInEmail: "" });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
+    expect(result.data.walkInEmail).toBe("");
   });
 
   test("a well-formed e-mail is normalised and kept", () => {
@@ -48,7 +54,7 @@ describe("completePointOfSaleSale wires the walk-in e-mail without creating an i
   test("the ticket, not an Invoice, is what gets attached and sent", () => {
     const walkInBlockStart = posSource.indexOf("if (isWalkIn) {");
     const emailCallIndex = posSource.indexOf("sendEmail(ticketEmail)");
-    const attachmentIndex = posSource.indexOf("filename: `ticket-${result.order.orderNumber}.pdf`");
+    const attachmentIndex = posSource.indexOf("filename: `${result.order.ticketNumber}.pdf`");
     expect(walkInBlockStart).toBeGreaterThan(-1);
     expect(emailCallIndex).toBeGreaterThan(walkInBlockStart);
     expect(attachmentIndex).toBeGreaterThan(walkInBlockStart);

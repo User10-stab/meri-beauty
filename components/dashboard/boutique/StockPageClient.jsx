@@ -2,11 +2,39 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
-import { Search, AlertTriangle, Boxes, History, ScanLine } from "lucide-react";
+import { Search, AlertTriangle, Boxes, History, ScanLine, ListOrdered, Printer } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { StockAdjustDialog } from "@/components/dashboard/boutique/StockAdjustDialog";
 import { StockHistoryDrawer } from "@/components/dashboard/boutique/StockHistoryDrawer";
+import { StockSnapshotDateFilter } from "@/components/dashboard/boutique/StockSnapshotDateFilter";
+
+// Mirrors StockHistoryDrawer's French movement-type labels — this file
+// hardcodes its copy in French throughout (like the newer Livre de recettes
+// components) rather than going through next-intl, so the new column follows
+// the same convention as every other string already on this page.
+const MOVEMENT_TYPE_LABELS = {
+  SALE: "Vente",
+  RESTOCK: "Réappro.",
+  RETURN: "Retour",
+  LOSS: "Perte",
+  ADJUSTMENT: "Correction",
+  SALON_USAGE: "Prestation",
+};
+
+function formatShortDate(value) {
+  return new Intl.DateTimeFormat("fr-BE", { day: "2-digit", month: "2-digit", year: "2-digit", timeZone: "Europe/Brussels" }).format(
+    new Date(value)
+  );
+}
+
+function todayDateOnly() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
 
 /**
  * @param {boolean} [props.initialLowStockOnly] - Deep-link preset from the
@@ -19,6 +47,15 @@ export function StockPageClient({ initialVariants, initialSearch = "", initialLo
   const [lowStockOnly, setLowStockOnly] = useState(initialLowStockOnly);
   const [adjusting, setAdjusting] = useState(null);
   const [historyFor, setHistoryFor] = useState(null);
+  const today = useMemo(() => todayDateOnly(), []);
+  // Drives only the "état du stock" print link below — the on-screen table
+  // stays live (getAllVariants has no historical mode: réservé/disponible
+  // aren't recorded over time, so a past-date table would be misleading).
+  const [snapshotDate, setSnapshotDate] = useState(today);
+  const snapshotHref =
+    snapshotDate && snapshotDate !== today
+      ? `/api/stock/inventory-pdf?asOf=${snapshotDate}`
+      : "/api/stock/inventory-pdf";
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -52,6 +89,25 @@ export function StockPageClient({ initialVariants, initialSearch = "", initialLo
 
   return (
     <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+      <div className="flex flex-wrap justify-end gap-2 border-b border-stroke px-6 py-3 dark:border-dark-3">
+        <Link
+          href="/dashboard/boutique/stock/mouvements"
+          className="inline-flex items-center gap-2 rounded-[7px] border border-stroke bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6"
+        >
+          <ListOrdered className="h-3.5 w-3.5" strokeWidth={2} />
+          Mouvements de stock
+        </Link>
+        <StockSnapshotDateFilter value={snapshotDate} today={today} onChange={setSnapshotDate} />
+        <a
+          href={snapshotHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-[7px] border border-stroke bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6"
+        >
+          <Printer className="h-3.5 w-3.5" strokeWidth={2} />
+          {snapshotDate !== today ? `Imprimer l'état du stock au ${formatShortDate(snapshotDate)} (PDF)` : "Imprimer l'état du stock (PDF)"}
+        </a>
+      </div>
       <div className="flex flex-col gap-3 border-b border-stroke px-6 py-4 dark:border-dark-3 lg:flex-row lg:items-center">
         <form onSubmit={handleUsbScan} className="flex w-full max-w-md gap-2">
           <div className="relative flex-1">
@@ -102,6 +158,7 @@ export function StockPageClient({ initialVariants, initialSearch = "", initialLo
               <TableHead>Stock</TableHead>
               <TableHead>Réservé</TableHead>
               <TableHead>Disponible</TableHead>
+              <TableHead>Dernier mouvement</TableHead>
               <TableHead className="pr-6 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -131,6 +188,31 @@ export function StockPageClient({ initialVariants, initialSearch = "", initialLo
                       </span>
                     )}
                   </div>
+                </TableCell>
+                <TableCell>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryFor(v)}
+                    title="Voir l'historique complet"
+                    className="text-left transition-opacity hover:opacity-70"
+                  >
+                    {v.lastMovement ? (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-medium text-gray-700 dark:text-dark-6">
+                            {MOVEMENT_TYPE_LABELS[v.lastMovement.type] ?? v.lastMovement.type}
+                          </span>
+                          <span className={`text-xs font-semibold ${v.lastMovement.quantity > 0 ? "text-emerald-600" : "text-red-500"}`}>
+                            {v.lastMovement.quantity > 0 ? "+" : ""}
+                            {v.lastMovement.quantity}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-400">{formatShortDate(v.lastMovement.createdAt)}</div>
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-400">Aucun mouvement</span>
+                    )}
+                  </button>
                 </TableCell>
                 <TableCell className="pr-6">
                   <div className="flex justify-end gap-1">

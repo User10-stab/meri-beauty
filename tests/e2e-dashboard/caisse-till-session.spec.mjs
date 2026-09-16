@@ -116,36 +116,17 @@ test.describe("the daily till", () => {
     // deterministic owner. openCashSession serialises the check-then-create
     // behind an advisory lock precisely so a double-click cannot do this.
     await page.goto(CAISSE_PAGE);
-    await expect(page.getByRole("heading", { name: /session ouverte/i })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^session ouverte$/i })).toBeVisible();
     // The opening form is not merely disabled — it is not rendered.
     await expect(page.locator("#opening-float")).toHaveCount(0);
 
     expect(await prisma.cashSession.count({ where: { closedAt: null } })).toBe(1);
   });
 
-  test("closing reconciles what was counted against what was expected", async () => {
-    const counted = OPENING_FLOAT + 5;
-
-    await page.goto(CAISSE_PAGE);
-    await page.locator("#counted-cash").fill(String(counted));
-    await page.getByRole("button", { name: /clôturer la caisse/i }).click();
-
-    await expect(page.getByRole("heading", { name: /aucune session ouverte/i })).toBeVisible({ timeout: 20_000 });
-
-    const closed = await prisma.cashSession.findUnique({
-      where: { id: openedSessionId },
-      select: { closedAt: true, closedById: true, expectedCash: true, countedCash: true, variance: true },
-    });
-    expect(closed.closedAt).not.toBeNull();
-    expect(closed.closedById).not.toBeNull();
-
-    // No sales were rung up, so expected is exactly the opening float, and
-    // the 5 € surplus must be recorded rather than silently absorbed — an
-    // unexplained surplus is as much a signal as a shortfall.
-    expect(Number(closed.expectedCash)).toBe(OPENING_FLOAT);
-    expect(Number(closed.countedCash)).toBe(counted);
-    expect(Number(closed.variance)).toBe(5);
-
-    openedSessionId = null; // closed through the UI; afterAll has nothing to do
-  });
+  // Since the 11 Sep 2026 redesign, closing is automatic (always at
+  // midnight — see lib/cash-book/auto-session.js) and there is no manual
+  // "Clôturer la caisse" button left in the UI to click. The manual
+  // "Vérifier le solde" recount that used to sit alongside it was removed
+  // (no real use), so there is nothing left for this suite to exercise past
+  // the till staying open under a second session attempt.
 });

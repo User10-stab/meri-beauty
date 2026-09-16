@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { allocatePieceNumber, seriesForMovementType } from "@/lib/cash-book/piece-number";
 import { computeSessionCashTotals } from "@/lib/cash-book/session-totals";
+import { buildCashMovementLabel } from "@/lib/cash-book/movement-types";
 
 /**
  * Money entering or leaving the drawer without being a sale or a refund:
@@ -71,13 +72,13 @@ export async function recordCashMovement({ type, amount, label, occurredAt = nul
   }
   const rounded = Math.round(value * 100) / 100;
 
-  const trimmedLabel = typeof label === "string" ? label.trim() : "";
-  if (!trimmedLabel) {
-    return { success: false, message: "Indiquez un motif — c'est la seule justification de ce mouvement dans le livre de caisse." };
-  }
-  if (trimmedLabel.length > 200) {
+  const motif = typeof label === "string" ? label.trim() : "";
+  if (motif.length > 200) {
     return { success: false, message: "Le motif ne peut pas dépasser 200 caractères." };
   }
+  // No motif typed → Désignation is just the movement kind ("Apport");
+  // a motif is typed → Désignation is prefixed with it ("Apport: fond de caisse").
+  const finalLabel = buildCashMovementLabel(type, motif);
 
   const when = occurredAt ? new Date(occurredAt) : new Date();
   if (Number.isNaN(when.getTime())) {
@@ -124,7 +125,7 @@ export async function recordCashMovement({ type, amount, label, occurredAt = nul
           cashSessionId: session.id,
           type,
           amount: rounded,
-          label: trimmedLabel,
+          label: finalLabel,
           pieceNumber,
           occurredAt: when,
           recordedById: guard.session.user.id,

@@ -25,7 +25,7 @@ export function ReturnRequestClient() {
   const [step, setStep] = useState("lookup"); // lookup | select | done
   const [lookingUp, setLookingUp] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [orderNumber, setOrderNumber] = useState("");
+  const [reference, setReference] = useState("");
   const [email, setEmail] = useState("");
   const [order, setOrder] = useState(null);
   const [selected, setSelected] = useState({}); // orderItemId -> quantity
@@ -35,7 +35,7 @@ export function ReturnRequestClient() {
   async function handleLookup(e) {
     e.preventDefault();
     setLookingUp(true);
-    const result = await getReturnableOrder({ orderNumber, email });
+    const result = await getReturnableOrder({ reference, email });
     setLookingUp(false);
     if (!result.success) {
       toast.error(result.message);
@@ -78,7 +78,7 @@ export function ReturnRequestClient() {
 
     setSubmitting(true);
     const result = await requestReturn({
-      orderNumber: order.orderNumber,
+      reference: order.reference,
       email,
       reasonCategory,
       reason: reason.trim(),
@@ -99,7 +99,7 @@ export function ReturnRequestClient() {
         <CheckCircle2 size={40} className="mx-auto mb-5 text-[#C8A46A]" />
         <h1 className="mb-3 text-3xl text-[#2F3A2E]">Demande envoyée</h1>
         <p className="text-sm text-gray-500">
-          Votre demande de retour pour la commande n°{order.orderNumber} a bien été transmise. Vous recevrez un e-mail
+          Votre demande de retour pour le ticket {order.reference} a bien été transmise. Vous recevrez un e-mail
           de confirmation, puis une réponse de notre équipe sous peu.
         </p>
       </div>
@@ -118,13 +118,15 @@ export function ReturnRequestClient() {
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Retrouver ma commande</h2>
           <input
             type="text"
-            inputMode="numeric"
-            value={orderNumber}
-            onChange={(e) => setOrderNumber(e.target.value)}
-            placeholder="Numéro de commande (ex : 42)"
+            value={reference}
+            onChange={(e) => setReference(e.target.value)}
+            placeholder="Numéro de ticket (ex : T-2026-000044)"
             className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
             required
           />
+          <p className="-mt-2 text-xs text-gray-400">
+            Il figure en haut de votre ticket de caisse. Sur un ancien ticket, indiquez le numéro de commande.
+          </p>
           <input
             type="email"
             value={email}
@@ -148,7 +150,7 @@ export function ReturnRequestClient() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="border border-neutral-200 p-6">
             <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
-              Commande n°{order.orderNumber}
+              Ticket {order.reference}
             </h2>
             <p className="mb-4 text-xs text-gray-400">
               {order.estimatedDeadline

@@ -10,11 +10,13 @@ import { createAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
 import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-templates";
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines, resolveSettlementInvoice } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
+import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
 import { resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
+import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { resolveCounterPriceAdjustment } from "@/lib/payments/counter-price-adjustment";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
@@ -677,8 +679,14 @@ export async function markAppointmentNoShow(appointmentId) {
           where: { id: noShowPayment.id },
           data: { status: "PAID" },
         });
+        // A non-privileged staff member (offTillActor) can never cause an
+        // Invoice to be created — see isTillCashOperator. The no-show still
+        // gets recorded and the deposit kept, it simply never gets an
+        // invoice.
+        const offTillActor = !isTillCashOperator(authCheck.user);
+        await allocatePaymentTicketNumber(tx, noShowPayment.id, "APPOINTMENT", null, new Date(), offTillActor);
 
-        if (hasInvoiceableVatIdentity(appointment.user)) {
+        if (hasInvoiceableVatIdentity(appointment.user) && !offTillActor) {
           const noShowVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
           await issueInvoice(tx, {
             paymentId: noShowPayment.id,
@@ -876,7 +884,7 @@ export async function completeAppointment(
     // backfilled. Fast-path check before the transaction; the authoritative
     // one is inside it, in case a session closes in the gap between the two.
     if (collectsAtTill && method === "CASH") {
-      const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+      const openCashSessionGate = await ensureCashSessionOpen(prisma);
       if (!openCashSessionGate) {
         return {
           success: false,
@@ -919,6 +927,9 @@ export async function completeAppointment(
             status: priceAdjustment.amountDue > 0 ? "PARTIALLY_PAID" : "PAID",
           },
         });
+        if (updatedPayment.status === "PAID") {
+          await allocatePaymentTicketNumber(tx, updatedPayment.id, "APPOINTMENT", null, new Date(), offTill);
+        }
       }
 
       if (collectsMoney) {
@@ -984,14 +995,21 @@ export async function completeAppointment(
           },
         });
 
+        await allocatePaymentTicketNumber(tx, updatedPayment.id, "APPOINTMENT", null, new Date(), offTill);
+
         // Same rule everywhere: a particulier never gets an invoice, only a
-        // VIES-valid VAT identity does (see settleReservation).
+        // VIES-valid VAT identity does (see settleReservation). A
+        // non-privileged staff member (offTill) can never cause an Invoice
+        // to be created — see isTillCashOperator — resolveSettlementInvoice
+        // is a hard no-op for them: nothing invoice-related is touched, not
+        // even superseding an existing one.
         const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
         ({ invoice, creditNote } = await resolveSettlementInvoice(tx, {
           existingInvoice: payment?.invoice ?? null,
           priceChanged: priceAdjustment.changed,
           adjustmentReason: priceAdjustment.reason,
           shouldIssue: hasInvoiceableVatIdentity(appointment.user),
+          canIssue: !offTill,
           issue: (supersedesInvoiceId) =>
             issueInvoice(tx, {
               paymentId: updatedPayment.id,
@@ -1030,6 +1048,7 @@ export async function completeAppointment(
           priceChanged: true,
           adjustmentReason: priceAdjustment.reason,
           shouldIssue: hasInvoiceableVatIdentity(appointment.user),
+          canIssue: !offTill,
           issue: (supersedesInvoiceId) =>
             issueInvoice(tx, {
               paymentId: updatedPayment.id,
@@ -1080,9 +1099,9 @@ export async function completeAppointment(
     }
     const { balance } = result;
 
-    // Ticket e-mail is gated purely on the acting staff member's
-    // SEND_TICKET_EMAIL permission — sendTicketByEmail re-derives auth()
-    // itself and checks it internally, so no separate check is needed here.
+    // Ticket e-mail is gated purely on the acting staff member passing
+    // canSendTicketEmail() — sendTicketByEmail re-derives auth() itself and
+    // checks it internally, so no separate check is needed here.
     // Deliberately NOT gated on !offTill/isTillCashOperator: that concept is
     // only about whether the collection joins the cash-session/drawer book,
     // not about whether the client should get their ticket. Fire-and-forget

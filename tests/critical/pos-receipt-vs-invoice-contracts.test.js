@@ -33,7 +33,11 @@ describe("a named customer always gets a receipt at the till; the invoice itself
   const posSource = source("actions/boutique/point-of-sale.js");
 
   test("invoice creation is gated on a reusable VIES identity — never on isCompany or a checkbox", () => {
-    expect(posSource).toContain("const shouldCreateInvoice = !isWalkIn && hasInvoiceableVatIdentity(customer)");
+    // VAT-eligibility is still VIES-derived, not isCompany or a checkbox —
+    // but eligibility alone no longer forces an invoice: the till's opt-out
+    // (wantsInvoice) can decline one for an eligible customer too.
+    expect(posSource).toContain("const isVatEligible = !isWalkIn && hasInvoiceableVatIdentity(customer)");
+    expect(posSource).toContain("const shouldCreateInvoice = isVatEligible && wantsInvoice");
     expect(posSource).toContain("const invoice = !shouldCreateInvoice");
     expect(posSource).not.toContain("requestInvoice");
   });
@@ -77,7 +81,11 @@ describe("a named customer always gets a receipt at the till; the invoice itself
     const fulfillment = source("lib/orders/fulfill-order-payment.js");
     // `!isPointOfSale ||` used to make this always true for a plain online
     // order too, bypassing the VIES gate entirely — fixed 2026-09-01.
-    expect(fulfillment).toContain("const shouldCreateInvoice = hasInvoiceableVatIdentity(invoiceCustomerUser)");
+    expect(fulfillment).toContain("const isVatEligible = hasInvoiceableVatIdentity(invoiceCustomerUser)");
+    // Eligibility alone no longer forces an invoice: a non-privileged staff
+    // actor (isStaffActor — see isTillCashOperator) never issues one from
+    // this path, same rule the till itself applies via !offTill.
+    expect(fulfillment).toContain("const shouldCreateInvoice = isVatEligible && !isStaffActor");
     expect(fulfillment).toContain("Votre ticket est joint à cet e-mail");
     expect(fulfillment).toContain("[fulfillOrderPayment] POS ticket email failed");
   });

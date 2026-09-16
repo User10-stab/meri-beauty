@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { STAFF_PERMISSIONS, hasDashboardPermission } from "@/lib/authorization";
+import { canSendTicketEmail } from "@/lib/authorization";
 import { sendEmail } from "@/lib/email";
 import { checkInReminderEmail } from "@/lib/email-templates";
 import { qrPngAttachment } from "@/lib/qrcode";
@@ -67,11 +67,11 @@ function resolveBookingForCheckIn(payment) {
  * got the original confirmation e-mail (or lost it) and now has no ticket to
  * show at the door.
  *
- * Gated on the same STAFF_PERMISSIONS.SEND_TICKET_EMAIL permission as the
- * till-receipt resend: both are "let this staff member put a document back
- * in a client's inbox," and the Opérations drawer that hosts both buttons is
- * admin-only regardless (requireAdmin), so there is no case where one is
- * available and not the other.
+ * Gated on the same canSendTicketEmail() check as the till-receipt resend:
+ * both are "let this staff member put a document back in a client's inbox,"
+ * and the Opérations drawer that hosts both buttons is admin-only regardless
+ * (requireAdmin), so there is no case where one is available and not the
+ * other.
  *
  * Deliberately NOT taking a recipient address from the caller, same reason
  * as sendTicketByEmail: the address always comes from the booking's own
@@ -82,7 +82,7 @@ export async function sendCheckInEmail(paymentId) {
   if (!session?.user) {
     return { success: false, message: "Non autorisé." };
   }
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL))) {
+  if (!(await canSendTicketEmail(session.user))) {
     return { success: false, message: "Non autorisé." };
   }
   if (typeof paymentId !== "string" || !paymentId) {

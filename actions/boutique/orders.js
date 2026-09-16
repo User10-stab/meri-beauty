@@ -22,6 +22,8 @@ import {
 import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote, buildInvoiceCustomer, isSellerLegalDataComplete } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
+import { allocateOrderTicketNumber } from "@/lib/tickets/allocate-ticket-number";
+import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { renderCreditNotePdf, renderTicketPdf } from "@/lib/pdf/render";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { formatSalonAddress } from "@/lib/format-address";
@@ -1364,7 +1366,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     // it, in case a session closes in the gap between the two. Only a till
     // operator hits this — an off-till pickup never enters the drawer.
     if (collectsAtTill && method === "CASH") {
-      const openCashSessionGate = await prisma.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } });
+      const openCashSessionGate = await ensureCashSessionOpen(prisma);
       if (!openCashSessionGate) {
         return {
           success: false,
@@ -1374,8 +1376,9 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
       }
     }
 
-    const { invoice } = await prisma.$transaction(async (tx) => {
+    const { invoice, ticketNumber } = await prisma.$transaction(async (tx) => {
       let invoice = null;
+      let ticketNumber = null;
 
       if (needsPayment) {
         const payment = await tx.payment.create({
@@ -1391,6 +1394,8 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
             discountAmount: order.discountAmount,
           },
         });
+
+        ticketNumber = await allocateOrderTicketNumber(tx, order.id, new Date(), offTill);
 
         // Attach to whichever till session is open so the counter cash is
         // reconcilable at close (see lib/cash-sessions.js). Authoritative
@@ -1428,11 +1433,14 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
         // Same rule everywhere: a particulier never gets an invoice, only a
         // VIES-valid VAT identity does (see settleReservation /
         // fulfillOrderPayment). No manual "request invoice" option exists at
-        // the counter for this exact reason.
+        // the counter for this exact reason. A non-privileged staff member
+        // (offTill) can never cause an Invoice to be created either way —
+        // see isTillCashOperator — the pickup still completes, it simply
+        // never gets an invoice.
         const invoiceCustomerUser = order.customerVatNumber
           ? { ...order.user, vatNumber: order.customerVatNumber }
           : order.user;
-        if (hasInvoiceableVatIdentity(invoiceCustomerUser)) {
+        if (hasInvoiceableVatIdentity(invoiceCustomerUser) && !offTill) {
           invoice = await issueInvoice(tx, {
             paymentId: payment.id,
             source: "ORDER",
@@ -1461,6 +1469,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
               previousStock: newStock + item.quantity,
               newStock,
               reason: `Commande n°${order.orderNumber} — paiement sur place`,
+              createdById: guard.session.user.id,
             },
           });
         }
@@ -1480,7 +1489,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
       });
       if (claimed.count === 0) throw new Error("PICKUP_ALREADY_CLAIMED");
 
-      return { invoice };
+      return { invoice, ticketNumber };
     // Same shape as lib/orders/fulfill-order-payment.js: payment, invoice
     // numbering and per-item stock updates are all sequential DB round
     // trips that can exceed Prisma's 5000ms default timeout against Neon.
@@ -1498,6 +1507,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
       });
       const ticketPdf = await renderTicketPdf({
         orderNumber: order.orderNumber,
+        ticketNumber,
         invoiceNumber: invoice?.number ?? null,
         issuedAt: order.createdAt,
         sellerName: salon?.legalName || "Meri Beauty",
@@ -1532,7 +1542,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
           `<p>Merci pour votre achat ! Votre ticket pour la commande n°${order.orderNumber} (<strong>${Number(order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p>` +
           (pendingInvoiceNote ? `<p>${pendingInvoiceNote.trim()}</p>` : "") +
           `<p>L'équipe Meri Beauty</p>`,
-        ...(ticketPdf ? { attachments: [{ filename: `ticket-${order.orderNumber}.pdf`, content: ticketPdf }] } : {}),
+        ...(ticketPdf ? { attachments: [{ filename: `${ticketNumber}.pdf`, content: ticketPdf }] } : {}),
       }).catch((err) => console.error("[completeOrderPickup] ticket email failed:", err));
     }
 
@@ -1649,12 +1659,12 @@ export async function confirmExpiredPickupNotCollected({ orderId }) {
         subject: `Commande expirée – n°${order.orderNumber} – Meri Beauty`,
         text:
           `Bonjour ${order.user.fullName},\n\n` +
-          `Votre commande n°${order.orderNumber}, à retirer en boutique, n'a pas été retirée dans le délai imparti et a été annulée. ` +
+          `Votre commande n°${order.orderNumber}, à retirer en boutique, n'a pas été retirée dans le délai prévu et a été annulée. ` +
           `Les articles sont de nouveau disponibles — vous pouvez repasser commande à tout moment.\n\n` +
           `L'équipe Meri Beauty`,
         html:
           `<p>Bonjour ${order.user.fullName},</p>` +
-          `<p>Votre commande n°${order.orderNumber}, à retirer en boutique, n'a pas été retirée dans le délai imparti et a été annulée. ` +
+          `<p>Votre commande n°${order.orderNumber}, à retirer en boutique, n'a pas été retirée dans le délai prévu et a été annulée. ` +
           `Les articles sont de nouveau disponibles — vous pouvez repasser commande à tout moment.</p>` +
           `<p>L'équipe Meri Beauty</p>`,
       }).catch((err) => console.error("[confirmExpiredPickupNotCollected] email failed:", err));
@@ -1879,6 +1889,7 @@ async function performOrderCancellation(order, reason, actor = {}) {
               previousStock: newStock - item.quantity,
               newStock,
               reason: `Commande n°${order.orderNumber} annulée`,
+              createdById: actor.actorId ?? null,
             },
           });
         } else {

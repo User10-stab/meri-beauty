@@ -1,11 +1,36 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { canSendTicketEmail } from "@/lib/authorization";
+import { escapeHtml } from "@/lib/email-templates";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { buildPaymentTicket } from "@/lib/cash-book/build-payment-ticket";
 
 // react-pdf needs Node APIs — not edge-compatible.
 export const runtime = "nodejs";
+
+/**
+ * Every caller opens this route in a new tab, so a JSON body is rendered to
+ * staff as raw text: a deposit-only reservation answered
+ * `{"error":"Ce paiement n'est pas encore clôturé — pas de ticket avant le
+ * solde."}`, which reads as a crash rather than as the rule it is. The status
+ * codes are unchanged — only the presentation is, and it covers every entry
+ * point at once (the operations drawer, the livre de caisse, the documents
+ * dialog, and any stale tab or bookmark).
+ */
+function ticketError(message, status) {
+  return new NextResponse(
+    `<!doctype html><html lang="fr"><head><meta charset="utf-8">` +
+      `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+      `<title>Ticket indisponible</title></head>` +
+      `<body style="margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;` +
+      `font:15px/1.6 system-ui,-apple-system,'Segoe UI',sans-serif;color:#2f3a2e;background:#faf9f7">` +
+      `<main style="max-width:32rem;padding:2rem;text-align:center">` +
+      `<h1 style="margin:0 0 .75rem;font-size:1.1rem">Ticket indisponible</h1>` +
+      `<p style="margin:0;color:#6b7280">${escapeHtml(message)}</p>` +
+      `</main></body></html>`,
+    { status, headers: { "Content-Type": "text/html; charset=utf-8" } }
+  );
+}
 
 /**
  * Reprint the till-style ticket for a rendez-vous/atelier/événement/formation
@@ -31,7 +56,7 @@ export const runtime = "nodejs";
  * A boutique/POS order keeps its own route (app/api/orders/[id]/ticket) —
  * real per-item line items, and it must work even before any Payment exists.
  *
- * Gated on the same STAFF_PERMISSIONS.SEND_TICKET_EMAIL permission as
+ * Gated on the same canSendTicketEmail() check as
  * actions/payments/send-ticket-email.js, which shares this route's ticket
  * assembly (lib/cash-book/build-payment-ticket.js) — a staff member who
  * isn't allowed to put a reservation ticket in a client's inbox shouldn't be
@@ -41,19 +66,29 @@ export const runtime = "nodejs";
 export async function GET(req, { params }) {
   const session = await auth();
   if (!session?.user) {
-    return NextResponse.json({ error: "Non autorisé." }, { status: 401 });
+    return ticketError("Vous devez être connecté pour ouvrir ce ticket.", 401);
   }
 
   const { id } = await params;
 
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.SEND_TICKET_EMAIL))) {
-    return NextResponse.json({ error: "Non autorisé." }, { status: 403 });
+  if (!(await canSendTicketEmail(session.user))) {
+    return ticketError("Votre rôle ne permet pas d'ouvrir ce ticket.", 403);
   }
 
   const transactionId = new URL(req.url).searchParams.get("transactionId");
-  const result = await buildPaymentTicket(id, { transactionId });
+
+  // buildPaymentTicket's assembly helpers throw rather than return null, so
+  // a settlement path can keep them inside its post-commit .catch(). A
+  // reprint has no such wrapper: an escaped throw became a bare HTTP 500
+  // with no body, which staff saw as the download silently doing nothing.
+  let result;
+  try {
+    result = await buildPaymentTicket(id, { transactionId });
+  } catch (error) {
+    return ticketError(error.message, 409);
+  }
   if (result.error) {
-    return NextResponse.json({ error: result.error.message }, { status: result.error.status });
+    return ticketError(result.error.message, result.error.status);
   }
 
   const { ticket } = result;
@@ -62,7 +97,10 @@ export async function GET(req, { params }) {
   return new NextResponse(pdf, {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${ticket.ticketNumber}.pdf"`,
+      // A payment settled before ticket numbering existed has no number to
+      // name the file after — fall back to the payment id, the way the
+      // boutique route falls back to recu-<orderNumber>.
+      "Content-Disposition": `inline; filename="${ticket.ticketNumber ?? `ticket-${id}`}.pdf"`,
     },
   });
 }

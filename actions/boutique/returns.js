@@ -21,6 +21,7 @@ import {
   completeReturnRequestSchema,
   rejectReturnRequestSchema,
 } from "@/lib/validations/commerce";
+import { parseCustomerOrderReference } from "@/lib/tickets/customer-reference";
 import { issueCreditNote } from "@/lib/invoicing";
 import { renderCreditNotePdf } from "@/lib/pdf/render";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
@@ -151,6 +152,7 @@ function serializeReturnRequest(rr) {
       ? {
           id: rr.order.id,
           orderNumber: rr.order.orderNumber,
+          ticketNumber: rr.order.ticketNumber,
           paymentMethod,
           paymentMethodLabel: refundMethodLabel(paymentMethod),
           requiresManualRefund: isManualOrderRefund(rr.order.payment),
@@ -176,31 +178,46 @@ function serializeReturnRequest(rr) {
 // ─── Customer: lookup + request ────────────────────────────────────────────────
 
 /**
- * Looks up an order by number + the email it was placed under, and reports
- * withdrawal eligibility + remaining returnable quantity per item. Never
- * reveals whether an email/order combination doesn't match (generic
- * "introuvable" message) — this is a public, unauthenticated lookup.
+ * The single reference a customer is ever shown — the number printed on their
+ * receipt. Staff-facing surfaces (audit log, stock movements, back-office
+ * lists) deliberately keep orderNumber instead: an unpaid order has no ticket,
+ * so it is the only identifier that exists for every order.
+ */
+const customerReference = (order) => order.ticketNumber ?? String(order.orderNumber);
+
+/**
+ * Looks up an order by the reference printed on its receipt — a ticket number,
+ * or an order number on anything printed before 15/09/2026 — plus the email it
+ * was placed under, and reports withdrawal eligibility + remaining returnable
+ * quantity per item. Never reveals whether an email/reference combination
+ * doesn't match (generic "introuvable" message) — this is a public,
+ * unauthenticated lookup.
  */
 export async function getReturnableOrder(input) {
   const parsed = lookupOrderForReturnSchema.safeParse(input);
   if (!parsed.success) {
-    return { success: false, message: "Numéro de commande ou e-mail invalide." };
+    return { success: false, message: "Numéro de ticket ou e-mail invalide." };
   }
-  const { orderNumber, email } = parsed.data;
+  const { reference, email } = parsed.data;
+  const orderFilter = parseCustomerOrderReference(reference);
+  if (!orderFilter) {
+    return { success: false, message: "Numéro de ticket ou e-mail invalide." };
+  }
+  const rateLimitKey = orderFilter.ticketNumber ?? String(orderFilter.orderNumber);
 
   const ip = await getClientIp();
   if (
     isRateLimited("return-lookup-ip", ip, { windowMs: RETURN_LOOKUP_IP_WINDOW_MS, max: RETURN_LOOKUP_IP_MAX }) ||
-    isRateLimited("return-lookup-order", String(orderNumber), { windowMs: RETURN_LOOKUP_ORDER_WINDOW_MS, max: RETURN_LOOKUP_ORDER_MAX })
+    isRateLimited("return-lookup-order", rateLimitKey, { windowMs: RETURN_LOOKUP_ORDER_WINDOW_MS, max: RETURN_LOOKUP_ORDER_MAX })
   ) {
     return { success: false, message: "Trop de tentatives. Veuillez patienter avant de réessayer." };
   }
   recordRateLimitHit("return-lookup-ip", ip);
-  recordRateLimitHit("return-lookup-order", String(orderNumber));
+  recordRateLimitHit("return-lookup-order", rateLimitKey);
 
   try {
     const order = await prisma.order.findFirst({
-      where: { orderNumber, user: { email: email.trim().toLowerCase() } },
+      where: { ...orderFilter, user: { email: email.trim().toLowerCase() } },
       include: {
         user: { select: { fullName: true, email: true } },
         items: true,
@@ -247,7 +264,10 @@ export async function getReturnableOrder(input) {
       success: true,
       data: {
         orderId: order.id,
-        orderNumber: order.orderNumber,
+        // The one reference the customer is shown from here on, and the one
+        // requestReturn expects back. Falls back to the order number only for
+        // a paid order that somehow predates ticket numbering.
+        reference: order.ticketNumber ?? String(order.orderNumber),
         deadline: window && !window.estimated ? window.end : null,
         estimatedDeadline: Boolean(window?.estimated),
         withdrawalExpired,
@@ -268,24 +288,29 @@ export async function requestReturn(input) {
     return {
       success: false,
       message:
-        errors.reasonCategory?.[0] ?? errors.reason?.[0] ?? errors.items?.[0] ?? errors.orderNumber?.[0] ?? errors.email?.[0] ?? "Données invalides.",
+        errors.reasonCategory?.[0] ?? errors.reason?.[0] ?? errors.items?.[0] ?? errors.reference?.[0] ?? errors.email?.[0] ?? "Données invalides.",
     };
   }
-  const { orderNumber, email, reasonCategory, reason, items } = parsed.data;
+  const { reference, email, reasonCategory, reason, items } = parsed.data;
+  const orderFilter = parseCustomerOrderReference(reference);
+  if (!orderFilter) {
+    return { success: false, message: "Numéro de ticket ou e-mail invalide." };
+  }
+  const rateLimitKey = orderFilter.ticketNumber ?? String(orderFilter.orderNumber);
 
   const ip = await getClientIp();
   if (
     isRateLimited("return-request-ip", ip, { windowMs: RETURN_REQUEST_IP_WINDOW_MS, max: RETURN_REQUEST_IP_MAX }) ||
-    isRateLimited("return-lookup-order", String(orderNumber), { windowMs: RETURN_LOOKUP_ORDER_WINDOW_MS, max: RETURN_LOOKUP_ORDER_MAX })
+    isRateLimited("return-lookup-order", rateLimitKey, { windowMs: RETURN_LOOKUP_ORDER_WINDOW_MS, max: RETURN_LOOKUP_ORDER_MAX })
   ) {
     return { success: false, message: "Trop de tentatives. Veuillez patienter avant de réessayer." };
   }
   recordRateLimitHit("return-request-ip", ip);
-  recordRateLimitHit("return-lookup-order", String(orderNumber));
+  recordRateLimitHit("return-lookup-order", rateLimitKey);
 
   try {
     const order = await prisma.order.findFirst({
-      where: { orderNumber, user: { email: email.trim().toLowerCase() } },
+      where: { ...orderFilter, user: { email: email.trim().toLowerCase() } },
       include: { user: true, items: true, returnRequests: { include: { items: true } } },
     });
     if (!order) return { success: false, message: "Aucune commande ne correspond à ce numéro et cet e-mail." };
@@ -371,7 +396,7 @@ export async function requestReturn(input) {
 
     sendEmail({
       to: order.user.email,
-      ...returnRequestReceivedEmail({ customerName: order.user.fullName, orderNumber: order.orderNumber, itemsSummary }),
+      ...returnRequestReceivedEmail({ customerName: order.user.fullName, reference: customerReference(order), itemsSummary }),
     }).catch((err) => console.error("[requestReturn] email failed:", err));
 
     revalidatePath("/dashboard/boutique/returns");
@@ -391,7 +416,11 @@ export async function listReturnRequests({ status, search, page = 1, pageSize = 
   if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page: 1, pageSize };
 
   try {
-    const searchAsOrderNumber = search && /^\d+$/.test(search.trim()) ? Number(search.trim()) : null;
+    // Customers now quote the ticket number off their receipt, so staff must
+    // be able to paste that straight in. The same resolver the public lookup
+    // uses accepts either form; the contains clause on top of it is what makes
+    // a partially typed "000044" find anything.
+    const searchAsReference = search ? parseCustomerOrderReference(search) : null;
 
     const where = {
       ...(status ? { status } : {}),
@@ -400,7 +429,8 @@ export async function listReturnRequests({ status, search, page = 1, pageSize = 
             OR: [
               { order: { user: { fullName: { contains: search, mode: "insensitive" } } } },
               { order: { user: { email: { contains: search, mode: "insensitive" } } } },
-              ...(searchAsOrderNumber !== null ? [{ order: { orderNumber: searchAsOrderNumber } }] : []),
+              { order: { ticketNumber: { contains: search.trim(), mode: "insensitive" } } },
+              ...(searchAsReference ? [{ order: searchAsReference }] : []),
             ],
           }
         : {}),
@@ -420,6 +450,7 @@ export async function listReturnRequests({ status, search, page = 1, pageSize = 
             select: {
               id: true,
               orderNumber: true,
+              ticketNumber: true,
               user: { select: { fullName: true, email: true } },
               payment: { select: { transactionReference: true, transactions: { select: { method: true, transactionType: true } } } },
             },
@@ -448,6 +479,7 @@ export async function getReturnRequestById(id) {
           select: {
             id: true,
             orderNumber: true,
+            ticketNumber: true,
             user: { select: { fullName: true, email: true } },
             payment: { select: { transactionReference: true, transactions: { select: { method: true, transactionType: true } } } },
           },
@@ -493,7 +525,7 @@ export async function approveReturnRequest(input) {
 
     sendEmail({
       to: rr.order.user.email,
-      ...returnApprovedEmail({ customerName: rr.order.user.fullName, orderNumber: rr.order.orderNumber, instructions }),
+      ...returnApprovedEmail({ customerName: rr.order.user.fullName, reference: customerReference(rr.order), instructions }),
     }).catch((err) => console.error("[approveReturnRequest] email failed:", err));
 
     revalidatePath("/dashboard/boutique/returns");
@@ -533,7 +565,7 @@ export async function rejectReturnRequest(input) {
 
     sendEmail({
       to: rr.order.user.email,
-      ...returnRejectedEmail({ customerName: rr.order.user.fullName, orderNumber: rr.order.orderNumber, reason: staffNote, decidedAt }),
+      ...returnRejectedEmail({ customerName: rr.order.user.fullName, reference: customerReference(rr.order), reason: staffNote, decidedAt }),
     }).catch((err) => console.error("[rejectReturnRequest] email failed:", err));
 
     revalidatePath("/dashboard/boutique/returns");
@@ -836,7 +868,7 @@ export async function completeReturnRequest(input) {
       to: rr.order.user.email,
       ...returnCompletedEmail({
         customerName: rr.order.user.fullName,
-        orderNumber: rr.order.orderNumber,
+        reference: customerReference(rr.order),
         refundAmount: totalRefund,
         manualRefund,
         refundPending: !manualRefund && refundQueued,

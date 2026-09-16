@@ -32,6 +32,9 @@ import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting
  * of them are.
  */
 
+// Outstanding refunds are a financial-integrity worklist — every
+// admin/owner sees every staff member's stuck refunds, on
+// purpose, so nothing gets lost to a colleague nobody else can see.
 async function requireAdmin() {
   const session = await auth();
   if (!session?.user || !isAdminRole(session.user.role)) return null;
@@ -276,6 +279,12 @@ export async function cancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION
       operationId: operation.id,
       awaitingStripeRefund: plan.automaticTotal > 0,
       requiresManualConfirmation: plan.requiresManualConfirmation,
+      // Handed straight back to the caller because it belongs to the newly
+      // created REFUND transaction, not the one the admin was looking at —
+      // a refetch of the original transaction's detail would never find it.
+      creditNote: operation.creditNote
+        ? { id: operation.creditNote.id, number: operation.creditNote.number }
+        : null,
     },
   };
 }

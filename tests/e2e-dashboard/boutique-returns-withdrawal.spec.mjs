@@ -98,7 +98,10 @@ async function lookUpOrder(page, order, customer) {
   const cookieBanner = page.getByRole("button", { name: /^j'accepte$/i });
   if (await cookieBanner.isVisible().catch(() => false)) await cookieBanner.click();
 
-  await page.getByPlaceholder(/numéro de commande/i).fill(String(order.orderNumber));
+  // The receipt now shows the ticket number and nothing else, so that is what
+  // a customer types. The order number still resolves for older receipts —
+  // see lib/tickets/customer-reference.js — hence the fallback here.
+  await page.getByPlaceholder(/numéro de ticket/i).fill(order.ticketNumber ?? String(order.orderNumber));
   await page.getByPlaceholder(/email utilisé/i).fill(customer.email);
   await page.getByRole("button", { name: /retrouver ma commande/i }).click();
   await skipIfRateLimited(page, "the order lookup");

@@ -2,6 +2,7 @@
  *   node scripts/renumber-tickets-2026.mjs                      # dry run
  *   node scripts/renumber-tickets-2026.mjs --apply              # write
  *   node scripts/renumber-tickets-2026.mjs --database-url=<url> # choisir la base
+ *   DATABASE_URL=<url> node scripts/renumber-tickets-2026.mjs --apply
  *
  * La base visée est affichée, avec sa provenance, avant toute action.
  * Lire cette ligne à chaque fois.
@@ -42,35 +43,11 @@
  * verification.
  */
 
-import { readFileSync, existsSync } from "node:fs";
-import dotenv from "dotenv";
+// MUST stay above the @prisma/client import — it snapshots the caller's
+// DATABASE_URL before Prisma loads `.env` over it. That module's header
+// explains why resolving this any other way picks the wrong database.
+import { resolveDatabaseUrl, describeTarget } from "./resolve-database-url.mjs";
 import { PrismaClient } from "@prisma/client";
-
-/**
- * The connection is resolved from the env FILES and handed to PrismaClient
- * explicitly, rather than left to process.env.
- *
- * `import` is hoisted: @prisma/client loads `.env` into process.env while
- * this module's own imports are still being evaluated, i.e. before any
- * dotenv call here could run — and dotenv does not overwrite a variable that
- * is already set. A script that says `config({ path: [".env.local", ".env"] })`
- * at the top therefore silently connects to whatever `.env` names, even
- * though `.env.local` overrides it everywhere else in this app. That is a
- * fine way to renumber the wrong database's tickets.
- *
- * Precedence, explicit and printed before anything runs:
- *   --database-url=<url>  >  .env.local  >  .env
- */
-function resolveDatabaseUrl() {
-  const flag = process.argv.find((arg) => arg.startsWith("--database-url="));
-  if (flag) return { url: flag.slice("--database-url=".length), from: "--database-url" };
-  for (const file of [".env.local", ".env"]) {
-    if (!existsSync(file)) continue;
-    const parsed = dotenv.parse(readFileSync(file));
-    if (parsed.DATABASE_URL) return { url: parsed.DATABASE_URL, from: file };
-  }
-  return { url: null, from: "(introuvable)" };
-}
 
 const APPLY = process.argv.includes("--apply");
 const YEAR = 2026;
@@ -94,11 +71,6 @@ const pad = (n) => String(n).padStart(6, "0");
 
 class Refusal extends Error {}
 class DryRunRollback extends Error {}
-
-function describeTarget(url) {
-  const m = (url ?? "").match(/@([^/?]+)\/([^?]+)/);
-  return m ? `${m[1]}/${m[2]}` : "(illisible)";
-}
 
 /**
  * Every 2026 ticket in existence, across both tables, each carrying the

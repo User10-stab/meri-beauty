@@ -189,6 +189,59 @@ describe("TicketDocument no longer synthesizes an identity at render time", () =
   });
 });
 
+
+// 16/09/2026 — both ticket scripts silently wrote to the wrong database.
+// `import` is hoisted and evaluated before any statement in a module body,
+// and @prisma/client loads `.env` into process.env as it initialises; dotenv
+// refuses to overwrite a variable that is already set. So the obvious
+// spelling — dotenv first in the import list, `config(...)` underneath — has
+// no effect whatsoever, and the script uses `.env` even though `.env.local`
+// overrides it everywhere else in this app. Nothing about it looks wrong at
+// runtime: it connects, it reports, it writes. It just renumbers the wrong
+// rows. These contracts pin the three moving parts.
+describe("a maintenance script cannot silently pick the wrong database", () => {
+  const resolver = source("scripts/resolve-database-url.mjs");
+  const SCRIPTS = ["scripts/backfill-ticket-numbers.mjs", "scripts/renumber-tickets-2026.mjs"];
+
+  test("the resolver snapshots the caller's DATABASE_URL at module load", () => {
+    // Read any later and it is indistinguishable from the value Prisma put
+    // there — which is the whole bug.
+    expect(resolver).toContain("const CALLER_URL = process.env.DATABASE_URL;");
+    // The files are parsed directly, never read back out of process.env.
+    expect(resolver).toContain('for (const file of [".env.local", ".env"])');
+    expect(resolver).toContain("dotenv.parse(readFileSync(file))");
+  });
+
+  test.each(SCRIPTS)("%s imports the resolver BEFORE @prisma/client", (path) => {
+    const code = source(path);
+    const resolverAt = code.indexOf('from "./resolve-database-url.mjs"');
+    const prismaAt = code.indexOf('from "@prisma/client"');
+    expect(resolverAt, "does not use the shared resolver").toBeGreaterThan(-1);
+    expect(prismaAt).toBeGreaterThan(-1);
+    // Import order is evaluation order. Swap these two lines and the
+    // snapshot above captures Prisma's own value instead of the caller's.
+    expect(resolverAt, "resolver must be imported first").toBeLessThan(prismaAt);
+  });
+
+  test.each(SCRIPTS)("%s hands the resolved url to PrismaClient explicitly", (path) => {
+    const code = source(path);
+    expect(code).toMatch(/new PrismaClient\(\{\s*datasources: \{ db: \{ url/);
+    // A bare `new PrismaClient()` re-reads the polluted process.env and
+    // throws the whole resolution away.
+    expect(code).not.toMatch(/new PrismaClient\(\s*\)/);
+  });
+
+  test.each(SCRIPTS)("%s no longer calls dotenv config() below its imports", (path) => {
+    expect(source(path)).not.toContain('config({ path: [".env.local", ".env"]');
+  });
+
+  test.each(SCRIPTS)("%s prints the target, and where it came from", (path) => {
+    const code = source(path);
+    expect(code).toContain("describeTarget(");
+    expect(code).toMatch(/source\s*:?\s*\$\{(DATABASE_URL_SOURCE|from)\}/);
+  });
+});
+
 // 15/09/2026: the backfill had never actually been runnable on the server it
 // exists for. It is ESM (.mjs) importing lib/tickets/allocate-ticket-number.js,
 // a `.js` in a package with no "type" — CommonJS to Node's resolver. Node

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useTransition } from "react";
+import { useState, useMemo, useCallback, useRef, useTransition } from "react";
 import { toast } from "sonner";
 import {
   Search,
@@ -9,7 +9,6 @@ import {
   ChevronRight,
   ChevronsUpDown,
   ChevronUp,
-  MoreHorizontal,
   Eye,
   Pencil,
   Trash2,
@@ -24,6 +23,7 @@ import {
 import { deleteIndependentStaff } from "@/actions/staff/delete-independent-staff";
 import { updateIndependentStaff } from "@/actions/staff/update-independent-staff";
 import { checkStaffReservationReadiness } from "@/lib/reservation-compliance";
+import { ActionMenu, ActionMenuDivider, ActionMenuItem, ActionMenuTrigger } from "@/components/dashboard/Tables/ActionMenu";
 import { getStaffStripeDisplayState } from "@/lib/stripe-connect-status";
 import { EditStaffModal } from "./EditStaffModal";
 import { WorkingHoursModal } from "./WorkingHoursModal";
@@ -235,62 +235,48 @@ function EmptyState({ hasSearch }) {
 
 // ─── Row actions dropdown ─────────────────────────────────────────────────────
 
+// Portal menu (see Tables/ActionMenu): never clipped by the table's scroll
+// container — flips upward for the last rows.
 function RowActions({ row, onEdit, onDelete, isPending }) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef(null);
 
   const close = useCallback(() => setOpen(false), []);
 
-  // Close on outside click
-  const handleBlur = useCallback((e) => {
-    if (!e.currentTarget.contains(e.relatedTarget)) close();
-  }, [close]);
+  function act(mode) {
+    close();
+    onEdit(row, mode);
+  }
 
   return (
-    <div className="relative flex justify-end" onBlur={handleBlur}>
-      <button
-        type="button"
-        onClick={() => setOpen((p) => !p)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Actions sur la ligne"
+    <div className="flex justify-end">
+      <ActionMenuTrigger
+        triggerRef={triggerRef}
+        open={open}
+        onToggle={() => setOpen((p) => !p)}
+        label="Actions sur la ligne"
         disabled={isPending}
-        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:opacity-40"
+      />
+      <ActionMenu
+        triggerRef={triggerRef}
+        open={open}
+        onClose={close}
+        label="Menu d'actions"
+        width={192}
       >
-        <MoreHorizontal size={16} />
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          aria-label="Menu d'actions"
-          className="absolute right-0 top-full z-40 mt-1 w-48 origin-top-right rounded-lg border border-gray-100 bg-white py-1 shadow-lg shadow-gray-200/60 animate-in fade-in-0 zoom-in-95"
-        >
-          <MenuBtn icon={Eye} label="Voir le profil" onClick={() => { close(); onEdit(row, "view"); }} />
-          <MenuBtn icon={Pencil} label="Modifier" onClick={() => { close(); onEdit(row, "edit"); }} />
-          <MenuBtn icon={Clock} label="Horaires de travail" onClick={() => { close(); onEdit(row, "hours"); }} />
-          <MenuBtn icon={Settings} label="Paramètres" onClick={() => { close(); onEdit(row, "settings"); }} />
-          <MenuBtn icon={row.isActive ? ShieldOff : ShieldCheck} label={row.isActive ? "Désactiver" : "Activer"} onClick={() => { close(); onEdit(row, "toggle"); }} />
-          <div className="my-1 border-t border-gray-100" role="separator" />
-          <MenuBtn icon={Trash2} label="Supprimer" danger onClick={() => { close(); onDelete(row); }} />
-        </div>
-      )}
+        <ActionMenuItem icon={Eye} label="Voir le profil" onSelect={() => act("view")} />
+        <ActionMenuItem icon={Pencil} label="Modifier" onSelect={() => act("edit")} />
+        <ActionMenuItem icon={Clock} label="Horaires de travail" onSelect={() => act("hours")} />
+        <ActionMenuItem icon={Settings} label="Paramètres" onSelect={() => act("settings")} />
+        <ActionMenuItem
+          icon={row.isActive ? ShieldOff : ShieldCheck}
+          label={row.isActive ? "Désactiver" : "Activer"}
+          onSelect={() => act("toggle")}
+        />
+        <ActionMenuDivider />
+        <ActionMenuItem icon={Trash2} label="Supprimer" danger onSelect={() => { close(); onDelete(row); }} />
+      </ActionMenu>
     </div>
-  );
-}
-
-function MenuBtn({ icon: Icon, label, onClick, danger }) {
-  return (
-    <button
-      role="menuitem"
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors focus-visible:bg-gray-50 focus-visible:outline-none ${
-        danger ? "text-red-500 hover:bg-red-50" : "text-gray-700 hover:bg-gray-50"
-      }`}
-    >
-      <Icon size={14} />
-      {label}
-    </button>
   );
 }
 
@@ -356,7 +342,7 @@ function DeleteDialog({ staff, onConfirm, onCancel, isPending }) {
  */
 export function StaffTable({ data, isLoading = false, services = [] }) {
   const [search, setSearch] = useState("");
-  const [perPage, setPerPage] = useState(5);
+  const [perPage, setPerPage] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortKey, setSortKey] = useState(null);
   const [sortDir, setSortDir] = useState(null);
@@ -457,7 +443,7 @@ export function StaffTable({ data, isLoading = false, services = [] }) {
 
   return (
     <>
-      <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm h-[62vh] overflow-y-auto">
+      <div className="flex flex-col rounded-xl border border-gray-200 bg-white shadow-sm h-[62vh]">
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-gray-100">
           <SearchBar value={search} onChange={handleSearch} />

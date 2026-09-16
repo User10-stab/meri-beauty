@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import {
   MoreHorizontal,
   CheckCircle2,
@@ -8,6 +8,7 @@ import {
   Eye,
   Loader2,
 } from "lucide-react";
+import { ActionMenu, ActionMenuDivider, ActionMenuItem, ActionMenuTrigger } from "@/components/dashboard/Tables/ActionMenu";
 
 // ─── Status badge config ───────────────────────────────────────────────────────
 
@@ -161,33 +162,7 @@ const VARIANT_CLASSES = {
 function AppointmentRowActions({ row, onConfirm, onCancel, onView }) {
   const [open, setOpen] = useState(false);
   const [loadingKey, setLoadingKey] = useState(null); // key of the item currently running
-  const containerRef = useRef(null);
   const triggerRef = useRef(null);
-
-  // ── Close on outside click ────────────────────────────────────────────────
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
-
-  // ── Close on Escape ───────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!open) return;
-    function handleKey(e) {
-      if (e.key === "Escape") {
-        setOpen(false);
-        triggerRef.current?.focus();
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [open]);
 
   const menuItems = getMenuItems(row.status, {
     onConfirm,
@@ -209,42 +184,32 @@ function AppointmentRowActions({ row, onConfirm, onCancel, onView }) {
   const isBusy = loadingKey !== null;
 
   return (
-    <div ref={containerRef} className="relative flex justify-end">
-      {/* Trigger */}
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
+    <div className="flex justify-end">
+      <ActionMenuTrigger
+        triggerRef={triggerRef}
+        open={open}
+        onToggle={() => setOpen((prev) => !prev)}
+        label="Actions du rendez-vous"
         disabled={isBusy}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Actions du rendez-vous"
-        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500 disabled:cursor-wait disabled:opacity-60"
       >
         {isBusy ? (
           <Loader2 size={15} className="animate-spin" />
         ) : (
           <MoreHorizontal size={15} />
         )}
-      </button>
+      </ActionMenuTrigger>
 
-      {/* Dropdown */}
-      {open && (
-        <div
-          role="menu"
-          aria-label="Actions du rendez-vous"
-          className="absolute right-0 top-full z-40 mt-1 w-44 origin-top-right rounded-lg border border-gray-100 bg-white py-1 shadow-lg shadow-gray-200/60 animate-in fade-in-0 zoom-in-95"
-        >
+      {/* Portal dropdown — flips upward for the last rows */}
+      <ActionMenu
+        triggerRef={triggerRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        label="Actions du rendez-vous"
+        width={176}
+      >
           {menuItems.map((item) => {
-            // Divider
             if (item.divider) {
-              return (
-                <div
-                  key={item.key}
-                  className="my-1 border-t border-gray-100"
-                  role="separator"
-                />
-              );
+              return <ActionMenuDivider key={item.key} />;
             }
 
             const Icon = item.icon;
@@ -254,21 +219,17 @@ function AppointmentRowActions({ row, onConfirm, onCancel, onView }) {
             const isAvailable = !!item.onClick;
 
             return (
-              <button
+              <ActionMenuItem
                 key={item.key}
-                role="menuitem"
-                type="button"
-                onClick={() => handleItemClick(item)}
+                icon={Icon}
+                label={item.label}
                 disabled={!isAvailable}
-                className={`flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors focus-visible:bg-gray-50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40 ${variantCls}`}
-              >
-                <Icon size={14} aria-hidden="true" />
-                {item.label}
-              </button>
+                onSelect={() => handleItemClick(item)}
+                className={variantCls}
+              />
             );
           })}
-        </div>
-      )}
+      </ActionMenu>
     </div>
   );
 }

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { findNearestAvailability } from "@/actions/reservation/find-nearest-availability";
 import { getAvailableSlots, getMonthAvailability } from "@/actions/reservation/get-available-slots";
-import { hasReservationWindow } from "@/lib/slot-availability";
 import { ChevronLeft, ChevronRight, Calendar, Clock, Euro, CalendarDays, Sparkles, CheckCircle2, Loader2 } from "lucide-react";
 import Image from "next/image";
 import { toast } from "sonner";
@@ -19,13 +18,10 @@ async function validateSlotAvailability(staffServiceId, date, time, t) {
     const msg = UNAVAILABLE_REASON_KEYS[result.data.reason] ? t(`dateTime.unavailableReasons.${UNAVAILABLE_REASON_KEYS[result.data.reason]}`) : t("dateTime.dayUnavailable");
     toast.error(msg); return false;
   }
-  // After the allTimeSlots fix, `available` mirrors reservationWindows, so either
-  // check is equivalent. Prefer the visual source (allTimeSlots) when present
-  // so the client-side validation can never disagree with what was shown as enabled.
-  const visualSlots = result.data.allTimeSlots
-    ? result.data.allTimeSlots.filter((s) => s.available !== false)
-    : result.data.reservationWindows ?? [];
-  const ok = hasReservationWindow(visualSlots, time);
+  // The allTimeSlots `available` flag is based on free-interval containment,
+  // so checking it directly is equivalent to the server-side freeIntervals check.
+  const slot = result.data.allTimeSlots?.find((s) => s.startTime === time);
+  const ok = slot ? slot.available !== false : false;
   if (!ok) { toast.error(t("dateTime.slotUnavailable")); return false; }
   return true;
 }

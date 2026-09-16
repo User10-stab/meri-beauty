@@ -2,7 +2,7 @@
 
 import { ChevronDown } from "lucide-react";
 
-const OPTIONS = [5, 10, 20, 50];
+const OPTIONS = [10, 25, 50, 100];
 
 /**
  * @param {object} props

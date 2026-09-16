@@ -87,11 +87,21 @@ describe("customer VAT policy", () => {
     ["missing VIES proof", { ...frenchCompany, vatValidatedAt: null }],
     ["stale VIES proof", { ...frenchCompany, vatValidatedAt: new Date("2025-01-01T00:00:00.000Z") }],
     ["invalid VAT format", { ...frenchCompany, vatNumber: "FRINVALID" }],
-    ["non-company account", { ...frenchCompany, isCompany: false }],
     ["no VAT number", { isCompany: true, vatNumber: null, vatValidatedAt: null }],
   ])("keeps 21% with %s", (_label, customer) => {
     expect(resolveGoodsVatPolicy({ customer, now }).vatRate).toBe(21);
     expect(resolveServiceVatPolicy({ customer, now }).vatRate).toBe(21);
+  });
+
+  it("a sole trader with a validated VAT number is B2B even without the company flag", () => {
+    // An indépendant·e has no company name and may have registered as an
+    // individual: the validated VAT number alone makes them a taxable business.
+    const soleTrader = { ...frenchCompany, isCompany: false };
+    expect(hasReusableVatValidation(soleTrader, soleTrader.vatNumber, now)).toBe(true);
+    expect(resolveServiceVatPolicy({ customer: soleTrader, now })).toMatchObject({ vatTreatment: "EU_REVERSE_CHARGE", vatRate: 0 });
+
+    const belgianSoleTrader = { isCompany: false, vatNumber: "BE0123456749", vatValidatedAt: new Date("2026-08-20T12:00:00.000Z") };
+    expect(resolveGoodsVatPolicy({ customer: belgianSoleTrader, now })).toMatchObject({ vatRate: 21, customerVatNumber: "BE0123456749" });
   });
 });
 

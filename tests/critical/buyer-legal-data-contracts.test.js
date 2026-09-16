@@ -144,11 +144,13 @@ describe("the guard does not overreach into the B2B fallback", () => {
   });
 
   test("a real B2B invoice cannot lack a legal name by construction", () => {
-    // customerType is DERIVED from legalName, so there is no state where a
-    // B2B document exists without one — no separate check is needed.
-    expect(source("lib/invoicing.js")).toContain(
-      "const isB2B = Boolean(customer.isCompany && customer.legalName);"
-    );
+    // customerType follows the VAT number (every invoice goes to a
+    // VAT-registered buyer), and the legal name falls back to the buyer's
+    // name — so there is no state where a B2B document exists without one.
+    const invoicing = source("lib/invoicing.js");
+    expect(invoicing).toContain("const isB2B = Boolean(customer.vatNumber?.toString().trim());");
+    expect(invoicing).toContain("const legalName = customer.legalName || customer.fullName;");
+    expect(invoicing).toContain("customerLegalName: isB2B ? legalName : null,");
   });
 });
 

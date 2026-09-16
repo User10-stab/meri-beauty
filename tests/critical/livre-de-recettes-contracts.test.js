@@ -13,8 +13,19 @@ import { groupRowsByDay } from "@/lib/livre-de-recettes/day-groups";
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
 
-function clientMock(transactions = []) {
+// The salon, as resolveSalonScope() hands it back: the ADMIN account, plus
+// Marie — whose STAFF role is exactly the trap this whole scope exists to
+// avoid, and whose Staff.id is what her appointments key on.
+const SALON_USERS = [
+  { id: "u_admin", staff: null },
+  { id: "u_marie", staff: { id: "s_marie" } },
+];
+
+function clientMock(transactions = [], salonUsers = SALON_USERS) {
   return {
+    user: {
+      findMany: vi.fn(() => Promise.resolve(salonUsers)),
+    },
     transaction: {
       findMany: vi.fn(({ where }) => {
         let matched = transactions;
@@ -91,7 +102,35 @@ describe("buildRecettesJournal", () => {
     expect(refundRow.signedAmount).toBe(-30);
   });
 
-  it("includes off-till cash and flags it, so the divergence from the cash book is visible", async () => {
+  // Inverted on purpose. This journal used to include off-till cash and flag
+  // it `offTill: true`, on the reasoning that it was still real revenue. It
+  // is — but not the SALON's: off-till cash is by construction cash a
+  // non-operator took at the counter, i.e. an independent's own takings,
+  // declared under her own VAT number. Counting it here overstated the
+  // salon's turnover, so the scope now keeps it out.
+  it("scopes the journal to the salon, in the query, so an independent's takings can never inflate it", async () => {
+    const client = clientMock();
+    await buildRecettesJournal(client, RANGE);
+    const arms = client.transaction.findMany.mock.calls[0][0].where.payment.OR;
+
+    // Two id spaces, and they are not interchangeable: an Order is stamped
+    // with a User.id, an Appointment with a Staff.id. Crossing them would
+    // leave an arm matching nothing, silently.
+    expect(arms).toContainEqual({ order: { createdByStaffId: { in: ["u_admin", "u_marie"] } } });
+    expect(arms).toContainEqual({ appointment: { staffId: { in: ["s_marie"] } } });
+    // A customer's own online purchase stamps nobody — salon revenue.
+    expect(arms).toContainEqual({ order: { createdByStaffId: null } });
+    // Ateliers and formations are the salon's own events; the schema carries
+    // no staff link on them at all, so there is nobody to hand them to.
+    expect(arms).toContainEqual({ workshopReservationId: { not: null } });
+    expect(arms).toContainEqual({ formationReservationId: { not: null } });
+
+    // The one appointment arm must be the bounded one. An unbounded second
+    // arm would quietly let every independent straight back in.
+    expect(arms.filter((a) => a.appointment)).toHaveLength(1);
+  });
+
+  it("still flags off-till cash on a row, so the divergence stays visible if the scope ever widens", async () => {
     const client = clientMock([
       txn({ id: "onTill", method: "CASH", cashSessionId: "sess_1", pieceNumber: "V0001" }),
       txn({ id: "offTill", method: "CASH", cashSessionId: null, pieceNumber: null }),
@@ -99,11 +138,20 @@ describe("buildRecettesJournal", () => {
     ]);
     const journal = await buildRecettesJournal(client, RANGE);
 
-    expect(journal.rows).toHaveLength(3);
     expect(journal.rows.find((r) => r.id === "offTill").offTill).toBe(true);
     expect(journal.rows.find((r) => r.id === "onTill").offTill).toBe(false);
     // A card payment is never "off-till" — that concept only applies to cash.
     expect(journal.rows.find((r) => r.id === "card").offTill).toBe(false);
+  });
+
+  it("an explicit staffId replaces the salon scope instead of intersecting with it", async () => {
+    // Filtering ON a practitioner is the admin asking for exactly her lines —
+    // intersecting with the salon scope would return an empty journal.
+    const client = clientMock();
+    await buildRecettesJournal(client, { ...RANGE, staffId: "s_julie" });
+    const where = client.transaction.findMany.mock.calls[0][0].where;
+    expect(where.payment).toEqual({ appointment: { staffService: { staffId: "s_julie" } } });
+    expect(client.user.findMany).not.toHaveBeenCalled();
   });
 
   it("categorizes each row by its payment source, splitting atelier from événement, with an OTHER bucket", async () => {
@@ -130,7 +178,9 @@ describe("buildRecettesJournal", () => {
     // The polymorphic source is unreachable from Prisma's where — the query must not try.
     const where = client.transaction.findMany.mock.calls[0][0].where;
     expect(where).not.toHaveProperty("category");
-    expect(where).not.toHaveProperty("payment");
+    // `where.payment` now carries the salon scope, but nothing category-shaped:
+    // the category lives behind a polymorphic Payment with no Prisma path.
+    expect(JSON.stringify(where.payment)).not.toContain("category");
   });
 
   it("backs HT and VAT out of each amount at its invoice rate once one exists", async () => {

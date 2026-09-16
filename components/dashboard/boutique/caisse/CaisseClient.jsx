@@ -93,6 +93,13 @@ const MOVEMENT_TYPES = [
 function pieceNumberHref(row) {
   if (row.kind !== "SALE" && row.kind !== "REFUND") return null;
   if (row.orderId) return `/api/orders/${row.orderId}/ticket`;
+  // Mirrors the route's own guard (lib/cash-book/build-payment-ticket.js):
+  // it serves a reservation ticket only for status PAID. That covers an
+  // acompte still owing a balance — the case this rule is really about — but
+  // also every refunded status, whose ticket the route refuses too. Either
+  // way, linking sent staff to an error instead of a document, so the piece
+  // number now stays plain text rather than promising something clickable.
+  if (row.paymentId && row.paymentStatus !== "PAID") return null;
   if (row.paymentId && row.kind === "SALE") return `/api/payments/${row.paymentId}/ticket?transactionId=${row.transactionId}`;
   if (row.paymentId) return `/api/payments/${row.paymentId}/ticket`;
   return null;

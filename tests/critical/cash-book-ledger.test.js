@@ -298,6 +298,24 @@ describe("buildCashBookLedger", () => {
     expect(result.rows[1]).toMatchObject({ transactionId: "txn-2", paymentId: "pay-2", orderId: null });
   });
 
+  it("carries the payment status, so an acompte row can decline to link at all", async () => {
+    const client = clientMock({
+      sessions: [BASE_SESSION],
+      transactions: [
+        {
+          id: "txn-3",
+          transactionType: "DEPOSIT",
+          amount: 12.5,
+          paidAt: new Date("2026-08-01T09:00:00Z"),
+          pieceNumber: "R0002",
+          payment: { id: "pay-3", status: "PARTIALLY_PAID", invoice: null, appointment: { staffService: null } },
+        },
+      ],
+    });
+    const result = await buildCashBookLedger(client, RANGE);
+    expect(result.rows[1]).toMatchObject({ paymentId: "pay-3", paymentStatus: "PARTIALLY_PAID" });
+  });
+
   it("a drawer movement carries no transaction/payment/order id — there is nothing to link", async () => {
     const client = clientMock({
       sessions: [BASE_SESSION],
@@ -335,6 +353,21 @@ describe("N° pièce links to the ticket it produced", () => {
 
   it("only SALE and REFUND rows are eligible — a drawer movement has no ticket", () => {
     expect(client).toContain('if (row.kind !== "SALE" && row.kind !== "REFUND") return null;');
+  });
+
+  it("offers no link at all for a reservation payment that is not settled", () => {
+    // The route serves a reservation ticket only for status PAID, so an
+    // acompte row used to send staff to an error page instead of a document.
+    expect(client).toContain('if (row.paymentId && row.paymentStatus !== "PAID") return null;');
+  });
+
+  it("applies that refusal before both reservation links, or it would never take effect", () => {
+    const guard = client.indexOf('row.paymentStatus !== "PAID"');
+    const saleLink = client.indexOf("ticket?transactionId=${row.transactionId}");
+    const refundLink = client.indexOf("if (row.paymentId) return `/api/payments/${row.paymentId}/ticket`;");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(saleLink);
+    expect(guard).toBeLessThan(refundLink);
   });
 });
 

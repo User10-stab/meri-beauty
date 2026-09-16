@@ -3,7 +3,7 @@
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasDashboardPermission, canAccessDashboard, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { canAccessDashboard, isTillCashOperator } from "@/lib/authorization";
 import {
   openCashSessionInternal,
   closeCashSessionInternal,
@@ -25,7 +25,7 @@ import {
 async function requireCashSessionAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.CASH_REGISTER))) {
+  if (!isTillCashOperator(session.user)) {
     return { error: "Accès non autorisé." };
   }
   return { session };
@@ -41,11 +41,7 @@ async function requireCashSessionOpeningAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
 
-  const [canUsePos, canManageCashRegister] = await Promise.all([
-    hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE),
-    hasDashboardPermission(session.user, STAFF_PERMISSIONS.CASH_REGISTER),
-  ]);
-  if (!canUsePos && !canManageCashRegister) return { error: "Accès non autorisé." };
+  if (!isTillCashOperator(session.user)) return { error: "Accès non autorisé." };
   return { session };
 }
 

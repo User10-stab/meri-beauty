@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { ROLES, STAFF_PERMISSIONS, getStaffId, hasDashboardPermission, isAdminRole } from "@/lib/authorization";
+import { ROLES, STAFF_PERMISSIONS, getStaffId, hasDashboardPermission, isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { completeAppointment } from "@/actions/appointment/manage-appointment";
 import { CounterCustomerError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
 import { counterCustomerSchema } from "@/lib/validations/counter-customer";
@@ -46,7 +46,7 @@ async function authorizeCounterAppointments() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
   const [canUseTill, canManageAppointments] = await Promise.all([
-    hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE),
+    isTillCashOperator(session.user),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS),
   ]);
   if (!canUseTill || !canManageAppointments) return { error: "Accès non autorisé." };

@@ -1,5 +1,4 @@
-import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { requireTillCashOperator } from "@/lib/route-protection";
 import { listOrders, listPickupsToVerify } from "@/actions/boutique/orders";
 import { OrdersPageClient } from "@/components/dashboard/boutique/OrdersPageClient";
 import { PickupsToVerify } from "@/components/dashboard/boutique/PickupsToVerify";
@@ -16,7 +15,7 @@ export async function generateMetadata() {
 }
 
 export default async function OrdersPage({ searchParams }) {
-  await requireDashboardPermission(STAFF_PERMISSIONS.ORDERS);
+  await requireTillCashOperator();
   const t = await getTranslations("dashboardBoutique.orders");
 
   // Deep-link preset from the dashboard "commandes à traiter" card.

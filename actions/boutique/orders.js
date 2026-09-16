@@ -10,7 +10,7 @@ import { auth } from "@/auth";
 import { stripe } from "@/lib/stripe";
 import { isCheckoutAuthorized, createResumeCheckoutToken } from "@/lib/resume-checkout-token";
 import { sendEmail } from "@/lib/email";
-import { ROLES, STAFF_PERMISSIONS, hasDashboardPermission, isAdminRole, isTillCashOperator } from "@/lib/authorization";
+import { ROLES, isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import {
   checkoutSchema,
   shipOrderSchema,
@@ -87,7 +87,7 @@ const GUEST_HOLD_RATE_LIMIT_MAX = 5;
 async function requireOrdersAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.ORDERS))) {
+  if (!isTillCashOperator(session.user)) {
     return { error: "Accès non autorisé." };
   }
   return { session };
@@ -1532,8 +1532,6 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
         ? ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
         : ` Votre facture officielle (n°${invoice.number}) vous sera transmise séparément par e-mail.`;
 
-      // The e-mail's only payload is that ticket, and its body says it is
-      // attached — so it goes only when there is one.
       if (ticketNumber) sendEmail({
         to: order.user.email,
         subject: `Votre ticket – Commande n°${order.orderNumber} – Meri Beauty`,

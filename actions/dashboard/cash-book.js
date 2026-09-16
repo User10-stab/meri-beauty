@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { isTillCashOperator } from "@/lib/authorization";
 import { buildCashBookLedger } from "@/lib/cash-book/build-ledger";
 import { buildRangeReport } from "@/lib/cash-book/build-day-report";
 import { normalizeCashBookParams } from "@/lib/cash-book/filters";
@@ -10,7 +10,7 @@ import { normalizeCashBookParams } from "@/lib/cash-book/filters";
 async function requireCashBookAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.CASH_REGISTER))) {
+  if (!isTillCashOperator(session.user)) {
     return { error: "Accès non autorisé." };
   }
   return { session };

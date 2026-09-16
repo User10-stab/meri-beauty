@@ -3,7 +3,7 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
-import { hasPermission, DASHBOARD_PERMISSIONS, getDashboardPermissions, isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { hasPermission, DASHBOARD_PERMISSIONS, getDashboardPermissions, isAdminRole, isTillCashOperator, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getLowStockVariants } from "@/actions/boutique/stock";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
 import { getCurrentStaffId } from "@/lib/route-protection";
@@ -113,7 +113,7 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
   const canSeeAppointments = isAdmin || permissions.includes(STAFF_PERMISSIONS.APPOINTMENTS);
   const canSeeCustomers = isAdmin || permissions.includes(STAFF_PERMISSIONS.CUSTOMERS);
   const canSeeStock = isAdmin || permissions.includes(STAFF_PERMISSIONS.BOUTIQUE_STOCK);
-  const canSeeOrders = isAdmin || permissions.includes(STAFF_PERMISSIONS.ORDERS);
+  const canSeeOrders = isAdmin || isTillCashOperator(session.user);
   const appointmentScope = effectiveStaffId ? { staffService: { staffId: effectiveStaffId } } : {};
   // In staff view, customers are the viewed member's customers (same
   // relationship rule as a staff member's own dashboard).

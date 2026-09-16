@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { STAFF_PERMISSIONS, hasDashboardPermission } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator } from "@/lib/authorization";
 import { searchCounterTickets } from "@/actions/boutique/settlements";
 import { searchCounterServices } from "@/actions/counter/walk-in-service";
 import { searchPointOfSaleProducts } from "@/actions/boutique/point-of-sale";
@@ -37,7 +37,7 @@ async function canSearchSessions() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
   const [canUseTill, canWorkshops, canFormations] = await Promise.all([
-    hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE),
+    isTillCashOperator(session.user),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS),
   ]);

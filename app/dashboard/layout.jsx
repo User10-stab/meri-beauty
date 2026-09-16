@@ -1,7 +1,7 @@
 import { DashboardShell } from "@/components/dashboard/Layouts/dashboard-shell";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
-import { getDashboardPermissions } from "@/lib/authorization";
+import { getDashboardPermissions, isTillCashOperator } from "@/lib/authorization";
 import { countPickupsToVerify } from "@/lib/orders/count-pickups-to-verify";
 import { countUnreadUserNotifications } from "@/lib/notifications";
 
@@ -37,6 +37,7 @@ export default async function DashboardLayout({ children }) {
   return (
     <DashboardShell
       user={session.user}
+      isSalonAccount={isTillCashOperator(session.user)}
       dashboardPermissions={dashboardPermissions}
       pickupsToVerifyCount={pickupsToVerifyCount}
       unreadNotificationsCount={unreadNotificationsCount}

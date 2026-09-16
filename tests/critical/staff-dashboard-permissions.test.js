@@ -39,20 +39,23 @@ describe("granular staff dashboard permissions", () => {
     ]);
   });
 
-  it("does not expose the whole boutique when only the cash register is granted", () => {
-    const urls = visibleUrls(getNavDataForRole(ROLES.STAFF, [STAFF_PERMISSIONS.POINT_OF_SALE]));
+  it("the salon account gets the till screens without exposing the rest of the boutique", () => {
+    // Caisse, Livre de caisse and Commandes follow the account (admin + Marie),
+    // not a permission; products/stock/returns keep their own permissions.
+    const urls = visibleUrls(getNavDataForRole(ROLES.STAFF, [], { isSalonAccount: true }));
     expect(urls).toContain("/dashboard/boutique/point-of-sale");
-    expect(urls).not.toContain("/dashboard/boutique/caisse");
+    expect(urls).toContain("/dashboard/boutique/caisse");
+    expect(urls).toContain("/dashboard/boutique/orders");
     expect(urls).not.toContain("/dashboard/boutique/products");
     expect(urls).not.toContain("/dashboard/boutique/stock");
-    expect(urls).not.toContain("/dashboard/boutique/orders");
     expect(urls).not.toContain("/dashboard/boutique/returns");
   });
 
   it("enforces sensitive boutique permissions in server actions", () => {
-    expect(read("actions/boutique/point-of-sale.js")).toContain("STAFF_PERMISSIONS.POINT_OF_SALE");
-    expect(read("actions/dashboard/cash-sessions.js")).toContain("STAFF_PERMISSIONS.CASH_REGISTER");
-    expect(read("actions/boutique/orders.js")).toContain("STAFF_PERMISSIONS.ORDERS");
+    // The till, the cash book and orders are the salon's own (admin + Marie).
+    expect(read("actions/boutique/point-of-sale.js")).toContain("isTillCashOperator(session.user)");
+    expect(read("actions/dashboard/cash-sessions.js")).toContain("isTillCashOperator(session.user)");
+    expect(read("actions/boutique/orders.js")).toContain("isTillCashOperator(session.user)");
     expect(read("actions/boutique/returns.js")).toContain("STAFF_PERMISSIONS.RETURNS");
     expect(read("actions/boutique/stock.js")).toContain("STAFF_PERMISSIONS.BOUTIQUE_STOCK");
     const stock = read("actions/boutique/stock.js");
@@ -65,20 +68,19 @@ describe("granular staff dashboard permissions", () => {
     expect(dashboardStats).toContain("isAdmin ? prisma.payment.findMany");
   });
 
-  it("lets a cashier open a session without granting closing or reporting access", () => {
+  it("opening and closing a till session are both the salon's own", () => {
     const cashSessions = read("actions/dashboard/cash-sessions.js");
     const openingGuard = cashSessions.slice(
       cashSessions.indexOf("async function requireCashSessionOpeningAccess()"),
       cashSessions.indexOf("const SESSION_INCLUDE")
     );
     const openSession = cashSessions.slice(
-      cashSessions.indexOf("export async function openCashSession(openingFloat)"),
+      cashSessions.indexOf("export async function openCashSession("),
       cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash)")
     );
     const closeSession = cashSessions.slice(cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash)"));
 
-    expect(openingGuard).toContain("STAFF_PERMISSIONS.POINT_OF_SALE");
-    expect(openingGuard).toContain("STAFF_PERMISSIONS.CASH_REGISTER");
+    expect(openingGuard).toContain("isTillCashOperator(session.user)");
     expect(openSession).toContain("requireCashSessionOpeningAccess()");
     expect(closeSession).toContain("requireCashSessionAccess()");
   });

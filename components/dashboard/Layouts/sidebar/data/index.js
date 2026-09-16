@@ -1,6 +1,6 @@
 import { Bell } from "lucide-react";
 import * as Icons from "../icons";
-import { ROLES, DASHBOARD_PERMISSIONS, STAFF_PERMISSIONS, canAccessStaffPermission } from "@/lib/authorization";
+import { ROLES, DASHBOARD_PERMISSIONS, STAFF_PERMISSIONS, canAccessStaffPermission, isAdminRole } from "@/lib/authorization";
 
 /**
  * Complete navigation data structure
@@ -57,9 +57,12 @@ const ALL_NAV_DATA = [
         icon: Icons.ShoppingBagIcon,
         items: [
           { title: "Opérations", url: "/dashboard/operations", roles: [ROLES.OWNER, ROLES.ADMIN] },
+          // A practitioner's own ledger, read-only. STAFF only: an admin is
+          // redirected from it to the full Opérations above anyway.
+          { title: "Mes opérations", url: "/dashboard/mes-operations", roles: [ROLES.STAFF] },
           { title: "Livre de recettes", url: "/dashboard/livre-de-recettes", roles: [ROLES.OWNER, ROLES.ADMIN] },
-          { title: "Caisse", url: "/dashboard/boutique/point-of-sale", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.POINT_OF_SALE },
-          { title: "Livre de caisse", url: "/dashboard/boutique/caisse", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.CASH_REGISTER },
+          { title: "Caisse", url: "/dashboard/boutique/point-of-sale", salonOnly: true },
+          { title: "Livre de caisse", url: "/dashboard/boutique/caisse", salonOnly: true },
           // Staff: read-only catalogue browsing (no cost/margin data) + stock adjustments.
           { title: "Produits", url: "/dashboard/boutique/products", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK, permission: STAFF_PERMISSIONS.BOUTIQUE_STOCK },
           { title: "Catégories", url: "/dashboard/boutique/categories", roles: DASHBOARD_PERMISSIONS.BOUTIQUE }, // Admin only — structural CRUD
@@ -67,7 +70,7 @@ const ALL_NAV_DATA = [
           // badge: expired on-site pickups whose stock nobody has ruled on
           // yet. The count is what keeps that worklist from being forgotten —
           // see lib/orders/count-pickups-to-verify.js.
-          { title: "Commandes", url: "/dashboard/boutique/orders", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.ORDERS, badge: "pickupsToVerify" },
+          { title: "Commandes", url: "/dashboard/boutique/orders", salonOnly: true, badge: "pickupsToVerify" },
           { title: "Retours", url: "/dashboard/boutique/returns", roles: DASHBOARD_PERMISSIONS.ORDERS, permission: STAFF_PERMISSIONS.RETURNS },
           { title: "Codes promo", url: "/dashboard/promo-codes", roles: DASHBOARD_PERMISSIONS.PROMO_CODES },
           { title: "Compte Stripe", url: "/dashboard/payments" },
@@ -112,10 +115,14 @@ const ALL_NAV_DATA = [
  * @param {string} userRole - The role of the current user
  * @returns {Array} Filtered navigation data
  */
-export function getNavDataForRole(userRole, grantedPermissions = []) {
+export function getNavDataForRole(userRole, grantedPermissions = [], { isSalonAccount = isAdminRole(userRole) } = {}) {
   if (!userRole) return [];
 
   const canSee = (item) => {
+    // `salonOnly`: the salon's own screens (Caisse, Livre de caisse,
+    // Commandes) — not a grantable permission. `isSalonAccount` is
+    // isTillCashOperator, resolved server-side: admin + Marie Mercier.
+    if (item.salonOnly && !isSalonAccount) return false;
     if (item.roles && !item.roles.includes(userRole)) return false;
     if (item.permission && !canAccessStaffPermission(userRole, grantedPermissions, item.permission)) return false;
     return true;

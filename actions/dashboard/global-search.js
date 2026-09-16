@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { getDashboardPermissions, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { getDashboardPermissions, isTillCashOperator, STAFF_PERMISSIONS } from "@/lib/authorization";
 
 const RESULT_LIMIT = 5;
 
@@ -49,7 +49,7 @@ export async function globalDashboardSearch(query) {
     );
   }
 
-  if (permissions.includes(STAFF_PERMISSIONS.ORDERS)) {
+  if (isTillCashOperator(session.user)) {
     const numericQuery = /^\d+$/.test(q) ? Number(q) : null;
     const orders = await prisma.order.findMany({
       where: {

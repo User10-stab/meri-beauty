@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasDashboardPermission, STAFF_PERMISSIONS, isAdminRole, isTillCashOperator } from "@/lib/authorization";
+import { isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
@@ -34,7 +34,7 @@ const POS_CHECKOUT_SECONDS = 31 * 60;
 async function requirePointOfSaleAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE))) {
+  if (!isTillCashOperator(session.user)) {
     return { error: "Accès non autorisé." };
   }
   return { session };

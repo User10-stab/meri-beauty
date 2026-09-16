@@ -28,8 +28,8 @@ describe("a booking's buyer can be completed without being reassigned", () => {
     expect(resolver).toContain("CounterCustomerError");
   });
 
-  test("completing a buyer is gated behind the counter permission, not a booking-specific one", () => {
-    expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.POINT_OF_SALE)");
+  test("completing a buyer is gated behind the counter (salon accounts only), not a booking-specific permission", () => {
+    expect(action).toContain("if (!isTillCashOperator(session.user)) {");
   });
 
   test("the action only ever looks up the buyer by id — it cannot be used to swap who they are", () => {

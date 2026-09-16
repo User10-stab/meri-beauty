@@ -76,11 +76,10 @@ describe("ticket-sending belongs to the salon, not to whoever holds a permission
     await expect(canSendTicketEmail(null)).resolves.toBe(false);
   });
 
-  test("SEND_TICKET_EMAIL survives as a key and a checkbox, but is no longer a default", () => {
-    // Kept so the column already stored on every Staff row stays meaningful,
-    // and so the decision costs one line to reverse. It grants nothing now.
-    expect(authz).toContain("SEND_TICKET_EMAIL: \"SEND_TICKET_EMAIL\"");
-    expect(authz).toContain("key: STAFF_PERMISSIONS.SEND_TICKET_EMAIL");
+  test("SEND_TICKET_EMAIL no longer exists — not a key, not a checkbox, not a default", () => {
+    // Deleted 16/09/2026: canSendTicketEmail decides from the account alone.
+    expect(authz).not.toContain("SEND_TICKET_EMAIL: \"SEND_TICKET_EMAIL\"");
+    expect(authz).not.toContain("key: STAFF_PERMISSIONS.SEND_TICKET_EMAIL");
     expect(authz).not.toContain("STAFF_PERMISSIONS.SEND_TICKET_EMAIL,\n]);");
   });
 

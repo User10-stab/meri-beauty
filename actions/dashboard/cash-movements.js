@@ -4,7 +4,7 @@ import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
+import { isTillCashOperator } from "@/lib/authorization";
 import { allocatePieceNumber, seriesForMovementType } from "@/lib/cash-book/piece-number";
 import { computeSessionCashTotals } from "@/lib/cash-book/session-totals";
 import { buildCashMovementLabel } from "@/lib/cash-book/movement-types";
@@ -20,7 +20,7 @@ import { buildCashMovementLabel } from "@/lib/cash-book/movement-types";
 async function requireCashMovementAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!(await hasDashboardPermission(session.user, STAFF_PERMISSIONS.CASH_REGISTER))) {
+  if (!isTillCashOperator(session.user)) {
     return { error: "Accès non autorisé." };
   }
   return { session };

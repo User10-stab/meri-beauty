@@ -28,14 +28,14 @@ function NavBadge({ count, label: describedAs }) {
   );
 }
 
-export function Sidebar({ userRole, dashboardPermissions = [], pickupsToVerifyCount = 0, unreadNotificationsCount = 0 }) {
+export function Sidebar({ userRole, isSalonAccount = false, dashboardPermissions = [], pickupsToVerifyCount = 0, unreadNotificationsCount = 0 }) {
   const t = useTranslations("dashboard");
   const pathname = usePathname();
   const { setIsOpen, isOpen, isMobile, toggleSidebar } = useSidebarContext();
   const [expandedItems, setExpandedItems] = useState([]);
 
   // Get navigation data filtered by user role
-  const NAV_DATA = getNavDataForRole(userRole, dashboardPermissions);
+  const NAV_DATA = getNavDataForRole(userRole, dashboardPermissions, { isSalonAccount });
   const titleKeys = {
     "Tableau de bord": "dashboard", "Notifications": "notifications", "Rendez-vous": "appointments", "Calendrier": "calendar",
     "Tous les rendez-vous": "allAppointments", "Clients": "customers", "Services": "services",

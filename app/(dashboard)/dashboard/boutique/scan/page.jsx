@@ -1,5 +1,4 @@
-import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { requireTillCashOperator } from "@/lib/route-protection";
 import { ProductScanClient } from "@/components/boutique/ProductScanClient";
 import { getTranslations } from "next-intl/server";
 
@@ -16,7 +15,7 @@ export async function generateMetadata() {
  * catalogue management (BOUTIQUE) stays admin-only.
  */
 export default async function ScanPage() {
-  await requireDashboardPermission(STAFF_PERMISSIONS.POINT_OF_SALE);
+  await requireTillCashOperator();
 
   return <ProductScanClient />;
 }

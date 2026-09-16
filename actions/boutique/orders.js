@@ -1058,7 +1058,7 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
     }
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      payment_method_types: ["card", "bancontact", "ideal", "eps", "blik"],
       line_items: lineItems,
       ...(discounts ? { discounts } : {}),
       mode: "payment",

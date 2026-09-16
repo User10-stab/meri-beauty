@@ -116,7 +116,7 @@ export async function createFormationReservationCheckoutSession(reservationId, c
     }
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      payment_method_types: ["card", "bancontact", "ideal", "eps", "blik"],
       line_items: [
         {
           price_data: {

@@ -128,6 +128,8 @@ function downloadCaisseCsv({ ledger, report }) {
       ...report.byVatRate.map((r) => [`${r.rate}%`, r.count, r.netAmount, r.vatAmount, r.grossAmount]),
       [],
       ["Réconciliation caisse", "Montant (€)"],
+      ...(report.openingBalance != null ? [["Solde en caisse au début de la période", report.openingBalance]] : []),
+      ["Ventes espèces de la période", report.totalSales],
       ["Mouvements — apports", report.cashMovements.in],
       ["Mouvements — sorties", -report.cashMovements.out],
       ...(report.expectedCash != null ? [["Attendu en caisse", report.expectedCash]] : [])
@@ -518,8 +520,13 @@ export function CaisseClient({
                     Réconciliation caisse
                   </h3>
                   <div className="divide-y divide-gray-100 dark:divide-dark-3">
+                    {report.openingBalance != null && (
+                      <SummaryRow label="Solde en caisse au début de la période" value={report.openingBalance} />
+                    )}
+                    <SummaryRow label="Ventes espèces de la période" value={report.totalSales} />
                     <SummaryRow label="Mouvements — apports" value={report.cashMovements.in} />
                     <SummaryRow label="Mouvements — sorties" value={-report.cashMovements.out} />
+                    {Boolean(report.ecart) && <SummaryRow label="Écart de caisse" value={report.ecart} />}
                     {report.expectedCash != null && <SummaryRow label="Attendu en caisse" value={report.expectedCash} emphasis />}
                   </div>
                 </div>

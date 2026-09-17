@@ -75,8 +75,9 @@ describe("the legal pages match what the code actually does", () => {
     expect(cgv).toContain("Bancontact");
     const flows = [
       "actions/boutique/orders.js",
-      "actions/workshops/create-workshop-reservation.js",
-      "actions/formations/create-formation-reservation.js",
+      // Atelier and formation checkout (public booking and staff relance)
+      // share one Stripe params builder.
+      "lib/reservations/activity-payment-relance.js",
     ];
     for (const flow of flows) {
       expect(source(flow)).toContain('"bancontact"');

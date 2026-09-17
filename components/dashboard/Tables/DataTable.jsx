@@ -92,6 +92,8 @@ export function DataTable({
   onNoShow,
   // Re-sends a booking's check-in QR to its client.
   onSendCheckIn,
+  // Relaunches an unpaid activity booking's online payment.
+  onResendPayment,
   renderRow: CustomRow,
   searchPlaceholder,
   searchFilter,
@@ -263,6 +265,7 @@ export function DataTable({
                         onSettle={onSettle}
                         onNoShow={onNoShow}
                         onSendCheckIn={onSendCheckIn}
+                        onResendPayment={onResendPayment}
                       />
                     ) : (
                       <TableRow

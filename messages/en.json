@@ -968,6 +968,7 @@
       }
     },
     "animators": {
+      "confirmDeleteAnimator": "Permanently delete animator \"{name}\"? This action is irreversible.",
       "searchAnimatorPlaceholder": "Search an animator...",
       "columns": {
         "name": "Name & Bio",
@@ -998,7 +999,8 @@
         "instagramLabel": "Instagram (Link)",
         "instagramPlaceholder": "https://instagram.com/name",
         "facebookLabel": "Facebook (Link)",
-        "facebookPlaceholder": "https://facebook.com/name"
+        "facebookPlaceholder": "https://facebook.com/name",
+        "errorGeneric": "An error occurred."
       },
       "socialTitles": {
         "website": "Website",
@@ -1429,8 +1431,12 @@
         "mode": "Mode",
         "status": "Status",
         "total": "Total",
-        "date": "Date"
+        "date": "Date",
+        "actions": "Actions"
       },
+      "settledBySale": "Sale no. {number}",
+      "settleAtPos": "Collect payment",
+      "settleAtPosTitle": "Open this order at the till to collect payment",
       "pickupCodeNotFound": "No order matches this code.",
       "status": {
         "PENDING_PAYMENT": "Payment pending",
@@ -1441,7 +1447,8 @@
         "SHIPPED": "Shipped",
         "COMPLETED": "Completed",
         "CANCELLED": "Cancelled",
-        "EXPIRED": "Expired"
+        "EXPIRED": "Expired",
+        "SETTLED_AT_COUNTER": "Settled at the counter"
       },
       "mode": {
         "PICKUP_PREPAID": "Pickup (paid)",
@@ -1686,7 +1693,8 @@
         "SHIPPED": "Shipped",
         "COMPLETED": "Completed",
         "CANCELLED": "Cancelled",
-        "EXPIRED": "Expired"
+        "EXPIRED": "Expired",
+        "SETTLED_AT_COUNTER": "Settled at the counter"
       },
       "returnStatusLabels": {
         "REQUESTED": "Requested",
@@ -2008,7 +2016,6 @@
       "waitingList": "Waiting list",
       "courses": "Courses",
       "staff": "Staff",
-      "performance": "Performance",
       "independentStaff": "Self-employed",
       "shop": "Shop",
       "products": "Products",
@@ -2051,10 +2058,6 @@
     },
     "staff": {
       "title": "Staff",
-      "performance": {
-        "title": "Staff performance",
-        "subtitle": "Appointments completed, revenue generated and commissions due, by staff member."
-      },
       "autoEntrepreneur": {
         "title": "Self-employed",
         "subtitle": "Manage the self-employed professionals attached to your salon.",
@@ -2367,6 +2370,7 @@
     "removeAria": "Remove promo code"
   },
   "myReservations": {
+    "yourReview": "Your review",
     "withExpert": "with {name}",
     "date": "Date",
     "time": "Time",
@@ -2582,7 +2586,8 @@
         "salonClosedDay": "The salon is closed on this day",
         "staffNotWorkingDay": "The staff member does not work on this day",
         "staffOnTimeOff": "The staff member is on leave",
-        "salonClosure": "The salon is closed (exception)"
+        "salonClosure": "The salon is closed (exception)",
+        "serviceNotOfferedThisDay": "This professional does not offer this service on that day"
       }
     },
     "review": {

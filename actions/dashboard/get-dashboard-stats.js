@@ -8,7 +8,7 @@ import { getLowStockVariants } from "@/actions/boutique/stock";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
-import { resolveSalonScope } from "@/lib/authorization/salon-scope";
+import { resolveSalonScope, salonPaymentArms } from "@/lib/authorization/salon-scope";
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
 
 // Same candidate statuses as lib/orders/notify-stale-fulfilment.js — the only
@@ -57,16 +57,15 @@ function monthLabelOf(year, monthIndex) {
  * (visitor counts, ad channels — none of which apply to a salon booking
  * app) with real numbers pulled from Payment/Appointment/Order/User.
  *
- * Global filters (admin dashboard):
+ * There is no staff filter. Every practitioner other than Marie is legally
+ * independent, so the admin dashboard shows the salon's figures only and has
+ * no way to open an independent's; a staff member keeps her own scope.
+ *
  * @param {object} [filters]
- * @param {string|null} [filters.staffId] - OWNER/ADMIN only: recalculate every
- *   statistic for this staff member and hide boutique/order sections (product
- *   and order figures are salon-wide and never attributed to a staff member).
- *   Ignored for non-admin callers, who keep their own appointment scope.
  * @param {string|null} [filters.month] - "YYYY-MM": recalculate every
  *   date-based statistic for this month. Defaults to the current month.
  */
-export async function getDashboardStats({ staffId = null, month = null } = {}) {
+export async function getDashboardStats({ month = null } = {}) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
   if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.DASHBOARD_HOME)) {
@@ -88,84 +87,30 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
 
-  // ── Viewed staff (admin-only filter) ───────────────────────────────────
-  // Non-admin callers keep their own scope: a passed staffId is ignored so a
-  // staff member can never pull another member's figures through this action.
-  let viewedStaff = null;
-  if (isAdmin && staffId) {
-    const target = await prisma.staff.findUnique({
-      where: { id: staffId },
-      select: {
-        id: true,
-        userId: true,
-        isDeleted: true,
-        user: { select: { fullName: true } },
-      },
-    });
-    if (target && !target.isDeleted) {
-      viewedStaff = { id: target.id, userId: target.userId, fullName: target.user.fullName };
-    }
-  }
-  const staffView = Boolean(viewedStaff);
-
   const ownStaffId = isAdmin ? null : await getCurrentStaffId();
-  const effectiveStaffId = staffView ? viewedStaff.id : ownStaffId;
+  const effectiveStaffId = ownStaffId;
   const canSeeAppointments = isAdmin || permissions.includes(STAFF_PERMISSIONS.APPOINTMENTS);
   const canSeeCustomers = isAdmin || permissions.includes(STAFF_PERMISSIONS.CUSTOMERS);
   const canSeeStock = isAdmin || permissions.includes(STAFF_PERMISSIONS.BOUTIQUE_STOCK);
   const canSeeOrders = isAdmin || isTillCashOperator(session.user);
   const appointmentScope = effectiveStaffId ? { staffService: { staffId: effectiveStaffId } } : {};
-  // In staff view, customers are the viewed member's customers (same
-  // relationship rule as a staff member's own dashboard).
-  const customerRelationshipFilters = staffView
-    ? staffCustomerRelationshipFilters({ staffId: viewedStaff.id, staffUserId: viewedStaff.userId })
-    : ownStaffId
-      ? staffCustomerRelationshipFilters({ staffId: ownStaffId, staffUserId: session.user.id })
-      : null;
+  const customerRelationshipFilters = ownStaffId
+    ? staffCustomerRelationshipFilters({ staffId: ownStaffId, staffUserId: session.user.id })
+    : null;
 
-  // Two different questions, and they must not be conflated.
-  //
-  // Staff view: that member's own appointment (reservation) payments.
-  // Boutique/order payments are salon-wide and excluded — the boutique/order
-  // sections are hidden in staff view for the same reason.
-  //
-  // Default view: the SALON's revenue, not everyone's. Every practitioner
-  // here is legally independent with her own VAT number, so summing all of
-  // them into one "chiffre d'affaires" card overstates what the salon
-  // actually earned. The scope is the ADMIN/OWNER accounts plus Marie
-  // Mercier (whose VAT number is the salon's, despite her STAFF role), plus
-  // the sales nobody rang up — a customer's own online purchase — and the
-  // salon's own ateliers and formations. Same arms, same reasoning, as
-  // lib/livre-de-recettes/build-recettes-journal.js; never re-derive the
-  // rule, see lib/authorization/salon-scope.js.
-  const salonScope = staffView || !isAdmin ? null : await resolveSalonScope(prisma);
+  // The SALON's revenue, not everyone's. Every practitioner here is legally
+  // independent with her own VAT number, so her takings are never added to
+  // the salon's "chiffre d'affaires". The scope is the ADMIN/OWNER accounts
+  // plus Marie Mercier (whose VAT number is the salon's, despite her STAFF
+  // role), plus the sales nobody rang up — a customer's own online purchase —
+  // and the salon's own ateliers and formations. Revenue is admin-only, so a
+  // non-admin never needs the scope. See lib/authorization/salon-scope.js.
+  const salonScope = isAdmin ? await resolveSalonScope(prisma) : null;
   const revenueWhere = {
     isDeleted: false,
     status: { in: REVENUE_STATUSES },
     paidAt: { gte: monthStart, lt: monthEnd },
-    ...(staffView
-      ? { appointment: { staffService: { staffId: viewedStaff.id } } }
-      : salonScope
-        ? {
-            OR: [
-              // Order.createdByStaffId → User.id ; Appointment.staffId →
-              // Staff.id. The two id spaces are not interchangeable.
-              { order: { createdByStaffId: { in: salonScope.salonUserIds } } },
-              { order: { createdByStaffId: null } },
-              { appointment: { staffId: { in: salonScope.salonStaffIds } } },
-              { workshopReservationId: { not: null } },
-              { formationReservationId: { not: null } },
-              // Attached to none of the four sources: no owner to hand it to,
-              // so it stays the salon's — same reasoning as an unstamped order.
-              {
-                orderId: null,
-                appointmentId: null,
-                workshopReservationId: null,
-                formationReservationId: null,
-              },
-            ],
-          }
-        : {}),
+    ...(salonScope ? { OR: salonPaymentArms(salonScope) } : {}),
   };
 
   // "Today" only exists in the current month — for another month the card
@@ -189,9 +134,6 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
     ...appointmentScope,
   };
 
-  // Boutique/order sections are salon-wide: hidden in staff view, and the
-  // order list follows the month filter in global view.
-  const showBoutique = !staffView;
 
   try {
     const [
@@ -202,7 +144,6 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
       listedAppointments,
       ordersInMonth,
       overdueCandidates,
-      staffOptions,
     ] = await Promise.all([
       // Single month query feeds both the revenue total and the daily chart.
       isAdmin ? prisma.payment.findMany({
@@ -220,7 +161,7 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
           ...(customerRelationshipFilters ? { OR: customerRelationshipFilters } : {}),
         },
       }) : Promise.resolve(0),
-      showBoutique && canSeeStock ? getLowStockVariants() : Promise.resolve({ success: true, data: [] }),
+      canSeeStock ? getLowStockVariants() : Promise.resolve({ success: true, data: [] }),
       canSeeAppointments ? prisma.appointment.findMany({
         where: appointmentListWhere,
         orderBy: { startTime: "asc" },
@@ -239,7 +180,7 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
           },
         },
       }) : Promise.resolve([]),
-      showBoutique && canSeeOrders ? prisma.order.findMany({
+      canSeeOrders ? prisma.order.findMany({
         where: { createdAt: { gte: monthStart, lt: monthEnd } },
         orderBy: { createdAt: "desc" },
         take: 5,
@@ -252,7 +193,7 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
           user: { select: { fullName: true } },
         },
       }) : Promise.resolve([]),
-      showBoutique && canSeeOrders ? prisma.order.findMany({
+      canSeeOrders ? prisma.order.findMany({
         where: { status: { in: OVERDUE_CANDIDATE_STATUSES } },
         select: {
           id: true,
@@ -265,12 +206,6 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
           collectedAt: true,
           user: { select: { fullName: true } },
         },
-      }) : Promise.resolve([]),
-      // Filter dropdown options (admins only — one cheap query).
-      isAdmin ? prisma.staff.findMany({
-        where: { isDeleted: false, user: { isDeleted: false } },
-        orderBy: { user: { fullName: "asc" } },
-        select: { id: true, user: { select: { fullName: true } } },
       }) : Promise.resolve([]),
     ]);
 
@@ -352,9 +287,6 @@ export async function getDashboardStats({ staffId = null, month = null } = {}) {
         activeMonth,
         monthLabel: monthLabelOf(monthYear, monthNumber - 1),
         isCurrentMonth,
-        staffView,
-        viewedStaff: viewedStaff ? { id: viewedStaff.id, fullName: viewedStaff.fullName } : null,
-        staffOptions: staffOptions.map((s) => ({ id: s.id, fullName: s.user.fullName })),
       },
     };
   } catch (error) {

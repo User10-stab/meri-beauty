@@ -968,6 +968,7 @@
       }
     },
     "animators": {
+      "confirmDeleteAnimator": "Supprimer définitivement l'animateur « {name} » ? Cette action est irréversible.",
       "searchAnimatorPlaceholder": "Rechercher un animateur...",
       "columns": {
         "name": "Nom & Biographie",
@@ -998,7 +999,8 @@
         "instagramLabel": "Instagram (Lien)",
         "instagramPlaceholder": "https://instagram.com/nom",
         "facebookLabel": "Facebook (Lien)",
-        "facebookPlaceholder": "https://facebook.com/nom"
+        "facebookPlaceholder": "https://facebook.com/nom",
+        "errorGeneric": "Une erreur est survenue."
       },
       "socialTitles": {
         "website": "Site web",
@@ -1429,8 +1431,12 @@
         "mode": "Mode",
         "status": "Statut",
         "total": "Total",
-        "date": "Date"
+        "date": "Date",
+        "actions": "Actions"
       },
+      "settledBySale": "Vente n°{number}",
+      "settleAtPos": "Encaisser",
+      "settleAtPosTitle": "Reprendre cette commande à la caisse pour l'encaisser",
       "pickupCodeNotFound": "Aucune commande ne correspond à ce code.",
       "status": {
         "PENDING_PAYMENT": "Paiement en attente",
@@ -1441,7 +1447,8 @@
         "SHIPPED": "Expédiée",
         "COMPLETED": "Terminée",
         "CANCELLED": "Annulée",
-        "EXPIRED": "Expirée"
+        "EXPIRED": "Expirée",
+        "SETTLED_AT_COUNTER": "Encaissée en caisse"
       },
       "mode": {
         "PICKUP_PREPAID": "Retrait (payé)",
@@ -1725,7 +1732,8 @@
         "SHIPPED": "Expédiée",
         "COMPLETED": "Terminée",
         "CANCELLED": "Annulée",
-        "EXPIRED": "Expirée"
+        "EXPIRED": "Expirée",
+        "SETTLED_AT_COUNTER": "Encaissée en caisse"
       },
       "returnStatusLabels": {
         "REQUESTED": "Demandée",
@@ -2008,7 +2016,6 @@
       "waitingList": "Liste d'attente",
       "courses": "Formations",
       "staff": "Staff",
-      "performance": "Performance",
       "independentStaff": "Auto-Entrepreneur",
       "shop": "Boutique",
       "products": "Produits",
@@ -2051,10 +2058,6 @@
     },
     "staff": {
       "title": "Équipe",
-      "performance": {
-        "title": "Performance du staff",
-        "subtitle": "Rendez-vous effectués, chiffre d'affaires généré et commissions dues, par membre du staff."
-      },
       "autoEntrepreneur": {
         "title": "Auto-Entrepreneurs",
         "subtitle": "Gérez les professionnels indépendants rattachés à votre salon.",

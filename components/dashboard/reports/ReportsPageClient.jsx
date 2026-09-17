@@ -1,6 +1,6 @@
 "use client";
 
-import { Euro, UserPlus, TicketPercent, PackageX, Banknote, Landmark, Info, Download, FileSpreadsheet } from "lucide-react";
+import { Euro, UserPlus, TicketPercent, PackageX, Banknote, Landmark, Download, FileSpreadsheet } from "lucide-react";
 import { PERIOD_LABELS } from "@/lib/reports-filters";
 
 const SOURCE_COLORS = {
@@ -27,6 +27,7 @@ const ORDER_STATUS_LABEL = {
   COMPLETED: "Terminée",
   CANCELLED: "Annulée",
   EXPIRED: "Expirée",
+  SETTLED_AT_COUNTER: "Encaissée en caisse",
 };
 
 const APPOINTMENT_STATUS_LABEL = {
@@ -58,7 +59,7 @@ function csvRow(values) {
  */
 function downloadReportCsv(data) {
   const period = PERIOD_LABELS[data.filters.months] ?? `${data.filters.months} mois`;
-  const scope = data.filters.staffName ? `Praticienne : ${data.filters.staffName}` : "Tout le salon";
+  const scope = "Le salon";
   const rows = [
     ["Rapport Meri Beauty"],
     ["Période", period],
@@ -95,7 +96,7 @@ function downloadReportCsv(data) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `rapport-meri-beauty-${data.filters.months}-mois${data.filters.staffId ? "-praticienne" : ""}.csv`;
+  link.download = `rapport-meri-beauty-${data.filters.months}-mois.csv`;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -114,7 +115,6 @@ export function ReportsPageClient({ data }) {
   const collectedTotal = data.cashCollected + data.bankCollected;
   const periodLabel = (PERIOD_LABELS[data.filters.months] ?? `${data.filters.months} mois`).toLowerCase();
   const excelParams = new URLSearchParams({ months: String(data.filters.months) });
-  if (data.filters.staffId) excelParams.set("staffId", data.filters.staffId);
 
   return (
     <div className="space-y-6">
@@ -136,18 +136,6 @@ export function ReportsPageClient({ data }) {
         </button>
       </div>
 
-      {data.staffScoped && (
-        <div className="flex items-start gap-2 rounded-[10px] border border-stroke bg-gray-50 px-4 py-3 text-xs text-gray-600 dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6">
-          <Info className="mt-0.5 h-4 w-4 flex-shrink-0" strokeWidth={2} />
-          <span>
-            Rapport limité à <strong>{data.filters.staffName}</strong> : rendez-vous et ventes en caisse
-            enregistrées par cette personne. Les ateliers et formations sont animés par le répertoire
-            animateurs, sans lien avec le personnel — ils sont donc exclus, tout comme les nouveaux
-            clients, les retours et les codes promo, qui ne s’attribuent pas à une praticienne.
-          </span>
-        </div>
-      )}
-
       {/* ── Summary cards ────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={<Euro size={20} />} label={`Chiffre d'affaires · ${periodLabel}`} value={formatEuro(data.totalRevenue)} />
@@ -156,29 +144,17 @@ export function ReportsPageClient({ data }) {
             Transaction ledger, not from Payment — see getReportsData. */}
         <StatCard icon={<Banknote size={20} />} label={`Espèces encaissées · ${periodLabel}`} value={formatEuro(data.cashCollected)} />
         <StatCard icon={<Landmark size={20} />} label={`Banque (carte + en ligne) · ${periodLabel}`} value={formatEuro(data.bankCollected)} />
-        {data.staffScoped ? (
-          <StatCard
-            icon={<UserPlus size={20} />}
-            label="Rendez-vous sur la période"
-            value={data.appointmentStatusCounts.reduce((sum, row) => sum + row.count, 0)}
-          />
-        ) : (
-          <StatCard icon={<UserPlus size={20} />} label={`Nouveaux clients · ${periodLabel}`} value={data.totalNewCustomers} />
-        )}
+        <StatCard icon={<UserPlus size={20} />} label={`Nouveaux clients · ${periodLabel}`} value={data.totalNewCustomers} />
       </div>
 
-      {/* Cards that cannot honestly be attributed to one practitioner are
-          hidden rather than shown salon-wide beside filtered figures. */}
-      {!data.staffScoped && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <StatCard
-            icon={<TicketPercent size={20} />}
-            label="Codes promo utilisés"
-            value={`${data.promoCode.uses} · ${formatEuro(data.promoCode.totalDiscount)}`}
-          />
-          <StatCard icon={<PackageX size={20} />} label={`Retours · ${periodLabel}`} value={data.returnsCount} />
-        </div>
-      )}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <StatCard
+          icon={<TicketPercent size={20} />}
+          label="Codes promo utilisés"
+          value={`${data.promoCode.uses} · ${formatEuro(data.promoCode.totalDiscount)}`}
+        />
+        <StatCard icon={<PackageX size={20} />} label={`Retours · ${periodLabel}`} value={data.returnsCount} />
+      </div>
 
       {/* ── Cash vs bank breakdown ─────────────────────────────────── */}
       <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
@@ -316,10 +292,7 @@ export function ReportsPageClient({ data }) {
         </div>
 
         {/* ── New customers per month ──────────────────────────────────────── */}
-        {/* Hidden under a staff filter: a new customer belongs to the salon,
-            not to whoever served them first, so getReportsData returns nothing
-            here and an all-zero chart would read as "nobody signed up". */}
-        <div className={`rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card ${data.staffScoped ? "hidden" : ""}`}>
+        <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
           <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">Nouveaux clients</h2>
           <div className="flex h-36 gap-2">
             {data.newCustomersByMonth.map((m) => (

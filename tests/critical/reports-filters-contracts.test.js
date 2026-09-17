@@ -38,13 +38,6 @@ describe("a hand-edited query string cannot widen a report", () => {
     expect(source("actions/dashboard/get-reports-data.js")).toContain("normalizeReportMonths(months)");
   });
 
-  test("an unknown staff id is refused, never silently ignored", () => {
-    // Falling back to "everyone" would quietly show a manager the whole
-    // salon's figures while the filter still read as one practitioner.
-    const action = source("actions/dashboard/get-reports-data.js");
-    expect(action).toContain("if (staffId && !selectedStaff)");
-    expect(action).toContain('message: "Membre du personnel introuvable."');
-  });
 });
 
 // Constants shared by the action and the filter bar cannot live in the action:
@@ -119,40 +112,46 @@ describe("cash and bank are told apart", () => {
   });
 });
 
-describe("a staff-filtered report never mixes scoped and salon-wide figures", () => {
+// Every practitioner other than Marie is legally independent, with her own
+// VAT number: her takings are hers. The report used to sum everyone by
+// default and offered a picker to open one practitioner's figures — both
+// are gone, and these lock that in.
+describe("the report is the salon's alone — independents are never summed in or selectable", () => {
   const action = source("actions/dashboard/get-reports-data.js");
   const client = source("components/dashboard/reports/ReportsPageClient.jsx");
+  const bar = source("components/dashboard/reports/ReportsFilterBar.jsx");
+  const page = source("app/dashboard/reports/page.jsx");
+  const route = source("app/api/reports/export/route.js");
 
-  test("it filters on both ids, because the two tables key differently", () => {
-    // Appointment.staffId points at Staff.id; Order.createdByStaffId points
-    // at User.id. Using one for both silently returns nothing.
-    expect(action).toContain("{ appointment: { staffId: selectedStaff.id } }");
-    expect(action).toContain("{ order: { createdByStaffId: staffUserId } }");
+  test("the scope comes from the one salon-scope module", () => {
+    expect(action).toContain("resolveSalonScope, salonPaymentArms");
+    expect(action).toContain("const salonPayment = { OR: salonPaymentArms(scope) };");
   });
 
-  test("ateliers and formations drop out, having no staff attribution at all", () => {
-    expect(action).toContain("staffScoped\n        ? []\n        : prisma.payment.findMany(");
+  test("every money query is scoped, on the right key for each table", () => {
+    // Order.createdByStaffId → User.id ; Appointment.staffId → Staff.id.
+    expect(action).toContain("{ createdByStaffId: { in: scope.salonUserIds } }, { createdByStaffId: null }");
+    expect(action).toContain("appointment: { staffId: { in: scope.salonStaffIds } },");
+    expect(action).toContain("order: salonOrder,");
+    expect(action).toContain("payment: salonPayment,");
+    expect(action).toContain("paidAt: { gte: rangeStart }, ...salonPayment },");
+    expect(action).toContain("order: salonOrder } })");
   });
 
-  test("unattributable figures are withheld rather than shown unfiltered", () => {
-    expect(action).toContain("staffScoped\n        ? null\n        : prisma.payment.aggregate(");
-    expect(action).toContain("staffScoped ? null : prisma.returnRequest.count(");
-    expect(client).toContain("{!data.staffScoped && (");
+  test("the action takes no staffId at all", () => {
+    expect(action).toContain("export async function getReportsData({ months } = {})");
+    expect(action).not.toContain("selectedStaff");
+    expect(action).not.toContain("staffScoped");
+    expect(action).not.toContain("staffOptions");
   });
 
-  test("the page says out loud what the filter excludes", () => {
-    // Otherwise a smaller number reads as a bad month rather than a narrower
-    // question.
-    expect(client).toContain("data.staffScoped && (");
-    expect(client).toContain("{data.filters.staffName}");
-    expect(client).toContain("ils sont donc exclus");
-  });
-
-  test("the client tolerates the withheld figures being absent", () => {
-    expect(client).toContain("data.promoCode.uses");
-    // ...only inside the non-scoped branch, so a null promoCode is never read.
-    const scopedBranch = client.slice(client.indexOf("{!data.staffScoped && ("));
-    expect(scopedBranch).toContain("data.promoCode.uses");
+  test("no screen, page or export offers or forwards a practitioner", () => {
+    expect(bar).not.toContain("staffOptions");
+    expect(bar).not.toContain("Praticienne");
+    expect(page).not.toContain("staffId");
+    expect(client).not.toContain("staffScoped");
+    expect(client).not.toContain("excelParams.set(\"staffId\"");
+    expect(route).not.toContain("staffId");
   });
 });
 
@@ -167,7 +166,7 @@ describe("filters live in the URL so a report is shareable", () => {
     const page = source("app/dashboard/reports/page.jsx");
     expect(page).toContain("const params = await searchParams;");
     expect(page).toContain("normalizeReportMonths(params?.months)");
-    expect(page).toContain("getReportsData({ months, staffId })");
+    expect(page).toContain("getReportsData({ months })");
   });
 });
 
@@ -183,7 +182,6 @@ describe("the visible filtered report can be exported", () => {
     // The export is intentionally built from the data rendered by the
     // server, not from a new unfiltered browser query.
     expect(client).toContain("function downloadReportCsv(data)");
-    expect(client).toContain("data.filters.staffName");
     expect(client).toContain("data.cashCollected");
     expect(client).toContain("data.bankCollected");
     expect(client).toContain("data.revenueByMonth.map");
@@ -193,10 +191,9 @@ describe("the visible filtered report can be exported", () => {
   test("the professional Excel download carries the current URL filters", () => {
     expect(client).toContain("Exporter Excel (.xlsx)");
     expect(client).toContain("/api/reports/export?");
-    expect(client).toContain('excelParams.set("staffId", data.filters.staffId)');
 
     const route = source("app/api/reports/export/route.js");
-    expect(route).toContain("getReportsData({ months, staffId })");
+    expect(route).toContain("getReportsData({ months })");
     expect(route).toContain("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     expect(route).toContain('"Cache-Control": "private, no-store"');
   });

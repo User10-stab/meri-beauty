@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
-import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2, Mail, AlertTriangle, QrCode } from "lucide-react";
-import { getTransactionDetail } from "@/actions/dashboard/admin-operations";
+import { X, Receipt, FileText, FileMinus, FilePlus2, Loader2, Mail, AlertTriangle, QrCode, Package } from "lucide-react";
+import { getTransactionDetail, getPendingOrderDetail } from "@/actions/dashboard/admin-operations";
 import { issueMissingRefundDocument, sendB2CRefundConfirmation } from "@/actions/dashboard/cancel-and-refund";
 import { sendTicketByEmail } from "@/actions/payments/send-ticket-email";
 import { sendCheckInEmail } from "@/actions/payments/send-checkin-email";
@@ -14,6 +14,7 @@ import { GenerateCreditNoteDialog } from "@/components/dashboard/operations/Gene
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import { performedByLabel } from "@/lib/dashboard/operation-filters";
+import { LIFECYCLE_STATUS_LABELS } from "@/lib/dashboard/operation-filters";
 import { SHIPPED_ORDER_STATUSES } from "@/lib/refunds/authorize";
 
 const money = (value) =>
@@ -99,6 +100,154 @@ function describeSource(payment) {
   return { kind: "—", title: "—", status: null, extra: null, customer: null };
 }
 
+const FULFILMENT_MODE_LABELS = {
+  PICKUP_PREPAID: "Retrait en boutique (payé en ligne)",
+  PICKUP_ON_SITE: "Retrait en boutique (paiement sur place)",
+  SHIPPING_PREPAID: "Livraison (payée en ligne)",
+};
+
+/**
+ * The customer's pickup / access QR code — the one they received by e-mail.
+ * Shared by a settled transaction and a still-unpaid pickup order, which is
+ * the case where staff most need it: the client is at the counter, without
+ * the e-mail, and has not paid yet.
+ */
+function CheckInSection({ checkIn, canResend = false, sending = false, onResend }) {
+  const isPickup = checkIn.kind === "ORDER_PICKUP";
+  return (
+    <div>
+      <SectionTitle>{isPickup ? "QR code de retrait" : "Billet / QR code d'accès"}</SectionTitle>
+      <div className="flex items-start gap-4 rounded-lg border border-gray-100 p-4">
+        {checkIn.qr ? (
+          <img
+            src={checkIn.qr}
+            alt="QR code envoyé au client"
+            className="h-24 w-24 flex-shrink-0 rounded-md border border-gray-100 bg-white"
+          />
+        ) : (
+          <div className="flex h-24 w-24 flex-shrink-0 items-center justify-center rounded-md border border-gray-100 bg-gray-50 text-gray-300">
+            <QrCode size={28} />
+          </div>
+        )}
+        <div className="min-w-0 space-y-1 text-sm">
+          <p className="font-mono text-base font-bold tracking-widest text-gray-900">{checkIn.code}</p>
+          {checkIn.seatsLabel && <p className="text-xs text-gray-500">{checkIn.seatsLabel}</p>}
+          <p className={checkIn.usedAt ? "text-xs font-medium text-emerald-700" : "text-xs text-gray-500"}>
+            {checkIn.usedAt
+              ? `${isPickup ? "Retiré" : "Scanné"} le ${dateTime(checkIn.usedAt)}.`
+              : "Pas encore scanné."}
+          </p>
+          {!isPickup && canResend && (
+            <button
+              type="button"
+              onClick={onResend}
+              disabled={sending}
+              className="mt-2 inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {sending ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
+              Renvoyer par e-mail
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A boutique order with no Transaction yet (getPendingOrderDetail). Nothing
+ * has been collected, so there is deliberately no ticket, no invoice and no
+ * cancel/refund action here — only what staff need at the counter: what was
+ * ordered, what is owed, and the customer's pickup QR code.
+ */
+function PendingOrderSections({ detail }) {
+  const { order, checkIn } = detail;
+  const discount = Number(order.discountAmount ?? 0);
+  // Taken over by the till: nothing is owed on this order any more — the
+  // money, the receipt and any invoice are on the counter sale.
+  const settledAtCounter = order.status === "SETTLED_AT_COUNTER";
+  const saleLink = order.settledBySale ? (
+    <a href={`/dashboard/boutique/orders/${order.settledBySale.id}`} className="font-semibold underline underline-offset-2">
+      vente n°{order.settledBySale.orderNumber}
+    </a>
+  ) : (
+    "vente au comptoir"
+  );
+  return (
+    <>
+      <div>
+        <SectionTitle>Paiement</SectionTitle>
+        {settledAtCounter ? (
+          <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            Encaissée en caisse — remplacée par la {saleLink}. Le paiement est enregistré sur cette vente.
+          </p>
+        ) : (
+          <p className="mb-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <AlertTriangle size={14} className="mt-px shrink-0" />
+            <span>
+              {order.fulfilmentMode === "PICKUP_ON_SITE"
+                ? "Pas encore encaissée — le client règle en boutique au moment du retrait."
+                : "Pas encore encaissée — aucun paiement n'a été confirmé pour cette commande."}
+            </span>
+          </p>
+        )}
+        <Row label="Montant total" value={money(order.totalAmount)} />
+        {!settledAtCounter && <Row label="Déjà réglé" value={money(0)} />}
+        {!settledAtCounter && <Row label="Solde restant" value={money(order.totalAmount)} />}
+        {!settledAtCounter && (
+          <Row label="À retirer au plus tard le" value={order.expiresAt ? dateTime(order.expiresAt) : null} />
+        )}
+      </div>
+
+      <div>
+        <SectionTitle>Origine</SectionTitle>
+        <Row label="Type" value="Commande boutique" />
+        <Row label="Référence" value={`n°${order.orderNumber}`} />
+        <Row label="Statut" value={LIFECYCLE_STATUS_LABELS[order.status] ?? order.status} />
+        <Row label="Mode" value={FULFILMENT_MODE_LABELS[order.fulfilmentMode] ?? order.fulfilmentMode} />
+        <Row label="Commandée le" value={dateTime(order.createdAt)} />
+        <Row label="Prête depuis le" value={order.readyForPickupAt ? dateTime(order.readyForPickupAt) : null} />
+        <Row label="Annulée le" value={order.cancelledAt ? dateTime(order.cancelledAt) : null} />
+        <Row label="Motif" value={order.cancelReason} />
+        <Row label="Client" value={order.user?.fullName} />
+        <Row label="E-mail" value={order.user?.email} />
+        <Row label="Réalisé par" value={performedByLabel(order.performedBy) ?? "Achat en ligne (client)"} />
+        <Row label="Note" value={order.notes} />
+      </div>
+
+      <div>
+        <SectionTitle>Articles</SectionTitle>
+        <ul className="divide-y divide-gray-100 rounded-lg border border-gray-100">
+          {order.items.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-4 px-4 py-2.5 text-sm">
+              <span className="min-w-0 text-gray-700">
+                {item.quantity} × {item.productName}
+                {item.variantName && <span className="text-gray-400"> — {item.variantName}</span>}
+              </span>
+              <span className="font-medium text-gray-900">{money(Number(item.unitPrice) * item.quantity)}</span>
+            </li>
+          ))}
+        </ul>
+        {discount > 0 && <Row label="Remise" value={`−${money(discount)}`} />}
+        <Row label="Total TTC" value={money(order.totalAmount)} />
+      </div>
+
+      {checkIn && <CheckInSection checkIn={checkIn} />}
+
+      <div>
+        <SectionTitle>Reçu / ticket de caisse</SectionTitle>
+        <p className="text-sm text-gray-500">
+          {settledAtCounter ? (
+            <>Le reçu est celui de la {saleLink}.</>
+          ) : (
+            "Pas encore de reçu — il est émis à l'encaissement de la commande, pas avant."
+          )}
+        </p>
+      </div>
+    </>
+  );
+}
+
 function amountStillDue(payment, sourceStatus) {
   if (!payment) return null;
   return collectibleBalance({
@@ -109,9 +258,12 @@ function amountStillDue(payment, sourceStatus) {
 }
 
 /**
- * @param {{ transactionId: string|null, onClose: () => void }} props
+ * Opens on a Transaction (`transactionId`) or, for a boutique order that has
+ * not been paid yet and so has no Transaction, on the order (`orderId`).
+ *
+ * @param {{ transactionId?: string|null, orderId?: string|null, onClose: () => void }} props
  */
-export function TransactionDetailDrawer({ transactionId, onClose }) {
+export function TransactionDetailDrawer({ transactionId = null, orderId = null, onClose }) {
   const closeBtnRef = useRef(null);
   const [detail, setDetail] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -125,8 +277,10 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   const [cancelRefundOpen, setCancelRefundOpen] = useState(false);
   const [generateCreditNoteOpen, setGenerateCreditNoteOpen] = useState(false);
 
+  const openKey = transactionId ?? orderId;
+
   useEffect(() => {
-    if (!transactionId) {
+    if (!openKey) {
       setDetail(null);
       setError(null);
       return;
@@ -134,7 +288,9 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     let cancelled = false;
     setIsLoading(true);
     setError(null);
-    getTransactionDetail(transactionId).then((result) => {
+    setDetail(null);
+    const load = transactionId ? getTransactionDetail(transactionId) : getPendingOrderDetail(orderId);
+    load.then((result) => {
       if (cancelled) return;
       if (result.success) setDetail(result.data);
       else setError(result.message);
@@ -143,7 +299,7 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
     return () => {
       cancelled = true;
     };
-  }, [transactionId]);
+  }, [openKey, transactionId, orderId]);
 
   async function handleGenerateCreditNote() {
     if (!transactionId || generatingNote) return;
@@ -224,28 +380,30 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
   }
 
   useEffect(() => {
-    if (!transactionId) return;
+    if (!openKey) return;
     const id = requestAnimationFrame(() => closeBtnRef.current?.focus());
     return () => cancelAnimationFrame(id);
-  }, [transactionId]);
+  }, [openKey]);
 
   useEffect(() => {
-    if (!transactionId) return;
+    if (!openKey) return;
     function handleKey(e) {
       if (e.key === "Escape") onClose();
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [transactionId, onClose]);
+  }, [openKey, onClose]);
 
   useEffect(() => {
-    document.body.style.overflow = transactionId ? "hidden" : "";
+    document.body.style.overflow = openKey ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [transactionId]);
+  }, [openKey]);
 
-  if (!transactionId) return null;
+  if (!openKey) return null;
+
+  const pendingOrder = detail?.pendingOrder ? detail.order : null;
 
   const payment = detail?.payment;
   const source = describeSource(payment);
@@ -331,23 +489,36 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Détail de la transaction"
+        aria-label={orderId ? "Détail de la commande" : "Détail de la transaction"}
         className="relative flex max-h-[92vh] w-full max-w-2xl flex-col rounded-2xl bg-white shadow-xl"
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-100 px-6 py-4">
           <div className="flex min-w-0 items-center gap-3">
             <div
               className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${
-                isRefund ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"
+                isRefund ? "bg-red-100 text-red-700" : pendingOrder ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"
               }`}
             >
-              <Receipt size={17} />
+              {pendingOrder ? <Package size={17} /> : <Receipt size={17} />}
             </div>
             <div className="min-w-0">
               <h2 className={`truncate text-base font-semibold leading-tight ${isRefund ? "text-red-600" : "text-gray-900"}`}>
-                {detail ? signedMoney(detail.amount, isRefund) : "Chargement…"}
+                {pendingOrder
+                  ? `Commande n°${pendingOrder.orderNumber} · ${money(pendingOrder.totalAmount)}`
+                  : detail
+                    ? signedMoney(detail.amount, isRefund)
+                    : "Chargement…"}
               </h2>
-              {detail && <span className="text-xs text-gray-400">{dateTime(detail.paidAt)}</span>}
+              {pendingOrder ? (
+                <span className={pendingOrder.status === "SETTLED_AT_COUNTER" ? "text-xs text-emerald-700" : "text-xs text-amber-700"}>
+                  {pendingOrder.status === "SETTLED_AT_COUNTER"
+                    ? `Encaissée en caisse${pendingOrder.settledBySale ? ` — vente n°${pendingOrder.settledBySale.orderNumber}` : ""}`
+                    : "Non payée"}{" "}
+                  · commandée le {dateTime(pendingOrder.createdAt)}
+                </span>
+              ) : (
+                detail && <span className="text-xs text-gray-400">{dateTime(detail.paidAt)}</span>
+              )}
             </div>
           </div>
           <button
@@ -365,7 +536,9 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
           {isLoading && <p className="text-sm text-gray-500">Chargement…</p>}
           {error && <p className="text-sm text-red-600">{error}</p>}
 
-          {detail && (
+          {pendingOrder && <PendingOrderSections detail={detail} />}
+
+          {detail && !pendingOrder && (
             <>
               <div>
                 <SectionTitle>Transaction</SectionTitle>
@@ -519,42 +692,12 @@ export function TransactionDetailDrawer({ transactionId, onClose }) {
               )}
 
               {detail.checkIn && (
-                <div>
-                  <SectionTitle>{detail.checkIn.kind === "ORDER_PICKUP" ? "QR code de retrait" : "Billet / QR code d'accès"}</SectionTitle>
-                  <div className="flex items-start gap-4 rounded-lg border border-gray-100 p-4">
-                    {detail.checkIn.qr ? (
-                      <img
-                        src={detail.checkIn.qr}
-                        alt="QR code envoyé au client"
-                        className="h-24 w-24 flex-shrink-0 rounded-md border border-gray-100 bg-white"
-                      />
-                    ) : (
-                      <div className="flex h-24 w-24 flex-shrink-0 items-center justify-center rounded-md border border-gray-100 bg-gray-50 text-gray-300">
-                        <QrCode size={28} />
-                      </div>
-                    )}
-                    <div className="min-w-0 space-y-1 text-sm">
-                      <p className="font-mono text-base font-bold tracking-widest text-gray-900">{detail.checkIn.code}</p>
-                      {detail.checkIn.seatsLabel && <p className="text-xs text-gray-500">{detail.checkIn.seatsLabel}</p>}
-                      <p className={detail.checkIn.usedAt ? "text-xs font-medium text-emerald-700" : "text-xs text-gray-500"}>
-                        {detail.checkIn.usedAt
-                          ? `${detail.checkIn.kind === "ORDER_PICKUP" ? "Retiré" : "Scanné"} le ${dateTime(detail.checkIn.usedAt)}.`
-                          : "Pas encore scanné."}
-                      </p>
-                      {detail.checkIn.kind !== "ORDER_PICKUP" && detail.canSendTicketEmail && (
-                        <button
-                          type="button"
-                          onClick={handleSendCheckIn}
-                          disabled={sendingCheckIn}
-                          className="mt-2 inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          {sendingCheckIn ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
-                          Renvoyer par e-mail
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <CheckInSection
+                  checkIn={detail.checkIn}
+                  canResend={detail.canSendTicketEmail}
+                  sending={sendingCheckIn}
+                  onResend={handleSendCheckIn}
+                />
               )}
 
               <div>

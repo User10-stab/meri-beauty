@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isValidVatFormat, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
+import { syncAccountVatNumber } from "@/lib/vat/account-vat";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { billingProfileSchema } from "@/lib/validations/billing-profile";
 
@@ -163,15 +164,16 @@ export async function updateMyVatNumber(vatNumber) {
   }
 
   try {
-    await prisma.user.update({
-      where: { id: session.user.id },
-      data: {
-        isCompany: true,
-        vatNumber: normalized,
-        vatValidatedAt: new Date(),
-        vatValidationName: viesResult.name ?? null,
-        vatValidationAddress: viesResult.address ?? null,
-      },
+    // Mirrored onto her staff profile when she has one: the number she just
+    // proved at VIES is the number her own sales must be issued under.
+    // Clearing a number above deliberately does NOT clear the staff one — an
+    // independent may not be left without one.
+    await syncAccountVatNumber(prisma, {
+      userId: session.user.id,
+      vatNumber: normalized,
+      validatedAt: new Date(),
+      viesName: viesResult.name ?? null,
+      viesAddress: viesResult.address ?? null,
     });
 
     revalidatePath("/profile");

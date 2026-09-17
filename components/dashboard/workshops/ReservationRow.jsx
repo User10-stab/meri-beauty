@@ -59,7 +59,7 @@ function formatSessionDate(date) {
  * @param {boolean} [props.highlighted] - Notification deep-link focus ring.
  * @param {object} [props.rowRef] - Ref attached to the row for scroll-into-view.
  */
-export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSendCheckIn, highlighted = false, rowRef }) {
+export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSendCheckIn, onResendPayment, isResendingPayment = false, highlighted = false, rowRef }) {
   const priceFormatted = (value) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
 
@@ -108,6 +108,9 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSe
         >
           {STATUS_LABELS[row.status] ?? row.status}
         </span>
+        {row.canResendPayment && (
+          <span className="mt-1 block text-xs text-amber-600">Paiement non abouti</span>
+        )}
       </td>
 
       {/* Payment */}
@@ -170,6 +173,21 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSe
               title="Renvoyer le QR code d'accès au client par e-mail"
             >
               QR code
+            </button>
+          )}
+          {/* The online payment never went through (hold still pending or
+              expired by the sweep): put the seat back on hold and e-mail the
+              client a fresh Stripe link — the atelier counterpart of the
+              appointment "Relancer le paiement" button. */}
+          {row.canResendPayment && onResendPayment && (
+            <button
+              type="button"
+              onClick={() => onResendPayment(row)}
+              disabled={isResendingPayment}
+              className="rounded-lg border border-amber-200 px-2.5 py-1.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
+              title="Réserver à nouveau la place 24 h et renvoyer un lien de paiement au client par e-mail"
+            >
+              {isResendingPayment ? "Envoi…" : "Relancer le paiement"}
             </button>
           )}
           <RowActions row={row} onEdit={onEdit} onDelete={onDelete} />

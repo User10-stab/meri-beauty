@@ -16,6 +16,7 @@ import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-works
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
+import { RELANCE_KINDS, buildActivityCheckoutParams } from "@/lib/reservations/activity-payment-relance";
 import {
   buildWorkshopReservationCreatedNotification,
   createNotificationsBulk,
@@ -93,8 +94,6 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
       };
     }
 
-    const { session } = reservation;
-    const activity = session.workshop;
     const isFullPayment = Number(reservation.balanceDue) === 0;
     const chargeAmount = isFullPayment ? Number(reservation.totalPrice) : Number(reservation.depositAmount);
     const workshopAction = isFullPayment ? "full_payment" : "deposit";
@@ -115,41 +114,22 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
       return { success: true, url: null, freeReservation: true, reservationId: reservation.id };
     }
 
-    const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact", "ideal"],
-      line_items: [
-        {
-          price_data: {
-            currency: "eur",
-            product_data: {
-              name: `${isFullPayment ? "Paiement total" : "Acompte"} - ${activity.title}`,
-              description: `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`,
-            },
-            unit_amount: Math.round(chargeAmount * 100),
-          },
-          quantity: 1,
-        },
-      ],
-      mode: "payment",
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation-atelier/succes?reservation_id=${reservation.id}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation-atelier?canceled=true&activity=${activity.id}&session=${session.id}`,
-      customer_email: reservation.customer.email,
-      metadata: {
-        kind: "workshop",
-        workshopAction,
-        reservationId: reservation.id,
-        sessionId: session.id,
-        activityId: activity.id,
-        seatsCount: String(reservation.seatsCount),
-        totalPrice: String(reservation.totalPrice),
-        depositAmount: String(reservation.depositAmount),
-        balanceDue: String(reservation.balanceDue),
-        customerUserId: reservation.customer.id,
-      },
-      payment_intent_data: {
-        metadata: { kind: "workshop", workshopAction, reservationId: reservation.id },
-      },
-    });
+    let stripeSession;
+    try {
+      stripeSession = await stripe.checkout.sessions.create(
+        buildActivityCheckoutParams(RELANCE_KINDS.WORKSHOP, reservation)
+      );
+    } catch (error) {
+      // No checkout exists, so the client cannot pay this hold — release the
+      // seat now instead of leaving it looking booked until the hold lapses.
+      await prisma.workshopReservation
+        .updateMany({
+          where: { id: reservation.id, status: "PENDING_DEPOSIT", payment: { is: null } },
+          data: { status: "CANCELLED", cancelledAt: new Date(), holdExpiresAt: new Date() },
+        })
+        .catch((releaseError) => console.error("[checkout] failed to release unpaid hold", reservation.id, releaseError));
+      throw error;
+    }
 
     return { success: true, url: stripeSession.url, reservationId: reservation.id };
   } catch (error) {
@@ -452,17 +432,33 @@ export async function createWorkshopReservation(data) {
     // two persisted Decimal(10,2) values always add back to the total.
     const balanceDue = Number((discountedTotal - depositAmount).toFixed(2));
 
+    // This customer's own still-live hold on this session, if any.
+    const liveHold = await prisma.workshopReservation.findFirst({
+      where: { sessionId, customerId: user.id, status: "PENDING_DEPOSIT", holdExpiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // Same rule as the formations flow, for the same reason — see the long
+    // comment in actions/formations/create-formation-reservation.js. A
+    // verified customer already holding a payment link must not be handed a
+    // second one: both stay payable, and paying both charges her twice.
+    if (liveHold && user.emailVerified) {
+      return {
+        success: false,
+        message:
+          "Vous avez déjà une réservation en attente de paiement pour cette session. " +
+          "Utilisez le lien de paiement reçu par email plutôt que d'en créer une seconde, " +
+          "sinon vous risquez d'être débité(e) deux fois. Contactez-nous si vous ne le retrouvez pas.",
+      };
+    }
+
     // An unverified customer (brand new, or a previous guest checkout that
     // was never confirmed) reuses their still-live hold on this session
     // instead of stacking a second one — otherwise resubmitting the form
-    // before confirming would lock a seat twice.
-    let reservation = null;
-    if (!user.emailVerified) {
-      reservation = await prisma.workshopReservation.findFirst({
-        where: { sessionId, customerId: user.id, status: "PENDING_DEPOSIT", holdExpiresAt: { gt: new Date() } },
-        orderBy: { createdAt: "desc" },
-      });
-    }
+    // before confirming would lock a seat twice. Safe for them precisely
+    // because they never reached Stripe: the hold above was created without a
+    // checkout session, so reuse cannot leave two payable links behind.
+    let reservation = user.emailVerified ? null : liveHold;
 
     if (!reservation) {
       // Rate-limited only for a genuinely new hold — reusing a live one

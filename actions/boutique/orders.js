@@ -254,6 +254,7 @@ function serializeOrder(order) {
     pickedUpAt: order.pickedUpAt,
     readyForPickupAt: order.readyForPickupAt,
     expiresAt: order.expiresAt,
+    stockReleasedAt: order.stockReleasedAt,
     cancelledAt: order.cancelledAt,
     cancelReason: order.cancelReason,
     notes: order.notes,
@@ -263,6 +264,10 @@ function serializeOrder(order) {
     user: order.user
       ? { id: order.user.id, fullName: order.user.fullName, email: order.user.email, phone: order.user.phone }
       : null,
+    // SETTLED_AT_COUNTER: the counter sale that replaced this order — and, on
+    // that sale, the order it came from.
+    settledBySale: order.settledBySale ? { id: order.settledBySale.id, orderNumber: order.settledBySale.orderNumber } : null,
+    settledOrder: order.settledOrder ? { id: order.settledOrder.id, orderNumber: order.settledOrder.orderNumber } : null,
     hasPayment: Boolean(order.payment),
     payment: order.payment
       ? {
@@ -1058,7 +1063,7 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
     }
 
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact", "ideal"],
+      payment_method_types: ["card", "bancontact"],
       line_items: lineItems,
       ...(discounts ? { discounts } : {}),
       mode: "payment",
@@ -1106,12 +1111,31 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
   if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page: 1, pageSize };
 
   try {
+    const searchWhere = search
+      ? {
+          OR: [
+            { pickupCode: { contains: search, mode: "insensitive" } },
+            { trackingCode: { contains: search, mode: "insensitive" } },
+            { user: { fullName: { contains: search, mode: "insensitive" } } },
+            { user: { email: { contains: search, mode: "insensitive" } } },
+          ],
+        }
+      : {};
+
     // "Commandes à traiter" deep-link (dashboard card): same overdue
-    // computation as the card, paginated here instead of capped.
+    // computation as the card, paginated here instead of capped. The status/
+    // mode/search filters still apply on top of it — they used to be silently
+    // ignored while this preset was on, so picking a status changed nothing.
     if (overdueOnly) {
       const now = new Date();
       const candidates = await prisma.order.findMany({
-        where: { status: { in: OVERDUE_CANDIDATE_STATUSES } },
+        where: {
+          status: status
+            ? { in: OVERDUE_CANDIDATE_STATUSES.includes(status) ? [status] : [] }
+            : { in: OVERDUE_CANDIDATE_STATUSES },
+          ...(fulfilmentMode ? { fulfilmentMode } : {}),
+          ...searchWhere,
+        },
         include: {
           user: { select: { id: true, fullName: true, email: true, phone: true } },
           payment: { select: { id: true, transactionReference: true, status: true, transactions: { select: { method: true, transactionType: true } } } },
@@ -1132,16 +1156,7 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
     const where = {
       ...(status ? { status } : {}),
       ...(fulfilmentMode ? { fulfilmentMode } : {}),
-      ...(search
-        ? {
-            OR: [
-              { pickupCode: { contains: search, mode: "insensitive" } },
-              { trackingCode: { contains: search, mode: "insensitive" } },
-              { user: { fullName: { contains: search, mode: "insensitive" } } },
-              { user: { email: { contains: search, mode: "insensitive" } } },
-            ],
-          }
-        : {}),
+      ...searchWhere,
     };
 
     // Unbounded findMany here used to fetch every order ever placed on
@@ -1158,6 +1173,7 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
           user: { select: { id: true, fullName: true, email: true, phone: true } },
           payment: { select: { id: true, transactionReference: true, status: true, transactions: { select: { method: true, transactionType: true } } } },
           items: true,
+          settledBySale: { select: { id: true, orderNumber: true } },
         },
       }),
     ]);
@@ -1181,6 +1197,8 @@ export async function getOrderById(orderId) {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
         payment: { include: { invoice: { include: { creditNotes: true } } } },
         items: true,
+        settledBySale: { select: { id: true, orderNumber: true } },
+        settledOrder: { select: { id: true, orderNumber: true } },
         returnRequests: { include: { items: true }, orderBy: { requestedAt: "desc" } },
         cancellationRequest: {
           include: {
@@ -1239,10 +1257,29 @@ export async function markOrderReadyForPickup(orderId) {
 export async function lookupOrderByPickupCode(pickupCode) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
+  return loadPickupFiche({ pickupCode }, "Commande introuvable — vérifiez le code.");
+}
 
+/**
+ * Same fiche as lookupOrderByPickupCode, reached from a counter search result
+ * instead of a scanned code — for the client who is standing at the till
+ * without their QR code.
+ */
+export async function lookupPickupOrderById(orderId) {
+  const guard = await requireOrdersAccess();
+  if (guard.error) return { success: false, message: guard.error };
+  if (typeof orderId !== "string" || !orderId) return { success: false, message: "Commande introuvable." };
+  return loadPickupFiche({ id: orderId }, "Commande introuvable.");
+}
+
+// Statuses in which an order is still waiting on the counter to hand it over.
+const PICKUP_PENDING_STATUSES = ["PAID", "READY_FOR_PICKUP", "PENDING_PICKUP"];
+const PICKUP_SEARCH_LIMIT = 20;
+
+async function loadPickupFiche(where, notFoundMessage) {
   try {
     const order = await prisma.order.findUnique({
-      where: { pickupCode },
+      where,
       select: {
         id: true,
         orderNumber: true,
@@ -1253,7 +1290,7 @@ export async function lookupOrderByPickupCode(pickupCode) {
         user: { select: { fullName: true } },
       },
     });
-    if (!order) return { success: false, message: "Commande introuvable — vérifiez le code." };
+    if (!order) return { success: false, message: notFoundMessage };
 
     return {
       success: true,
@@ -1270,8 +1307,68 @@ export async function lookupOrderByPickupCode(pickupCode) {
       },
     };
   } catch (error) {
-    console.error("[lookupOrderByPickupCode]", error);
+    console.error("[loadPickupFiche]", error);
     return { success: false, message: "Impossible de lire cette commande." };
+  }
+}
+
+/**
+ * Boutique pickups still waiting for their customer, found by the client's
+ * name (every word must match, in any order and casing — "dupont marie"
+ * finds "Marie Dupont") or by the order number. The counter omnibar's
+ * fallback for a client who lost their pickup QR code: scanning stays the
+ * fast path (lookupOrderByPickupCode).
+ */
+export async function searchCounterPickups(query) {
+  const guard = await requireOrdersAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
+
+  const value = query?.trim() ?? "";
+  if (value.length < 3) return { success: true, data: [] };
+  const terms = value.split(/\s+/).filter(Boolean);
+  const orderNumber = /^n?°?\s*\d+$/i.test(value) ? Number(value.replace(/\D/g, "")) : null;
+
+  try {
+    const orders = await prisma.order.findMany({
+      where: {
+        fulfilmentMode: { in: ["PICKUP_PREPAID", "PICKUP_ON_SITE"] },
+        status: { in: PICKUP_PENDING_STATUSES },
+        OR: [
+          { user: { is: { AND: terms.map((term) => ({ fullName: { contains: term, mode: "insensitive" } })) } } },
+          ...(orderNumber && Number.isSafeInteger(orderNumber) && orderNumber <= 2147483647 ? [{ orderNumber }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        fulfilmentMode: true,
+        totalAmount: true,
+        createdAt: true,
+        payment: { select: { id: true } },
+        user: { select: { fullName: true } },
+        _count: { select: { items: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: PICKUP_SEARCH_LIMIT,
+    });
+
+    return {
+      success: true,
+      data: orders.map((order) => ({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        customerName: order.user?.fullName ?? "—",
+        totalAmount: Number(order.totalAmount),
+        hasPayment: Boolean(order.payment),
+        itemCount: order._count.items,
+        createdAt: order.createdAt,
+      })),
+    };
+  } catch (error) {
+    console.error("[searchCounterPickups]", error);
+    return { success: false, message: "Impossible de rechercher les commandes.", data: [] };
   }
 }
 
@@ -2026,7 +2123,7 @@ export async function cancelOrder(input) {
     },
   });
   if (!order) return { success: false, message: "Commande introuvable." };
-  if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
+  if (["CANCELLED", "EXPIRED", "COMPLETED", "SETTLED_AT_COUNTER"].includes(order.status)) {
     return { success: false, message: "Cette commande ne peut plus être annulée." };
   }
   if (order.status === "SHIPPED") {

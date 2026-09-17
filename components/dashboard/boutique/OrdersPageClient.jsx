@@ -3,13 +3,14 @@
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, ScanLine, Camera, Package, Loader2, AlertTriangle } from "lucide-react";
+import { Search, ScanLine, Camera, Package, Loader2, AlertTriangle, Wallet } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import Button from "@/components/ui/Button";
 import { PickupScannerDialog } from "@/components/dashboard/boutique/PickupScannerDialog";
 import { Pagination } from "@/components/dashboard/Tables/Pagination";
 import { listOrders } from "@/actions/boutique/orders";
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
+import { canSettleOrderAtPointOfSale } from "@/lib/orders/point-of-sale-handoff";
 import { useTranslations } from "next-intl";
 
 const PAGE_SIZE = 20;
@@ -24,6 +25,7 @@ const STATUS_STYLE = {
   COMPLETED: "bg-gray-100 text-gray-500 border-gray-200",
   CANCELLED: "bg-red-50 text-red-600 border-red-100",
   EXPIRED: "bg-red-50 text-red-600 border-red-100",
+  SETTLED_AT_COUNTER: "bg-emerald-50 text-emerald-700 border-emerald-100",
 };
 
 function formatPrice(n) {
@@ -65,6 +67,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
     COMPLETED: t("status.COMPLETED"),
     CANCELLED: t("status.CANCELLED"),
     EXPIRED: t("status.EXPIRED"),
+    SETTLED_AT_COUNTER: t("status.SETTLED_AT_COUNTER"),
   };
 
   function refetch(next) {
@@ -230,7 +233,8 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
                 <TableHead>{t("tableHeaders.mode")}</TableHead>
                 <TableHead>{t("tableHeaders.status")}</TableHead>
                 <TableHead>{t("tableHeaders.total")}</TableHead>
-                <TableHead className="pr-6">{t("tableHeaders.date")}</TableHead>
+                <TableHead>{t("tableHeaders.date")}</TableHead>
+                <TableHead className="pr-6 text-right">{t("tableHeaders.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -264,6 +268,11 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[o.status]}`}>
                       {STATUS_LABEL[o.status]}
                     </span>
+                    {o.status === "SETTLED_AT_COUNTER" && o.settledBySale && (
+                      <span className="mt-1 block text-xs text-gray-500">
+                        {t("settledBySale", { number: o.settledBySale.orderNumber })}
+                      </span>
+                    )}
                     {(() => {
                       const reason = getOrderOverdueReason(o);
                       if (!reason) return null;
@@ -281,10 +290,28 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
                   <TableCell>
                     <span className="font-medium text-gray-700 dark:text-dark-6">{formatPrice(o.totalAmount)}</span>
                   </TableCell>
-                  <TableCell className="pr-6">
+                  <TableCell>
                     <span className="text-gray-500 dark:text-dark-6">
                       {new Date(o.createdAt).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}
                     </span>
+                  </TableCell>
+                  <TableCell className="pr-6 text-right">
+                    {/* Unpaid pay-at-pickup order → open it at the till,
+                        pre-filled, to add items or settle it there. */}
+                    {canSettleOrderAtPointOfSale(o) && (
+                      <button
+                        type="button"
+                        title={t("settleAtPosTitle")}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          router.push(`/dashboard/boutique/point-of-sale?order=${encodeURIComponent(o.id)}`);
+                        }}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#1f291f]"
+                      >
+                        <Wallet size={13} />
+                        {t("settleAtPos")}
+                      </button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

@@ -67,7 +67,7 @@ export default function CGVPage() {
       <H2>5. Paiement</H2>
       <P>
         Les paiements en ligne sont traités de façon sécurisée par Stripe et acceptés par carte
-        bancaire (Visa, Mastercard), Bancontact et iDEAL. Meri Beauty n'a à aucun moment accès à
+        bancaire (Visa, Mastercard) et Bancontact. Meri Beauty n'a à aucun moment accès à
         vos coordonnées bancaires complètes. Au salon, les règlements sont acceptés en espèces ou
         par carte via notre terminal de paiement.
       </P>

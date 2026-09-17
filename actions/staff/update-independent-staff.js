@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { updateIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { sendVerificationEmail } from "@/actions/auth/verify-email";
+import { syncAccountVatNumber, verifyStaffVatNumber } from "@/lib/vat/account-vat";
+import { normalizeVatNumber } from "@/lib/vat-validation";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -96,6 +98,7 @@ export async function updateIndependentStaff(input) {
       isDeleted: true,
       isActive:  true,
       userId:    true,
+      vatNumber: true,
       user:      { select: { id: true, fullName: true, email: true, phone: true } },
     },
   });
@@ -110,6 +113,19 @@ export async function updateIndependentStaff(input) {
   // Capture the current active state so we can detect a deactivation inside
   // the transaction without an extra round-trip after the fact.
   const wasActive = existing.isActive;
+
+  // A new number is checked against VIES; an unchanged one is not, so editing
+  // a bio doesn't depend on VIES being up. Either way the number is mirrored
+  // onto the customer account below — one person, one VAT number.
+  const normalizedVat = normalizeVatNumber(vatNumber);
+  const vatChanged = normalizedVat !== normalizeVatNumber(existing.vatNumber);
+  let vatCheck = null;
+  if (vatChanged) {
+    vatCheck = await verifyStaffVatNumber(vatNumber);
+    if (!vatCheck.ok) {
+      return { success: false, message: vatCheck.message, errors: { vatNumber: vatCheck.message } };
+    }
+  }
 
   // ── 2b. Email/phone uniqueness among active (non-deleted) users, ignoring
   // soft-deleted accounts (so a deleted account can be re-created cleanly)
@@ -220,13 +236,31 @@ export async function updateIndependentStaff(input) {
           bio:               bio               ?? null,
           languages:         languages         ?? [],
           yearsOfExperience: yearsOfExperience ?? null,
-          vatNumber:         vatNumber         ?? null,
+          vatNumber:         normalizedVat,
           rythme:            rythme            ?? null,
           isActive,
           hireDate: hireDate ? new Date(hireDate) : null,
           ...(dashboardPermissions !== undefined ? { dashboardPermissions } : {}),
         },
       });
+
+      if (vatCheck) {
+        await syncAccountVatNumber(tx, {
+          userId: existing.userId,
+          vatNumber: vatCheck.vatNumber,
+          validatedAt: vatCheck.validatedAt,
+          viesName: vatCheck.name,
+          viesAddress: vatCheck.address,
+        });
+      } else {
+        // Unchanged number, but the customer account may never have had it
+        // (the two rows were filled in by different screens for years).
+        // Backfill it without touching an existing VIES confirmation.
+        await tx.user.updateMany({
+          where: { id: existing.userId, NOT: { vatNumber: normalizedVat } },
+          data: { isCompany: true, vatNumber: normalizedVat },
+        });
+      }
 
       // 4c. Replace service assignments
       // Delete all current StaffService rows, then re-create the new set.

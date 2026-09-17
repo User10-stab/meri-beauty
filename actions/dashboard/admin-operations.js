@@ -28,10 +28,8 @@ const PAGE_SIZE = 30;
  * A FormationSession's Animator is only a real staff/admin account when its
  * e-mail matches one — resolveFormationAnimatorId() (actions/formations/
  * create-formation.js) keeps that in lockstep for any formation assigned
- * through the dashboard's own staff picker, same bridge getStaffPerformance()
- * already reads for commission. Batched (one query for however many distinct
- * e-mails a page of rows carries) rather than per-row, same shape as that
- * action's own staffEmails lookup.
+ * through the formation form's staff picker. Batched (one query for however
+ * many distinct e-mails a page of rows carries) rather than per-row.
  */
 async function resolveStaffByEmails(emails) {
   const distinct = [...new Set(emails.filter(Boolean))];
@@ -60,11 +58,9 @@ function normalizeParams(params = {}) {
   const lifecycleOptions = LIFECYCLE_STATUS_FILTERS[tab === "transactions" ? "all" : tab] ?? [];
   const lifecycleStatus = lifecycleOptions.includes(params.lifecycleStatus) ? params.lifecycleStatus : "ALL";
   const paymentEvent = PAYMENT_EVENT_FILTERS.includes(params.paymentEvent) ? params.paymentEvent : "ALL";
-  // Validated against the database, not here — see resolveOperationsScope,
-  // which rejects an unknown id rather than letting it widen the ledger back
-  // to everyone, the same way get-reports-data.js does.
-  const staffId = typeof params.staffId === "string" ? params.staffId.trim() : "";
-  return { tab, page, type, lifecycleStatus, paymentEvent, staffId };
+  // No `staffId` here, on purpose: whose ledger is read is decided by the
+  // session alone (see getAdminOperations), never by the query string.
+  return { tab, page, type, lifecycleStatus, paymentEvent };
 }
 
 /**
@@ -82,15 +78,12 @@ function normalizeParams(params = {}) {
  *   order, a system audit entry) belong to the salon too, and ateliers and
  *   formations are the salon's own events, so both arms come through whole.
  *
- *   STAFF — one practitioner, chosen from the filter or forced to the reader
- *   herself on /dashboard/mes-operations. Ateliers and formations drop out
- *   entirely: the animator is matched by e-mail with no foreign key, so there
- *   is no honest way to attribute one, and showing everyone's next to
- *   filtered figures would be worse than showing none. Same call
- *   get-reports-data.js makes.
- *
- * Marie is selectable in the filter like anyone else; the difference is that
- * her rows are already in the default view.
+ *   STAFF — a practitioner reading her OWN ledger on /dashboard/mes-operations.
+ *   Only ever the session's own Staff row. There is no way to pick one: every
+ *   practitioner is legally independent, and the salon has no right to read
+ *   her takings. Ateliers and formations drop out entirely: the animator is
+ *   matched by e-mail with no foreign key, so there is no honest way to
+ *   attribute one.
  *
  * @returns {Promise<null|{ mode: string, staffId: string, staffName: string|null,
  *   userIds: string[], staffIds: string[], includeUnattributed: boolean,
@@ -454,6 +447,10 @@ async function hydrateOrders(ids) {
       // null (not undefined) is a genuine, deliberate answer here: a
       // customer's own online/pickup order has no staff involved at all.
       createdByStaff: { select: { fullName: true, role: true } },
+      // SETTLED_AT_COUNTER: the sale that replaced the order, and on that
+      // sale the order it came from — so neither row reads as unexplained.
+      settledBySale: { select: { id: true, orderNumber: true } },
+      settledOrder: { select: { id: true, orderNumber: true } },
     },
   });
   return rows.map((row) => ({
@@ -849,17 +846,17 @@ export async function getAdminOperations(params = {}) {
     return { success: false, message: "Non autorisé.", data: [], totalCount: 0, page: 1, pageSize: PAGE_SIZE };
   }
 
-  const { tab, page, type, lifecycleStatus, paymentEvent, staffId } = normalizeParams(params);
+  const { tab, page, type, lifecycleStatus, paymentEvent } = normalizeParams(params);
   const skip = (page - 1) * PAGE_SIZE;
   const sourceTypes = OPERATION_PRESETS[tab]?.sourceTypes ?? null;
 
-  // A practitioner reads this through /dashboard/mes-operations and sees her
-  // own lines and nothing else: her own id is FORCED here, server-side,
-  // whatever the query string asked for — the route guard on
-  // /dashboard/operations is unchanged and still admin-only, and every
-  // export of a "use server" module is a public endpoint in its own right.
+  // Whose ledger is decided by the session alone, server-side — every export
+  // of a "use server" module is a public endpoint in its own right, so a
+  // `staffId` in the params is ignored rather than trusted:
+  //   - an admin always reads the SALON's ledger, never an independent's;
+  //   - a practitioner (/dashboard/mes-operations) reads her own and nothing else.
   const isAdmin = isAdminRole(session.user.role);
-  let requestedStaffId = staffId;
+  let requestedStaffId = "";
   if (!isAdmin) {
     const own = await prisma.staff.findFirst({
       where: { userId: session.user.id, isDeleted: false },
@@ -882,7 +879,6 @@ export async function getAdminOperations(params = {}) {
       lifecycleStatus,
       paymentEvent,
       staffId: requestedStaffId,
-      staffOptions: [],
       pageSize: PAGE_SIZE,
       totalCount: 0,
       data: [],
@@ -890,21 +886,15 @@ export async function getAdminOperations(params = {}) {
   }
 
   try {
-    const [{ ids: idRows, totalCount }, staffOptions] = await Promise.all([
-      listUnifiedOperationIds({
-        scope,
-        sourceTypes,
-        type,
-        lifecycleStatus,
-        paymentEvent,
-        skip,
-        take: PAGE_SIZE,
-      }),
-      // Only an admin gets a filter to drive; the personal view has none.
-      // Marie appears in it like anyone else — the difference is that her
-      // rows are already in the default, unfiltered view.
-      isAdmin ? listOperationsStaffOptions() : Promise.resolve([]),
-    ]);
+    const { ids: idRows, totalCount } = await listUnifiedOperationIds({
+      scope,
+      sourceTypes,
+      type,
+      lifecycleStatus,
+      paymentEvent,
+      skip,
+      take: PAGE_SIZE,
+    });
 
     const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [], ADJUSTMENT: [], TRANSFER: [] };
     for (const row of idRows) idsBySource[row.sourceType]?.push(row.id);
@@ -935,7 +925,6 @@ export async function getAdminOperations(params = {}) {
       paymentEvent,
       staffId: scope.staffId,
       staffName: scope.staffName,
-      staffOptions,
       readOnly: !isAdmin,
       pageSize: PAGE_SIZE,
       totalCount,
@@ -952,7 +941,6 @@ export async function getAdminOperations(params = {}) {
       paymentEvent,
       staffId: scope.staffId,
       staffName: scope.staffName,
-      staffOptions: [],
       readOnly: !isAdmin,
       pageSize: PAGE_SIZE,
       totalCount: 0,
@@ -960,20 +948,6 @@ export async function getAdminOperations(params = {}) {
       message: "Impossible de charger les opérations.",
     };
   }
-}
-
-/**
- * The staff directory behind the Opérations filter — same shape and same
- * ordering as getReportsData's own, so the two screens offer the same names
- * in the same order. Marie is in it like every other practitioner.
- */
-async function listOperationsStaffOptions() {
-  const staffList = await prisma.staff.findMany({
-    where: { isDeleted: false, user: { isDeleted: false } },
-    orderBy: { user: { fullName: "asc" } },
-    select: { id: true, isActive: true, user: { select: { fullName: true } } },
-  });
-  return staffList.map((s) => ({ id: s.id, fullName: s.user.fullName, isActive: s.isActive }));
 }
 
 /**
@@ -1158,6 +1132,92 @@ export async function getTransactionDetail(transactionId) {
   } catch (error) {
     console.error("[getTransactionDetail]", error);
     return { success: false, message: "Impossible de charger le détail de cette transaction." };
+  }
+}
+
+/**
+ * The detail drawer for a boutique order that has no Transaction yet — a
+ * "réserver en ligne, payer au retrait" pickup still waiting for the
+ * customer, most of the time. getTransactionDetail is keyed on a Transaction
+ * and such an order has none (PICKUP_ON_SITE creates its Payment only at the
+ * counter, see completeOrderPickup), so the row used to offer no way in at
+ * all — not even to show a client who lost the e-mail their pickup QR code.
+ *
+ * Read-only on purpose: nothing has been collected, so there is no ticket,
+ * no invoice and nothing to refund. The drawer shows the order, its items
+ * and its QR code, and says the receipt comes with the payment.
+ */
+export async function getPendingOrderDetail(orderId) {
+  const session = await requireAdminOperationsAccess();
+  if (!session) {
+    return { success: false, message: "Non autorisé." };
+  }
+  if (typeof orderId !== "string" || !orderId) {
+    return { success: false, message: "Commande introuvable." };
+  }
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        source: true,
+        fulfilmentMode: true,
+        createdAt: true,
+        expiresAt: true,
+        readyForPickupAt: true,
+        cancelledAt: true,
+        cancelReason: true,
+        subtotal: true,
+        discountAmount: true,
+        totalAmount: true,
+        totalExclVat: true,
+        totalVat: true,
+        vatRate: true,
+        notes: true,
+        pickupCode: true,
+        pickedUpAt: true,
+        stockReleasedAt: true,
+        settledBySale: { select: { id: true, orderNumber: true } },
+        user: { select: { fullName: true, email: true } },
+        createdByStaff: { select: { fullName: true, role: true } },
+        items: { select: { id: true, productName: true, variantName: true, quantity: true, unitPrice: true }, orderBy: { createdAt: "asc" } },
+        payment: { select: { status: true, transactions: { where: { isDeleted: false }, select: { id: true } } } },
+      },
+    });
+    if (!order) return { success: false, message: "Commande introuvable." };
+
+    // Once money has moved this is an ordinary transaction and belongs in
+    // getTransactionDetail — with its ticket, invoice and refund actions.
+    // A settled Payment with no live Transaction is not "unpaid" either, and
+    // must not be shown as such.
+    const settled = order.payment && !["PENDING", "FAILED", "PARTIALLY_PAID"].includes(order.payment.status);
+    if ((order.payment?.transactions ?? []).length > 0 || settled) {
+      return { success: false, message: "Cette commande a déjà été encaissée — ouvrez sa transaction." };
+    }
+
+    const { payment, createdByStaff, ...rest } = order;
+    const detailOrder = {
+      ...rest,
+      performedBy: createdByStaff ? { name: createdByStaff.fullName, role: createdByStaff.role } : null,
+    };
+    // Only while the order can still be collected. An abandoned Stripe
+    // checkout, a cancelled order or one whose stock is already back on sale
+    // has a code nobody should be handed: scanning it would only be refused.
+    const collectable =
+      ["PENDING_PICKUP", "READY_FOR_PICKUP"].includes(order.status) ||
+      (order.status === "EXPIRED" && !order.stockReleasedAt);
+    const checkIn = collectable ? await resolveCheckInAsset({ order: detailOrder }) : null;
+
+    return {
+      success: true,
+      data: serializeDecimalFields({ pendingOrder: true, order: detailOrder, checkIn }),
+    };
+  } catch (error) {
+    console.error("[getPendingOrderDetail]", error);
+    return { success: false, message: "Impossible de charger le détail de cette commande." };
   }
 }
 

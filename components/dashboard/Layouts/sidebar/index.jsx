@@ -42,7 +42,7 @@ export function Sidebar({ userRole, isSalonAccount = false, dashboardPermissions
     "Paiements": "payments", "Compte Stripe": "stripe",
     "Workshops & Événements": "workshops", "Activités": "activities", "Animateurs": "animators",
     "Réservations": "reservations", "Liste d'attente": "waitingList", "Formations": "courses", "Staff": "staff",
-    "Performance": "performance", "Auto-Entrepreneur": "independentStaff", "Boutique": "shop", "Produits": "products",
+    "Auto-Entrepreneur": "independentStaff", "Boutique": "shop", "Produits": "products",
     "Catégories": "categories", "Stock": "stock", "Commandes": "orders", "Retours": "returns", "Factures": "invoices",
     "Codes promo": "promoCodes", "Newsletter": "newsletter", "Demandes de location": "rentalRequests",
     "Avis clients": "reviews", "Rapports": "reports"

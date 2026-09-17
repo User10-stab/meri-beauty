@@ -154,7 +154,7 @@ export default async function EvenementDetailPage({ params }) {
           key={i}
           type="application/ld+json"
           // Escape "<" so a salon-editable field can never break out of the
-          // script tag. Same guard the HairSalon schema uses in (public)/layout.js.
+          // script tag. Same guard the BeautySalon schema uses in (public)/layout.js.
           dangerouslySetInnerHTML={{
             __html: JSON.stringify(schema).replace(/</g, "\\u003c"),
           }}

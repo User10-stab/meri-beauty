@@ -5,19 +5,12 @@ import { toast } from "sonner";
 import { X, Loader2 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { createPromoCode, updatePromoCode } from "@/actions/promo-codes";
+import { toBrusselsInputValue } from "@/lib/datetime/brussels-input";
 
 const TYPE_OPTIONS = [
   { value: "PERCENTAGE", label: "Pourcentage (%)" },
   { value: "FIXED", label: "Montant fixe (€)" },
 ];
-
-function toDateTimeLocal(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const pad = (part) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 /**
  * @param {{ open: boolean, promoCode: object|null, onClose: () => void, onSaved: () => void }} props
@@ -35,7 +28,7 @@ export function PromoCodeModal({ open, promoCode, onClose, onSaved }) {
       type: promoCode?.type ?? "PERCENTAGE",
       value: promoCode?.value ?? "",
       minOrderAmount: promoCode?.minOrderAmount ?? "",
-      expiresAt: toDateTimeLocal(promoCode?.expiresAt),
+      expiresAt: toBrusselsInputValue(promoCode?.expiresAt),
       maxUses: promoCode?.maxUses ?? "",
       isActive: promoCode?.isActive ?? true,
     });

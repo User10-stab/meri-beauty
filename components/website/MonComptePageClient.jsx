@@ -21,6 +21,7 @@ const ORDER_STATUS_LABELS = {
   COMPLETED: "Terminée",
   CANCELLED: "Annulée",
   EXPIRED: "Expirée",
+  SETTLED_AT_COUNTER: "Encaissée en caisse",
 };
 
 const RESERVATION_STATUS_LABELS = {
@@ -43,6 +44,7 @@ const STATUS_STYLE = {
   COMPLETED: "bg-gray-100 text-gray-500 border-gray-200",
   CANCELLED: "bg-red-50 text-red-600 border-red-100",
   EXPIRED: "bg-red-50 text-red-600 border-red-100",
+  SETTLED_AT_COUNTER: "bg-emerald-50 text-emerald-700 border-emerald-100",
   NO_SHOW: "bg-red-50 text-red-600 border-red-100",
 };
 
@@ -195,7 +197,7 @@ function OrderCard({ order }) {
 
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-ink/8 pt-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          {order.pickupCode && !["COMPLETED", "CANCELLED", "EXPIRED"].includes(order.status) && (
+          {order.pickupCode && !["COMPLETED", "CANCELLED", "EXPIRED", "SETTLED_AT_COUNTER"].includes(order.status) && (
             <span className="text-[11px] text-ink/45">Code de retrait : <span className="font-mono font-semibold text-ink/70">{order.pickupCode}</span></span>
           )}
           <InvoiceLink invoice={order.payment?.invoice} />

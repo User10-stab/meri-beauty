@@ -10,6 +10,7 @@ import {
   getActivityReservationCapabilities,
 } from "@/lib/activity-reservation-access";
 import { sessionOccupancyByIds, OCCUPANCY_KINDS } from "@/lib/reservations/session-occupancy";
+import { canRelanceActivityPayment } from "@/lib/reservations/activity-payment-relance";
 
 /**
  * Récupère toutes les réservations de workshops/événements pour le tableau
@@ -51,6 +52,7 @@ export async function getWorkshopReservations() {
         return {
           ...reservation,
           ...capabilities,
+          canResendPayment: canRelanceActivityPayment(reservation),
           session: reservationSession
             ? { ...reservationSession, capacitySeats: capacity, remainingSeats: capacity != null ? capacity - taken : null }
             : reservationSession,

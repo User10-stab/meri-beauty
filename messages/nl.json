@@ -968,6 +968,7 @@
       }
     },
     "animators": {
+      "confirmDeleteAnimator": "Animator \"{name}\" definitief verwijderen? Deze actie is onomkeerbaar.",
       "searchAnimatorPlaceholder": "Zoek een animator...",
       "columns": {
         "name": "Naam & Bio",
@@ -998,7 +999,8 @@
         "instagramLabel": "Instagram (Link)",
         "instagramPlaceholder": "https://instagram.com/naam",
         "facebookLabel": "Facebook (Link)",
-        "facebookPlaceholder": "https://facebook.com/naam"
+        "facebookPlaceholder": "https://facebook.com/naam",
+        "errorGeneric": "Er is een fout opgetreden."
       },
       "socialTitles": {
         "website": "Website",
@@ -1429,8 +1431,12 @@
         "mode": "Modus",
         "status": "Status",
         "total": "Totaal",
-        "date": "Datum"
+        "date": "Datum",
+        "actions": "Acties"
       },
+      "settledBySale": "Verkoop nr. {number}",
+      "settleAtPos": "Afrekenen",
+      "settleAtPosTitle": "Deze bestelling aan de kassa afrekenen",
       "pickupCodeNotFound": "Geen bestelling komt overeen met deze code.",
       "status": {
         "PENDING_PAYMENT": "Betaling in afwachting",
@@ -1441,7 +1447,8 @@
         "SHIPPED": "Verzonden",
         "COMPLETED": "Voltooid",
         "CANCELLED": "Geannuleerd",
-        "EXPIRED": "Verlopen"
+        "EXPIRED": "Verlopen",
+        "SETTLED_AT_COUNTER": "Afgerekend aan de kassa"
       },
       "mode": {
         "PICKUP_PREPAID": "Afhalen (betaald)",
@@ -1686,7 +1693,8 @@
         "SHIPPED": "Verzonden",
         "COMPLETED": "Voltooid",
         "CANCELLED": "Geannuleerd",
-        "EXPIRED": "Verlopen"
+        "EXPIRED": "Verlopen",
+        "SETTLED_AT_COUNTER": "Afgerekend aan de kassa"
       },
       "returnStatusLabels": {
         "REQUESTED": "Aangevraagd",
@@ -2008,7 +2016,6 @@
       "waitingList": "Wachtlijst",
       "courses": "Opleidingen",
       "staff": "Team",
-      "performance": "Prestaties",
       "independentStaff": "Zelfstandigen",
       "shop": "Winkel",
       "products": "Producten",
@@ -2051,10 +2058,6 @@
     },
     "staff": {
       "title": "Team",
-      "performance": {
-        "title": "Team prestaties",
-        "subtitle": "Voltooide afspraken, gegenereerde omzet en verschuldigde commissies, per teamlid."
-      },
       "autoEntrepreneur": {
         "title": "Zelfstandigen",
         "subtitle": "Beheer de zelfstandige professionals die aan uw salon zijn gekoppeld.",
@@ -2367,6 +2370,7 @@
     "removeAria": "Promocode verwijderen"
   },
   "myReservations": {
+    "yourReview": "Uw beoordeling",
     "withExpert": "met {name}",
     "date": "Datum",
     "time": "Tijd",
@@ -2582,7 +2586,8 @@
         "salonClosedDay": "De salon is gesloten op deze dag",
         "staffNotWorkingDay": "Het personeelslid werkt niet op deze dag",
         "staffOnTimeOff": "Het personeelslid heeft vrijaf",
-        "salonClosure": "De salon is gesloten (uitzondering)"
+        "salonClosure": "De salon is gesloten (uitzondering)",
+        "serviceNotOfferedThisDay": "Deze professional biedt deze dienst niet aan op die dag"
       }
     },
     "review": {

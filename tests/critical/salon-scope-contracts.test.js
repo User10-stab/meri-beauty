@@ -1,7 +1,7 @@
 import { describe, expect, it, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { resolveSalonScope } from "@/lib/authorization/salon-scope";
+import { resolveSalonScope, salonPaymentArms } from "@/lib/authorization/salon-scope";
 import { TILL_CASH_OPERATOR_EMAIL, isTillCashOperator } from "@/lib/authorization";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -112,24 +112,39 @@ describe("every salon-wide figure resolves its scope from the one module", () =>
     ["the livre de recettes", "lib/livre-de-recettes/build-recettes-journal.js"],
     ["Opérations", "actions/dashboard/admin-operations.js"],
     ["the dashboard revenue card", "actions/dashboard/get-dashboard-stats.js"],
+    ["Rapports", "actions/dashboard/get-reports-data.js"],
   ];
 
   test.each(CONSUMERS)("%s imports resolveSalonScope rather than re-deriving it", (_label, path) => {
     const code = source(path);
-    expect(code).toContain('import { resolveSalonScope } from "@/lib/authorization/salon-scope"');
+    expect(code).toMatch(/import \{ resolveSalonScope(, salonPaymentArms)? \} from "@\/lib\/authorization\/salon-scope"/);
     // The two id spaces are not interchangeable: an Order is stamped with a
-    // User.id, an Appointment with a Staff.id. Every consumer keys on both.
-    expect(code).toContain("salonUserIds");
-    expect(code).toContain("salonStaffIds");
+    // User.id, an Appointment with a Staff.id. Every consumer keys on both,
+    // directly or through salonPaymentArms (which does).
+    expect(code.includes("salonPaymentArms(") || (code.includes("salonUserIds") && code.includes("salonStaffIds"))).toBe(true);
   });
 
-  test("the dashboard filter no longer calls the unfiltered figure « Tous les Staff »", () => {
-    // It never was everyone's total in any meaningful sense, and now it is
-    // explicitly one entity's: the salon.
-    const filters = source("components/dashboard/DashboardFilters.jsx");
-    // Comments here name the old label to explain why it went; strip them.
-    const rendered = filters.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
-    expect(rendered).not.toContain("Tous les Staff");
-    expect(rendered).toContain('<option value="">Le salon</option>');
+  test("salonPaymentArms keys each source on its own id space", () => {
+    const arms = salonPaymentArms({ salonUserIds: ["u_admin", "u_marie"], salonStaffIds: ["s_marie"] });
+    expect(arms).toContainEqual({ order: { createdByStaffId: { in: ["u_admin", "u_marie"] } } });
+    expect(arms).toContainEqual({ appointment: { staffId: { in: ["s_marie"] } } });
+    expect(arms.filter((a) => a.appointment)).toHaveLength(1);
+  });
+
+  // An independent's money is hers. No salon screen may offer a way to pick
+  // one practitioner and read her figures.
+  test.each([
+    ["the dashboard filter", "components/dashboard/DashboardFilters.jsx"],
+    ["the dashboard stats", "actions/dashboard/get-dashboard-stats.js"],
+    ["the dashboard page", "app/dashboard/page.jsx"],
+    ["the reports filter bar", "components/dashboard/reports/ReportsFilterBar.jsx"],
+    ["the recettes filter bar", "components/dashboard/recettes/RecettesFilterBar.jsx"],
+    ["the recettes action", "actions/dashboard/get-recettes-journal.js"],
+    ["the recettes page", "app/dashboard/livre-de-recettes/page.jsx"],
+  ])("%s has no staff picker", (_label, path) => {
+    const code = source(path).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(code).not.toContain("staffOptions");
+    expect(code).not.toContain("viewedStaff");
+    expect(code).not.toMatch(/params\?\.staffId|staffId:\s*filterStaffId|activeStaffId/);
   });
 });

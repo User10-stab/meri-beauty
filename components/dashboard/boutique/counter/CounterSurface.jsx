@@ -6,6 +6,7 @@ import { ScanLine, Ticket } from "lucide-react";
 import { lookupCounterCode } from "@/actions/counter/lookup";
 import { searchCounter } from "@/actions/counter/search";
 import { lookupActivityCheckInById } from "@/actions/activities/check-in";
+import { lookupPickupOrderById } from "@/actions/boutique/orders";
 import { CounterOmniBar } from "@/components/dashboard/boutique/counter/CounterOmniBar";
 import { CounterResults } from "@/components/dashboard/boutique/counter/CounterResults";
 import { CounterFiche } from "@/components/dashboard/boutique/counter/CounterFiche";
@@ -57,6 +58,7 @@ export function CounterSurface({
   canAdjustStock = false,
   canOpenCashSession = false,
   canCollectCash = false,
+  sourceOrderId = null,
 }) {
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -105,6 +107,22 @@ export function CounterSurface({
     openTicket({ domain: "TICKET", ...result.data });
   }
 
+  // A client who lost their pickup QR code, found by name instead — opens
+  // the exact same fiche a scanned code does.
+  async function openPickup(row) {
+    const requestId = ++requestRef.current;
+    setLoading(true);
+    const result = await lookupPickupOrderById(row.orderId);
+    if (requestRef.current !== requestId) return;
+    setLoading(false);
+
+    if (!result.success) {
+      toast.error(result.message);
+      return;
+    }
+    openTicket({ domain: "PICKUP", ...result.data });
+  }
+
   // A service or session row lacking the matching permission falls back to
   // this toast rather than silently opening the composer for something the
   // staff member can't actually complete. Nothing else routes here any
@@ -117,6 +135,12 @@ export function CounterSurface({
   function selectResult(row) {
     if (row.type === "BOOKING") {
       openBooking(row);
+    } else if (row.type === "PICKUP") {
+      if (canPickup) {
+        openPickup(row);
+      } else {
+        notifyNotPermitted();
+      }
     } else if (row.type === "SESSION") {
       // Opens the booking composer straight into "Atelier / formation"
       // mode, pre-filled with this session — see
@@ -163,6 +187,10 @@ export function CounterSurface({
       }
       if (result.data.length === 1 && result.data[0].type === "BOOKING") {
         openBooking(result.data[0]);
+        return;
+      }
+      if (result.data.length === 1 && result.data[0].type === "PICKUP" && canPickup) {
+        openPickup(result.data[0]);
         return;
       }
       setNameResults(result.data);
@@ -221,7 +249,8 @@ export function CounterSurface({
             <h2 className="text-base font-bold text-dark dark:text-white">Pointage &amp; encaissement</h2>
           </div>
           <p className="mb-4 text-xs text-gray-500 dark:text-dark-6">
-            Scannez le QR du client, saisissez son code, ou cherchez par nom de client ou de service.
+            Scannez le QR du client, saisissez son code, ou cherchez par nom de client (réservations et commandes à
+            retirer), par n° de commande ou par service.
           </p>
 
           <CounterOmniBar
@@ -286,6 +315,7 @@ export function CounterSurface({
         canCollectCash={canCollectCash}
         pendingProduct={pendingProduct}
         onConsumePendingProduct={() => setPendingProduct(null)}
+        sourceOrderId={sourceOrderId}
       />
     </div>
   );

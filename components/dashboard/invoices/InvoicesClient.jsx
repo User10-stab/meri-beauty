@@ -287,7 +287,7 @@ export function InvoicesClient({ data }) {
                       <DeliveryCell doc={invoice} peppolApplicable={invoice.peppolApplicable} />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap justify-end gap-1.5">
+                      <div className="flex justify-end gap-1.5 whitespace-nowrap">
                         <DocumentActions
                           pdfHref={`/api/invoices/${invoice.id}/pdf`}
                           peppolApplicable={invoice.peppolApplicable}
@@ -307,16 +307,18 @@ export function InvoicesClient({ data }) {
                         )}
                       </div>
                       {invoice.creditNotes.map((note) => (
-                        <div key={note.id} className="mt-1.5 flex flex-wrap items-center justify-end gap-1.5">
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-violet-800" title={note.reason ?? undefined}>
+                        <div key={note.id} className="mt-2 flex flex-col items-end gap-1">
+                          <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold text-violet-800" title={note.reason ?? undefined}>
                             <FileMinus size={12} /> {note.number} · −{euro(note.totalInclVat)}
                           </span>
-                          <DocumentActions
-                            pdfHref={`/api/credit-notes/${note.id}/pdf`}
-                            peppolApplicable={invoice.peppolApplicable}
-                            onSend={(channel) => setDelivery({ kind: "CREDIT_NOTE", document: note, invoice, channel })}
-                            tone="border-violet-200 bg-white text-violet-900 hover:bg-violet-100"
-                          />
+                          <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                            <DocumentActions
+                              pdfHref={`/api/credit-notes/${note.id}/pdf`}
+                              peppolApplicable={invoice.peppolApplicable}
+                              onSend={(channel) => setDelivery({ kind: "CREDIT_NOTE", document: note, invoice, channel })}
+                              tone="border-violet-200 bg-white text-violet-900 hover:bg-violet-100"
+                            />
+                          </div>
                         </div>
                       ))}
                     </td>

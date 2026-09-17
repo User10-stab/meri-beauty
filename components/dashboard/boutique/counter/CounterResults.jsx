@@ -1,12 +1,13 @@
 "use client";
 
-import { Calendar, Package, Scissors, Ticket } from "lucide-react";
+import { Calendar, Package, Scissors, ShoppingBag, Ticket } from "lucide-react";
 import { KIND_LABEL, formatDateTime, formatPrice } from "@/components/dashboard/boutique/counter/counter-format";
 
 const SESSION_KIND_LABEL = { workshop: "Atelier / Événement", formation: "Formation" };
 
 function rowKey(row) {
   if (row.type === "BOOKING") return `booking:${row.kind}:${row.id}`;
+  if (row.type === "PICKUP") return `pickup:${row.orderId}`;
   if (row.type === "SERVICE") return `service:${row.staffServiceId}`;
   if (row.type === "SESSION") return `session:${row.kind}:${row.sessionId}`;
   if (row.type === "PRODUCT") return `product:${row.variantId}`;
@@ -32,6 +33,37 @@ function BookingRow({ row }) {
         )}
         {row.balanceDue > 0 && (
           <span className="text-sm font-bold text-primary">{formatPrice(row.balanceDue)}</span>
+        )}
+      </div>
+    </>
+  );
+}
+
+const PICKUP_STATUS_LABEL = {
+  PENDING_PICKUP: "En attente de retrait",
+  READY_FOR_PICKUP: "Prête pour retrait",
+  PAID: "Payée",
+};
+
+function PickupRow({ row }) {
+  return (
+    <>
+      <ShoppingBag className="h-4 w-4 shrink-0 text-gray-400" strokeWidth={1.75} />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-bold text-dark dark:text-white">{row.customerName}</p>
+        <p className="truncate text-xs text-gray-500 dark:text-dark-6">
+          Commande n°{row.orderNumber} · {row.itemCount} article{row.itemCount > 1 ? "s" : ""} ·{" "}
+          {PICKUP_STATUS_LABEL[row.status] ?? row.status}
+        </p>
+        <p className="text-xs text-gray-500 dark:text-dark-6">Commandée le {formatDateTime(row.createdAt)}</p>
+      </div>
+      <div className="flex items-center gap-2 text-right">
+        {row.hasPayment ? (
+          <span className="rounded-full bg-green-light-6 px-2 py-0.5 text-[10px] font-semibold text-green-dark dark:bg-green/10 dark:text-green">
+            Payée
+          </span>
+        ) : (
+          <span className="text-sm font-bold text-primary">{formatPrice(row.totalAmount)}</span>
         )}
       </div>
     </>
@@ -87,7 +119,7 @@ function ProductRow({ row }) {
   );
 }
 
-const ROW_RENDERERS = { BOOKING: BookingRow, SERVICE: ServiceRow, SESSION: SessionRow, PRODUCT: ProductRow };
+const ROW_RENDERERS = { BOOKING: BookingRow, PICKUP: PickupRow, SERVICE: ServiceRow, SESSION: SessionRow, PRODUCT: ProductRow };
 
 function ResultRow({ row, onSelect }) {
   const Row = ROW_RENDERERS[row.type] ?? BookingRow;
@@ -129,6 +161,7 @@ function ResultSection({ title, rows, onSelect }) {
  */
 export function CounterResults({ rows, onSelect }) {
   const bookings = rows.filter((row) => row.type === "BOOKING");
+  const pickups = rows.filter((row) => row.type === "PICKUP");
   // A service and a session sell different things, but both answer the same
   // intent — "start a new sale" — so they share one section rather than two.
   const sellable = rows.filter((row) => row.type === "SERVICE" || row.type === "SESSION");
@@ -137,6 +170,7 @@ export function CounterResults({ rows, onSelect }) {
   return (
     <div className="space-y-5">
       <ResultSection title="Réservations existantes" rows={bookings} onSelect={onSelect} />
+      <ResultSection title="Commandes à retirer" rows={pickups} onSelect={onSelect} />
       <ResultSection title="Vendre / créer une réservation" rows={sellable} onSelect={onSelect} />
       <ResultSection title="Produits en boutique" rows={products} onSelect={onSelect} />
     </div>

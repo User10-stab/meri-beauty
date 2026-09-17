@@ -2,23 +2,26 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
-import { CalendarRange, RotateCcw, UserRound } from "lucide-react";
+import { CalendarRange, RotateCcw } from "lucide-react";
 import { PERIOD_LABELS } from "@/lib/reports-filters";
 
 /**
- * Period and practitioner filters for the reports page.
+ * Period filter for the reports page. There is no practitioner filter: the
+ * report covers the salon only, and an independent's takings are not the
+ * salon's to read.
  *
  * Drives the URL rather than local state, so the server component re-runs the
  * query with the new window: a filtered report is then a link someone can
  * bookmark or paste to a colleague, and the back button behaves.
  */
-export function ReportsFilterBar({ months, staffId, periods, staffOptions }) {
+export function ReportsFilterBar({ months, periods }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
 
   function setParam(key, value) {
     const params = new URLSearchParams(searchParams.toString());
+    params.delete("staffId");
     if (value) params.set(key, String(value));
     else params.delete(key);
 
@@ -27,7 +30,7 @@ export function ReportsFilterBar({ months, staffId, periods, staffOptions }) {
     });
   }
 
-  const hasFilters = staffId || months !== 6;
+  const hasFilters = months !== 6;
 
   return (
     <div
@@ -52,30 +55,6 @@ export function ReportsFilterBar({ months, staffId, periods, staffOptions }) {
           {periods.map((value) => (
             <option key={value} value={value}>
               {PERIOD_LABELS[value] ?? `${value} mois`}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="min-w-[220px]">
-        <label
-          htmlFor="report-staff"
-          className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6"
-        >
-          <UserRound className="h-3.5 w-3.5" strokeWidth={2} />
-          Praticienne
-        </label>
-        <select
-          id="report-staff"
-          value={staffId ?? ""}
-          onChange={(event) => setParam("staffId", event.target.value)}
-          className="w-full rounded-[7px] border border-stroke bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-        >
-          <option value="">Tout le salon</option>
-          {staffOptions.map((staff) => (
-            <option key={staff.id} value={staff.id}>
-              {staff.fullName}
-              {staff.isActive ? "" : " (inactive)"}
             </option>
           ))}
         </select>

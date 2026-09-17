@@ -27,6 +27,7 @@ import { saveCheckoutVatNumber } from "@/lib/customer-vat";
 import { stripe } from "@/lib/stripe";
 import { getAppBaseUrl } from "@/lib/site-url";
 import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
+import { POS_HANDOFF_STATUSES, canSettleOrderAtPointOfSale } from "@/lib/orders/point-of-sale-handoff";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const POS_CHECKOUT_SECONDS = 31 * 60;
@@ -167,6 +168,109 @@ export async function searchPointOfSaleCustomers(query) {
   } catch (error) {
     console.error("[searchPointOfSaleCustomers]", error);
     return { success: false, message: "Impossible de rechercher le client.", data: [] };
+  }
+}
+
+/**
+ * Prefill for the till when an unpaid pickup order is opened with
+ * « Encaisser » from the orders list: its client and its lines, at today's
+ * shelf price (the same price the sale itself will charge). Nothing is
+ * changed here — the order is only closed when the sale completes.
+ *
+ * availableQuantity adds back what this order itself holds: those units are
+ * reserved for exactly this client, so they must not count against them.
+ */
+export async function getPointOfSaleOrderDraft(orderId) {
+  const guard = await requirePointOfSaleAccess();
+  if (guard.error) return { success: false, message: guard.error };
+  if (typeof orderId !== "string" || !orderId) return { success: false, message: "Commande introuvable." };
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        fulfilmentMode: true,
+        stockReleasedAt: true,
+        discountAmount: true,
+        payment: { select: { id: true } },
+        user: {
+          select: {
+            id: true, fullName: true, email: true, phone: true, isDeleted: true,
+            addressLine1: true, addressLine2: true, addressCity: true,
+            addressPostalCode: true, addressCountry: true, vatNumber: true,
+            vatValidatedAt: true, vatValidationName: true, isCompany: true,
+          },
+        },
+        items: {
+          select: {
+            variantId: true,
+            productName: true,
+            variantName: true,
+            quantity: true,
+            variant: {
+              select: {
+                id: true,
+                name: true,
+                price: true,
+                stockQuantity: true,
+                reservedQuantity: true,
+                isActive: true,
+                isDeleted: true,
+                product: { select: { name: true, status: true, isDeleted: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!order) return { success: false, message: "Commande introuvable." };
+    if (!canSettleOrderAtPointOfSale(order)) {
+      return { success: false, message: `La commande n°${order.orderNumber} n'est plus à encaisser.` };
+    }
+
+    const lines = new Map();
+    const unavailable = [];
+    for (const item of order.items) {
+      const variant = item.variant;
+      const sellable =
+        variant && variant.isActive && !variant.isDeleted && !variant.product.isDeleted && variant.product.status === "ACTIVE";
+      if (!sellable) {
+        unavailable.push(item.variantName ? `${item.productName} — ${item.variantName}` : item.productName);
+        continue;
+      }
+      const present = lines.get(variant.id);
+      if (present) {
+        present.quantity += item.quantity;
+        present.availableQuantity += item.quantity;
+        continue;
+      }
+      lines.set(variant.id, {
+        variantId: variant.id,
+        productName: variant.product.name,
+        variantName: variant.name,
+        unitPrice: Number(variant.price),
+        quantity: item.quantity,
+        availableQuantity: Math.max(0, variant.stockQuantity - variant.reservedQuantity) + item.quantity,
+      });
+    }
+
+    return {
+      success: true,
+      data: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        customer: order.user && !order.user.isDeleted ? serializeCustomer(order.user) : null,
+        items: [...lines.values()],
+        unavailable,
+        discountAmount: Number(order.discountAmount ?? 0),
+      },
+    };
+  } catch (error) {
+    console.error("[getPointOfSaleOrderDraft]", error);
+    return { success: false, message: "Impossible de charger cette commande." };
   }
 }
 
@@ -345,7 +449,7 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived, invoiceRequested } = parsed.data;
+  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived, invoiceRequested, sourceOrderId } = parsed.data;
   if (items.some((item) => item.type === "SERVICE")) {
     return {
       success: false,
@@ -460,6 +564,58 @@ export async function completePointOfSaleSale(input) {
         customer = vatSave.user;
       }
 
+      // « Encaisser » from the orders list: claim the unpaid pickup order
+      // first (the status/payment guard makes a double submit, or a teammate
+      // settling it through the pickup fiche at the same moment, lose
+      // cleanly), then hand its held units back so the availability check
+      // below counts them as sellable again. Everything rolls back with the
+      // sale if anything after this fails.
+      let sourceOrder = null;
+      if (sourceOrderId) {
+        sourceOrder = await tx.order.findUnique({
+          where: { id: sourceOrderId },
+          select: {
+            id: true,
+            orderNumber: true,
+            status: true,
+            fulfilmentMode: true,
+            stockReleasedAt: true,
+            promoCodeId: true,
+            payment: { select: { id: true } },
+            items: { select: { variantId: true, quantity: true } },
+          },
+        });
+        if (!canSettleOrderAtPointOfSale(sourceOrder)) throw new Error("POS_SOURCE_ORDER_UNAVAILABLE");
+        const claim = await tx.order.updateMany({
+          where: {
+            id: sourceOrder.id,
+            fulfilmentMode: "PICKUP_ON_SITE",
+            status: { in: POS_HANDOFF_STATUSES },
+            stockReleasedAt: null,
+            payment: { is: null },
+          },
+          // Not a cancellation: the order is sold, as the counter sale created
+          // below — linked through settledBySaleId once that sale exists.
+          data: { status: "SETTLED_AT_COUNTER" },
+        });
+        if (claim.count === 0) throw new Error("POS_SOURCE_ORDER_UNAVAILABLE");
+        for (const item of sourceOrder.items) {
+          if (!item.variantId) continue;
+          await tx.productVariant.updateMany({
+            where: { id: item.variantId, reservedQuantity: { gte: item.quantity } },
+            data: { reservedQuantity: { decrement: item.quantity } },
+          });
+        }
+        // The till sells at shelf price, so the original order's promo code
+        // is not carried over — give its use back, as a cancellation would.
+        if (sourceOrder.promoCodeId) {
+          await tx.promoCode.updateMany({
+            where: { id: sourceOrder.promoCodeId, usedCount: { gt: 0 } },
+            data: { usedCount: { decrement: 1 } },
+          });
+        }
+      }
+
       const saleItems = [];
       for (const [variantId, quantity] of groupedItems) {
         await tx.$queryRaw`SELECT id FROM "ProductVariant" WHERE id = ${variantId} FOR UPDATE`;
@@ -522,6 +678,8 @@ export async function completePointOfSaleSale(input) {
           expiresAt: isQrPayment ? new Date(Date.now() + (POS_CHECKOUT_SECONDS + 4 * 60) * 1000) : null,
           notes: isQrPayment
             ? "Vente en magasin — paiement Stripe QR"
+            : sourceOrder
+            ? `Vente directe en magasin — reprise de la commande n°${sourceOrder.orderNumber}`
             : isWalkIn
             ? "Vente directe en magasin — client de passage"
             : "Vente directe en magasin",
@@ -667,9 +825,29 @@ export async function completePointOfSaleSale(input) {
             customerId: customer?.id ?? null,
             itemCount: saleItems.length,
             ...(method === "EXTERNAL_TERMINAL" ? { terminalReference: terminalReference.trim() } : {}),
+            ...(sourceOrder ? { sourceOrderId: sourceOrder.id, sourceOrderNumber: sourceOrder.orderNumber } : {}),
           },
         },
       });
+
+      if (sourceOrder) {
+        await tx.order.update({
+          where: { id: sourceOrder.id },
+          data: { settledBySaleId: order.id },
+        });
+        await tx.auditLog.create({
+          data: {
+            actorId: guard.session.user.id,
+            actorRole: guard.session.user.role,
+            action: "order.settled_at_point_of_sale",
+            entityType: "Order",
+            entityId: sourceOrder.id,
+            before: { status: sourceOrder.status },
+            after: { status: "SETTLED_AT_COUNTER", settledBySaleId: order.id, replacedByOrderId: order.id },
+            metadata: { orderNumber: sourceOrder.orderNumber, replacedByOrderNumber: order.orderNumber },
+          },
+        });
+      }
 
       return { order: { ...order, ticketNumber }, invoice, customer };
     // A counter sale does a VIES call, a row-locked stock check, invoice
@@ -868,6 +1046,9 @@ export async function completePointOfSaleSale(input) {
     }
     if (error.message === "POS_CHECKOUT_RETRY_WINDOW_EXPIRED") {
       return { success: false, message: "Cette tentative QR est trop ancienne. Annulez-la puis recommencez." };
+    }
+    if (error.message === "POS_SOURCE_ORDER_UNAVAILABLE") {
+      return { success: false, message: "La commande reprise n'est plus à encaisser — elle a déjà été réglée, annulée ou remise en vente." };
     }
     if (error.message === "POS_PRODUCT_UNAVAILABLE") return { success: false, message: "Un produit du panier n'est plus disponible." };
     if (typeof error.message === "string" && error.message.startsWith("POS_STOCK_UNAVAILABLE:")) {

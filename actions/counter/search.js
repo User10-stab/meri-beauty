@@ -6,6 +6,7 @@ import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator } from "@
 import { searchCounterTickets } from "@/actions/boutique/settlements";
 import { searchCounterServices } from "@/actions/counter/walk-in-service";
 import { searchPointOfSaleProducts } from "@/actions/boutique/point-of-sale";
+import { searchCounterPickups } from "@/actions/boutique/orders";
 import { OCCUPANCY_KINDS, sessionOccupancyByIds } from "@/lib/reservations/session-occupancy";
 
 /**
@@ -154,7 +155,7 @@ async function searchCounterSessions(query) {
 /**
  * Fans the same typed query out to every domain and tags each row with the
  * result-row `type` the counter UI dispatches on: BOOKING/PICKUP go to a
- * fiche, SERVICE/SESSION go to the booking composer, PRODUCT goes straight
+ * fiche (a PICKUP is a boutique order found by its client's name), SERVICE/SESSION go to the booking composer, PRODUCT goes straight
  * to the cart. One domain being unavailable (a permission the cashier
  * lacks, or a transient failure) never erases the others' results.
  */
@@ -162,15 +163,16 @@ export async function searchCounter(query) {
   const value = query?.trim() ?? "";
   if (value.length < 3) return { success: true, data: [] };
 
-  const [tickets, services, sessions, products] = await Promise.allSettled([
+  const [tickets, services, sessions, products, pickups] = await Promise.allSettled([
     searchCounterTickets(value),
     searchCounterServices(value),
     searchCounterSessions(value),
     searchPointOfSaleProducts(value),
+    searchCounterPickups(value),
   ]);
 
-  const labels = ["bookings", "services", "sessions", "products"];
-  [tickets, services, sessions, products].forEach((result, index) => {
+  const labels = ["bookings", "services", "sessions", "products", "pickups"];
+  [tickets, services, sessions, products, pickups].forEach((result, index) => {
     if (result.status === "rejected") {
       console.error(`[searchCounter] recherche ${labels[index]} indisponible`, result.reason);
     }
@@ -180,12 +182,14 @@ export async function searchCounter(query) {
   const serviceRows = services.status === "fulfilled" && services.value.success ? services.value.data : [];
   const sessionRows = sessions.status === "fulfilled" && sessions.value.success ? sessions.value.data : [];
   const productRows = products.status === "fulfilled" && products.value.success ? products.value.data : [];
+  const pickupRows = pickups.status === "fulfilled" && pickups.value.success ? pickups.value.data : [];
 
   const hasAnySuccess =
     (tickets.status === "fulfilled" && tickets.value.success) ||
     (services.status === "fulfilled" && services.value.success) ||
     (sessions.status === "fulfilled" && sessions.value.success) ||
-    (products.status === "fulfilled" && products.value.success);
+    (products.status === "fulfilled" && products.value.success) ||
+    (pickups.status === "fulfilled" && pickups.value.success);
   if (!hasAnySuccess) {
     return { success: false, message: "Impossible de charger les résultats.", data: [] };
   }
@@ -194,6 +198,7 @@ export async function searchCounter(query) {
     success: true,
     data: [
       ...ticketRows.map((row) => ({ type: "BOOKING", ...row })),
+      ...pickupRows.map((row) => ({ type: "PICKUP", ...row })),
       ...serviceRows.map((row) => ({ type: "SERVICE", ...row })),
       ...sessionRows.map((row) => ({ type: "SESSION", ...row })),
       ...productRows.map((row) => ({ type: "PRODUCT", ...row })),

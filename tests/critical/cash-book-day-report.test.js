@@ -353,6 +353,51 @@ describe("buildRangeReport", () => {
     expect(report.byVatRate).toEqual([{ rate: 21, netAmount: 200, vatAmount: 42, grossAmount: 242, count: 2 }]);
   });
 
+  // 17 Sep 2026: the Rapport counted every CASH transaction of the period,
+  // including sales an independent settled off-till (no session, no piece
+  // number). September 2026 showed 903,51 € of "ventes espèces" beside the
+  // journal's 773,51 € of "Total entrées" — 130 € of another practitioner's
+  // money in the salon's own drawer report.
+  it("counts only the cash that went through the drawer, exactly like the journal", async () => {
+    const client = rangeClientMock({ sessions: [] });
+    await buildRangeReport(client, RANGE);
+    expect(client.transaction.findMany.mock.calls[0][0].where).toMatchObject({
+      method: "CASH",
+      isDeleted: false,
+      cashSessionId: { not: null },
+      pieceNumber: { not: null },
+    });
+  });
+
+  // The reconciliation has to read as a calculation: what the drawer already
+  // held, plus what the period put in or took out, is what it should hold now.
+  it("solde de départ + ventes + mouvements (± écart) = attendu en caisse", async () => {
+    const client = rangeClientMock({
+      sessions: [{ id: "s1", openedAt: new Date("2026-08-01T08:00:00Z"), openingFloat: 100, closedAt: null, countedCash: null, variance: null }],
+      transactions: [
+        { amount: 73, method: "CASH", transactionType: "FINAL_PAYMENT", cashSessionId: "s1", pieceNumber: "V0003", payment: { invoice: { vatRate: 21 }, order: { id: "o1" } } },
+      ],
+    });
+    const report = await buildRangeReport(client, RANGE);
+    expect(report).toMatchObject({ openingBalance: 100, totalSales: 73, ecart: 0, expectedCash: 173 });
+    expect(report.openingBalance + report.totalSales + report.cashMovements.in - report.cashMovements.out + report.ecart).toBe(report.expectedCash);
+  });
+
+  it("a float that doesn't continue the previous session carries into the reconciliation as an écart", async () => {
+    const client = rangeClientMock({
+      sessions: [
+        { id: "s1", openedAt: new Date("2026-08-01T08:00:00Z"), openingFloat: 100, closedAt: new Date("2026-08-01T12:00:00Z"), expectedCash: 173, countedCash: 0, variance: -173 },
+        { id: "s2", openedAt: new Date("2026-08-01T13:00:00Z"), openingFloat: 0, closedAt: null, countedCash: null, variance: null },
+      ],
+      transactions: [
+        { amount: 73, method: "CASH", transactionType: "FINAL_PAYMENT", cashSessionId: "s1", pieceNumber: "V0003", payment: { invoice: { vatRate: 21 }, order: { id: "o1" } } },
+      ],
+    });
+    const report = await buildRangeReport(client, RANGE);
+    expect(report.ecart).toBe(-173);
+    expect(report.openingBalance + report.totalSales + report.cashMovements.in - report.cashMovements.out + report.ecart).toBe(report.expectedCash);
+  });
+
   // 16 Sep 2026: the "vs. période précédente" comparison (the % badges) was
   // removed at the client's request — the report no longer computes it.
   it("the report carries no previous-period comparison", async () => {
@@ -452,6 +497,12 @@ describe("day-report wiring", () => {
     expect(client).not.toContain("previousPeriod");
     expect(client).not.toContain("DeltaBadge");
     expect(client).toContain("byCategoryCounts");
+  });
+
+  test("the reconciliation block shows the opening balance and the period's sales, not just the expected total", () => {
+    expect(client).toContain('label="Solde en caisse au début de la période"');
+    expect(client).toContain('label="Ventes espèces de la période"');
+    expect(client).toContain('label="Attendu en caisse"');
   });
 
   // 16 Sep 2026: the on-screen "Sessions de caisse" table was pulled — a

@@ -15,6 +15,7 @@ import {
 } from "@/actions/workshops/manage-reservation";
 import { isAdminRole } from "@/lib/authorization";
 import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
+import { resendActivityReservationPayment } from "@/actions/payments/resend-activity-payment";
 
 const COLUMNS = [
   { key: "activity", label: "Activité & Séance" },
@@ -38,6 +39,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
   const [toSettle, setToSettle] = useState(null);
   const [isSettling, startSettle] = useTransition();
   const [focusedId, setFocusedId] = useState(focusReservationId);
+  const [resendingPaymentId, setResendingPaymentId] = useState(null);
   const focusRowRef = useRef(null);
 
   const focusRow = focusedId
@@ -64,6 +66,18 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
         toast.error(result.message);
       }
     });
+  }
+
+  async function handleResendPayment(row) {
+    setResendingPaymentId(row.id);
+    const result = await resendActivityReservationPayment({ kind: "WORKSHOP", id: row.id });
+    setResendingPaymentId(null);
+    if (result.success) {
+      toast.success(result.message);
+      router.refresh();
+    } else {
+      toast.error(result.message);
+    }
   }
 
   async function handleSendCheckIn(row) {
@@ -102,6 +116,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
       <ReservationRow
         {...props}
         highlighted={props.row.id === focusedId}
+        isResendingPayment={props.row.id === resendingPaymentId}
         rowRef={props.row.id === focusedId ? focusRowRef : undefined}
       />
     );
@@ -132,6 +147,7 @@ export function ReservationsPageClient({ initialReservations = [], userRole, can
         onSettle={(row) => setToSettle(row)}
         onNoShow={handleNoShow}
         onSendCheckIn={handleSendCheckIn}
+        onResendPayment={handleResendPayment}
         searchPlaceholder="Rechercher une réservation..."
         searchFilter={(row, query) =>
           row.session?.workshop?.title?.toLowerCase().includes(query) ||

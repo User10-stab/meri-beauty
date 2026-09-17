@@ -1425,8 +1425,11 @@
         "mode": "Mode",
         "status": "Status",
         "total": "Total",
-        "date": "Date"
+        "date": "Date",
+        "actions": "Actions"
       },
+      "settleAtPos": "Collect payment",
+      "settleAtPosTitle": "Open this order at the till to collect payment",
       "pickupCodeNotFound": "No order matches this code.",
       "status": {
         "PENDING_PAYMENT": "Payment pending",

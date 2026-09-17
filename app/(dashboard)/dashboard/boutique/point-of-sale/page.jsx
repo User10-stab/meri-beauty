@@ -5,8 +5,13 @@ import { CounterSurface } from "@/components/dashboard/boutique/counter/CounterS
 
 export const metadata = { title: "Caisse — Meri Beauty" };
 
-export default async function PointOfSalePage() {
+export default async function PointOfSalePage({ searchParams }) {
   await requireTillCashOperator();
+
+  // « Encaisser » on an unpaid pickup order (orders list) lands here with
+  // ?order=<id>: the till opens pre-filled with that order's lines and client.
+  const params = await searchParams;
+  const sourceOrderId = typeof params?.order === "string" ? params.order : null;
 
   const session = await auth();
 
@@ -44,6 +49,7 @@ export default async function PointOfSalePage() {
       // else's collection is recorded off-till, so the "espèces / carte"
       // step is hidden from them (server enforces it regardless).
       canCollectCash={isTillCashOperator(session.user)}
+      sourceOrderId={sourceOrderId}
     />
   );
 }

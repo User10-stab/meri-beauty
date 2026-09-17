@@ -48,7 +48,13 @@ export function findUnsafeMoneyTestEnv(env = process.env, { requireMailpit = tru
   const databaseUrl = (env.DATABASE_URL ?? "").trim();
   if (!databaseUrl) {
     problems.push("DATABASE_URL is not set.");
-  } else if (!hostOf(databaseUrl).includes(REQUIRED_DB_HOST)) {
+  } else if (
+    !hostOf(databaseUrl).includes(REQUIRED_DB_HOST) &&
+    // Explicit opt-in for a test database on this machine (e.g. the local
+    // restore of a prod dump). Loopback only — and never a default, since an
+    // SSH tunnel to OVH would also be "localhost".
+    !(env.E2E_ALLOW_LOCAL_DB === "1" && /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(hostOf(databaseUrl)))
+  ) {
     problems.push(
       `DATABASE_URL host is "${hostOf(databaseUrl) || "unparseable"}", which is not a ${REQUIRED_DB_HOST} ` +
         "host. Production is self-hosted Postgres on OVH — this suite creates real invoices and credit " +

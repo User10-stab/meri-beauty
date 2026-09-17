@@ -254,6 +254,7 @@ function serializeOrder(order) {
     pickedUpAt: order.pickedUpAt,
     readyForPickupAt: order.readyForPickupAt,
     expiresAt: order.expiresAt,
+    stockReleasedAt: order.stockReleasedAt,
     cancelledAt: order.cancelledAt,
     cancelReason: order.cancelReason,
     notes: order.notes,
@@ -1239,10 +1240,29 @@ export async function markOrderReadyForPickup(orderId) {
 export async function lookupOrderByPickupCode(pickupCode) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
+  return loadPickupFiche({ pickupCode }, "Commande introuvable — vérifiez le code.");
+}
 
+/**
+ * Same fiche as lookupOrderByPickupCode, reached from a counter search result
+ * instead of a scanned code — for the client who is standing at the till
+ * without their QR code.
+ */
+export async function lookupPickupOrderById(orderId) {
+  const guard = await requireOrdersAccess();
+  if (guard.error) return { success: false, message: guard.error };
+  if (typeof orderId !== "string" || !orderId) return { success: false, message: "Commande introuvable." };
+  return loadPickupFiche({ id: orderId }, "Commande introuvable.");
+}
+
+// Statuses in which an order is still waiting on the counter to hand it over.
+const PICKUP_PENDING_STATUSES = ["PAID", "READY_FOR_PICKUP", "PENDING_PICKUP"];
+const PICKUP_SEARCH_LIMIT = 20;
+
+async function loadPickupFiche(where, notFoundMessage) {
   try {
     const order = await prisma.order.findUnique({
-      where: { pickupCode },
+      where,
       select: {
         id: true,
         orderNumber: true,
@@ -1253,7 +1273,7 @@ export async function lookupOrderByPickupCode(pickupCode) {
         user: { select: { fullName: true } },
       },
     });
-    if (!order) return { success: false, message: "Commande introuvable — vérifiez le code." };
+    if (!order) return { success: false, message: notFoundMessage };
 
     return {
       success: true,
@@ -1270,8 +1290,68 @@ export async function lookupOrderByPickupCode(pickupCode) {
       },
     };
   } catch (error) {
-    console.error("[lookupOrderByPickupCode]", error);
+    console.error("[loadPickupFiche]", error);
     return { success: false, message: "Impossible de lire cette commande." };
+  }
+}
+
+/**
+ * Boutique pickups still waiting for their customer, found by the client's
+ * name (every word must match, in any order and casing — "dupont marie"
+ * finds "Marie Dupont") or by the order number. The counter omnibar's
+ * fallback for a client who lost their pickup QR code: scanning stays the
+ * fast path (lookupOrderByPickupCode).
+ */
+export async function searchCounterPickups(query) {
+  const guard = await requireOrdersAccess();
+  if (guard.error) return { success: false, message: guard.error, data: [] };
+
+  const value = query?.trim() ?? "";
+  if (value.length < 3) return { success: true, data: [] };
+  const terms = value.split(/\s+/).filter(Boolean);
+  const orderNumber = /^n?°?\s*\d+$/i.test(value) ? Number(value.replace(/\D/g, "")) : null;
+
+  try {
+    const orders = await prisma.order.findMany({
+      where: {
+        fulfilmentMode: { in: ["PICKUP_PREPAID", "PICKUP_ON_SITE"] },
+        status: { in: PICKUP_PENDING_STATUSES },
+        OR: [
+          { user: { is: { AND: terms.map((term) => ({ fullName: { contains: term, mode: "insensitive" } })) } } },
+          ...(orderNumber && Number.isSafeInteger(orderNumber) && orderNumber <= 2147483647 ? [{ orderNumber }] : []),
+        ],
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        fulfilmentMode: true,
+        totalAmount: true,
+        createdAt: true,
+        payment: { select: { id: true } },
+        user: { select: { fullName: true } },
+        _count: { select: { items: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: PICKUP_SEARCH_LIMIT,
+    });
+
+    return {
+      success: true,
+      data: orders.map((order) => ({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        customerName: order.user?.fullName ?? "—",
+        totalAmount: Number(order.totalAmount),
+        hasPayment: Boolean(order.payment),
+        itemCount: order._count.items,
+        createdAt: order.createdAt,
+      })),
+    };
+  } catch (error) {
+    console.error("[searchCounterPickups]", error);
+    return { success: false, message: "Impossible de rechercher les commandes.", data: [] };
   }
 }
 

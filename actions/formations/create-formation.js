@@ -232,6 +232,29 @@ export async function updateFormation(input) {
       return { success: false, message: "Formation introuvable." };
     }
 
+    // Sending a formation back to draft pulls it off the public site while
+    // any Stripe link already handed to a client stays live: the client keeps
+    // a payable link for a formation she can no longer see, and staff read the
+    // formation as inactive. That happened in prod on 17/09/2026 on "ACOMPTE
+    // BASE PRO", where the client had an open deposit link the whole time.
+    // Any reservation row blocks it, cancelled and past ones included — the
+    // owner's call, so that a formation people have booked can never quietly
+    // disappear. "Archivé" still hides it without losing the history.
+    if (rest.status === "DRAFT" && existingFormation.status !== "DRAFT") {
+      const reservationCount = await prisma.formationReservation.count({
+        where: { session: { formationId: id } },
+      });
+      if (reservationCount > 0) {
+        return {
+          success: false,
+          message:
+            `Impossible de repasser « ${existingFormation.title} » en brouillon : ` +
+            `${reservationCount} réservation${reservationCount > 1 ? "s y sont rattachées" : " y est rattachée"}. ` +
+            `Passez son statut à « Archivé » pour la retirer de l'affichage sans perdre l'historique.`,
+        };
+      }
+    }
+
     const existingIds = existingFormation.sessions.map((s) => s.id);
     const incomingSessionIds = sessions.filter((s) => s.id).map((s) => s.id);
     if (incomingSessionIds.some((incomingId) => !existingIds.includes(incomingId))) {

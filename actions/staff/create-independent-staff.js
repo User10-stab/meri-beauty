@@ -11,7 +11,7 @@ import { sendEmail } from "@/lib/email";
 import { emailVerificationEmail } from "@/lib/email-templates";
 import { generateSecurePassword } from "@/lib/generate-password";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
-import { verifyVatWithVies } from "@/lib/vat-validation";
+import { syncAccountVatNumber, verifyStaffVatNumber } from "@/lib/vat/account-vat";
 import { createAndSendStaffContractInvoice } from "@/lib/staff-invoice";
 
 const BCRYPT_SALT_ROUNDS = 12;
@@ -183,14 +183,11 @@ export async function createIndependentStaff(input) {
     }
   }
 
-  if (vatNumber) {
-    const viesResult = await verifyVatWithVies(vatNumber);
-    if (!viesResult.success) {
-      return { success: false, message: viesResult.message || "Impossible de vérifier ce numéro auprès de VIES. Réessayez.", errors: { vatNumber: "Vérification VIES indisponible." } };
-    }
-    if (!viesResult.valid) {
-      return { success: false, message: "Ce numéro de TVA n'est pas reconnu comme actif par VIES.", errors: { vatNumber: "Numéro non reconnu par VIES." } };
-    }
+  // Mandatory: an independent issues her own tickets and invoices under her
+  // own number. A VIES outage still lets the onboarding through, unvalidated.
+  const vatCheck = await verifyStaffVatNumber(vatNumber);
+  if (!vatCheck.ok) {
+    return { success: false, message: vatCheck.message, errors: { vatNumber: vatCheck.message } };
   }
 
   const plainPassword = generateSecurePassword();
@@ -225,10 +222,19 @@ export async function createIndependentStaff(input) {
           yearsOfExperience: yearsOfExperience ?? null,
           isActive: true,
           hireDate: hireDate ? new Date(hireDate) : null,
-          vatNumber,
+          vatNumber: vatCheck.vatNumber,
           rythme: rythme ?? null,
           dashboardPermissions,
         },
+      });
+
+      // The same number on her customer account: one person, one VAT number.
+      await syncAccountVatNumber(tx, {
+        userId: user.id,
+        vatNumber: vatCheck.vatNumber,
+        validatedAt: vatCheck.validatedAt,
+        viesName: vatCheck.name,
+        viesAddress: vatCheck.address,
       });
 
       const newContract = await tx.contract.create({

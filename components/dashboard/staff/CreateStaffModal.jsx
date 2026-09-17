@@ -587,13 +587,13 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
 
               {/* VAT Number */}
               <div>
-                <Label htmlFor="vatNumber" icon={Hash}>
+                <Label htmlFor="vatNumber" icon={Hash} required>
                   Numéro de TVA
                 </Label>
                 <TextInput
                   id="vatNumber"
                   type="text"
-                  placeholder="ex. BE0123456789 (optionnel)"
+                  placeholder="ex. BE0123456789"
                   error={errors.vatNumber}
                   {...register("vatNumber")}
                 />

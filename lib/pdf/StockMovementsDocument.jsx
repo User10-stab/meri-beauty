@@ -13,6 +13,22 @@ import { groupMovementsByDay, formatDayLabel } from "@/lib/stock/movement-day-gr
  */
 const LOGO_BUFFER = fs.readFileSync(path.join(process.cwd(), "public", "Images", "Logo.png"));
 
+/** "17 septembre 2026 à 14:32" — the generation time, not just the day. */
+function formatDateTime(date) {
+  const time = new Date(date).toLocaleTimeString("fr-BE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Brussels",
+  });
+  return `${formatDate(date)} à ${time}`;
+}
+
+/** "2026-09-01" → "01/09/2026" for printed labels. */
+function formatDayOnly(value) {
+  const [year, month, day] = String(value).split("-");
+  return day && month && year ? `${day}/${month}/${year}` : value;
+}
+
 function truncate(value, maxLength) {
   if (!value || value.length <= maxLength) return value;
   return `${value.slice(0, maxLength - 1)}…`;
@@ -100,11 +116,35 @@ const styles = StyleSheet.create({
   colSku: { flex: 1.1, overflow: "hidden" },
   colType: { flex: 1.3, overflow: "hidden" },
   colQty: { flex: 0.6, textAlign: "right", paddingRight: 6 },
-  colBefore: { flex: 1.3, textAlign: "right", paddingRight: 14 },
+  // Avant / après as three fixed slots (17 Sep 2026: "2 » 1" read as one
+  // number) — the two figures sit well apart and align row to row.
+  beforeAfter: { flex: 1.3, flexDirection: "row", justifyContent: "flex-end", paddingRight: 14 },
+  beforeValue: { width: 34, textAlign: "right" },
+  beforeArrow: { width: 36, textAlign: "center", color: COLORS.muted },
+  afterValue: { width: 34, textAlign: "left" },
   colReason: { flex: 2.5, overflow: "hidden", paddingLeft: 4 },
   colBy: { flex: 1.3, overflow: "hidden" },
   colDayLabel: { flex: 9.3 },
   colDayCount: { flex: 1.4, textAlign: "right" },
+
+  // ─── Closing block (end of the document) ──────────────────────────────
+  closing: { marginTop: 16, alignItems: "flex-end" },
+  closingBox: { width: 280, borderTop: `1 solid ${COLORS.brand}`, paddingTop: 6 },
+  closingRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2.5 },
+  closingLabel: { fontSize: 8, color: COLORS.muted },
+  closingValue: { fontSize: 8.5 },
+  closingGrand: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: COLORS.brand,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginTop: 4,
+  },
+  closingGrandLabel: { fontSize: 8, fontWeight: 700, letterSpacing: 0.6, color: COLORS.white },
+  closingGrandValue: { fontSize: 10, fontWeight: 700, color: COLORS.white },
+  closingNote: { fontSize: 6.5, color: COLORS.muted, marginTop: 5, textAlign: "right" },
+  closingGenerated: { fontSize: 7, color: COLORS.muted, marginTop: 6, textAlign: "right" },
 });
 
 function Letterhead({ filters }) {
@@ -136,7 +176,7 @@ function Letterhead({ filters }) {
 function Footer({ generatedAt }) {
   return (
     <View style={styles.footer} fixed>
-      <Text style={styles.footerText}>Généré le {formatDate(generatedAt)} — Meri Beauty</Text>
+      <Text style={styles.footerText}>Généré le {formatDateTime(generatedAt)} — Meri Beauty</Text>
       <Text
         style={styles.footerText}
         render={({ pageNumber, totalPages }) => `Page ${pageNumber} / ${totalPages}`}
@@ -153,7 +193,11 @@ function TableHead() {
       <Text style={[styles.tableHeadCell, styles.colSku]}>RÉFÉRENCE</Text>
       <Text style={[styles.tableHeadCell, styles.colType]}>TYPE</Text>
       <Text style={[styles.tableHeadCell, styles.colQty]}>QTÉ</Text>
-      <Text style={[styles.tableHeadCell, styles.colBefore]}>AVANT → APRÈS</Text>
+      <View style={styles.beforeAfter}>
+        <Text style={[styles.tableHeadCell, styles.beforeValue]}>AVANT</Text>
+        <Text style={[styles.tableHeadCell, styles.beforeArrow]}>»</Text>
+        <Text style={[styles.tableHeadCell, styles.afterValue]}>APRÈS</Text>
+      </View>
       <Text style={[styles.tableHeadCell, styles.colReason]}>MOTIF</Text>
       <Text style={[styles.tableHeadCell, styles.colBy]}>PAR</Text>
     </View>
@@ -183,9 +227,11 @@ function DataRow({ row }) {
         {row.quantity > 0 ? "+" : ""}
         {row.quantity}
       </Text>
-      <Text style={styles.colBefore}>
-        {row.previousStock} → {row.newStock}
-      </Text>
+      <View style={styles.beforeAfter}>
+        <Text style={styles.beforeValue}>{row.previousStock}</Text>
+        <Text style={styles.beforeArrow}>»</Text>
+        <Text style={styles.afterValue}>{row.newStock}</Text>
+      </View>
       <Text style={styles.colReason}>{truncate(row.reason, 40) || "—"}</Text>
       <Text style={styles.colBy}>{truncate(row.createdByName, 20) || "—"}</Text>
     </View>
@@ -203,6 +249,41 @@ function DayBlock({ group }) {
       {group.rows.map((row) => (
         <DataRow key={row.id} row={row} />
       ))}
+    </View>
+  );
+}
+
+/**
+ * Closes the ledger on the catalogue's total stock, so a controller reading a
+ * list of movements can check it against a physical count. Always computed
+ * over every movement type (see computeStockTotals), even when the list above
+ * is filtered to one.
+ */
+function StockTotals({ filters, stock, generatedAt }) {
+  return (
+    <View style={styles.closing} wrap={false}>
+      <View style={styles.closingBox}>
+        <View style={styles.closingRow}>
+          <Text style={styles.closingLabel}>Stock total au début ({formatDayOnly(filters.from)})</Text>
+          <Text style={styles.closingValue}>{stock.atStart} unités</Text>
+        </View>
+        <View style={styles.closingRow}>
+          <Text style={styles.closingLabel}>Entrées de la période</Text>
+          <Text style={styles.closingValue}>+{stock.unitsIn} unités</Text>
+        </View>
+        <View style={styles.closingRow}>
+          <Text style={styles.closingLabel}>Sorties de la période</Text>
+          <Text style={styles.closingValue}>-{stock.unitsOut} unités</Text>
+        </View>
+        <View style={styles.closingGrand}>
+          <Text style={styles.closingGrandLabel}>STOCK TOTAL À LA FIN ({formatDayOnly(filters.to)})</Text>
+          <Text style={styles.closingGrandValue}>{stock.atEnd} unités</Text>
+        </View>
+        {filters.type !== "ALL" && (
+          <Text style={styles.closingNote}>Totaux calculés sur tous les types de mouvement, pas seulement « {filters.typeLabel} ».</Text>
+        )}
+        <Text style={styles.closingGenerated}>Document généré le {formatDateTime(generatedAt)}</Text>
+      </View>
     </View>
   );
 }
@@ -230,6 +311,14 @@ export function StockMovementsDocument({ report }) {
 
         <View style={styles.synthesis}>
           <View style={styles.synthesisItem}>
+            <Text style={styles.synthesisLabel}>Stock au début ({formatDayOnly(filters.from)})</Text>
+            <Text style={styles.synthesisValue}>{summary.stock.atStart}</Text>
+          </View>
+          <View style={styles.synthesisItem}>
+            <Text style={styles.synthesisLabel}>Stock à la fin ({formatDayOnly(filters.to)})</Text>
+            <Text style={styles.synthesisValue}>{summary.stock.atEnd}</Text>
+          </View>
+          <View style={styles.synthesisItem}>
             <Text style={styles.synthesisLabel}>Total mouvements</Text>
             <Text style={styles.synthesisValue}>{summary.count}</Text>
           </View>
@@ -249,6 +338,8 @@ export function StockMovementsDocument({ report }) {
         ) : (
           dayGroups.map((group) => <DayBlock key={group.key} group={group} />)
         )}
+
+        <StockTotals filters={filters} stock={summary.stock} generatedAt={generatedAt} />
       </Page>
     </Document>
   );

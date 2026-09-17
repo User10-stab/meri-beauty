@@ -163,22 +163,40 @@ function CheckInSection({ checkIn, canResend = false, sending = false, onResend 
 function PendingOrderSections({ detail }) {
   const { order, checkIn } = detail;
   const discount = Number(order.discountAmount ?? 0);
+  // Taken over by the till: nothing is owed on this order any more — the
+  // money, the receipt and any invoice are on the counter sale.
+  const settledAtCounter = order.status === "SETTLED_AT_COUNTER";
+  const saleLink = order.settledBySale ? (
+    <a href={`/dashboard/boutique/orders/${order.settledBySale.id}`} className="font-semibold underline underline-offset-2">
+      vente n°{order.settledBySale.orderNumber}
+    </a>
+  ) : (
+    "vente au comptoir"
+  );
   return (
     <>
       <div>
         <SectionTitle>Paiement</SectionTitle>
-        <p className="mb-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          <AlertTriangle size={14} className="mt-px shrink-0" />
-          <span>
-            {order.fulfilmentMode === "PICKUP_ON_SITE"
-              ? "Pas encore encaissée — le client règle en boutique au moment du retrait."
-              : "Pas encore encaissée — aucun paiement n'a été confirmé pour cette commande."}
-          </span>
-        </p>
+        {settledAtCounter ? (
+          <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+            Encaissée en caisse — remplacée par la {saleLink}. Le paiement est enregistré sur cette vente.
+          </p>
+        ) : (
+          <p className="mb-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <AlertTriangle size={14} className="mt-px shrink-0" />
+            <span>
+              {order.fulfilmentMode === "PICKUP_ON_SITE"
+                ? "Pas encore encaissée — le client règle en boutique au moment du retrait."
+                : "Pas encore encaissée — aucun paiement n'a été confirmé pour cette commande."}
+            </span>
+          </p>
+        )}
         <Row label="Montant total" value={money(order.totalAmount)} />
-        <Row label="Déjà réglé" value={money(0)} />
-        <Row label="Solde restant" value={money(order.totalAmount)} />
-        <Row label="À retirer au plus tard le" value={order.expiresAt ? dateTime(order.expiresAt) : null} />
+        {!settledAtCounter && <Row label="Déjà réglé" value={money(0)} />}
+        {!settledAtCounter && <Row label="Solde restant" value={money(order.totalAmount)} />}
+        {!settledAtCounter && (
+          <Row label="À retirer au plus tard le" value={order.expiresAt ? dateTime(order.expiresAt) : null} />
+        )}
       </div>
 
       <div>
@@ -219,7 +237,11 @@ function PendingOrderSections({ detail }) {
       <div>
         <SectionTitle>Reçu / ticket de caisse</SectionTitle>
         <p className="text-sm text-gray-500">
-          Pas encore de reçu — il est émis à l&apos;encaissement de la commande, pas avant.
+          {settledAtCounter ? (
+            <>Le reçu est celui de la {saleLink}.</>
+          ) : (
+            "Pas encore de reçu — il est émis à l'encaissement de la commande, pas avant."
+          )}
         </p>
       </div>
     </>
@@ -488,7 +510,12 @@ export function TransactionDetailDrawer({ transactionId = null, orderId = null, 
                     : "Chargement…"}
               </h2>
               {pendingOrder ? (
-                <span className="text-xs text-amber-700">Non payée · commandée le {dateTime(pendingOrder.createdAt)}</span>
+                <span className={pendingOrder.status === "SETTLED_AT_COUNTER" ? "text-xs text-emerald-700" : "text-xs text-amber-700"}>
+                  {pendingOrder.status === "SETTLED_AT_COUNTER"
+                    ? `Encaissée en caisse${pendingOrder.settledBySale ? ` — vente n°${pendingOrder.settledBySale.orderNumber}` : ""}`
+                    : "Non payée"}{" "}
+                  · commandée le {dateTime(pendingOrder.createdAt)}
+                </span>
               ) : (
                 detail && <span className="text-xs text-gray-400">{dateTime(detail.paidAt)}</span>
               )}

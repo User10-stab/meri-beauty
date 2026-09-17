@@ -18,7 +18,7 @@ const SCHEMA_DAY = {
   SUNDAY: "Sunday",
 };
 
-/** LocalBusiness/HairSalon structured data — lets Google show address,
+/** LocalBusiness/BeautySalon structured data — lets Google show address,
  * hours, phone, and (once reviews exist) a rating directly in search
  * results instead of just a plain blue link. */
 function buildLocalBusinessSchema(salon) {
@@ -26,18 +26,26 @@ function buildLocalBusinessSchema(salon) {
 
   return {
     "@context": "https://schema.org",
-    "@type": "HairSalon",
+    "@type": "BeautySalon",
     name: salon.name,
     url: SITE_URL,
     ...(salon.logo ? { image: salon.logo } : {}),
     ...(salon.phone ? { telephone: salon.phone } : {}),
     ...(salon.email ? { email: salon.email } : {}),
-    ...(salon.address
+    // Prefer the structured address fields (used for invoicing/Peppol) over
+    // the freeform `address` string — they carry postal code and city as
+    // their own properties, which is what lets Google/AI engines match the
+    // salon to "Jette" or "1090" searches instead of just parsing one blob.
+    ...(salon.addressLine1 || salon.address
       ? {
           address: {
             "@type": "PostalAddress",
-            streetAddress: salon.address,
-            addressCountry: "BE",
+            streetAddress: salon.addressLine1
+              ? [salon.addressLine1, salon.addressLine2].filter(Boolean).join(", ")
+              : salon.address,
+            ...(salon.postalCode ? { postalCode: salon.postalCode } : {}),
+            ...(salon.city ? { addressLocality: salon.city } : {}),
+            addressCountry: salon.countryCode || "BE",
           },
         }
       : {}),

@@ -6,7 +6,7 @@ import { pickupQrDataUrl, checkInQrDataUrl } from "@/lib/qrcode";
 import { CHECK_IN_KINDS, ensureCheckInCode } from "@/lib/activities/check-in-code";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 
-const CLOSED_ORDER_STATUSES = new Set(["COMPLETED", "CANCELLED", "EXPIRED"]);
+const CLOSED_ORDER_STATUSES = new Set(["COMPLETED", "CANCELLED", "EXPIRED", "SETTLED_AT_COUNTER"]);
 
 // Only a CONFIRMED reservation carries a ticket. PENDING_DEPOSIT has not paid
 // yet, and CANCELLED / COMPLETED / NO_SHOW are all doors that already closed —

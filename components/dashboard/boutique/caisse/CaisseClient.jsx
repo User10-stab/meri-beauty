@@ -316,7 +316,7 @@ export function CaisseClient({
               <h2 className="font-semibold text-gray-900 dark:text-white">Session ouverte</h2>
               <p className="text-gray-600 dark:text-dark-6">
                 Ouverte le {formatDateTime(currentSession.openedAt)}
-                {currentSession.isAutoOpened ? " (automatique)" : ` par ${currentSession.openedBy?.fullName ?? "—"}`} — fond{" "}
+                {currentSession.isAutoOpened ? " (automatique)" : ` par ${currentSession.openedBy?.fullName ?? "—"}`} — solde{" "}
                 {formatEuro(currentSession.openingFloat)}.
               </p>
             </div>

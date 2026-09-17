@@ -98,7 +98,6 @@ const ALL_NAV_DATA = [
         title: "Équipe & administration",
         icon: Icons.User,
         items: [
-          { title: "Performance", url: "/dashboard/staff/performance", roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT },
           { title: "Auto-Entrepreneur", url: "/dashboard/staff/auto-entrepreneur", roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT },
           { title: "Comptes Stripe", url: "/dashboard/staff/stripe-accounts", roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT },
           { title: "Facturation mensuelle", url: "/dashboard/staff-invoices", roles: [ROLES.OWNER, ROLES.ADMIN] },

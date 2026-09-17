@@ -264,6 +264,10 @@ function serializeOrder(order) {
     user: order.user
       ? { id: order.user.id, fullName: order.user.fullName, email: order.user.email, phone: order.user.phone }
       : null,
+    // SETTLED_AT_COUNTER: the counter sale that replaced this order — and, on
+    // that sale, the order it came from.
+    settledBySale: order.settledBySale ? { id: order.settledBySale.id, orderNumber: order.settledBySale.orderNumber } : null,
+    settledOrder: order.settledOrder ? { id: order.settledOrder.id, orderNumber: order.settledOrder.orderNumber } : null,
     hasPayment: Boolean(order.payment),
     payment: order.payment
       ? {
@@ -1107,12 +1111,31 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
   if (guard.error) return { success: false, message: guard.error, data: [], totalCount: 0, page: 1, pageSize };
 
   try {
+    const searchWhere = search
+      ? {
+          OR: [
+            { pickupCode: { contains: search, mode: "insensitive" } },
+            { trackingCode: { contains: search, mode: "insensitive" } },
+            { user: { fullName: { contains: search, mode: "insensitive" } } },
+            { user: { email: { contains: search, mode: "insensitive" } } },
+          ],
+        }
+      : {};
+
     // "Commandes à traiter" deep-link (dashboard card): same overdue
-    // computation as the card, paginated here instead of capped.
+    // computation as the card, paginated here instead of capped. The status/
+    // mode/search filters still apply on top of it — they used to be silently
+    // ignored while this preset was on, so picking a status changed nothing.
     if (overdueOnly) {
       const now = new Date();
       const candidates = await prisma.order.findMany({
-        where: { status: { in: OVERDUE_CANDIDATE_STATUSES } },
+        where: {
+          status: status
+            ? { in: OVERDUE_CANDIDATE_STATUSES.includes(status) ? [status] : [] }
+            : { in: OVERDUE_CANDIDATE_STATUSES },
+          ...(fulfilmentMode ? { fulfilmentMode } : {}),
+          ...searchWhere,
+        },
         include: {
           user: { select: { id: true, fullName: true, email: true, phone: true } },
           payment: { select: { id: true, transactionReference: true, status: true, transactions: { select: { method: true, transactionType: true } } } },
@@ -1133,16 +1156,7 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
     const where = {
       ...(status ? { status } : {}),
       ...(fulfilmentMode ? { fulfilmentMode } : {}),
-      ...(search
-        ? {
-            OR: [
-              { pickupCode: { contains: search, mode: "insensitive" } },
-              { trackingCode: { contains: search, mode: "insensitive" } },
-              { user: { fullName: { contains: search, mode: "insensitive" } } },
-              { user: { email: { contains: search, mode: "insensitive" } } },
-            ],
-          }
-        : {}),
+      ...searchWhere,
     };
 
     // Unbounded findMany here used to fetch every order ever placed on
@@ -1159,6 +1173,7 @@ export async function listOrders({ status, fulfilmentMode, search, page = 1, pag
           user: { select: { id: true, fullName: true, email: true, phone: true } },
           payment: { select: { id: true, transactionReference: true, status: true, transactions: { select: { method: true, transactionType: true } } } },
           items: true,
+          settledBySale: { select: { id: true, orderNumber: true } },
         },
       }),
     ]);
@@ -1182,6 +1197,8 @@ export async function getOrderById(orderId) {
         user: { select: { id: true, fullName: true, email: true, phone: true } },
         payment: { include: { invoice: { include: { creditNotes: true } } } },
         items: true,
+        settledBySale: { select: { id: true, orderNumber: true } },
+        settledOrder: { select: { id: true, orderNumber: true } },
         returnRequests: { include: { items: true }, orderBy: { requestedAt: "desc" } },
         cancellationRequest: {
           include: {
@@ -2106,7 +2123,7 @@ export async function cancelOrder(input) {
     },
   });
   if (!order) return { success: false, message: "Commande introuvable." };
-  if (["CANCELLED", "EXPIRED", "COMPLETED"].includes(order.status)) {
+  if (["CANCELLED", "EXPIRED", "COMPLETED", "SETTLED_AT_COUNTER"].includes(order.status)) {
     return { success: false, message: "Cette commande ne peut plus être annulée." };
   }
   if (order.status === "SHIPPED") {

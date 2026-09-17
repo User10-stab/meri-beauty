@@ -21,7 +21,7 @@ describe("customer order history pickup QR", () => {
     expect(action).toMatch(/import\s*\{[^}]*pickupQrDataUrl[^}]*\}\s*from\s*"@\/lib\/qrcode"/);
     expect(action).toContain("await pickupQrDataUrl(order.pickupCode)");
     expect(action).toContain('order.fulfilmentMode !== "SHIPPING_PREPAID"');
-    expect(action).toContain('["COMPLETED", "CANCELLED", "EXPIRED"]');
+    expect(action).toContain('["COMPLETED", "CANCELLED", "EXPIRED", "SETTLED_AT_COUNTER"]');
     expect(action).toContain("orders.map(attachPickupQr)");
   });
 

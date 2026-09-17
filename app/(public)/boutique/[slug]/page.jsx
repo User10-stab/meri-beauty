@@ -105,7 +105,7 @@ export default async function ProductPage({ params, searchParams }) {
           type="application/ld+json"
           // Escape "<" so a salon-editable field (name, description) can
           // never break out of the script tag or inject markup. Same guard
-          // the HairSalon schema uses in (public)/layout.js.
+          // the BeautySalon schema uses in (public)/layout.js.
           dangerouslySetInnerHTML={{
             __html: JSON.stringify(productSchema).replace(/</g, "\\u003c"),
           }}

@@ -594,7 +594,9 @@ export async function completePointOfSaleSale(input) {
             stockReleasedAt: null,
             payment: { is: null },
           },
-          data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: "Encaissée en caisse" },
+          // Not a cancellation: the order is sold, as the counter sale created
+          // below — linked through settledBySaleId once that sale exists.
+          data: { status: "SETTLED_AT_COUNTER" },
         });
         if (claim.count === 0) throw new Error("POS_SOURCE_ORDER_UNAVAILABLE");
         for (const item of sourceOrder.items) {
@@ -831,7 +833,7 @@ export async function completePointOfSaleSale(input) {
       if (sourceOrder) {
         await tx.order.update({
           where: { id: sourceOrder.id },
-          data: { cancelReason: `Encaissée en caisse — vente n°${order.orderNumber}` },
+          data: { settledBySaleId: order.id },
         });
         await tx.auditLog.create({
           data: {
@@ -841,7 +843,7 @@ export async function completePointOfSaleSale(input) {
             entityType: "Order",
             entityId: sourceOrder.id,
             before: { status: sourceOrder.status },
-            after: { status: "CANCELLED", replacedByOrderId: order.id },
+            after: { status: "SETTLED_AT_COUNTER", settledBySaleId: order.id, replacedByOrderId: order.id },
             metadata: { orderNumber: sourceOrder.orderNumber, replacedByOrderNumber: order.orderNumber },
           },
         });

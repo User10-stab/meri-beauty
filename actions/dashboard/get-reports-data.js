@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
+import { resolveSalonScope, salonPaymentArms } from "@/lib/authorization/salon-scope";
 import {
   BANK_METHODS,
   CASH_METHODS,
@@ -28,7 +29,7 @@ function monthLabel(key) {
 
 /**
  * Cross-cutting business reports — separate from getDashboardStats() (today's
- * snapshot) and getStaffPerformance() (per-staff breakdown). This is the
+ * snapshot). There is no per-staff breakdown anywhere, by design. This is the
  * "how's the business doing over time, across every revenue line" view.
  *
  * Two money figures come out of here and they answer different questions.
@@ -39,12 +40,18 @@ function monthLabel(key) {
  * Payment can exist with no Transaction row), so they are reported side by
  * side rather than one being presented as a breakdown of the other.
  *
- * @param {{ months?: number, staffId?: string|null }} [filters]
+ * Every figure is the SALON's only (lib/authorization/salon-scope.js): the
+ * ADMIN/OWNER accounts, Marie Mercier (her VAT number is the salon's), the
+ * online sales nobody rang up, and the salon's own ateliers and formations.
+ * Every other practitioner is legally independent — her takings are hers,
+ * are never added into these totals, and there is no filter to open them.
+ *
+ * @param {{ months?: number }} [filters]
  *   `months` must be one of REPORT_PERIODS; anything else falls back to the
  *   default rather than letting a hand-edited query string scan the whole
- *   ledger. `staffId` scopes to one practitioner — see staffScoped below.
+ *   ledger.
  */
-export async function getReportsData({ months, staffId } = {}) {
+export async function getReportsData({ months } = {}) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
   if (!hasPermission(session.user.role, DASHBOARD_PERMISSIONS.REPORTS)) {
@@ -56,32 +63,11 @@ export async function getReportsData({ months, staffId } = {}) {
   const rangeStart = new Date(now.getFullYear(), now.getMonth() - (monthsBack - 1), 1);
 
   try {
-    // The staff directory drives the filter dropdown, and resolving the
-    // selected one gives both ids the filter needs: Appointment keys on
-    // Staff.id, Order.createdByStaffId keys on User.id.
-    const staffList = await prisma.staff.findMany({
-      where: { isDeleted: false, user: { isDeleted: false } },
-      orderBy: { user: { fullName: "asc" } },
-      select: { id: true, isActive: true, user: { select: { id: true, fullName: true } } },
-    });
-    const staffOptions = staffList.map((s) => ({
-      id: s.id,
-      fullName: s.user.fullName,
-      isActive: s.isActive,
-    }));
-
-    const selectedStaff = staffId ? staffList.find((s) => s.id === staffId) ?? null : null;
-    // An unknown id must not silently widen the report back to everyone.
-    if (staffId && !selectedStaff) {
-      return { success: false, message: "Membre du personnel introuvable." };
-    }
-    const staffScoped = Boolean(selectedStaff);
-    const staffUserId = selectedStaff?.user.id ?? null;
-
-    // Ateliers and formations are run by the Animator directory, which has no
-    // link to Staff — there is no honest way to attribute them to a
-    // practitioner, so a staff-scoped report leaves them out entirely rather
-    // than showing everyone's.
+    const scope = await resolveSalonScope(prisma);
+    const salonPayment = { OR: salonPaymentArms(scope) };
+    // An Order is the salon's when a salon account rang it up, or nobody did
+    // (the customer's own online purchase). Order.createdByStaffId → User.id.
+    const salonOrder = { OR: [{ createdByStaffId: { in: scope.salonUserIds } }, { createdByStaffId: null }] };
 
     const [
       boutiquePayments,
@@ -102,7 +88,7 @@ export async function getReportsData({ months, staffId } = {}) {
           status: { in: REVENUE_STATUSES },
           paidAt: { gte: rangeStart },
           orderId: { not: null },
-          ...(staffUserId ? { order: { createdByStaffId: staffUserId } } : {}),
+          order: salonOrder,
         },
         select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
@@ -112,22 +98,20 @@ export async function getReportsData({ months, staffId } = {}) {
           status: { in: REVENUE_STATUSES },
           paidAt: { gte: rangeStart },
           appointmentId: { not: null },
-          ...(selectedStaff ? { appointment: { staffId: selectedStaff.id } } : {}),
+          // Appointment.staffId → Staff.id: only Marie's, never an independent's.
+          appointment: { staffId: { in: scope.salonStaffIds } },
         },
         select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
-      staffScoped
-        ? []
-        : prisma.payment.findMany({
-            where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, workshopReservationId: { not: null } },
-            select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
-          }),
-      staffScoped
-        ? []
-        : prisma.payment.findMany({
-            where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, formationReservationId: { not: null } },
-            select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
-          }),
+      // Ateliers and formations are the salon's own events.
+      prisma.payment.findMany({
+        where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, workshopReservationId: { not: null } },
+        select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
+      }),
+      prisma.payment.findMany({
+        where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, formationReservationId: { not: null } },
+        select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
+      }),
 
       // Cash vs bank. Grouped with transactionType so a refund can be netted
       // off its own method instead of inflating takings — a €50 card sale
@@ -137,16 +121,7 @@ export async function getReportsData({ months, staffId } = {}) {
         where: {
           isDeleted: false,
           paidAt: { gte: rangeStart },
-          ...(staffScoped
-            ? {
-                payment: {
-                  OR: [
-                    { appointment: { staffId: selectedStaff.id } },
-                    { order: { createdByStaffId: staffUserId } },
-                  ],
-                },
-              }
-            : {}),
+          payment: salonPayment,
         },
         _sum: { amount: true },
       }),
@@ -156,8 +131,10 @@ export async function getReportsData({ months, staffId } = {}) {
         where: {
           order: {
             createdAt: { gte: rangeStart },
-            status: { notIn: ["CANCELLED", "EXPIRED"] },
-            ...(staffUserId ? { createdByStaffId: staffUserId } : {}),
+            // SETTLED_AT_COUNTER: its items are counted once, on the counter
+            // sale that replaced it.
+            status: { notIn: ["CANCELLED", "EXPIRED", "SETTLED_AT_COUNTER"] },
+            ...salonOrder,
           },
         },
         _sum: { quantity: true, unitPrice: true },
@@ -166,7 +143,7 @@ export async function getReportsData({ months, staffId } = {}) {
       }),
       prisma.order.groupBy({
         by: ["status"],
-        where: { createdAt: { gte: rangeStart }, ...(staffUserId ? { createdByStaffId: staffUserId } : {}) },
+        where: { createdAt: { gte: rangeStart }, ...salonOrder },
         _count: { _all: true },
       }),
       prisma.appointment.groupBy({
@@ -174,28 +151,23 @@ export async function getReportsData({ months, staffId } = {}) {
         where: {
           isDeleted: false,
           createdAt: { gte: rangeStart },
-          ...(selectedStaff ? { staffId: selectedStaff.id } : {}),
+          staffId: { in: scope.salonStaffIds },
         },
         _count: { _all: true },
       }),
 
-      // Not attributable to a practitioner — a new customer belongs to the
-      // salon, not to whoever happened to serve them first. Skipped rather
-      // than shown unfiltered next to filtered figures.
-      staffScoped
-        ? []
-        : prisma.user.findMany({
-            where: { role: "CUSTOMER", isDeleted: false, createdAt: { gte: rangeStart } },
-            select: { createdAt: true },
-          }),
-      staffScoped
-        ? null
-        : prisma.payment.aggregate({
-            where: { isDeleted: false, promoCodeId: { not: null }, paidAt: { gte: rangeStart } },
-            _sum: { discountAmount: true },
-            _count: { _all: true },
-          }),
-      staffScoped ? null : prisma.returnRequest.count({ where: { requestedAt: { gte: rangeStart } } }),
+      // A count of accounts, not money — a new customer belongs to the salon,
+      // not to whoever happened to serve them first.
+      prisma.user.findMany({
+        where: { role: "CUSTOMER", isDeleted: false, createdAt: { gte: rangeStart } },
+        select: { createdAt: true },
+      }),
+      prisma.payment.aggregate({
+        where: { isDeleted: false, promoCodeId: { not: null }, paidAt: { gte: rangeStart }, ...salonPayment },
+        _sum: { discountAmount: true },
+        _count: { _all: true },
+      }),
+      prisma.returnRequest.count({ where: { requestedAt: { gte: rangeStart }, order: salonOrder } }),
     ]);
 
     // ── Monthly revenue by source, one bucket per calendar month so a
@@ -270,15 +242,8 @@ export async function getReportsData({ months, staffId } = {}) {
       data: {
         filters: {
           months: monthsBack,
-          staffId: selectedStaff?.id ?? null,
-          staffName: selectedStaff?.user.fullName ?? null,
           periods: REPORT_PERIODS,
-          staffOptions,
         },
-        // Tells the client to hide the cards that cannot honestly be scoped
-        // to one practitioner rather than showing salon-wide numbers beside
-        // filtered ones.
-        staffScoped,
         rangeStart,
         totalRevenue,
         revenueByMonth,
@@ -291,9 +256,7 @@ export async function getReportsData({ months, staffId } = {}) {
         appointmentStatusCounts: appointmentStatusCounts.map((s) => ({ status: s.status, count: s._count._all })),
         newCustomersByMonth,
         totalNewCustomers: newCustomersRaw.length,
-        promoCode: promoAgg
-          ? { uses: promoAgg._count._all, totalDiscount: Number(promoAgg._sum.discountAmount ?? 0) }
-          : null,
+        promoCode: { uses: promoAgg._count._all, totalDiscount: Number(promoAgg._sum.discountAmount ?? 0) },
         returnsCount,
       },
     };

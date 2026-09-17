@@ -25,6 +25,7 @@ const STATUS_STYLE = {
   COMPLETED: "bg-gray-100 text-gray-500 border-gray-200",
   CANCELLED: "bg-red-50 text-red-600 border-red-100",
   EXPIRED: "bg-red-50 text-red-600 border-red-100",
+  SETTLED_AT_COUNTER: "bg-emerald-50 text-emerald-700 border-emerald-100",
 };
 
 function formatPrice(n) {
@@ -66,6 +67,7 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
     COMPLETED: t("status.COMPLETED"),
     CANCELLED: t("status.CANCELLED"),
     EXPIRED: t("status.EXPIRED"),
+    SETTLED_AT_COUNTER: t("status.SETTLED_AT_COUNTER"),
   };
 
   function refetch(next) {
@@ -266,6 +268,11 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
                     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${STATUS_STYLE[o.status]}`}>
                       {STATUS_LABEL[o.status]}
                     </span>
+                    {o.status === "SETTLED_AT_COUNTER" && o.settledBySale && (
+                      <span className="mt-1 block text-xs text-gray-500">
+                        {t("settledBySale", { number: o.settledBySale.orderNumber })}
+                      </span>
+                    )}
                     {(() => {
                       const reason = getOrderOverdueReason(o);
                       if (!reason) return null;

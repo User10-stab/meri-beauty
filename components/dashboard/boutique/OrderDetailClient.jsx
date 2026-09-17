@@ -28,6 +28,7 @@ const STATUS_LABEL = {
   COMPLETED: "Terminée",
   CANCELLED: "Annulée",
   EXPIRED: "Expirée",
+  SETTLED_AT_COUNTER: "Encaissée en caisse",
 };
 
 const STATUS_STYLE = {
@@ -40,6 +41,7 @@ const STATUS_STYLE = {
   COMPLETED: "bg-gray-100 text-gray-500 border-gray-200",
   CANCELLED: "bg-red-50 text-red-600 border-red-100",
   EXPIRED: "bg-red-50 text-red-600 border-red-100",
+  SETTLED_AT_COUNTER: "bg-emerald-50 text-emerald-700 border-emerald-100",
 };
 
 const CANCELLABLE = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP"];
@@ -175,9 +177,33 @@ export function OrderDetailClient({ order }) {
         {" · "}{formatDate(order.createdAt)}
       </p>
 
-      {order.cancelReason && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          Raison : {order.cancelReason}
+      {order.status === "SETTLED_AT_COUNTER" ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Encaissée en caisse — remplacée par{" "}
+          {order.settledBySale ? (
+            <Link href={`/dashboard/boutique/orders/${order.settledBySale.id}`} className="font-semibold underline underline-offset-2">
+              la vente n°{order.settledBySale.orderNumber}
+            </Link>
+          ) : (
+            "une vente au comptoir"
+          )}
+          . Le paiement, le reçu et la facture sont sur cette vente.
+        </div>
+      ) : (
+        order.cancelReason && (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            Raison : {order.cancelReason}
+          </div>
+        )
+      )}
+
+      {order.settledOrder && (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+          Encaissée en caisse — reprise de{" "}
+          <Link href={`/dashboard/boutique/orders/${order.settledOrder.id}`} className="font-semibold underline underline-offset-2">
+            la commande n°{order.settledOrder.orderNumber}
+          </Link>
+          .
         </div>
       )}
 

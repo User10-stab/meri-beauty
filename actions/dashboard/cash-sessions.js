@@ -11,6 +11,7 @@ import {
   getLastClosedCountedCash,
   SESSION_INCLUDE,
 } from "@/lib/cash-book/session-lifecycle";
+import { computeSessionCashTotals } from "@/lib/cash-book/session-totals";
 
 /**
  * A daily till open/close boundary. Before this, every CASH POS sale was
@@ -156,8 +157,11 @@ export async function openCashSession(openingFloat, { confirmDivergence = false 
   // noticed. This blocks that silent break: a manual open that diverges from
   // the carried-forward suggestion needs one extra explicit confirmation
   // instead of going through on the first submit.
+  // No `suggested > 0` exemption: a last count of 0 € is exactly the state a
+  // mistaken close-to-zero leaves behind, and opening on top of it with a
+  // different amount deserves the same explicit confirmation.
   const suggested = await getLastClosedCountedCash(prisma);
-  if (suggested != null && suggested > 0 && !confirmDivergence && Math.abs(amount - suggested) > 0.01) {
+  if (suggested != null && !confirmDivergence && Math.abs(amount - suggested) > 0.01) {
     return {
       success: false,
       code: "OPENING_FLOAT_MISMATCH",
@@ -189,13 +193,33 @@ export async function openCashSession(openingFloat, { confirmDivergence = false 
   return { success: true, data: serializeCashSession(session) };
 }
 
-export async function closeCashSession(sessionId, countedCash) {
+export async function closeCashSession(sessionId, countedCash, { confirmDivergence = false } = {}) {
   const guard = await requireCashSessionAccess();
   if (guard.error) return { success: false, message: guard.error };
 
   const counted = Number(countedCash);
   if (!Number.isFinite(counted) || counted < 0) {
     return { success: false, message: "Le montant compté doit être un montant positif ou nul." };
+  }
+
+  // 11/09/2026: a test closure typed 0 € against 1 289,85 € expected went
+  // through on the first submit, and every later session carried that 0 —
+  // "Attendu en caisse" silently restarted from nothing. A count that differs
+  // from the expected cash is a real écart de caisse; it must be confirmed
+  // explicitly, the same rule openCashSession applies to the float.
+  if (!confirmDivergence) {
+    const open = await prisma.cashSession.findUnique({ where: { id: sessionId }, select: { closedAt: true, openingFloat: true } });
+    if (open && !open.closedAt) {
+      const { expectedCash } = await computeSessionCashTotals(prisma, sessionId, open.openingFloat);
+      if (Math.abs(counted - expectedCash) > 0.01) {
+        return {
+          success: false,
+          code: "CLOSING_COUNT_MISMATCH",
+          expectedCash,
+          message: `La caisse devrait contenir ${expectedCash.toFixed(2)} €. Confirmez si vous avez vraiment compté ${counted.toFixed(2)} € (écart de ${(counted - expectedCash).toFixed(2)} €).`,
+        };
+      }
+    }
   }
 
   // Atomic claim, gated on still being open inside closeCashSessionInternal —

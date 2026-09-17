@@ -442,7 +442,8 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       // (markAppointmentNoShow). A forfeited deposit will essentially never
       // already have payment.invoice set (deposits aren't invoiced at
       // collection time), but guard on it anyway for idempotency.
-      if (forfeitAmount > REFUND_EPSILON && !payment.invoice && hasInvoiceableVatIdentity(appointment.user)) {
+      // Never for an independent's sale — she documents it under her own VAT.
+      if (forfeitAmount > REFUND_EPSILON && !payment.invoice && !payment.payeeStaffId && hasInvoiceableVatIdentity(appointment.user)) {
         const cancellationFeeVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
         await issueInvoice(tx, {
           paymentId: payment.id,
@@ -684,7 +685,7 @@ export async function markAppointmentNoShow(appointmentId) {
         // Invoice to be created — see isTillCashOperator. The no-show still
         // gets recorded and the deposit kept, it simply never gets an
         // invoice.
-        const offTillActor = !isTillCashOperator(authCheck.user);
+        const offTillActor = !isTillCashOperator(authCheck.user) || Boolean(noShowPayment.payeeStaffId);
         await allocatePaymentTicketNumber(tx, noShowPayment.id, "APPOINTMENT", null, new Date(), offTillActor);
 
         if (hasInvoiceableVatIdentity(appointment.user) && !offTillActor) {
@@ -845,7 +846,13 @@ export async function completeAppointment(
     // and the collection Transaction is detached from every cash session so
     // it shows in Opérations but not in the drawer's book or its X/Z report.
     // AppointmentDrawer / FicheSettleAction hide the popup for them too.
-    const offTill = !isTillCashOperator(authCheck.user);
+    // An independent practitioner's appointment is her sale: off-till whoever
+    // collects it — even the admin or Marie — with no salon ticket or invoice.
+    // With no Payment row yet, the practitioner it is booked with decides.
+    const independentSale = payment
+      ? Boolean(payment.payeeStaffId)
+      : Boolean((await resolvePayeeForAppointment(prisma, { staffId: appointment.staffId })).payeeStaffId);
+    const offTill = !isTillCashOperator(authCheck.user) || independentSale;
     const collectsAtTill = collectsMoney && !offTill;
 
     // A card payment is only accepted as EXTERNAL_TERMINAL, which carries the

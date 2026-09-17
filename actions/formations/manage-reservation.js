@@ -206,7 +206,8 @@ export async function cancelFormationReservation(reservationId, { reason, refund
       // lib/reservations/settle-reservation.js's doc comment), so this is
       // the only point where that invoice gets issued for a forfeited
       // deposit.
-        if (hasInvoiceableVatIdentity(reservation.customer)) {
+        // Never for an independent's sale — she documents it under her own VAT.
+        if (!payment.payeeStaffId && hasInvoiceableVatIdentity(reservation.customer)) {
           await issueInvoice(tx, {
             paymentId: payment.id,
             source: "FORMATION",

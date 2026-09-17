@@ -21,6 +21,8 @@ const COMPLETE_SALON = {
 function invoicingTx() {
   return {
     $queryRaw: vi.fn().mockResolvedValue([{ lastNumber: 7 }]),
+    // A salon sale: issueInvoice refuses an independent practitioner's payment.
+    payment: { findUnique: vi.fn().mockResolvedValue({ payeeStaffId: null }) },
     salon: { findUnique: vi.fn().mockResolvedValue(COMPLETE_SALON) },
     invoice: { create: vi.fn(async ({ data }) => ({ id: "inv-1", ...data })) },
   };

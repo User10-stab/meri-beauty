@@ -1081,7 +1081,11 @@ async function processAppointmentCheckoutSession(session, connectedAccountId = n
       },
     });
 
-    if (nextPaymentStatus === "PAID") {
+    // An independent's appointment is her sale: no salon ticket, no salon
+    // invoice — whatever Stripe account it was paid on.
+    const independentSale = Boolean(existingPayment.payeeStaffId);
+
+    if (nextPaymentStatus === "PAID" && !independentSale) {
       await allocatePaymentTicketNumber(tx, paymentId, "APPOINTMENT");
     }
 
@@ -1089,7 +1093,7 @@ async function processAppointmentCheckoutSession(session, connectedAccountId = n
     // so the gapless Belgian invoice number is never consumed on rollback.
     // Deposits are invoiced only after the remaining balance is collected.
     let invoice = null;
-    if (nextPaymentStatus === "PAID" && hasInvoiceableVatIdentity(appointment.user)) {
+    if (nextPaymentStatus === "PAID" && !independentSale && hasInvoiceableVatIdentity(appointment.user)) {
       const bookingVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
       invoice = await issueInvoice(tx, {
         paymentId,
@@ -1593,7 +1597,7 @@ async function applyWorkshopSessionChangeFee(session, meta, stripeAccountId = nu
       // collide. See the flagged edge case in the audit report: this guard
       // silently skips invoicing a legitimate second fee rather than
       // resolving where that revenue's invoice should go.
-      if (!reservation.payment.invoice && hasInvoiceableVatIdentity(reservation.customer)) {
+      if (!reservation.payment.invoice && !reservation.payment.payeeStaffId && hasInvoiceableVatIdentity(reservation.customer)) {
         await issueInvoice(tx, {
           paymentId: reservation.payment.id,
           source: "WORKSHOP",
@@ -1780,7 +1784,7 @@ async function applyWorkshopSeatsChangeFee(session, meta, stripeAccountId = null
       // collide. See the flagged edge case in the audit report: this guard
       // silently skips invoicing a legitimate second fee rather than
       // resolving where that revenue's invoice should go.
-      if (!reservation.payment.invoice && hasInvoiceableVatIdentity(reservation.customer)) {
+      if (!reservation.payment.invoice && !reservation.payment.payeeStaffId && hasInvoiceableVatIdentity(reservation.customer)) {
         await issueInvoice(tx, {
           paymentId: reservation.payment.id,
           source: "WORKSHOP",

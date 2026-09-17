@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
@@ -187,13 +188,15 @@ export default async function StaffProfilePage({ params }) {
         {/* The only scrollable area on the page — scrollbar hidden, scrolling intact. */}
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 pt-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden lg:pt-1">
           {staff.staffServices.length > 0 && (
-            <StaffServices
-              services={staff.staffServices}
-              staffId={staff.id}
-              categories={categories}
-              staffName={staff.user.fullName}
-              customerSession={customerSession}
-            />
+            <Suspense fallback={null}>
+              <StaffServices
+                services={staff.staffServices}
+                staffId={staff.id}
+                categories={categories}
+                staffName={staff.user.fullName}
+                customerSession={customerSession}
+              />
+            </Suspense>
           )}
         </div>
       </div>

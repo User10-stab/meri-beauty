@@ -17,7 +17,6 @@ import {
   FileSignature,
   Layers,
   Info,
-  Crop,
   MapPin,
   Mail,
   Lock,
@@ -31,7 +30,7 @@ import { LanguageTagInput } from "./LanguageTagInput";
 import { ServiceMultiSelect } from "./ServiceMultiSelect";
 import { StaffPermissionsField } from "./StaffPermissionsField";
 import { optimizeImage, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES } from "@/lib/imageOptimization";
-import { faceCrop, getCroppedPreview } from "@/lib/faceCrop";
+import { faceCrop } from "@/lib/faceCrop";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -111,38 +110,10 @@ function InfoRow({ label, value }) {
 
 function PhotoUpload({ value, onChange, error }) {
   const inputRef = useRef(null);
-  const cropAreaRef = useRef(null);
   const [uploading, setUploading] = useState(false);
-  const [recropping, setRecropping] = useState(false);
   const [preview, setPreview] = useState(value ?? null);
-  const [focusX, setFocusX] = useState(50);
-  const [focusY, setFocusY] = useState(30);
-  const [dragging, setDragging] = useState(false);
 
   useEffect(() => { setPreview(value ?? null); }, [value]);
-
-  function handlePointerDown(e) {
-    if (!cropAreaRef.current) return;
-    e.preventDefault();
-    setDragging(true);
-    updateFocus(e);
-  }
-  function handlePointerMove(e) {
-    if (!dragging) return;
-    e.preventDefault();
-    updateFocus(e);
-  }
-  function handlePointerUp() { setDragging(false); }
-
-  function updateFocus(e) {
-    const el = cropAreaRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const x = Math.round(Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)));
-    const y = Math.round(Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100)));
-    setFocusX(x);
-    setFocusY(y);
-  }
 
   async function handleFile(file) {
     if (!file) return;
@@ -175,31 +146,6 @@ function PhotoUpload({ value, onChange, error }) {
     finally { setUploading(false); }
   }
 
-  async function handleRecrop() {
-    if (!value) return;
-    setRecropping(true);
-    try {
-      const res = await fetch(value);
-      if (!res.ok) throw new Error("Impossible de récupérer l'image.");
-      const blob = await res.blob();
-      const ext = blob.type.split("/")[1] || "webp";
-      const file = new File([blob], `recrop.${ext}`, { type: blob.type });
-
-      const cropped = await faceCrop(file, { focusX, focusY });
-      if (cropped.size > MAX_OUTPUT_BYTES) { toast.error("Image trop volumineuse après recadrage."); return; }
-
-      setPreview(URL.createObjectURL(cropped));
-      setUploading(true);
-      const fd = new FormData();
-      fd.append("file", cropped);
-      const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
-      const data = await uploadRes.json();
-      if (data.success) { onChange(data.url); toast.success("Photo recadrée."); }
-      else { toast.error(data.message); setPreview(value); onChange(value); }
-    } catch (err) { toast.error(err?.message ?? "Erreur lors du recadrage."); }
-    finally { setRecropping(false); setUploading(false); }
-  }
-
   return (
     <div className="flex flex-col items-center gap-2">
       <div
@@ -228,43 +174,6 @@ function PhotoUpload({ value, onChange, error }) {
         )}
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" onChange={(e) => handleFile(e.target.files?.[0])} aria-hidden="true" />
       </div>
-
-      {preview && (
-        <>
-          <div
-            ref={cropAreaRef}
-            onPointerDown={handlePointerDown}
-            onPointerMove={handlePointerMove}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-            className="relative w-40 cursor-crosshair overflow-hidden rounded-lg border border-gray-200 bg-gray-100"
-            style={{ aspectRatio: "1.45 / 1" }}
-          >
-            <img src={preview} alt="Aperçu recadrage" className="h-full w-full object-cover pointer-events-none" />
-            <div
-              className="pointer-events-none absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-              style={{ left: `${focusX}%`, top: `${focusY}%` }}
-            >
-              <div className="h-4 w-4 rounded-full border-2 border-white bg-gold/70 shadow-md" />
-            </div>
-            <div className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
-              {Array.from({ length: 9 }).map((_, i) => (
-                <div key={i} className="border border-white/20" />
-              ))}
-            </div>
-          </div>
-          <p className="text-[10px] text-gray-400">Glissez pour centrer le visage</p>
-          <button
-            type="button"
-            onClick={handleRecrop}
-            disabled={recropping || uploading}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-[11px] font-medium text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-800 disabled:opacity-50"
-          >
-            {recropping ? <Loader2 size={10} className="animate-spin" /> : <Crop size={10} />}
-            Recadrer le visage
-          </button>
-        </>
-      )}
 
       <p className="mt-1.5 max-w-[112px] text-center text-[11px] leading-tight text-gray-400">
         Pour une qualité optimale, utilisez une image de moins de 10&nbsp;Mo.

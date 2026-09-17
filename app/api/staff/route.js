@@ -22,6 +22,12 @@ export async function GET() {
             avatar: true,
           },
         },
+        staffServices: {
+          where: { isDeleted: false, isActive: true },
+          select: {
+            service: { select: { category: { select: { name: true } } } },
+          },
+        },
       },
     });
 
@@ -33,6 +39,13 @@ export async function GET() {
         experience: staff.yearsOfExperience ?? 0,
         rating: 4.9,
         image: staff.photo ?? staff.user.avatar ?? "/Images/expert.webp",
+        categories: [
+          ...new Set(
+            (staff.staffServices || [])
+              .map((ss) => ss.service?.category?.name)
+              .filter(Boolean)
+          ),
+        ],
       }))
     );
   } catch (error) {

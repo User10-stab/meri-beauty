@@ -13,7 +13,7 @@ import LocaleSwitcher from "@/components/LocaleSwitcher";
 const NAV_LINKS = [
   { label: "Accueil", href: "/" },
   { label: "Concept", href: "/concept" },
-  { label: "Réservation", href: "/reservation" },
+  { label: "Prestations", href: "/reservation" },
   { label: "Boutique", href: "/boutique" },
   { label: "Évènements & Ateliers", href: "/evenements" },
   { label: "Formations", href: "/formations" },
@@ -127,7 +127,7 @@ export default function Navbar() {
       <nav className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 md:px-10 lg:grid lg:grid-cols-[auto_1fr_auto] lg:gap-6 lg:px-14">
 
         {/* ── Logo (left) ── */}
-        <Link href="#accueil" className="shrink-0" aria-label="Maison Adar — Accueil">
+        <Link href="/" className="shrink-0" aria-label="Maison Adar — Accueil">
           <Image
             src="/Images/image.webp"
             alt="Maison Adar"

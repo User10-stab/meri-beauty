@@ -50,7 +50,7 @@ async function BannerCard({ href, isLowSeats, data, sessionDate }) {
  * Below `lg`, the overlay is hidden in favor of a plain strip under the
  * hero — there's no room to float a card over the image on small screens.
  */
-export default async function WorkshopBanner() {
+async function getBannerProps() {
   const result = await getHomepageBannerData();
   const data = result?.data;
 
@@ -66,6 +66,16 @@ export default async function WorkshopBanner() {
       : `/reservation-atelier?activity=${data.activity.id}&session=${data.session.id}`
     : `/evenements/${data.activity.id}`;
 
+  return { href, isLowSeats, data, sessionDate };
+}
+
+export default async function WorkshopBanner() {
+  const props = await getBannerProps();
+
+  if (!props) return null;
+
+  const { href, isLowSeats, data, sessionDate } = props;
+
   return (
     <>
       {/* Mobile / tablet — plain strip below the hero */}
@@ -78,9 +88,44 @@ export default async function WorkshopBanner() {
       </section>
 
       {/* Desktop — floating overlay at the top-right of the hero image */}
-      <div className="absolute right-6 top-8 z-20 hidden w-[320px] sm:right-10 lg:right-14 lg:block xl:right-20">
+      <div className="absolute right-6 top-8 z-20 hidden w-[400px] sm:right-10 lg:right-14 lg:block xl:right-20">
         <BannerCard href={href} isLowSeats={isLowSeats} data={data} sessionDate={sessionDate} />
       </div>
     </>
+  );
+}
+
+/* Mobile / tablet strip — same content/logic, usable outside the hero. */
+export async function WorkshopBannerStrip() {
+  const props = await getBannerProps();
+
+  if (!props) return null;
+
+  const { href, isLowSeats, data, sessionDate } = props;
+
+  return (
+    <section className="bg-cream px-6 py-6 md:px-10 lg:hidden">
+      <div className="mx-auto flex max-w-[1200px] justify-end">
+        <div className="w-full max-w-md">
+          <BannerCard href={href} isLowSeats={isLowSeats} data={data} sessionDate={sessionDate} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* Desktop card without its own absolute positioning, so it can live in the
+   hero's shared right-side stack with the same gap as the other cards. */
+export async function WorkshopBannerStackCard() {
+  const props = await getBannerProps();
+
+  if (!props) return null;
+
+  const { href, isLowSeats, data, sessionDate } = props;
+
+  return (
+    <div className="w-full shrink-0">
+      <BannerCard href={href} isLowSeats={isLowSeats} data={data} sessionDate={sessionDate} />
+    </div>
   );
 }

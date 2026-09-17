@@ -4,7 +4,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import { ArrowRight } from "lucide-react";
 import { ArrowIcon } from "./icons";
+
 
 const FALLBACK_STYLISTS = [
   {
@@ -14,6 +16,7 @@ const FALLBACK_STYLISTS = [
     specialityKey: null,
     experience: 5,
     image: "/Images/expert.jpg",
+    categories: [],
   },
   {
     id: 2,
@@ -22,6 +25,7 @@ const FALLBACK_STYLISTS = [
     specialityKey: null,
     experience: 6,
     image: "/Images/expert.jpg",
+    categories: [],
   },
   {
     id: 3,
@@ -30,6 +34,7 @@ const FALLBACK_STYLISTS = [
     specialityKey: null,
     experience: 8,
     image: "/Images/expert.jpg",
+    categories: [],
   },
   {
     id: 4,
@@ -37,6 +42,7 @@ const FALLBACK_STYLISTS = [
     specialityKey: "expertSpecialtyHair",
     experience: 8,
     image: "/Images/expert.jpg",
+    categories: [],
   },
 ];
 
@@ -188,39 +194,56 @@ export default function OurExperts() {
 }
 
 function ExpertCard({ stylist, index, t }) {
-  const firstName = stylist.name.split(" ")[0];
+  const firstName = (stylist.name || "").split(" ")[0];
   const Sprig = SPRIGS[index % SPRIGS.length];
   const imageSrc = stylist.image || "/Images/expert.jpg";
+  const categories = Array.isArray(stylist.categories) ? stylist.categories : [];
 
   return (
     <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)]">
-      <div className="relative max-h-[380px] aspect-[9/16] w-full overflow-hidden bg-[#f5ece0]">
+      <div className="relative aspect-[9/16] w-full h-[480px] overflow-hidden bg-[#f5ece0]  ">
         <Image
           src={imageSrc}
           alt={stylist.name}
           fill
           sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-          className="h-full w-full object-cover object-center transition-transform duration-700 group-hover:scale-[1.03]"
+          className="h-full w-full object-cover obje transition-transform duration-700 group-hover:scale-[1.03]"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-60" />
       </div>
 
-      <div className="relative flex flex-1 flex-col px-7 pb-7 pt-6 sm:px-6">
+      <div className="relative flex flex-1 flex-col justify-between  pb-7 pt-6 px-4">
         <div className="pointer-events-none absolute bottom-2 right-3 text-[#c9b99a]/70">
           <Sprig className="h-[64px] w-[44px]" />
         </div>
 
-        <h3 className="font-display text-[20px] font-semibold leading-none tracking-tight text-primary sm:text-[20px]">
-          {stylist.name}
-        </h3>
+        <div className="flex flex-col " >
+          <h3 className="font-display capitalize text-[20px] font-semibold leading-none tracking-tight text-primary sm:text-[20px]">
+            {stylist.name}
+          </h3>
+        {categories.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {categories.map((category) => (
+              <Link
+                key={category}
+                href={`/staff/${stylist.id}?category=${encodeURIComponent(category)}`}
+                className="group/pill flex items-center gap-1.5 rounded-full border border-gold/30 px-2 py-1.5 text-[11px] font-medium leading-none text-gold transition-all duration-200 hover:border-gold hover:bg-gold hover:text-white"
+              >
+                <span>{category}</span>
+                <ArrowRight size={12} className="text-gold transition-colors group-hover/pill:text-white" />
+              </Link>
+            ))}
+          </div>
+        )}
 
+        </div>
         <div className="mt-3">
           <Link
             href={`/staff/${stylist.id}`}
-            className="inline-flex items-center gap-1.5 rounded-full border border-[#d9c9a8] px-4 py-[7px] text-[12px] font-medium text-[#8c6f3a] transition-all duration-200 hover:border-[#b89664] hover:bg-[#b89664] hover:text-white"
+            className="group/link inline-flex items-center gap-1.5 py-[7px] text-[13px] font-medium text-[#8c6f3a] underline decoration-[#d9c9a8] underline-offset-4 transition-colors hover:text-[#b89664] hover:decoration-[#b89664]"
           >
             {t("expertsDiscover", { name: firstName })}
-            <ArrowIcon className="h-3 w-3" />
+            <ArrowIcon className="h-3 w-3 transition-transform duration-200 group-hover/link:translate-x-0.5" />
           </Link>
         </div>
       </div>

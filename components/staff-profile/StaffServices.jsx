@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Clock, Euro, ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { useSearchParams } from "next/navigation";
 import QuickBookingModal from "@/components/reservation/QuickBookingModal";
 
 function useInView(threshold = 0.15) {
@@ -42,15 +43,24 @@ function formatPrice(price) {
 
 export default function StaffServices({ services, staffId, categories, staffName, customerSession = null }) {
   const [sectionRef, sectionInView] = useInView();
-  const [activeCategory, setActiveCategory] = useState(null);
+  const searchParams = useSearchParams();
   const [quickBooking, setQuickBooking] = useState(null);
   const t = useTranslations("staffProfile");
+
+  // Pre-select the category coming from the ?category= query param (set by
+  // the reservation page when the user clicks a staff member from a category).
+  // Validate that it actually exists in this staff member's category list so
+  // we never show an empty filtered view.
+  const allCategories = categories && categories.length > 0 ? categories : [];
+  const paramCategory = searchParams.get("category");
+  const initialCategory =
+    paramCategory && allCategories.includes(paramCategory) ? paramCategory : null;
+  const [activeCategory, setActiveCategory] = useState(initialCategory);
 
   if (!services || services.length === 0) {
     return null;
   }
 
-  const allCategories = categories && categories.length > 0 ? categories : [];
   const filteredServices = activeCategory
     ? services.filter((ss) => ss.service.category?.name === activeCategory)
     : services;

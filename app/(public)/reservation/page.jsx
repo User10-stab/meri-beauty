@@ -1,23 +1,17 @@
 import Link from "next/link";
 import PageHero from "@/components/website/PageHero";
-import ReservationForm from "@/components/reservation/ReservationForm";
-import { auth } from "@/auth";
+import ReservationCategoryPicker from "@/components/reservation/ReservationCategoryPicker";
 import { getTranslations } from "next-intl/server";
 import { Headset } from "lucide-react";
 
 export default async function Page() {
-  const session = await auth();
   const t = await getTranslations();
-
-  const customerSession = session?.user?.role === "CUSTOMER" ? session.user : null;
 
   return (
     <div className="w-full bg-[#fdf8f0]">
       <PageHero
         title={t("reservation.title")}
         description={t("reservation.subtitle")}
-        buttonText={t("reservation.button")}
-        buttonLink="#prestations"
         backgroundImage="/Images/heroImage.webp"
         label={t("reservation.label")}
       />
@@ -25,23 +19,23 @@ export default async function Page() {
       {/* Intro — heading band */}
       <div id="prestations" className="relative overflow-hidden bg-[#fdf8f0]">
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.035]" style={{ backgroundImage: "repeating-linear-gradient(90deg,#b89664 0px,#b89664 1px,transparent 1px,transparent 80px)" }} />
-        <div className="relative flex flex-col items-center justify-center px-4 py-12 text-center sm:px-6 sm:py-14">
-          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.32em] text-[#b89664]">{t("reservation.servicesEyebrow")}</p>
+        <div className="relative flex flex-col items-center justify-center text-center px-6 pt-12">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#b89664]">{t("reservation.servicesEyebrow")}</p>
           <h2 className="font-display text-[1.8rem] font-semibold leading-tight tracking-tight text-[#2F3A2E] sm:text-[2rem] md:text-[3rem]">{t("reservation.heading")}</h2>
           <div className="mt-4 h-px w-10 bg-[#b89664]/20" />
           <p className="mt-4 max-w-lg text-sm leading-relaxed text-[#6f6a64] sm:text-[15px]">{t("reservation.subtitle2")}</p>
         </div>
       </div>
 
-      {/* Divider — always between #prestations and #booking */}
+      {/* Divider */}
       <div aria-hidden="true" className="pointer-events-none flex items-center justify-center gap-3 py-3 text-[#b89664]/50">
         <span className="h-px w-16 bg-current" />
         <span className="h-2 w-2 rotate-45 border border-current" />
         <span className="h-px w-16 bg-current" />
       </div>
 
-      {/* Booking flow — premium shell */}
-      <div id="booking" className="mt-12 relative overflow-hidden bg-[#fdf8f0] pb-12 sm:pb-30">
+      {/* Category picker */}
+      <div id="booking" className="relative overflow-hidden bg-[#fdf8f0] pb-20 sm:pb-28">
         <div aria-hidden="true" className="pointer-events-none absolute left-[-82px] top-20 hidden h-56 w-56 rounded-full border border-[#b89664]/40 lg:block">
           <div className="absolute inset-5 rounded-full border border-[#b89664]/30" />
           <div className="absolute inset-11 rounded-full border border-[#b89664]/20" />
@@ -49,8 +43,8 @@ export default async function Page() {
         <div aria-hidden="true" className="pointer-events-none absolute right-8 top-28 hidden h-12 w-12 rotate-45 border border-[#b89664]/45 lg:block">
           <div className="absolute inset-2 border border-[#b89664]/30" />
         </div>
-        <div className="mx-auto max-w-[1280px] px-4 sm:px-6 lg:px-8">
-          <ReservationForm customerSession={customerSession} origin="/reservation" />
+        <div className="mx-auto max-w-7xl px-4 pt-12 sm:px-6 lg:px-8">
+          <ReservationCategoryPicker />
         </div>
         <div aria-hidden="true" className="pointer-events-none absolute bottom-0 left-1/2 hidden -translate-x-1/2 items-center gap-3 text-[#b89664]/50 sm:flex">
           <span className="h-px w-16 bg-current" />

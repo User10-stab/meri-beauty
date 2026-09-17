@@ -26,8 +26,8 @@ export default function StaffProfileHero({ name, firstName, bio, yearsOfExperien
       </div>
       <div className="relative p-5 sm:p-7">
         <div className="grid grid-cols-3 gap-6">
-            <div className="relative col-span-1 mx-auto aspect-[9/16] w-full max-w-[18rem]  rounded-[1.5rem] bg-[#efe5d7] sm:max-w-[20rem]">
-            <Image src={image} alt={name} fill priority sizes="(max-width: 640px) 18rem, (max-width: 1023px) 20rem, 20rem" className="object-contain rounded-xl" unoptimized />
+            <div className="relative col-span-1 mx-auto aspect-[9/16] w-full max-w-[18rem]  rounded-[1.5rem] sm:max-w-[20rem]">
+            <Image src={image} alt={name} fill priority sizes="(max-width: 640px) 18rem, (max-width: 1023px) 20rem, 20rem" className="object-contain" unoptimized />
             {/* {yearsOfExperience > 0 && (
               <span className="absolute bottom-4 left-4 inline-flex items-center gap-1.5 rounded-full border border-gold/60 bg-white/95 px-3 py-1.5 text-[11px] w-[145px] z-2 font-semibold text-[#2F3A2E]">
                 <Star size={14} className="fill-[#b89664] text-[#b89664]" />{t("experience", { count: yearsOfExperience })}

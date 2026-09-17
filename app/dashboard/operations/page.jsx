@@ -23,10 +23,9 @@ export default async function OperationsPage({ searchParams }) {
       type: params?.type,
       lifecycleStatus: params?.lifecycleStatus,
       paymentEvent: params?.paymentEvent,
-      // Empty means the salon — the administration and Marie, plus the
-      // unattributed online sales and the salon's own activities. Validated
-      // server-side: an unknown id is an error, never a silent widening.
-      staffId: params?.staffId,
+      // No staff filter: this is the salon's ledger only — the administration
+      // and Marie, plus the unattributed online sales and the salon's own
+      // activities. An independent's operations are hers, never shown here.
     }),
     getOutstandingRefundLegs(),
     listStuckPayments(),

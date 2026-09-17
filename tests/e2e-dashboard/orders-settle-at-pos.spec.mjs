@@ -116,9 +116,12 @@ test.describe("settle an unpaid pickup order at the till", () => {
     expect(sale.payment?.status).toBe("PAID");
 
     const original = await prisma.order.findUnique({ where: { id: order.id }, include: { payment: true } });
-    expect(original.status).toBe("CANCELLED");
+    // Not a cancellation: its own status, and a real link to the sale.
+    expect(original.status).toBe("SETTLED_AT_COUNTER");
     expect(original.payment).toBeNull();
-    expect(original.cancelReason).toContain(`vente n°${sale.orderNumber}`);
+    expect(original.settledBySaleId).toBe(sale.id);
+    expect(original.cancelReason).toBeNull();
+    expect(original.cancelledAt).toBeNull();
 
     const after = await prisma.productVariant.findUnique({ where: { id: variant.id } });
     // Seeded 10 on hand; the paid order still holds 1, the taken-over order's
@@ -128,6 +131,36 @@ test.describe("settle an unpaid pickup order at the till", () => {
 
     const audit = await prisma.auditLog.findFirst({ where: { entityId: order.id, action: "order.settled_at_point_of_sale" } });
     expect(audit).not.toBeNull();
+  });
+
+  test("both orders say what happened, and link to each other", async () => {
+    const sale = await prisma.order.findUnique({ where: { id: saleOrderId }, select: { orderNumber: true } });
+
+    // The original order: its own status, not « Annulée », and a link to the sale.
+    await page.goto(`/dashboard/boutique/orders/${order.id}`);
+    await expect(page.getByText("Encaissée en caisse", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/annulée/i)).toHaveCount(0);
+    await expect(page.getByText(/raison :/i)).toHaveCount(0);
+    const toSale = page.getByRole("link", { name: `la vente n°${sale.orderNumber}` });
+    await expect(toSale).toHaveAttribute("href", `/dashboard/boutique/orders/${saleOrderId}`);
+
+    // The sale points back at the order it came from.
+    await toSale.click();
+    await page.waitForURL(new RegExp(`/dashboard/boutique/orders/${saleOrderId}$`));
+    await expect(page.getByRole("link", { name: `la commande n°${order.orderNumber}` })).toHaveAttribute(
+      "href",
+      `/dashboard/boutique/orders/${order.id}`,
+    );
+
+    // Opérations: same wording on the row, and the drawer does not call it unpaid.
+    await page.goto("/dashboard/operations?tab=orders");
+    const row = page.locator("tr").filter({ has: page.getByRole("link", { name: `Commande n°${order.orderNumber}`, exact: true }) });
+    await expect(row.getByRole("link", { name: `Encaissée en caisse — vente n°${sale.orderNumber}` })).toBeVisible();
+    await row.getByRole("button", { name: /voir le détail/i }).click();
+    const dialog = page.getByRole("dialog", { name: /détail de la commande/i });
+    await expect(dialog).toContainText(`Encaissée en caisse — vente n°${sale.orderNumber}`);
+    await expect(dialog).not.toContainText(/non payée|pas encore encaissée/i);
+    await dialog.getByRole("button", { name: /fermer/i }).click();
   });
 
   test("the closed order no longer offers « Encaisser », and the till refuses it", async () => {

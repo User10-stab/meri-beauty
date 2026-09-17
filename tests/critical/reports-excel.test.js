@@ -3,7 +3,7 @@ import ExcelJS from "exceljs";
 import { buildReportsWorkbook } from "@/lib/reports-excel";
 
 const data = {
-  filters: { months: 2, staffId: null, staffName: null },
+  filters: { months: 2 },
   totalRevenue: 655,
   cashCollected: 210,
   bankCollected: 445,

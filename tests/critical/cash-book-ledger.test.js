@@ -219,6 +219,58 @@ describe("buildCashBookLedger", () => {
     expect(result.totals).toEqual({ entrees: 275, sorties: 55, finalBalance: 720 });
   });
 
+  // 17 Sep 2026: the printed book shows each sale's TVA % / HT / TVA — the
+  // invoice's rate when one exists, else the policy rate; refunds give the
+  // VAT back; drawer movements carry none.
+  it("breaks each sale and refund down into HT and TVA, and leaves movements without VAT", async () => {
+    const client = clientMock({
+      sessions: [BASE_SESSION],
+      transactions: [
+        {
+          transactionType: "FINAL_PAYMENT",
+          amount: 121,
+          paidAt: new Date("2026-08-01T09:00:00Z"),
+          pieceNumber: "V0001",
+          payment: { invoice: null, order: { orderNumber: 12, user: null } },
+        },
+        {
+          transactionType: "FINAL_PAYMENT",
+          amount: 100,
+          paidAt: new Date("2026-08-01T09:30:00Z"),
+          pieceNumber: "V0002",
+          payment: { invoice: { number: "F-1", vatRate: 0 }, order: { orderNumber: 13, user: null } },
+        },
+        {
+          transactionType: "REFUND",
+          amount: 12.1,
+          paidAt: new Date("2026-08-01T10:30:00Z"),
+          pieceNumber: "V0003",
+          payment: { invoice: null, order: { orderNumber: 12, user: null } },
+        },
+      ],
+      movements: [{ type: "EXPENSE", amount: 25, occurredAt: new Date("2026-08-01T10:00:00Z"), pieceNumber: "D0001", label: "Achat" }],
+    });
+
+    const result = await buildCashBookLedger(client, RANGE);
+    const byPiece = Object.fromEntries(result.rows.map((r) => [r.pieceNumber, r]));
+    expect(byPiece.V0001).toMatchObject({ vatRate: 21, amountHt: 100, amountVat: 21, vatSource: "estimated" });
+    expect(byPiece.V0002).toMatchObject({ vatRate: 0, amountHt: 100, amountVat: 0, vatSource: "invoice" });
+    expect(byPiece.V0003).toMatchObject({ amountHt: -10, amountVat: -2.1 });
+    expect(byPiece.D0001.amountVat).toBeUndefined();
+
+    const [day] = groupLedgerRowsByDay(result.rows);
+    expect(day).toMatchObject({ totalHt: 190, totalVat: 18.9 });
+  });
+
+  it("the printed book drops the Solde synthesis card and stamps the generation time", () => {
+    const document = source("lib/pdf/CashBookDocument.jsx");
+    expect(document).not.toContain('synthesisLabel}>Solde<');
+    expect(document).toContain("Total des entrées");
+    expect(document).toContain("Total des sorties");
+    expect(document).toContain("Total TVA");
+    expect(document).toContain('hour: "2-digit"');
+  });
+
   it("labels a sale by its payment source — order, appointment, atelier, événement, formation", async () => {
     const client = clientMock({
       sessions: [BASE_SESSION],

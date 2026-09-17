@@ -100,6 +100,12 @@ describe("buildRecettesJournal", () => {
     const refundRow = journal.rows.find((r) => r.id === "c");
     expect(refundRow.isRefund).toBe(true);
     expect(refundRow.signedAmount).toBe(-30);
+
+    // 17 Sep 2026: the PDF closes on Total hors TVA / Total TVA / Total des
+    // recettes — net of refunds, and HT + TVA must add back to the total.
+    expect(journal.summary.totalHt).toBeCloseTo(223.14, 2);
+    expect(journal.summary.totalVat).toBeCloseTo(46.86, 2);
+    expect(Math.round((journal.summary.totalHt + journal.summary.totalVat) * 100) / 100).toBe(270);
   });
 
   // Inverted on purpose. This journal used to include off-till cash and flag
@@ -144,14 +150,14 @@ describe("buildRecettesJournal", () => {
     expect(journal.rows.find((r) => r.id === "card").offTill).toBe(false);
   });
 
-  it("an explicit staffId replaces the salon scope instead of intersecting with it", async () => {
-    // Filtering ON a practitioner is the admin asking for exactly her lines —
-    // intersecting with the salon scope would return an empty journal.
+  it("a staffId can no longer swap the salon scope for an independent's lines", async () => {
+    // It used to: an admin could open one practitioner's takings here. Every
+    // practitioner but Marie is independent, so that view is gone.
     const client = clientMock();
     await buildRecettesJournal(client, { ...RANGE, staffId: "s_julie" });
     const where = client.transaction.findMany.mock.calls[0][0].where;
-    expect(where.payment).toEqual({ appointment: { staffService: { staffId: "s_julie" } } });
-    expect(client.user.findMany).not.toHaveBeenCalled();
+    expect(JSON.stringify(where)).not.toContain("s_julie");
+    expect(where.payment.OR).toContainEqual({ appointment: { staffId: { in: ["s_marie"] } } });
   });
 
   it("categorizes each row by its payment source, splitting atelier from événement, with an OTHER bucket", async () => {

@@ -12,14 +12,13 @@ export default async function ReportsPage({ searchParams }) {
   await requireRole(DASHBOARD_PERMISSIONS.REPORTS); // OWNER/ADMIN only — getReportsData() re-checks server-side
   const t = await getTranslations("dashboard.reports");
 
-  // Filters live in the URL so a report is a shareable link. Both values are
-  // re-validated inside getReportsData — a hand-edited query string must not
-  // widen the window or slip past the staff lookup.
+  // The period lives in the URL so a report is a shareable link. It is
+  // re-validated inside getReportsData. There is no staff filter: the report
+  // is the salon's alone, never an independent practitioner's.
   const params = await searchParams;
   const months = normalizeReportMonths(params?.months);
-  const staffId = typeof params?.staffId === "string" && params.staffId ? params.staffId : null;
 
-  const result = await getReportsData({ months, staffId });
+  const result = await getReportsData({ months });
 
   return (
     <div className="space-y-6">
@@ -32,9 +31,7 @@ export default async function ReportsPage({ searchParams }) {
 
       <ReportsFilterBar
         months={months}
-        staffId={staffId}
         periods={result.data?.filters?.periods ?? REPORT_PERIODS}
-        staffOptions={result.data?.filters?.staffOptions ?? []}
       />
 
       {!result.success ? (

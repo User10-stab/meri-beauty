@@ -33,6 +33,16 @@ const LOGO_BUFFER = fs.readFileSync(path.join(process.cwd(), "public", "Images",
  * reference/name is never the reader's only way to find the transaction,
  * the date/client/category context around it is.
  */
+/** "17 septembre 2026 à 14:32" — the generation time, not just the day. */
+function formatDateTime(date) {
+  const time = new Date(date).toLocaleTimeString("fr-BE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Brussels",
+  });
+  return `${formatDate(date)} à ${time}`;
+}
+
 function truncate(value, maxLength) {
   if (!value || value.length <= maxLength) return value;
   return `${value.slice(0, maxLength - 1)}…`;
@@ -146,6 +156,24 @@ const styles = StyleSheet.create({
   colHt: { flex: 1, textAlign: "right" },
   colVat: { flex: 1, textAlign: "right" },
   colTtc: { flex: 1.1, textAlign: "right" },
+
+  // ─── Closing totals (end of the journal) ──────────────────────────────
+  closing: { marginTop: 16, alignItems: "flex-end" },
+  closingBox: { width: 260, borderTop: `1 solid ${COLORS.brand}`, paddingTop: 6 },
+  closingRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 2.5 },
+  closingLabel: { fontSize: 8, color: COLORS.muted },
+  closingValue: { fontSize: 8.5 },
+  closingGrand: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: COLORS.brand,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginTop: 4,
+  },
+  closingGrandLabel: { fontSize: 8, fontWeight: 700, letterSpacing: 0.6, color: COLORS.white },
+  closingGrandValue: { fontSize: 10, fontWeight: 700, color: COLORS.white },
+  closingGenerated: { fontSize: 7, color: COLORS.muted, marginTop: 6, textAlign: "right" },
 });
 
 function Letterhead({ filters }) {
@@ -181,7 +209,7 @@ function Letterhead({ filters }) {
 function Footer({ generatedAt }) {
   return (
     <View style={styles.footer} fixed>
-      <Text style={styles.footerText}>Généré le {formatDate(generatedAt)} — Meri Beauty</Text>
+      <Text style={styles.footerText}>Généré le {formatDateTime(generatedAt)} — Meri Beauty</Text>
       <Text
         style={styles.footerText}
         render={({ pageNumber, totalPages }) => `Page ${pageNumber} / ${totalPages}`}
@@ -257,6 +285,28 @@ function DayBlock({ group }) {
   );
 }
 
+function ClosingTotals({ summary, generatedAt }) {
+  return (
+    <View style={styles.closing} wrap={false}>
+      <View style={styles.closingBox}>
+        <View style={styles.closingRow}>
+          <Text style={styles.closingLabel}>Total hors TVA</Text>
+          <Text style={styles.closingValue}>{money(summary.totalHt)}</Text>
+        </View>
+        <View style={styles.closingRow}>
+          <Text style={styles.closingLabel}>Total TVA</Text>
+          <Text style={styles.closingValue}>{money(summary.totalVat)}</Text>
+        </View>
+        <View style={styles.closingGrand}>
+          <Text style={styles.closingGrandLabel}>TOTAL DES RECETTES</Text>
+          <Text style={styles.closingGrandValue}>{money(summary.total)}</Text>
+        </View>
+        <Text style={styles.closingGenerated}>Document généré le {formatDateTime(generatedAt)}</Text>
+      </View>
+    </View>
+  );
+}
+
 /** @param {ReturnType<typeof import("@/lib/livre-de-recettes/build-recettes-journal").buildRecettesJournal>} journal */
 export function RecettesJournalDocument({ journal }) {
   const { filters, summary, rows, truncated, generatedAt } = journal;
@@ -278,10 +328,9 @@ export function RecettesJournalDocument({ journal }) {
         )}
 
         <View style={styles.synthesis}>
-          <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>Total net des recettes</Text>
-            <Text style={styles.synthesisValue}>{money(summary.total)}</Text>
-          </View>
+          {/* No "Total net des recettes" card here (17 Sep 2026): without
+              refunds it repeated Recettes brutes. The net total now closes the
+              document instead, split into HT / TVA — see ClosingTotals. */}
           <View style={styles.synthesisItem}>
             <Text style={styles.synthesisLabel}>Recettes brutes</Text>
             <Text style={styles.synthesisValue}>{money(summary.grossInflow)}</Text>
@@ -304,6 +353,8 @@ export function RecettesJournalDocument({ journal }) {
         ) : (
           dayGroups.map((group) => <DayBlock key={group.key} group={group} />)
         )}
+
+        <ClosingTotals summary={summary} generatedAt={generatedAt} />
       </Page>
     </Document>
   );

@@ -108,55 +108,27 @@ describe("attribution rides in the SQL, not in the hydration", () => {
   });
 });
 
-describe("filtering on one practitioner", () => {
-  it("narrows to her ids alone, and stops treating unstamped rows as hers", async () => {
-    await getAdminOperations({ staffId: "s_julie" });
+// Every practitioner other than Marie is legally independent: the salon has
+// no right to read her takings. The admin "qui" picker is gone, and a staffId
+// smuggled into the params must change nothing.
+describe("an admin can never open an independent's ledger", () => {
+  it("ignores a staffId in the params and stays on the salon scope", async () => {
+    const result = await getAdminOperations({ staffId: "s_julie" });
     const query = firstQuery();
 
-    expect(query.values).toContain("u_julie");
-    expect(query.values).toContain("s_julie");
-    expect(query.values).not.toContain("u_marie");
-    expect(query.values).not.toContain("s_marie");
-    // An unattributed row belongs to the salon, never to whoever is being
-    // looked at — this is the clause that must NOT survive the mode switch.
-    expect(query.sql).not.toContain('o."createdByStaffId" IS NULL');
-  });
-
-  it("drops ateliers and formations, which carry no staff link at all", async () => {
-    await getAdminOperations({ staffId: "s_julie" });
-    const sql = firstQuery().sql;
-    // Same call get-reports-data.js makes: the animator is matched by e-mail
-    // with no foreign key, so there is no honest attribution to be had.
-    expect(sql).not.toContain("'WORKSHOP' AS");
-    expect(sql).not.toContain("'FORMATION' AS");
-  });
-
-  it("Marie is selectable like anyone else, even though she is already in the default view", async () => {
-    mocks.staffFindUnique.mockResolvedValue({
-      id: "s_marie",
-      isDeleted: false,
-      user: { id: "u_marie", fullName: "Marie Mercier" },
-    });
-    const result = await getAdminOperations({ staffId: "s_marie" });
     expect(result.success).toBe(true);
-    expect(result.staffId).toBe("s_marie");
-    expect(firstQuery().values).toContain("s_marie");
-    expect(firstQuery().values).not.toContain("u_admin");
+    expect(result.staffId).toBe("");
+    expect(query.values).not.toContain("u_julie");
+    expect(query.values).not.toContain("s_julie");
+    expect(query.values).toContain("s_marie");
+    // Never even looked up — there is no code path that resolves one.
+    expect(mocks.staffFindUnique).not.toHaveBeenCalled();
   });
 
-  it("refuses an unknown id instead of quietly widening back to the whole salon", async () => {
-    mocks.staffFindUnique.mockResolvedValue(null);
-    const result = await getAdminOperations({ staffId: "s_ghost" });
-    expect(result.success).toBe(false);
-    expect(result.message).toBe("Membre du personnel introuvable.");
-    expect(mocks.query).not.toHaveBeenCalled();
-  });
-
-  it("refuses a soft-deleted one the same way", async () => {
-    mocks.staffFindUnique.mockResolvedValue({ ...JULIE, isDeleted: true });
-    const result = await getAdminOperations({ staffId: "s_julie" });
-    expect(result.success).toBe(false);
-    expect(mocks.query).not.toHaveBeenCalled();
+  it("offers no staff directory to pick from", async () => {
+    const result = await getAdminOperations({});
+    expect(result).not.toHaveProperty("staffOptions");
+    expect(mocks.staffFindMany).not.toHaveBeenCalled();
   });
 });
 
@@ -185,7 +157,7 @@ describe("a practitioner reading her own ledger", () => {
 
   it("gets no filter to drive, and no salon-wide fallback if her Staff row is gone", async () => {
     const withOptions = await getAdminOperations({});
-    expect(withOptions.staffOptions).toEqual([]);
+    expect(withOptions).not.toHaveProperty("staffOptions");
 
     mocks.staffFindFirst.mockResolvedValue(null);
     mocks.query.mockClear();
@@ -224,9 +196,15 @@ describe("the personal view is a separate, read-only route", () => {
   const operations = source("app/dashboard/operations/page.jsx");
   const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
 
-  test("/dashboard/operations stays admin-only — supervision did not move", () => {
+  test("/dashboard/operations stays admin-only, and never forwards a staff id", () => {
     expect(operations).toContain("await requireAdmin(false)");
-    expect(operations).toContain("staffId: params?.staffId");
+    expect(operations).not.toContain("staffId:");
+  });
+
+  test("the staff picker is gone from the shared client", () => {
+    expect(client).not.toContain("StaffFilter");
+    expect(client).not.toContain("staffOptions");
+    expect(client).not.toContain('search.set("staffId"');
   });
 
   test("the personal page never takes the staff id from the URL", () => {
@@ -247,6 +225,5 @@ describe("the personal view is a separate, read-only route", () => {
     // The drawer and InvoiceRowActions are backed by admin-only actions and
     // reach the salon's own documents, so the whole Actions cell goes away.
     expect(client).toContain("{readOnly ? (");
-    expect(client).toContain("{readOnly ? null : (");
   });
 });

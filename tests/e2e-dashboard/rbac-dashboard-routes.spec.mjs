@@ -77,7 +77,6 @@ const ADMIN_ONLY_ROUTES = [
   "/dashboard/reviews",
   "/dashboard/settings",
   "/dashboard/staff/auto-entrepreneur",
-  "/dashboard/staff/performance",
 ];
 
 /** The shared not-found body. */

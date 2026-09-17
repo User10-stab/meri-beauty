@@ -384,6 +384,10 @@ enum OrderStatus {
   COMPLETED // picked up, or shipped and closed out
   CANCELLED
   EXPIRED // pay-on-site pickup not collected within the deadline
+  // Pay-on-site pickup taken over by the till (« Encaisser ») and sold as a
+  // new counter sale — settledBySaleId. Not a cancellation: the money is on
+  // that sale, and this order must never count as revenue on its own.
+  SETTLED_AT_COUNTER
 }
 
 enum OrderSource {
@@ -1382,6 +1386,13 @@ model Order {
   stockReleasedAt       DateTime?
   stockReleasedByUserId String?
   stockReleasedBy       User?     @relation("OrderStockReleasedBy", fields: [stockReleasedByUserId], references: [id], onDelete: SetNull)
+
+  // SETTLED_AT_COUNTER only: the counter sale that replaced this order. The
+  // back relation (settledOrder) lets that sale point back at the order it
+  // came from.
+  settledBySaleId String? @unique
+  settledBySale   Order?  @relation("OrderSettledAtCounter", fields: [settledBySaleId], references: [id], onDelete: SetNull)
+  settledOrder    Order?  @relation("OrderSettledAtCounter")
 
   notes String?
 

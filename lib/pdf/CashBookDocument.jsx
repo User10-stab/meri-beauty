@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Document, Page, View, Text, Image, StyleSheet } from "@react-pdf/renderer";
 import { COLORS, money, formatDate } from "./theme";
-import { groupLedgerRowsByDay, formatDayLabel } from "@/lib/cash-book/day-groups";
+import { groupLedgerRowsByDay, formatDayLabel, sumLedgerVat } from "@/lib/cash-book/day-groups";
 
 /**
  * The printable Livre de caisse — a real generated PDF (logo, real
@@ -11,7 +11,8 @@ import { groupLedgerRowsByDay, formatDayLabel } from "@/lib/cash-book/day-groups
  * RecettesJournalDocument.jsx (copied rather than shared, same reasoning:
  * tweaking one must never regress the other).
  *
- * Journal only — entrées/sorties/solde, day by day. The inline "Rapport"
+ * Journal only — entrées/sorties/solde, day by day, with each sale's VAT
+ * (taux/HT/TVA) beside it (17 Sep 2026 ask). The inline "Rapport"
  * section CaisseClient.jsx renders on screen (category/VAT breakdown,
  * comparison, session detail) used to be included here too, but the client's
  * explicit ask (14 Sep 2026) is that printing this book stays what it always
@@ -32,6 +33,16 @@ const ROW_COLORS = {
 };
 
 const NEGATIVE_DISPLAY_KINDS = new Set(["EXPENSE", "WITHDRAWAL"]);
+
+/** "17 septembre 2026 à 14:32" — the client wants the generation time, not just the day. */
+function formatDateTime(date) {
+  const time = new Date(date).toLocaleTimeString("fr-BE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Brussels",
+  });
+  return `${formatDate(date)} à ${time}`;
+}
 
 /** Same free-text cap as RecettesJournalDocument.jsx — see its own comment for why. */
 function truncate(value, maxLength) {
@@ -121,18 +132,21 @@ const styles = StyleSheet.create({
   colDate: { flex: 1.4, overflow: "hidden" },
   colPiece: { flex: 1.2, overflow: "hidden" },
   colRef: { flex: 1, overflow: "hidden" },
-  colLabel: { flex: 4.6 },
+  colLabel: { flex: 3.6 },
   // The day header row has no other columns in it (see DayBlock) — this
   // widens the label to the row's full width instead of leaving it capped
   // at colLabel's own share, which would strand blank space where the
   // now-removed duplicate totals used to sit.
   dayRowLabel: { flex: 1 },
+  colRate: { flex: 0.6, textAlign: "right" },
+  colHt: { flex: 1.1, textAlign: "right" },
+  colVat: { flex: 1, textAlign: "right" },
   colEntree: { flex: 1.1, textAlign: "right" },
   colSortie: { flex: 1.1, textAlign: "right" },
   colSolde: { flex: 1.2, textAlign: "right" },
 });
 
-function Letterhead({ filters }) {
+function Letterhead({ filters, generatedAt }) {
   return (
     <View style={styles.header} fixed>
       <View style={styles.headerBrand}>
@@ -148,6 +162,10 @@ function Letterhead({ filters }) {
           <Text style={styles.headerMetaLabel}>Période : </Text>
           Du {filters.from} au {filters.to}
         </Text>
+        <Text style={styles.headerMetaLine}>
+          <Text style={styles.headerMetaLabel}>Généré le : </Text>
+          {formatDateTime(generatedAt)}
+        </Text>
       </View>
     </View>
   );
@@ -156,7 +174,7 @@ function Letterhead({ filters }) {
 function Footer({ generatedAt }) {
   return (
     <View style={styles.footer} fixed>
-      <Text style={styles.footerText}>Généré le {formatDate(generatedAt)} — Meri Beauty</Text>
+      <Text style={styles.footerText}>Généré le {formatDateTime(generatedAt)} — Meri Beauty</Text>
       <Text
         style={styles.footerText}
         render={({ pageNumber, totalPages }) => `Page ${pageNumber} / ${totalPages}`}
@@ -172,6 +190,9 @@ function TableHead() {
       <Text style={[styles.tableHeadCell, styles.colPiece]}>N° PIÈCE</Text>
       <Text style={[styles.tableHeadCell, styles.colRef]}>RÉF.</Text>
       <Text style={[styles.tableHeadCell, styles.colLabel]}>DÉSIGNATION</Text>
+      <Text style={[styles.tableHeadCell, styles.colRate]}>TVA %</Text>
+      <Text style={[styles.tableHeadCell, styles.colHt]}>HT</Text>
+      <Text style={[styles.tableHeadCell, styles.colVat]}>TVA</Text>
       <Text style={[styles.tableHeadCell, styles.colEntree]}>ENTRÉES</Text>
       <Text style={[styles.tableHeadCell, styles.colSortie]}>SORTIES</Text>
       <Text style={[styles.tableHeadCell, styles.colSolde]}>SOLDE</Text>
@@ -197,6 +218,9 @@ function DataRow({ row, index }) {
       <Text style={styles.colPiece}>{truncate(row.pieceNumber, 18) || "—"}</Text>
       <Text style={styles.colRef}>{truncate(row.reference, 14) || "—"}</Text>
       <Text style={[styles.colLabel, color && { color }]}>{row.label}</Text>
+      <Text style={styles.colRate}>{row.vatRate != null ? `${row.vatRate} %` : "—"}</Text>
+      <Text style={[styles.colHt, color && { color }]}>{row.amountHt != null ? money(row.amountHt) : "—"}</Text>
+      <Text style={[styles.colVat, color && { color }]}>{row.amountVat != null ? money(row.amountVat) : "—"}</Text>
       <Text style={[styles.colEntree, color && { color }]}>{row.entree ? money(row.entree) : "—"}</Text>
       <Text style={[styles.colSortie, color && { color }]}>{sortieValue != null ? money(sortieValue) : "—"}</Text>
       <Text style={[styles.colSolde, styles.bold]}>{money(row.solde)}</Text>
@@ -223,6 +247,9 @@ function DayBlock({ group }) {
         <Text style={styles.colPiece} />
         <Text style={styles.colRef} />
         <Text style={[styles.colLabel, styles.bold]}>Total du jour</Text>
+        <Text style={styles.colRate} />
+        <Text style={[styles.colHt, styles.bold]}>{money(group.totalHt)}</Text>
+        <Text style={[styles.colVat, styles.bold]}>{money(group.totalVat)}</Text>
         <Text style={[styles.colEntree, styles.bold]}>{money(group.totalEntrees)}</Text>
         <Text style={[styles.colSortie, styles.bold]}>{money(group.totalSorties)}</Text>
         <Text style={[styles.colSolde, styles.bold]}>{money(group.closingBalance)}</Text>
@@ -238,25 +265,32 @@ function DayBlock({ group }) {
 export function CashBookDocument({ ledger, generatedAt }) {
   const { filters, totals, rows } = ledger;
   const dayGroups = groupLedgerRowsByDay(rows);
+  const vatTotals = sumLedgerVat(rows);
 
   return (
     <Document title="Livre de caisse — Meri Beauty" author="Meri Beauty" subject="Journal chronologique de caisse">
       <Page size="A4" orientation="landscape" style={styles.page}>
-        <Letterhead filters={filters} />
+        <Letterhead filters={filters} generatedAt={generatedAt} />
         <Footer generatedAt={generatedAt} />
 
         <View style={styles.synthesis}>
           <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>Total entrées</Text>
+            <Text style={styles.synthesisLabel}>Total des entrées</Text>
             <Text style={styles.synthesisValue}>{money(totals.entrees)}</Text>
           </View>
           <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>Total sorties</Text>
+            <Text style={styles.synthesisLabel}>Total des sorties</Text>
             <Text style={styles.synthesisValue}>{money(totals.sorties)}</Text>
           </View>
+          {/* No "Solde" card (17 Sep 2026): it repeated the running balance the
+              journal's last line already prints, and read as a second total. */}
           <View style={styles.synthesisItem}>
-            <Text style={styles.synthesisLabel}>Solde</Text>
-            <Text style={styles.synthesisValue}>{money(totals.finalBalance)}</Text>
+            <Text style={styles.synthesisLabel}>Total HT</Text>
+            <Text style={styles.synthesisValue}>{money(vatTotals.ht)}</Text>
+          </View>
+          <View style={styles.synthesisItem}>
+            <Text style={styles.synthesisLabel}>Total TVA</Text>
+            <Text style={styles.synthesisValue}>{money(vatTotals.vat)}</Text>
           </View>
           <View style={styles.synthesisItem}>
             <Text style={styles.synthesisLabel}>Écritures</Text>

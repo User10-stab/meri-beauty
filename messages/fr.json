@@ -1425,8 +1425,11 @@
         "mode": "Mode",
         "status": "Statut",
         "total": "Total",
-        "date": "Date"
+        "date": "Date",
+        "actions": "Actions"
       },
+      "settleAtPos": "Encaisser",
+      "settleAtPosTitle": "Reprendre cette commande à la caisse pour l'encaisser",
       "pickupCodeNotFound": "Aucune commande ne correspond à ce code.",
       "status": {
         "PENDING_PAYMENT": "Paiement en attente",

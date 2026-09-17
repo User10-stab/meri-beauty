@@ -328,6 +328,8 @@ export function OrderDetailClient({ order }) {
               invoice at all yet still needs its slip reprintable. */}
           <div className="space-y-2 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
             <h2 className="mb-1 font-semibold text-gray-800 dark:text-white">Documents</h2>
+              {/* No receipt before the order is paid — the route refuses it too. */}
+              {order.payment && !["PENDING", "FAILED", "PARTIALLY_PAID"].includes(order.payment.status) ? (
               <a
                 href={`/api/orders/${order.id}/ticket`}
                 target="_blank"
@@ -337,6 +339,9 @@ export function OrderDetailClient({ order }) {
                 <span>Reçu / ticket de caisse</span>
                 <Printer size={14} />
               </a>
+              ) : (
+              <p className="text-sm text-gray-500">Pas encore de reçu — il est émis à l&apos;encaissement de la commande.</p>
+              )}
               {order.invoice && (
               <div className="flex items-center gap-2">
                 <a

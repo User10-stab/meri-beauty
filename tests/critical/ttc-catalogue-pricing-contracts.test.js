@@ -79,7 +79,11 @@ describe("boutique paths never add VAT to a stored product price", () => {
     expect(orders).toContain("repriceTtcCataloguePrice(item.variant.price, taxPolicy.vatRate)");
 
     const pos = source("actions/boutique/point-of-sale.js");
-    expect(pos.match(/unitPrice: Number\(variant\.price\)/g) ?? []).toHaveLength(2);
+    // 3 since 17/09/2026: getPointOfSaleOrderDraft prefills the till from an
+    // unpaid pickup order at the same stored TTC shelf price. Display only —
+    // completePointOfSaleSale still re-reads and reprices it server-side.
+    expect(pos.match(/unitPrice: Number\(variant\.price\)/g) ?? []).toHaveLength(3);
+    expect(pos).toContain("export async function getPointOfSaleOrderDraft(orderId)");
     expect(pos).toContain("taxUnitPrice: repriceTtcCataloguePrice(item.price, posVatPolicy.vatRate)");
   });
 });

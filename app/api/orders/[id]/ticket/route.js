@@ -42,6 +42,7 @@ export async function GET(req, { params }) {
         ticketNumber: true,
         payment: {
           select: {
+            status: true,
             invoice: { select: { number: true } },
             transactions: {
               where: {
@@ -79,6 +80,18 @@ export async function GET(req, { params }) {
   if (!order) {
     return NextResponse.json({ error: "Commande introuvable." }, { status: 404 });
   }
+  // No receipt before the order is paid. A pay-at-pickup order has no
+  // Payment at all until the counter collects it, and a prepaid one sits
+  // PENDING until Stripe confirms — rendering either would hand out a slip
+  // for money the salon never received. Same rule the reservation ticket
+  // enforces in lib/cash-book/build-payment-ticket.js.
+  if (!order.payment || ["PENDING", "FAILED", "PARTIALLY_PAID"].includes(order.payment.status)) {
+    return NextResponse.json(
+      { error: "Cette commande n'est pas encore payée — pas de reçu avant l'encaissement." },
+      { status: 409 }
+    );
+  }
+
   if (!canAccessDashboard(session.user.role)) {
     // A customer may only obtain proof of a collection that belongs to them;
     // a pending checkout must never be printable as a paid receipt.

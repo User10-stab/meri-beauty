@@ -13,6 +13,7 @@ import {
   completePointOfSaleSale,
   cancelPointOfSaleCheckout,
   getPointOfSaleProductByBarcode,
+  getPointOfSaleOrderDraft,
   getPointOfSaleOrderStatus,
   recoverPointOfSaleCheckout,
   searchPointOfSaleCustomers,
@@ -49,6 +50,7 @@ export function CounterCart({
   canCollectCash = false,
   pendingProduct,
   onConsumePendingProduct,
+  sourceOrderId = null,
 }) {
   // Only Marie / an admin rings a sale into the Livre de caisse. For everyone
   // else completePointOfSaleSale records the sale off-till (see
@@ -108,8 +110,13 @@ export function CounterCart({
   const scannerControlsRef = useRef(null);
   const scannerBusyRef = useRef(false);
   const [isPending, startTransition] = useTransition();
+  // An unpaid pickup order opened here with « Encaisser » (orders list):
+  // { orderId, orderNumber }. Sent with the sale so the server closes that
+  // order and releases its reservation in the same transaction.
+  const [sourceOrder, setSourceOrder] = useState(null);
+  const [loadingSourceOrder, setLoadingSourceOrder] = useState(Boolean(sourceOrderId));
 
-  const total = useMemo(() => cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0), [cart]);
+  const total =useMemo(() => cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0), [cart]);
   const cashReceivedNumber = Number(cashReceived);
   const changeDue = cashReceived !== "" && !Number.isNaN(cashReceivedNumber) ? cashReceivedNumber - total : null;
   const walkInEmailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkInEmail.trim());
@@ -341,12 +348,16 @@ export function CounterCart({
           quantity: 1,
         }];
       }
-      if (present.quantity >= item.availableQuantity) {
+      // A line prefilled from a taken-over order already counts that order's
+      // own held units as available; a search/scan result does not — keep
+      // whichever ceiling is higher so the order's units aren't lost.
+      const ceiling = Math.max(present.availableQuantity, item.availableQuantity);
+      if (present.quantity >= ceiling) {
         toast.error("La quantité demandée dépasse le stock disponible.");
         added = false;
         return current;
       }
-      return current.map((entry) => (entry.variantId === item.variantId ? { ...entry, quantity: entry.quantity + 1 } : entry));
+      return current.map((entry) => (entry.variantId === item.variantId ? { ...entry, quantity: entry.quantity + 1, availableQuantity: ceiling } : entry));
     });
     return added;
   }, []);
@@ -373,6 +384,63 @@ export function CounterCart({
     onConsumePendingProduct?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingProduct]);
+
+  // « Encaisser » from the orders list: fill the cart and the client from
+  // that order. Staff can then add or remove lines and settle as usual —
+  // cash or terminal only (a QR checkout completes later, in the webhook,
+  // too late to close the original order together with the sale).
+  useEffect(() => {
+    if (!sourceOrderId) return undefined;
+    let cancelled = false;
+    setLoadingSourceOrder(true);
+    getPointOfSaleOrderDraft(sourceOrderId)
+      .then((result) => {
+        if (cancelled) return;
+        if (!result.success) {
+          toast.error(result.message);
+          router.replace("/dashboard/boutique/point-of-sale");
+          return;
+        }
+        const draft = result.data;
+        setCart(
+          draft.items.map((item) => ({
+            key: item.variantId,
+            type: "PRODUCT",
+            variantId: item.variantId,
+            productName: item.productName,
+            variantName: item.variantName,
+            unitPrice: item.unitPrice,
+            availableQuantity: item.availableQuantity,
+            quantity: item.quantity,
+          }))
+        );
+        if (draft.customer) {
+          setIsWalkIn(false);
+          selectCustomer(draft.customer);
+        }
+        setMethod((current) => (current === "CARD_QR" ? "CASH" : current));
+        setSourceOrder({ orderId: draft.orderId, orderNumber: draft.orderNumber, discountAmount: draft.discountAmount });
+        if (draft.unavailable.length > 0) {
+          toast.error(`Plus en vente, non repris : ${draft.unavailable.join(", ")}.`);
+        }
+        toast.success(`Commande n°${draft.orderNumber} reprise à la caisse.`);
+        document.getElementById("counter-cart")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      })
+      .catch(() => !cancelled && toast.error("Impossible de charger cette commande."))
+      .finally(() => !cancelled && setLoadingSourceOrder(false));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceOrderId]);
+
+  // Drops the taken-over order: the cart empties and the original order is
+  // left exactly as it was (nothing was changed on it yet).
+  function releaseSourceOrder() {
+    setSourceOrder(null);
+    setCart([]);
+    router.replace("/dashboard/boutique/point-of-sale");
+  }
 
   const addBarcode = useCallback(async (scannedCode = barcode) => {
     const code = scannedCode?.trim();
@@ -552,7 +620,7 @@ export function CounterCart({
   const willBeBelgianB2B = willHaveVatInvoice && customer.vatNumber.trim().toUpperCase().startsWith("BE");
 
   function selectMethod(next) {
-    if (next === "CARD_QR" && isWalkIn) return; // blocked while client de passage is active
+    if (next === "CARD_QR" && (isWalkIn || sourceOrder)) return; // blocked for a client de passage and for a taken-over order
     setMethod(next);
     if (next !== "EXTERNAL_TERMINAL") {
       setTerminalApproved(false);
@@ -587,6 +655,7 @@ export function CounterCart({
         method,
         attemptKey,
         invoiceRequested,
+        sourceOrderId: sourceOrder?.orderId ?? null,
         ...(method === "EXTERNAL_TERMINAL" ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
         ...(method === "CASH" ? { cashReceived: cashReceivedNumber } : {}),
       });
@@ -757,6 +826,35 @@ export function CounterCart({
           <h1 className="mt-1 text-2xl font-bold text-dark dark:text-white">Vente en magasin</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-dark-6">Scannez les articles, associez le client, encaissez puis envoyez son reçu.</p>
         </div>
+
+        {loadingSourceOrder && (
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-dark-3">
+            <Loader2 size={15} className="animate-spin" />
+            Chargement de la commande…
+          </div>
+        )}
+
+        {sourceOrder && (
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+            <div className="min-w-0">
+              <p className="font-semibold">Commande n°{sourceOrder.orderNumber} reprise à la caisse</p>
+              <p className="mt-0.5 text-xs">
+                Ajoutez ou retirez des articles, puis encaissez en espèces ou au terminal. La commande d&apos;origine
+                sera clôturée et remplacée par cette vente.
+                {sourceOrder.discountAmount > 0 &&
+                  ` Attention : sa remise de ${sourceOrder.discountAmount.toFixed(2)} € n'est pas reprise — les articles sont au prix en boutique.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={releaseSourceOrder}
+              disabled={isPending}
+              className="shrink-0 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:bg-transparent dark:text-amber-300"
+            >
+              Ne plus reprendre
+            </button>
+          </div>
+        )}
 
         <form
           onSubmit={(event) => {
@@ -963,7 +1061,7 @@ export function CounterCart({
         <div className="space-y-2 border-t border-gray-100 pt-5 dark:border-dark-3">
           <p className="text-sm font-medium text-gray-700 dark:text-dark-6">Paiement encaissé</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <button type="button" onClick={() => selectMethod("CARD_QR")} disabled={isWalkIn} title={isWalkIn ? "Indisponible en mode client de passage" : undefined} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${method === "CARD_QR" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte QR</button>
+            <button type="button" onClick={() => selectMethod("CARD_QR")} disabled={isWalkIn || Boolean(sourceOrder)} title={isWalkIn ? "Indisponible en mode client de passage" : sourceOrder ? "Une commande reprise se règle en espèces ou au terminal" : undefined} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${method === "CARD_QR" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte QR</button>
             <button type="button" onClick={() => selectMethod("CASH")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CASH" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><Banknote size={16} />Espèces</button>
             <button type="button" onClick={() => selectMethod("EXTERNAL_TERMINAL")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "EXTERNAL_TERMINAL" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Terminal externe</button>
           </div>

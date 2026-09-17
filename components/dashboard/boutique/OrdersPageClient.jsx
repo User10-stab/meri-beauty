@@ -3,13 +3,14 @@
 import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Search, ScanLine, Camera, Package, Loader2, AlertTriangle } from "lucide-react";
+import { Search, ScanLine, Camera, Package, Loader2, AlertTriangle, Wallet } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import Button from "@/components/ui/Button";
 import { PickupScannerDialog } from "@/components/dashboard/boutique/PickupScannerDialog";
 import { Pagination } from "@/components/dashboard/Tables/Pagination";
 import { listOrders } from "@/actions/boutique/orders";
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
+import { canSettleOrderAtPointOfSale } from "@/lib/orders/point-of-sale-handoff";
 import { useTranslations } from "next-intl";
 
 const PAGE_SIZE = 20;
@@ -230,7 +231,8 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
                 <TableHead>{t("tableHeaders.mode")}</TableHead>
                 <TableHead>{t("tableHeaders.status")}</TableHead>
                 <TableHead>{t("tableHeaders.total")}</TableHead>
-                <TableHead className="pr-6">{t("tableHeaders.date")}</TableHead>
+                <TableHead>{t("tableHeaders.date")}</TableHead>
+                <TableHead className="pr-6 text-right">{t("tableHeaders.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -281,10 +283,28 @@ export function OrdersPageClient({ initialOrders, initialTotalCount, initialOver
                   <TableCell>
                     <span className="font-medium text-gray-700 dark:text-dark-6">{formatPrice(o.totalAmount)}</span>
                   </TableCell>
-                  <TableCell className="pr-6">
+                  <TableCell>
                     <span className="text-gray-500 dark:text-dark-6">
                       {new Date(o.createdAt).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}
                     </span>
+                  </TableCell>
+                  <TableCell className="pr-6 text-right">
+                    {/* Unpaid pay-at-pickup order → open it at the till,
+                        pre-filled, to add items or settle it there. */}
+                    {canSettleOrderAtPointOfSale(o) && (
+                      <button
+                        type="button"
+                        title={t("settleAtPosTitle")}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          router.push(`/dashboard/boutique/point-of-sale?order=${encodeURIComponent(o.id)}`);
+                        }}
+                        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-[#2f3a2e] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#1f291f]"
+                      >
+                        <Wallet size={13} />
+                        {t("settleAtPos")}
+                      </button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

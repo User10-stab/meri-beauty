@@ -1162,6 +1162,91 @@ export async function getTransactionDetail(transactionId) {
 }
 
 /**
+ * The detail drawer for a boutique order that has no Transaction yet — a
+ * "réserver en ligne, payer au retrait" pickup still waiting for the
+ * customer, most of the time. getTransactionDetail is keyed on a Transaction
+ * and such an order has none (PICKUP_ON_SITE creates its Payment only at the
+ * counter, see completeOrderPickup), so the row used to offer no way in at
+ * all — not even to show a client who lost the e-mail their pickup QR code.
+ *
+ * Read-only on purpose: nothing has been collected, so there is no ticket,
+ * no invoice and nothing to refund. The drawer shows the order, its items
+ * and its QR code, and says the receipt comes with the payment.
+ */
+export async function getPendingOrderDetail(orderId) {
+  const session = await requireAdminOperationsAccess();
+  if (!session) {
+    return { success: false, message: "Non autorisé." };
+  }
+  if (typeof orderId !== "string" || !orderId) {
+    return { success: false, message: "Commande introuvable." };
+  }
+
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        source: true,
+        fulfilmentMode: true,
+        createdAt: true,
+        expiresAt: true,
+        readyForPickupAt: true,
+        cancelledAt: true,
+        cancelReason: true,
+        subtotal: true,
+        discountAmount: true,
+        totalAmount: true,
+        totalExclVat: true,
+        totalVat: true,
+        vatRate: true,
+        notes: true,
+        pickupCode: true,
+        pickedUpAt: true,
+        stockReleasedAt: true,
+        user: { select: { fullName: true, email: true } },
+        createdByStaff: { select: { fullName: true, role: true } },
+        items: { select: { id: true, productName: true, variantName: true, quantity: true, unitPrice: true }, orderBy: { createdAt: "asc" } },
+        payment: { select: { status: true, transactions: { where: { isDeleted: false }, select: { id: true } } } },
+      },
+    });
+    if (!order) return { success: false, message: "Commande introuvable." };
+
+    // Once money has moved this is an ordinary transaction and belongs in
+    // getTransactionDetail — with its ticket, invoice and refund actions.
+    // A settled Payment with no live Transaction is not "unpaid" either, and
+    // must not be shown as such.
+    const settled = order.payment && !["PENDING", "FAILED", "PARTIALLY_PAID"].includes(order.payment.status);
+    if ((order.payment?.transactions ?? []).length > 0 || settled) {
+      return { success: false, message: "Cette commande a déjà été encaissée — ouvrez sa transaction." };
+    }
+
+    const { payment, createdByStaff, ...rest } = order;
+    const detailOrder = {
+      ...rest,
+      performedBy: createdByStaff ? { name: createdByStaff.fullName, role: createdByStaff.role } : null,
+    };
+    // Only while the order can still be collected. An abandoned Stripe
+    // checkout, a cancelled order or one whose stock is already back on sale
+    // has a code nobody should be handed: scanning it would only be refused.
+    const collectable =
+      ["PENDING_PICKUP", "READY_FOR_PICKUP"].includes(order.status) ||
+      (order.status === "EXPIRED" && !order.stockReleasedAt);
+    const checkIn = collectable ? await resolveCheckInAsset({ order: detailOrder }) : null;
+
+    return {
+      success: true,
+      data: serializeDecimalFields({ pendingOrder: true, order: detailOrder, checkIn }),
+    };
+  } catch (error) {
+    console.error("[getPendingOrderDetail]", error);
+    return { success: false, message: "Impossible de charger le détail de cette commande." };
+  }
+}
+
+/**
  * When this payment's booking was last repriced at the counter, or null if it
  * never was. The audit row is the only record of an adjustment — nothing on
  * Payment itself distinguishes a total that was always 40 € from one discounted

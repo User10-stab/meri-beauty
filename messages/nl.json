@@ -1425,8 +1425,11 @@
         "mode": "Modus",
         "status": "Status",
         "total": "Totaal",
-        "date": "Datum"
+        "date": "Datum",
+        "actions": "Acties"
       },
+      "settleAtPos": "Afrekenen",
+      "settleAtPosTitle": "Deze bestelling aan de kassa afrekenen",
       "pickupCodeNotFound": "Geen bestelling komt overeen met deze code.",
       "status": {
         "PENDING_PAYMENT": "Betaling in afwachting",

@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowRightLeft, CreditCard, Package, CalendarDays, GraduationCap, X } from "lucide-react";
+import { ArrowRightLeft, CreditCard, Package, CalendarDays, GraduationCap, X, Eye } from "lucide-react";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/ui/table";
 import { InvoiceRowActions } from "@/components/dashboard/operations/InvoiceRowActions";
 import { TransactionDetailDrawer } from "@/components/dashboard/operations/TransactionDetailDrawer";
@@ -614,7 +614,7 @@ function TransferCrossLink({ logId, transferredAt }) {
  * server action, so offering them would only produce "Non autorisé" — and
  * the documents they reach are the salon's, not hers.
  */
-function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer, readOnly = false }) {
+function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpenTransfer, readOnly = false }) {
   return (
     <Table>
       <TableHeader>
@@ -721,6 +721,19 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenTransfer, readOnly =
                     className="whitespace-nowrap rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-[#2f3a2e] hover:bg-gray-50"
                   >
                     Voir le détail
+                  </button>
+                ) : row.sourceType === "ORDER" && !transaction && !invoice ? (
+                  // A boutique order nothing has been collected on yet — a
+                  // pay-at-pickup order waiting for its customer. No
+                  // Transaction means no "Voir / gérer", so this opens the
+                  // same drawer on the order itself: details and pickup QR
+                  // code, but no ticket until it is actually paid.
+                  <button
+                    type="button"
+                    onClick={() => onOpenPendingOrder(row.id)}
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-[#2f3a2e] hover:bg-[#f4f7f3] hover:text-[#2f3a2e]"
+                  >
+                    <Eye size={14} /> Voir le détail
                   </button>
                 ) : (
                   <InvoiceRowActions
@@ -841,6 +854,7 @@ export function AdminOperationsClient({ result, basePath = "/dashboard/operation
     readOnly = false,
   } = result ?? {};
   const [detailId, setDetailId] = useState(null);
+  const [pendingOrderId, setPendingOrderId] = useState(null);
   const [transferDetail, setTransferDetail] = useState(null);
 
   const hasPrevious = page > 1;
@@ -940,7 +954,13 @@ export function AdminOperationsClient({ result, basePath = "/dashboard/operation
         {data.length === 0 ? (
           <div className="px-6 py-16 text-center text-sm text-gray-500">Aucune donnée dans cette catégorie.</div>
         ) : (
-          <UnifiedOperationsTable rows={data} onOpenDetail={setDetailId} onOpenTransfer={setTransferDetail} readOnly={readOnly} />
+          <UnifiedOperationsTable
+            rows={data}
+            onOpenDetail={setDetailId}
+            onOpenPendingOrder={setPendingOrderId}
+            onOpenTransfer={setTransferDetail}
+            readOnly={readOnly}
+          />
         )}
       </div>
 
@@ -962,6 +982,7 @@ export function AdminOperationsClient({ result, basePath = "/dashboard/operation
       </div>
 
       <TransactionDetailDrawer transactionId={detailId} onClose={() => setDetailId(null)} />
+      <TransactionDetailDrawer orderId={pendingOrderId} onClose={() => setPendingOrderId(null)} />
       <TransferDetailModal transfer={transferDetail} onClose={() => setTransferDetail(null)} />
     </div>
   );

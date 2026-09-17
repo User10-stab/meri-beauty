@@ -30,6 +30,7 @@ import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservat
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { getAvailableSlots as getAvailableSlotsAction } from "@/actions/reservation/get-available-slots";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import { resolvePayeeForAppointment, payeePaymentData } from "@/lib/payments/resolve-payee";
 
 // Re-export getAvailableSlots for use in the manual appointment modal
 export const getAvailableSlots = getAvailableSlotsAction;
@@ -406,6 +407,7 @@ export async function createManualAppointment(input) {
         const pay = await tx.payment.create({
           data: {
             appointmentId: appt.id,
+            ...payeePaymentData(await resolvePayeeForAppointment(tx, { staffId })),
             depositAmount,
             totalAmount,
             paidAmount: 0,

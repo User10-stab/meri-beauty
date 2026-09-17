@@ -9,6 +9,7 @@ import {
   canSendTicketEmail as canSendTicketEmailOperator,
 } from "@/lib/authorization";
 import { resolveSalonScope } from "@/lib/authorization/salon-scope";
+import { listIndependentPayeeStaffIds } from "@/lib/payments/resolve-payee";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import {
   TYPE_FILTERS,
@@ -72,34 +73,36 @@ function normalizeParams(params = {}) {
  *
  * Two modes:
  *
- *   SALON (the default) — the salon's own activity: the ADMIN/OWNER accounts
- *   plus Marie Mercier, whose VAT number is the salon's despite her STAFF
- *   role (resolveSalonScope). Rows nobody stamped (a customer's own online
- *   order, a system audit entry) belong to the salon too, and ateliers and
- *   formations are the salon's own events, so both arms come through whole.
+ *   SALON (the default) — the salon's own activity. Money rows (appointments,
+ *   atelier and formation seats) are the salon's when their Payment's frozen
+ *   owner is (`Payment.payeeStaffId` null, see lib/payments/resolve-payee.js);
+ *   a seat not paid yet follows its session's animator. Orders and audit rows
+ *   follow who rang them up: the ADMIN/OWNER accounts plus Marie Mercier
+ *   (resolveSalonScope), and rows nobody stamped.
  *
  *   STAFF — a practitioner reading her OWN ledger on /dashboard/mes-operations.
  *   Only ever the session's own Staff row. There is no way to pick one: every
  *   practitioner is legally independent, and the salon has no right to read
- *   her takings. Ateliers and formations drop out entirely: the animator is
- *   matched by e-mail with no foreign key, so there is no honest way to
- *   attribute one.
+ *   her takings. The same owner test, pointed at her: her appointments, and
+ *   the atelier/formation seats of sessions she animates.
  *
  * @returns {Promise<null|{ mode: string, staffId: string, staffName: string|null,
- *   userIds: string[], staffIds: string[], includeUnattributed: boolean,
- *   includeActivities: boolean }>} null when `staffId` names nobody.
+ *   userIds: string[], independentStaffIds: string[], includeUnattributed: boolean }>}
+ *   null when `staffId` names nobody.
  */
 async function resolveOperationsScope(staffId) {
   if (!staffId) {
-    const { salonUserIds, salonStaffIds } = await resolveSalonScope(prisma);
+    const [{ salonUserIds }, independentStaffIds] = await Promise.all([
+      resolveSalonScope(prisma),
+      listIndependentPayeeStaffIds(prisma),
+    ]);
     return {
       mode: "SALON",
       staffId: "",
       staffName: null,
       userIds: salonUserIds,
-      staffIds: salonStaffIds,
+      independentStaffIds,
       includeUnattributed: true,
-      includeActivities: true,
     };
   }
 
@@ -116,9 +119,8 @@ async function resolveOperationsScope(staffId) {
     staffId: staff.id,
     staffName: staff.user.fullName,
     userIds: [staff.user.id],
-    staffIds: [staff.id],
+    independentStaffIds: [],
     includeUnattributed: false,
-    includeActivities: false,
   };
 }
 
@@ -174,20 +176,47 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
   // — never the three-hop join through StaffService). The two id spaces are
   // not interchangeable: crossing them matches nothing, silently.
   const orderScope = ownedBy(Prisma.sql`o."createdByStaffId"`, scope.userIds);
-  const appointmentScope =
-    scope.staffIds.length === 0
-      ? Prisma.sql`AND false`
-      : Prisma.sql`AND a."staffId" IN (${Prisma.join(scope.staffIds)})`;
+
+  // Money rows follow the Payment's frozen owner (Payment.payeeStaffId, null =
+  // the salon) — never who clicked. See lib/payments/resolve-payee.js.
+  const paymentOwned = (alias) =>
+    scope.mode === "STAFF"
+      ? Prisma.sql`${Prisma.raw(alias)}."payeeStaffId" = ${scope.staffId}`
+      : Prisma.sql`${Prisma.raw(alias)}."payeeStaffId" IS NULL`;
+  // A seat with no Payment yet has no frozen owner: it follows the session's
+  // animator (or the catalogue's), the same rule resolve-payee applies when
+  // the payment is eventually created.
+  const animatorOwned = (expr) =>
+    scope.mode === "STAFF"
+      ? Prisma.sql`${expr} = ${scope.staffId}`
+      : scope.independentStaffIds.length === 0
+        ? Prisma.sql`true`
+        : Prisma.sql`(${expr} IS NULL OR ${expr} NOT IN (${Prisma.join(scope.independentStaffIds)}))`;
+  const reservationScope = (paymentColumn, rowId) => {
+    const animator = Prisma.sql`COALESCE(sa."staffId", ca."staffId")`;
+    return Prisma.sql`AND (
+      EXISTS (SELECT 1 FROM "Payment" po WHERE po.${Prisma.raw(paymentColumn)} = ${Prisma.raw(rowId)} AND ${paymentOwned("po")})
+      OR (
+        NOT EXISTS (SELECT 1 FROM "Payment" po WHERE po.${Prisma.raw(paymentColumn)} = ${Prisma.raw(rowId)})
+        AND ${animatorOwned(animator)}
+      )
+    )`;
+  };
+  const workshopScope = reservationScope('"workshopReservationId"', "wr.id");
+  const formationScope = reservationScope('"formationReservationId"', "fr.id");
+  const workshopAnimatorJoins = Prisma.sql`
+      LEFT JOIN "animators" sa ON sa.id = ws."animatorId"
+      LEFT JOIN "animators" ca ON ca.id = w."animatorId"`;
+  const formationAnimatorJoins = Prisma.sql`
+      LEFT JOIN "animators" sa ON sa.id = fs."animatorId"
+      LEFT JOIN "animators" ca ON ca.id = f."animatorId"`;
   // Adjustments and transfers are audit rows, and an audit row already knows
   // who did it — the cheapest honest attribution on this screen.
   const actorScope = ownedBy(Prisma.sql`al."actorId"`, scope.userIds);
 
   const includeOrders = !sourceTypes || sourceTypes.includes("ORDER");
-  // Ateliers and formations carry no staff link in the schema at all, so
-  // there is nothing to filter them by — they are the salon's own events,
-  // included whole in salon mode and dropped in staff mode.
-  const includeWorkshops = (!sourceTypes || sourceTypes.includes("WORKSHOP")) && scope.includeActivities;
-  const includeFormations = (!sourceTypes || sourceTypes.includes("FORMATION")) && scope.includeActivities;
+  const includeWorkshops = !sourceTypes || sourceTypes.includes("WORKSHOP");
+  const includeFormations = !sourceTypes || sourceTypes.includes("FORMATION");
   // Appointments are only ever reachable from the unrestricted (transactions)
   // preset — Commandes/Ateliers/Formations never showed them before either.
   const includeAppointments = !sourceTypes;
@@ -245,7 +274,9 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
       FROM "workshop_reservations" wr
       JOIN "workshop_sessions" ws ON ws.id = wr."sessionId"
       JOIN "workshops" w ON w.id = ws."workshopId"
+      ${workshopAnimatorJoins}
       WHERE 1=1
+        ${workshopScope}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND wr."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${type !== "ALL" ? Prisma.sql`AND w."type"::text = ${type}` : Prisma.empty}
         ${
@@ -268,7 +299,9 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
       FROM "formation_reservations" fr
       JOIN "formation_sessions" fs ON fs.id = fr."sessionId"
       JOIN "formations" f ON f.id = fs."formationId"
+      ${formationAnimatorJoins}
       WHERE 1=1
+        ${formationScope}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND fr."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${type !== "ALL" ? Prisma.sql`AND f."type"::text = ${type}` : Prisma.empty}
         ${
@@ -292,7 +325,7 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
       JOIN "Appointment" a ON a.id = p."appointmentId"
       WHERE t."isDeleted" = false
         AND p."appointmentId" IS NOT NULL
-        ${appointmentScope}
+        AND ${paymentOwned("p")}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND a."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${paymentEvent !== "ALL" ? Prisma.sql`AND t."transactionType"::text = ${paymentEvent}` : Prisma.empty}
     `);
@@ -314,9 +347,10 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
       JOIN "workshop_reservations" wr ON wr.id = al."entityId"
       JOIN "workshop_sessions" ws ON ws.id = wr."sessionId"
       JOIN "workshops" w ON w.id = ws."workshopId"
+      ${workshopAnimatorJoins}
       WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_SESSION_TRANSFERRED}
         AND al."entityType" = 'WorkshopReservation'
-        ${actorScope}
+        ${workshopScope}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND wr."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${type !== "ALL" ? Prisma.sql`AND w."type"::text = ${type}` : Prisma.empty}
     `);
@@ -329,9 +363,10 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
       JOIN "formation_reservations" fr ON fr.id = al."entityId"
       JOIN "formation_sessions" fs ON fs.id = fr."sessionId"
       JOIN "formations" f ON f.id = fs."formationId"
+      ${formationAnimatorJoins}
       WHERE al."action" = ${AUDIT_ACTIONS.RESERVATION_SESSION_TRANSFERRED}
         AND al."entityType" = 'FormationReservation'
-        ${actorScope}
+        ${formationScope}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND fr."status"::text = ${lifecycleStatus}` : Prisma.empty}
         ${type !== "ALL" ? Prisma.sql`AND f."type"::text = ${type}` : Prisma.empty}
     `);

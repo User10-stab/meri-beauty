@@ -618,6 +618,11 @@ model Animator {
   website   String?
   instagram String?
   facebook  String?
+  // The staff profile this animator IS, when it is one. Replaces matching on
+  // e-mail: it decides whose Stripe account a formation/atelier is charged to
+  // (lib/payments/resolve-payee.js). Null = an outside animator, the salon's.
+  staffId   String?  @unique
+  staff     Staff?   @relation("AnimatorStaff", fields: [staffId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1644,6 +1649,8 @@ model Staff {
   appointments    Appointment[]
   newsletters     Newsletter[]
   monthlyInvoices StaffMonthlyInvoice[]
+  animator        Animator?           @relation("AnimatorStaff")
+  payeePayments   Payment[]           @relation("PaymentPayee")
 }
 
 // StaffService
@@ -1920,8 +1927,21 @@ model Payment {
   // model RefundOperation's closing comment.
   refundOperations      RefundOperation[]
 
+  // Whose money this is, frozen when the payment is created
+  // (lib/payments/resolve-payee.js). Null = the salon. Set = an independent
+  // practitioner: her sale, under her own VAT number, charged to her own
+  // Stripe account — never counted in the salon's books, never given a salon
+  // ticket/invoice/credit note, and only she may refund it.
+  payeeStaffId    String?
+  payeeStaff      Staff?  @relation("PaymentPayee", fields: [payeeStaffId], references: [id])
+  // The Stripe connected account the online charge lives on (null = the
+  // platform account, or no online charge). Frozen at charge time so a later
+  // change of the practitioner's account never redirects a refund lookup.
+  stripeAccountId String?
+
   @@index([promoCodeId])
   @@index([ticketKind])
+  @@index([payeeStaffId])
 }
 
 enum TicketKind {

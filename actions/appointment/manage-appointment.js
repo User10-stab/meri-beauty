@@ -26,6 +26,7 @@ import {
   buildAppointmentNoShowNotification,
   getAppointmentNotificationRecipients,
 } from "@/lib/notifications";
+import { resolvePayeeForAppointment, payeePaymentData } from "@/lib/payments/resolve-payee";
 
 /**
  * Verify the authenticated user can manage the given appointment.
@@ -952,6 +953,7 @@ export async function completeAppointment(
           : await tx.payment.create({
               data: {
                 appointmentId,
+                ...payeePaymentData(await resolvePayeeForAppointment(tx, { staffId: appointment.staffId })),
                 depositAmount: 0,
                 totalAmount: priceAdjustment.finalTotal,
                 paidAmount: priceAdjustment.finalTotal,

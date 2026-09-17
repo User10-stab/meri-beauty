@@ -39,6 +39,7 @@ import { SessionExpiredError, PhoneAlreadyRegisteredError } from "@/lib/reservat
 import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment-check-in-qr";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
+import { resolvePayeeForAppointment, payeePaymentData } from "@/lib/payments/resolve-payee";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -560,6 +561,7 @@ export async function createReservation(data) {
         payment = await tx.payment.create({
           data: {
             appointmentId: appointment.id,
+            ...payeePaymentData(await resolvePayeeForAppointment(tx, { staffId: staffService.staffId })),
             depositAmount,
             totalAmount,
             paidAmount: 0,

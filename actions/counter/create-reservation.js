@@ -23,6 +23,7 @@ import { workshopReservationConfirmationEmail, formationReservationConfirmationE
 import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
 import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
 import { revalidatePath } from "next/cache";
+import { resolvePayeeForWorkshopSession, resolvePayeeForFormationSession, payeePaymentData } from "@/lib/payments/resolve-payee";
 
 /**
  * Sells a brand-new workshop/formation/événement seat at the counter —
@@ -276,9 +277,14 @@ export async function createCounterReservation(input) {
           },
         });
 
+        const payee =
+          data.kind === "WORKSHOP"
+            ? await resolvePayeeForWorkshopSession(tx, { sessionId: session.id })
+            : await resolvePayeeForFormationSession(tx, { sessionId: session.id });
         const payment = await tx.payment.create({
           data: {
             [data.kind === "WORKSHOP" ? "workshopReservationId" : "formationReservationId"]: reservation.id,
+            ...payeePaymentData(payee),
             depositAmount: isFullPayment ? 0 : collected,
             totalAmount: total,
             paidAmount: collected,

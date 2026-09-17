@@ -105,14 +105,16 @@ async function resolveFormationAnimatorId(session, requestedStaffUserId) {
       isDeleted: false,
       user: { role: "STAFF", isActive: true, isDeleted: false },
     },
-    select: { photo: true, user: { select: { fullName: true, email: true } } },
+    select: { id: true, photo: true, user: { select: { fullName: true, email: true } } },
   });
   if (!staff) throw new Error("FORMATION_STAFF_NOT_AVAILABLE");
 
+  // staffId is the real link payee resolution reads (lib/payments/resolve-payee.js):
+  // a formation this practitioner animates is charged to her own Stripe account.
   const animator = await prisma.animator.upsert({
     where: { email: staff.user.email },
-    update: { name: staff.user.fullName, ...(staff.photo ? { avatar: staff.photo } : {}) },
-    create: { name: staff.user.fullName, email: staff.user.email, avatar: staff.photo ?? null },
+    update: { name: staff.user.fullName, staffId: staff.id, ...(staff.photo ? { avatar: staff.photo } : {}) },
+    create: { name: staff.user.fullName, email: staff.user.email, staffId: staff.id, avatar: staff.photo ?? null },
   });
   return animator.id;
 }

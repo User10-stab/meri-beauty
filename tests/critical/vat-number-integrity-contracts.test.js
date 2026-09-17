@@ -109,11 +109,24 @@ describe("a VAT number is never stored apart from its verification proof", () =>
     "actions/workshops/create-workshop-reservation.js",
     "actions/workshops/waiting-list.js",
     "actions/salon/update-salon.js",
-    "actions/staff/create-independent-staff.js",
-    "actions/staff/create-staff-from-rental.js",
+    "lib/vat/account-vat.js",
     "app/api/rental-requests/route.js",
   ])("%s performs a server-side VIES lookup before accepting VAT", (file) => {
     expect(source(file)).toContain("verifyVatWithVies(");
+  });
+
+  // 17 Sep 2026: the three staff screens now share one gate
+  // (verifyStaffVatNumber), which is where the VIES call moved — a staff
+  // profile must never be written with a number nobody checked.
+  test.each([
+    "actions/staff/create-independent-staff.js",
+    "actions/staff/create-staff-from-rental.js",
+    "actions/staff/update-independent-staff.js",
+  ])("%s runs the shared staff VAT gate before writing", (file) => {
+    const content = source(file);
+    expect(content).toContain("verifyStaffVatNumber(");
+    expect(content).toContain("syncAccountVatNumber(");
+    expect(content).not.toContain("verifyVatWithVies(");
   });
 
   test("the rental route no longer writes the number on its own", () => {

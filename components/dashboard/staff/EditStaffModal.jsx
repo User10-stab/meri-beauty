@@ -8,6 +8,7 @@ import {
   X,
   Loader2,
   User,
+  Hash,
   Calendar,
   FileText,
   Globe,
@@ -431,7 +432,6 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
   return (
     <form id="edit-staff-form" onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
       <input type="hidden" {...register("id")} />
-      <input type="hidden" {...register("vatNumber")} />
 
       {/* ── Photo + identity ──────────────────────────────────────── */}
       <div>
@@ -578,6 +578,14 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
               <TextInput id="editHireDate" type="date" error={errors.hireDate} {...register("hireDate")} />
               <FieldError message={errors.hireDate?.message} />
             </div>
+          </div>
+
+          {/* Numéro de TVA — obligatoire : une indépendante facture sous le
+              sien, et il est recopié sur son compte client. */}
+          <div>
+            <Label htmlFor="editVatNumber" icon={Hash} required>Numéro de TVA</Label>
+            <TextInput id="editVatNumber" type="text" placeholder="ex. BE0123456789" error={errors.vatNumber} {...register("vatNumber")} />
+            <FieldError message={errors.vatNumber?.message} />
           </div>
 
           {/* Rythme souhaité */}

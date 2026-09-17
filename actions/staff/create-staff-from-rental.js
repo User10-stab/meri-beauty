@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { createIndependentStaffSchema } from "@/lib/validations/independent-staff";
 import { sendEmail } from "@/lib/email";
-import { verifyVatWithVies } from "@/lib/vat-validation";
+import { syncAccountVatNumber, verifyStaffVatNumber } from "@/lib/vat/account-vat";
 import { createAndSendStaffContractInvoice } from "@/lib/staff-invoice";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
@@ -103,14 +103,11 @@ export async function createStaffFromRental(input, rentalRequestId) {
     }
   }
 
-  if (vatNumber) {
-    const viesResult = await verifyVatWithVies(vatNumber);
-    if (!viesResult.success) {
-      return { success: false, message: viesResult.message || "Impossible de vérifier ce numéro auprès de VIES. Réessayez.", errors: { vatNumber: "Vérification VIES indisponible." } };
-    }
-    if (!viesResult.valid) {
-      return { success: false, message: "Ce numéro de TVA n'est pas reconnu comme actif par VIES.", errors: { vatNumber: "Numéro non reconnu par VIES." } };
-    }
+  // Mandatory: an independent issues her own tickets and invoices under her
+  // own number. A VIES outage still lets the onboarding through, unvalidated.
+  const vatCheck = await verifyStaffVatNumber(vatNumber);
+  if (!vatCheck.ok) {
+    return { success: false, message: vatCheck.message, errors: { vatNumber: vatCheck.message } };
   }
 
   // ── 3. Check if user already exists ──────────────────────────────────────
@@ -258,7 +255,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
         yearsOfExperience: yearsOfExperience ?? null,
         isActive: true,
         hireDate: hireDate ? new Date(hireDate) : null,
-        vatNumber,
+        vatNumber: vatCheck.vatNumber,
         dashboardPermissions,
       };
 
@@ -270,6 +267,17 @@ export async function createStaffFromRental(input, rentalRequestId) {
         : await tx.staff.create({ data: { ...staffData, userId } });
 
       // ── Create Contract (always FIXED_RENT — mandatory for all staff) ──
+      // A rental request usually converts an existing CUSTOMER account into a
+      // staff one — exactly the case where the number already sat on the other
+      // row, or is about to be needed there.
+      await syncAccountVatNumber(tx, {
+        userId,
+        vatNumber: vatCheck.vatNumber,
+        validatedAt: vatCheck.validatedAt,
+        viesName: vatCheck.name,
+        viesAddress: vatCheck.address,
+      });
+
       const newContract = await tx.contract.create({
         data: {
           staffId: newStaff.id,

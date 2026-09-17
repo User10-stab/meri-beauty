@@ -7,6 +7,7 @@ import Button from "@/components/ui/Button";
 import { createActivity, updateActivity } from "@/actions/workshops/create-activity";
 import { useTranslations } from "next-intl";
 import { optimizeImage, MAX_INPUT_BYTES, MAX_OUTPUT_BYTES } from "@/lib/imageOptimization";
+import { toBrusselsInputValue } from "@/lib/datetime/brussels-input";
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -186,8 +187,8 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
         language: activity.language ?? "Français",
         animatorId: activity.animatorId ?? "",
         status: activity.status ?? "DRAFT",
-        startDate: firstSession?.startDate ? new Date(firstSession.startDate).toISOString().slice(0, 16) : "",
-        endDate: firstSession?.endDate ? new Date(firstSession.endDate).toISOString().slice(0, 16) : "",
+        startDate: firstSession?.startDate ? toBrusselsInputValue(firstSession.startDate) : "",
+        endDate: firstSession?.endDate ? toBrusselsInputValue(firstSession.endDate) : "",
         allowMultipleSessions: activity.allowMultipleSessions ?? false,
         depositPercentage: activity.depositPercentage ?? 50,
       });
@@ -195,12 +196,12 @@ export function CreateActivityModal({ open, onClose, onCreated, activity, animat
         setSessions(
           activity.sessions.map((s) => ({
             id: s.id,
-            startDate: s.startDate ? new Date(s.startDate).toISOString().slice(0, 16) : "",
-            endDate: s.endDate ? new Date(s.endDate).toISOString().slice(0, 16) : "",
+            startDate: s.startDate ? toBrusselsInputValue(s.startDate) : "",
+            endDate: s.endDate ? toBrusselsInputValue(s.endDate) : "",
             capacity: String(s.capacity ?? ""),
             animatorId: s.animatorId ?? "",
             registrationDeadline: s.registrationDeadline
-              ? new Date(s.registrationDeadline).toISOString().slice(0, 16)
+              ? toBrusselsInputValue(s.registrationDeadline)
               : "",
           }))
         );

@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
+import { parseBrusselsInputValue } from "@/lib/datetime/brussels-input";
 
 const sessionSchema = z.object({
   id: z.string().optional(),
@@ -163,12 +164,12 @@ export async function createFormation(input) {
           sessions.length > 0
             ? {
                 create: resolvedSessions.map((s) => ({
-                  startDate: new Date(s.startDate),
-                  endDate: s.endDate ? new Date(s.endDate) : null,
+                  startDate: parseBrusselsInputValue(s.startDate),
+                  endDate: parseBrusselsInputValue(s.endDate),
                   capacity: s.capacity,
                   animatorId: s.animatorId || null,
                   registrationDeadline: s.registrationDeadline
-                    ? new Date(s.registrationDeadline)
+                    ? parseBrusselsInputValue(s.registrationDeadline)
                     : null,
                 })),
               }
@@ -296,12 +297,12 @@ export async function updateFormation(input) {
             create: resolvedSessions
               .filter((s) => !s.id)
               .map((s) => ({
-                startDate: new Date(s.startDate),
-                endDate: s.endDate ? new Date(s.endDate) : null,
+                startDate: parseBrusselsInputValue(s.startDate),
+                endDate: parseBrusselsInputValue(s.endDate),
                 capacity: s.capacity,
                 animatorId: s.animatorId || null,
                 registrationDeadline: s.registrationDeadline
-                  ? new Date(s.registrationDeadline)
+                  ? parseBrusselsInputValue(s.registrationDeadline)
                   : null,
               })),
           },
@@ -314,12 +315,12 @@ export async function updateFormation(input) {
           await tx.formationSession.update({
             where: { id: s.id },
             data: {
-              startDate: new Date(s.startDate),
-              endDate: s.endDate ? new Date(s.endDate) : null,
+              startDate: parseBrusselsInputValue(s.startDate),
+              endDate: parseBrusselsInputValue(s.endDate),
               capacity: s.capacity,
               animatorId: s.animatorId || null,
               registrationDeadline: s.registrationDeadline
-                ? new Date(s.registrationDeadline)
+                ? parseBrusselsInputValue(s.registrationDeadline)
                 : null,
             },
           });

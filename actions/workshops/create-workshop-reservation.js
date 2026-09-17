@@ -16,6 +16,7 @@ import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-works
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
+import { RELANCE_KINDS, buildActivityCheckoutParams } from "@/lib/reservations/activity-payment-relance";
 import {
   buildWorkshopReservationCreatedNotification,
   createNotificationsBulk,
@@ -93,8 +94,6 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
       };
     }
 
-    const { session } = reservation;
-    const activity = session.workshop;
     const isFullPayment = Number(reservation.balanceDue) === 0;
     const chargeAmount = isFullPayment ? Number(reservation.totalPrice) : Number(reservation.depositAmount);
     const workshopAction = isFullPayment ? "full_payment" : "deposit";
@@ -115,41 +114,9 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
       return { success: true, url: null, freeReservation: true, reservationId: reservation.id };
     }
 
-    const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact", "ideal"],
-      line_items: [
-        {
-          price_data: {
-            currency: "eur",
-            product_data: {
-              name: `${isFullPayment ? "Paiement total" : "Acompte"} - ${activity.title}`,
-              description: `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`,
-            },
-            unit_amount: Math.round(chargeAmount * 100),
-          },
-          quantity: 1,
-        },
-      ],
-      mode: "payment",
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation-atelier/succes?reservation_id=${reservation.id}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation-atelier?canceled=true&activity=${activity.id}&session=${session.id}`,
-      customer_email: reservation.customer.email,
-      metadata: {
-        kind: "workshop",
-        workshopAction,
-        reservationId: reservation.id,
-        sessionId: session.id,
-        activityId: activity.id,
-        seatsCount: String(reservation.seatsCount),
-        totalPrice: String(reservation.totalPrice),
-        depositAmount: String(reservation.depositAmount),
-        balanceDue: String(reservation.balanceDue),
-        customerUserId: reservation.customer.id,
-      },
-      payment_intent_data: {
-        metadata: { kind: "workshop", workshopAction, reservationId: reservation.id },
-      },
-    });
+    const stripeSession = await stripe.checkout.sessions.create(
+      buildActivityCheckoutParams(RELANCE_KINDS.WORKSHOP, reservation)
+    );
 
     return { success: true, url: stripeSession.url, reservationId: reservation.id };
   } catch (error) {

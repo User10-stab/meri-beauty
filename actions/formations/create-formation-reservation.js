@@ -16,6 +16,7 @@ import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-for
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
+import { RELANCE_KINDS, buildActivityCheckoutParams } from "@/lib/reservations/activity-payment-relance";
 import {
   buildFormationReservationCreatedNotification,
   createNotificationsBulk,
@@ -93,8 +94,6 @@ export async function createFormationReservationCheckoutSession(reservationId, c
       };
     }
 
-    const { session } = reservation;
-    const formation = session.formation;
     const isFullPayment = Number(reservation.balanceDue) === 0;
     const chargeAmount = isFullPayment ? Number(reservation.totalPrice) : Number(reservation.depositAmount);
     const formationAction = isFullPayment ? "full_payment" : "deposit";
@@ -115,44 +114,9 @@ export async function createFormationReservationCheckoutSession(reservationId, c
       return { success: true, url: null, freeReservation: true, reservationId: reservation.id };
     }
 
-    const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact", "ideal"],
-      line_items: [
-        {
-          price_data: {
-            currency: "eur",
-            product_data: {
-              name: `${isFullPayment ? "Paiement total" : "Acompte"} - ${formation.title}`,
-              description:
-                formation.type === "PRIVATE"
-                  ? `Formation individuelle • ${new Date(session.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`
-                  : `${reservation.seatsCount} place${reservation.seatsCount > 1 ? "s" : ""} • ${new Date(session.startDate).toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`,
-            },
-            unit_amount: Math.round(chargeAmount * 100),
-          },
-          quantity: 1,
-        },
-      ],
-      mode: "payment",
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation-formation/succes?reservation_id=${reservation.id}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/reservation-formation?canceled=true&formation=${formation.id}&session=${session.id}`,
-      customer_email: reservation.customer.email,
-      metadata: {
-        kind: "formation",
-        formationAction,
-        reservationId: reservation.id,
-        sessionId: session.id,
-        formationId: formation.id,
-        seatsCount: String(reservation.seatsCount),
-        totalPrice: String(reservation.totalPrice),
-        depositAmount: String(reservation.depositAmount),
-        balanceDue: String(reservation.balanceDue),
-        customerUserId: reservation.customer.id,
-      },
-      payment_intent_data: {
-        metadata: { kind: "formation", formationAction, reservationId: reservation.id },
-      },
-    });
+    const stripeSession = await stripe.checkout.sessions.create(
+      buildActivityCheckoutParams(RELANCE_KINDS.FORMATION, reservation)
+    );
 
     return { success: true, url: stripeSession.url, reservationId: reservation.id };
   } catch (error) {

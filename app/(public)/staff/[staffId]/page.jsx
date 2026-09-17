@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import StaffProfileHero from "@/components/staff-profile/StaffProfileHero";
 import StaffServices from "@/components/staff-profile/StaffServices";
+import StaffViewportLock from "@/components/staff-profile/StaffViewportLock";
 
 async function getStaffProfile(staffId) {
   try {
@@ -157,13 +158,17 @@ export default async function StaffProfilePage({ params }) {
   ];
 
   return (
-    // Standalone two-section layout: the page itself never scrolls
-    // (h-dvh + overflow-hidden). The hero stays fixed while only the
-    // services column scrolls, so there is a single scrollbar.
-    <div className="h-dvh w-full overflow-hidden bg-[#fdf8f0]">
-      <div className="mx-auto flex h-full min-h-0 max-w-[1700px] flex-col overflow-hidden px-4 py-4 sm:px-6 lg:flex-row lg:gap-10 lg:px-10 lg:py-6 xl:gap-14">
+    // Navbar (rendered by the shared public layout) + standalone two-section
+    // layout below it. The content height subtracts the navbar height
+    // (logo h-[52px] + nav py-3 = 76px) so navbar + content fit the viewport
+    // exactly. The page itself never scrolls (see StaffViewportLock): the
+    // hero stays fixed while only the services column scrolls, with no
+    // visible scrollbars anywhere.
+    <div className="h-[calc(100dvh-76px)] w-full overflow-hidden bg-[#fdf8f0]">
+      <StaffViewportLock />
+      <div className="mx-auto flex h-full min-h-0 max-w-[1800px] flex-col overflow-hidden px-4 py-4 sm:px-6 lg:flex-row lg:gap-10 lg:px-10 lg:py-6 xl:gap-14">
         {/* Fixed hero — never scrolls at page level; its own scrollbar is
-            hidden so only the services column shows a scrollbar. */}
+            hidden. */}
         <div className="flex items-center max-h-[44dvh] shrink-0 overflow-hidden lg:sticky lg:top-0 lg:h-full lg:max-h-none lg:w-[500px] lg:overflow-y-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden ">
           <StaffProfileHero
             name={staff.user.fullName}

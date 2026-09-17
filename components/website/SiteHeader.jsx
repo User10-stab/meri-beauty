@@ -122,12 +122,6 @@ export default function Navbar() {
     };
   }, [menuOpen]);
 
-  // Staff profile pages render a standalone layout (fixed hero + scrollable
-  // services) without the site navbar.
-  if (normalizedPath.startsWith("/staff/")) {
-    return null;
-  }
-
   return (
     <header className="sticky top-0 z-50 bg-primary">
       <nav className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 md:px-10 lg:grid lg:grid-cols-[auto_1fr_auto] lg:gap-6 lg:px-14">

@@ -129,9 +129,10 @@ export default function StaffServices({ services, staffId, categories, staffName
               return (
                 <article
                   key={staffService.id}
-                  className="group flex flex-col rounded-2xl border border-[#ede5d8] bg-white p-6 transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.1)] hover:-translate-y-1 hover:border-[#b89664]/30"
+                  className="group flex flex-col justify-between rounded-2xl border border-[#ede5d8] bg-white p-6 transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.1)] hover:-translate-y-1 hover:border-[#b89664]/30"
                 >
-                  {/* Category badge */}
+                 <div>
+                   {/* Category badge */}
                   {service.category?.name && (
                     <span className="mb-3 self-start rounded-full bg-[#fdf8f0] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#b89664]">
                       {service.category.name}
@@ -139,7 +140,7 @@ export default function StaffServices({ services, staffId, categories, staffName
                   )}
 
                   {/* Service name */}
-                  <h3 className="font-display text-xl font-bold leading-tight tracking-tight text-[#2F3A2E] group-hover:text-[#b89664] transition-colors duration-300">
+                  <h3 className="font-display mt-3 text-[21px] font-bold leading-tight tracking-tight text-[#2F3A2E] group-hover:text-[#b89664] transition-colors duration-300">
                     {service.name}
                   </h3>
 
@@ -149,30 +150,33 @@ export default function StaffServices({ services, staffId, categories, staffName
                       {service.description}
                     </p>
                   )}
+                 </div>
 
-                  {/* Duration & Price */}
+                 <div>
+                   {/* Duration & Price */}
                   <div className="mt-4 flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 text-sm text-[#6f6a64]">
+                    <span className="inline-flex items-center gap-2 text-sm text-[#6f6a64] bg-[#fdf8f0] rounded-full px-3 py-2">
                       <Clock size={16} className="text-[#b89664]" />
                       {formatDuration(duration)}
                     </span>
-                    <span className="inline-flex items-center gap-1 text-lg font-bold text-[#2F3A2E]">
+                    <span className="inline-flex items-center gap-1 text-[16px] font-bold text-[#2F3A2E] bg-[#fdf8f0] rounded-full px-3 py-2 ">
                       <Euro size={16} className="text-[#b89664]" />
                       {formatPrice(price)}
                     </span>
                   </div>
 
                   {/* CTA */}
-                  <div className="mt-6">
+                  <div className="mt-4">
                     <button
                       type="button"
                       onClick={() => setQuickBooking({ serviceId: service.id, serviceName: service.name })}
-                      className="group/btn flex w-full items-center justify-between gap-2 rounded-full bg-gradient-to-r from-[#2F3A2E] to-[#1a2419] px-6 py-3 text-sm font-semibold text-white transition-all duration-300 hover:shadow-lg hover:from-[#212a20] hover:to-[#151c14] hover:-translate-y-0.5"
+                      className="group/btn flex w-full items-center justify-between gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white transition-all duration-300 hover:shadow-lg hover:from-[#212a20] hover:to-[#151c14] hover:-translate-y-0.5"
                     >
                       {t("book")}
                       <ArrowRight size={16} className="transition-transform group-hover/btn:translate-x-1" />
                     </button>
                   </div>
+                 </div>
                 </article>
               );
             })}

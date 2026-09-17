@@ -34,8 +34,9 @@ describe.each([
   test("every failed-sale branch (missing/cancelled reservation, underpayment, cancelled concurrently, hold expired/overbooked) flags instead of refunding", () => {
     const flagCalls = src.split("await flagPaymentForManualRefund(session,").length - 1;
     // reservation gone, reservation cancelled, underpayment, cancelled
-    // concurrently, hold-expired-overbooked = 5 sites per file.
-    expect(flagCalls).toBe(5);
+    // concurrently, hold-expired-overbooked, and a second payment landing on
+    // an already-confirmed reservation = 6 sites per file.
+    expect(flagCalls).toBe(6);
     expect(src).not.toContain("refunded: true");
   });
 

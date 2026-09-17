@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
+import { liveSeatFilter } from "@/lib/reservations/session-occupancy";
 
 /**
  * Everything to plot on the dashboard calendar for a given date range:
@@ -79,7 +80,7 @@ export async function getCalendarEvents({ from, to }) {
               capacity: true,
               workshop: { select: { title: true, type: true } },
               animator: { select: { name: true } },
-              reservations: { where: { status: { not: "CANCELLED" } }, select: { seatsCount: true } },
+              reservations: { where: liveSeatFilter(), select: { seatsCount: true } },
             },
             orderBy: { startDate: "asc" },
           }),
@@ -98,7 +99,7 @@ export async function getCalendarEvents({ from, to }) {
               capacity: true,
               formation: { select: { title: true, type: true } },
               animator: { select: { name: true } },
-              reservations: { where: { status: { not: "CANCELLED" } }, select: { seatsCount: true } },
+              reservations: { where: liveSeatFilter(), select: { seatsCount: true } },
             },
             orderBy: { startDate: "asc" },
           }),

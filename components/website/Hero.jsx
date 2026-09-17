@@ -153,12 +153,15 @@ export default async function Hero() {
       </section>
 
       {/* Event/workshop promo — plain strip under the hero on mobile/tablet.
-          On desktop the card lives in the shared right-side stack below so
-          every hero card is separated by the same gap. */}
+          On desktop the card is pinned to the top of the hero, aligned
+          with the staff card column below. */}
       <WorkshopBannerStrip />
+      <div className="absolute right-4 top-8 z-20 hidden w-[250px] sm:right-6 sm:w-[270px] md:right-8 md:w-[290px] lg:right-14 lg:block lg:w-[400px] xl:right-20">
+        <WorkshopBannerStackCard />
+      </div>
 
       {/* ══════════════════════════════════════
-          RIGHT-SIDE FLOATING CARDS (promo + staff + opening hours)
+          RIGHT-SIDE FLOATING CARDS (staff + opening hours)
           Vertically centered on the right side
           of the hero section. A single flex `gap-4` separates every card,
           so the space between the cards is always identical.
@@ -175,8 +178,6 @@ export default async function Hero() {
         }}
       >
         <div className="flex max-h-[calc(92vh-3rem)] flex-col gap-4 overflow-y-auto pr-0.5">
-          {/* ── Promo card (same gap as every other hero card) ── */}
-          <WorkshopBannerStackCard />
           {/* ── Staff list card (unchanged content/logic) ── */}
           <aside
             aria-label={t("staffCardTitle")}
@@ -253,73 +254,7 @@ export default async function Hero() {
       </aside>
 
           {/* ── Opening hours card (restored design/content, compact) ── */}
-          <aside
-            aria-label={t("openingHours")}
-            className="w-full shrink-0 overflow-hidden rounded-2xl bg-white shadow-2xl shadow-black/25"
-          >
-            {/* Address */}
-            <div className="bg-gold px-4 py-3">
-              <div className="flex items-start gap-2">
-                <ClockIcon className="mt-0.5 h-4 w-4 shrink-0 text-white/80" />
-                <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-white">
-                   {t("openingHours")}
-                </p>
-              </div>
-            </div>
-
-            {/* Card Body */}
-            <div className="px-4 py-4">
-              {/* <div className="mb-3 flex items-center gap-2 justify-between">
-                <h2 className="text-[0.95rem] font-bold uppercase leading-[1.1] tracking-tight text-ink">
-                  {t("openingHours")}
-                </h2>
-                <ClockIcon className="mt-0.5 h-5 w-5 text-gold" />
-              </div> */}
-
-              {/* Boutique Section */}
-              <div className="mb-3">
-                <h3 className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-ink">
-                  {t("boutiqueLabel")}
-                </h3>
-                <ul className="flex max-h-[160px] flex-col gap-2 overflow-y-auto pr-1">
-                  {workingDays.length > 0 ? (
-                    workingDays.map((item) => (
-                      <li
-                        key={item.label}
-                        className="border-b border-black/8 pb-2 last:border-0 last:pb-0"
-                      >
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-black/40">
-                          {item.label}
-                        </p>
-                        <p className="mt-0.5 text-[0.9rem] font-light leading-snug text-gold">
-                          {item.hours}
-                        </p>
-                      </li>
-                    ))
-                  ) : (
-                    <li>
-                      <p className="text-sm text-gray-500">
-                        {t("openingHoursUnavailable")}
-                      </p>
-                    </li>
-                  )}
-                </ul>
-              </div>
-
-              {/* Salon Section */}
-              <div className="border-t border-black/8 pt-3">
-                <h3 className="mb-1 text-[11px] font-bold uppercase tracking-[0.12em] text-ink">
-                  {t("salonLabel")}
-                </h3>
-                <p className="text-[0.9rem] font-light leading-snug text-gold">
-                  {t("byAppointment")}
-                </p>
-                <p className="mt-0.5 text-[10px] text-black/50">
-                  {t("hoursByProvider")}
-                </p>
-              </div>
-            </div>
-          </aside>
+         
         </div>
       </div>
     </div>

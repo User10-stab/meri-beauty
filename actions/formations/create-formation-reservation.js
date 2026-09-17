@@ -14,6 +14,7 @@ import { validateCustomerIdentity, validateBillingAddress } from "@/lib/validati
 import { captureWarning } from "@/lib/monitoring";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import { resolvePayeeForFormationSession, payeeCanChargeOnline, payeeCheckoutMetadata, payeeStripeOptions, PAYEE_ONLINE_UNAVAILABLE_MESSAGE } from "@/lib/payments/resolve-payee";
 import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { RELANCE_KINDS, buildActivityCheckoutParams } from "@/lib/reservations/activity-payment-relance";
@@ -87,7 +88,18 @@ export async function createFormationReservationCheckoutSession(reservationId, c
       return { success: false, message: "Le délai de réservation a expiré. Veuillez recommencer." };
     }
 
-    if (!(await isSellerLegalDataComplete())) {
+    const { session } = reservation;
+
+    // Whose money this seat is: the session's animator when she is an
+    // independent (charged on her own Stripe account), otherwise the salon.
+    // Frozen into the Checkout Session's metadata so the webhook attributes
+    // the Payment to the account the charge was actually made on.
+    const payee = await resolvePayeeForFormationSession(prisma, { sessionId: session.id });
+    if (!payeeCanChargeOnline(payee)) {
+      return { success: false, message: PAYEE_ONLINE_UNAVAILABLE_MESSAGE };
+    }
+    // The salon's legal identity only gates a sale the salon invoices.
+    if (!payee.staff && !(await isSellerLegalDataComplete())) {
       return {
         success: false,
         message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
@@ -106,7 +118,7 @@ export async function createFormationReservationCheckoutSession(reservationId, c
     if (chargeAmount <= 0) {
       const syntheticSession = {
         id: `free_formation_${reservation.id}`,
-        metadata: { kind: "formation", formationAction, reservationId: reservation.id },
+        metadata: { kind: "formation", formationAction, reservationId: reservation.id, ...payeeCheckoutMetadata(payee) },
         amount_total: 0,
         payment_intent: null,
       };
@@ -117,7 +129,8 @@ export async function createFormationReservationCheckoutSession(reservationId, c
     let stripeSession;
     try {
       stripeSession = await stripe.checkout.sessions.create(
-        buildActivityCheckoutParams(RELANCE_KINDS.FORMATION, reservation)
+        buildActivityCheckoutParams(RELANCE_KINDS.FORMATION, reservation, { payee }),
+        payeeStripeOptions(payee)
       );
     } catch (error) {
       // No checkout exists, so the client cannot pay this hold — release the

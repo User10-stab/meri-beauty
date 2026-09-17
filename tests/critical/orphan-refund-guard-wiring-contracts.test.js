@@ -27,8 +27,11 @@ describe.each([
     expect(src).not.toContain("refundSession");
   });
 
-  test("takes a plain session argument — no allowAutoRefund option left to thread through", () => {
-    expect(src).toContain(`export async function ${fnName}(session) {`);
+  test("takes the session plus the connected account only — no allowAutoRefund option left to thread through", () => {
+    // stripeAccountId is where the charge lives (an independent animator's
+    // own Stripe account), so a flagged case points at the right dashboard.
+    expect(src).toContain(`export async function ${fnName}(session, { stripeAccountId = null } = {}) {`);
+    expect(src).not.toContain("allowAutoRefund");
   });
 
   test("every failed-sale branch (missing/cancelled reservation, underpayment, cancelled concurrently, hold expired/overbooked) flags instead of refunding", () => {
@@ -84,8 +87,8 @@ describe("reconcileMissedCheckouts calls the activity confirm functions plainly 
 
   test("no allowAutoRefund wiring remains anywhere", () => {
     expect(src).not.toContain("allowAutoRefund");
-    expect(src).toContain("confirmWorkshopReservationPayment(fullSession)");
-    expect(src).toContain("confirmFormationReservationPayment(fullSession)");
+    expect(src).toContain("confirmWorkshopReservationPayment(fullSession, { stripeAccountId })");
+    expect(src).toContain("confirmFormationReservationPayment(fullSession, { stripeAccountId })");
   });
 
   test("a flagged-for-review outcome is still counted separately from a genuine confirmation", () => {

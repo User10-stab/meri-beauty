@@ -22,6 +22,7 @@ import { hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { OCCUPANCY_KINDS, liveSeatFilter, sessionOccupancy } from "@/lib/reservations/session-occupancy";
+import { resolvePayeeForStaff, resolvePayeeForWorkshopSession, payeeCanChargeOnline, payeeCheckoutMetadata, payeeStripeOptions, PAYEE_ONLINE_UNAVAILABLE_MESSAGE } from "@/lib/payments/resolve-payee";
 
 // The 10% charge remains limited to seat-count changes. Moving a customer to
 // another session/activity is an admin correction and is free of charge.
@@ -47,6 +48,7 @@ function transferErrorMessage(code) {
     TARGET_SESSION_FULL: "La séance cible n'a pas assez de places disponibles.",
     PAYMENT_NOT_FOUND: "Aucun paiement fiable n'est lié à cette réservation.",
     PAYMENT_UNDER_REFUND: "Un remboursement est déjà en cours ou enregistré pour ce paiement.",
+    TRANSFER_PAYEE_MISMATCH: "La séance cible est animée par une autre personne : l'argent déjà encaissé est sur le compte Stripe de l'animatrice d'origine et ne peut pas la suivre. Annulez et remboursez la réservation, puis réservez la nouvelle séance.",
     LEGAL_DOCUMENT_EXISTS: "Cette réservation a déjà été corrigée par une note de crédit. Traitez-la manuellement avant de transférer la réservation.",
     PRICE_DECISION_REQUIRED: "Choisissez si la différence de prix doit être ajoutée au solde ou offerte au client.",
     INVALID_PRICE_DECISION: "La décision de prix sélectionnée n'est pas valable.",
@@ -475,6 +477,12 @@ export async function changeReservationSession(reservationId, newSessionId, { re
 
       const payment = reservation.payment;
       if (!payment) throw new Error("PAYMENT_NOT_FOUND");
+      // A paid booking never changes owner: its money sits on the current
+      // payee's Stripe account, and this action moves no money.
+      const targetPayee = await resolvePayeeForWorkshopSession(tx, { sessionId: target.id });
+      if ((targetPayee.payeeStaffId ?? null) !== (payment.payeeStaffId ?? null)) {
+        throw new Error("TRANSFER_PAYEE_MISMATCH");
+      }
       if (
         payment.transactions.length > 0 ||
         payment.refundOperations.length > 0 ||
@@ -723,13 +731,19 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
 
     const reservation = await prisma.workshopReservation.findUnique({
       where: { id: reservationId },
-      include: { session: { include: { workshop: true } }, customer: true },
+      include: { session: { include: { workshop: true } }, customer: true, payment: { select: { payeeStaffId: true } } },
     });
     if (!reservation) {
       return { success: false, message: "Réservation introuvable." };
     }
     if (reservation.status !== "CONFIRMED") {
       return { success: false, message: "Seule une réservation confirmée peut être modifiée." };
+    }
+    // The fee is charged to whoever owns the booking — the account the
+    // original seats were paid into — never re-derived from the session.
+    const payee = await resolvePayeeForStaff(prisma, { staffId: reservation.payment?.payeeStaffId ?? null });
+    if (!payeeCanChargeOnline(payee)) {
+      return { success: false, message: PAYEE_ONLINE_UNAVAILABLE_MESSAGE };
     }
     if (seats === reservation.seatsCount) {
       return { success: false, message: "Cette réservation a déjà ce nombre de places." };
@@ -772,7 +786,9 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
     const amountToCharge = changeFeeAmount + priceDelta;
 
     const stripeSession = await stripe.checkout.sessions.create({
-      payment_method_types: ["card", "bancontact"],
+      // A connected account serves its own enabled methods; the salon keeps
+      // its verified list.
+      ...(payee.staff ? {} : { payment_method_types: ["card", "bancontact"] }),
       line_items: [
         {
           price_data: {
@@ -800,15 +816,17 @@ export async function changeReservationSeats(reservationId, newSeatsCount) {
         changeFeeAmount: String(changeFeeAmount),
         newTotalPrice: String(newTotalPrice),
         newDepositAmount: String(newDepositAmount),
+        ...payeeCheckoutMetadata(payee),
       },
       payment_intent_data: {
         metadata: {
           kind: "workshop",
           workshopAction: "seats_change_fee",
           reservationId: reservation.id,
+          ...payeeCheckoutMetadata(payee),
         },
       },
-    });
+    }, payeeStripeOptions(payee));
 
     return {
       success: true,

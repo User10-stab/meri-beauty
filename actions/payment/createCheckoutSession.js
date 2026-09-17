@@ -556,7 +556,7 @@ export async function createCheckoutSession(reservationData) {
 
       await prisma.payment.update({
         where: { id: payment.id },
-        data: { transactionReference: session.id },
+        data: { transactionReference: session.id, stripeAccountId: staff.stripeAccountId },
       });
 
       return {

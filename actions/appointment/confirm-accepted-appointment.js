@@ -162,7 +162,7 @@ export async function confirmAcceptedAppointment(appointmentId, paymentMethod, c
 
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { transactionReference: checkoutSession.id },
+      data: { transactionReference: checkoutSession.id, stripeAccountId: staff.stripeAccountId },
     });
 
     return { success: true, url: checkoutSession.url, confirmed: false };

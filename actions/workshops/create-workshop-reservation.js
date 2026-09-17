@@ -14,6 +14,7 @@ import { validateCustomerIdentity, validateBillingAddress } from "@/lib/validati
 import { captureWarning } from "@/lib/monitoring";
 import { confirmWorkshopReservationPayment } from "@/lib/workshops/fulfill-workshop-reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
+import { resolvePayeeForWorkshopSession, payeeCanChargeOnline, payeeCheckoutMetadata, payeeStripeOptions, PAYEE_ONLINE_UNAVAILABLE_MESSAGE } from "@/lib/payments/resolve-payee";
 import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { RELANCE_KINDS, buildActivityCheckoutParams } from "@/lib/reservations/activity-payment-relance";
@@ -87,7 +88,18 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
       return { success: false, message: "Le délai de réservation a expiré. Veuillez recommencer." };
     }
 
-    if (!(await isSellerLegalDataComplete())) {
+    const { session } = reservation;
+
+    // Whose money this seat is: the session's animator when she is an
+    // independent (charged on her own Stripe account), otherwise the salon.
+    // Frozen into the Checkout Session's metadata so the webhook attributes
+    // the Payment to the account the charge was actually made on.
+    const payee = await resolvePayeeForWorkshopSession(prisma, { sessionId: session.id });
+    if (!payeeCanChargeOnline(payee)) {
+      return { success: false, message: PAYEE_ONLINE_UNAVAILABLE_MESSAGE };
+    }
+    // The salon's legal identity only gates a sale the salon invoices.
+    if (!payee.staff && !(await isSellerLegalDataComplete())) {
       return {
         success: false,
         message: "Le paiement en ligne n'est pas disponible pour le moment. Merci de réessayer plus tard ou de nous contacter.",
@@ -106,7 +118,7 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
     if (chargeAmount <= 0) {
       const syntheticSession = {
         id: `free_workshop_${reservation.id}`,
-        metadata: { kind: "workshop", workshopAction, reservationId: reservation.id },
+        metadata: { kind: "workshop", workshopAction, reservationId: reservation.id, ...payeeCheckoutMetadata(payee) },
         amount_total: 0,
         payment_intent: null,
       };
@@ -117,7 +129,8 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
     let stripeSession;
     try {
       stripeSession = await stripe.checkout.sessions.create(
-        buildActivityCheckoutParams(RELANCE_KINDS.WORKSHOP, reservation)
+        buildActivityCheckoutParams(RELANCE_KINDS.WORKSHOP, reservation, { payee }),
+        payeeStripeOptions(payee)
       );
     } catch (error) {
       // No checkout exists, so the client cannot pay this hold — release the

@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { parseBrusselsInputValue } from "@/lib/datetime/brussels-input";
+import { sessionsBlockedByPayeeChange, PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE } from "@/lib/payments/resolve-payee";
 
 const sessionSchema = z.object({
   id: z.string().optional(),
@@ -233,6 +234,27 @@ export async function updateActivity(input) {
         };
       }
 
+    }
+
+    // Changing who animates a session changes whose Stripe account its seats
+    // are charged to — refused once a seat is paid to someone else.
+    const nextActivityAnimatorId = animatorId || null;
+    const blockedSessions = await sessionsBlockedByPayeeChange(
+      prisma,
+      "WORKSHOP",
+      existingActivity.sessions
+        .filter((existing) => incomingIds.includes(existing.id))
+        .map((existing) => {
+          const incoming = sessions.find((s) => s.id === existing.id);
+          return {
+            sessionId: existing.id,
+            currentAnimatorId: existing.animatorId ?? existingActivity.animatorId ?? null,
+            nextAnimatorId: incoming.animatorId || nextActivityAnimatorId,
+          };
+        })
+    );
+    if (blockedSessions.length > 0) {
+      return { success: false, message: PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE };
     }
 
     const updated = await prisma.$transaction(async (tx) => {

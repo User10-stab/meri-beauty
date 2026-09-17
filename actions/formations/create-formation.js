@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { parseBrusselsInputValue } from "@/lib/datetime/brussels-input";
+import { sessionsBlockedByPayeeChange, PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE } from "@/lib/payments/resolve-payee";
 
 const sessionSchema = z.object({
   id: z.string().optional(),
@@ -306,6 +307,26 @@ export async function updateFormation(input) {
               : "Impossible de retirer des sessions qui ont déjà des réservations. Annulez d'abord ces réservations, ou laissez-les dans le formulaire.",
         };
       }
+    }
+
+    // Changing who animates a session changes whose Stripe account its seats
+    // are charged to — refused once a seat is paid to someone else.
+    const blockedSessions = await sessionsBlockedByPayeeChange(
+      prisma,
+      "FORMATION",
+      resolvedSessions
+        .filter((s) => s.id)
+        .map((s) => {
+          const existing = existingSessionById.get(s.id);
+          return {
+            sessionId: s.id,
+            currentAnimatorId: existing.animatorId ?? existingFormation.animatorId ?? null,
+            nextAnimatorId: s.animatorId || animatorId || null,
+          };
+        })
+    );
+    if (blockedSessions.length > 0) {
+      return { success: false, message: PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE };
     }
 
     const updated = await prisma.$transaction(async (tx) => {

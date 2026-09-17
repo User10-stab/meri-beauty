@@ -21,6 +21,7 @@ import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { formationSessionChangeEmail } from "@/lib/email-templates";
 import { OCCUPANCY_KINDS, liveSeatFilter, sessionOccupancy } from "@/lib/reservations/session-occupancy";
+import { resolvePayeeForFormationSession } from "@/lib/payments/resolve-payee";
 
 // The transfer is a free admin correction — see changeFormationReservationSession.
 const TRANSFER_PRICE_DECISIONS = {
@@ -43,6 +44,7 @@ function transferErrorMessage(code) {
     TARGET_SESSION_FULL: "La séance cible n'a pas assez de places disponibles.",
     PAYMENT_NOT_FOUND: "Aucun paiement fiable n'est lié à cette réservation.",
     PAYMENT_UNDER_REFUND: "Un remboursement est déjà en cours ou enregistré pour ce paiement.",
+    TRANSFER_PAYEE_MISMATCH: "La séance cible est animée par une autre personne : l'argent déjà encaissé est sur le compte Stripe de l'animatrice d'origine et ne peut pas la suivre. Annulez et remboursez la réservation, puis réservez la nouvelle séance.",
     LEGAL_DOCUMENT_EXISTS: "Cette réservation a déjà été corrigée par une note de crédit. Traitez-la manuellement avant de transférer la réservation.",
     PRICE_DECISION_REQUIRED: "Choisissez si la différence de prix doit être ajoutée au solde ou offerte au client.",
     INVALID_PRICE_DECISION: "La décision de prix sélectionnée n'est pas valable.",
@@ -462,6 +464,12 @@ export async function changeFormationReservationSession(reservationId, newSessio
 
       const payment = reservation.payment;
       if (!payment) throw new Error("PAYMENT_NOT_FOUND");
+      // A paid booking never changes owner: its money sits on the current
+      // payee's Stripe account, and this action moves no money.
+      const targetPayee = await resolvePayeeForFormationSession(tx, { sessionId: target.id });
+      if ((targetPayee.payeeStaffId ?? null) !== (payment.payeeStaffId ?? null)) {
+        throw new Error("TRANSFER_PAYEE_MISMATCH");
+      }
       if (
         payment.transactions.length > 0 ||
         payment.refundOperations.length > 0 ||

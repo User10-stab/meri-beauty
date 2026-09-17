@@ -457,7 +457,7 @@ export async function createManualAppointment(input) {
 
       await prisma.payment.update({
         where: { id: payment.id },
-        data: { transactionReference: checkoutSession.id },
+        data: { transactionReference: checkoutSession.id, stripeAccountId: staffService.staff.stripeAccountId },
       });
 
       const paymentUrl = checkoutSession.url;

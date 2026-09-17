@@ -299,15 +299,18 @@ export async function POST(req) {
       // Transaction against the existing one. Anything else is the initial
       // deposit/full-payment booking confirmation.
       const workshopAction = session.metadata?.workshopAction;
+      // event.account: the independent animator's connected account when the
+      // seat was charged there (null = the platform account).
+      const stripeAccountId = event.account ?? null;
       if (workshopAction === "session_change_fee") {
-        result = await applyWorkshopSessionChangeFee(session, session.metadata);
+        result = await applyWorkshopSessionChangeFee(session, session.metadata, stripeAccountId);
       } else if (workshopAction === "seats_change_fee") {
-        result = await applyWorkshopSeatsChangeFee(session, session.metadata);
+        result = await applyWorkshopSeatsChangeFee(session, session.metadata, stripeAccountId);
       } else {
-        result = await confirmWorkshopReservationPayment(session);
+        result = await confirmWorkshopReservationPayment(session, { stripeAccountId });
       }
     } else if (session.metadata?.kind === "formation") {
-      result = await confirmFormationReservationPayment(session);
+      result = await confirmFormationReservationPayment(session, { stripeAccountId: event.account ?? null });
     } else {
       result = await processAppointmentCheckoutSession(session, event.account ?? null);
     }
@@ -1478,7 +1481,7 @@ async function notifyAppointmentPaymentFailed({ paymentId, appointmentId, failed
 // so there's exactly one implementation instead of two that can drift apart.
 
 /** Applies an admin-mediated session change once its 10% fee has cleared. */
-async function applyWorkshopSessionChangeFee(session, meta) {
+async function applyWorkshopSessionChangeFee(session, meta, stripeAccountId = null) {
   const { reservationId, newSessionId } = meta;
 
   if (!reservationId || !newSessionId) {
@@ -1503,7 +1506,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
 
   if (!reservation) {
     console.error("[stripe-webhook] WorkshopReservation gone for session change, flagging for manual refund:", session.id);
-    await flagPaymentForManualRefund(session, "réservation introuvable (frais de changement de session)");
+    await flagPaymentForManualRefund(session, "réservation introuvable (frais de changement de session)", { stripeAccountId });
     return { received: true, refunded: false, flaggedForReview: true, reason: "reservation deleted" };
   }
 
@@ -1512,7 +1515,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
     // outstanding — the salon can't honor a session change on a booking
     // that no longer exists, same as the main reservation-confirmation path.
     console.warn("[stripe-webhook] Reservation cancelled before session-change fee cleared, flagging for manual refund:", session.id);
-    await flagPaymentForManualRefund(session, "réservation annulée (frais de changement de session)");
+    await flagPaymentForManualRefund(session, "réservation annulée (frais de changement de session)", { stripeAccountId });
     return { received: true, refunded: false, flaggedForReview: true, reason: "reservation cancelled" };
   }
 
@@ -1537,7 +1540,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
   });
   if (directTransferAfterLinkCreation) {
     console.warn("[stripe-webhook] Stale session-change fee paid after a direct admin transfer:", session.id);
-    await flagPaymentForManualRefund(session, "ancien lien de changement payé après un transfert administratif");
+    await flagPaymentForManualRefund(session, "ancien lien de changement payé après un transfert administratif", { stripeAccountId });
     return { received: true, refunded: false, flaggedForReview: true, reason: "stale session change link" };
   }
 
@@ -1547,7 +1550,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
   });
   if (!newSession) {
     console.error("[stripe-webhook] Target session gone for session change, flagging for manual refund:", session.id);
-    await flagPaymentForManualRefund(session, "session cible introuvable (frais de changement de session)");
+    await flagPaymentForManualRefund(session, "session cible introuvable (frais de changement de session)", { stripeAccountId });
     return { received: true, refunded: false, flaggedForReview: true, reason: "target session deleted" };
   }
 
@@ -1640,7 +1643,7 @@ async function applyWorkshopSessionChangeFee(session, meta) {
 }
 
 /** Applies an admin-mediated seat-count change once its flat 10% fee has cleared. */
-async function applyWorkshopSeatsChangeFee(session, meta) {
+async function applyWorkshopSeatsChangeFee(session, meta, stripeAccountId = null) {
   const { reservationId, newSeatsCount, newTotalPrice, newDepositAmount } = meta;
   const seats = Number(newSeatsCount);
 
@@ -1666,7 +1669,7 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
 
   if (!reservation) {
     console.error("[stripe-webhook] WorkshopReservation gone for seats change, flagging for manual refund:", session.id);
-    await flagPaymentForManualRefund(session, "réservation introuvable (frais de changement de places)");
+    await flagPaymentForManualRefund(session, "réservation introuvable (frais de changement de places)", { stripeAccountId });
     return { received: true, refunded: false, flaggedForReview: true, reason: "reservation deleted" };
   }
 
@@ -1674,7 +1677,7 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
     // The reservation was cancelled while this fee-payment link was still
     // outstanding — same failed-sale safety net as the other webhook paths.
     console.warn("[stripe-webhook] Reservation cancelled before seats-change fee cleared, flagging for manual refund:", session.id);
-    await flagPaymentForManualRefund(session, "réservation annulée (frais de changement de places)");
+    await flagPaymentForManualRefund(session, "réservation annulée (frais de changement de places)", { stripeAccountId });
     return { received: true, refunded: false, flaggedForReview: true, reason: "reservation cancelled" };
   }
 
@@ -1799,7 +1802,7 @@ async function applyWorkshopSeatsChangeFee(session, meta) {
     // increase, and tell the customer why instead of leaving them guessing
     // why their card was charged then refunded.
     console.warn(`[stripe-webhook] Seats increase for reservation ${reservation.id} would exceed capacity, flagging for manual refund:`, session.id);
-    await flagPaymentForManualRefund(session, "places épuisées entre-temps (frais de changement de places)");
+    await flagPaymentForManualRefund(session, "places épuisées entre-temps (frais de changement de places)", { stripeAccountId });
     sendEmail({
       to: reservation.customer.email,
       subject: `Places non disponibles — ${reservation.session.workshop.title} — Meri Beauty`,

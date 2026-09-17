@@ -426,17 +426,39 @@ export async function createFormationReservation(data) {
     // two persisted Decimal(10,2) values always add back to the total.
     const balanceDue = Number((discountedTotal - depositAmount).toFixed(2));
 
+    // This customer's own still-live hold on this session, if any.
+    const liveHold = await prisma.formationReservation.findFirst({
+      where: { sessionId, customerId: user.id, status: "PENDING_DEPOSIT", holdExpiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // A verified customer with a payment link already in her inbox must not be
+    // handed a second one: both links stay payable, and paying both charges
+    // her twice. Refusing is the only safe answer here — reusing the same
+    // reservation would leave two live Stripe sessions pointing at it, and the
+    // second payment then lands on the "already CONFIRMED" branch of
+    // lib/formations/fulfill-formation-reservation-payment.js, which treats it
+    // as a redelivered webhook and swallows it with no refund flag at all.
+    // Until 17/09/2026 nothing stopped this: a place taken by an unpaid
+    // booking used to make the session look full, which hid the problem, and
+    // the paid-only rule shipped that day removed that accidental guard.
+    if (liveHold && user.emailVerified) {
+      return {
+        success: false,
+        message:
+          "Vous avez déjà une réservation en attente de paiement pour cette session. " +
+          "Utilisez le lien de paiement reçu par email plutôt que d'en créer une seconde, " +
+          "sinon vous risquez d'être débité(e) deux fois. Contactez-nous si vous ne le retrouvez pas.",
+      };
+    }
+
     // An unverified customer (brand new, or a previous guest checkout that
     // was never confirmed) reuses their still-live hold on this session
     // instead of stacking a second one — otherwise resubmitting the form
-    // before confirming would lock a seat twice.
-    let reservation = null;
-    if (!user.emailVerified) {
-      reservation = await prisma.formationReservation.findFirst({
-        where: { sessionId, customerId: user.id, status: "PENDING_DEPOSIT", holdExpiresAt: { gt: new Date() } },
-        orderBy: { createdAt: "desc" },
-      });
-    }
+    // before confirming would lock a seat twice. Safe for them precisely
+    // because they never reached Stripe: the hold above was created without a
+    // checkout session, so reuse cannot leave two payable links behind.
+    let reservation = user.emailVerified ? null : liveHold;
 
     if (!reservation) {
       // Rate-limited only for a genuinely new hold — reusing a live one

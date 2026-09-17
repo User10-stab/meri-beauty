@@ -114,9 +114,22 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
       return { success: true, url: null, freeReservation: true, reservationId: reservation.id };
     }
 
-    const stripeSession = await stripe.checkout.sessions.create(
-      buildActivityCheckoutParams(RELANCE_KINDS.WORKSHOP, reservation)
-    );
+    let stripeSession;
+    try {
+      stripeSession = await stripe.checkout.sessions.create(
+        buildActivityCheckoutParams(RELANCE_KINDS.WORKSHOP, reservation)
+      );
+    } catch (error) {
+      // No checkout exists, so the client cannot pay this hold — release the
+      // seat now instead of leaving it looking booked until the hold lapses.
+      await prisma.workshopReservation
+        .updateMany({
+          where: { id: reservation.id, status: "PENDING_DEPOSIT", payment: { is: null } },
+          data: { status: "CANCELLED", cancelledAt: new Date(), holdExpiresAt: new Date() },
+        })
+        .catch((releaseError) => console.error("[checkout] failed to release unpaid hold", reservation.id, releaseError));
+      throw error;
+    }
 
     return { success: true, url: stripeSession.url, reservationId: reservation.id };
   } catch (error) {

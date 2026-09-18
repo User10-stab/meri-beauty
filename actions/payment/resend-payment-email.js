@@ -138,7 +138,7 @@ export async function resendPaymentEmail(appointmentId) {
     // ── Update payment reference ────────────────────────────────────────────
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { transactionReference: checkoutSession.id },
+      data: { transactionReference: checkoutSession.id, stripeAccountId: staff.stripeAccountId },
     });
 
     // ── Send payment email ──────────────────────────────────────────────────

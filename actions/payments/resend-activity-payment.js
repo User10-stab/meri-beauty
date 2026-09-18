@@ -12,6 +12,12 @@ import { authorizeActivityReservationOperation } from "@/lib/activity-reservatio
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import {
+  resolvePayeeForActivitySession,
+  payeeCanChargeOnline,
+  payeeStripeOptions,
+  PAYEE_ONLINE_UNAVAILABLE_MESSAGE,
+} from "@/lib/payments/resolve-payee";
+import {
   RELANCE_CHECKOUT_TTL_MS,
   RELANCE_HOLD_TTL_MS,
   RELANCE_KINDS,
@@ -61,10 +67,16 @@ function formatSessionDate(date) {
  * Payment row to hold a session id before the payment clears, so Stripe is
  * the only place to find the client's earlier links.
  */
-async function listReservationCheckoutSessions(metadataKind, reservation) {
+async function listReservationCheckoutSessions(metadataKind, reservation, stripeOptions) {
   const matches = [];
   const createdSince = Math.floor(new Date(reservation.createdAt).getTime() / 1000) - 60;
-  for await (const checkoutSession of stripe.checkout.sessions.list({ created: { gte: createdSince }, limit: 100 })) {
+  // An independent's seat is a direct charge on her own account, and the
+  // platform cannot see those sessions at all — listing without her account
+  // would find nothing and happily mint a SECOND payable link.
+  for await (const checkoutSession of stripe.checkout.sessions.list(
+    { created: { gte: createdSince }, limit: 100 },
+    stripeOptions
+  )) {
     if (checkoutSession.metadata?.kind === metadataKind && checkoutSession.metadata?.reservationId === reservation.id) {
       matches.push(checkoutSession);
     }
@@ -91,6 +103,9 @@ export async function resendActivityReservationPayment({ kind, id } = {}) {
 
   let newCheckoutSession = null;
   let seatHeld = false;
+  // Hoisted: the catch below expires the unused session, and it has to do
+  // that on the account the session was created on.
+  let stripeOptions;
   try {
     const session = await auth();
     const access = await authorizeActivityReservationOperation({
@@ -122,14 +137,22 @@ export async function resendActivityReservationPayment({ kind, id } = {}) {
     if (!reservation.customer?.email) {
       return { success: false, message: "Ce client n'a pas d'adresse e-mail." };
     }
-    if (!(await isSellerLegalDataComplete())) {
+    // Whose money this seat is — the same answer the original booking froze,
+    // so a relance never moves a charge from one Stripe account to another.
+    const payee = await resolvePayeeForActivitySession(prisma, { kind, sessionId: reservation.sessionId });
+    if (!payeeCanChargeOnline(payee)) {
+      return { success: false, message: PAYEE_ONLINE_UNAVAILABLE_MESSAGE };
+    }
+    stripeOptions = payeeStripeOptions(payee);
+    // The salon's legal identity only gates a sale the salon invoices.
+    if (!payee.staff && !(await isSellerLegalDataComplete())) {
       return { success: false, message: "Le paiement en ligne n'est pas disponible pour le moment." };
     }
 
     // A client who already paid — or whose bank payment is still processing —
     // must never receive a second link. Earlier links that are still open are
     // closed, so only the new one can be paid.
-    const earlierSessions = await listReservationCheckoutSessions(config.metadataKind, reservation);
+    const earlierSessions = await listReservationCheckoutSessions(config.metadataKind, reservation, stripeOptions);
     if (earlierSessions.some((s) => s.status === "complete")) {
       return {
         success: false,
@@ -137,13 +160,20 @@ export async function resendActivityReservationPayment({ kind, id } = {}) {
       };
     }
     for (const earlier of earlierSessions) {
-      if (earlier.status === "open") await stripe.checkout.sessions.expire(earlier.id);
+      // expire(id, params, options) — the request options are the THIRD
+      // argument. Passed second, `{ stripeAccount }` is sent as a body field
+      // and Stripe answers "Received unknown parameter: stripeAccount", which
+      // threw the whole relance. It only ever bit an independent's booking:
+      // payeeStripeOptions() returns undefined for the salon, and
+      // expire(id, undefined) is perfectly valid.
+      if (earlier.status === "open") await stripe.checkout.sessions.expire(earlier.id, {}, stripeOptions);
     }
 
     const now = Date.now();
     const holdExpiresAt = new Date(now + RELANCE_HOLD_TTL_MS);
     newCheckoutSession = await stripe.checkout.sessions.create(
-      buildActivityCheckoutParams(kind, reservation, { expiresAt: new Date(now + RELANCE_CHECKOUT_TTL_MS) })
+      buildActivityCheckoutParams(kind, reservation, { expiresAt: new Date(now + RELANCE_CHECKOUT_TTL_MS), payee }),
+      stripeOptions
     );
 
     // Seat back on hold, atomically against capacity — the same session lock
@@ -211,7 +241,7 @@ export async function resendActivityReservationPayment({ kind, id } = {}) {
     // The new link must not stay payable for a booking that was not put back
     // on hold.
     if (newCheckoutSession && !seatHeld) {
-      await stripe.checkout.sessions.expire(newCheckoutSession.id).catch((expireError) =>
+      await stripe.checkout.sessions.expire(newCheckoutSession.id, {}, stripeOptions).catch((expireError) =>
         console.error("[resendActivityReservationPayment] could not expire unused session:", expireError)
       );
     }

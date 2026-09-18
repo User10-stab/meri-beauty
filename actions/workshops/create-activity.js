@@ -235,6 +235,12 @@ export async function updateActivity(input) {
 
     }
 
+    // No payee guard here, unlike formations: an atelier's money is the
+    // salon's whoever animates it (see resolvePayeeForWorkshopSession), so
+    // changing the animator can never strand a paid seat on someone else's
+    // Stripe account. Re-adding one would refuse ordinary edits for a
+    // reason that no longer exists.
+
     const updated = await prisma.$transaction(async (tx) => {
       if (idsToDelete.length > 0) {
         await tx.workshopSession.deleteMany({ where: { id: { in: idsToDelete } } });

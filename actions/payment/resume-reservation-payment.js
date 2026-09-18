@@ -209,7 +209,7 @@ export async function resumeReservationPayment(paymentId) {
     // via the new session ID.
     await prisma.payment.update({
       where: { id: payment.id },
-      data:  { transactionReference: checkoutSession.id },
+      data:  { transactionReference: checkoutSession.id, stripeAccountId: staff.stripeAccountId },
     });
 
     return {

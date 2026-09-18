@@ -57,13 +57,13 @@ export const metadata = {
     siteName: "Meri Beauty",
     title: "Meri Beauty — Salon de beauté à Jette, Bruxelles",
     description: SITE_DESCRIPTION,
-    images: [{ url: "/Images/hero.webp" }],
+    images: [{ url: "/Images/og-default.jpg", width: 1200, height: 630, alt: "Meri Beauty — salon de beauté à Jette, Bruxelles" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "Meri Beauty — Salon de beauté à Jette, Bruxelles",
     description: SITE_DESCRIPTION,
-    images: ["/Images/hero.webp"],
+    images: ["/Images/og-default.jpg"],
   },
 };
 

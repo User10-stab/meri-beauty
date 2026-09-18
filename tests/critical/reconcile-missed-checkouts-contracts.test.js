@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  prisma: { payment: { findFirst: vi.fn() }, notification: { findFirst: vi.fn() } },
+  prisma: { payment: { findFirst: vi.fn() }, notification: { findFirst: vi.fn() }, staff: { findMany: vi.fn() } },
   stripe: { checkout: { sessions: { list: vi.fn(), retrieve: vi.fn() } } },
   isForeignCheckoutSession: vi.fn(() => false),
   fulfillOrderPayment: vi.fn(),
@@ -50,6 +50,8 @@ beforeEach(() => {
   mocks.isForeignCheckoutSession.mockReturnValue(false);
   mocks.prisma.payment.findFirst.mockResolvedValue(null);
   mocks.prisma.notification.findFirst.mockResolvedValue(null);
+  // No connected account by default: only the platform account is scanned.
+  mocks.prisma.staff.findMany.mockResolvedValue([]);
   mocks.stripe.checkout.sessions.retrieve.mockImplementation(async (id) => session({ id }));
 });
 
@@ -59,7 +61,9 @@ describe("reconcileMissedCheckouts", () => {
 
     const result = await reconcileMissedCheckouts();
 
-    expect(mocks.confirmWorkshopReservationPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_1" }));
+    expect(mocks.confirmWorkshopReservationPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_1" }), {
+      stripeAccountId: null,
+    });
     expect(result).toEqual({ checked: 1, reconciled: 1, flagged: 0, failures: [] });
   });
 
@@ -72,7 +76,9 @@ describe("reconcileMissedCheckouts", () => {
     await reconcileMissedCheckouts();
 
     expect(mocks.fulfillOrderPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_order" }));
-    expect(mocks.confirmFormationReservationPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_formation" }));
+    expect(mocks.confirmFormationReservationPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_formation" }), {
+      stripeAccountId: null,
+    });
   });
 
   it("counts a flagged-for-review outcome separately from a genuine confirmation — it must never inflate the 'recovered' count", async () => {
@@ -166,7 +172,27 @@ describe("reconcileMissedCheckouts", () => {
 
     expect(result.checked).toBe(2);
     expect(mocks.stripe.checkout.sessions.list).toHaveBeenLastCalledWith(
-      expect.objectContaining({ starting_after: "cs_a" })
+      expect.objectContaining({ starting_after: "cs_a" }),
+      undefined
     );
+  });
+
+  it("also scans each practitioner's connected account, where an independent animator's seats are charged", async () => {
+    mocks.prisma.staff.findMany.mockResolvedValue([{ stripeAccountId: "acct_julie" }]);
+    mocks.stripe.checkout.sessions.list
+      .mockResolvedValueOnce({ data: [], has_more: false })
+      .mockResolvedValueOnce({
+        data: [session({ id: "cs_julie", metadata: { kind: "formation", reservationId: "f1" } })],
+        has_more: false,
+      });
+
+    const result = await reconcileMissedCheckouts();
+
+    expect(mocks.stripe.checkout.sessions.list).toHaveBeenLastCalledWith(expect.any(Object), { stripeAccount: "acct_julie" });
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledWith("cs_julie", {}, { stripeAccount: "acct_julie" });
+    expect(mocks.confirmFormationReservationPayment).toHaveBeenCalledWith(expect.objectContaining({ id: "cs_julie" }), {
+      stripeAccountId: "acct_julie",
+    });
+    expect(result.reconciled).toBe(1);
   });
 });

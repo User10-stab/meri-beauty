@@ -1,7 +1,7 @@
 import { describe, expect, it, test, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { resolveSalonScope, salonPaymentArms } from "@/lib/authorization/salon-scope";
+import { resolveSalonScope, SALON_PAYMENT_WHERE } from "@/lib/authorization/salon-scope";
 import { TILL_CASH_OPERATOR_EMAIL, isTillCashOperator } from "@/lib/authorization";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -108,27 +108,29 @@ describe("TILL_CASH_OPERATOR_EMAIL — the default is load-bearing", () => {
 // to be scoped the same way, from the same module. A screen that quietly
 // keeps summing everyone is the whole problem restated.
 describe("every salon-wide figure resolves its scope from the one module", () => {
-  const CONSUMERS = [
+  const MONEY_CONSUMERS = [
     ["the livre de recettes", "lib/livre-de-recettes/build-recettes-journal.js"],
-    ["Opérations", "actions/dashboard/admin-operations.js"],
     ["the dashboard revenue card", "actions/dashboard/get-dashboard-stats.js"],
     ["Rapports", "actions/dashboard/get-reports-data.js"],
   ];
 
-  test.each(CONSUMERS)("%s imports resolveSalonScope rather than re-deriving it", (_label, path) => {
+  test.each(MONEY_CONSUMERS)("%s keeps the salon's money through SALON_PAYMENT_WHERE", (_label, path) => {
     const code = source(path);
-    expect(code).toMatch(/import \{ resolveSalonScope(, salonPaymentArms)? \} from "@\/lib\/authorization\/salon-scope"/);
-    // The two id spaces are not interchangeable: an Order is stamped with a
-    // User.id, an Appointment with a Staff.id. Every consumer keys on both,
-    // directly or through salonPaymentArms (which does).
-    expect(code.includes("salonPaymentArms(") || (code.includes("salonUserIds") && code.includes("salonStaffIds"))).toBe(true);
+    expect(code).toMatch(/SALON_PAYMENT_WHERE \} from "@\/lib\/authorization\/salon-scope"/);
+    // The old per-source OR arms keyed on ids are gone: ownership is the
+    // payment's frozen payee now, never re-derived per screen.
+    expect(code).not.toContain("salonPaymentArms");
   });
 
-  test("salonPaymentArms keys each source on its own id space", () => {
-    const arms = salonPaymentArms({ salonUserIds: ["u_admin", "u_marie"], salonStaffIds: ["s_marie"] });
-    expect(arms).toContainEqual({ order: { createdByStaffId: { in: ["u_admin", "u_marie"] } } });
-    expect(arms).toContainEqual({ appointment: { staffId: { in: ["s_marie"] } } });
-    expect(arms.filter((a) => a.appointment)).toHaveLength(1);
+  test("Opérations scopes its raw SQL by the same payee, and lists independents from resolve-payee", () => {
+    const code = source("actions/dashboard/admin-operations.js");
+    expect(code).toContain('import { resolveSalonScope } from "@/lib/authorization/salon-scope"');
+    expect(code).toContain("listIndependentPayeeStaffIds(prisma)");
+    expect(code).toContain('."payeeStaffId" IS NULL');
+  });
+
+  test("the salon's payments are exactly the ones with no independent payee", () => {
+    expect(SALON_PAYMENT_WHERE).toEqual({ payeeStaffId: null });
   });
 
   // An independent's money is hers. No salon screen may offer a way to pick

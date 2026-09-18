@@ -8,7 +8,7 @@ import { getLowStockVariants } from "@/actions/boutique/stock";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
-import { resolveSalonScope, salonPaymentArms } from "@/lib/authorization/salon-scope";
+import { SALON_PAYMENT_WHERE } from "@/lib/authorization/salon-scope";
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
 
 // Same candidate statuses as lib/orders/notify-stale-fulfilment.js — the only
@@ -98,19 +98,15 @@ export async function getDashboardStats({ month = null } = {}) {
     ? staffCustomerRelationshipFilters({ staffId: ownStaffId, staffUserId: session.user.id })
     : null;
 
-  // The SALON's revenue, not everyone's. Every practitioner here is legally
-  // independent with her own VAT number, so her takings are never added to
-  // the salon's "chiffre d'affaires". The scope is the ADMIN/OWNER accounts
-  // plus Marie Mercier (whose VAT number is the salon's, despite her STAFF
-  // role), plus the sales nobody rang up — a customer's own online purchase —
-  // and the salon's own ateliers and formations. Revenue is admin-only, so a
-  // non-admin never needs the scope. See lib/authorization/salon-scope.js.
-  const salonScope = isAdmin ? await resolveSalonScope(prisma) : null;
+  // The SALON's revenue, not everyone's. An independent practitioner's sale
+  // (Payment.payeeStaffId set) is hers, under her own VAT number, and is never
+  // added to the salon's "chiffre d'affaires". Revenue is admin-only, so a
+  // non-admin never runs this query. See lib/authorization/salon-scope.js.
   const revenueWhere = {
     isDeleted: false,
     status: { in: REVENUE_STATUSES },
     paidAt: { gte: monthStart, lt: monthEnd },
-    ...(salonScope ? { OR: salonPaymentArms(salonScope) } : {}),
+    ...SALON_PAYMENT_WHERE,
   };
 
   // "Today" only exists in the current month — for another month the card

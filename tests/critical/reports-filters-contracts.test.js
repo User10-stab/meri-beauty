@@ -124,17 +124,18 @@ describe("the report is the salon's alone — independents are never summed in o
   const route = source("app/api/reports/export/route.js");
 
   test("the scope comes from the one salon-scope module", () => {
-    expect(action).toContain("resolveSalonScope, salonPaymentArms");
-    expect(action).toContain("const salonPayment = { OR: salonPaymentArms(scope) };");
+    expect(action).toContain("resolveSalonScope, SALON_PAYMENT_WHERE");
+    expect(action).toContain("const salonPayment = SALON_PAYMENT_WHERE;");
   });
 
-  test("every money query is scoped, on the right key for each table", () => {
-    // Order.createdByStaffId → User.id ; Appointment.staffId → Staff.id.
-    expect(action).toContain("{ createdByStaffId: { in: scope.salonUserIds } }, { createdByStaffId: null }");
-    expect(action).toContain("appointment: { staffId: { in: scope.salonStaffIds } },");
-    expect(action).toContain("order: salonOrder,");
+  test("every money query keeps only the salon's own payments", () => {
+    // Boutique, appointments, ateliers, formations: the payment's frozen
+    // owner, so an atelier an independent animates is hers, not the salon's.
+    expect(action.match(/\.\.\.salonPayment,/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(action.match(/\.\.\.salonPayment \}/g)?.length).toBeGreaterThanOrEqual(3);
     expect(action).toContain("payment: salonPayment,");
-    expect(action).toContain("paidAt: { gte: rangeStart }, ...salonPayment },");
+    // Orders also still follow who rang them up (User.id).
+    expect(action).toContain("{ createdByStaffId: { in: scope.salonUserIds } }, { createdByStaffId: null }");
     expect(action).toContain("order: salonOrder } })");
   });
 

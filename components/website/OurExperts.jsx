@@ -15,7 +15,7 @@ const FALLBACK_STYLISTS = [
     speciality: "Prothésiste ongulaire",
     specialityKey: null,
     experience: 5,
-    image: "/Images/expert.jpg",
+    image: "/Images/expert.webp",
     categories: [],
   },
   {
@@ -24,7 +24,7 @@ const FALLBACK_STYLISTS = [
     speciality: "Experte en soins naturels",
     specialityKey: null,
     experience: 6,
-    image: "/Images/expert.jpg",
+    image: "/Images/expert.webp",
     categories: [],
   },
   {
@@ -33,7 +33,7 @@ const FALLBACK_STYLISTS = [
     speciality: "Fondatrice & coordination",
     specialityKey: null,
     experience: 8,
-    image: "/Images/expert.jpg",
+    image: "/Images/expert.webp",
     categories: [],
   },
   {
@@ -41,7 +41,7 @@ const FALLBACK_STYLISTS = [
     name: "Sofia Bellamy",
     specialityKey: "expertSpecialtyHair",
     experience: 8,
-    image: "/Images/expert.jpg",
+    image: "/Images/expert.webp",
     categories: [],
   },
 ];
@@ -250,7 +250,7 @@ export default function OurExperts() {
 function ExpertCard({ stylist, index, t }) {
   const firstName = (stylist.name || "").split(" ")[0];
   const Sprig = SPRIGS[index % SPRIGS.length];
-  const imageSrc = stylist.image || "/Images/expert.jpg";
+  const imageSrc = stylist.image || "/Images/expert.webp";
   const categories = Array.isArray(stylist.categories) ? stylist.categories : [];
 
   return (

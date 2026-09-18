@@ -103,11 +103,14 @@ export async function createStaffFromRental(input, rentalRequestId) {
     }
   }
 
-  // Mandatory: an independent issues her own tickets and invoices under her
-  // own number. A VIES outage still lets the onboarding through, unvalidated.
-  const vatCheck = await verifyStaffVatNumber(vatNumber);
-  if (!vatCheck.ok) {
-    return { success: false, message: vatCheck.message, errors: { vatNumber: vatCheck.message } };
+  // Optional at creation: she can be onboarded without a VAT number and add
+  // it later. Only run the VIES round-trip when one was actually provided.
+  let vatCheck = { ok: true, vatNumber: null, validatedAt: null, name: null, address: null, pending: false };
+  if (vatNumber) {
+    vatCheck = await verifyStaffVatNumber(vatNumber);
+    if (!vatCheck.ok) {
+      return { success: false, message: vatCheck.message, errors: { vatNumber: vatCheck.message } };
+    }
   }
 
   // ── 3. Check if user already exists ──────────────────────────────────────
@@ -194,11 +197,11 @@ export async function createStaffFromRental(input, rentalRequestId) {
           data: {
             fullName,
             phone,
-            addressLine1,
+            addressLine1: addressLine1 || null,
             addressLine2: addressLine2 || null,
-            addressCity,
-            addressPostalCode,
-            addressCountry,
+            addressCity: addressCity || null,
+            addressPostalCode: addressPostalCode || null,
+            addressCountry: addressCountry || null,
             role: "STAFF",
             // email is NOT updated — it's the unique identifier and should
             // remain as-is to avoid breaking references
@@ -232,11 +235,11 @@ export async function createStaffFromRental(input, rentalRequestId) {
             fullName,
             email,
             phone,
-            addressLine1,
+            addressLine1: addressLine1 || null,
             addressLine2: addressLine2 || null,
-            addressCity,
-            addressPostalCode,
-            addressCountry,
+            addressCity: addressCity || null,
+            addressPostalCode: addressPostalCode || null,
+            addressCountry: addressCountry || null,
             password: hashedPassword,
             role: "STAFF",
             emailVerified: false,
@@ -353,7 +356,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
             ...finalContract,
             dueDate: contract.dueDate != null && String(contract.dueDate).trim() !== "" ? String(contract.dueDate).trim() : finalContract.dueDate ?? null,
           },
-          user: { ...invoiceUser, vatNumber: invoiceUser.vatNumber ?? vatNumber },
+          user: { ...invoiceUser, vatNumber: invoiceUser.vatNumber ?? vatCheck.vatNumber },
         });
       }
     } catch (invoiceErr) {

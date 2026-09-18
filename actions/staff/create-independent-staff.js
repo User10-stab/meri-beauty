@@ -183,11 +183,16 @@ export async function createIndependentStaff(input) {
     }
   }
 
-  // Mandatory: an independent issues her own tickets and invoices under her
-  // own number. A VIES outage still lets the onboarding through, unvalidated.
-  const vatCheck = await verifyStaffVatNumber(vatNumber);
-  if (!vatCheck.ok) {
-    return { success: false, message: vatCheck.message, errors: { vatNumber: vatCheck.message } };
+  // Optional at creation: she can be onboarded without a VAT number and add
+  // it later. Only run the VIES round-trip when one was actually provided —
+  // an independent still can't issue her own invoices until then (see
+  // lib/staff-invoice.js, which tolerates a null vatNumber).
+  let vatCheck = { ok: true, vatNumber: null, validatedAt: null, name: null, address: null, pending: false };
+  if (vatNumber) {
+    vatCheck = await verifyStaffVatNumber(vatNumber);
+    if (!vatCheck.ok) {
+      return { success: false, message: vatCheck.message, errors: { vatNumber: vatCheck.message } };
+    }
   }
 
   const plainPassword = generateSecurePassword();
@@ -200,11 +205,11 @@ export async function createIndependentStaff(input) {
           fullName,
           email,
           phone,
-          addressLine1,
+          addressLine1: addressLine1 || null,
           addressLine2: addressLine2 || null,
-          addressCity,
-          addressPostalCode,
-          addressCountry,
+          addressCity: addressCity || null,
+          addressPostalCode: addressPostalCode || null,
+          addressCountry: addressCountry || null,
           password: hashedPassword,
           role: "STAFF",
           emailVerified: false,
@@ -333,7 +338,7 @@ export async function createIndependentStaff(input) {
           ...createdContract,
           dueDate: contract.dueDate != null && String(contract.dueDate).trim() !== "" ? String(contract.dueDate).trim() : createdContract.dueDate ?? null,
         },
-        user: { ...createdUser, vatNumber },
+        user: { ...createdUser, vatNumber: vatCheck.vatNumber },
       });
     } catch (invoiceErr) {
       console.error("[createIndependentStaff] staff invoice failed (non-blocking):", invoiceErr);

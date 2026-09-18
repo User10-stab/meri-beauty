@@ -116,11 +116,13 @@ export async function updateIndependentStaff(input) {
 
   // A new number is checked against VIES; an unchanged one is not, so editing
   // a bio doesn't depend on VIES being up. Either way the number is mirrored
-  // onto the customer account below — one person, one VAT number.
+  // onto the customer account below — one person, one VAT number. Clearing
+  // the number (or leaving it blank on a profile that never had one) needs no
+  // VIES round trip either — there's nothing to verify about "no number".
   const normalizedVat = normalizeVatNumber(vatNumber);
   const vatChanged = normalizedVat !== normalizeVatNumber(existing.vatNumber);
   let vatCheck = null;
-  if (vatChanged) {
+  if (vatChanged && normalizedVat) {
     vatCheck = await verifyStaffVatNumber(vatNumber);
     if (!vatCheck.ok) {
       return { success: false, message: vatCheck.message, errors: { vatNumber: vatCheck.message } };
@@ -236,7 +238,7 @@ export async function updateIndependentStaff(input) {
           bio:               bio               ?? null,
           languages:         languages         ?? [],
           yearsOfExperience: yearsOfExperience ?? null,
-          vatNumber:         normalizedVat,
+          vatNumber:         normalizedVat || null,
           rythme:            rythme            ?? null,
           isActive,
           hireDate: hireDate ? new Date(hireDate) : null,
@@ -252,10 +254,13 @@ export async function updateIndependentStaff(input) {
           viesName: vatCheck.name,
           viesAddress: vatCheck.address,
         });
-      } else {
-        // Unchanged number, but the customer account may never have had it
-        // (the two rows were filled in by different screens for years).
-        // Backfill it without touching an existing VIES confirmation.
+      } else if (normalizedVat) {
+        // Unchanged, non-blank number, but the customer account may never
+        // have had it (the two rows were filled in by different screens for
+        // years). Backfill it without touching an existing VIES confirmation.
+        // A blank vatNumber has nothing to backfill — leave the customer
+        // account's own number (if any) untouched rather than overwriting it
+        // with "".
         await tx.user.updateMany({
           where: { id: existing.userId, NOT: { vatNumber: normalizedVat } },
           data: { isCompany: true, vatNumber: normalizedVat },

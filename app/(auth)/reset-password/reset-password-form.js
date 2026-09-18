@@ -5,17 +5,22 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { signIn } from "next-auth/react";
 import { Lock, Eye, EyeOff, Loader2, Sparkles, AlertCircle, Check, ArrowRight } from "lucide-react";
 import { resetPasswordSchema } from "@/lib/validations/reset-password";
 import { resetPassword } from "@/actions/auth/reset-password";
+import { normalizeCallbackUrl } from "@/lib/safe-callback-url";
 
-export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
+export default function ResetPasswordForm({ token, isValidToken, tokenError, returnTo = null }) {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [serverSuccess, setServerSuccess] = useState(null);
+  // Set once the password is reset mid-reservation: the customer is signed
+  // back in and returned to the exact booking they left.
+  const [resumingReservation, setResumingReservation] = useState(false);
 
   const {
     register,
@@ -45,6 +50,40 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
         setServerError(response.message);
         setIsLoading(false);
         return;
+      }
+
+      // Interrupted reservation: sign straight back in with the password
+      // just set (the reset also verified the address) and return to the
+      // exact booking — prestation, experte, date and créneau are restored
+      // there from the snapshot. A hard navigation reloads the session.
+      if (returnTo && response.email) {
+        let target = "";
+        try {
+          target = normalizeCallbackUrl(returnTo, "", window.location.origin);
+        } catch {
+          target = "";
+        }
+        if (target) {
+          setServerSuccess(response.message);
+          setResumingReservation(true);
+          try {
+            await signIn("credentials", {
+              email: response.email,
+              password: data.password,
+              redirect: false,
+            });
+          } catch {
+            // Sign-in failure is non-fatal: the password IS reset, so the
+            // customer can sign in manually from the reservation instead.
+          }
+          // Hard navigation on purpose: the destination re-renders
+          // server-side with the fresh session.
+          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+          window.location.href = target;
+          return;
+        }
+        // Unusable return path (should not happen — validated twice
+        // already): fall through to the standard login redirect below.
       }
 
       setServerSuccess(response.message);
@@ -77,7 +116,7 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
           </p>
           <div className="pt-2">
             <Link
-              href="/forgot-password"
+              href={returnTo ? `/forgot-password?returnTo=${encodeURIComponent(returnTo)}` : "/forgot-password"}
               className="w-full inline-flex justify-center items-center gap-2 py-3.5 px-4 text-sm font-semibold rounded-2xl text-white bg-[#2F3A2E] hover:bg-[#3d4d3c] transition-all shadow-md active:scale-[0.98]"
             >
               Demander un nouveau lien
@@ -85,12 +124,21 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
             </Link>
           </div>
           <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800">
-            <Link
-              href="/login"
-              className="text-xs font-semibold text-zinc-500 hover:text-[#2F3A2E] dark:text-zinc-400 dark:hover:text-[#a8c4a2] transition-colors"
-            >
-              Retour à la connexion
-            </Link>
+            {returnTo ? (
+              <Link
+                href={returnTo}
+                className="text-xs font-semibold text-zinc-500 hover:text-[#2F3A2E] dark:text-zinc-400 dark:hover:text-[#a8c4a2] transition-colors"
+              >
+                Retour à ma réservation
+              </Link>
+            ) : (
+              <Link
+                href="/login"
+                className="text-xs font-semibold text-zinc-500 hover:text-[#2F3A2E] dark:text-zinc-400 dark:hover:text-[#a8c4a2] transition-colors"
+              >
+                Retour à la connexion
+              </Link>
+            )}
           </div>
         </div>
       </div>
@@ -126,7 +174,12 @@ export default function ResetPasswordForm({ token, isValidToken, tokenError }) {
         {serverSuccess && (
           <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-300 text-sm animate-in fade-in slide-in-from-top-2 duration-250">
             <Check className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-            <p className="font-medium">{serverSuccess}</p>
+            <div>
+              <p className="font-medium">{serverSuccess}</p>
+              {resumingReservation && (
+                <p className="mt-1 font-medium">Retour à votre réservation…</p>
+              )}
+            </div>
           </div>
         )}
 

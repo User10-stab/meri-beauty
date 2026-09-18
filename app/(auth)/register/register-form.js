@@ -16,11 +16,9 @@ import {
   Eye,
   EyeOff,
   User,
-  AtSign,
   Mail,
   Phone,
   Lock,
-  KeyRound,
   Building2,
   MapPin,
 } from "lucide-react";
@@ -64,14 +62,6 @@ const fields = [
     autoComplete: "name",
   },
   {
-    name: "nickName",
-    label: "Surnom",
-    type: "text",
-    placeholder: "Marie (facultatif)",
-    icon: AtSign,
-    autoComplete: "nickname",
-  },
-  {
     name: "email",
     label: "Adresse e-mail",
     type: "email",
@@ -93,14 +83,6 @@ const fields = [
     type: "password",
     placeholder: "••••••••",
     icon: Lock,
-    autoComplete: "new-password",
-  },
-  {
-    name: "confirmPassword",
-    label: "Confirmez le mot de passe",
-    type: "password",
-    placeholder: "••••••••",
-    icon: KeyRound,
     autoComplete: "new-password",
   },
 ];
@@ -132,11 +114,9 @@ export default function RegisterForm() {
     resolver: zodResolver(registerClientSchema),
     defaultValues: {
       fullName: "",
-      nickName: "",
       email: "",
       phone: "",
       password: "",
-      confirmPassword: "",
       isCompany: false,
       vatNumber: "",
       companyLegalName: "",
@@ -144,7 +124,6 @@ export default function RegisterForm() {
       companyLegalForm: "",
       billingContactName: "",
       addressLine1: "",
-      addressLine2: "",
       addressCity: "",
       addressPostalCode: "",
       addressCountry: "BE",
@@ -184,10 +163,7 @@ export default function RegisterForm() {
     setServerSuccess(null);
 
     try {
-      // Strip confirmPassword — it's client-only validation, not a DB field
-      const { confirmPassword: _confirm, ...serverData } = data;
-
-      const response = await registerUser(serverData);
+      const response = await registerUser(data);
 
       if (!response.success) {
         // Surface per-field server errors back into the form
@@ -290,42 +266,8 @@ export default function RegisterForm() {
 
         {/* Form */}
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)} noValidate>
-          {/* Two-column grid on sm+ for full name / nickname */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {fields.slice(0, 2).map((field) => (
-              <FieldInput
-                key={field.name}
-                field={field}
-                register={register}
-                errors={errors}
-                isLoading={isLoading}
-                showPassword={showPassword}
-                onTogglePassword={togglePasswordVisibility}
-              />
-            ))}
-          </div>
-
-          {/* Single-column for the rest */}
-          <div className="space-y-4">
-            {fields.slice(2).map((field) => (
-              <FieldInput
-                key={field.name}
-                field={field}
-                register={register}
-                errors={errors}
-                isLoading={isLoading}
-                showPassword={showPassword}
-                onTogglePassword={togglePasswordVisibility}
-              />
-            ))}
-          </div>
-
-          {/* Password strength hint */}
-          <p className="text-xs text-zinc-400 dark:text-zinc-500 -mt-2 pl-1">
-            Le mot de passe doit contenir au moins 8 caractères.
-          </p>
-
-          {/* Account type — asked directly at signup, not inferred later */}
+          {/* Account type first — same Particulier / Entreprise choice as the
+              reservation client-information step, Particulier by default */}
           <div className="space-y-2">
             <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
               Type de compte
@@ -359,6 +301,41 @@ export default function RegisterForm() {
               </button>
             </div>
           </div>
+
+          {/* Two-column grid on sm+ for full name / email */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {fields.slice(0, 2).map((field) => (
+              <FieldInput
+                key={field.name}
+                field={field}
+                register={register}
+                errors={errors}
+                isLoading={isLoading}
+                showPassword={showPassword}
+                onTogglePassword={togglePasswordVisibility}
+              />
+            ))}
+          </div>
+
+          {/* Single-column for the rest */}
+          <div className="space-y-4">
+            {fields.slice(2).map((field) => (
+              <FieldInput
+                key={field.name}
+                field={field}
+                register={register}
+                errors={errors}
+                isLoading={isLoading}
+                showPassword={showPassword}
+                onTogglePassword={togglePasswordVisibility}
+              />
+            ))}
+          </div>
+
+          {/* Password strength hint */}
+          <p className="text-xs text-zinc-400 dark:text-zinc-500 -mt-2 pl-1">
+            Le mot de passe doit contenir au moins 8 caractères.
+          </p>
 
           {isCompany ? (
             <div className="space-y-1">
@@ -428,7 +405,9 @@ export default function RegisterForm() {
             </div>
           ) : null}
 
-          {/* Billing address — mandatory for every account, needed on every invoice */}
+          {/* Billing address — entreprise only, same Adresse / Ville / Pays
+              split as the reservation client-information step */}
+          {isCompany ? (
           <div className="space-y-4">
             <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
               Adresse de facturation
@@ -444,6 +423,7 @@ export default function RegisterForm() {
                   type="text"
                   autoComplete="address-line1"
                   disabled={isLoading}
+                  required={isCompany}
                   {...register("addressLine1")}
                   placeholder="Rue et numéro"
                   className={`block w-full pl-11 pr-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
@@ -460,21 +440,13 @@ export default function RegisterForm() {
               )}
             </div>
 
-            <input
-              type="text"
-              autoComplete="address-line2"
-              disabled={isLoading}
-              {...register("addressLine2")}
-              placeholder="Boîte, étage, complément (optionnel)"
-              className="block w-full px-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border border-zinc-200/80 dark:border-zinc-700 focus:ring-[#2F3A2E]/30 focus:border-[#2F3A2E] dark:focus:ring-[#a8c4a2]/30 dark:focus:border-[#a8c4a2] focus:outline-none focus:ring-4 transition-all duration-200 disabled:opacity-60"
-            />
-
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-1">
                 <input
                   type="text"
                   autoComplete="postal-code"
                   disabled={isLoading}
+                  required={isCompany}
                   {...register("addressPostalCode")}
                   placeholder="Code postal"
                   className={`block w-full px-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
@@ -494,6 +466,7 @@ export default function RegisterForm() {
                   type="text"
                   autoComplete="address-level2"
                   disabled={isLoading}
+                  required={isCompany}
                   {...register("addressCity")}
                   placeholder="Ville"
                   className={`block w-full px-4 py-3.5 bg-zinc-50/50 dark:bg-zinc-800/30 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 rounded-2xl border ${
@@ -521,6 +494,7 @@ export default function RegisterForm() {
               ))}
             </select>
           </div>
+          ) : null}
 
           {/* Newsletter opt-in */}
           <label className="flex items-start gap-3 cursor-pointer select-none group">
@@ -615,11 +589,6 @@ function FieldInput({ field, register, errors, isLoading, showPassword, onToggle
         className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider"
       >
         {field.label}
-        {field.name === "nickName" && (
-          <span className="ml-1 normal-case font-normal text-zinc-400 dark:text-zinc-500">
-            (optional)
-          </span>
-        )}
       </label>
       <div className="relative rounded-2xl shadow-sm">
         {Icon && (

@@ -158,6 +158,8 @@ export async function verifyEmail(rawToken) {
     // there is no created order/reservation to resume — the return path
     // (resumeId) is handed back to the verification page instead, which
     // signs the customer in and brings them back to their booking.
+    // Post-signup tokens ("SIGNUP") skip it for the same reason: the
+    // verification page signs the customer in and redirects home.
     // Only the guest-checkout types below enter the payment-resume path.
     const CHECKOUT_RESUME_TYPES = ["ORDER", "WORKSHOP", "FORMATION"];
     let resumeSuccess = null;
@@ -234,13 +236,16 @@ export async function verifyEmail(rawToken) {
       userId: user.id,
       // The verified address, so the verification page can sign the customer
       // straight back in. A short-lived autologin token is only minted for
-      // appointment-reservation tokens — the caller just proved ownership of
-      // this address via the single-use token, exactly like the new-account
-      // issuance in createReservation/createCheckoutSession. Plain
-      // registration and checkout tokens get none (null).
+      // appointment-reservation and post-signup tokens — the caller just
+      // proved ownership of this address via the single-use token, exactly
+      // like the new-account issuance in createReservation/
+      // createCheckoutSession. Plain registration and checkout tokens get
+      // none (null).
       email: matchedToken.email,
       autologinToken:
-        matchedToken.resumeType === "RESERVATION" ? generateAutologinToken(matchedToken.email) : null,
+        matchedToken.resumeType === "RESERVATION" || matchedToken.resumeType === "SIGNUP"
+          ? generateAutologinToken(matchedToken.email)
+          : null,
       // Set only for tokens issued mid-checkout — null for plain
       // registration tokens.
       resumeType: matchedToken.resumeType,

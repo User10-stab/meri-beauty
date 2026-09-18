@@ -93,9 +93,6 @@ export default function QuickBookingModal({
                   <CalendarCheck size={18} />
                 </span>
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#b89664]">
-                    Réservation rapide
-                  </p>
                   <h2 className="font-display text-lg font-semibold leading-tight text-[#2F3A2E]">
                     {serviceName ?? "Votre rendez-vous"}
                     {staffName ? (

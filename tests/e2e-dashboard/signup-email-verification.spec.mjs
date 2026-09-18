@@ -26,8 +26,7 @@ import { loginAs } from "../e2e-money/fixtures/auth.mjs";
 
 const PASSWORD = "E2eSignup!2026";
 
-/** Both halves of the register form's address block, which a Belgian account needs. */
-const ADDRESS = { line1: "Rue de l'Inscription 12", postalCode: "1000", city: "Bruxelles" };
+/** Particulier signup asks for identity fields only (no address block). */
 
 test.describe("signing up and verifying an e-mail address", () => {
   test.afterAll(async () => {
@@ -51,11 +50,6 @@ test.describe("signing up and verifying an e-mail address", () => {
     await page.locator("#email").fill(email);
     await page.locator("#phone").fill(`+324${String(Date.now()).slice(-8)}`);
     await page.locator("#password").fill(PASSWORD);
-    await page.locator("#confirmPassword").fill(PASSWORD);
-
-    await page.locator("#addressLine1").fill(ADDRESS.line1);
-    await page.locator('[name="addressPostalCode"]').fill(ADDRESS.postalCode);
-    await page.locator('[name="addressCity"]').fill(ADDRESS.city);
 
     await page.locator("#termsAccepted").check();
     await page.getByRole("button", { name: /créer mon compte/i }).click();

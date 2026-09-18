@@ -202,6 +202,27 @@ describe("company registration VAT rules", () => {
     expect(result.success).toBe(false);
     expect(result.error.flatten().fieldErrors.vatNumber?.[0]).toContain("DE");
   });
+
+  it("requires a complete billing address for a company (invoices need rue + ville + code postal)", () => {
+    for (const field of ["addressLine1", "addressCity", "addressPostalCode"]) {
+      const result = registerSchema.safeParse({ ...registration, [field]: "" });
+      expect(result.success).toBe(false);
+      expect(result.error.flatten().fieldErrors[field]?.[0]).toContain("obligatoire");
+    }
+  });
+
+  it("lets a particulier register with identity fields only (B2C sales are ticket-only, never invoiced)", () => {
+    const result = registerSchema.safeParse({
+      ...registration,
+      isCompany: false,
+      companyLegalName: "",
+      vatNumber: "",
+      addressLine1: "",
+      addressCity: "",
+      addressPostalCode: "",
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("public VIES abuse protection", () => {

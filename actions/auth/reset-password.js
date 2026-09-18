@@ -154,6 +154,10 @@ export async function resetPassword(input) {
     return {
       success: true,
       message: "Votre mot de passe a bien été réinitialisé. Vous pouvez maintenant vous connecter.",
+      // Returned only after the single-use token proved ownership of this
+      // address, so the reset page can sign the customer straight back in
+      // and resume an interrupted reservation.
+      email: matchedToken.email,
     };
   } catch (error) {
     console.error("[resetPassword]", error);

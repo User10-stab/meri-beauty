@@ -10,6 +10,7 @@ import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/r
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate } from "@/lib/terms-consent";
 import { verifyVatWithVies } from "@/lib/vat-validation";
+import { buildVerifyEmailUrl } from "@/lib/verify-email-link";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
@@ -145,7 +146,7 @@ export async function registerUser(input) {
       const newUser = await tx.user.create({
         data: {
           fullName,
-          nickName,
+          nickName: nickName || null,
           email,
           phone,
           password: hashedPassword,
@@ -155,10 +156,13 @@ export async function registerUser(input) {
           isCompany,
           vatNumber: vatNumberToSave,
           ...(vatValidation ?? {}),
-          addressLine1,
+          // Address is entreprise-only at signup (particulier registers with
+          // identity fields only, like the reservation flow): store empties
+          // as null, matching reservation-created accounts.
+          addressLine1: addressLine1 || null,
           addressLine2: addressLine2 || null,
-          addressCity,
-          addressPostalCode,
+          addressCity: addressCity || null,
+          addressPostalCode: addressPostalCode || null,
           addressCountry,
           ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "registration"),
           ...buildTermsAcceptanceUpdate(),
@@ -171,6 +175,8 @@ export async function registerUser(input) {
           email: newUser.email,
           tokenHash,
           expiresAt,
+          resumeType: "SIGNUP",
+          resumeId: "/",
         },
       });
 
@@ -189,9 +195,12 @@ export async function registerUser(input) {
       return newUser;
     });
 
-    const verificationUrl = `${
-      process.env.NEXTAUTH_URL || "http://localhost:3000"
-    }/verify-email?token=${encodeURIComponent(plainToken)}`;
+    // One click verifies the address, signs the customer in and returns
+    // them to the home page: the link carries a signed marker (same
+    // mechanism as the reservation flow) plus a "SIGNUP" return context on
+    // the token row, so post-verify behavior is server-driven, never
+    // trusted from URL params.
+    const verificationUrl = buildVerifyEmailUrl(plainToken, { resumeType: "SIGNUP", resumeId: "/" });
 
     // The database transaction above has already committed. Email delivery is
     // a follow-up operation, so a provider outage must not make the UI claim

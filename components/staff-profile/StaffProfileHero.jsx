@@ -1,25 +1,24 @@
 "use client";
 
 import Image from "next/image";
-import { Calendar, Clock, Heart, Star } from "lucide-react";
+import { Calendar, Heart, Star } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { LeftBotanical, BotanicalSprig } from "@/components/botanical-decorations";
-
-const DAYS = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
 
 const LANGUAGE_LABELS = {
   FRENCH: "Français", ENGLISH: "English", ARABIC: "العربية", SPANISH: "Español",
   DUTCH: "Nederlands", GERMAN: "Deutsch", PORTUGUESE: "Português", ITALIAN: "Italiano",
 };
 
-export default function StaffProfileHero({ name, firstName, bio, yearsOfExperience, languages, rythme, workingHours, image, socialLinks, categories }) {
+export default function StaffProfileHero({ name, firstName, bio, yearsOfExperience, languages, workingHours, image, socialLinks, categories }) {
   const t = useTranslations("staffProfile");
-  const hoursByDay = new Map((workingHours || []).map((hour) => [hour.day, hour]));
-  const schedule = DAYS.map((day) => hoursByDay.get(day) || { day, isClosed: true });
+  // Only the days the staff member actually works — closed/non-working days
+  // (including days with no record at all) are never displayed.
+  const openDays = (workingHours || []).filter((hour) => !hour.isClosed);
   const shortBio = bio || t("defaultBio", { firstName });
 
   return (
-    <aside className="relative overflow-hidden rounded-[2rem] border border-[#e7dccb] bg-[#fffdf9]">
+    <aside className="relative max-h-[44dvh] overflow-x-hidden overflow-y-auto rounded-[2rem] border border-[#e7dccb] bg-[#fffdf9] [scrollbar-width:none] lg:max-h-full [&::-webkit-scrollbar]:hidden">
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
         <LeftBotanical className="absolute -right-10 -top-8 h-40 w-32 -rotate-20 text-[#b89664]/90" />
         {/* <LeftBotanical className="absolute -bottom-12 -left-8 h-32 w-30 -rotate-12 text-[#b89664]/90" /> */}
@@ -55,15 +54,14 @@ export default function StaffProfileHero({ name, firstName, bio, yearsOfExperien
               <p className="mt-6 mb-4 text-sm leading-6 text-[#6f6a64]">{shortBio}</p>
              
         
-        {rythme && (
-          <div className="flex items-center gap-3 border-b border-[#ede5d8] py-5"><Clock size={17} className="shrink-0 text-[#b89664]" /><div><p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8b8178]">{t("workRhythm")}</p><p className="mt-1 text-sm font-medium text-[#2F3A2E]">{t(`rhythm.${rythme}`)}</p></div></div>
-        )}
+        {openDays.length > 0 && (
         <section className="pt-5" aria-labelledby="working-hours-title">
           <div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2F3A2E] text-white"><Calendar size={15} /></span><div><h2 id="working-hours-title" className="text-base font-semibold text-[#2F3A2E]">{t("workingHours")}</h2><p className="text-xs text-[#8b8178]">{t("workingHoursNote")}</p></div></div>
           <dl className="mt-4 divide-y divide-[#ede5d8] rounded-xl border border-[#ede5d8] bg-[#fdfaf4] px-4">
-            {schedule.map((hour) => <div key={hour.day} className="flex items-center justify-between gap-4 py-2.5 text-xs"><dt className="font-medium text-[#465044]">{t(`days.${hour.day}`)}</dt><dd className={hour.isClosed ? "text-[#9a9590]" : "font-semibold text-[#8b7046]"}>{hour.isClosed ? t("closed") : `${hour.startTime} – ${hour.endTime}`}</dd></div>)}
+            {openDays.map((hour) => <div key={hour.day} className="flex items-center justify-between gap-4 py-2.5 text-xs"><dt className="font-medium text-[#465044]">{t(`days.${hour.day}`)}</dt><dd className="font-semibold text-[#8b7046]">{`${hour.startTime} – ${hour.endTime}`}</dd></div>)}
           </dl>
         </section>
+        )}
         {Object.entries(socialLinks || {}).filter(([, url]) => url).length > 0 && (
           <section className="pt-5" aria-labelledby="social-links-title">
             <h2 id="social-links-title" className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8b8178]">{t("follow")}</h2>

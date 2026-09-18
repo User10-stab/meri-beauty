@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { passwordResetEmail } from "@/lib/email-templates";
 import { forgotPasswordSchema } from "@/lib/validations/forgot-password";
 import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
+import { buildResetPasswordUrl, isSafeReturnPath } from "@/lib/verify-email-link";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
@@ -36,6 +37,13 @@ export async function forgotPassword(input) {
   }
 
   const { email } = parsed.data;
+
+  // Optional post-reset return path (reservation interrupted mid-booking).
+  // Strictly validated: an invalid value is dropped, never trusted — the
+  // reset itself does not depend on it. The token row carries no resume
+  // context; the signed marker travels in the emailed link instead.
+  const rawReturnTo = typeof input?.returnTo === "string" ? input.returnTo : null;
+  const safeReturnTo = isSafeReturnPath(rawReturnTo) ? rawReturnTo : null;
   const ip = await getClientIp();
 
   const rateLimitKey = hashRateLimitValue(`${email}:${ip}`);
@@ -54,9 +62,16 @@ export async function forgotPassword(input) {
 
     if (!user) {
       await new Promise((resolve) => setTimeout(resolve, Math.random() * 200 + 100));
+      // Deliberate, product-requested disclosure: the caller is told there is
+      // no account for this address (instead of the usual enumeration-safe
+      // reply) so the forgot-password screen can point them at registration.
+      // Account existence is already discoverable elsewhere in this app
+      // (public checkEmailExists, distinct login messages), so this adds no
+      // new oracle class.
       return {
         success: true,
-        message: "Si un compte existe avec cette adresse e-mail, un lien de réinitialisation vient d'être envoyé.",
+        accountExists: false,
+        message: "Aucun compte n'est associé à cette adresse e-mail. Vous pouvez créer un nouveau compte.",
       };
     }
 
@@ -79,7 +94,7 @@ export async function forgotPassword(input) {
       },
     });
 
-    const resetUrl = `${process.env.NEXTAUTH_URL || "http://localhost:3000"}/reset-password?token=${encodeURIComponent(plainToken)}`;
+    const resetUrl = buildResetPasswordUrl(plainToken, safeReturnTo);
 
     const emailTemplate = passwordResetEmail({
       customerName: user.fullName,
@@ -96,7 +111,8 @@ export async function forgotPassword(input) {
 
     return {
       success: true,
-      message: "If an account exists with that email, a password reset link has been sent.",
+      accountExists: true,
+      message: "Cette adresse e-mail est associée à un compte. Un lien de réinitialisation vient de vous être envoyé.",
     };
   } catch (error) {
     console.error("[forgotPassword]", error);

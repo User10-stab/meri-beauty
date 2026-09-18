@@ -155,10 +155,10 @@ export default async function Hero() {
       {/* Event/workshop promo — plain strip under the hero on mobile/tablet.
           On desktop the card is pinned to the top of the hero, aligned
           with the staff card column below. */}
-      <WorkshopBannerStrip />
+      {/* <WorkshopBannerStrip />
       <div className="absolute right-4 top-8 z-20 hidden w-[250px] sm:right-6 sm:w-[270px] md:right-8 md:w-[290px] lg:right-14 lg:block lg:w-[400px] xl:right-20">
         <WorkshopBannerStackCard />
-      </div>
+      </div> */}
 
       {/* ══════════════════════════════════════
           RIGHT-SIDE FLOATING CARDS (staff + opening hours)

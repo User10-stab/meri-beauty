@@ -6,11 +6,25 @@ import { sendVerificationEmail } from "@/actions/auth/verify-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
+import { refineCompanyVat } from "@/lib/validations/register";
 import { isSafeReturnPath } from "@/lib/verify-email-link";
+import countriesData from "@/data/countries.json";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
+
+/**
+ * Resolves a 2-letter country code from either a code ("BE") or a localized
+ * country name ("Belgique") — the reservation form stores names while VAT
+ * validation reasons in codes. Falls back to "BE".
+ */
+function resolveCountryCode(value) {
+  const raw = String(value ?? "").trim();
+  if (/^[A-Za-z]{2}$/.test(raw)) return raw.toUpperCase();
+  const match = countriesData.find((c) => c.name?.toLowerCase() === raw.toLowerCase());
+  return match?.code ?? "BE";
+}
 
 /**
  * Creates or finds a pending customer, then sends a verification email.
@@ -29,6 +43,7 @@ const RATE_LIMIT_MAX_REQUESTS = 3;
  *   password: string,
  *   newsletterSubscribed?: boolean,
  *   isCompany?: boolean,
+ *   companyLegalName?: string,
  *   vatNumber?: string,
  *   addressLine1?: string,
  *   addressLine2?: string,
@@ -46,6 +61,7 @@ export async function initCustomerVerification({
   password,
   newsletterSubscribed,
   isCompany,
+  companyLegalName,
   vatNumber,
   addressLine1,
   addressLine2,
@@ -83,6 +99,42 @@ export async function initCustomerVerification({
   // trusted — verification itself does not depend on it.
   const safeReturnTo = isSafeReturnPath(returnTo) ? String(returnTo) : null;
 
+  // Entreprise accounts must bring the same complete company identity the
+  // signup flow requires — invoicing cannot use them otherwise (no
+  // VIES-validated VAT number means ticket-only, and formatUserAddress()
+  // needs rue + ville + code postal for the buyer address). Reuses the
+  // signup VAT rule through a minimal issue collector.
+  if (isCompany) {
+    const countryCode = resolveCountryCode(addressCountry);
+    const issues = [];
+    refineCompanyVat(
+      {
+        isCompany: true,
+        companyLegalName: companyLegalName?.trim() || "",
+        vatNumber: vatNumber?.trim() || "",
+        addressCountry: countryCode,
+      },
+      { addIssue: (issue) => issues.push(issue) }
+    );
+    if (!addressLine1?.trim()) {
+      issues.push({ path: ["addressLine1"], message: "L'adresse est obligatoire pour un compte entreprise." });
+    }
+    if (!addressCity?.trim()) {
+      issues.push({ path: ["addressCity"], message: "La ville est obligatoire pour un compte entreprise." });
+    }
+    if (!addressPostalCode?.trim()) {
+      issues.push({ path: ["addressPostalCode"], message: "Le code postal est obligatoire pour un compte entreprise." });
+    }
+    if (issues.length > 0) {
+      const first = issues[0];
+      return {
+        verified: false,
+        field: Array.isArray(first.path) ? first.path[0] : "vatNumber",
+        message: first.message,
+      };
+    }
+  }
+
   const ip = await getClientIp();
   const rateLimitKey = `${normalizedEmail}:${ip}`;
   if (isRateLimited("init-customer-verification", rateLimitKey, { windowMs: RATE_LIMIT_WINDOW_MS, max: RATE_LIMIT_MAX_REQUESTS })) {
@@ -115,7 +167,7 @@ export async function initCustomerVerification({
   if (!existingUser) {
     const hashedPassword = await bcrypt.hash(providedPassword, BCRYPT_SALT_ROUNDS);
 
-    await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
         fullName: validFullName,
         email: normalizedEmail,
@@ -125,15 +177,24 @@ export async function initCustomerVerification({
         emailVerified: false,
         isActive: true,
         isCompany: isCompany ?? false,
-        vatNumber: vatNumber || null,
-        addressLine1: addressLine1 || null,
-        addressLine2: addressLine2 || null,
-        addressCity: addressCity || null,
-        addressPostalCode: addressPostalCode || null,
-        addressCountry: addressCountry || "BE",
+        vatNumber: vatNumber?.trim() || null,
+        addressLine1: addressLine1?.trim() || null,
+        addressLine2: addressLine2?.trim() || null,
+        addressCity: addressCity?.trim() || null,
+        addressPostalCode: addressPostalCode?.trim() || null,
+        addressCountry: addressCountry?.trim() || "BE",
         ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
       },
     });
+
+    // Entreprise legal identity for future B2B invoices (same BillingProfile
+    // the signup flow creates). The invoice itself still requires a live
+    // VIES validation, refreshable later from the profile/checkout.
+    if (created && isCompany && companyLegalName?.trim()) {
+      await prisma.billingProfile.create({
+        data: { userId: created.id, companyLegalName: companyLegalName.trim() },
+      });
+    }
   } else {
     // User exists but not verified — update their info with latest data
     await prisma.user.update({
@@ -143,15 +204,23 @@ export async function initCustomerVerification({
         phone: validPhone,
         password: await bcrypt.hash(providedPassword, BCRYPT_SALT_ROUNDS),
         isCompany: isCompany ?? false,
-        vatNumber: vatNumber || null,
-        addressLine1: addressLine1 || null,
-        addressLine2: addressLine2 || null,
-        addressCity: addressCity || null,
-        addressPostalCode: addressPostalCode || null,
-        addressCountry: addressCountry || "BE",
+        vatNumber: vatNumber?.trim() || null,
+        addressLine1: addressLine1?.trim() || null,
+        addressLine2: addressLine2?.trim() || null,
+        addressCity: addressCity?.trim() || null,
+        addressPostalCode: addressPostalCode?.trim() || null,
+        addressCountry: addressCountry?.trim() || "BE",
         ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
       },
     });
+
+    if (isCompany && companyLegalName?.trim()) {
+      await prisma.billingProfile.upsert({
+        where: { userId: existingUser.id },
+        update: { companyLegalName: companyLegalName.trim() },
+        create: { userId: existingUser.id, companyLegalName: companyLegalName.trim() },
+      });
+    }
   }
 
   // 3. Send the verification email (fire-and-forget the result is irrelevant —

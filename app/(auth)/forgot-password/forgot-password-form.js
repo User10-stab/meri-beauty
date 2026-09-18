@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
@@ -8,29 +8,38 @@ import { Mail, Loader2, Sparkles, AlertCircle, Check, ArrowLeft } from "lucide-r
 import { forgotPasswordSchema } from "@/lib/validations/forgot-password";
 import { forgotPassword } from "@/actions/auth/forgot-password";
 
-export default function ForgotPasswordForm() {
+export default function ForgotPasswordForm({ defaultEmail = "", returnTo = null }) {
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
   const [serverSuccess, setServerSuccess] = useState(null);
+  // Mirrors the action's explicit disclosure: true = reset link sent,
+  // false = no account for this address (offer registration instead).
+  const [accountExists, setAccountExists] = useState(null);
 
   const {
     register,
     handleSubmit,
+    reset,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(forgotPasswordSchema),
     defaultValues: {
-      email: "",
+      email: defaultEmail,
     },
   });
+
+  useEffect(() => {
+    if (defaultEmail) reset({ email: defaultEmail });
+  }, [defaultEmail, reset]);
 
   const onSubmit = async (data) => {
     setIsLoading(true);
     setServerError(null);
     setServerSuccess(null);
+    setAccountExists(null);
 
     try {
-      const response = await forgotPassword(data);
+      const response = await forgotPassword({ ...data, returnTo });
 
       if (!response.success) {
         setServerError(response.message);
@@ -38,6 +47,7 @@ export default function ForgotPasswordForm() {
         return;
       }
 
+      setAccountExists(response.accountExists !== false);
       setServerSuccess(response.message);
       setIsLoading(false);
     } catch (error) {
@@ -62,6 +72,11 @@ export default function ForgotPasswordForm() {
           <p className="text-sm text-zinc-500 dark:text-zinc-400">
             Saisissez votre adresse e-mail pour recevoir un lien de réinitialisation sécurisé
           </p>
+          {returnTo && (
+            <p className="text-sm font-medium text-[#2F3A2E] dark:text-[#a8c4a2]">
+              Après la réinitialisation, vous reviendrez directement à votre réservation.
+            </p>
+          )}
         </div>
 
         {/* Server Status Banners */}
@@ -72,10 +87,25 @@ export default function ForgotPasswordForm() {
           </div>
         )}
 
-        {serverSuccess && (
+        {serverSuccess && accountExists !== false && (
           <div className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-950/30 dark:border-emerald-900/50 dark:text-emerald-300 text-sm animate-in fade-in slide-in-from-top-2 duration-250">
             <Check className="h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
             <p className="font-medium">{serverSuccess}</p>
+          </div>
+        )}
+
+        {serverSuccess && accountExists === false && (
+          <div className="space-y-4 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900/50 dark:text-amber-300 text-sm animate-in fade-in slide-in-from-top-2 duration-250">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 shrink-0" />
+              <p className="font-medium">{serverSuccess}</p>
+            </div>
+            <Link
+              href={returnTo || "/register"}
+              className="w-full inline-flex justify-center items-center gap-2 py-3 px-4 text-sm font-semibold rounded-2xl text-white bg-[#2F3A2E] hover:bg-[#3d4d3c] transition-all shadow-md active:scale-[0.98]"
+            >
+              Créer un compte
+            </Link>
           </div>
         )}
 

@@ -169,15 +169,16 @@ export default async function StaffProfilePage({ params }) {
       <StaffViewportLock />
       <div className="mx-auto flex h-full min-h-0 max-w-[1800px] flex-col overflow-hidden px-4 py-4 sm:px-6 lg:flex-row lg:gap-10 lg:px-10 lg:py-6 xl:gap-14">
         {/* Fixed hero — never scrolls at page level; its own scrollbar is
-            hidden. */}
-        <div className="flex items-center max-h-[44dvh] shrink-0 overflow-hidden lg:sticky lg:top-0 lg:h-full lg:max-h-none lg:w-[500px] lg:overflow-y-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden ">
+            hidden. Top-anchored (not centered) so a long profile can never
+            be amputated at the top: excess content stays reachable through
+            the same hidden internal scroll on mobile. */}
+        <div className="flex max-h-[44dvh] shrink-0 items-start overflow-y-auto overflow-x-hidden [scrollbar-width:none] lg:sticky lg:top-0 lg:h-full lg:max-h-none lg:w-[500px] lg:items-center lg:overflow-y-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:hidden ">
           <StaffProfileHero
             name={staff.user.fullName}
             firstName={firstName}
             bio={staff.bio}
             yearsOfExperience={staff.yearsOfExperience}
             languages={staff.languages}
-            rythme={staff.rythme}
             workingHours={staff.workingHours}
             image={profileImage}
             socialLinks={salonSocial}

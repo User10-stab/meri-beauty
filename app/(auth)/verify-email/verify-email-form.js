@@ -101,10 +101,10 @@ export default function VerifyEmailForm({
     setVerifyingEmail(false);
   }
 
-  // One-click reservation links (signed marker validated server-side in
-  // page.js) verify immediately on load: the button in the email IS the
-  // single click. Runs once, as a POST-backed Server Action — a plain
-  // prefetch without JavaScript execution never reaches this.
+  // One-click links (reservation or post-signup — signed marker validated
+  // server-side in page.js) verify immediately on load: the button in the
+  // email IS the single click. Runs once, as a POST-backed Server Action —
+  // a plain prefetch without JavaScript execution never reaches this.
   useEffect(() => {
     if (autoVerify && verificationToken && !verificationResult && !autoSubmittedRef.current) {
       autoSubmittedRef.current = true;
@@ -118,10 +118,17 @@ export default function VerifyEmailForm({
   // straight back in (short-lived, email-bound autologin token minted by
   // verifyEmail) and return them to the exact booking they left — the form
   // there restores their snapshot and opens the step after the client
-  // information step. A hard navigation reloads the server session.
+  // information step. Post-signup tokens ("SIGNUP") take the same path with
+  // resumeId "/" — verified, signed in, home. A hard navigation reloads the
+  // server session.
   useEffect(() => {
     const result = verificationResult;
-    if (!result?.success || result.resumeType !== "RESERVATION" || !result.resumeId) return;
+    if (
+      !result?.success ||
+      (result.resumeType !== "RESERVATION" && result.resumeType !== "SIGNUP") ||
+      !result.resumeId
+    )
+      return;
     let cancelled = false;
     (async () => {
       setResumingReservation(true);
@@ -257,8 +264,10 @@ export default function VerifyEmailForm({
   }
 
   // Reservation token verified — signing back in and returning to the
-  // booking. Covers the instant before the hard navigation away.
+  // booking (or home for a post-signup token). Covers the instant before
+  // the hard navigation away.
   if (resumingReservation) {
+    const isSignup = verificationResult?.resumeType === "SIGNUP";
     return (
       <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
         <div className="max-w-md w-full space-y-6 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 text-center">
@@ -266,7 +275,7 @@ export default function VerifyEmailForm({
             <Check className="h-6 w-6" />
           </div>
           <h2 className="text-xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">E-mail confirmé</h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Retour à votre réservation…</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">{isSignup ? "Redirection vers l'accueil…" : "Retour à votre réservation…"}</p>
         </div>
       </div>
     );

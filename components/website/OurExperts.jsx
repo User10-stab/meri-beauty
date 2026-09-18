@@ -134,6 +134,28 @@ export default function OurExperts() {
   const [isLoading, setIsLoading] = useState(true);
   const [headerRef, headerInView] = useInView();
   const [cardsRef, cardsInView] = useInView();
+  const trackRef = useRef(null);
+  const [canPrev, setCanPrev] = useState(false);
+  const [canNext, setCanNext] = useState(false);
+
+  const updateArrows = () => {
+    const el = trackRef.current;
+    if (!el) return;
+    setCanPrev(el.scrollLeft > 8);
+    setCanNext(el.scrollLeft < el.scrollWidth - el.clientWidth - 8);
+  };
+
+  useEffect(() => {
+    updateArrows();
+    window.addEventListener("resize", updateArrows);
+    return () => window.removeEventListener("resize", updateArrows);
+  }, [stylists.length, isLoading]);
+
+  const scrollTrack = (dir) => {
+    const el = trackRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
+  };
 
   useEffect(() => {
     async function loadExperts() {
@@ -177,16 +199,48 @@ export default function OurExperts() {
               {t("expertsBody")}
             </p>
           </div>
+
+          {/* Carousel navigation */}
+          <div className="flex shrink-0 items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => scrollTrack(-1)}
+              disabled={!canPrev}
+              aria-label={t("expertsLeft")}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-gold/40 text-gold transition-all duration-200 hover:bg-gold hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gold"
+            >
+              <ArrowIcon className="h-4 w-4 rotate-180" />
+            </button>
+            <button
+              type="button"
+              onClick={() => scrollTrack(1)}
+              disabled={!canNext}
+              aria-label={t("expertsRight")}
+              className="flex h-10 w-10 items-center justify-center rounded-full border border-gold/40 text-gold transition-all duration-200 hover:bg-gold hover:text-white disabled:cursor-default disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gold"
+            >
+              <ArrowIcon className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Cards grid */}
+        {/* Cards carousel — horizontal scroll-snap row; extra staff stay
+            reachable by swiping or via the arrows above. */}
         <div
           ref={cardsRef}
-          className={`grid grid-cols-1 gap-5 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4 transition-all duration-700 ease-out delay-150 ${cardsInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
+          className={`transition-all duration-700 ease-out delay-150 ${cardsInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
         >
-          {list.map((stylist, index) => (
-            <ExpertCard key={stylist.id ?? index} stylist={stylist} index={index} t={t} />
-          ))}
+          <div
+            ref={trackRef}
+            onScroll={updateArrows}
+            role="region"
+            aria-roledescription="carousel"
+            aria-label={t("expertsTitle")}
+            className="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-2 sm:gap-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {list.map((stylist, index) => (
+              <ExpertCard key={stylist.id ?? index} stylist={stylist} index={index} t={t} />
+            ))}
+          </div>
         </div>
       </div>
     </section>
@@ -200,13 +254,13 @@ function ExpertCard({ stylist, index, t }) {
   const categories = Array.isArray(stylist.categories) ? stylist.categories : [];
 
   return (
-    <article className="group relative flex flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)]">
+    <article className="group relative flex w-[80%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)] sm:w-[calc(50%-12px)] lg:w-[calc(25%-18px)]">
       <div className="relative aspect-[9/16] w-full h-[480px] overflow-hidden bg-[#f5ece0]  ">
         <Image
           src={imageSrc}
           alt={stylist.name}
           fill
-          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+          sizes="(max-width: 640px) 80vw, (max-width: 1024px) 50vw, 25vw"
           className="h-full w-full object-cover obje transition-transform duration-700 group-hover:scale-[1.03]"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-60" />

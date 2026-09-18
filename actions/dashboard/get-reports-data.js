@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, DASHBOARD_PERMISSIONS } from "@/lib/authorization";
 import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
-import { resolveSalonScope, salonPaymentArms } from "@/lib/authorization/salon-scope";
+import { resolveSalonScope, SALON_PAYMENT_WHERE } from "@/lib/authorization/salon-scope";
 import {
   BANK_METHODS,
   CASH_METHODS,
@@ -64,7 +64,7 @@ export async function getReportsData({ months } = {}) {
 
   try {
     const scope = await resolveSalonScope(prisma);
-    const salonPayment = { OR: salonPaymentArms(scope) };
+    const salonPayment = SALON_PAYMENT_WHERE;
     // An Order is the salon's when a salon account rang it up, or nobody did
     // (the customer's own online purchase). Order.createdByStaffId → User.id.
     const salonOrder = { OR: [{ createdByStaffId: { in: scope.salonUserIds } }, { createdByStaffId: null }] };
@@ -89,6 +89,7 @@ export async function getReportsData({ months } = {}) {
           paidAt: { gte: rangeStart },
           orderId: { not: null },
           order: salonOrder,
+          ...salonPayment,
         },
         select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
@@ -98,18 +99,19 @@ export async function getReportsData({ months } = {}) {
           status: { in: REVENUE_STATUSES },
           paidAt: { gte: rangeStart },
           appointmentId: { not: null },
-          // Appointment.staffId → Staff.id: only Marie's, never an independent's.
-          appointment: { staffId: { in: scope.salonStaffIds } },
+          // Marie's (and any employee's) appointments — never an independent's.
+          ...salonPayment,
         },
         select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
-      // Ateliers and formations are the salon's own events.
+      // Ateliers and formations — except the ones an independent animates,
+      // whose seats are her own sales.
       prisma.payment.findMany({
-        where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, workshopReservationId: { not: null } },
+        where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, workshopReservationId: { not: null }, ...salonPayment },
         select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
       prisma.payment.findMany({
-        where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, formationReservationId: { not: null } },
+        where: { isDeleted: false, status: { in: REVENUE_STATUSES }, paidAt: { gte: rangeStart }, formationReservationId: { not: null }, ...salonPayment },
         select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
       }),
 

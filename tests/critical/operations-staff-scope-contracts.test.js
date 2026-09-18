@@ -54,7 +54,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.auth.mockResolvedValue({ user: { id: "u_admin", role: "ADMIN" } });
   mocks.userFindMany.mockResolvedValue(SALON_USERS);
-  mocks.staffFindMany.mockResolvedValue([{ id: "s_julie", isActive: true, user: { fullName: "Julie Schoemans" } }]);
+  // Every INDEPENDENT profile — Marie's type is INDEPENDENT too; the salon
+  // scope is what takes her back out of the payee list.
+  mocks.staffFindMany.mockResolvedValue([{ id: "s_julie" }, { id: "s_marie" }]);
   mocks.staffFindUnique.mockResolvedValue(JULIE);
   mocks.query.mockResolvedValue([]);
   mocks.transactions.mockResolvedValue([]);
@@ -69,18 +71,26 @@ beforeEach(() => {
 // and every number around them would be wrong — `totalCount` counting rows
 // the reader never sees, "Suivant" leading to a page that renders empty.
 describe("attribution rides in the SQL, not in the hydration", () => {
-  it("scopes the default view to the salon, on the right key for each source", async () => {
+  it("scopes money rows by the Payment's frozen owner, and orders by who rang them up", async () => {
     await getAdminOperations({});
     const query = firstQuery();
 
-    // Order → User.id, Appointment → Staff.id. Crossing the two id spaces
-    // matches nothing, silently, and this is where that would show.
+    // Appointments and paid seats: Payment.payeeStaffId null is the salon.
+    expect(query.sql).toContain('p."payeeStaffId" IS NULL');
+    expect(query.sql).toContain('po."payeeStaffId" IS NULL');
+    // Orders still follow the account that rang them up (User.id).
     expect(query.sql).toContain('o."createdByStaffId" IN');
-    expect(query.sql).toContain('a."staffId" IN');
     expect(query.values).toContain("u_admin");
     expect(query.values).toContain("u_marie");
-    expect(query.values).toContain("s_marie");
-    expect(query.values).not.toContain("s_julie");
+  });
+
+  it("an unpaid seat follows its animator, and only independents are excluded — never Marie", async () => {
+    await getAdminOperations({});
+    const query = firstQuery();
+    expect(query.sql).toContain('COALESCE(sa."staffId", ca."staffId")');
+    expect(query.sql).toContain("NOT IN");
+    expect(query.values).toContain("s_julie");
+    expect(query.values).not.toContain("s_marie");
   });
 
   it("counts through the same arms, so totalCount and the page agree", async () => {
@@ -88,9 +98,9 @@ describe("attribution rides in the SQL, not in the hydration", () => {
     // Two queries over one shared `unioned` fragment: if the scope reached
     // only the paged one, the header would promise rows the table cannot show.
     expect(mocks.query).toHaveBeenCalledTimes(2);
-    expect(countQuery().sql).toContain('o."createdByStaffId" IN');
-    expect(countQuery().sql).toContain('a."staffId" IN');
-    expect(countQuery().values).toContain("s_marie");
+    expect(countQuery().sql).toContain('p."payeeStaffId" IS NULL');
+    expect(countQuery().sql).toContain('po."payeeStaffId" IS NULL');
+    expect(countQuery().values).toContain("s_julie");
   });
 
   it("keeps an unstamped row in the salon view — nobody rang it up, so it is the salon's", async () => {
@@ -106,6 +116,13 @@ describe("attribution rides in the SQL, not in the hydration", () => {
     expect(sql).toContain("'WORKSHOP' AS");
     expect(sql).toContain("'FORMATION' AS");
   });
+
+  it("a session transfer follows the reservation's owner, not the admin who moved it", async () => {
+    await getAdminOperations({});
+    const sql = firstQuery().sql;
+    const transferArm = sql.slice(sql.indexOf("'TRANSFER' AS"));
+    expect(transferArm).toContain('po."payeeStaffId" IS NULL');
+  });
 });
 
 // Every practitioner other than Marie is legally independent: the salon has
@@ -118,9 +135,8 @@ describe("an admin can never open an independent's ledger", () => {
 
     expect(result.success).toBe(true);
     expect(result.staffId).toBe("");
+    expect(query.sql).not.toContain('"payeeStaffId" =');
     expect(query.values).not.toContain("u_julie");
-    expect(query.values).not.toContain("s_julie");
-    expect(query.values).toContain("s_marie");
     // Never even looked up — there is no code path that resolves one.
     expect(mocks.staffFindUnique).not.toHaveBeenCalled();
   });
@@ -128,7 +144,6 @@ describe("an admin can never open an independent's ledger", () => {
   it("offers no staff directory to pick from", async () => {
     const result = await getAdminOperations({});
     expect(result).not.toHaveProperty("staffOptions");
-    expect(mocks.staffFindMany).not.toHaveBeenCalled();
   });
 });
 
@@ -145,6 +160,16 @@ describe("a practitioner reading her own ledger", () => {
     expect(result.staffId).toBe("s_julie");
     expect(result.readOnly).toBe(true);
     expect(firstQuery().values).toContain("s_julie");
+    expect(firstQuery().sql).toContain('p."payeeStaffId" =');
+    expect(firstQuery().sql).not.toContain('"payeeStaffId" IS NULL');
+  });
+
+  it("sees the ateliers and formations she animates — they are her own sales", async () => {
+    await getAdminOperations({});
+    const sql = firstQuery().sql;
+    expect(sql).toContain("'WORKSHOP' AS");
+    expect(sql).toContain("'FORMATION' AS");
+    expect(sql).toContain('COALESCE(sa."staffId", ca."staffId") =');
   });
 
   it("cannot read a colleague's takings by hand-editing the query string", async () => {
@@ -179,15 +204,12 @@ describe("empty lists never reach Postgres as `IN ()`", () => {
     expect(sql).toContain("AND false");
   });
 
-  it("an ADMIN with no Staff row leaves the appointment arm bounded, not open", async () => {
-    mocks.userFindMany.mockResolvedValue([{ id: "u_admin", staff: null }]);
+  it("with no independent at all, the animator check stays open instead of emitting NOT IN ()", async () => {
+    mocks.staffFindMany.mockResolvedValue([{ id: "s_marie" }]);
     await getAdminOperations({});
     const sql = firstQuery().sql;
-    expect(sql).toContain('o."createdByStaffId" IN');
-    // No salon Staff.id exists, so no appointment can be the salon's — the
-    // arm must close, not fall through to every practitioner's rendez-vous.
-    expect(sql).not.toContain('a."staffId" IN');
-    expect(sql).toContain("AND false");
+    expect(sql).not.toContain("IN ()");
+    expect(sql).not.toContain("NOT IN");
   });
 });
 

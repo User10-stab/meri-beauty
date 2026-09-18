@@ -14,6 +14,7 @@ import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-numbe
 import { resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
+import { authorizeRefundActor } from "@/lib/refunds/authorize";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
@@ -26,6 +27,7 @@ import {
   buildAppointmentNoShowNotification,
   getAppointmentNotificationRecipients,
 } from "@/lib/notifications";
+import { resolvePayeeForAppointment, payeePaymentData } from "@/lib/payments/resolve-payee";
 
 /**
  * Verify the authenticated user can manage the given appointment.
@@ -309,13 +311,27 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
     // just because the assigned staff member (rather than an admin) clicked
     // cancel — only admin decides whether to waive the forfeit
     // (waiveDepositForfeit below).
+    //
+    // An independent practitioner's own sale (Payment.payeeStaffId) is the
+    // exception, the other way round: the money is on her Stripe account and
+    // under her VAT number, so she alone cancels and refunds it — including
+    // waiving her own forfeit — and the admin is refused (authorizeRefundActor).
     if (wasPaid) {
-      const session = await auth();
-      if (!isAdminRole(session?.user?.role)) {
-        return {
-          success: false,
-          message: "Seul un administrateur peut annuler un rendez-vous déjà payé (remboursement requis). Contactez un administrateur.",
-        };
+      if (payment.payeeStaffId) {
+        const owner = authorizeRefundActor({
+          actorRole: authCheck.userRole,
+          actorStaffId: isAdminRole(authCheck.userRole) ? null : await getCurrentStaffId(),
+          payeeStaffId: payment.payeeStaffId,
+        });
+        if (!owner.allowed) return { success: false, message: owner.message };
+      } else {
+        const session = await auth();
+        if (!isAdminRole(session?.user?.role)) {
+          return {
+            success: false,
+            message: "Seul un administrateur peut annuler un rendez-vous déjà payé (remboursement requis). Contactez un administrateur.",
+          };
+        }
       }
     }
 
@@ -441,7 +457,8 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       // (markAppointmentNoShow). A forfeited deposit will essentially never
       // already have payment.invoice set (deposits aren't invoiced at
       // collection time), but guard on it anyway for idempotency.
-      if (forfeitAmount > REFUND_EPSILON && !payment.invoice && hasInvoiceableVatIdentity(appointment.user)) {
+      // Never for an independent's sale — she documents it under her own VAT.
+      if (forfeitAmount > REFUND_EPSILON && !payment.invoice && !payment.payeeStaffId && hasInvoiceableVatIdentity(appointment.user)) {
         const cancellationFeeVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });
         await issueInvoice(tx, {
           paymentId: payment.id,
@@ -683,7 +700,7 @@ export async function markAppointmentNoShow(appointmentId) {
         // Invoice to be created — see isTillCashOperator. The no-show still
         // gets recorded and the deposit kept, it simply never gets an
         // invoice.
-        const offTillActor = !isTillCashOperator(authCheck.user);
+        const offTillActor = !isTillCashOperator(authCheck.user) || Boolean(noShowPayment.payeeStaffId);
         await allocatePaymentTicketNumber(tx, noShowPayment.id, "APPOINTMENT", null, new Date(), offTillActor);
 
         if (hasInvoiceableVatIdentity(appointment.user) && !offTillActor) {
@@ -844,7 +861,13 @@ export async function completeAppointment(
     // and the collection Transaction is detached from every cash session so
     // it shows in Opérations but not in the drawer's book or its X/Z report.
     // AppointmentDrawer / FicheSettleAction hide the popup for them too.
-    const offTill = !isTillCashOperator(authCheck.user);
+    // An independent practitioner's appointment is her sale: off-till whoever
+    // collects it — even the admin or Marie — with no salon ticket or invoice.
+    // With no Payment row yet, the practitioner it is booked with decides.
+    const independentSale = payment
+      ? Boolean(payment.payeeStaffId)
+      : Boolean((await resolvePayeeForAppointment(prisma, { staffId: appointment.staffId })).payeeStaffId);
+    const offTill = !isTillCashOperator(authCheck.user) || independentSale;
     const collectsAtTill = collectsMoney && !offTill;
 
     // A card payment is only accepted as EXTERNAL_TERMINAL, which carries the
@@ -952,6 +975,7 @@ export async function completeAppointment(
           : await tx.payment.create({
               data: {
                 appointmentId,
+                ...payeePaymentData(await resolvePayeeForAppointment(tx, { staffId: appointment.staffId })),
                 depositAmount: 0,
                 totalAmount: priceAdjustment.finalTotal,
                 paidAmount: priceAdjustment.finalTotal,

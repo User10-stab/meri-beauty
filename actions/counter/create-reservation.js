@@ -23,6 +23,7 @@ import { workshopReservationConfirmationEmail, formationReservationConfirmationE
 import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
 import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
 import { revalidatePath } from "next/cache";
+import { resolvePayeeForWorkshopSession, resolvePayeeForFormationSession, payeePaymentData } from "@/lib/payments/resolve-payee";
 
 /**
  * Sells a brand-new workshop/formation/événement seat at the counter —
@@ -175,7 +176,14 @@ export async function createCounterReservation(input) {
   // still creates the booking and still records the deposit/full payment, but
   // off-till: no open-till requirement and the CASH Transaction is detached
   // from every session, so it shows in Opérations, not in the drawer's book.
-  const offTill = !isTillCashOperator(guard.session.user);
+  // A seat an independent animates is her sale: off-till whoever sells it,
+  // no salon ticket or invoice. Resolved once, and the same payee is written
+  // on the Payment below.
+  const payee =
+    data.kind === "WORKSHOP"
+      ? await resolvePayeeForWorkshopSession(prisma, { sessionId: data.sessionId })
+      : await resolvePayeeForFormationSession(prisma, { sessionId: data.sessionId });
+  const offTill = !isTillCashOperator(guard.session.user) || Boolean(payee.payeeStaffId);
   const useTill = !offTill && data.payment.method === "CASH";
 
   if (data.payment.method === "EXTERNAL_TERMINAL" && !data.payment.terminalReference?.trim()) {
@@ -279,6 +287,7 @@ export async function createCounterReservation(input) {
         const payment = await tx.payment.create({
           data: {
             [data.kind === "WORKSHOP" ? "workshopReservationId" : "formationReservationId"]: reservation.id,
+            ...payeePaymentData(payee),
             depositAmount: isFullPayment ? 0 : collected,
             totalAmount: total,
             paidAmount: collected,

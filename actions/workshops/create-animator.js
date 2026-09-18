@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { isAdminRole } from "@/lib/authorization";
+import { staffIdForAnimatorEmail } from "@/lib/payments/resolve-payee";
 
 const animatorSchema = z.object({
   name: z.string().trim().min(2, "Le nom doit contenir au moins 2 caractères.").max(100, "Le nom ne peut pas dépasser 100 caractères."),
@@ -65,7 +66,9 @@ export async function createAnimator(input) {
     }
 
     const animator = await prisma.animator.create({
-      data: parsed.data,
+      // An animator whose e-mail is a staff profile IS that practitioner —
+      // it decides whose Stripe account her ateliers are charged to.
+      data: { ...parsed.data, staffId: await staffIdForAnimatorEmail(prisma, email) },
     });
 
     revalidatePath("/dashboard/workshops");
@@ -125,7 +128,7 @@ export async function updateAnimator(input) {
 
     const updated = await prisma.animator.update({
       where: { id },
-      data: parsed.data,
+      data: { ...parsed.data, staffId: await staffIdForAnimatorEmail(prisma, email) },
     });
 
     revalidatePath("/dashboard/workshops");

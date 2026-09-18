@@ -16,9 +16,9 @@ describe("B2C sales never issue invoices", () => {
   });
 
   test.each([
-    ["lib/workshops/fulfill-workshop-reservation-payment.js", "isFullPayment && hasInvoiceableVatIdentity(reservation.customer)"],
-    ["lib/formations/fulfill-formation-reservation-payment.js", "isFullPayment && hasInvoiceableVatIdentity(reservation.customer)"],
-    ["app/api/webhooks/stripe/route.js", 'nextPaymentStatus === "PAID" && hasInvoiceableVatIdentity(appointment.user)'],
+    ["lib/workshops/fulfill-workshop-reservation-payment.js", "isFullPayment && !independentSale && hasInvoiceableVatIdentity(reservation.customer)"],
+    ["lib/formations/fulfill-formation-reservation-payment.js", "isFullPayment && !independentSale && hasInvoiceableVatIdentity(reservation.customer)"],
+    ["app/api/webhooks/stripe/route.js", 'nextPaymentStatus === "PAID" && !independentSale && hasInvoiceableVatIdentity(appointment.user)'],
     ["actions/workshops/manage-reservation.js", "hasInvoiceableVatIdentity(reservation.customer)"],
     ["actions/formations/manage-reservation.js", "hasInvoiceableVatIdentity(reservation.customer)"],
   ])("%s checks the validated VAT identity before invoicing", (file, guard) => {

@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { parseBrusselsInputValue } from "@/lib/datetime/brussels-input";
+import { sessionsBlockedByPayeeChange, PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE } from "@/lib/payments/resolve-payee";
 
 const sessionSchema = z.object({
   id: z.string().optional(),
@@ -105,14 +106,16 @@ async function resolveFormationAnimatorId(session, requestedStaffUserId) {
       isDeleted: false,
       user: { role: "STAFF", isActive: true, isDeleted: false },
     },
-    select: { photo: true, user: { select: { fullName: true, email: true } } },
+    select: { id: true, photo: true, user: { select: { fullName: true, email: true } } },
   });
   if (!staff) throw new Error("FORMATION_STAFF_NOT_AVAILABLE");
 
+  // staffId is the real link payee resolution reads (lib/payments/resolve-payee.js):
+  // a formation this practitioner animates is charged to her own Stripe account.
   const animator = await prisma.animator.upsert({
     where: { email: staff.user.email },
-    update: { name: staff.user.fullName, ...(staff.photo ? { avatar: staff.photo } : {}) },
-    create: { name: staff.user.fullName, email: staff.user.email, avatar: staff.photo ?? null },
+    update: { name: staff.user.fullName, staffId: staff.id, ...(staff.photo ? { avatar: staff.photo } : {}) },
+    create: { name: staff.user.fullName, email: staff.user.email, staffId: staff.id, avatar: staff.photo ?? null },
   });
   return animator.id;
 }
@@ -304,6 +307,26 @@ export async function updateFormation(input) {
               : "Impossible de retirer des sessions qui ont déjà des réservations. Annulez d'abord ces réservations, ou laissez-les dans le formulaire.",
         };
       }
+    }
+
+    // Changing who animates a session changes whose Stripe account its seats
+    // are charged to — refused once a seat is paid to someone else.
+    const blockedSessions = await sessionsBlockedByPayeeChange(
+      prisma,
+      "FORMATION",
+      resolvedSessions
+        .filter((s) => s.id)
+        .map((s) => {
+          const existing = existingSessionById.get(s.id);
+          return {
+            sessionId: s.id,
+            currentAnimatorId: existing.animatorId ?? existingFormation.animatorId ?? null,
+            nextAnimatorId: s.animatorId || animatorId || null,
+          };
+        })
+    );
+    if (blockedSessions.length > 0) {
+      return { success: false, message: PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE };
     }
 
     const updated = await prisma.$transaction(async (tx) => {

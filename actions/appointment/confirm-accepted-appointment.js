@@ -15,6 +15,7 @@ import {
   getAppointmentEmailRecipients,
   getAppointmentNotificationRecipients,
 } from "@/lib/notifications";
+import { resolvePayeeForAppointment, payeePaymentData } from "@/lib/payments/resolve-payee";
 
 function getPaymentMethod(value) {
   if (value === "online" || value === "cash") return value;
@@ -114,6 +115,7 @@ export async function confirmAcceptedAppointment(appointmentId, paymentMethod, c
     const payment = existingPayment ?? await prisma.payment.create({
       data: {
         appointmentId: appointment.id,
+        ...payeePaymentData(await resolvePayeeForAppointment(prisma, { staffId: appointment.staffId })),
         depositAmount: decision.depositAmount,
         totalAmount: decision.totalAmount,
         paidAmount: 0,
@@ -160,7 +162,7 @@ export async function confirmAcceptedAppointment(appointmentId, paymentMethod, c
 
     await prisma.payment.update({
       where: { id: payment.id },
-      data: { transactionReference: checkoutSession.id },
+      data: { transactionReference: checkoutSession.id, stripeAccountId: staff.stripeAccountId },
     });
 
     return { success: true, url: checkoutSession.url, confirmed: false };

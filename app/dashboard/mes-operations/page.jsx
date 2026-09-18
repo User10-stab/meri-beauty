@@ -2,7 +2,9 @@ import { redirect } from "next/navigation";
 import { requireDashboard, getCurrentStaffId } from "@/lib/route-protection";
 import { isAdminRole } from "@/lib/authorization";
 import { getAdminOperations } from "@/actions/dashboard/admin-operations";
+import { getMyOutstandingRefundLegs } from "@/actions/dashboard/cancel-and-refund";
 import { AdminOperationsClient } from "@/components/dashboard/operations/AdminOperationsClient";
+import { OutstandingRefunds } from "@/components/dashboard/operations/OutstandingRefunds";
 
 export const metadata = {
   title: "Mes opérations — Dashboard",
@@ -17,10 +19,13 @@ export const dynamic = "force-dynamic";
  * they are no longer counted in the salon's books, and this is where she
  * reads them back.
  *
- * Read-only on purpose. The actions on /dashboard/operations (send an
- * invoice, open a refund, reprint a ticket) all produce documents in the
- * salon's name, which is precisely what an independent's sale must not
- * generate. Its own guard is unchanged: /dashboard/operations stays
+ * The salon's document actions on /dashboard/operations (send an invoice,
+ * reprint a ticket, issue a credit note) stay out of this page: they produce
+ * documents in the salon's name, which is precisely what an independent's
+ * sale must not generate. Refunding is hers, though, and it is here — her
+ * money is on her own Stripe account, so she is the only one who can send it
+ * back, and what she still owes is listed at the top of the page. Its own
+ * guard is unchanged: /dashboard/operations stays
  * admin-only, and an admin supervising everyone does it from there.
  *
  * The staff id is never taken from the query string — getAdminOperations
@@ -42,13 +47,16 @@ export default async function MyOperationsPage({ searchParams }) {
   if (!staffId) redirect("/dashboard");
 
   const params = await searchParams;
-  const result = await getAdminOperations({
-    tab: params?.tab,
-    page: params?.page,
-    type: params?.type,
-    lifecycleStatus: params?.lifecycleStatus,
-    paymentEvent: params?.paymentEvent,
-  });
+  const [result, outstandingRefunds] = await Promise.all([
+    getAdminOperations({
+      tab: params?.tab,
+      page: params?.page,
+      type: params?.type,
+      lifecycleStatus: params?.lifecycleStatus,
+      paymentEvent: params?.paymentEvent,
+    }),
+    getMyOutstandingRefundLegs(),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -64,6 +72,9 @@ export default async function MyOperationsPage({ searchParams }) {
           {result.message}
         </div>
       ) : null}
+      {/* Above her ledger: money she has promised a client back and not yet
+          sent is the most time-sensitive thing on this page. */}
+      <OutstandingRefunds legs={outstandingRefunds.data} independent />
       <AdminOperationsClient result={result} basePath="/dashboard/mes-operations" />
     </div>
   );

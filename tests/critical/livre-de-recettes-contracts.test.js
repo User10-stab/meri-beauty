@@ -117,23 +117,12 @@ describe("buildRecettesJournal", () => {
   it("scopes the journal to the salon, in the query, so an independent's takings can never inflate it", async () => {
     const client = clientMock();
     await buildRecettesJournal(client, RANGE);
-    const arms = client.transaction.findMany.mock.calls[0][0].where.payment.OR;
+    const where = client.transaction.findMany.mock.calls[0][0].where;
 
-    // Two id spaces, and they are not interchangeable: an Order is stamped
-    // with a User.id, an Appointment with a Staff.id. Crossing them would
-    // leave an arm matching nothing, silently.
-    expect(arms).toContainEqual({ order: { createdByStaffId: { in: ["u_admin", "u_marie"] } } });
-    expect(arms).toContainEqual({ appointment: { staffId: { in: ["s_marie"] } } });
-    // A customer's own online purchase stamps nobody — salon revenue.
-    expect(arms).toContainEqual({ order: { createdByStaffId: null } });
-    // Ateliers and formations are the salon's own events; the schema carries
-    // no staff link on them at all, so there is nobody to hand them to.
-    expect(arms).toContainEqual({ workshopReservationId: { not: null } });
-    expect(arms).toContainEqual({ formationReservationId: { not: null } });
-
-    // The one appointment arm must be the bounded one. An unbounded second
-    // arm would quietly let every independent straight back in.
-    expect(arms.filter((a) => a.appointment)).toHaveLength(1);
+    // The payment's frozen owner (lib/payments/resolve-payee.js): null is the
+    // salon — Marie's sales included — and anything else is an independent's.
+    // In the `where`, so `truncated` and the totals describe what was kept.
+    expect(where.payment).toEqual({ payeeStaffId: null });
   });
 
   it("still flags off-till cash on a row, so the divergence stays visible if the scope ever widens", async () => {
@@ -157,7 +146,7 @@ describe("buildRecettesJournal", () => {
     await buildRecettesJournal(client, { ...RANGE, staffId: "s_julie" });
     const where = client.transaction.findMany.mock.calls[0][0].where;
     expect(JSON.stringify(where)).not.toContain("s_julie");
-    expect(where.payment.OR).toContainEqual({ appointment: { staffId: { in: ["s_marie"] } } });
+    expect(where.payment).toEqual({ payeeStaffId: null });
   });
 
   it("categorizes each row by its payment source, splitting atelier from événement, with an OTHER bucket", async () => {

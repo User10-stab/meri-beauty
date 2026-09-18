@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { AlertTriangle, Banknote, CreditCard, ExternalLink, Loader2 } from "lucide-react";
 import { confirmManualRefundLeg, resolveManualRefundCase } from "@/actions/dashboard/cancel-and-refund";
+import { createLoginLink } from "@/actions/stripe/create-login-link";
 
 /**
  * Every refund still owed to a customer.
@@ -64,7 +65,62 @@ function OperationMeta({ leg }) {
  * button: confirming here would be an admin asserting something the webhook
  * can verify, and the two would eventually disagree.
  */
-function StripeLegRow({ leg }) {
+/**
+ * Where an independent's own Stripe actually lives — which is not the same
+ * place for everyone.
+ *
+ * This used to assume every independent was on an Express account and always
+ * minted a login link. Both halves of that were wrong:
+ *
+ *   `accounts.createLoginLink` is Express-ONLY. Called for a Standard account
+ *   Stripe throws, and create-login-link.js turns that into a raw
+ *   "Erreur Stripe : ..." toast — so the practitioners who CAN refund (Rose
+ *   and Lyly are Standard) were exactly the ones this button refused to open.
+ *
+ *   An Express holder has no refund control at all, so sending her there was
+ *   a dead end anyway: she arrives, finds nothing, and the refund quietly
+ *   stays owed. The caller offers her no button for that reason.
+ *
+ * A Standard holder gets a link to the payment itself, account-scoped: a
+ * direct charge does not exist on the platform dashboard, so an unscoped
+ * /payments/<pi> URL lands on "no such payment".
+ */
+function OwnStripeDashboardButton({ accountId = null, paymentIntentId = null }) {
+  const [opening, setOpening] = useState(false);
+
+  if (accountId && paymentIntentId) {
+    return (
+      <a
+        href={`https://dashboard.stripe.com/${accountId}/payments/${paymentIntentId}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-[13px] font-medium text-blue-800 hover:bg-blue-50"
+      >
+        <ExternalLink size={14} /> Ouvrir ce paiement dans Stripe
+      </a>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={opening}
+      onClick={async () => {
+        setOpening(true);
+        const result = await createLoginLink();
+        setOpening(false);
+        if (result.success && result.data?.url) window.open(result.data.url, "_blank", "noopener,noreferrer");
+        else toast.error(result.message ?? "Impossible d'ouvrir votre tableau de bord Stripe.");
+      }}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-[13px] font-medium text-blue-800 hover:bg-blue-50 disabled:opacity-50"
+    >
+      {opening ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />} Ouvrir mon tableau de bord
+      Stripe
+    </button>
+  );
+}
+
+function StripeLegRow({ leg, independent = false }) {
   const paymentIntentId = leg.stripePaymentIntentId ?? leg.sourceTransaction?.stripePaymentIntentId ?? null;
 
   // A rendez-vous is a Connect DIRECT charge on the staff member's own
@@ -73,6 +129,9 @@ function StripeLegRow({ leg }) {
   // page where the payment does not exist — and the natural next move from
   // there is to go looking for it, or to assume it is already refunded.
   const account = leg.connectedAccountId ?? null;
+  // "express" | "standard" | null (the salon's own account). Express is the
+  // one that cannot refund from its own dashboard, whatever it is told.
+  const expressPayee = independent && leg.connectedAccountType === "express";
   const stripeUrl = paymentIntentId
     ? account
       ? `https://dashboard.stripe.com/${account}/payments/${paymentIntentId}`
@@ -116,7 +175,24 @@ function StripeLegRow({ leg }) {
             Remboursez <strong>exactement {money(amountDue)}</strong> — pas le total de la facture. Seul
             ce montant est passé par Stripe.
           </p>
-          {account && (
+          {independent ? (
+            expressPayee ? (
+              // Stripe's Express dashboard has no refund control, so the old
+              // instruction was one she could not follow — and the refund then
+              // sat owed with nobody aware of it.
+              <p className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                Votre compte Stripe est un compte <strong>Express</strong> : son tableau de bord ne permet pas
+                de rembourser. <strong>Le salon doit effectuer ce remboursement pour vous</strong> —
+                transmettez-lui l&apos;identifiant ci-dessous. Pour rembourser vous-même à l&apos;avenir, il
+                faut un compte Stripe standard.
+              </p>
+            ) : (
+              <p className="mb-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-[12px] text-blue-900">
+                Ce paiement est sur votre propre compte Stripe. Ouvrez-le avec le bouton ci-dessous et
+                remboursez exactement ce montant depuis votre tableau de bord.
+              </p>
+            )
+          ) : account && (
             <p className="mb-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
               Paiement encaissé sur le compte Stripe de{" "}
               <strong>{leg.connectedAccountStaffName ?? "l'intervenant"}</strong> — il n&apos;apparaît pas
@@ -131,7 +207,11 @@ function StripeLegRow({ leg }) {
               {shortDate(leg.sourceTransaction?.paidAt)} dans Stripe.
             </p>
           )}
-          {stripeUrl && (
+          {independent ? (
+            // No button for an Express payee: every destination is a dead end,
+            // and a button that leads nowhere reads as "already handled".
+            !expressPayee && <OwnStripeDashboardButton accountId={account} paymentIntentId={paymentIntentId} />
+          ) : stripeUrl && (
             <a
               href={stripeUrl}
               target="_blank"
@@ -284,7 +364,11 @@ function ManualRefundCaseRow({ refundCase }) {
   );
 }
 
-export function OutstandingRefunds({ legs, manualRefundCases = [] }) {
+/**
+ * `independent` is the /dashboard/mes-operations rendering: a practitioner's
+ * own refunds, made on her own Stripe Express account.
+ */
+export function OutstandingRefunds({ legs, manualRefundCases = [], independent = false }) {
   const router = useRouter();
   if ((!legs || legs.length === 0) && manualRefundCases.length === 0) return null;
 
@@ -302,8 +386,9 @@ export function OutstandingRefunds({ legs, manualRefundCases = [] }) {
     <section className="rounded-2xl border border-amber-300 bg-white p-5">
       <h2 className="text-base font-semibold text-gray-900">Remboursements dus — {money(total)}</h2>
       <p className="mb-4 mt-1 text-[13px] text-gray-600">
-        Ces annulations sont enregistrées et documentées, mais l&apos;argent n&apos;est pas encore reparti.
-        Tant qu&apos;une ligne reste ici, le client n&apos;a pas été informé.
+        {independent
+          ? "Ces annulations sont enregistrées, mais l'argent n'est pas encore rendu à vos clients. C'est à vous de le rembourser. Tant qu'une ligne reste ici, le client n'a pas été informé."
+          : "Ces annulations sont enregistrées et documentées, mais l'argent n'est pas encore reparti. Tant qu'une ligne reste ici, le client n'a pas été informé."}
       </p>
 
       {manualRefundCases.length > 0 && (
@@ -324,7 +409,7 @@ export function OutstandingRefunds({ legs, manualRefundCases = [] }) {
           </h3>
           <ul className="mb-4 space-y-3">
             {stripeLegs.map((leg) => (
-              <StripeLegRow key={leg.id} leg={leg} />
+              <StripeLegRow key={leg.id} leg={leg} independent={independent} />
             ))}
           </ul>
         </>

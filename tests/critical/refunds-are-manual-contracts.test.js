@@ -160,7 +160,11 @@ describe("a rendez-vous refund is a Connect charge, not a platform one", () => {
 
   test("the worklist links to the staff member's own Stripe dashboard", () => {
     const action = source("actions/dashboard/cancel-and-refund.js");
-    expect(action).toContain("connectedAccountId: staff?.stripeAccountId ?? null");
+    // `owner` is the payee (Payment.payeeStaffId) first, falling back to the
+    // appointment's practitioner for rows written before payees existed. It
+    // used to read the practitioner only, which attributed an atelier or
+    // formation seat to nobody.
+    expect(action).toContain("connectedAccountId: payment?.stripeAccountId ?? owner?.stripeAccountId ?? null");
 
     const panel = source("components/dashboard/operations/OutstandingRefunds.jsx");
     expect(panel).toContain("`https://dashboard.stripe.com/${account}/payments/${paymentIntentId}`");

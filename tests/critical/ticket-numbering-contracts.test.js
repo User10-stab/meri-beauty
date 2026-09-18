@@ -21,16 +21,16 @@ describe("lib/tickets/allocate-ticket-number.js — the shared global ticket seq
       "export async function allocateOrderTicketNumber(tx, orderId, now = new Date(), isStaffActor = false)"
     );
     expect(allocator).toContain("export async function allocatePaymentTicketNumber(");
-    expect(allocator).toContain("export function formatTicketNumber(year, seq, seriesPrefix = \"T\")");
+    expect(allocator).toContain("export function formatTicketNumber(year, seq)");
   });
 
   test("uses its own counter-key namespace, distinct from invoicing and the cash book", () => {
     expect(allocator).toContain("`TICKET-${ticketYear(now)}`");
   });
 
-  test("a non-privileged staff actor gets a separate, still gapless, series", () => {
-    expect(allocator).toContain("`TICKET-STAFF-${ticketYear(now)}`");
-    expect(allocator).toContain('isStaffActor ? "TS" : "T"');
+  test("there is one ticket series only — the never-used staff TS- series is gone", () => {
+    expect(allocator).not.toContain("TICKET-STAFF");
+    expect(allocator).not.toContain('"TS"');
   });
 
   test("reuses the same atomic upsert as invoicing/piece-number — no separate retry logic", () => {
@@ -63,7 +63,7 @@ describe("lib/activities/activity-kind.js is the one place Workshop/Event is dec
 describe("every hook point that settles a sale allocates a ticket number", () => {
   // Staff-reachable call sites pass a resolved isStaffActor flag (offTill /
   // offTillActor — see isTillCashOperator) so a non-privileged staff sale
-  // lands on the separate "TS-" series; the remaining sites have no staff
+  // gets no salon ticket; the remaining sites have no staff
   // actor at all (customer self-checkout / Stripe webhook) and are
   // deliberately left on the two-argument, admin-series default.
   const cases = [
@@ -125,14 +125,14 @@ describe("every hook point that settles a sale allocates a ticket number", () =>
 describe("a non-privileged staff actor gets no ticket number at all", () => {
   const MAY = new Date("2026-05-04T10:00:00Z");
 
-  function txMock({ existing = null, next = 7 } = {}) {
+  function txMock({ existing = null, next = 7, payeeStaffId = null } = {}) {
     return {
       order: {
         findUnique: vi.fn(() => Promise.resolve({ ticketNumber: existing })),
         update: vi.fn(() => Promise.resolve({})),
       },
       payment: {
-        findUnique: vi.fn(() => Promise.resolve({ ticketNumber: existing })),
+        findUnique: vi.fn(() => Promise.resolve({ ticketNumber: existing, payeeStaffId })),
         update: vi.fn(() => Promise.resolve({})),
       },
       $queryRaw: vi.fn(() => Promise.resolve([{ lastNumber: next }])),
@@ -176,6 +176,24 @@ describe("a non-privileged staff actor gets no ticket number at all", () => {
     const tx = txMock({ existing: "T-2026-000003" });
     await expect(allocateOrderTicketNumber(tx, "order_1", MAY, true)).resolves.toBeNull();
     expect(tx.order.findUnique).not.toHaveBeenCalled();
+  });
+
+  // 17/09/2026 — whose sale it is, not who clicked. The admin or Marie
+  // settling Julie's appointment used to put the salon's ticket on it.
+  test("an independent's payment gets no ticket even when the salon settles it", async () => {
+    const tx = txMock({ payeeStaffId: "s_julie" });
+    await expect(
+      allocatePaymentTicketNumber(tx, "pay_1", "APPOINTMENT", null, MAY, false)
+    ).resolves.toBeNull();
+    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.payment.update).not.toHaveBeenCalled();
+  });
+
+  test("a stale number on her payment is not handed back either", async () => {
+    const tx = txMock({ payeeStaffId: "s_julie", existing: "T-2026-000035" });
+    await expect(
+      allocatePaymentTicketNumber(tx, "pay_1", "APPOINTMENT", null, MAY, false)
+    ).resolves.toBeNull();
   });
 });
 

@@ -25,6 +25,7 @@ import {
   buildTermsAcceptanceUpdate,
   recordTermsAcceptance,
 } from "@/lib/terms-consent";
+import { resolvePayeeForAppointment, payeePaymentData } from "@/lib/payments/resolve-payee";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -450,6 +451,7 @@ export async function createCheckoutSession(reservationData) {
       const payment = await tx.payment.create({
         data: {
           appointmentId: appointment.id,
+          ...payeePaymentData(await resolvePayeeForAppointment(tx, { staffId: staffService.staffId })),
           depositAmount: paymentDecision.depositAmount,
           totalAmount,
           paidAmount: 0,
@@ -554,7 +556,7 @@ export async function createCheckoutSession(reservationData) {
 
       await prisma.payment.update({
         where: { id: payment.id },
-        data: { transactionReference: session.id },
+        data: { transactionReference: session.id, stripeAccountId: staff.stripeAccountId },
       });
 
       return {

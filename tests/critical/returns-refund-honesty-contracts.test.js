@@ -123,7 +123,7 @@ describe("B6 — a consumer can be refunded without an invoice", () => {
 
   test("the real rule lives in queueManualRefund, and is about B2B only", () => {
     expect(source("lib/refunds/queue-manual-refund.js")).toContain(
-      'if (!creditNoteId && customerIsBusiness) {',
+      'if (!creditNoteId && customerIsBusiness && !independentSale) {',
     );
     expect(returns).toContain("customerIsBusiness: isBusinessRefundCustomer(rr.order.user)");
   });

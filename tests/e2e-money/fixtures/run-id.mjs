@@ -63,6 +63,28 @@ export function taggedEmail(label, runId = getRunId()) {
   return `e2e+${label}.${runId}@meribeauty.test`;
 }
 
+/**
+ * A discriminator that is unique per *call*, where the run id is only unique
+ * per run.
+ *
+ * Playwright recycles a worker after a test fails, and the replacement worker
+ * re-runs the enclosing `beforeAll`. Seeding is therefore not guaranteed to
+ * happen once per describe: a spec with a failing first test seeds its
+ * fixtures twice, with the same run id both times. Every seeded identity keyed
+ * on `taggedEmail(label)` alone then collides on `User.email`, and the second
+ * beforeAll dies with a Prisma unique-constraint error that has nothing to do
+ * with what actually failed — hiding the real first failure behind a seeding
+ * one (this is precisely what obscured the Connect formation failures).
+ *
+ * `contains: runId` is how scripts/purge-e2e-money-data.mjs finds rows, so the
+ * suffix goes after the run id and the purge still sweeps every attempt.
+ */
+let seedSequence = 0;
+export function uniqueSuffix() {
+  seedSequence += 1;
+  return `${process.pid.toString(36)}${seedSequence}`;
+}
+
 /** The admin's written motive, which every refund path requires anyway. */
 export function taggedReason(text, runId = getRunId()) {
   return `[${runId}] ${text}`;

@@ -73,36 +73,42 @@ describe("one person, one VAT number", () => {
   });
 });
 
-describe("an independent staff profile cannot exist without a VAT number", () => {
+describe("an independent staff profile can be created without a VAT number", () => {
+  // Policy reversed 2026-09-18: onboarding must not block on a number the
+  // admin doesn't have yet (same for the professional address below). She
+  // just can't issue her own invoices until one is added — see
+  // createIndependentStaff/createStaffFromRental, which skip the VIES round
+  // trip entirely when vatNumber is blank instead of rejecting the form.
   const base = {
     fullName: "Julie Schoemans",
     email: "julieschoemans@gmail.com",
     phone: "+32470000000",
-    addressLine1: "Rue Bonaventure 113",
-    addressCity: "Jette",
-    addressPostalCode: "1090",
-    addressCountry: "BE",
     languages: ["fr"],
     yearsOfExperience: 3,
     contract: { fixedRent: 300, startDate: "2026-09-01" },
   };
 
-  it("refuses a missing or empty number at creation", () => {
+  it("accepts a missing or empty number at creation", () => {
     for (const vatNumber of [undefined, "", "   "]) {
-      const parsed = createIndependentStaffSchema.safeParse({ ...base, vatNumber });
-      expect(parsed.success).toBe(false);
-      expect(JSON.stringify(parsed.error.flatten().fieldErrors.vatNumber)).toContain("obligatoire");
+      expect(createIndependentStaffSchema.safeParse({ ...base, vatNumber }).success).toBe(true);
     }
   });
 
-  it("refuses a number that isn't a real EU one, and accepts a valid one", () => {
+  it("still refuses a number that isn't a real EU one, and accepts a valid one", () => {
     expect(createIndependentStaffSchema.safeParse({ ...base, vatNumber: "0542845058" }).success).toBe(false);
     // Julie's own number with one digit changed: right shape, wrong Belgian checksum.
     expect(createIndependentStaffSchema.safeParse({ ...base, vatNumber: "BE0542845059" }).success).toBe(false);
     expect(createIndependentStaffSchema.safeParse({ ...base, vatNumber: JULIE_VAT }).success).toBe(true);
   });
 
-  it("applies the same rule when editing, so a blank profile can't stay blank", () => {
+  it("also accepts a missing professional address at creation", () => {
+    for (const field of ["addressLine1", "addressCity", "addressPostalCode", "addressCountry"]) {
+      expect(createIndependentStaffSchema.safeParse({ ...base, [field]: "" }).success).toBe(true);
+      expect(createIndependentStaffSchema.safeParse({ ...base, [field]: undefined }).success).toBe(true);
+    }
+  });
+
+  it("still requires a VAT number when editing, so a profile that already needs one can't go blank", () => {
     const edit = { ...base, id: "staff_1", isActive: true };
     expect(updateIndependentStaffSchema.safeParse({ ...edit, vatNumber: "" }).success).toBe(false);
     expect(updateIndependentStaffSchema.safeParse({ ...edit, vatNumber: JULIE_VAT }).success).toBe(true);
@@ -120,7 +126,8 @@ describe("the screens that learn a VAT number pass it on", () => {
     const edit = source("components/dashboard/staff/EditStaffModal.jsx");
     expect(edit).not.toContain('<input type="hidden" {...register("vatNumber")} />');
     expect(edit).toContain('<Label htmlFor="editVatNumber" icon={Hash} required>Numéro de TVA</Label>');
-    expect(source("components/dashboard/staff/CreateStaffModal.jsx")).toContain('<Label htmlFor="vatNumber" icon={Hash} required>');
+    // Creation itself no longer marks it required — see the schema change above.
+    expect(source("components/dashboard/staff/CreateStaffModal.jsx")).toContain('<Label htmlFor="vatNumber" icon={Hash}>');
   });
 
   it("an unchanged number doesn't spend a VIES call, but still backfills the customer account", () => {

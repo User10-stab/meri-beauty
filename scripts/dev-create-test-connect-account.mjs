@@ -145,6 +145,7 @@ async function main() {
         });
         await linkAnimator(staff);
         await ensurePricedService(staff);
+        await ensureOnboardingComplete(staff);
         return;
       }
       console.log(`${staff.stripeAccountId} is not fully enabled — creating a fresh one.`);
@@ -214,6 +215,7 @@ async function main() {
 
   await linkAnimator(staff);
   await ensurePricedService(staff);
+  await ensureOnboardingComplete(staff);
   console.log(`\nStaff ${staff.id} (${FULL_NAME}) is ready to animate a formation.`);
 }
 
@@ -259,6 +261,60 @@ async function ensurePricedService(staff) {
     },
   });
   console.log(`Service "${service.name}" attached at 55,00 € (${staffService.id})`);
+}
+
+/**
+ * Gets her past the onboarding gate.
+ *
+ * checkOnboardingStatus requires three things of a STAFF member — at least one
+ * spoken language, one contract and one working-hours row — and until it has
+ * them the dashboard renders a BLOCKING onboarding overlay on every page. It
+ * swallows Escape, and its call to action navigates to /dashboard/account-settings.
+ *
+ * That matters here because it is indistinguishable from a broken feature: in
+ * tests/e2e-money/rendez-vous-connect-refund.spec.mjs the overlay silently
+ * took the click meant for "Rembourser" and the run ended up on the account
+ * page, looking as though the refund button had done something strange. She
+ * needs a usable dashboard to refund her own clients at all, so completing the
+ * setup belongs here, with the rest of what makes this account real.
+ *
+ * FIXED_RENT with no commission: nothing in the money paths reads the contract,
+ * and a percentage would invite the reader to think the split is modelled here.
+ */
+async function ensureOnboardingComplete(staff) {
+  const [contracts, hours] = await Promise.all([
+    prisma.contract.count({ where: { staffId: staff.id } }),
+    prisma.workingHour.count({ where: { staffId: staff.id } }),
+  ]);
+
+  if (contracts === 0) {
+    await prisma.contract.create({
+      data: {
+        staffId: staff.id,
+        type: "FIXED_RENT",
+        fixedRent: 0,
+        startDate: new Date("2026-01-01"),
+        status: "ACTIVE",
+        notes: "Compte de test e2e — aucun loyer réel.",
+      },
+    });
+    console.log("Contract created (FIXED_RENT, 0 €)");
+  }
+
+  if (hours === 0) {
+    await prisma.workingHour.createMany({
+      data: ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"].map((day) => ({
+        staffId: staff.id,
+        day,
+        startTime: "09:00",
+        endTime: "18:00",
+        isClosed: false,
+      })),
+    });
+    console.log("Working hours created (Mon-Fri 09:00-18:00)");
+  }
+
+  await prisma.staff.update({ where: { id: staff.id }, data: { setupCompleted: true } });
 }
 
 /** The link payee resolution reads — without it her seats resolve to the salon. */

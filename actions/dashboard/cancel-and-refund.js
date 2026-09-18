@@ -729,8 +729,17 @@ async function loadOutstandingRefundLegs(paymentWhere) {
           payment: {
             select: {
               stripeAccountId: true,
+              // Express or Standard decides WHERE she can refund — and
+              // whether she can at all. Stripe's Express dashboard has no
+              // refund control of any kind, so an Express payee cannot do
+              // this herself however clearly she is asked to; a Standard
+              // payee has the full dashboard and can. The panel has to say
+              // something different to each, so it needs the type.
+              payeeStaff: {
+                select: { stripeAccountType: true, stripeAccountId: true, user: { select: { fullName: true } } },
+              },
               appointment: {
-                select: { staff: { select: { stripeAccountId: true, user: { select: { fullName: true } } } } },
+                select: { staff: { select: { stripeAccountId: true, stripeAccountType: true, user: { select: { fullName: true } } } } },
               },
             },
           },
@@ -746,12 +755,16 @@ async function loadOutstandingRefundLegs(paymentWhere) {
   return serializeDecimalFields(
     outstandingLegs.map((leg) => {
       const payment = leg.refundOperation?.payment ?? null;
-      const staff = payment?.appointment?.staff ?? null;
+      // The payee owns the money; the appointment's practitioner is the
+      // fallback for rows written before payees existed.
+      const owner = payment?.payeeStaff ?? payment?.appointment?.staff ?? null;
       return {
         ...leg,
         // Null for every platform charge, which is the salon's normal case.
-        connectedAccountId: payment?.stripeAccountId ?? staff?.stripeAccountId ?? null,
-        connectedAccountStaffName: staff?.user?.fullName ?? null,
+        connectedAccountId: payment?.stripeAccountId ?? owner?.stripeAccountId ?? null,
+        connectedAccountStaffName: owner?.user?.fullName ?? null,
+        // "express" | "standard" | null. Null means the salon's own account.
+        connectedAccountType: owner?.stripeAccountType ?? null,
       };
     }),
   );

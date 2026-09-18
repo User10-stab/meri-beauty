@@ -24,6 +24,12 @@ import { TILL_CASH_OPERATOR_EMAIL } from "../../../lib/authorization.js";
 
 const CUSTOMER_PASSWORD = "E2eMoney!2026";
 
+/**
+ * The only connected account a test-mode key can reach — created, with this
+ * same password, by scripts/dev-create-test-connect-account.mjs.
+ */
+const CONNECT_TEST_ANIMATOR_EMAIL = "e2e.connect.animatrice@meribeauty.test";
+
 /** The same key the run is guarded on — see fixtures/env-guard.mjs. */
 const stripe = new Stripe((process.env.STRIPE_SECRET_KEY ?? "").trim());
 
@@ -436,6 +442,33 @@ export async function readVariantStock(variantId) {
  * The appointment itself is inserted rather than booked through the public
  * wizard: the booking funnel is UI, and what is under test here is the money.
  */
+/**
+ * How to log in as the independent a Connect scenario picked.
+ *
+ * Only one account can be picked at all: seedConnectAppointment probes Stripe
+ * and keeps the first reachable connected account, and in test mode that is
+ * the one scripts/dev-create-test-connect-account.mjs creates — every real
+ * practitioner's account is live and invisible to an sk_test_ key. So the
+ * password is knowable, because this fixture is the thing that set it.
+ *
+ * Throws rather than guessing if some other account ever becomes reachable:
+ * a wrong password here would surface as "stuck on /login", which reads like
+ * a broken login page rather than a fixture that picked an account it has no
+ * credentials for.
+ */
+export function connectStaffCredentials(staff) {
+  const email = staff?.user?.email;
+  if (email !== CONNECT_TEST_ANIMATOR_EMAIL) {
+    throw new Error(
+      `This scenario needs to log in as the independent who owns the charge, but it picked ` +
+        `"${email ?? "(no e-mail)"}", whose password this suite does not know.
+` +
+        `Only ${CONNECT_TEST_ANIMATOR_EMAIL} is seeded with one — see scripts/dev-create-test-connect-account.mjs.`,
+    );
+  }
+  return { email, password: CUSTOMER_PASSWORD };
+}
+
 export async function seedConnectAppointment({ customer, daysAhead = 40 } = {}) {
   const candidates = await prisma.staff.findMany({
     where: {
@@ -443,7 +476,7 @@ export async function seedConnectAppointment({ customer, daysAhead = 40 } = {}) 
       isDeleted: false,
     },
     include: {
-      user: { select: { fullName: true } },
+      user: { select: { fullName: true, email: true } },
       staffServices: {
         where: { isActive: true },
         include: { service: { select: { name: true } } },

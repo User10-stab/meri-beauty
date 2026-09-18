@@ -5,7 +5,12 @@ import { taggedReason } from "./fixtures/run-id.mjs";
 import { loginAs, loginAsAdmin } from "./fixtures/auth.mjs";
 import { payAndReturn } from "./fixtures/stripe-checkout.mjs";
 import { refundInStripe, readChargeFromStripe } from "./fixtures/marie.mjs";
-import { seedCustomer, seedConnectAppointment, customerCredentials } from "./fixtures/seed-money.mjs";
+import {
+  seedCustomer,
+  seedConnectAppointment,
+  customerCredentials,
+  connectStaffCredentials,
+} from "./fixtures/seed-money.mjs";
 
 /**
  * Rendez-vous: paid in full online, cancelled, refunded by hand.
@@ -83,23 +88,68 @@ test.describe("rendez-vous — Connect direct charge, cancelled and refunded by 
     expect(types).toContain("FINAL_PAYMENT");
     expect(types).not.toContain("DEPOSIT");
 
-    // ── 2. The admin cancels and queues the refund ────────────────────────
+    // ── 2. The salon cannot see it, so the salon cannot refund it ─────────
+    //
+    // This assertion is the whole point of the payee design, and it replaces
+    // what this spec used to do here (an admin finding the row in Operations
+    // and refunding it). admin-operations.js scopes money rows to
+    // `payeeStaffId IS NULL`, so her charge is simply absent from every salon
+    // screen — the rule being "her money never appears on the salon's
+    // dashboard, no matter what".
     await loginAsAdmin(page);
     // Rendez-vous have no tab of their own; they sit in the unified
     // transactions view as kind "Rendez-vous".
     await page.goto("/dashboard/operations?tab=transactions&page=1");
+    await expect(
+      page.getByRole("row").filter({ hasText: customer.email }),
+      "an independent's charge is visible in the salon's Operations screen",
+    ).toHaveCount(0, { timeout: 15_000 });
+
+    // ── 2b. She cancels and queues the refund, from her own screen ────────
+    //
+    // The money is on HER Stripe account, so she is the only person who can
+    // send it back — lib/refunds/authorize.js refuses an admin on a payment
+    // whose payee is someone else (NOT_PAYMENT_OWNER).
+    await loginAs(page, connectStaffCredentials(staff));
+    await page.goto("/dashboard/mes-operations");
+    // Asserted, not assumed: this page redirects rather than erroring when the
+    // reader has no Staff row (to /dashboard) or is an admin (to
+    // /dashboard/operations), and a silent bounce here would otherwise surface
+    // many steps later as a missing field in a dialog.
+    await expect(page, "she was redirected away from Mes opérations").toHaveURL(/\/dashboard\/mes-operations/);
 
     const row = page.getByRole("row").filter({ hasText: customer.email });
     await expect(row).toHaveCount(1, { timeout: 15_000 });
-    await row.getByRole("button", { name: /voir\s*\/\s*gérer/i }).click();
-
-    const drawer = page.getByRole("dialog", { name: /détail de la transaction/i });
-    await expect(drawer).toBeVisible();
-    await drawer.getByRole("button", { name: /annuler et rembourser/i }).click();
+    await row.getByRole("button", { name: /^rembourser$/i }).click();
 
     const cancelDialog = page.getByRole("dialog", { name: /annuler et rembourser/i });
     await expect(cancelDialog).toBeVisible();
-    await cancelDialog.locator("#refund-reason").fill(taggedReason("Rendez-vous annulé — test e2e Connect"));
+
+    // The dialog shell opens immediately; everything inside it — including the
+    // motif field — renders only once previewCancelAndRefund has answered, and
+    // that call re-runs the whole authorization (ownership, the 48-hour
+    // window, whether a written request was required). A refusal therefore
+    // looks identical to a slow preview: the field simply never appears, and
+    // the bare timeout says only "waiting for #refund-reason".
+    //
+    // So read the dialog back when it does not arrive. The refusal is printed
+    // in it, in French, and is the actual answer.
+    const reasonField = cancelDialog.locator("#refund-reason");
+    try {
+      await reasonField.waitFor({ state: "visible", timeout: 30_000 });
+    } catch (cause) {
+      // The whole page, not just the dialog: if the dialog closed itself (a
+      // refusal can unmount it), reading the dialog gives nothing at all.
+      const seen = await page.locator("body").innerText().catch(() => "(could not read the page)");
+      throw new Error(
+        `The refund preview never produced a motif field.
+URL: ${page.url()}
+--- page ---
+${seen.slice(0, 1200)}`,
+        { cause },
+      );
+    }
+    await reasonField.fill(taggedReason("Rendez-vous annulé — test e2e Connect"));
     const confirmButton = cancelDialog.getByRole("button", { name: /confirmer l'opération/i });
     await expect(confirmButton).toBeEnabled({ timeout: 10_000 });
     await confirmButton.click();
@@ -131,7 +181,11 @@ test.describe("rendez-vous — Connect direct charge, cancelled and refunded by 
     expect(beforeRefund.amountRefunded).toBe(0);
     await assertLedgerSound(paymentId, { expectHeld: price });
 
-    // ── 4. Marie refunds by hand, on the staff member's account ───────────
+    // ── 4. She refunds by hand, in her own Stripe dashboard ──────────────
+    //
+    // Same API call the dashboard makes, scoped to her connected account. The
+    // application still refunds nothing itself — the rule of 02/09/2026 is
+    // unchanged by Connect; what changed is whose dashboard does it.
     await refundInStripe({
       paymentIntentId: operation.legs[0].stripePaymentIntentId,
       amount: price,

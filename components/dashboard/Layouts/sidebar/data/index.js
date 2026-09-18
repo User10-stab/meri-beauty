@@ -105,6 +105,10 @@ const ALL_NAV_DATA = [
           { title: "Demandes de location", url: "/dashboard/rental-requests", roles: DASHBOARD_PERMISSIONS.RENTAL_REQUESTS },
           { title: "Avis clients", url: "/dashboard/reviews", roles: DASHBOARD_PERMISSIONS.REVIEWS },
           { title: "Rapports", url: "/dashboard/reports", roles: DASHBOARD_PERMISSIONS.REPORTS },
+          // Search Console : la connexion OAuth vaut pour tout le salon et
+          // ses jetons ouvrent les données de référencement du site, d'où
+          // OWNER/ADMIN en dur plutôt qu'une permission délégable.
+          { title: "Référencement Google", url: "/dashboard/seo", roles: [ROLES.OWNER, ROLES.ADMIN] },
         ],
       },
     ],

@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 import { prisma } from "./db.mjs";
-import { getRunId, taggedEmail } from "./run-id.mjs";
+import { getRunId, taggedEmail, uniqueSuffix } from "./run-id.mjs";
 import Stripe from "stripe";
 import { TILL_CASH_OPERATOR_EMAIL } from "../../../lib/authorization.js";
 
@@ -79,13 +79,17 @@ export async function seedCustomer({ label = "customer", withAddress = true } = 
   }
 
   const runId = getRunId();
-  const email = taggedEmail(label, runId);
+  // Per call, not per run: a recycled worker re-runs beforeAll with the same
+  // run id, and a second `e2e+connect-formation.<runId>@…` would fail on
+  // User.email. See uniqueSuffix in run-id.mjs.
+  const tag = `${label}.${runId}.${uniqueSuffix()}`;
+  const email = `e2e+${tag}@meribeauty.test`;
 
   return prisma.user.create({
     data: {
       fullName: `Client Test Automatise ${label}`,
       email,
-      phone: tagPhone(`${runId}:${label}`),
+      phone: tagPhone(tag),
       password: await bcrypt.hash(CUSTOMER_PASSWORD, 12),
       role: "CUSTOMER",
       emailVerified: true,
@@ -326,7 +330,7 @@ export async function seedConnectFormationSession({
  */
 export async function seedUnreadyIndependentFormationSession({ price = 90, daysAhead = 47 } = {}) {
   const runId = getRunId();
-  const email = taggedEmail(`animatrice-sans-stripe-${runId}`);
+  const email = taggedEmail(`animatrice-sans-stripe.${runId}.${uniqueSuffix()}`);
 
   const user = await prisma.user.create({
     data: {
@@ -339,7 +343,10 @@ export async function seedUnreadyIndependentFormationSession({ price = 90, daysA
     },
   });
   const staff = await prisma.staff.create({
-    data: { userId: user.id, type: "INDEPENDENT", isActive: true },
+    // languages/yearsOfExperience are required by the model and irrelevant
+    // here — what matters is stripeAccountId staying null, which is what
+    // "cannot charge online" actually means.
+    data: { userId: user.id, type: "INDEPENDENT", isActive: true, languages: ["fr"], yearsOfExperience: 1 },
   });
   const animator = await prisma.animator.create({
     data: { name: user.fullName, email, staffId: staff.id },

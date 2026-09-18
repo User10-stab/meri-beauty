@@ -246,6 +246,21 @@ export async function createFormationReservation(data) {
       return { success: false, message: "Session non disponible." };
     }
 
+    // Refused here, before a seat is held, rather than only at checkout.
+    //
+    // The gate also lives in create{Formation,Workshop}ReservationCheckoutSession
+    // — it has to, because a resumed checkout from an e-mailed link enters
+    // there directly. But that call happens *after* this action has created the
+    // hold, and its refusal leaves the hold behind: an unpayable PENDING_DEPOSIT
+    // row that occupies the place for the full 24 h window. Every visitor who
+    // tried would eat another seat, so a session animated by an independent who
+    // has not finished onboarding (Lyly today) would quietly fill up with holds
+    // nobody can pay. Checking before anything is written costs one query and
+    // makes the refusal free of side effects.
+    if (!payeeCanChargeOnline(await resolvePayeeForFormationSession(prisma, { sessionId: session.id }))) {
+      return { success: false, message: PAYEE_ONLINE_UNAVAILABLE_MESSAGE };
+    }
+
     // Validate priority access from the waiting list (first come, first served)
     if (isPriority) {
       if (!waitingListEntryId) {

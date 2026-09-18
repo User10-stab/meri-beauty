@@ -89,7 +89,10 @@ async function main() {
   const payments = await prisma.payment.findMany({
     where: {
       payeeStaffId: null,
-      OR: [{ appointmentId: { not: null } }, { workshopReservationId: { not: null } }, { formationReservationId: { not: null } }],
+      // No workshopReservationId: an atelier is the salon's own event and its
+      // money is the salon's whoever animates it (18/09/2026), so there is
+      // nothing here to hand to anybody. Same omission as the migration.
+      OR: [{ appointmentId: { not: null } }, { formationReservationId: { not: null } }],
     },
     select: {
       id: true,
@@ -99,9 +102,6 @@ async function main() {
       transactionReference: true,
       invoice: { select: { number: true } },
       appointment: { select: { staffId: true, date: true } },
-      workshopReservation: {
-        select: { session: { select: { animatorId: true, startDate: true, workshop: { select: { animatorId: true, title: true } } } } },
-      },
       formationReservation: {
         select: { session: { select: { animatorId: true, startDate: true, formation: { select: { animatorId: true, title: true } } } } },
       },
@@ -120,8 +120,8 @@ async function main() {
       // Appointment checkouts have always been direct charges on the
       // practitioner's connected account, never the platform's.
     } else {
-      const res = p.workshopReservation ?? p.formationReservation;
-      const catalogue = res.session.workshop ?? res.session.formation;
+      const res = p.formationReservation;
+      const catalogue = res.session.formation;
       const animatorId = res.session.animatorId ?? catalogue.animatorId;
       staffId = animatorId ? animatorStaff.get(animatorId) ?? null : null;
       label = `${catalogue.title} ${res.session.startDate.toISOString().slice(0, 10)}`;

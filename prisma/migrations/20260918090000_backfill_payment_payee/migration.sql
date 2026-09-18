@@ -14,8 +14,9 @@
 --   * an owner is a Staff of type INDEPENDENT who is not the salon itself
 --     (an ADMIN/OWNER account, or the till cash operator — Marie, whose VAT
 --     is the salon's);
---   * an appointment belongs to its practitioner, an atelier/formation seat
---     to its session's animator (falling back to the activity's own);
+--   * an appointment belongs to its practitioner, and a FORMATION seat to its
+--     session's animator (falling back to the formation's own). An atelier
+--     seat is always the salon's, whoever animates it;
 --   * a payment is NEVER relabelled when something already says it was the
 --     salon's — a salon invoice or ticket number is a legal statement that
 --     cannot be taken back, and a pre-switch activity seat charged on the
@@ -67,17 +68,12 @@ owned AS (
   JOIN "Appointment" ap ON ap.id = p."appointmentId"
   WHERE p."payeeStaffId" IS NULL
 
-  UNION ALL
-
-  SELECT p.id, COALESCE(sess_an."staffId", parent_an."staffId"),
-         p."transactionReference" IS NOT NULL
-  FROM "Payment" p
-  JOIN "workshop_reservations" r ON r.id = p."workshopReservationId"
-  JOIN "workshop_sessions" ws ON ws.id = r."sessionId"
-  JOIN "workshops" w ON w.id = ws."workshopId"
-  LEFT JOIN "animators" sess_an   ON sess_an.id   = ws."animatorId"
-  LEFT JOIN "animators" parent_an ON parent_an.id = w."animatorId"
-  WHERE p."payeeStaffId" IS NULL
+  -- No atelier branch, deliberately. An atelier is the salon's own event and
+  -- its money is the salon's whoever animates it (18/09/2026) — the same rule
+  -- resolvePayeeForWorkshopSession applies to every new booking. Handing a
+  -- past atelier seat to its animator here would take revenue out of the
+  -- salon's books that the salon actually earned, which is the mirror image
+  -- of the bug this backfill exists to prevent.
 
   UNION ALL
 

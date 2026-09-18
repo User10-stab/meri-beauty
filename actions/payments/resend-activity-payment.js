@@ -160,7 +160,13 @@ export async function resendActivityReservationPayment({ kind, id } = {}) {
       };
     }
     for (const earlier of earlierSessions) {
-      if (earlier.status === "open") await stripe.checkout.sessions.expire(earlier.id, stripeOptions);
+      // expire(id, params, options) — the request options are the THIRD
+      // argument. Passed second, `{ stripeAccount }` is sent as a body field
+      // and Stripe answers "Received unknown parameter: stripeAccount", which
+      // threw the whole relance. It only ever bit an independent's booking:
+      // payeeStripeOptions() returns undefined for the salon, and
+      // expire(id, undefined) is perfectly valid.
+      if (earlier.status === "open") await stripe.checkout.sessions.expire(earlier.id, {}, stripeOptions);
     }
 
     const now = Date.now();
@@ -235,7 +241,7 @@ export async function resendActivityReservationPayment({ kind, id } = {}) {
     // The new link must not stay payable for a booking that was not put back
     // on hold.
     if (newCheckoutSession && !seatHeld) {
-      await stripe.checkout.sessions.expire(newCheckoutSession.id, stripeOptions).catch((expireError) =>
+      await stripe.checkout.sessions.expire(newCheckoutSession.id, {}, stripeOptions).catch((expireError) =>
         console.error("[resendActivityReservationPayment] could not expire unused session:", expireError)
       );
     }

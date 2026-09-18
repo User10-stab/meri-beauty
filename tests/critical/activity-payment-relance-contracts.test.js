@@ -84,6 +84,22 @@ function workshopReservation(overrides = {}) {
   };
 }
 
+function formationReservation(overrides = {}) {
+  return {
+    ...workshopReservation(),
+    id: "fr_1",
+    sessionId: "fs_1",
+    session: {
+      id: "fs_1",
+      status: "SCHEDULED",
+      startDate: FUTURE,
+      capacity: 6,
+      formation: { id: "f_1", title: "Formation base pro", capacity: 6, type: "PUBLIC" },
+    },
+    ...overrides,
+  };
+}
+
 function stripeHas(sessions) {
   mocks.stripe.checkout.sessions.list.mockImplementation(() => ({
     async *[Symbol.asyncIterator]() {
@@ -99,6 +115,7 @@ beforeEach(() => {
   mocks.sendEmail.mockResolvedValue({ success: true });
   mocks.sessionOccupancy.mockResolvedValue(0);
   mocks.tx.workshopReservation.updateMany.mockResolvedValue({ count: 1 });
+  mocks.tx.formationReservation.updateMany.mockResolvedValue({ count: 1 });
   mocks.stripe.checkout.sessions.create.mockResolvedValue({ id: "cs_new", url: "https://checkout.stripe.test/cs_new" });
   mocks.stripe.checkout.sessions.expire.mockResolvedValue({});
   stripeHas([]);
@@ -136,10 +153,17 @@ describe("resendActivityReservationPayment", () => {
 
     expect(result.success).toBe(true);
     expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledTimes(1);
-    // Second argument is the Stripe account the link lives on: undefined for a
+    // THIRD argument is the Stripe account the link lives on: undefined for a
     // salon sale, { stripeAccount } for an independent's. A link created on her
     // connected account is invisible to — and unclosable from — the platform.
-    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_old", undefined);
+    //
+    // The position matters and this assertion is the reason it was wrong for a
+    // while: expire(id, params, options), so options passed second is sent as a
+    // request body field and the real API answers "Received unknown parameter:
+    // stripeAccount". A mock accepts it happily, so these three assertions went
+    // green while an independent's relance threw in production. Only the e2e
+    // case against real Stripe caught it (18/09/2026).
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_old", {}, undefined);
 
     const params = mocks.stripe.checkout.sessions.create.mock.calls[0][0];
     expect(params.metadata).toMatchObject({ kind: "workshop", workshopAction: "deposit", reservationId: "wr_1" });
@@ -173,7 +197,7 @@ describe("resendActivityReservationPayment", () => {
     const result = await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
 
     expect(result).toEqual({ success: false, message: expect.stringContaining("complète") });
-    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_new", undefined);
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_new", {}, undefined);
     expect(mocks.tx.workshopReservation.updateMany).not.toHaveBeenCalled();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
@@ -193,13 +217,17 @@ describe("resendActivityReservationPayment", () => {
   // see her sessions at all, so listing without it finds no earlier link,
   // closes nothing, and hands the client a SECOND payable link — the exact
   // double-charge this whole change set exists to prevent.
-  describe("a seat animated by an independent stays on her Stripe account", () => {
+  // FORMATION, not WORKSHOP: an atelier is the salon's own event and its money
+  // is the salon's whoever animates it (18/09/2026), so a formation seat is
+  // the only activity seat that can belong to an independent at all. The
+  // atelier half of that rule is pinned by its own describe below.
+  describe("a formation seat animated by an independent stays on her Stripe account", () => {
     const JULIE_ACCOUNT = "acct_julie";
 
     beforeEach(() => {
-      mocks.prisma.workshopSession.findUnique.mockResolvedValue({
+      mocks.prisma.formationSession.findUnique.mockResolvedValue({
         animator: { staffId: "s_julie" },
-        workshop: { animator: { staffId: "s_julie" } },
+        formation: { animator: { staffId: "s_julie" } },
       });
       mocks.prisma.staff.findUnique.mockResolvedValue({
         id: "s_julie",
@@ -210,23 +238,23 @@ describe("resendActivityReservationPayment", () => {
         stripeChargesEnabled: true,
         stripePayoutsEnabled: true,
       });
-      mocks.prisma.workshopReservation.findUnique.mockResolvedValue(workshopReservation());
+      mocks.prisma.formationReservation.findUnique.mockResolvedValue(formationReservation());
     });
 
     it("lists, closes and recreates the link on her account", async () => {
-      stripeHas([{ id: "cs_old", status: "open", metadata: { kind: "workshop", reservationId: "wr_1" } }]);
+      stripeHas([{ id: "cs_old", status: "open", metadata: { kind: "formation", reservationId: "fr_1" } }]);
 
-      const result = await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
+      const result = await resendActivityReservationPayment({ kind: "FORMATION", id: "fr_1" });
 
       expect(result.success).toBe(true);
       const options = { stripeAccount: JULIE_ACCOUNT };
       expect(mocks.stripe.checkout.sessions.list).toHaveBeenCalledWith(expect.anything(), options);
-      expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_old", options);
+      expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_old", {}, options);
       expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(expect.anything(), options);
     });
 
     it("freezes her as the payee and lets her account choose the payment methods", async () => {
-      await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
+      await resendActivityReservationPayment({ kind: "FORMATION", id: "fr_1" });
 
       const params = mocks.stripe.checkout.sessions.create.mock.calls[0][0];
       expect(params.metadata.payeeStaffId).toBe("s_julie");
@@ -247,10 +275,50 @@ describe("resendActivityReservationPayment", () => {
         stripePayoutsEnabled: false,
       });
 
-      const result = await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
+      const result = await resendActivityReservationPayment({ kind: "FORMATION", id: "fr_1" });
 
       expect(result.success).toBe(false);
       expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // The other half of the same rule, and the one that is easy to lose: an
+  // atelier animated by a fully-onboarded independent must STILL be the
+  // salon's. Nothing else here would notice if resolvePayeeForWorkshopSession
+  // started reading the animator again — the relance would quietly move the
+  // salon's own event revenue onto her Stripe account.
+  describe("an atelier stays on the salon's account even when an independent animates it", () => {
+    beforeEach(() => {
+      mocks.prisma.workshopSession.findUnique.mockResolvedValue({
+        animator: { staffId: "s_julie" },
+        workshop: { animator: { staffId: "s_julie" } },
+      });
+      mocks.prisma.staff.findUnique.mockResolvedValue({
+        id: "s_julie",
+        type: "INDEPENDENT",
+        userId: "u_julie",
+        isDeleted: false,
+        stripeAccountId: "acct_julie",
+        stripeChargesEnabled: true,
+        stripePayoutsEnabled: true,
+      });
+      mocks.prisma.workshopReservation.findUnique.mockResolvedValue(workshopReservation());
+    });
+
+    it("creates the new link on the platform, with no connected account and no payee", async () => {
+      stripeHas([]);
+
+      const result = await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
+
+      expect(result.success).toBe(true);
+      // `undefined` options, not `{ stripeAccount: … }` — a platform charge.
+      expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(expect.anything(), undefined);
+
+      const params = mocks.stripe.checkout.sessions.create.mock.calls[0][0];
+      expect(params.metadata.payeeStaffId).toBe("");
+      expect(params.payment_intent_data.metadata.payeeStaffId).toBe("");
+      // The salon's own sales keep their explicit, verified method list.
+      expect(params.payment_method_types).toEqual(["card", "bancontact"]);
     });
   });
 });

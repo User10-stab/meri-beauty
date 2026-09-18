@@ -5,6 +5,8 @@ import {
   PAYEE_METADATA_KEY,
   SALON_PAYEE,
   payeeCheckoutMetadata,
+  resolvePayeeForActivitySession,
+  resolvePayeeForWorkshopSession,
   resolvePayeeFromCheckout,
   sessionsBlockedByPayeeChange,
 } from "@/lib/payments/resolve-payee";
@@ -44,9 +46,52 @@ describe("the payee travels with the Checkout Session", () => {
   });
 });
 
-describe("an atelier/formation seat is charged to its animator's account", () => {
+// The rule that makes the salon's own events the salon's money.
+//
+// Worth its own describe because it is invisible everywhere else: an atelier
+// whose animator is a fully-onboarded independent looks, to every other test
+// here, exactly like one animated by nobody. If resolvePayeeForWorkshopSession
+// started reading the animator again, the first sign would be the salon's
+// event revenue arriving in someone else's bank account.
+describe("an atelier is always the salon's money", () => {
+  const animatedByJulie = {
+    workshopSession: { findUnique: vi.fn(() => Promise.resolve({ animator: { staffId: "s_julie" }, workshop: { animator: { staffId: "s_julie" } } })) },
+    staff: { findUnique: vi.fn(() => Promise.resolve(JULIE)) },
+    user: { findMany: vi.fn(() => Promise.resolve([])) },
+  };
+
+  it("resolves to the salon even when an independent animates the session", async () => {
+    expect(await resolvePayeeForWorkshopSession(animatedByJulie, { sessionId: "ws_1" })).toEqual(SALON_PAYEE);
+  });
+
+  it("does not even look the animator up", async () => {
+    animatedByJulie.workshopSession.findUnique.mockClear();
+    await resolvePayeeForWorkshopSession(animatedByJulie, { sessionId: "ws_1" });
+    expect(animatedByJulie.workshopSession.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("answers the same through the kind dispatcher the relance uses", async () => {
+    expect(await resolvePayeeForActivitySession(animatedByJulie, { kind: "WORKSHOP", sessionId: "ws_1" })).toEqual(SALON_PAYEE);
+  });
+
+  it("still routes a formation seat to her, so this is a rule about ateliers and not a kill switch", async () => {
+    const tx = {
+      formationSession: { findUnique: vi.fn(() => Promise.resolve({ animator: { staffId: "s_julie" }, formation: { animator: null } })) },
+      staff: { findUnique: vi.fn(() => Promise.resolve(JULIE)) },
+      user: { findMany: vi.fn(() => Promise.resolve([])) },
+    };
+    const payee = await resolvePayeeForActivitySession(tx, { kind: "FORMATION", sessionId: "fs_1" });
+    expect(payee.payeeStaffId).toBe("s_julie");
+  });
+});
+
+describe("a formation seat is charged to its animator's account", () => {
+  // Formations only. An atelier is the salon's own event and its money is the
+  // salon's whoever animates it (18/09/2026) — pinned by "an atelier is always
+  // the salon's money" below. The atelier booking action still calls the
+  // resolver and still passes the answer to Stripe; what changed is that the
+  // answer is now always the salon, decided in one place.
   test.each([
-    ["workshop", "actions/workshops/create-workshop-reservation.js", "resolvePayeeForWorkshopSession"],
     ["formation", "actions/formations/create-formation-reservation.js", "resolvePayeeForFormationSession"],
   ])("%s checkout", (_kind, path, resolver) => {
     const code = source(path);
@@ -63,6 +108,48 @@ describe("an atelier/formation seat is charged to its animator's account", () =>
     expect(code).toContain("...payeeCheckoutMetadata(payee)");
     // the salon's legal identity only gates a sale the salon invoices
     expect(code).toContain("if (!payee.staff && !(await isSellerLegalDataComplete())) {");
+  });
+
+  // Stripe's request options are always the LAST argument, after the params.
+  //
+  // `sessions.expire(id, params, options)` and `paymentIntents.retrieve(id,
+  // params, options)` both look like they take options second, and both
+  // accept it silently: the object is sent as a request BODY field, Stripe
+  // answers "Received unknown parameter: stripeAccount", and the call throws.
+  // It cannot be caught by any salon-payee test, because payeeStripeOptions()
+  // returns undefined for the salon and `expire(id, undefined)` is valid — so
+  // the mistake is invisible until an independent's booking hits it. That is
+  // exactly how it shipped: the relance threw for her and worked for the
+  // salon (found 18/09/2026 by the e2e Connect relance case).
+  test("connected-account calls pass { stripeAccount } as the request options, not as params", () => {
+    const code = source("actions/payments/resend-activity-payment.js");
+    const expireCalls = code.match(/sessions\.expire\([^)]*\)/g) ?? [];
+    expect(expireCalls.length).toBeGreaterThan(0);
+    for (const call of expireCalls) {
+      expect(call, `${call} passes the options as params`).toContain("{}, stripeOptions");
+    }
+  });
+
+  // An unready payee is refused BEFORE a seat is written, not only at
+  // checkout.
+  //
+  // The gate in create…ReservationCheckoutSession is unavoidable — a resumed
+  // checkout from an e-mailed link enters there directly — but the public
+  // booking action calls it only after it has already created the 15-minute
+  // hold. Refusing there leaves a PENDING_DEPOSIT row nobody can ever pay,
+  // holding the place until the sweep, once per visitor. A session animated
+  // by an independent who has not finished onboarding (Lyly, 18/09/2026)
+  // would fill with unpayable holds and stop selling, with no error anywhere
+  // to say why.
+  test.each([
+    ["formation", "actions/formations/create-formation-reservation.js", "resolvePayeeForFormationSession"],
+  ])("%s refuses an unready payee before holding a seat", (_kind, path, resolver) => {
+    const code = source(path);
+    const gate = code.indexOf(`if (!payeeCanChargeOnline(await ${resolver}(prisma, { sessionId: session.id })))`);
+    const hold = code.indexOf("holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000)");
+    expect(gate, "the pre-hold payee gate is gone").toBeGreaterThan(-1);
+    expect(hold, "the 15-minute seat hold moved — re-anchor this test").toBeGreaterThan(-1);
+    expect(gate, "the payee is checked only after the seat is already held").toBeLessThan(hold);
   });
 
   // The booking checkouts and the staff "Relancer le paiement" share this
@@ -131,7 +218,9 @@ describe("a paid booking never changes owner", () => {
     }
   );
 
-  test.each(["actions/workshops/create-activity.js", "actions/formations/create-formation.js"])(
+  // Formations only, again: changing an atelier's animator cannot strand a
+  // paid seat, because no atelier seat was ever charged to an animator.
+  test.each(["actions/formations/create-formation.js"])(
     "%s refuses an animator change on a session that already holds someone else's payment",
     (path) => {
       const code = source(path);
@@ -139,6 +228,10 @@ describe("a paid booking never changes owner", () => {
       expect(code).toContain("return { success: false, message: PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE };");
     }
   );
+
+  test("the atelier editor does NOT carry that guard, so ordinary edits are not refused", () => {
+    expect(source("actions/workshops/create-activity.js")).not.toContain("sessionsBlockedByPayeeChange");
+  });
 
   function txMock({ animatorStaff = {}, conflicting = null } = {}) {
     return {

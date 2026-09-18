@@ -177,7 +177,7 @@ export default async function Hero() {
           transform: "translateY(-50%)",
         }}
       >
-        <div className="flex max-h-[calc(92vh-3rem)] flex-col gap-4 overflow-y-auto pr-0.5">
+        <div className="flex flex-col gap-4">
           {/* ── Staff list card (unchanged content/logic) ── */}
           <aside
             aria-label={t("staffCardTitle")}
@@ -205,7 +205,7 @@ export default async function Hero() {
           </div> */}
 
           {staffMembers.length > 0 ? (
-            <ul className="flex max-h-[320px] flex-col gap-4 overflow-y-auto pr-1">
+            <ul className="flex flex-col gap-4">
               {staffMembers.map((member) => (
                 <li
                   key={member.id}
@@ -238,7 +238,7 @@ export default async function Hero() {
                           href={`/staff/${member.id}?category=${encodeURIComponent(category)}`}
                            className="group/pill rounded-full flex justify-between gap-2 border border-gold/30 px-2.5 py-1.5 text-[11px] font-medium leading-none text-gold transition-all duration-200 hover:border-gold hover:bg-gold hover:text-white"
                          >
-                           <span>  {category}</span>
+                           <span className="lowercase">  {category}</span>
                            <ArrowRight size={12} className="text-gold group-hover/pill:text-white" />
                         </Link>
                       ))}

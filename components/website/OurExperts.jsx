@@ -229,7 +229,7 @@ function ExpertCard({ stylist, index, t }) {
                 href={`/staff/${stylist.id}?category=${encodeURIComponent(category)}`}
                 className="group/pill flex items-center gap-1.5 rounded-full border border-gold/30 px-2 py-1.5 text-[11px] font-medium leading-none text-gold transition-all duration-200 hover:border-gold hover:bg-gold hover:text-white"
               >
-                <span>{category}</span>
+                <span className="lowercase">{category}</span>
                 <ArrowRight size={12} className="text-gold transition-colors group-hover/pill:text-white" />
               </Link>
             ))}

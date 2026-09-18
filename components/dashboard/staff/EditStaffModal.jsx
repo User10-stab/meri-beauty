@@ -403,7 +403,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
         {/* Address */}
         <div className="mt-4">
           <Label htmlFor="editAddressLine1" icon={MapPin}>Adresse de facturation</Label>
-          <TextInput id="editAddressLine1" type="text" placeholder="Numéro et rue" error={errors.addressLine1} {...register("addressLine1")} />
+          <TextInput id="editAddressLine1" type="text" placeholder="Numéro et rue (optionnel)" error={errors.addressLine1} {...register("addressLine1")} />
           <FieldError message={errors.addressLine1?.message} />
         </div>
 
@@ -413,14 +413,14 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
             <FieldError message={errors.addressLine2?.message} />
           </div>
           <div>
-            <TextInput id="editAddressPostalCode" type="text" placeholder="Code postal" error={errors.addressPostalCode} {...register("addressPostalCode")} />
+            <TextInput id="editAddressPostalCode" type="text" placeholder="Code postal (optionnel)" error={errors.addressPostalCode} {...register("addressPostalCode")} />
             <FieldError message={errors.addressPostalCode?.message} />
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mt-4">
           <div>
-            <TextInput id="editAddressCity" type="text" placeholder="Ville" error={errors.addressCity} {...register("addressCity")} />
+            <TextInput id="editAddressCity" type="text" placeholder="Ville (optionnel)" error={errors.addressCity} {...register("addressCity")} />
             <FieldError message={errors.addressCity?.message} />
           </div>
           <div>
@@ -489,11 +489,11 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
             </div>
           </div>
 
-          {/* Numéro de TVA — obligatoire : une indépendante facture sous le
-              sien, et il est recopié sur son compte client. */}
+          {/* Numéro de TVA — optionnel : une indépendante qui en a un facture
+              sous le sien, et il est recopié sur son compte client. */}
           <div>
-            <Label htmlFor="editVatNumber" icon={Hash} required>Numéro de TVA</Label>
-            <TextInput id="editVatNumber" type="text" placeholder="ex. BE0123456789" error={errors.vatNumber} {...register("vatNumber")} />
+            <Label htmlFor="editVatNumber" icon={Hash}>Numéro de TVA</Label>
+            <TextInput id="editVatNumber" type="text" placeholder="ex. BE0123456789 (optionnel)" error={errors.vatNumber} {...register("vatNumber")} />
             <FieldError message={errors.vatNumber?.message} />
           </div>
 

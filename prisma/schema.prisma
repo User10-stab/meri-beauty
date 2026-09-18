@@ -917,6 +917,7 @@ model User {
   decidedRefundOperations        RefundOperation[]      @relation("RefundOperationDecidedBy")
   confirmedRefundLegs            RefundLeg[]            @relation("RefundLegConfirmedBy")
   resolvedManualRefundCases       ManualRefundCase[]    @relation("ManualRefundCaseResolvedBy")
+  googleConnection               GoogleConnection?
 
   @@index([role])
   @@index([isActive, isDeleted])
@@ -2941,4 +2942,37 @@ model EmailVerificationToken {
 
   @@index([email])
   @@index([expiresAt])
+}
+
+// GOOGLE SEARCH CONSOLE
+// Le consentement OAuth d'un administrateur, qui donne à l'application un
+// accès en LECTURE SEULE aux statistiques Search Console du site.
+//
+// accessToken et refreshToken ne sont jamais stockés en clair : les deux
+// colonnes contiennent le format chiffré AES-256-GCM produit par
+// lib/token-encryption.js, et ni l'un ni l'autre n'est jamais renvoyé au
+// navigateur (voir actions/seo/).
+//
+// userId est unique : un même administrateur ne détient qu'une connexion à
+// la fois, une reconnexion remplace la précédente. Le salon n'ayant qu'une
+// propriété Search Console, s'il existe plusieurs lignes (deux
+// administrateurs ayant chacun connecté leur compte), c'est la plus
+// récemment mise à jour qui fait foi — voir getActiveConnection().
+model GoogleConnection {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  googleEmail  String
+  accessToken  String // chiffré
+  refreshToken String // chiffré
+  // Expiration de l'ACCESS token (≈ 1 h). Le refresh token, lui, n'expire
+  // pas à date fixe : il est révoqué, ce que seul un appel à Google révèle.
+  expiresAt DateTime?
+  // La propriété interrogée, telle que Google l'identifie :
+  // "https://meribeautystudio.com/" ou "sc-domain:meribeautystudio.com".
+  siteUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

@@ -51,6 +51,27 @@ variable it needs and what it's for:
 | `MONDIAL_RELAY_*`, `NEXT_PUBLIC_MONDIAL_RELAY_BRAND_ID` | Shipping integration — use Mondial Relay's sandbox credentials for local dev. |
 | `INSTA_API` | Instagram feed integration. |
 | `SITE_ACCESS_PASSWORD` | Only relevant if you want to test the password gate locally. Leave **unset** for normal local dev — if set, `middleware.js` gates the entire site behind a password prompt. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | OAuth client for the Google Search Console dashboard (`/dashboard/seo`). Optional — leave unset and that page simply says the integration isn't configured. See "Google Search Console" below. |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:3000/api/seo/google/callback` locally. Must match the redirect URI declared in Google Cloud **character for character**. Optional: without it the URI is derived from `NEXT_PUBLIC_APP_URL`, but setting it explicitly avoids a mismatch. |
+| `GOOGLE_TOKEN_ENCRYPTION_KEY` | 32-byte key (base64 or hex) encrypting the Google OAuth tokens at rest — `openssl rand -base64 32`. Required for the SEO page; without it no token can be stored. **Changing this key makes existing stored tokens unreadable**, forcing a reconnect. |
+| `GOOGLE_SEARCH_CONSOLE_SITE` | The Search Console property to query by default, exactly as Google identifies it: `sc-domain:meribeautystudio.com` (domain property) or `https://meribeautystudio.com/` (URL-prefix property). Only an initial value — the property actually chosen is stored per connection. |
+
+### Google Search Console (optional, for `/dashboard/seo`)
+
+Before the SEO dashboard can show anything, someone has to do this once in Google Cloud:
+
+1. Create (or reuse) a project at <https://console.cloud.google.com/>.
+2. Enable the **Google Search Console API** for that project.
+3. Configure the OAuth consent screen. While it is in *Testing*, add every Google
+   account that will connect as a **test user** — otherwise Google refuses the consent.
+4. Create an **OAuth client ID** of type *Web application*, and declare the redirect
+   URI `http://localhost:3000/api/seo/google/callback` (add the production one too:
+   `https://meribeautystudio.com/api/seo/google/callback`).
+5. Copy the client ID/secret into `.env`, generate `GOOGLE_TOKEN_ENCRYPTION_KEY`, and
+   restart the app.
+
+The connecting Google account must already have at least **read** access to the
+Search Console property — the app only reads, it never grants itself access.
 
 ## 4. Set up the database schema + seed data
 

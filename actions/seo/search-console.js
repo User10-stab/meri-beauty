@@ -13,6 +13,7 @@ import {
   resolveDateRange,
   resolveSiteUrl,
   summarizeRows,
+  listSitemaps,
 } from "@/lib/seo/search-console";
 import { cacheKey, cached } from "@/lib/seo/cache";
 import { SEO_ERROR_CODES, failure, failureFromGoogleError } from "@/lib/seo/errors";
@@ -178,6 +179,90 @@ async function getTopByDimension(dimension, { from, to, limit }) {
     return { success: true, data: rows.map(formatDimensionRow) };
   } catch (error) {
     console.error(`[getTopByDimension:${dimension}]`, error);
+    return failureFromGoogleError(error);
+  }
+}
+
+/**
+ * La série jour par jour, pour les courbes de tendance.
+ *
+ * `rowLimit` est volontairement large : une ligne par jour, et la période la
+ * plus longue proposée par l'interface est de trois mois.
+ *
+ * @param {{ from?: string, to?: string }} [params]
+ * @returns {Promise<{ success: boolean, code?: string, message?: string, data: Array<object> | null }>}
+ */
+export async function getSeoTimeseries({ from, to } = {}) {
+  const context = await prepare();
+  if (context.failure) return context.failure;
+  if (!context.siteUrl) return failure(SEO_ERROR_CODES.PROPRIETE_INTROUVABLE);
+
+  const { startDate, endDate } = resolveDateRange({ from, to });
+
+  try {
+    const rows = await cached(
+      cacheKey("timeseries", context.connection.id, context.siteUrl, startDate, endDate),
+      () =>
+        querySearchAnalytics(context.auth, {
+          siteUrl: context.siteUrl,
+          startDate,
+          endDate,
+          dimensions: ["date"],
+          rowLimit: 200,
+        })
+    );
+
+    // Google renvoie déjà les dates dans l'ordre, mais rien ne le garantit :
+    // un tri explicite évite une courbe en dents de scie si cela changeait.
+    return {
+      success: true,
+      data: rows.map(formatDimensionRow).sort((a, b) => a.key.localeCompare(b.key)),
+    };
+  } catch (error) {
+    console.error("[getSeoTimeseries]", error);
+    return failureFromGoogleError(error);
+  }
+}
+
+/**
+ * D'où viennent les recherches.
+ *
+ * @param {{ from?: string, to?: string, limit?: number }} [params]
+ * @returns {Promise<{ success: boolean, code?: string, message?: string, data: Array<object> | null }>}
+ */
+export async function getTopCountries({ from, to, limit = 8 } = {}) {
+  return getTopByDimension("country", { from, to, limit });
+}
+
+/**
+ * Répartition ordinateur / mobile / tablette.
+ *
+ * @param {{ from?: string, to?: string }} [params]
+ * @returns {Promise<{ success: boolean, code?: string, message?: string, data: Array<object> | null }>}
+ */
+export async function getDeviceBreakdown({ from, to } = {}) {
+  return getTopByDimension("device", { from, to, limit: 3 });
+}
+
+/**
+ * L'état des sitemaps déclarés pour la propriété.
+ *
+ * @returns {Promise<{ success: boolean, code?: string, message?: string, data: Array<object> | null }>}
+ */
+export async function getSitemaps() {
+  const context = await prepare();
+  if (context.failure) return context.failure;
+  if (!context.siteUrl) return failure(SEO_ERROR_CODES.PROPRIETE_INTROUVABLE);
+
+  try {
+    const sitemaps = await cached(
+      cacheKey("sitemaps", context.connection.id, context.siteUrl),
+      () => listSitemaps(context.auth, context.siteUrl)
+    );
+
+    return { success: true, data: sitemaps };
+  } catch (error) {
+    console.error("[getSitemaps]", error);
     return failureFromGoogleError(error);
   }
 }

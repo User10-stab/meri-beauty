@@ -1,10 +1,26 @@
 import { redirect } from "next/navigation";
-import { MousePointerClick, Eye, Percent, ListOrdered, Search, FileText } from "lucide-react";
+import {
+  MousePointerClick,
+  Eye,
+  Percent,
+  ListOrdered,
+  Search,
+  FileText,
+  Globe,
+  MonitorSmartphone,
+  TrendingUp,
+  Map as MapIcon,
+  ExternalLink,
+} from "lucide-react";
 import { auth } from "@/auth";
 import { isAdminRole } from "@/lib/authorization";
 import { getGoogleConnectionStatus } from "@/actions/seo/google-connection";
 import {
+  getDeviceBreakdown,
   getSearchConsoleOverview,
+  getSeoTimeseries,
+  getSitemaps,
+  getTopCountries,
   getTopPages,
   getTopQueries,
   listSearchConsoleSites,
@@ -20,6 +36,13 @@ import {
 } from "@/lib/seo/format";
 import { SeoConnectionBar } from "@/components/dashboard/seo/SeoConnectionBar";
 import { SeoDateRangeBar } from "@/components/dashboard/seo/SeoDateRangeBar";
+import {
+  SEO_COLORS,
+  SeoCountriesChart,
+  SeoDevicesChart,
+  SeoPositionChart,
+  SeoTrendChart,
+} from "@/components/dashboard/seo/SeoCharts";
 
 export const metadata = {
   title: "Référencement Google — Dashboard",
@@ -89,12 +112,17 @@ export default async function SeoPage({ searchParams }) {
  * même pas le réseau.
  */
 async function ConnectedView({ connection, startDate, endDate }) {
-  const [overview, queries, pages, sites] = await Promise.all([
-    getSearchConsoleOverview({ from: startDate, to: endDate }),
-    getTopQueries({ from: startDate, to: endDate }),
-    getTopPages({ from: startDate, to: endDate }),
-    listSearchConsoleSites(),
-  ]);
+  const [overview, queries, pages, sites, timeseries, countries, devices, sitemaps] =
+    await Promise.all([
+      getSearchConsoleOverview({ from: startDate, to: endDate }),
+      getTopQueries({ from: startDate, to: endDate }),
+      getTopPages({ from: startDate, to: endDate }),
+      listSearchConsoleSites(),
+      getSeoTimeseries({ from: startDate, to: endDate }),
+      getTopCountries({ from: startDate, to: endDate }),
+      getDeviceBreakdown({ from: startDate, to: endDate }),
+      getSitemaps(),
+    ]);
 
   const needsReconnect = overview.code === SEO_ERROR_CODES.RECONNEXION_REQUISE;
 
@@ -125,19 +153,52 @@ async function ConnectedView({ connection, startDate, endDate }) {
             <StatCard
               icon={<MousePointerClick size={20} />}
               label="Clics"
+              hint="Visites depuis Google"
               value={formatInteger(overview.data.clicks)}
+              accent={SEO_COLORS.clics}
             />
             <StatCard
               icon={<Eye size={20} />}
               label="Impressions"
+              hint="Apparitions dans les résultats"
               value={formatInteger(overview.data.impressions)}
+              accent={SEO_COLORS.impressions}
             />
-            <StatCard icon={<Percent size={20} />} label="CTR" value={formatCtr(overview.data.ctr)} />
+            <StatCard
+              icon={<Percent size={20} />}
+              label="CTR"
+              hint="Clics rapportés aux impressions"
+              value={formatCtr(overview.data.ctr)}
+            />
             <StatCard
               icon={<ListOrdered size={20} />}
               label="Position moyenne"
+              hint="1 = tout en haut des résultats"
               value={formatPosition(overview.data.position)}
+              accent={SEO_COLORS.position}
             />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <ChartCard
+              title="Clics et impressions"
+              subtitle="Deux panneaux séparés : les impressions se comptent en centaines et les clics en dizaines, donc une échelle commune écraserait la courbe des clics."
+              icon={<TrendingUp size={16} />}
+              result={timeseries}
+              emptyLabel="Pas encore de données sur cette période."
+            >
+              {(rows) => <SeoTrendChart rows={rows} />}
+            </ChartCard>
+
+            <ChartCard
+              title="Position moyenne"
+              subtitle="L'axe est inversé : plus la courbe est haute, meilleur est le classement."
+              icon={<ListOrdered size={16} />}
+              result={timeseries}
+              emptyLabel="Pas encore de données sur cette période."
+            >
+              {(rows) => <SeoPositionChart rows={rows} />}
+            </ChartCard>
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -159,6 +220,30 @@ async function ConnectedView({ connection, startDate, endDate }) {
               emptyLabel="Aucune page sur cette période."
             />
           </div>
+
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <ChartCard
+              title="Pays"
+              subtitle="D'où partent les recherches qui mènent au site."
+              icon={<MapIcon size={16} />}
+              result={countries}
+              emptyLabel="Aucun pays sur cette période."
+            >
+              {(rows) => <SeoCountriesChart rows={rows} labelFor={formatCountry} />}
+            </ChartCard>
+
+            <ChartCard
+              title="Appareils"
+              subtitle="Ordinateur, mobile ou tablette."
+              icon={<MonitorSmartphone size={16} />}
+              result={devices}
+              emptyLabel="Aucun appareil sur cette période."
+            >
+              {(rows) => <SeoDevicesChart rows={rows} labelFor={formatDevice} />}
+            </ChartCard>
+          </div>
+
+          <SitemapsCard result={sitemaps} />
         </>
       )}
     </>
@@ -292,17 +377,182 @@ function Alert({ tone = "error", children }) {
   );
 }
 
-/** Même carte d'indicateur que l'écran Rapports. */
-function StatCard({ icon, label, value }) {
+/**
+ * Carte d'indicateur.
+ *
+ * `accent` n'est pas décoratif : c'est exactement la couleur de la série
+ * correspondante dans les graphiques ci-dessous. La pastille sert donc de
+ * légende — on relie « Clics » à la bonne courbe sans avoir à chercher. Le
+ * CTR n'a pas de pastille parce qu'il n'est tracé nulle part : c'est un
+ * rapport entre deux autres chiffres, pas une série. Les valeurs et les
+ * libellés gardent les couleurs de texte habituelles ; seule la pastille
+ * porte la teinte.
+ */
+function StatCard({ icon, label, value, hint, accent }) {
   return (
-    <div className="flex items-center gap-4 rounded-[10px] border border-stroke bg-white p-5 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white">
-        {icon}
+    <div className="rounded-[10px] border border-stroke bg-white p-5 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+      <div className="flex items-center gap-4">
+        <div
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${
+            accent ? "" : "bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
+          }`}
+          style={accent ? { backgroundColor: accent + "1F", color: accent } : undefined}
+        >
+          {icon}
+        </div>
+        <div className="min-w-0">
+          <p className="text-2xl font-bold leading-tight text-dark dark:text-white">{value}</p>
+          <p className="truncate text-sm text-gray-500 dark:text-dark-6">{label}</p>
+        </div>
       </div>
-      <div className="min-w-0">
-        <p className="text-xl font-bold text-dark dark:text-white">{value}</p>
-        <p className="truncate text-sm text-gray-500 dark:text-dark-6">{label}</p>
-      </div>
+      {hint && <p className="mt-3 text-xs text-gray-400 dark:text-dark-6">{hint}</p>}
     </div>
   );
+}
+
+/**
+ * Carte contenant un graphique.
+ *
+ * Le graphique arrive en fonction enfant pour que le cas « pas de données »
+ * soit traité ici, une seule fois : aucun composant client n'est monté quand
+ * il n'y a rien à tracer, ce qui évite d'afficher des axes vides.
+ */
+function ChartCard({ title, subtitle, icon, result, emptyLabel, children }) {
+  const rows = result?.success ? result.data : [];
+
+  return (
+    <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-[#2f3a2e] dark:text-white">{icon}</span>
+        <h2 className="text-lg font-bold text-dark dark:text-white">{title}</h2>
+      </div>
+      <p className="mb-5 text-xs text-gray-500 dark:text-dark-6">{subtitle}</p>
+
+      {!result?.success ? (
+        <Alert tone="error">{result?.message ?? "Données indisponibles."}</Alert>
+      ) : rows.length === 0 ? (
+        <p className="py-16 text-center text-sm text-gray-500 dark:text-dark-6">{emptyLabel}</p>
+      ) : (
+        children(rows)
+      )}
+    </div>
+  );
+}
+
+/** L'état des sitemaps, vu par Google. */
+function SitemapsCard({ result }) {
+  const rows = result?.success ? result.data : [];
+
+  return (
+    <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="text-[#2f3a2e] dark:text-white">
+          <Globe size={16} />
+        </span>
+        <h2 className="text-lg font-bold text-dark dark:text-white">Sitemaps</h2>
+      </div>
+      <p className="mb-5 text-xs text-gray-500 dark:text-dark-6">
+        Les plans du site déclarés à Google, et la dernière fois qu'il les a lus.
+      </p>
+
+      {!result?.success ? (
+        <Alert tone="error">{result?.message ?? "Données indisponibles."}</Alert>
+      ) : rows.length === 0 ? (
+        <p className="py-8 text-center text-sm text-gray-500 dark:text-dark-6">
+          Aucun sitemap déclaré pour cette propriété. Il s'ajoute depuis Search Console, section
+          « Sitemaps ».
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-sm">
+            <thead className="border-b border-stroke text-xs uppercase text-gray-500 dark:border-dark-3 dark:text-dark-6">
+              <tr>
+                <th className="px-2 py-3 font-semibold">Chemin</th>
+                <th className="px-2 py-3 text-right font-semibold">Soumis le</th>
+                <th className="px-2 py-3 text-right font-semibold">Lu le</th>
+                <th className="px-2 py-3 text-right font-semibold">URL</th>
+                <th className="px-2 py-3 text-right font-semibold">Erreurs</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stroke dark:divide-dark-3">
+              {rows.map((row) => (
+                <tr key={row.path}>
+                  <td className="max-w-[320px] truncate px-2 py-3" title={row.path}>
+                    <a
+                      href={row.path}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-[#5750F1] hover:underline"
+                    >
+                      {row.path}
+                      <ExternalLink size={12} />
+                    </a>
+                  </td>
+                  <td className="px-2 py-3 text-right text-gray-500 dark:text-dark-6">
+                    {row.lastSubmitted ? formatDateLabel(row.lastSubmitted.slice(0, 10)) : "—"}
+                  </td>
+                  <td className="px-2 py-3 text-right text-gray-500 dark:text-dark-6">
+                    {row.lastDownloaded ? formatDateLabel(row.lastDownloaded.slice(0, 10)) : "—"}
+                  </td>
+                  <td className="px-2 py-3 text-right font-semibold text-dark dark:text-white">
+                    {formatInteger(row.submitted)}
+                  </td>
+                  <td className="px-2 py-3 text-right">
+                    {/* L'état ne repose pas sur la seule couleur : le chiffre et
+                        le symbole le disent aussi. */}
+                    <span
+                      className={
+                        row.errors > 0
+                          ? "font-semibold text-red-600"
+                          : "text-gray-500 dark:text-dark-6"
+                      }
+                    >
+                      {row.errors > 0 ? formatInteger(row.errors) + " \u26a0" : "0"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Google renvoie des codes pays ISO 3166-1 alpha-3 en minuscules ("bel").
+// Intl.DisplayNames ne comprend que l'alpha-2, d'où cette table pour les pays
+// réellement plausibles ici ; tout le reste retombe sur le code en majuscules,
+// ce qui reste lisible plutôt que faux.
+const COUNTRY_LABELS = {
+  bel: "Belgique",
+  fra: "France",
+  nld: "Pays-Bas",
+  lux: "Luxembourg",
+  deu: "Allemagne",
+  gbr: "Royaume-Uni",
+  esp: "Espagne",
+  ita: "Italie",
+  mar: "Maroc",
+  dza: "Algérie",
+  tun: "Tunisie",
+  usa: "États-Unis",
+  che: "Suisse",
+  prt: "Portugal",
+  tur: "Turquie",
+  can: "Canada",
+};
+
+function formatCountry(code) {
+  return COUNTRY_LABELS[String(code).toLowerCase()] ?? String(code).toUpperCase();
+}
+
+const DEVICE_LABELS = {
+  DESKTOP: "Ordinateur",
+  MOBILE: "Mobile",
+  TABLET: "Tablette",
+};
+
+function formatDevice(code) {
+  return DEVICE_LABELS[String(code).toUpperCase()] ?? String(code);
 }

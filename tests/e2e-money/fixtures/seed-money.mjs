@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { prisma } from "./db.mjs";
 import { getRunId, taggedEmail } from "./run-id.mjs";
+import Stripe from "stripe";
 import { TILL_CASH_OPERATOR_EMAIL } from "../../../lib/authorization.js";
 
 /**
@@ -22,6 +23,9 @@ import { TILL_CASH_OPERATOR_EMAIL } from "../../../lib/authorization.js";
  */
 
 const CUSTOMER_PASSWORD = "E2eMoney!2026";
+
+/** The same key the run is guarded on — see fixtures/env-guard.mjs. */
+const stripe = new Stripe((process.env.STRIPE_SECRET_KEY ?? "").trim());
 
 /** Far enough out that the 48-hour cancellation window is never the reason a test fails. */
 function farFutureDate(daysAhead = 45) {
@@ -227,26 +231,37 @@ async function findChargeableIndependent() {
   });
   const salonStaffIds = salonUsers.map((u) => u.staff?.id).filter(Boolean);
 
-  const staff = await prisma.staff.findFirst({
+  const candidates = await prisma.staff.findMany({
     where: {
       id: { notIn: salonStaffIds },
       type: "INDEPENDENT",
       stripeAccountId: { not: null },
-      stripeChargesEnabled: true,
-      stripePayoutsEnabled: true,
       isDeleted: false,
     },
     include: { user: { select: { id: true, fullName: true, email: true } } },
   });
 
-  if (!staff) {
-    throw new Error(
-      "No INDEPENDENT staff member outside the salon has a Stripe Connect account with charges and payouts " +
-        "enabled. An activity she animates is a direct charge on her own account, so this scenario cannot run " +
-        "without one, and one cannot be seeded (Staff.stripeAccountId is unique, Express onboarding is interactive).",
-    );
+  // The DB flags are not enough. Every real independent's row says charges and
+  // payouts are enabled — and every one of those accounts lives in Stripe
+  // **live** mode, invisible to an sk_test_ key. Picking on the flags alone
+  // selects one of them and the checkout dies with "The provided key does not
+  // have access to account acct_…", which surfaces in the browser as nothing
+  // more than "Erreur lors de la création de la session de paiement".
+  //
+  // So ask Stripe, with the key this run actually uses.
+  const reachable = [];
+  for (const staff of candidates) {
+    const account = await stripe.accounts.retrieve(staff.stripeAccountId).catch(() => null);
+    if (account?.charges_enabled && account?.payouts_enabled) return staff;
+    if (account) reachable.push(`${staff.user.fullName} (${staff.stripeAccountId}): visible but not chargeable`);
   }
-  return staff;
+
+  throw new Error(
+    `None of the ${candidates.length} independent staff members' Stripe accounts can be charged with this key.\n` +
+      (reachable.length ? `  ${reachable.join("\n  ")}\n` : "  (none of them are even visible to it)\n") +
+      "An activity she animates is a direct charge on her own account, so this scenario cannot run without one.\n" +
+      "Create a test-mode account with:  node scripts/dev-create-test-connect-account.mjs",
+  );
 }
 
 /** The Animator row that points at a staff profile — the link payee resolution reads. */
@@ -415,11 +430,9 @@ export async function readVariantStock(variantId) {
  * wizard: the booking funnel is UI, and what is under test here is the money.
  */
 export async function seedConnectAppointment({ customer, daysAhead = 40 } = {}) {
-  const staff = await prisma.staff.findFirst({
+  const candidates = await prisma.staff.findMany({
     where: {
       stripeAccountId: { not: null },
-      stripeChargesEnabled: true,
-      stripePayoutsEnabled: true,
       isDeleted: false,
     },
     include: {
@@ -432,11 +445,26 @@ export async function seedConnectAppointment({ customer, daysAhead = 40 } = {}) 
     },
   });
 
+  // Ask Stripe rather than trusting the columns: every real practitioner's row
+  // says charges and payouts are enabled, and every one of those accounts is a
+  // **live** account that an sk_test_ key cannot even see. Choosing on the
+  // flags picks one of them, and the checkout then fails with "The provided
+  // key does not have access to account acct_…".
+  let staff = null;
+  for (const candidate of candidates) {
+    const account = await stripe.accounts.retrieve(candidate.stripeAccountId).catch(() => null);
+    if (account?.charges_enabled && account?.payouts_enabled) {
+      staff = candidate;
+      break;
+    }
+  }
+
   if (!staff) {
     throw new Error(
-      "No staff member has a Stripe Connect account with charges and payouts enabled. Appointments are " +
-        "direct charges on the staff member's own account, so this scenario cannot run without one, and " +
-        "one cannot be seeded (Staff.stripeAccountId is unique and Express onboarding is interactive).",
+      `None of the ${candidates.length} staff members with a Stripe account can be charged with this key — ` +
+        "they are live accounts, invisible in test mode. Appointments are direct charges on the practitioner's " +
+        "own account, so this scenario cannot run without a reachable one.\n" +
+        "Create a test-mode account with:  node scripts/dev-create-test-connect-account.mjs",
     );
   }
 

@@ -139,7 +139,12 @@ async function main() {
       const existing = await stripe.accounts.retrieve(staff.stripeAccountId);
       if (existing.charges_enabled && existing.payouts_enabled) {
         console.log(`Reusing ${staff.stripeAccountId} (charges + payouts enabled).`);
+        await prisma.staff.update({
+          where: { id: staff.id },
+          data: { stripeChargesEnabled: true, stripePayoutsEnabled: true },
+        });
         await linkAnimator(staff);
+        await ensurePricedService(staff);
         return;
       }
       console.log(`${staff.stripeAccountId} is not fully enabled — creating a fresh one.`);
@@ -208,7 +213,52 @@ async function main() {
       });
 
   await linkAnimator(staff);
+  await ensurePricedService(staff);
   console.log(`\nStaff ${staff.id} (${FULL_NAME}) is ready to animate a formation.`);
+}
+
+/**
+ * One priced, active service for her.
+ *
+ * seedConnectAppointment (tests/e2e-money/fixtures/seed-money.mjs) books the
+ * highest-priced active service of whichever staff member has a usable
+ * connected account. Without one it throws "has a connected account but no
+ * service priced above 0 €", so the rendez-vous Connect scenario cannot run
+ * against this account either.
+ */
+async function ensurePricedService(staff) {
+  const existing = await prisma.staffService.findFirst({
+    where: { staffId: staff.id, isActive: true, isDeleted: false, price: { gt: 0 } },
+    select: { id: true, price: true },
+  });
+  if (existing) {
+    console.log(`Service ${existing.id} already priced at ${Number(existing.price).toFixed(2)} €`);
+    return;
+  }
+
+  // Reuse the catalogue rather than inventing a Service: one needs a Category,
+  // and a stray uncategorised service would show up in the dashboard.
+  const service = await prisma.service.findFirst({
+    where: { isDeleted: false },
+    select: { id: true, name: true },
+    orderBy: { createdAt: "asc" },
+  });
+  if (!service) {
+    console.log("No Service exists in this database — seed the catalogue first.");
+    return;
+  }
+
+  const staffService = await prisma.staffService.create({
+    data: {
+      staffId: staff.id,
+      serviceId: service.id,
+      createdById: staff.userId,
+      price: 55,
+      duration: 60,
+      photo: "",
+    },
+  });
+  console.log(`Service "${service.name}" attached at 55,00 € (${staffService.id})`);
 }
 
 /** The link payee resolution reads — without it her seats resolve to the salon. */

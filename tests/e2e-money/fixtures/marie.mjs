@@ -66,6 +66,10 @@ export async function readChargeFromStripe(paymentIntentId, connectedAccountId =
     chargeId: typeof charge === "string" ? charge : charge?.id ?? null,
     amount: (intent.amount ?? 0) / 100,
     amountRefunded: (typeof charge === "object" ? charge?.amount_refunded ?? 0 : 0) / 100,
+    // Null when the platform took no cut, which is the rule for every direct
+    // charge here: she receives 100 % and the salon's share is settled off
+    // Stripe through her contract.
+    applicationFee: (intent.application_fee_amount ?? null) === null ? null : intent.application_fee_amount / 100,
   };
 }
 

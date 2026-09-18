@@ -96,10 +96,11 @@ test.describe("formation — charged to the animator's own Stripe account", () =
     // makes routing bugs invisible to every other spec here.
     const intentId = payment.transactions[0].stripePaymentIntentId;
     const charge = await readChargeFromStripe(intentId, hers.staff.stripeAccountId);
-    expect(charge.amount).toBe(Math.round(DEPOSIT * 100));
+    // readChargeFromStripe answers in euros, not cents.
+    expect(charge.amount).toBeCloseTo(DEPOSIT, 2);
     // No application fee: she receives 100%, the salon's cut is settled off
     // Stripe through her contract — the same rule appointments already follow.
-    expect(charge.application_fee_amount ?? null).toBeNull();
+    expect(charge.applicationFee).toBeNull();
 
     // ── The platform issues no document for a sale that is not its own ────
     expect(payment.ticketNumber).toBeNull();
@@ -123,7 +124,7 @@ test.describe("formation — charged to the animator's own Stripe account", () =
     // Null account = the platform. This resolves only because the charge is
     // there.
     const charge = await readChargeFromStripe(intentId, null);
-    expect(charge.amount).toBe(Math.round(DEPOSIT * 100));
+    expect(charge.amount).toBeCloseTo(DEPOSIT, 2);
 
     // The salon's own sale keeps the salon's paperwork.
     expect(payment.ticketNumber).not.toBeNull();

@@ -76,6 +76,51 @@ export async function payOnStripeCheckout(page, { card = TEST_CARDS.SUCCESS, nam
   };
 
   await fillIfPresent("#email", "e2e@meribeauty.test");
+
+  // A session offering more than one payment method no longer renders the card
+  // form directly: the methods become an accordion, and #cardNumber does not
+  // exist at all until its card row is opened. Every activity and boutique
+  // checkout offers card + Bancontact, and a connected account serves whatever
+  // it has enabled, so this is now the normal shape — only a single-method
+  // session (the till, card-only) still lands straight on the form.
+  //
+  // Three things about this are easy to get wrong, and each costs a 30-60s
+  // timeout that says only "waiting for #cardNumber":
+  //   * the page must be given time to render before deciding which shape it
+  //     is. Checking the instant the URL matches always reads "no accordion",
+  //     skips the click, and then waits out the clock on a chooser;
+  //   * there is no <label for=...> to aim at, only the radio;
+  //   * that radio is visually hidden behind the accordion row, so Playwright
+  //     refuses a normal click as "not visible" and a DOM .click() does not
+  //     even check it. The forced click dispatches real mouse events at its
+  //     box, which is what opens the row.
+  const CARD_RADIO = "#payment-method-accordion-item-title-card";
+  try {
+    await page
+      .locator(`#cardNumber, ${CARD_RADIO}`)
+      .first()
+      .waitFor({ state: "attached", timeout: 60_000 });
+  } catch (cause) {
+    // "waiting for #cardNumber" says nothing about WHY. Stripe's hosted page
+    // has several shapes — a Link sign-in step, an expired session, a plain
+    // error — and each one looks identical from a bare timeout. Print what is
+    // actually on screen so the next person does not have to open the trace.
+    const seen = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "(could not read the page)");
+    throw new Error(
+      `Stripe Checkout showed neither the card form nor a card accordion within 60s.\n` +
+        `URL: ${page.url()}\n--- page text ---\n${seen.slice(0, 800)}`,
+      { cause },
+    );
+  }
+
+  const cardAccordion = page.locator(CARD_RADIO);
+  if ((await cardAccordion.count()) > 0) {
+    await cardAccordion.first().click({ force: true });
+  }
+
   // Card number first and with the full timeout budget: it is the field
   // whose readiness gates the rest of the form, so waiting on it here is
   // what the later fields' shorter, default waits are implicitly relying on.

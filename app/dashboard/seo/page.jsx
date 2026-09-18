@@ -25,7 +25,7 @@ import {
   getTopQueries,
   listSearchConsoleSites,
 } from "@/actions/seo/search-console";
-import { resolveDateRange } from "@/lib/seo/search-console";
+import { findBroaderDomainProperty, resolveDateRange } from "@/lib/seo/search-console";
 import { OAUTH_REDIRECT_MESSAGES, SEO_ERROR_CODES } from "@/lib/seo/errors";
 import {
   formatCtr,
@@ -126,6 +126,15 @@ async function ConnectedView({ connection, startDate, endDate }) {
 
   const needsReconnect = overview.code === SEO_ERROR_CODES.RECONNEXION_REQUISE;
 
+  // Une propriete de prefixe ne mesure que l'hote exact. Si le compte a aussi
+  // acces a la propriete de domaine equivalente, les chiffres affiches sont
+  // silencieusement incomplets — mieux vaut le dire que laisser croire le
+  // contraire. Cas typique : la connexion date d'avant la creation de la
+  // propriete de domaine.
+  const broaderProperty = sites.success
+    ? findBroaderDomainProperty(connection.siteUrl, sites.data)
+    : null;
+
   return (
     <>
       <SeoConnectionBar
@@ -133,6 +142,18 @@ async function ConnectedView({ connection, startDate, endDate }) {
         siteUrl={connection.siteUrl}
         sites={sites.success ? sites.data : []}
       />
+
+      {broaderProperty && (
+        <Alert tone="warning">
+          <span>
+            La propriété interrogée est <strong>{connection.siteUrl}</strong>, qui ne couvre que cet
+            hôte exact. Les visites arrivant sur <strong>www</strong> ou sur un sous-domaine
+            n'apparaissent donc pas dans les chiffres ci-dessous. La propriété{" "}
+            <strong>{broaderProperty}</strong> couvre tout le domaine : la sélectionner dans la liste
+            ci-dessus donne une mesure complète.
+          </span>
+        </Alert>
+      )}
 
       <SeoDateRangeBar startDate={startDate} endDate={endDate} />
 
@@ -361,17 +382,20 @@ function NotConfiguredCard({ missingEnv }) {
 
 /** Bandeau d'information ou d'erreur, au format des autres écrans. */
 function Alert({ tone = "error", children }) {
-  const isError = tone === "error";
+  // Chaque ton porte aussi son symbole : l'information ne repose jamais sur la
+  // seule couleur. Un ton inconnu retombe sur l'erreur plutot que sur le
+  // succes — se tromper en signalant un probleme inexistant est moins grave
+  // que de peindre un avertissement en vert.
+  const TONES = {
+    error: { className: "border-red-200 bg-red-50 text-red-700", symbol: "⚠" },
+    warning: { className: "border-amber-200 bg-amber-50 text-amber-800", symbol: "⚠" },
+    success: { className: "border-green-200 bg-green-50 text-green-700", symbol: "✓" },
+  };
+  const { className, symbol } = TONES[tone] ?? TONES.error;
+
   return (
-    <div
-      role="alert"
-      className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${
-        isError
-          ? "border-red-200 bg-red-50 text-red-700"
-          : "border-green-200 bg-green-50 text-green-700"
-      }`}
-    >
-      <span className="mt-0.5 flex-shrink-0 text-lg leading-none">{isError ? "⚠" : "✓"}</span>
+    <div role="alert" className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm ${className}`}>
+      <span className="mt-0.5 flex-shrink-0 text-lg leading-none">{symbol}</span>
       {children}
     </div>
   );

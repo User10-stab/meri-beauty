@@ -14,6 +14,7 @@ import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-numbe
 import { resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
+import { authorizeRefundActor } from "@/lib/refunds/authorize";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
@@ -310,13 +311,27 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
     // just because the assigned staff member (rather than an admin) clicked
     // cancel — only admin decides whether to waive the forfeit
     // (waiveDepositForfeit below).
+    //
+    // An independent practitioner's own sale (Payment.payeeStaffId) is the
+    // exception, the other way round: the money is on her Stripe account and
+    // under her VAT number, so she alone cancels and refunds it — including
+    // waiving her own forfeit — and the admin is refused (authorizeRefundActor).
     if (wasPaid) {
-      const session = await auth();
-      if (!isAdminRole(session?.user?.role)) {
-        return {
-          success: false,
-          message: "Seul un administrateur peut annuler un rendez-vous déjà payé (remboursement requis). Contactez un administrateur.",
-        };
+      if (payment.payeeStaffId) {
+        const owner = authorizeRefundActor({
+          actorRole: authCheck.userRole,
+          actorStaffId: isAdminRole(authCheck.userRole) ? null : await getCurrentStaffId(),
+          payeeStaffId: payment.payeeStaffId,
+        });
+        if (!owner.allowed) return { success: false, message: owner.message };
+      } else {
+        const session = await auth();
+        if (!isAdminRole(session?.user?.role)) {
+          return {
+            success: false,
+            message: "Seul un administrateur peut annuler un rendez-vous déjà payé (remboursement requis). Contactez un administrateur.",
+          };
+        }
       }
     }
 

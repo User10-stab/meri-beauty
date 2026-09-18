@@ -9,6 +9,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { InvoiceRowActions } from "@/components/dashboard/operations/InvoiceRowActions";
 import { TransactionDetailDrawer } from "@/components/dashboard/operations/TransactionDetailDrawer";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
+import { CancelAndRefundDialog } from "@/components/dashboard/operations/CancelAndRefundDialog";
 import { getTransferDetail } from "@/actions/dashboard/admin-operations";
 import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import {
@@ -609,12 +610,33 @@ function TransferCrossLink({ logId, transferredAt }) {
 
 /**
  * `readOnly` is the /dashboard/mes-operations rendering: a practitioner
- * reading her own lines. Every action on this table (the detail drawer,
- * InvoiceRowActions' send/refund/credit-note) is backed by an admin-only
- * server action, so offering them would only produce "Non autorisé" — and
- * the documents they reach are the salon's, not hers.
+ * reading her own lines. The salon's document actions (the detail drawer,
+ * InvoiceRowActions' send/credit-note) stay out of it — they are backed by
+ * admin-only server actions and the documents they reach are the salon's,
+ * not hers.
+ *
+ * One action is hers, and it is here: "Rembourser". Her sale was charged to
+ * her own Stripe account, so she is the only one who can give that money
+ * back — the admin is refused on it (lib/refunds/authorize.js). The dialog
+ * previews the same guards and explains the refusal if the row is not
+ * refundable.
  */
-function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpenTransfer, readOnly = false }) {
+/**
+ * Money actually collected and not already fully given back — the only rows
+ * worth offering "Rembourser" on. A transfer line (operationOnly) moves no
+ * money, and a refund line is the giving-back itself.
+ */
+function refundableByOwner(row) {
+  if (row.operationOnly || !row.payment?.id) return false;
+  if (row.transactionType === "REFUND") return false;
+  // The server computes what is still refundable from the ledger
+  // (summarizeRefundState); a status alone would offer the button on a
+  // payment already given back.
+  if (row.refundState) return Number(row.refundState.remainingRefundable ?? 0) > 0.01;
+  return ["PAID", "PARTIALLY_PAID", "PARTIALLY_REFUNDED"].includes(row.payment.status);
+}
+
+function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpenTransfer, onRefund, readOnly = false }) {
   return (
     <Table>
       <TableHeader>
@@ -729,7 +751,17 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
               </TableCell>
               <TableCell className="pr-6">
                 {readOnly ? (
-                  <span className="text-xs text-gray-400">—</span>
+                  refundableByOwner(row) ? (
+                    <button
+                      type="button"
+                      onClick={() => onRefund(row.payment.id)}
+                      className="whitespace-nowrap rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
+                    >
+                      Rembourser
+                    </button>
+                  ) : (
+                    <span className="text-xs text-gray-400">—</span>
+                  )
                 ) : row.operationOnly ? (
                   <button
                     type="button"
@@ -826,6 +858,8 @@ export function AdminOperationsClient({ result, basePath = "/dashboard/operation
   const [detailId, setDetailId] = useState(null);
   const [pendingOrderId, setPendingOrderId] = useState(null);
   const [transferDetail, setTransferDetail] = useState(null);
+  // Mes opérations only: the payment a practitioner is refunding.
+  const [refundPaymentId, setRefundPaymentId] = useState(null);
 
   const hasPrevious = page > 1;
   const hasNext = page * pageSize < totalCount;
@@ -916,6 +950,7 @@ export function AdminOperationsClient({ result, basePath = "/dashboard/operation
             onOpenDetail={setDetailId}
             onOpenPendingOrder={setPendingOrderId}
             onOpenTransfer={setTransferDetail}
+            onRefund={setRefundPaymentId}
             readOnly={readOnly}
           />
         )}
@@ -941,6 +976,11 @@ export function AdminOperationsClient({ result, basePath = "/dashboard/operation
       <TransactionDetailDrawer transactionId={detailId} onClose={() => setDetailId(null)} />
       <TransactionDetailDrawer orderId={pendingOrderId} onClose={() => setPendingOrderId(null)} />
       <TransferDetailModal transfer={transferDetail} onClose={() => setTransferDetail(null)} />
+      <CancelAndRefundDialog
+        open={Boolean(refundPaymentId)}
+        paymentId={refundPaymentId}
+        onClose={() => setRefundPaymentId(null)}
+      />
     </div>
   );
 }

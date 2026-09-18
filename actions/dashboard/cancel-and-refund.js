@@ -16,7 +16,7 @@ import {
 } from "@/lib/refunds/open-refund-operation";
 import { settleRefundLeg } from "@/lib/refunds/settle-leg";
 import { sendB2CRefundConfirmation as deliverB2CRefundConfirmation } from "@/lib/refunds/send-b2c-refund-confirmation";
-import { authorizeRefund, cancelsUnderlyingItem, releasesCapacity } from "@/lib/refunds/authorize";
+import { authorizeRefund, authorizeRefundActor, cancelsUnderlyingItem, releasesCapacity } from "@/lib/refunds/authorize";
 import { notifyAllInWaitingList } from "@/lib/workshops/notify-waiting-list";
 import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting-list";
 
@@ -32,13 +32,35 @@ import { notifyAllInFormationWaitingList } from "@/lib/formations/notify-waiting
  * of them are.
  */
 
-// Outstanding refunds are a financial-integrity worklist — every
-// admin/owner sees every staff member's stuck refunds, on
-// purpose, so nothing gets lost to a colleague nobody else can see.
+// The salon-only actions below (manual capture cases, missing documents) stay
+// admin-only.
 async function requireAdmin() {
   const session = await auth();
   if (!session?.user || !isAdminRole(session.user.role)) return null;
   return session;
+}
+
+/**
+ * Who may reach a refund action at all: an admin (for the salon's sales) or
+ * a practitioner with a Staff row (for her own). Which payment each may
+ * actually touch is decided per payment by authorizeRefundActor — an
+ * independent's sale is hers alone, and the admin is refused on it.
+ *
+ * @returns {Promise<{session: object, actor: {id: string, role: string, staffId: string|null}}|null>}
+ */
+async function requireRefundActor() {
+  const session = await auth();
+  if (!session?.user) return null;
+  const staff = await prisma.staff.findFirst({
+    where: { userId: session.user.id, isDeleted: false },
+    select: { id: true },
+  });
+  if (!isAdminRole(session.user.role) && !staff) return null;
+  return { session, actor: { id: session.user.id, role: session.user.role, staffId: staff?.id ?? null } };
+}
+
+function ownerVerdict(actor, payeeStaffId) {
+  return authorizeRefundActor({ actorRole: actor.role, actorStaffId: actor.staffId, payeeStaffId: payeeStaffId ?? null });
 }
 
 function refreshOperationViews() {
@@ -81,14 +103,20 @@ function currentStatus(context, source) {
  * clicking.
  */
 export async function previewCancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION", reason = "" }) {
-  const session = await requireAdmin();
-  if (!session) return { success: false, message: "Non autorisé." };
+  const guard = await requireRefundActor();
+  if (!guard) return { success: false, message: "Non autorisé." };
+  const { session, actor } = guard;
   if (trigger === "FINANCIAL_CORRECTION") {
     return { success: false, message: "La correction financière n'est plus disponible. Utilisez l'annulation appropriée." };
   }
 
   const context = await loadRefundContext(prisma, paymentId);
   if (!context) return { success: false, message: "Paiement introuvable." };
+  // Refused before anything about the sale is returned: a colleague's (or,
+  // for the admin, an independent's) customer and amounts are not theirs to read.
+  const owner = ownerVerdict(actor, context.payeeStaffId);
+  if (!owner.allowed) return { success: false, message: owner.message };
+  const independentSale = Boolean(context.payeeStaffId);
 
   const source = resolveRefundSource(context);
   // Every available path refunds the exact remaining amount. Partial
@@ -125,7 +153,8 @@ export async function previewCancelAndRefund({ paymentId, trigger = "SALON_CANCE
   // Checked with the reason the admin has actually typed so far, so an
   // empty motive shows as the blocker it is rather than a surprise later.
   const verdict = authorizeRefund({
-    actorRole: session.user.role,
+    actorRole: actor.role,
+    actorStaffId: actor.staffId,
     source,
     trigger,
     reason: reason || "—",
@@ -158,6 +187,10 @@ export async function previewCancelAndRefund({ paymentId, trigger = "SALON_CANCE
     data: serializeDecimalFields({
       paymentId,
       source,
+      // Her own sale: no salon document, and the card money is on her own
+      // Stripe account (stripeAccountId), where she refunds it herself.
+      independentSale,
+      stripeAccountId: context.stripeAccountId ?? null,
       itemLabel: describeItem(context, source),
       currentStatus: currentStatus(context, source),
       // "Conserver le statut historique" — the dialog has to say plainly
@@ -216,8 +249,9 @@ export async function previewCancelAndRefund({ paymentId, trigger = "SALON_CANCE
  * confirming a hand-over (CASH/CARD legs) — never here.
  */
 export async function cancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION", reason }) {
-  const session = await requireAdmin();
-  if (!session) return { success: false, message: "Non autorisé." };
+  const guard = await requireRefundActor();
+  if (!guard) return { success: false, message: "Non autorisé." };
+  const { actor } = guard;
   if (typeof paymentId !== "string" || !paymentId) return { success: false, message: "Paiement introuvable." };
   if (trigger === "FINANCIAL_CORRECTION") {
     return { success: false, message: "La correction financière n'est plus disponible. Utilisez l'annulation appropriée." };
@@ -233,7 +267,9 @@ export async function cancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION
       paymentId,
       trigger,
       reason: reason.trim(),
-      actor: { id: session.user.id, role: session.user.role },
+      // The ownership check itself runs inside the locking transaction, on
+      // the freshly re-read payment (authorizeRefund).
+      actor,
       requestedAmount: null,
     });
   } catch (error) {
@@ -270,7 +306,7 @@ export async function cancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION
   if (plan.manualTotal > 0) {
     parts.push(`${plan.manualTotal.toFixed(2)} € à rendre en main propre, puis à confirmer.`);
   }
-  parts.push("Une fois le remboursement confirmé, l'administrateur choisit lui-même d'informer le client.");
+  parts.push("Une fois le remboursement confirmé, vous choisissez vous-même d'informer le client.");
 
   return {
     success: true,
@@ -295,15 +331,26 @@ export async function cancelAndRefund({ paymentId, trigger = "SALON_CANCELLATION
  * ledger row.
  */
 export async function confirmManualRefundLeg({ legId, terminalReference = null, cashHandedOver = false }) {
-  const session = await requireAdmin();
-  if (!session) return { success: false, message: "Non autorisé." };
+  const guard = await requireRefundActor();
+  if (!guard) return { success: false, message: "Non autorisé." };
+  const { actor } = guard;
   if (typeof legId !== "string" || !legId) return { success: false, message: "Remboursement introuvable." };
+
+  // Only whoever owns the sale attests that its money went back.
+  const target = await prisma.refundLeg.findUnique({
+    where: { id: legId },
+    select: { refundOperation: { select: { payment: { select: { payeeStaffId: true } } } } },
+  });
+  if (!target) return { success: false, message: "Remboursement introuvable." };
+  const owner = ownerVerdict(actor, target.refundOperation?.payment?.payeeStaffId);
+  if (!owner.allowed) return { success: false, message: owner.message };
 
   const result = await settleRefundLeg({
     prisma,
     legId,
     manual: {
-      confirmedByUserId: session.user.id,
+      confirmedByUserId: actor.id,
+      confirmedByRole: actor.role,
       terminalReference,
       cashHandedOver,
     },
@@ -506,6 +553,8 @@ export async function issueMissingRefundDocument(transactionId) {
 
       const context = await loadRefundContext(tx, transaction.paymentId);
       if (!context) throw new Error("TRANSACTION_NOT_FOUND");
+      // The salon documents nothing for an independent's sale.
+      if (context.payeeStaffId) throw new Error("INDEPENDENT_SALE");
 
       if (!context.invoice) {
         throw new Error("NO_INVOICE_TO_CREDIT");
@@ -556,6 +605,7 @@ export async function issueMissingRefundDocument(transactionId) {
       ALREADY_DOCUMENTED: "Ce remboursement possède déjà sa note de crédit.",
       LEDGER_INCONSISTENT: "Les montants de ce paiement sont incohérents — réconciliation requise.",
       NOTHING_LEFT_TO_CREDIT: "Cette facture est déjà entièrement créditée.",
+      INDEPENDENT_SALE: "Cette vente appartient à une praticienne indépendante : le salon n'émet aucun document pour elle.",
       NO_INVOICE_TO_CREDIT:
         "Un remboursement B2C ne reçoit pas de document. Vous pouvez envoyer la confirmation de remboursement manuellement depuis le détail de l'opération.",
       CREDIT_NOTE_EXCEEDS_INVOICE: "Le montant dépasse ce qui reste créditable sur cette facture.",
@@ -568,9 +618,16 @@ export async function issueMissingRefundDocument(transactionId) {
 
 /** Sends the optional plain B2C confirmation after every refund leg is settled. */
 export async function sendB2CRefundConfirmation(operationId) {
-  const session = await requireAdmin();
-  if (!session) return { success: false, message: "Non autorisé." };
+  const guard = await requireRefundActor();
+  if (!guard) return { success: false, message: "Non autorisé." };
   if (typeof operationId !== "string" || !operationId) return { success: false, message: "Remboursement introuvable." };
+  const target = await prisma.refundOperation.findUnique({
+    where: { id: operationId },
+    select: { payment: { select: { payeeStaffId: true } } },
+  });
+  if (!target) return { success: false, message: "Remboursement introuvable." };
+  const owner = ownerVerdict(guard.actor, target.payment?.payeeStaffId);
+  if (!owner.allowed) return { success: false, message: owner.message };
 
   const result = await deliverB2CRefundConfirmation({ prisma, operationId }).catch((error) => {
     console.error("[sendB2CRefundConfirmation]", error);
@@ -609,11 +666,39 @@ export async function getOutstandingRefundLegs() {
   const session = await requireAdmin();
   if (!session) return { success: false, message: "Non autorisé.", data: [] };
 
+  // The salon's refunds only. An independent's legs are hers to make, on her
+  // own Stripe account, and she works them from Mes opérations
+  // (getMyOutstandingRefundLegs) — the salon neither sees nor settles them.
+  const legs = await loadOutstandingRefundLegs({ payeeStaffId: null });
+  const manualRefundCases = await prisma.manualRefundCase.findMany({
+    where: { resolvedAt: null },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return { success: true, data: legs, manualRefundCases: serializeDecimalFields(manualRefundCases) };
+}
+
+/**
+ * The same worklist for an independent practitioner: the refunds she owes
+ * on her own sales, and nobody else's. The Staff id comes from the session,
+ * never from the caller.
+ */
+export async function getMyOutstandingRefundLegs() {
+  const guard = await requireRefundActor();
+  if (!guard?.actor.staffId || isAdminRole(guard.actor.role)) {
+    return { success: false, message: "Non autorisé.", data: [], manualRefundCases: [] };
+  }
+  const legs = await loadOutstandingRefundLegs({ payeeStaffId: guard.actor.staffId });
+  return { success: true, data: legs, manualRefundCases: [] };
+}
+
+async function loadOutstandingRefundLegs(paymentWhere) {
   const legs = await prisma.refundLeg.findMany({
     where: {
+      refundOperation: { payment: paymentWhere },
       OR: [
         { status: { in: ["PENDING", "MANUAL_CONFIRMATION_REQUIRED", "FAILED"] } },
-        // Settled, but for less than was owed — an admin typed a smaller
+        // Settled, but for less than was owed — someone typed a smaller
         // figure into Stripe. Real money moved, so the leg is SUCCEEDED and
         // must stay so, but the remainder is still owed and would otherwise
         // vanish from every screen.
@@ -622,9 +707,9 @@ export async function getOutstandingRefundLegs() {
     },
     orderBy: { createdAt: "asc" },
     include: {
-      // The original payment the admin has to find in Stripe. Selected here
-      // rather than derived in the component so the panel can print the
-      // exact payment_intent instead of asking someone to go hunting.
+      // The original payment to find in Stripe. Selected here rather than
+      // derived in the component so the panel can print the exact
+      // payment_intent instead of asking someone to go hunting.
       sourceTransaction: { select: { stripePaymentIntentId: true, stripeCheckoutSessionId: true, paidAt: true } },
       refundOperation: {
         select: {
@@ -635,13 +720,15 @@ export async function getOutstandingRefundLegs() {
           totalAmount: true,
           createdAt: true,
           creditNote: { select: { number: true } },
-          // A rendez-vous is charged as a Stripe Connect DIRECT charge on
-          // the staff member's own account, so it does not exist on the
-          // platform account at all. The worklist's "Ouvrir dans Stripe"
-          // link has to carry that account id or it sends the admin to a
-          // dashboard where the payment simply is not there.
+          // A charge made on a connected account (a rendez-vous, or a seat an
+          // independent animates) does not exist on the platform account at
+          // all. The worklist's "Ouvrir dans Stripe" link has to carry that
+          // account id or it sends the reader to a dashboard where the
+          // payment simply is not there. Payment.stripeAccountId is frozen at
+          // charge time; the appointment's practitioner covers older rows.
           payment: {
             select: {
+              stripeAccountId: true,
               appointment: {
                 select: { staff: { select: { stripeAccountId: true, user: { select: { fullName: true } } } } },
               },
@@ -655,25 +742,17 @@ export async function getOutstandingRefundLegs() {
   const outstandingLegs = legs.filter(
     (leg) => leg.status !== "SUCCEEDED" || Number(leg.settledAmount ?? leg.amount) + 0.01 < Number(leg.amount),
   );
-  const manualRefundCases = await prisma.manualRefundCase.findMany({
-    where: { resolvedAt: null },
-    orderBy: { createdAt: "asc" },
-  });
 
-  return {
-    success: true,
-    data: serializeDecimalFields(
-      outstandingLegs.map((leg) => {
-        const staff = leg.refundOperation?.payment?.appointment?.staff ?? null;
-        return {
-          ...leg,
-          // Null for every platform charge (boutique, atelier, formation),
-          // which is the normal case; set only for a Connect direct charge.
-          connectedAccountId: staff?.stripeAccountId ?? null,
-          connectedAccountStaffName: staff?.user?.fullName ?? null,
-        };
-      }),
-    ),
-    manualRefundCases: serializeDecimalFields(manualRefundCases),
-  };
+  return serializeDecimalFields(
+    outstandingLegs.map((leg) => {
+      const payment = leg.refundOperation?.payment ?? null;
+      const staff = payment?.appointment?.staff ?? null;
+      return {
+        ...leg,
+        // Null for every platform charge, which is the salon's normal case.
+        connectedAccountId: payment?.stripeAccountId ?? staff?.stripeAccountId ?? null,
+        connectedAccountStaffName: staff?.user?.fullName ?? null,
+      };
+    }),
+  );
 }

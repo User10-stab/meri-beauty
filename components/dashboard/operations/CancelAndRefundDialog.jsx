@@ -48,6 +48,24 @@ const TRIGGERS = Object.freeze([
   },
 ]);
 
+// An independent practitioner refunding her own sale (preview.independentSale)
+// reads the same three choices in her own terms — it is her decision, not
+// the salon's.
+const INDEPENDENT_TRIGGER_TEXT = Object.freeze({
+  SALON_CANCELLATION: {
+    label: "Annulation de votre part",
+    hint: "Vous annulez de votre propre initiative. Aucune demande client n'est requise, mais le motif l'est.",
+  },
+  CUSTOMER_REQUEST_APPROVED: {
+    label: "Demande du client approuvée",
+    hint: "Nécessite une demande écrite du client déjà approuvée.",
+  },
+  NO_SHOW_EXCEPTION: {
+    label: "Exception — absence (no-show)",
+    hint: "Conserve le statut NO_SHOW tout en préparant un remboursement exceptionnel. Motif obligatoire.",
+  },
+});
+
 function Row({ label, value, tone = "default" }) {
   const toneClass =
     tone === "danger" ? "text-red-700"
@@ -104,6 +122,10 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
 
   if (!open) return null;
 
+  const independent = Boolean(preview?.independentSale);
+  const triggers = independent
+    ? TRIGGERS.map((option) => ({ ...option, ...INDEPENDENT_TRIGGER_TEXT[option.value] }))
+    : TRIGGERS;
   const reasonTooShort = reason.trim().length < 10;
   const blocked = Boolean(preview?.blockedReason);
   const canConfirm = Boolean(preview) && !blocked && !reasonTooShort && !submitting && !loading;
@@ -160,7 +182,7 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
             <fieldset className="mb-4">
               <legend className="mb-2 text-[13px] font-medium text-gray-700">Origine de la décision</legend>
               <div className="space-y-1.5">
-                {TRIGGERS.map((option) => (
+                {triggers.map((option) => (
                   <label
                     key={option.value}
                     className={`flex cursor-pointer gap-2.5 rounded-lg border p-2.5 ${
@@ -217,7 +239,9 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
               <Row
                 label="Document"
                 value={
-                  preview.alreadyFullyCredited
+                  independent
+                    ? "aucun document du salon — vente sous votre propre numéro de TVA"
+                    : preview.alreadyFullyCredited
                     ? "facture déjà entièrement créditée — aucun nouveau document"
                     : preview.documentKind === "CREDIT_NOTE"
                       ? `note de crédit (facture ${preview.invoiceNumber})`
@@ -234,7 +258,7 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
                   an admin does, by hand in Stripe. Saying otherwise here is
                   how someone ends up believing the money already left. */}
               <Row
-                label="À rembourser dans Stripe (manuellement)"
+                label={independent ? "À rembourser dans votre compte Stripe (manuellement)" : "À rembourser dans Stripe (manuellement)"}
                 value={preview.automaticTotal > 0 ? money(preview.automaticTotal) : "aucun"}
                 tone={preview.automaticTotal > 0 ? "warn" : "default"}
               />
@@ -256,10 +280,10 @@ export function CancelAndRefundDialog({ open, paymentId, onClose }) {
             </p>
 
             <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
-              <strong>Cette action ne rembourse rien.</strong> Elle prépare le document et, selon le motif, annule ou conserve l&apos;historique.
-              Les remboursements restent à effectuer : dans Stripe pour la partie en ligne, en main propre
-              pour le reste. Ils apparaîtront en haut de cette page tant qu&apos;ils ne sont pas faits, et
-              le client ne sera informé qu&apos;une fois tout confirmé.
+              <strong>Cette action ne rembourse rien.</strong>{" "}
+              {independent
+                ? "Elle annule ou conserve l'historique selon le motif, et note ce que vous devez rendre. Le remboursement reste à faire par vous : dans votre compte Stripe pour la partie en ligne, en main propre pour le reste. Il apparaîtra en haut de Mes opérations tant qu'il n'est pas fait, et le client ne sera informé qu'une fois tout confirmé."
+                : "Elle prépare le document et, selon le motif, annule ou conserve l'historique. Les remboursements restent à effectuer : dans Stripe pour la partie en ligne, en main propre pour le reste. Ils apparaîtront en haut de cette page tant qu'ils ne sont pas faits, et le client ne sera informé qu'une fois tout confirmé."}
             </p>
 
             {preview.inFlightOperation && (

@@ -1086,6 +1086,10 @@ export async function getTransactionDetail(transactionId) {
     });
 
     if (!transaction) return { success: false, message: "Transaction introuvable." };
+    // The salon's drawer never opens an independent's sale — her customer,
+    // her amounts, her refunds. Opérations does not list them; this closes the
+    // same door for a transaction id reached any other way.
+    if (transaction.payment?.payeeStaffId) return { success: false, message: "Non autorisé." };
 
     // Drives the drawer's "Annuler et rembourser" gate — same formula
     // InvoiceRowActions uses for the Transactions-tab row, computed here via

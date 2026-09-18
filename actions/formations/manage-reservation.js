@@ -22,6 +22,7 @@ import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { formationSessionChangeEmail } from "@/lib/email-templates";
 import { OCCUPANCY_KINDS, liveSeatFilter, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { resolvePayeeForFormationSession } from "@/lib/payments/resolve-payee";
+import { REFUND_DENIAL, refundDenialMessage } from "@/lib/refunds/authorize";
 
 // The transfer is a free admin correction — see changeFormationReservationSession.
 const TRANSFER_PRICE_DECISIONS = {
@@ -108,6 +109,12 @@ export async function cancelFormationReservation(reservationId, { reason, refund
     }
     if (reservation.status === "CANCELLED") {
       return { success: false, message: "Cette réservation est déjà annulée." };
+    }
+    // A seat an independent animates was paid to her (Payment.payeeStaffId):
+    // refunding it is hers to decide and to do, from Mes opérations — never
+    // the salon's. Cancelling without a refund stays possible here.
+    if (refundPayment && reservation.payment?.payeeStaffId) {
+      return { success: false, message: refundDenialMessage(REFUND_DENIAL.NOT_PAYMENT_OWNER) };
     }
 
     // Converted 2026-09-02: this no longer refunds. An OWNER/ADMIN performs

@@ -5,6 +5,7 @@ import { Clock, Euro, ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useSearchParams } from "next/navigation";
 import QuickBookingModal from "@/components/reservation/QuickBookingModal";
+import { loadPendingReservation } from "@/lib/reservation-pending";
 
 function useInView(threshold = 0.15) {
   const ref = useRef(null);
@@ -46,6 +47,29 @@ export default function StaffServices({ services, staffId, categories, staffName
   const searchParams = useSearchParams();
   const [quickBooking, setQuickBooking] = useState(null);
   const t = useTranslations("staffProfile");
+
+  // Seamless return from the one-click email verification
+  // (?booking=<serviceId>&verified=1): reopen the booking modal on the same
+  // prestation so the customer lands straight back in their reservation —
+  // the form itself restores their snapshot and jumps past the client
+  // information step. Never opens for another expert's booking.
+  useEffect(() => {
+    const bookingServiceId = searchParams.get("booking");
+    if (!bookingServiceId || !searchParams.has("verified") || quickBooking) return;
+    const snapshot = customerSession?.email ? loadPendingReservation(customerSession.email) : null;
+    const listed = (services ?? []).find((ss) => ss?.service?.id === bookingServiceId);
+    const draft = snapshot?.data?.appointmentDrafts?.[0];
+    const snapshotStaffId = draft?.staff?.id ?? snapshot?.data?.staff?.id ?? null;
+    if (!listed && snapshotStaffId !== staffId) return;
+    const draftService = draft?.service;
+    const serviceName =
+      listed?.service?.name ??
+      (draftService?.id === bookingServiceId ? draftService?.name : null) ??
+      "";
+    setQuickBooking({ serviceId: bookingServiceId, serviceName });
+    // Mount-only: the redirect always lands on a fresh page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Pre-select the category coming from the ?category= query param (set by
   // the reservation page when the user clicks a staff member from a category).

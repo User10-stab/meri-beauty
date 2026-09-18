@@ -8,7 +8,9 @@ import { recordExternalJobRun } from "@/lib/background-jobs";
 /**
  * Anniversary-based daily staff billing cron endpoint.
  *
- * Generates and emails invoices for active staff whose nextInvoiceDate <= today.
+ * Generates invoices for active staff whose nextInvoiceDate <= today.
+ * Invoices are generated only — they are NEVER emailed automatically;
+ * the admin sends them manually from the dashboard ("Envoyer la facture").
  * Each staff member is billed on their individual contract anniversary date,
  * not on a calendar-month boundary.
  *
@@ -73,6 +75,7 @@ export async function GET(req) {
       success: summary.errors === 0,
       billingDate: summary.billingDate,
       processed: summary.processed,
+      generated: summary.generated,
       sent: summary.sent,
       skipped: summary.skipped,
       emailFailed: summary.emailFailed,

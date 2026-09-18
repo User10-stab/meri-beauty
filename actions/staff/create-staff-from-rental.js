@@ -332,7 +332,9 @@ export async function createStaffFromRental(input, rentalRequestId) {
     revalidatePath(REVALIDATE_PATH);
     revalidatePath("/dashboard/rental-requests");
 
-    // Invoice for the new contract — outside transaction so email failure does not roll back staff/contract.
+    // Invoice for the new contract — outside transaction so a failure does not
+    // roll back staff/contract. Generation only: never emailed automatically,
+    // the admin sends it manually from the dashboard ("Envoyer la facture").
     // Idempotent per contract; errors are logged but do not fail the overall creation.
     try {
       const invoiceUser = await prisma.user.findUnique({

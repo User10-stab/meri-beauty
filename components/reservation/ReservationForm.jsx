@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight, Clock, Euro, Calendar, User, Sparkles, X } from "lucide-react";
+import { toast } from "sonner";
 import { toIntlLocale } from "@/lib/intl-locale";
 import CategoryStep from "./steps/CategoryStep";
 import ServiceStep from "./steps/ServiceStep";
@@ -15,6 +16,7 @@ import ReviewStep from "./steps/ReviewStep";
 import PaymentStep from "./steps/PaymentStep";
 import { computePaymentDecision } from "@/lib/reservation-payment";
 import ReservationStatusModal from "./ReservationStatusModal";
+import { loadPendingReservation, clearPendingReservation } from "@/lib/reservation-pending";
 import { useRouter } from "next/navigation";
 
 function isStepValid(stepId, reservationData) {
@@ -263,6 +265,75 @@ export default function ReservationForm({ customerSession = null, initialPreset 
   const updateReservationData = (data) => setReservationData((prev) => ({ ...prev, ...data }));
   const draftStepNumber = STEPS.findIndex((s) => s.draftStep) + 1;
 
+  // Post-verification return path handed to the client information step: the
+  // verification email links back here so one click brings the customer
+  // straight back to their booking. In quick mode the service is re-selected
+  // via ?booking= so the modal reopens on the right prestation.
+  const verificationReturnTo = useMemo(() => {
+    const params = [];
+    if (quickMode) {
+      const serviceId =
+        preset?.service?.id ?? reservationData.appointmentDrafts?.[0]?.service?.id ?? null;
+      if (serviceId) params.push(`booking=${encodeURIComponent(serviceId)}`);
+    }
+    params.push("verified=1");
+    const separator = origin.includes("?") ? "&" : "?";
+    return `${origin}${separator}${params.join("&")}`;
+    // Rebuilt only from stable inputs — the snapshot restore below runs once
+    // on mount, before any user interaction changes the drafts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [origin, quickMode, preset]);
+
+  // Seamless return from the one-click email verification (?verified=1): the
+  // customer is now signed in (customerSession present, client step filtered
+  // out), so restore everything they entered and open the step right after
+  // the client information step — never a blank form.
+  useEffect(() => {
+    if (!isAuthenticated || !customerSession?.email) return;
+    let search = "";
+    try {
+      search = window.location.search;
+    } catch {
+      return;
+    }
+    let hasFlag = false;
+    try {
+      hasFlag = new URLSearchParams(search).has("verified");
+    } catch {
+      return;
+    }
+    if (!hasFlag) return;
+    const snapshot = loadPendingReservation(customerSession.email);
+    if (!snapshot?.data) {
+      // The verification link was followed but the pending reservation is
+      // gone (expired, cleared, or a different device/browser): say so
+      // plainly instead of silently restarting on a blank first step.
+      toast.error(t("reservationSteps.customer.sessionExpired"), { duration: 6000 });
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("verified");
+        window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      } catch {
+        // Non-fatal.
+      }
+      return;
+    }
+    setReservationData((prev) => ({ ...prev, ...snapshot.data }));
+    const reviewIndex = STEPS.findIndex((s) => s.id === 7);
+    if (reviewIndex !== -1) setCurrentStep(reviewIndex + 1);
+    clearPendingReservation();
+    toast.success(t("reservationSteps.customer.resumeSuccess"));
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("verified");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      // Non-fatal — the flag is harmless once the snapshot is consumed.
+    }
+    // Mount-only: the redirect above always lands on a fresh form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const nextStep = () => { if (currentStep < STEPS.length) setCurrentStep((prev) => prev + 1); };
   const prevStep = () => { if (currentStep > 1) setCurrentStep((prev) => prev - 1); };
   const goToStep = (step) => { if (step < currentStep) setCurrentStep(step); };
@@ -317,8 +388,10 @@ export default function ReservationForm({ customerSession = null, initialPreset 
   const showSidebar = hasSummary && !isCategoryStep;
   const hideGlobalNav = isLastStep || isDraftStep || isDateTimeStep || isCategoryStep || isPaymentStep || isReviewStep || isCustomerStep;
 
-  // Back is available on every step except the very first one
-  const showBack = currentStep > 1;
+  // Back is available on every step except the very first one. The client
+  // information step renders its own discreet top arrow instead of the
+  // bottom button — same prevStep action, no duplicated navigation.
+  const showBack = currentStep > 1 && !isCustomerStep;
 
   return (
     <div className="relative bg-[#fdf8f0]">
@@ -352,6 +425,7 @@ export default function ReservationForm({ customerSession = null, initialPreset 
                     goToStep={goToStepById}
                     lockPreset={quickMode}
                     origin={origin}
+                    returnTo={verificationReturnTo}
                     showStatus={showStatus}
                   />
                 )}

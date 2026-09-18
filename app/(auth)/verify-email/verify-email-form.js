@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
+import { signIn } from "next-auth/react";
 import { Mail, Loader2, Sparkles, AlertCircle, Check, ArrowLeft, RefreshCcw } from "lucide-react";
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
 import { resendVerificationEmail, verifyEmail } from "@/actions/auth/verify-email";
@@ -21,6 +22,7 @@ export default function VerifyEmailForm({
   resumeToken,
   defaultEmail = "",
   verificationToken = "",
+  autoVerify = false,
 }) {
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
@@ -29,6 +31,8 @@ export default function VerifyEmailForm({
   const [retryError, setRetryError] = useState(null);
   const [verifyingEmail, setVerifyingEmail] = useState(false);
   const [verificationResult, setVerificationResult] = useState(null);
+  const [resumingReservation, setResumingReservation] = useState(false);
+  const autoSubmittedRef = useRef(false);
 
   const effectiveSuccess = verificationResult?.success ?? success;
   const effectiveMessage = verificationResult?.message ?? message;
@@ -97,6 +101,68 @@ export default function VerifyEmailForm({
     setVerifyingEmail(false);
   }
 
+  // One-click reservation links (signed marker validated server-side in
+  // page.js) verify immediately on load: the button in the email IS the
+  // single click. Runs once, as a POST-backed Server Action — a plain
+  // prefetch without JavaScript execution never reaches this.
+  useEffect(() => {
+    if (autoVerify && verificationToken && !verificationResult && !autoSubmittedRef.current) {
+      autoSubmittedRef.current = true;
+      handleVerifyEmail();
+    }
+    // handleVerifyEmail is stable (no props/state captured) — run once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoVerify, verificationToken]);
+
+  // Reservation resume: the address is now verified, so sign the customer
+  // straight back in (short-lived, email-bound autologin token minted by
+  // verifyEmail) and return them to the exact booking they left — the form
+  // there restores their snapshot and opens the step after the client
+  // information step. A hard navigation reloads the server session.
+  useEffect(() => {
+    const result = verificationResult;
+    if (!result?.success || result.resumeType !== "RESERVATION" || !result.resumeId) return;
+    let cancelled = false;
+    (async () => {
+      setResumingReservation(true);
+      let target = "";
+      try {
+        target = normalizeCallbackUrl(result.resumeId, "", window.location.origin);
+      } catch {
+        target = "";
+      }
+      if (!target) {
+        // Unusable return path (should not happen — it was validated at
+        // token creation): stop here and fall through to the generic
+        // "verified, go sign in" card below. The account is verified and
+        // the customer knows their password.
+        if (!cancelled) setResumingReservation(false);
+        return;
+      }
+      try {
+        if (result.email && result.autologinToken) {
+          await signIn("credentials", {
+            email: result.email,
+            autologinToken: result.autologinToken,
+            redirect: false,
+          });
+        }
+      } catch {
+        // Sign-in failure is non-fatal: the address is verified either way
+        // and the customer can sign in with their chosen password.
+      }
+      if (!cancelled) {
+        // Hard navigation on purpose: the customer just signed in and the
+        // destination re-renders server-side with the fresh session.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.href = target;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [verificationResult]);
+
   const {
     register,
     handleSubmit,
@@ -147,6 +213,18 @@ export default function VerifyEmailForm({
   };
 
   if (verificationToken && !verificationResult) {
+    // One-click reservation link: verify straight away, no second button.
+    if (autoVerify) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
+          <div className="max-w-md w-full space-y-6 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 text-center">
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-[#2F3A2E] dark:text-[#a8c4a2]" />
+            <h2 className="text-xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">Vérification en cours</h2>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">Nous confirmons votre adresse e-mail…</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
         <div className="max-w-md w-full space-y-6 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 text-center">
@@ -173,6 +251,22 @@ export default function VerifyEmailForm({
               "Confirmer mon adresse e-mail"
             )}
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Reservation token verified — signing back in and returning to the
+  // booking. Covers the instant before the hard navigation away.
+  if (resumingReservation) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-radial from-[#f4f6f4] via-[#f8faf7] to-[#eef2ed] px-4 py-12 sm:px-6 lg:px-8 dark:from-[#0f1410] dark:via-[#131a12] dark:to-[#111811]">
+        <div className="max-w-md w-full space-y-6 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-md p-8 sm:p-10 rounded-3xl shadow-2xl border border-[#2F3A2E]/10 dark:border-[#2F3A2E]/30 text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+            <Check className="h-6 w-6" />
+          </div>
+          <h2 className="text-xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">E-mail confirmé</h2>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Retour à votre réservation…</p>
         </div>
       </div>
     );

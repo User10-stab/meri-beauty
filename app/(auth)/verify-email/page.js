@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { checkReservationReturn } from "@/lib/verify-email-link";
 import VerifyEmailForm from "./verify-email-form";
 
 export const metadata = {
@@ -24,7 +25,22 @@ export default async function VerifyEmailPage({ searchParams }) {
     // scanners and security previews can fetch this page before the customer
     // ever sees it. The client form asks for an explicit click, then invokes
     // verifyEmail() as a POST-backed Server Action.
-    return <VerifyEmailForm verificationToken={token} defaultEmail={defaultEmail} />;
+    //
+    // Exception: reservation links carry a signed one-click marker (flow=r)
+    // issued alongside the token. The marker is HMAC-bound to the return
+    // path and expiry, so it cannot be forged or transplanted — and it is
+    // only honoured by real browsers executing the auto-submit below, never
+    // by a plain prefetch. Registration and checkout links have no marker
+    // and keep the explicit-click behaviour exactly as before.
+    let autoVerify = false;
+    try {
+      autoVerify =
+        params?.flow === "r" &&
+        checkReservationReturn(params?.ret, params?.exp, params?.sig);
+    } catch {
+      autoVerify = false;
+    }
+    return <VerifyEmailForm verificationToken={token} defaultEmail={defaultEmail} autoVerify={autoVerify} />;
   }
 
   const result = deliveryFailed

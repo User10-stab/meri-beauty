@@ -321,8 +321,10 @@ export async function createIndependentStaff(input) {
       html: verificationTemplate.html,
     });
 
-    // Generate and send invoice for the staff contract — outside the main
-    // transaction so a failed email does not roll back staff/contract creation.
+    // Generate the invoice for the staff contract — outside the main
+    // transaction so a failure does not roll back staff/contract creation.
+    // Generation only: the invoice is never emailed automatically, the admin
+    // sends it manually from the dashboard ("Envoyer la facture").
     // Idempotent: reuses existing invoice if already present for this contract.
     // Errors are logged but do not fail the staff creation response.
     try {

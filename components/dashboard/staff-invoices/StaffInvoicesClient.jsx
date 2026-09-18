@@ -78,7 +78,7 @@ function AlertBanner({ result, onClose }) {
       <span className="mt-0.5 flex-shrink-0 leading-none">{ok ? "✓" : "⚠"}</span>
       <span>
         {ok
-          ? "La facture a été renvoyée avec succès."
+          ? "La facture a été envoyée avec succès."
           : `Échec de l'envoi : ${result.error}`}
       </span>
       <button
@@ -408,7 +408,7 @@ export function StaffInvoicesClient({
                         </a>
                       )}
 
-                      {/* Renvoyer — only for failed/generated rows that have an invoice */}
+                      {/* Envoyer / Renvoyer — manual send for generated or failed rows that have an invoice */}
                       {row.invoice && (row.status === "EMAIL_FAILED" || row.status === "GENERATED") && (
                         <button
                           type="button"
@@ -416,9 +416,9 @@ export function StaffInvoicesClient({
                           onClick={() => handleResend(row.id)}
                           className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
                           style={{ backgroundColor: "#C8A46A" }}
-                          aria-label="Renvoyer la facture par e-mail"
+                          aria-label={row.status === "GENERATED" ? "Envoyer la facture par e-mail" : "Renvoyer la facture par e-mail"}
                         >
-                          {resendingId === row.id ? "Envoi…" : "Renvoyer"}
+                          {resendingId === row.id ? "Envoi…" : row.status === "GENERATED" ? "Envoyer la facture" : "Renvoyer"}
                         </button>
                       )}
                     </div>

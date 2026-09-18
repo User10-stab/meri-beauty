@@ -9,6 +9,8 @@ import { resendVerificationSchema } from "@/lib/validations/resend-verification"
 import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-verification";
 import { createResumeCheckoutToken } from "@/lib/resume-checkout-token";
+import { buildVerifyEmailUrl } from "@/lib/verify-email-link";
+import { generateAutologinToken } from "@/lib/autologin";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 24 * 60; // 24 hours instead of 15 minutes
@@ -26,8 +28,15 @@ function generateTemporaryPassword() {
   return crypto.randomBytes(9).toString("base64url");
 }
 
-export async function sendVerificationEmail(user) {
+export async function sendVerificationEmail(user, opts = {}) {
   if (!user?.email) return;
+
+  // Optional resume context, stored on the token row and looked up
+  // server-side on verify — never trusted from a URL param. Only the
+  // appointment-reservation flow sets resumeType "RESERVATION" (with the
+  // validated return path as resumeId); every other caller leaves both null
+  // and keeps the exact behaviour as before.
+  const { resumeType = null, resumeId = null, emailVariant = null } = opts ?? {};
 
   try {
     const plainToken = crypto.randomUUID();
@@ -46,17 +55,18 @@ export async function sendVerificationEmail(user) {
         email: user.email,
         tokenHash,
         expiresAt,
+        resumeType,
+        resumeId,
       },
     });
 
-    const verificationUrl = `${
-      process.env.NEXTAUTH_URL || "http://localhost:3000"
-    }/verify-email?token=${encodeURIComponent(plainToken)}`;
+    const verificationUrl = buildVerifyEmailUrl(plainToken, { resumeType, resumeId });
 
     const emailTemplate = emailVerificationEmail({
       customerName: user.fullName,
       verificationUrl,
       expiresInMinutes: TOKEN_EXPIRY_MINUTES,
+      variant: emailVariant,
     });
 
     await sendEmail({
@@ -142,22 +152,29 @@ export async function verifyEmail(rawToken) {
       },
     });
 
-    // Checkout-issued token: generate real credentials (the placeholder
-    // password set at submit time was never shown to anyone) and try to
-    // actually start payment. Deliberately done here, inline, using the
-    // user.id this same function just resolved from the validated token —
-    // never as a separately "use server"-exported function taking a
-    // client-supplied userId. That used to be resumeCheckoutAfterVerification
-    // in actions/shared/resume-checkout-after-verification.js: any caller
-    // could invoke it directly with an arbitrary userId and force-overwrite
-    // that account's password (a forced-reset/lockout + email-spam vector).
-    // Plain registration tokens have no resumeType — nothing further to do.
+    // Appointment-reservation tokens ("RESERVATION") deliberately skip this
+    // block: the customer chose their own password in the reservation form,
+    // so there is nothing to generate and no credentials email to send, and
+    // there is no created order/reservation to resume — the return path
+    // (resumeId) is handed back to the verification page instead, which
+    // signs the customer in and brings them back to their booking.
+    // Only the guest-checkout types below enter the payment-resume path.
+    const CHECKOUT_RESUME_TYPES = ["ORDER", "WORKSHOP", "FORMATION"];
     let resumeSuccess = null;
     let resumeUrl = null;
     let resumeMessage = null;
     let resumeToken = null;
 
-    if (matchedToken.resumeType) {
+    if (matchedToken.resumeType && CHECKOUT_RESUME_TYPES.includes(matchedToken.resumeType)) {
+      // Checkout-issued token: generate real credentials (the placeholder
+      // password set at submit time was never shown to anyone) and try to
+      // actually start payment. Deliberately done here, inline, using the
+      // user.id this same function just resolved from the validated token —
+      // never as a separately "use server"-exported function taking a
+      // client-supplied userId. That used to be resumeCheckoutAfterVerification
+      // in actions/shared/resume-checkout-after-verification.js: any caller
+      // could invoke it directly with an arbitrary userId and force-overwrite
+      // that account's password (a forced-reset/lockout + email-spam vector).
       const temporaryPassword = generateTemporaryPassword();
       const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
       await prisma.user.update({ where: { id: user.id }, data: { password: hashedPassword } });
@@ -215,6 +232,15 @@ export async function verifyEmail(rawToken) {
       success: true,
       message: "Votre adresse e-mail a bien été confirmée. Vous pouvez maintenant vous connecter.",
       userId: user.id,
+      // The verified address, so the verification page can sign the customer
+      // straight back in. A short-lived autologin token is only minted for
+      // appointment-reservation tokens — the caller just proved ownership of
+      // this address via the single-use token, exactly like the new-account
+      // issuance in createReservation/createCheckoutSession. Plain
+      // registration and checkout tokens get none (null).
+      email: matchedToken.email,
+      autologinToken:
+        matchedToken.resumeType === "RESERVATION" ? generateAutologinToken(matchedToken.email) : null,
       // Set only for tokens issued mid-checkout — null for plain
       // registration tokens.
       resumeType: matchedToken.resumeType,
@@ -307,14 +333,18 @@ export async function resendVerificationEmail(input) {
       },
     });
 
-    const verificationUrl = `${
-      process.env.NEXTAUTH_URL || "http://localhost:3000"
-    }/verify-email?token=${encodeURIComponent(plainToken)}`;
+    const verificationUrl = buildVerifyEmailUrl(plainToken, {
+      resumeType: pendingCheckout?.resumeType ?? null,
+      resumeId: pendingCheckout?.resumeId ?? null,
+    });
 
     const emailTemplate = emailVerificationEmail({
       customerName: user.fullName,
       verificationUrl,
       expiresInMinutes: TOKEN_EXPIRY_MINUTES,
+      // A resent reservation link keeps the reservation copy so the customer
+      // still lands straight back in their booking after one click.
+      variant: pendingCheckout?.resumeType === "RESERVATION" ? "reservation" : null,
     });
 
     const emailResult = await sendEmail({

@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
+import StepBackArrow from "@/components/reservation/StepBackArrow";
 
 function PaymentOption({ title, description, badge, selected, disabled, index, onSelect }) {
   return (
@@ -33,7 +34,7 @@ function PaymentOption({ title, description, badge, selected, disabled, index, o
   );
 }
 
-export default function PaymentStep({ data, customerSession, origin = "/reservation", showStatus }) {
+export default function PaymentStep({ data, customerSession, origin = "/reservation", showStatus, prevStep, lockPreset = false }) {
   const t = useTranslations("reservationSteps");
   const [paymentMethod, setPaymentMethod] = useState(null);
   const [processing, setProcessing] = useState(false);
@@ -153,10 +154,13 @@ export default function PaymentStep({ data, customerSession, origin = "/reservat
 
   return (
     <div className="mx-auto max-w-2xl">
-      <div className="mb-6">
-        <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">{t("payment.title")}</h2>
-        <p className="mt-2 text-sm text-[#6f6a64]">{t("payment.subtitle")}</p>
-        <div className="mt-3 h-px w-10 bg-[#b89664]/20" />
+      <div className={lockPreset ? "flex gap-4" : undefined}>
+        {lockPreset && <StepBackArrow onBack={prevStep} label={t("customer.back")} />}
+        <div className="mb-6">
+          <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">{t("payment.title")}</h2>
+          <p className="mt-2 text-sm text-[#6f6a64]">{t("payment.subtitle")}</p>
+          <div className="mt-3 h-px w-10 bg-[#b89664]/20" />
+        </div>
       </div>
 
       <div className="space-y-5">

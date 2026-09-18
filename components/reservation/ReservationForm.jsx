@@ -390,8 +390,10 @@ export default function ReservationForm({ customerSession = null, initialPreset 
 
   // Back is available on every step except the very first one. The client
   // information step renders its own discreet top arrow instead of the
-  // bottom button — same prevStep action, no duplicated navigation.
-  const showBack = currentStep > 1 && !isCustomerStep;
+  // bottom button — same prevStep action, no duplicated navigation. In
+  // quick mode every step uses the shared top StepBackArrow instead, so the
+  // bottom button never renders there.
+  const showBack = currentStep > 1 && !isCustomerStep && !quickMode;
 
   return (
     <div className="relative bg-[#fdf8f0]">

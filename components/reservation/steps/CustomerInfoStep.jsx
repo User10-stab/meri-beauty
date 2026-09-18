@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { User, Mail, Phone, Lock, Eye, EyeOff, Loader2, MailCheck, LogIn, ArrowLeft } from "lucide-react";
+import { User, Mail, Phone, Lock, Eye, EyeOff, Loader2, MailCheck, LogIn } from "lucide-react";
 import { toast } from "sonner";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
@@ -14,6 +14,7 @@ import { getVatCountryCode, isValidVatFormat, viesPrefixForCountry } from "@/lib
 import countriesData from "@/data/countries.json";
 import { useTranslations } from "next-intl";
 import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
+import StepBackArrow from "@/components/reservation/StepBackArrow";
 import { CountrySelect } from "@/components/shared/CountrySelect";
 import { savePendingReservation } from "@/lib/reservation-pending";
 
@@ -532,14 +533,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
     return (
       <div className="mx-auto max-w-xl">
         <div className="flex gap-4">
-            <button
-            type="button"
-            onClick={prevStep}
-            aria-label={t("customer.back")}
-            className="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-[#9a9590] transition-colors bg-[#f5ece0] hover:bg-primary hover:text-white"
-          >
-            <ArrowLeft size={16} /> 
-          </button>
+            <StepBackArrow onBack={prevStep} label={t("customer.back")} />
           <div className="mb-5">
             <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">{t("customer.title")}</h2>
             <p className="mt-2 text-sm leading-relaxed text-[#6f6a64]">{t("customer.loginSubtitle")}</p>
@@ -658,14 +652,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
   return (
     <div className="mx-auto max-w-xl">
       <div className="flex gap-4">
-         <button
-        type="button"
-        onClick={prevStep}
-        aria-label={t("customer.back")}
-        className="mb-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-[#9a9590] transition-colors bg-[#f5ece0] hover:bg-primary hover:text-white"
-      >
-        <ArrowLeft size={16} />
-      </button>
+          <StepBackArrow onBack={prevStep} label={t("customer.back")} />
       <div className="mb-5">
         <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">{t("customer.title")}</h2>
         <p className="mt-2 text-sm leading-relaxed text-[#6f6a64]">{t("customer.subtitle")}</p>

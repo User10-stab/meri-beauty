@@ -62,7 +62,7 @@ export default function StaffProfileHero({ name, firstName, bio, yearsOfExperien
           </dl>
         </section>
         )}
-        {Object.entries(socialLinks || {}).filter(([, url]) => url).length > 0 && (
+        {/* {Object.entries(socialLinks || {}).filter(([, url]) => url).length > 0 && (
           <section className="pt-5" aria-labelledby="social-links-title">
             <h2 id="social-links-title" className="text-xs font-semibold uppercase tracking-[0.16em] text-[#8b8178]">{t("follow")}</h2>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -71,7 +71,7 @@ export default function StaffProfileHero({ name, firstName, bio, yearsOfExperien
               ))}
             </div>
           </section>
-        )}
+        )} */}
         <div className="mt-6 flex items-center justify-center gap-2 text-[#b89664]/45" aria-hidden="true"><span className="h-px w-10 bg-current" /><Heart size={13} className="fill-current" /><span className="h-px w-10 bg-current" /></div>
       </div>
     </aside>

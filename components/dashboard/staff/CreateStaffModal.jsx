@@ -415,13 +415,13 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
 
             {/* Address */}
             <div className="mt-4">
-              <Label htmlFor="addressLine1" icon={MapPin} required>
+              <Label htmlFor="addressLine1" icon={MapPin}>
                 Adresse professionnelle
               </Label>
               <TextInput
                 id="addressLine1"
                 type="text"
-                placeholder="Numéro et rue"
+                placeholder="Numéro et rue (optionnel)"
                 error={errors.addressLine1}
                 {...register("addressLine1")}
               />
@@ -443,7 +443,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                 <TextInput
                   id="addressPostalCode"
                   type="text"
-                  placeholder="Code postal"
+                  placeholder="Code postal (optionnel)"
                   error={errors.addressPostalCode}
                   {...register("addressPostalCode")}
                 />
@@ -456,7 +456,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                 <TextInput
                   id="addressCity"
                   type="text"
-                  placeholder="Ville"
+                  placeholder="Ville (optionnel)"
                   error={errors.addressCity}
                   {...register("addressCity")}
                 />
@@ -587,13 +587,13 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
 
               {/* VAT Number */}
               <div>
-                <Label htmlFor="vatNumber" icon={Hash} required>
+                <Label htmlFor="vatNumber" icon={Hash}>
                   Numéro de TVA
                 </Label>
                 <TextInput
                   id="vatNumber"
                   type="text"
-                  placeholder="ex. BE0123456789"
+                  placeholder="ex. BE0123456789 (optionnel)"
                   error={errors.vatNumber}
                   {...register("vatNumber")}
                 />

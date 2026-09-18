@@ -3,7 +3,12 @@ import { getAppBaseUrl } from "@/lib/site-url";
 const SITE_URL = getAppBaseUrl();
 
 // Same paths kept out of every crawler below — private/transactional pages
-// that have nothing to index (auth, cart/checkout, account, success screens).
+// that have nothing to index (auth, cart/checkout, account, payment and
+// success screens, one-click e-mail actions).
+//
+// Entries are prefix matches, so "/reservation-atelier" also covers its
+// /succes child, and "/reservation" is deliberately NOT listed: that one is
+// the public booking landing page and belongs in the sitemap.
 const DISALLOW = [
   "/api/",
   "/dashboard/",
@@ -18,9 +23,18 @@ const DISALLOW = [
   "/mes-reservations",
   "/boutique/cart",
   "/boutique/checkout",
-  "/reservation-atelier/succes",
-  "/reservation-formation/succes",
+  "/boutique/order/",
+  // Query-param driven booking funnels (?activityId=, ?formationId=). The
+  // bare URL renders an empty client shell with no content to index, and the
+  // parameterised ones are mid-checkout steps.
+  "/reservation-atelier",
+  "/reservation-formation",
   "/reservation/success",
+  "/reservation/retry-payment",
+  // Pay-this-appointment links sent by e-mail.
+  "/appointment/",
+  // Unsubscribe confirmation reached from a newsletter footer link.
+  "/newsletter/",
 ];
 
 // AI assistants and answer engines that read robots.txt before crawling or

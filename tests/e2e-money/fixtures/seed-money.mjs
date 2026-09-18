@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { prisma } from "./db.mjs";
 import { getRunId, taggedEmail } from "./run-id.mjs";
+import { TILL_CASH_OPERATOR_EMAIL } from "../../../lib/authorization.js";
 
 /**
  * The world each scenario books against.
@@ -206,6 +207,154 @@ export async function seedFormationSession({
  *
  * @param {{ label?: string, price?: number, stockQuantity?: number }} [options]
  */
+/**
+ * The independent an activity can be charged to: INDEPENDENT, not the salon,
+ * and her Stripe account ready for a direct charge.
+ *
+ * Found rather than created, for the same reason seedConnectAppointment finds
+ * one: `Staff.stripeAccountId` is unique and Express onboarding is an
+ * interactive Stripe flow, so a usable connected account cannot be seeded.
+ */
+async function findChargeableIndependent() {
+  const salonUsers = await prisma.user.findMany({
+    where: {
+      OR: [
+        { role: { in: ["ADMIN", "OWNER"] } },
+        { email: { equals: TILL_CASH_OPERATOR_EMAIL, mode: "insensitive" } },
+      ],
+    },
+    select: { staff: { select: { id: true } } },
+  });
+  const salonStaffIds = salonUsers.map((u) => u.staff?.id).filter(Boolean);
+
+  const staff = await prisma.staff.findFirst({
+    where: {
+      id: { notIn: salonStaffIds },
+      type: "INDEPENDENT",
+      stripeAccountId: { not: null },
+      stripeChargesEnabled: true,
+      stripePayoutsEnabled: true,
+      isDeleted: false,
+    },
+    include: { user: { select: { id: true, fullName: true, email: true } } },
+  });
+
+  if (!staff) {
+    throw new Error(
+      "No INDEPENDENT staff member outside the salon has a Stripe Connect account with charges and payouts " +
+        "enabled. An activity she animates is a direct charge on her own account, so this scenario cannot run " +
+        "without one, and one cannot be seeded (Staff.stripeAccountId is unique, Express onboarding is interactive).",
+    );
+  }
+  return staff;
+}
+
+/** The Animator row that points at a staff profile — the link payee resolution reads. */
+async function animatorForStaff(staff) {
+  return prisma.animator.upsert({
+    where: { email: staff.user.email },
+    update: { name: staff.user.fullName, staffId: staff.id },
+    create: { name: staff.user.fullName, email: staff.user.email, staffId: staff.id },
+  });
+}
+
+/**
+ * A formation whose session is animated by an independent, so the seat is
+ * charged to HER connected account instead of the salon's.
+ *
+ * @param {{ price?: number, capacity?: number, depositPercentage?: number, daysAhead?: number }} [options]
+ */
+export async function seedConnectFormationSession({
+  price = 120,
+  capacity = 6,
+  depositPercentage = 50,
+  daysAhead = 46,
+} = {}) {
+  const runId = getRunId();
+  const staff = await findChargeableIndependent();
+  const animator = await animatorForStaff(staff);
+
+  const formation = await prisma.formation.create({
+    data: {
+      type: "PUBLIC",
+      title: `E2E Formation Connect ${runId}`,
+      description: "Formation animée par une indépendante — suite money e2e.",
+      price,
+      duration: 240,
+      capacity,
+      status: "PUBLISHED",
+      depositPercentage,
+      animatorId: animator.id,
+    },
+  });
+
+  const session = await prisma.formationSession.create({
+    data: {
+      formationId: formation.id,
+      startDate: farFutureDate(daysAhead),
+      capacity,
+      status: "SCHEDULED",
+      animatorId: animator.id,
+    },
+  });
+
+  return { formation, session, staff, animator, price, depositPercentage };
+}
+
+/**
+ * A formation animated by an independent whose Stripe account is NOT ready.
+ *
+ * Unlike the one above, this staff member IS seeded: an account that cannot
+ * charge is exactly one with `stripeAccountId: null`, which carries no unique
+ * constraint and needs no Stripe onboarding. Mutating a real connected staff
+ * row to fake this would race every other scenario on a shared database.
+ */
+export async function seedUnreadyIndependentFormationSession({ price = 90, daysAhead = 47 } = {}) {
+  const runId = getRunId();
+  const email = taggedEmail(`animatrice-sans-stripe-${runId}`);
+
+  const user = await prisma.user.create({
+    data: {
+      fullName: `E2E Animatrice Sans Stripe ${runId}`,
+      email,
+      password: await bcrypt.hash(CUSTOMER_PASSWORD, 12),
+      phone: `+3299${Date.now().toString().slice(-7)}`,
+      role: "STAFF",
+      emailVerified: true,
+    },
+  });
+  const staff = await prisma.staff.create({
+    data: { userId: user.id, type: "INDEPENDENT", isActive: true },
+  });
+  const animator = await prisma.animator.create({
+    data: { name: user.fullName, email, staffId: staff.id },
+  });
+
+  const formation = await prisma.formation.create({
+    data: {
+      type: "PUBLIC",
+      title: `E2E Formation Sans Stripe ${runId}`,
+      price,
+      duration: 180,
+      capacity: 4,
+      status: "PUBLISHED",
+      depositPercentage: 50,
+      animatorId: animator.id,
+    },
+  });
+  const session = await prisma.formationSession.create({
+    data: {
+      formationId: formation.id,
+      startDate: farFutureDate(daysAhead),
+      capacity: 4,
+      status: "SCHEDULED",
+      animatorId: animator.id,
+    },
+  });
+
+  return { formation, session, staff, user, animator, price };
+}
+
 export async function seedShopProduct({ label = "boutique", price = 32, stockQuantity = 12 } = {}) {
   const runId = getRunId();
   const slug = `e2e-${label}-${runId}`.toLowerCase();

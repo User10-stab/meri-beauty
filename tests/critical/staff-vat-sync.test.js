@@ -108,10 +108,23 @@ describe("an independent staff profile can be created without a VAT number", () 
     }
   });
 
-  it("still requires a VAT number when editing, so a profile that already needs one can't go blank", () => {
-    const edit = { ...base, id: "staff_1", isActive: true };
-    expect(updateIndependentStaffSchema.safeParse({ ...edit, vatNumber: "" }).success).toBe(false);
+  it("also accepts a blank VAT number and address when editing, so a profile created without one stays editable", () => {
+    // The edit form always sends real strings, never undefined — a profile
+    // created without these (creation is optional too, see above) must not
+    // fail validation on every subsequent edit just because they're still
+    // blank. updateIndependentStaff itself skips the VIES call and any
+    // backfill when the number is blank (see actions/staff/update-independent-staff.js).
+    const edit = { ...base, id: "staff_1", isActive: true, vatNumber: "" };
+    for (const field of ["addressLine1", "addressCity", "addressPostalCode", "addressCountry"]) {
+      expect(updateIndependentStaffSchema.safeParse({ ...edit, [field]: "" }).success).toBe(true);
+    }
+    expect(updateIndependentStaffSchema.safeParse(edit).success).toBe(true);
     expect(updateIndependentStaffSchema.safeParse({ ...edit, vatNumber: JULIE_VAT }).success).toBe(true);
+  });
+
+  it("still refuses an invalid (non-blank) VAT number when editing", () => {
+    const edit = { ...base, id: "staff_1", isActive: true };
+    expect(updateIndependentStaffSchema.safeParse({ ...edit, vatNumber: "0542845058" }).success).toBe(false);
   });
 });
 
@@ -125,15 +138,15 @@ describe("the screens that learn a VAT number pass it on", () => {
   it("the edit form shows the number instead of hiding it, so a missing one can be fixed", () => {
     const edit = source("components/dashboard/staff/EditStaffModal.jsx");
     expect(edit).not.toContain('<input type="hidden" {...register("vatNumber")} />');
-    expect(edit).toContain('<Label htmlFor="editVatNumber" icon={Hash} required>Numéro de TVA</Label>');
-    // Creation itself no longer marks it required — see the schema change above.
+    // Neither creation nor editing marks it required anymore — see the schema change above.
+    expect(edit).toContain('<Label htmlFor="editVatNumber" icon={Hash}>Numéro de TVA</Label>');
     expect(source("components/dashboard/staff/CreateStaffModal.jsx")).toContain('<Label htmlFor="vatNumber" icon={Hash}>');
   });
 
-  it("an unchanged number doesn't spend a VIES call, but still backfills the customer account", () => {
+  it("an unchanged, non-blank number doesn't spend a VIES call, but still backfills the customer account", () => {
     const update = source("actions/staff/update-independent-staff.js");
     expect(update).toContain("const vatChanged = normalizedVat !== normalizeVatNumber(existing.vatNumber);");
-    expect(update).toContain("if (vatChanged) {");
+    expect(update).toContain("if (vatChanged && normalizedVat) {");
     expect(update).toContain("where: { id: existing.userId, NOT: { vatNumber: normalizedVat } },");
   });
 

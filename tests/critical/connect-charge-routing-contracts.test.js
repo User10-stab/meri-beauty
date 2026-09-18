@@ -52,11 +52,32 @@ describe("an atelier/formation seat is charged to its animator's account", () =>
     const code = source(path);
     expect(code).toContain(`const payee = await ${resolver}(prisma, { sessionId: session.id });`);
     expect(code).toContain("if (!payeeCanChargeOnline(payee)) {");
-    expect(code).toContain("}, payeeStripeOptions(payee));");
-    // frozen in both the session and the payment intent metadata
-    expect(code.match(/\.\.\.payeeCheckoutMetadata\(payee\)/g)?.length).toBeGreaterThanOrEqual(3);
+    // The params come from the one shared builder (see the test below) and the
+    // direct-charge option from the SAME payee — passing one without the other
+    // would charge one account while the metadata claims a different owner.
+    expect(code).toContain("buildActivityCheckoutParams(RELANCE_KINDS.");
+    expect(code).toContain("{ payee }),");
+    expect(code).toContain("payeeStripeOptions(payee)");
+    // the free-seat path builds its own synthetic session, so it has to freeze
+    // the payee by hand
+    expect(code).toContain("...payeeCheckoutMetadata(payee)");
     // the salon's legal identity only gates a sale the salon invoices
     expect(code).toContain("if (!payee.staff && !(await isSellerLegalDataComplete())) {");
+  });
+
+  // The booking checkouts and the staff "Relancer le paiement" share this
+  // builder. When the payee lived inline in the two booking actions, a relance
+  // for an independent's seat silently rebuilt the checkout on the salon's
+  // account — the first charge on hers, the replacement on the salon's.
+  test("the shared activity checkout builder carries the payee for every caller", () => {
+    const code = source("lib/reservations/activity-payment-relance.js");
+    expect(code).toContain("payee = SALON_PAYEE");
+    // frozen in both the session and the payment intent metadata
+    expect(code.match(/\.\.\.payeeCheckoutMetadata\(payee\)/g)).toHaveLength(2);
+    // A connected account serves its own methods; naming one it has not
+    // activated is a 400 that kills the checkout (iDEAL, 17/09/2026).
+    expect(code).toContain('...(payee.staff ? {} : { payment_method_types: ["card", "bancontact"] })');
+    expect(code).not.toContain('"ideal"');
   });
 
   test.each([

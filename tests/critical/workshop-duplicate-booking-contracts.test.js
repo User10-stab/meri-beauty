@@ -16,12 +16,21 @@ const mocks = vi.hoisted(() => ({
   aggregate: vi.fn(),
   checkoutCreate: vi.fn(),
   sendVerificationEmail: vi.fn().mockResolvedValue({}),
+  // Payee resolution: the session's animator decides whose Stripe account
+  // the seat is charged to. No animator => the salon, which is this suite's
+  // case — these booking tests are about the duplicate-link guard, not
+  // about routing.
+  sessionFindUnique: vi.fn().mockResolvedValue(null),
+  userFindMany: vi.fn().mockResolvedValue([]),
+  staffFindUnique: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/prisma", () => {
   const client = {
     activity: { findUnique: mocks.activityFindUnique },
-    user: { findFirst: mocks.userFindFirst, update: mocks.userUpdate, create: vi.fn() },
+    user: { findFirst: mocks.userFindFirst, update: mocks.userUpdate, create: vi.fn(), findMany: mocks.userFindMany },
+    workshopSession: { findUnique: mocks.sessionFindUnique },
+    staff: { findUnique: mocks.staffFindUnique },
     workshopReservation: {
       findFirst: mocks.reservationFindFirst,
       findUnique: mocks.reservationFindUnique,
@@ -113,6 +122,9 @@ beforeEach(() => {
     sessions: [{ id: SESSION_ID, status: "SCHEDULED", capacity: 8, animatorId: null, startDate: new Date("2026-10-02T09:00:00Z") }],
   });
   mocks.aggregate.mockResolvedValue({ _sum: { seatsCount: 0 } });
+  mocks.sessionFindUnique.mockResolvedValue(null);
+  mocks.userFindMany.mockResolvedValue([]);
+  mocks.staffFindUnique.mockResolvedValue(null);
   mocks.queryRaw.mockResolvedValue([{ id: SESSION_ID }]);
   mocks.reservationCreate.mockResolvedValue({ ...liveHold, id: "reservation-new" });
   mocks.reservationFindUnique.mockResolvedValue({

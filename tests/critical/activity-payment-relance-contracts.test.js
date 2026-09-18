@@ -26,6 +26,13 @@ const mocks = vi.hoisted(() => {
     prisma: {
       workshopReservation: { findUnique: vi.fn() },
       formationReservation: { findUnique: vi.fn() },
+      // Payee resolution — a relance has to rebuild the link on the SAME
+      // Stripe account the first one was created on. No animator on the
+      // session means the salon, which is what these cases exercise.
+      workshopSession: { findUnique: vi.fn(async () => null) },
+      formationSession: { findUnique: vi.fn(async () => null) },
+      staff: { findUnique: vi.fn(async () => null) },
+      user: { findMany: vi.fn(async () => []) },
       $transaction: vi.fn(async (fn) => fn(tx)),
     },
   };
@@ -129,7 +136,10 @@ describe("resendActivityReservationPayment", () => {
 
     expect(result.success).toBe(true);
     expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledTimes(1);
-    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_old");
+    // Second argument is the Stripe account the link lives on: undefined for a
+    // salon sale, { stripeAccount } for an independent's. A link created on her
+    // connected account is invisible to — and unclosable from — the platform.
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_old", undefined);
 
     const params = mocks.stripe.checkout.sessions.create.mock.calls[0][0];
     expect(params.metadata).toMatchObject({ kind: "workshop", workshopAction: "deposit", reservationId: "wr_1" });
@@ -163,7 +173,7 @@ describe("resendActivityReservationPayment", () => {
     const result = await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
 
     expect(result).toEqual({ success: false, message: expect.stringContaining("complète") });
-    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_new");
+    expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_new", undefined);
     expect(mocks.tx.workshopReservation.updateMany).not.toHaveBeenCalled();
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
@@ -176,5 +186,71 @@ describe("resendActivityReservationPayment", () => {
     expect(result.success).toBe(false);
     expect(mocks.prisma.formationReservation.findUnique).not.toHaveBeenCalled();
     expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  // A seat animated by an independent is a direct charge on HER account. Every
+  // Stripe call a relance makes has to name that account: the platform cannot
+  // see her sessions at all, so listing without it finds no earlier link,
+  // closes nothing, and hands the client a SECOND payable link — the exact
+  // double-charge this whole change set exists to prevent.
+  describe("a seat animated by an independent stays on her Stripe account", () => {
+    const JULIE_ACCOUNT = "acct_julie";
+
+    beforeEach(() => {
+      mocks.prisma.workshopSession.findUnique.mockResolvedValue({
+        animator: { staffId: "s_julie" },
+        workshop: { animator: { staffId: "s_julie" } },
+      });
+      mocks.prisma.staff.findUnique.mockResolvedValue({
+        id: "s_julie",
+        type: "INDEPENDENT",
+        userId: "u_julie",
+        isDeleted: false,
+        stripeAccountId: JULIE_ACCOUNT,
+        stripeChargesEnabled: true,
+        stripePayoutsEnabled: true,
+      });
+      mocks.prisma.workshopReservation.findUnique.mockResolvedValue(workshopReservation());
+    });
+
+    it("lists, closes and recreates the link on her account", async () => {
+      stripeHas([{ id: "cs_old", status: "open", metadata: { kind: "workshop", reservationId: "wr_1" } }]);
+
+      const result = await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
+
+      expect(result.success).toBe(true);
+      const options = { stripeAccount: JULIE_ACCOUNT };
+      expect(mocks.stripe.checkout.sessions.list).toHaveBeenCalledWith(expect.anything(), options);
+      expect(mocks.stripe.checkout.sessions.expire).toHaveBeenCalledWith("cs_old", options);
+      expect(mocks.stripe.checkout.sessions.create).toHaveBeenCalledWith(expect.anything(), options);
+    });
+
+    it("freezes her as the payee and lets her account choose the payment methods", async () => {
+      await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
+
+      const params = mocks.stripe.checkout.sessions.create.mock.calls[0][0];
+      expect(params.metadata.payeeStaffId).toBe("s_julie");
+      expect(params.payment_intent_data.metadata.payeeStaffId).toBe("s_julie");
+      // Naming a method her account has not activated is a 400 that kills the
+      // whole checkout — the iDEAL failure of 17/09/2026.
+      expect(params).not.toHaveProperty("payment_method_types");
+    });
+
+    it("refuses rather than silently relaunching onto the salon when her account is not ready", async () => {
+      mocks.prisma.staff.findUnique.mockResolvedValue({
+        id: "s_julie",
+        type: "INDEPENDENT",
+        userId: "u_julie",
+        isDeleted: false,
+        stripeAccountId: JULIE_ACCOUNT,
+        stripeChargesEnabled: false,
+        stripePayoutsEnabled: false,
+      });
+
+      const result = await resendActivityReservationPayment({ kind: "WORKSHOP", id: "wr_1" });
+
+      expect(result.success).toBe(false);
+      expect(mocks.stripe.checkout.sessions.create).not.toHaveBeenCalled();
+    });
   });
 });

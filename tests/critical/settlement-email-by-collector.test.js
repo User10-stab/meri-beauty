@@ -6,11 +6,19 @@ const mocks = vi.hoisted(() => ({
   sendTicketByEmail: vi.fn(),
   buildPaymentTicket: vi.fn(),
   sendEmail: vi.fn(),
+  paymentFindUnique: vi.fn(),
 }));
 
 vi.mock("@/actions/payments/send-ticket-email", () => ({ sendTicketByEmail: mocks.sendTicketByEmail }));
 vi.mock("@/lib/cash-book/build-payment-ticket", () => ({ buildPaymentTicket: mocks.buildPaymentTicket }));
 vi.mock("@/lib/email", () => ({ sendEmail: mocks.sendEmail }));
+// sendSettlementEmail reads Payment.payeeStaffId to decide whose sale it is.
+// Mocked deliberately rather than left to reach a real database: unmocked, it
+// answered `null` against a developer's DB — so "the salon's sale" was never
+// actually asserted, it was just what a missing row happened to look like —
+// and in CI, whose DATABASE_URL is a placeholder, the connection error was
+// swallowed by the function's own catch and no e-mail was sent at all.
+vi.mock("@/lib/prisma", () => ({ prisma: { payment: { findUnique: mocks.paymentFindUnique } } }));
 
 import { sendSettlementEmail } from "@/lib/payments/send-settlement-email";
 import { paymentConfirmedEmail } from "@/lib/email-templates";
@@ -22,10 +30,14 @@ const MARIE = { id: "u_marie", role: "STAFF", email: "contact@meribeautystudio.c
 const ADMIN = { id: "u_admin", role: "ADMIN", email: "admin@meribeauty.com" };
 const JULIE = { id: "u_julie", role: "STAFF", email: "julieschoemans@gmail.com", fullName: "Julie Schoemans" };
 
+const JULIES_SALE = { payeeStaffId: "staff_julie" };
+const SALONS_SALE = { payeeStaffId: null };
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.sendTicketByEmail.mockResolvedValue({ success: true });
   mocks.sendEmail.mockResolvedValue({ success: true });
+  mocks.paymentFindUnique.mockResolvedValue(SALONS_SALE);
   mocks.buildPaymentTicket.mockResolvedValue({
     ticket: {
       ticketNumber: null,
@@ -52,6 +64,7 @@ describe("the settlement e-mail depends on who collected", () => {
   });
 
   it("an independent's client gets a plain payment confirmation, with no attachment", async () => {
+    mocks.paymentFindUnique.mockResolvedValue(JULIES_SALE);
     const result = await sendSettlementEmail(JULIE, "pay_3", { transactionId: "tx_3" });
 
     expect(result.success).toBe(true);
@@ -67,6 +80,23 @@ describe("the settlement e-mail depends on who collected", () => {
     for (const body of [mail.text, mail.html]) {
       expect(body).not.toMatch(/ticket|encaiss|indépendante|Julie/i);
     }
+  });
+
+  /**
+   * The case the payee column exists for. Marie is the till cash operator, so
+   * the collector test alone would send the salon's ticket — but the sale is
+   * Julie's, and the salon issues no document for it. Whose sale it is has to
+   * beat who collected it, or Marie settling a balance at the counter would
+   * mint a salon ticket for money that is not the salon's.
+   */
+  it("the salon collecting an independent's sale still issues no ticket", async () => {
+    mocks.paymentFindUnique.mockResolvedValue(JULIES_SALE);
+
+    const result = await sendSettlementEmail(MARIE, "pay_5", { transactionId: "tx_5" });
+
+    expect(result.success).toBe(true);
+    expect(mocks.sendTicketByEmail, "Marie collected, but the sale is Julie's").not.toHaveBeenCalled();
+    expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
   });
 
   it("never throws into a settlement that already committed", async () => {

@@ -150,9 +150,9 @@ export function SeoPositionChart({ rows }) {
  * Barres horizontales : les libellés de pays sont du texte, et l'horizontale
  * leur laisse la place de s'écrire en entier sans rotation.
  */
-export function SeoCountriesChart({ rows, labelFor }) {
+export function SeoCountriesChart({ rows, labels }) {
   const options = {
-    ...baseOptions(rows.map((row) => labelFor(row.key))),
+    ...baseOptions(labels),
     chart: { fontFamily: "inherit", type: "bar", height: 300, toolbar: { show: false }, animations: { enabled: false } },
     colors: [SEO_COLORS.clics],
     plotOptions: {
@@ -175,9 +175,9 @@ export function SeoCountriesChart({ rows, labelFor }) {
 }
 
 /** Ordinateur / mobile / tablette, en clics. */
-export function SeoDevicesChart({ rows, labelFor }) {
+export function SeoDevicesChart({ rows, labels }) {
   const options = {
-    ...baseOptions(rows.map((row) => labelFor(row.key))),
+    ...baseOptions(labels),
     chart: { fontFamily: "inherit", type: "bar", height: 300, toolbar: { show: false }, animations: { enabled: false } },
     colors: [SEO_COLORS.clics],
     plotOptions: {

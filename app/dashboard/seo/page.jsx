@@ -250,7 +250,7 @@ async function ConnectedView({ connection, startDate, endDate }) {
               result={countries}
               emptyLabel="Aucun pays sur cette période."
             >
-              {(rows) => <SeoCountriesChart rows={rows} labelFor={formatCountry} />}
+              {(rows) => <SeoCountriesChart rows={rows} labels={rows.map((row) => formatCountry(row.key))} />}
             </ChartCard>
 
             <ChartCard
@@ -260,7 +260,7 @@ async function ConnectedView({ connection, startDate, endDate }) {
               result={devices}
               emptyLabel="Aucun appareil sur cette période."
             >
-              {(rows) => <SeoDevicesChart rows={rows} labelFor={formatDevice} />}
+              {(rows) => <SeoDevicesChart rows={rows} labels={rows.map((row) => formatDevice(row.key))} />}
             </ChartCard>
           </div>
 

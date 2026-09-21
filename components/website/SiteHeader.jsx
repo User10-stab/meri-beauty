@@ -130,7 +130,7 @@ export default function Navbar() {
         <Link href="/" className="shrink-0" aria-label="Maison Adar — Accueil">
           <Image
             src="/Images/image.webp"
-            alt="Maison Adar"
+            alt="MeriBeauty"
             width={156}
             height={110}
             priority

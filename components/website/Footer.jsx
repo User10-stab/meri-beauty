@@ -197,7 +197,7 @@ export default function Footer({ salon }) {
 
   const navigation = [
     { label: t("home"), href: "/" },
-    { label: t("prestations"), href: "/#concept" },
+    { label: t("prestations"), href: "/reservation#booking" },
     { label: t("team"), href: "/#equipe" },
     { label: t("shop"), href: "/boutique" },
     { label: t("events"), href: "/evenements" },

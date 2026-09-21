@@ -21,6 +21,7 @@ import { saveCheckoutVatNumber } from "@/lib/customer-vat";
 import { CounterCustomerError } from "@/lib/reservation-errors";
 import { isBelgianVatNumber } from "@/lib/peppyrus";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
+import { manualSaleInvoiceInput } from "@/lib/invoices/manual-sale-invoice";
 import { listAwaitedTransfers } from "@/actions/payments/awaited-transfer";
 
 /**
@@ -124,33 +125,9 @@ function assertInvoiceable(buyer) {
   assertBuyerLegalDataComplete(buildInvoiceCustomer(buyer));
 }
 
-/** The invoice lines of a manual sale, rebuilt from what its Order recorded. */
-function invoiceLinesFromItems(items) {
-  return items.map((item) => ({
-    description: item.variantName ? `${item.productName} — ${item.variantName}` : item.productName,
-    quantity: item.quantity,
-    unitPrice: Number(item.unitPrice),
-  }));
-}
-
-/**
- * Issues the invoice of a fully-paid manual sale, from its Order: lines,
- * VAT treatment and comment exactly as recorded when the sale was composed.
- * No due date — the invoice is only ever issued paid.
- */
+/** Issues the invoice of a fully-paid manual sale (see manualSaleInvoiceInput). */
 function issueManualInvoice(tx, { order, buyer, paymentId }) {
-  return issueInvoice(tx, {
-    paymentId,
-    source: "MANUAL",
-    totalInclVat: Number(order.totalAmount),
-    customer: buildInvoiceCustomer(buyer),
-    lines: invoiceLinesFromItems(order.items),
-    vatRate: Number(order.vatRate),
-    vatTreatment: order.vatTreatment,
-    taxCountryCode: order.taxCountryCode,
-    taxNote: order.taxNote,
-    notes: order.invoiceNotes || null,
-  });
+  return issueInvoice(tx, manualSaleInvoiceInput({ order, buyer, paymentId }));
 }
 
 /**

@@ -244,7 +244,7 @@ export default function OurExperts() {
             role="region"
             aria-roledescription="carousel"
             aria-label={t("expertsTitle")}
-            className="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-2 sm:gap-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex snap-x snap-mandatory gap-5 overflow-x-auto scroll-smooth pb-2 sm:gap-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {list.map((stylist, index) => (
               <ExpertCard key={stylist.id ?? index} stylist={stylist} index={index} t={t} />
@@ -264,7 +264,7 @@ function ExpertCard({ stylist, index, t }) {
 
   return (
     <article className="group relative flex w-[80%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)] sm:w-[calc(50%-12px)] lg:w-[calc(20%-16px)]">
-      <div className="relative aspect-[9/16] w-full h-[480px] overflow-hidden bg-[#f5ece0]  ">
+      <div className="relative aspect-[9/16] w-full h-[420px] overflow-hidden bg-[#f5ece0]  ">
         <Image
           src={imageSrc}
           alt={stylist.name}

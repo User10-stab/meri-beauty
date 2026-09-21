@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sendVerificationEmail } from "@/actions/auth/verify-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { TERMS_CONSENT_REQUIRED_MESSAGE, buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { refineCompanyVat } from "@/lib/validations/register";
 import { isSafeReturnPath } from "@/lib/verify-email-link";
@@ -42,6 +43,7 @@ function resolveCountryCode(value) {
  *   phone: string,
  *   password: string,
  *   newsletterSubscribed?: boolean,
+ *   termsAccepted?: boolean,
  *   isCompany?: boolean,
  *   companyLegalName?: string,
  *   vatNumber?: string,
@@ -60,6 +62,7 @@ export async function initCustomerVerification({
   phone, 
   password,
   newsletterSubscribed,
+  termsAccepted,
   isCompany,
   companyLegalName,
   vatNumber,
@@ -70,6 +73,17 @@ export async function initCustomerVerification({
   addressCountry,
   returnTo,
 }) {
+  // Same rule as signup and every other purchase path: the account cannot be
+  // created without CGV consent, and this public action must not rely on the
+  // client checkbox alone. The field lets the caller point at its checkbox.
+  if (termsAccepted !== true) {
+    return {
+      verified: false,
+      field: "terms",
+      message: TERMS_CONSENT_REQUIRED_MESSAGE,
+    };
+  }
+
   const validation = validateCustomerIdentity({ fullName, email, phone }, { requirePhone: true });
   if (!validation.success) {
     return { verified: false, field: validation.field, message: validation.message };
@@ -184,6 +198,7 @@ export async function initCustomerVerification({
         addressPostalCode: addressPostalCode?.trim() || null,
         addressCountry: addressCountry?.trim() || "BE",
         ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
+        ...buildTermsAcceptanceUpdate(),
       },
     });
 
@@ -213,6 +228,10 @@ export async function initCustomerVerification({
         ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
       },
     });
+
+    // Consent for the returning-but-unverified account — gated inside, so an
+    // already-recorded first acceptance is never reset by resubmission.
+    await recordTermsAcceptance(prisma, existingUser.id);
 
     if (isCompany && companyLegalName?.trim()) {
       await prisma.billingProfile.upsert({

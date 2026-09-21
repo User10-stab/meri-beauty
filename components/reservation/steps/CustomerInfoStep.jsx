@@ -66,7 +66,7 @@ function FormError({ message }) {
   );
 }
 
-const FOCUS_ORDER = ["fullName", "email", "phone", "password", "companyLegalName", "vatNumber", "addressLine1", "addressPostalCode", "addressCity"];
+const FOCUS_ORDER = ["fullName", "email", "phone", "password", "companyLegalName", "vatNumber", "addressLine1", "addressPostalCode", "addressCity", "termsAccepted"];
 
 function focusFirstError(errs) {
   for (const id of FOCUS_ORDER) {
@@ -108,6 +108,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
       phone: "",
       password: "",
       newsletterSubscribed: false,
+      termsAccepted: false,
       isCompany: false,
       companyLegalName: "",
       vatNumber: "",
@@ -213,6 +214,9 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
     else if (phone.length < 8 || !PHONE_RE.test(phone)) errs.phone = t("customer.errorPhoneInvalid");
     if (!formData.password) errs.password = t("customer.errorPasswordRequired");
     else if (formData.password.length < 8) errs.password = t("customer.errorPasswordShort");
+    // Same rule as signup: creating the account requires accepting the
+    // terms — applies to Particulier and Entreprise alike (outside isCompany).
+    if (formData.termsAccepted !== true) errs.termsAccepted = t("customer.acceptTermsRequired");
     if (isCompany) {
       if (!formData.companyLegalName?.trim()) errs.companyLegalName = t("customer.errorLegalNameRequired");
       const vat = formData.vatNumber?.trim() ?? "";
@@ -273,6 +277,8 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
         return { field, message: t("customer.errorPhoneInvalid") };
       case "password":
         return { field, message: t("customer.errorPasswordShort") };
+      case "terms":
+        return { field: "termsAccepted", message: t("customer.acceptTermsRequired") };
       case "companyLegalName":
         return { field, message: t("customer.errorLegalNameRequired") };
       case "vatNumber":
@@ -344,6 +350,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
         phone: formData.phone.trim(),
         password: formData.password,
         newsletterSubscribed: formData.newsletterSubscribed,
+        termsAccepted: formData.termsAccepted === true,
         isCompany: formData.isCompany,
         companyLegalName: formData.companyLegalName?.trim() || null,
         vatNumber: formData.vatNumber?.trim() || null,
@@ -364,6 +371,10 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
       }
       if (result?.emailSent) {
         savePendingReservation(buildReservationSnapshot(formData.email));
+        toast.success(
+          "Votre compte a été créé avec succès. Un e-mail de vérification a été envoyé. Vérifiez votre boîte de réception ou vos spams, puis validez votre adresse e-mail avant de vous connecter.",
+          { duration: 8000 }
+        );
         setVerificationSent({ email: formData.email.trim() });
         return;
       }
@@ -655,8 +666,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
           <StepBackArrow onBack={prevStep} label={t("customer.back")} />
       <div className="mb-5">
         <h2 className="font-display text-[1.7rem] font-semibold leading-tight tracking-tight text-[#2F3A2E]">{t("customer.title")}</h2>
-        <p className="mt-2 text-sm leading-relaxed text-[#6f6a64]">{t("customer.subtitle")}</p>
-        <p className="mt-1 text-xs text-[#9a9590]">{t("customer.accountCreated")}</p>
+        <p className="mt-2 text-sm leading-relaxed text-[#6f6a64]">{t("customer.accountAutoCreated")}</p>
         <div className="mt-3 h-px w-10 bg-[#b89664]/20" />
       </div>
       </div>
@@ -922,6 +932,33 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
             <input type="checkbox" name="newsletterSubscribed" checked={formData.newsletterSubscribed} onChange={handleChange} className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#ede5d8] text-[#2F3A2E] focus:ring-[#2F3A2E]/20" />
             <span className="text-xs leading-relaxed text-[#6f6a64]">{t("customer.newsletter")}</span>
           </label>
+
+          {/* Automatic account creation note */}
+          {/* <p className="text-xs leading-relaxed text-[#6f6a64]">{t("customer.accountAutoCreated")}</p> */}
+
+          {/* Terms & conditions — mandatory, same pattern as the signup form
+              (separate from the marketing opt-in above). Required for both
+              Particulier and Entreprise since an account is always created. */}
+          <div>
+            <label className={`flex cursor-pointer items-start gap-2.5 rounded-xl border bg-white/60 px-3.5 py-2.5 ${errors.termsAccepted ? "border-red-300" : "border-[#ede5d8]/50"}`}>
+              <input
+                type="checkbox"
+                id="termsAccepted"
+                name="termsAccepted"
+                checked={formData.termsAccepted === true}
+                onChange={handleChange}
+                aria-invalid={Boolean(errors.termsAccepted)}
+                aria-describedby={errors.termsAccepted ? "termsAccepted-error" : undefined}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#ede5d8] text-[#2F3A2E] focus:ring-[#2F3A2E]/20"
+              />
+              <span className="text-xs leading-relaxed text-[#6f6a64]">{t.rich("customer.acceptTerms", { cgv: (chunks) => (<a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#2F3A2E]">{chunks}</a>), privacy: (chunks) => (<a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#2F3A2E]">{chunks}</a>)})}</span>
+            </label>
+            {errors.termsAccepted && (
+              <p id="termsAccepted-error" role="alert" className="mt-1.5 text-xs leading-relaxed text-red-600">
+                {errors.termsAccepted}
+              </p>
+            )}
+          </div>
         </div>
 
         <button type="submit" disabled={sendingVerification} className={`mt-5 w-full rounded-full px-5 py-2.5 text-[13px] font-medium text-white transition-all ${sendingVerification ? "cursor-not-allowed bg-[#ede5d8] text-white/70" : "bg-[#b89664] hover:bg-[#a38353] hover:shadow-md hover:-translate-y-px"}`}>

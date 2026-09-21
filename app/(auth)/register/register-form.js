@@ -190,7 +190,7 @@ export default function RegisterForm() {
         toast.success(
           response.vatVerificationPending
             ? "Votre compte a été créé. Votre numéro de TVA est enregistré en attente de vérification VIES. Vérifiez votre adresse e-mail avant de vous connecter."
-            : "Votre compte a été créé avec succès. Un e-mail de vérification vous a été envoyé. Veuillez consulter votre boîte de réception et vérifier votre adresse e-mail avant de vous connecter.",
+            : "Votre compte a été créé avec succès. Un e-mail de vérification a été envoyé. Vérifiez votre boîte de réception ou vos spams, puis validez votre adresse e-mail avant de vous connecter",
           { duration: 8000 }
         );
       }

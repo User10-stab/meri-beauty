@@ -16,6 +16,7 @@ async function getHeroStaff() {
         isActive: true,
         user: { isDeleted: false, isActive: true },
       },
+      orderBy: { createdAt: "asc" },
       select: {
         id: true,
         photo: true,
@@ -42,8 +43,7 @@ async function getHeroStaff() {
           ),
         ],
       }))
-      .filter((staff) => staff.name && staff.categories.length > 0)
-      .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+      .filter((staff) => staff.name && staff.categories.length > 0);
   } catch {
     return [];
   }

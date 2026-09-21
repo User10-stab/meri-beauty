@@ -10,7 +10,7 @@ export async function GET() {
         isDeleted: false,
         user: { isDeleted: false },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: "asc" },
       select: {
         id: true,
         photo: true,

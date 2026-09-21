@@ -7,7 +7,7 @@ import { useSearchParams } from "next/navigation";
 import QuickBookingModal from "@/components/reservation/QuickBookingModal";
 import { loadPendingReservation } from "@/lib/reservation-pending";
 
-function useInView(threshold = 0.15) {
+function useInView(threshold = 0) {
   const ref = useRef(null);
   const [inView, setInView] = useState(false);
   useEffect(() => {
@@ -93,13 +93,12 @@ export default function StaffServices({ services, staffId, categories, staffName
     <section className="relative">
       <div>
         <div
-          ref={sectionRef}
           className={`transition-all duration-700 ease-out ${
             sectionInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
           }`}
         >
           {/* Header */}
-          <div className="mb-8 flex flex-col gap-4 sm:mb-10 sm:flex-row sm:items-end sm:justify-between">
+          <div ref={sectionRef} className="mb-8 flex flex-col gap-4 sm:mb-10 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="mb-3 inline-flex items-center gap-2">
                 <span className="h-px w-8 bg-[#b89664]" />

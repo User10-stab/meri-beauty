@@ -34,6 +34,7 @@ import { getOrCreateCalendarToken, regenerateCalendarToken } from "@/actions/sta
 import { updatePaymentSettings } from "@/actions/staff/update-payment-settings";
 import Button from "@/components/ui/Button";
 import { faceCrop } from "@/lib/faceCrop";
+import { toBrusselsInputValue } from "@/lib/datetime/brussels-input";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -353,7 +354,7 @@ function PersonalInfoSection({ data, onSuccess }) {
           <Label icon={Phone} required>Téléphone</Label>
           <TextInput
             type="tel"
-            placeholder="+33 1 23 45 67 89"
+            placeholder="+32 1 23 45 67 89"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             error={errors.phone}
@@ -1115,15 +1116,20 @@ function TimeOffSection({ data, onSuccess }) {
 
   function startEdit(item) {
     setEditingId(item.id);
-    setStartDate(item.startDate.split("T")[0]);
-    setEndDate(item.endDate.split("T")[0]);
+    // Brussels wall-clock parts of the stored instants — NOT browser-local
+    // getHours()/getDate(): the API serializes Brussels times as UTC ISO
+    // (10:00 CEST → "08:00Z"), so reading them through the device timezone
+    // shifts them by the UTC offset (10:00 → 08:00 in summer) on any device
+    // not set to Europe/Brussels. See lib/datetime/brussels-input.js.
+    const [startDay, startClock] = toBrusselsInputValue(item.startDate).split("T");
+    const [endDay, endClock] = toBrusselsInputValue(item.endDate).split("T");
+    setStartDate(startDay);
+    setEndDate(endDay);
     setIsFullDay(item.isFullDay !== false);
-    // Extract time from ISO strings for partial-day
+    // Exact saved times for partial-day
     if (item.isFullDay === false) {
-      const startDt = new Date(item.startDate);
-      const endDt = new Date(item.endDate);
-      setStartTime(`${String(startDt.getHours()).padStart(2, "0")}:${String(startDt.getMinutes()).padStart(2, "0")}`);
-      setEndTime(`${String(endDt.getHours()).padStart(2, "0")}:${String(endDt.getMinutes()).padStart(2, "0")}`);
+      setStartTime(startClock);
+      setEndTime(endClock);
     } else {
       setStartTime("09:00");
       setEndTime("17:00");
@@ -1159,9 +1165,12 @@ function TimeOffSection({ data, onSuccess }) {
         if (res.errors) {
           setErrors(res.errors);
           const first = Object.values(res.errors).find(Boolean);
+          // A meaningful server message always wins; the generic text is only
+          // a last resort when there is genuinely nothing useful to show.
           if (first) toast.error(first);
+          else toast.error(res.message || "Une erreur est survenue.");
         } else {
-          toast.error(res.message);
+          toast.error(res.message || "Une erreur est survenue.");
         }
       }
     });

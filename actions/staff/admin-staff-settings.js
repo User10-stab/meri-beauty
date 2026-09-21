@@ -9,6 +9,7 @@ import {
   updateReservationSettingsSchema,
   staffTimeOffSchema,
 } from "@/lib/validations/staff-settings";
+import { validateTimeOffSlot, formatTimeOffConflict } from "@/lib/time-off-validation";
 
 const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
 const VALID_PAYMENT_METHODS = ["BOTH", "ONLINE_ONLY", "CASH_ONLY"];
@@ -234,11 +235,42 @@ export async function createStaffTimeOffForAdmin(staffId, input) {
 
     const { startDate, endDate, isFullDay, startTime, endTime, reason } = parsed.data;
 
+    const newStart = buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false);
+    const newEnd = buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true);
+
+    // Server-side conflict check immediately before creating: an overlapping
+    // reservation, formation, TimeOff, or out-of-hours request is rejected
+    // instead of silently overbooking the staff member.
+    const conflict = await validateTimeOffSlot(prisma, {
+      staffId: staff.id,
+      newStart,
+      newEnd,
+      isFullDay,
+    });
+
+    if (!conflict.ok) {
+      // Propagate the specific validation message — never replace it with a
+      // generic error: the user needs to know WHY the TimeOff is refused.
+      const message = formatTimeOffConflict("créer", conflict);
+      return {
+        success: false,
+        message,
+        errors: {
+          startDate: message,
+          endDate: message,
+          startTime: null,
+          endTime: null,
+          isFullDay: null,
+          reason: null,
+        },
+      };
+    }
+
     const created = await prisma.timeOff.create({
       data: {
         staffId: staff.id,
-        startDate: buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false),
-        endDate: buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true),
+        startDate: newStart,
+        endDate: newEnd,
         isFullDay,
         reason: reason || null,
       },
@@ -299,11 +331,41 @@ export async function updateStaffTimeOffForAdmin(timeOffId, staffId, input) {
 
     const { startDate, endDate, isFullDay, startTime, endTime, reason } = parsed.data;
 
+    const newStart = buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false);
+    const newEnd = buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true);
+
+    // Same server-side conflict check as creation — exclude the TimeOff being
+    // edited so saving it unchanged never conflicts with itself.
+    const conflict = await validateTimeOffSlot(prisma, {
+      staffId: staff.id,
+      newStart,
+      newEnd,
+      isFullDay,
+      excludeTimeOffId: timeOffId,
+    });
+
+    if (!conflict.ok) {
+      // Same propagation as creation, contextualized for an edit.
+      const message = formatTimeOffConflict("modifier", conflict);
+      return {
+        success: false,
+        message,
+        errors: {
+          startDate: message,
+          endDate: message,
+          startTime: null,
+          endTime: null,
+          isFullDay: null,
+          reason: null,
+        },
+      };
+    }
+
     const { count } = await prisma.timeOff.updateMany({
       where: { id: timeOffId, staffId: staff.id },
       data: {
-        startDate: buildDateTime(startDate.split("T")[0], isFullDay ? null : startTime, false),
-        endDate: buildDateTime(endDate.split("T")[0], isFullDay ? null : endTime, true),
+        startDate: newStart,
+        endDate: newEnd,
         isFullDay,
         reason: reason || null,
       },

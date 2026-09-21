@@ -361,7 +361,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
             </div>
             <div>
               <Label htmlFor="editPhone" icon={Phone} required>Téléphone</Label>
-              <TextInput id="editPhone" type="tel" placeholder="+33 6 12 34 56 78" error={errors.phone} {...register("phone")} />
+              <TextInput id="editPhone" type="tel" placeholder="+32 6 12 34 56 78" error={errors.phone} {...register("phone")} />
               <FieldError message={errors.phone?.message} />
             </div>
             <div>

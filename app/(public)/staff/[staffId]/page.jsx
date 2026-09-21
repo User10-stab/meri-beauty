@@ -160,20 +160,22 @@ export default async function StaffProfilePage({ params }) {
   ];
 
   return (
-    // Navbar (rendered by the shared public layout) + standalone two-section
-    // layout below it. The content height subtracts the navbar height
-    // (logo h-[52px] + nav py-3 = 76px) so navbar + content fit the viewport
-    // exactly. The page itself never scrolls (see StaffViewportLock): the
-    // hero stays fixed while only the services column scrolls, with no
-    // visible scrollbars anywhere.
-    <div className="h-[calc(100dvh-76px)] w-full overflow-hidden bg-[#fdf8f0]">
+    /*
+     * Mobile  — normal vertical scroll: hero → services → rest of page.
+     *           No fixed height, no overflow-hidden, no viewport lock.
+     * Desktop (lg+) — two-column fixed layout: hero is sticky, only the
+     *           services column scrolls. StaffViewportLock locks body
+     *           scroll so no second scrollbar appears.
+     */
+    <div className="w-full bg-[#fdf8f0] lg:h-[calc(100dvh-76px)] lg:overflow-hidden">
       <StaffViewportLock />
-      <div className="mx-auto flex h-full min-h-0 max-w-[1800px] flex-col overflow-hidden px-4 py-4 sm:px-6 lg:flex-row lg:gap-10 lg:px-10 lg:py-6 xl:gap-14">
-        {/* Fixed hero — never scrolls at page level; its own scrollbar is
-            hidden. Top-anchored (not centered) so a long profile can never
-            be amputated at the top: excess content stays reachable through
-            the same hidden internal scroll on mobile. */}
-        <div className="flex max-h-[44dvh] shrink-0 items-start overflow-y-auto overflow-x-hidden [scrollbar-width:none] lg:sticky lg:top-0 lg:h-full lg:max-h-none lg:w-[500px] lg:items-center lg:overflow-y-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:hidden ">
+      <div className="mx-auto flex max-w-[1800px] flex-col px-4 py-4 sm:px-6 lg:h-full lg:min-h-0 lg:flex-row lg:gap-10 lg:overflow-hidden lg:px-10 lg:py-6 xl:gap-14">
+
+        {/* Hero column
+            Mobile  — natural height, no internal scroll, no max-height cap.
+            Desktop — sticky, fills full column height, hidden scrollbar for
+                      overflow content. */}
+        <div className="w-full shrink-0 lg:sticky lg:top-0 lg:h-full lg:w-[500px] lg:overflow-y-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden">
           <StaffProfileHero
             name={staff.user.fullName}
             firstName={firstName}
@@ -187,8 +189,10 @@ export default async function StaffProfilePage({ params }) {
           />
         </div>
 
-        {/* The only scrollable area on the page — scrollbar hidden, scrolling intact. */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-6 pt-4 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden lg:pt-1">
+        {/* Services column
+            Mobile  — flows naturally below the hero.
+            Desktop — only scrollable area; scrollbar hidden. */}
+        <div className="mt-6 flex-1 pb-6 lg:mt-0 lg:min-h-0 lg:overflow-y-auto lg:overscroll-contain lg:pt-1 lg:[scrollbar-width:none] lg:[-ms-overflow-style:none] lg:[&::-webkit-scrollbar]:hidden">
           {staff.staffServices.length > 0 && (
             <Suspense fallback={null}>
               <StaffServices

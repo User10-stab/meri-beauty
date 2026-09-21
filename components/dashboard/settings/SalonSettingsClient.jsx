@@ -247,7 +247,7 @@ function BusinessInfoSection({ salon, onSuccess }) {
             </h3>
             <div>
               <Label icon={Phone} required>Téléphone</Label>
-              <TextInput id="phone" type="tel" placeholder="+33 1 23 45 67 89" error={errors.phone} {...register("phone")} />
+              <TextInput id="phone" type="tel" placeholder="+32 1 23 45 67 89" error={errors.phone} {...register("phone")} />
               <FieldError message={errors.phone?.message} />
             </div>
             <div>

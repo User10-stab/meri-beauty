@@ -44,6 +44,15 @@ const FALLBACK_STYLISTS = [
     image: "/Images/expert.webp",
     categories: [],
   },
+  {
+    id: 5,
+    name: "Camille",
+    speciality: "Maquilleuse professionnelle",
+    specialityKey: null,
+    experience: 4,
+    image: "/Images/expert.webp",
+    categories: [],
+  },
 ];
 
 function useInView(threshold = 0.15) {
@@ -254,13 +263,13 @@ function ExpertCard({ stylist, index, t }) {
   const categories = Array.isArray(stylist.categories) ? stylist.categories : [];
 
   return (
-    <article className="group relative flex w-[80%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)] sm:w-[calc(50%-12px)] lg:w-[calc(25%-18px)]">
+    <article className="group relative flex w-[80%] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-[#ede5d8] bg-white shadow-[0_2px_18px_rgba(47,58,46,0.07)] transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.12)] sm:w-[calc(50%-12px)] lg:w-[calc(20%-16px)]">
       <div className="relative aspect-[9/16] w-full h-[480px] overflow-hidden bg-[#f5ece0]  ">
         <Image
           src={imageSrc}
           alt={stylist.name}
           fill
-          sizes="(max-width: 640px) 80vw, (max-width: 1024px) 50vw, 25vw"
+          sizes="(max-width: 640px) 80vw, (max-width: 1024px) 50vw, 20vw"
           className="h-full w-full object-cover obje transition-transform duration-700 group-hover:scale-[1.03]"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-60" />

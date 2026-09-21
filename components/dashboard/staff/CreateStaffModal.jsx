@@ -405,7 +405,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                 <TextInput
                   id="phone"
                   type="tel"
-                  placeholder="+33 6 12 34 56 78"
+                  placeholder="+32 6 12 34 56 78"
                   error={errors.phone}
                   {...register("phone")}
                 />

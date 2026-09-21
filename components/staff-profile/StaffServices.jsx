@@ -163,24 +163,24 @@ export default function StaffServices({ services, staffId, categories, staffName
               return (
                 <article
                   key={staffService.id}
-                  className="group flex flex-col justify-between rounded-2xl border border-[#ede5d8] bg-white p-6 transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.1)] hover:-translate-y-1 hover:border-[#b89664]/30"
+                  className="group flex flex-col justify-between rounded-xl border border-[#ede5d8] bg-white p-4 transition-all duration-300 hover:shadow-[0_8px_28px_rgba(47,58,46,0.1)] hover:-translate-y-1 hover:border-[#b89664]/30 sm:rounded-2xl sm:p-6"
                 >
                  <div>
                    {/* Category badge */}
                   {service.category?.name && (
-                    <span className="mb-3 self-start rounded-full bg-[#fdf8f0] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#b89664]">
+                    <span className="mb-2 self-start rounded-full bg-[#fdf8f0] px-2.5 py-1 text-[10px] font-semibold lowercase tracking-wider text-[#b89664] sm:mb-3 sm:px-3 sm:py-1.5">
                       {service.category.name}
                     </span>
                   )}
 
                   {/* Service name */}
-                  <h3 className="font-display mt-3 text-[21px] font-bold leading-tight tracking-tight text-[#2F3A2E] group-hover:text-[#b89664] transition-colors duration-300">
+                  <h3 className="font-display mt-2 text-[16px] font-bold leading-tight tracking-tight text-[#2F3A2E] group-hover:text-[#b89664] transition-colors duration-300 sm:mt-3 sm:text-[21px]">
                     {service.name}
                   </h3>
 
                   {/* Description */}
                   {service.description && (
-                    <p className="mt-3 flex-1 text-sm leading-relaxed text-[#6f6a64] line-clamp-3">
+                    <p className="mt-2 flex-1 text-xs leading-relaxed text-[#6f6a64] line-clamp-2 sm:mt-3 sm:text-sm sm:line-clamp-3">
                       {service.description}
                     </p>
                   )}
@@ -188,26 +188,29 @@ export default function StaffServices({ services, staffId, categories, staffName
 
                  <div>
                    {/* Duration & Price */}
-                  <div className="mt-4 flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 text-sm text-[#6f6a64] bg-[#fdf8f0] rounded-full px-3 py-2">
-                      <Clock size={16} className="text-[#b89664]" />
+                  <div className="mt-3 flex items-center justify-between sm:mt-4">
+                    <span className="inline-flex items-center gap-1.5 text-xs text-[#6f6a64] bg-[#fdf8f0] rounded-full px-2.5 py-1.5 sm:gap-2 sm:text-sm sm:px-3 sm:py-2">
+                      <Clock size={13} className="text-[#b89664] sm:hidden" />
+                      <Clock size={16} className="hidden text-[#b89664] sm:block" />
                       {formatDuration(duration)}
                     </span>
-                    <span className="inline-flex items-center gap-1 text-[16px] font-bold text-[#2F3A2E] bg-[#fdf8f0] rounded-full px-3 py-2 ">
-                      <Euro size={16} className="text-[#b89664]" />
+                    <span className="inline-flex items-center gap-1 text-[14px] font-bold text-[#2F3A2E] bg-[#fdf8f0] rounded-full px-2.5 py-1.5 sm:text-[16px] sm:px-3 sm:py-2">
+                      <Euro size={13} className="text-[#b89664] sm:hidden" />
+                      <Euro size={16} className="hidden text-[#b89664] sm:block" />
                       {formatPrice(price)}
                     </span>
                   </div>
 
                   {/* CTA */}
-                  <div className="mt-4">
+                  <div className="mt-3 sm:mt-4">
                     <button
                       type="button"
                       onClick={() => setQuickBooking({ serviceId: service.id, serviceName: service.name })}
-                      className="group/btn flex w-full items-center justify-between gap-2 rounded-full bg-primary px-6 py-3 text-sm font-semibold text-white transition-all duration-300 hover:shadow-lg hover:from-[#212a20] hover:to-[#151c14] hover:-translate-y-0.5"
+                      className="group/btn flex w-full items-center justify-between gap-2 rounded-full bg-primary px-4 py-2.5 text-xs font-semibold text-white transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5 sm:px-6 sm:py-3 sm:text-sm"
                     >
                       {t("book")}
-                      <ArrowRight size={16} className="transition-transform group-hover/btn:translate-x-1" />
+                      <ArrowRight size={14} className="transition-transform group-hover/btn:translate-x-1 sm:hidden" />
+                      <ArrowRight size={16} className="hidden transition-transform group-hover/btn:translate-x-1 sm:block" />
                     </button>
                   </div>
                  </div>

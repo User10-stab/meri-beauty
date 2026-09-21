@@ -26,6 +26,7 @@ import {
   getOrCreateCalendarTokenForAdmin,
   regenerateCalendarTokenForAdmin,
 } from "@/actions/staff/admin-staff-settings";
+import { toBrusselsInputValue } from "@/lib/datetime/brussels-input";
 
 // ─── Primitives (local, matching EditStaffModal styling) ─────────────────────
 
@@ -347,14 +348,19 @@ function TimeOffSection({ staffId, items, onChanged }) {
 
   function startEdit(item) {
     setEditingId(item.id);
-    setStartDate(item.startDate.split("T")[0]);
-    setEndDate(item.endDate.split("T")[0]);
+    // Brussels wall-clock parts of the stored instants — NOT browser-local
+    // getHours()/getDate(): the API serializes Brussels times as UTC ISO
+    // (10:00 CEST → "08:00Z"), so reading them through the device timezone
+    // shifts them by the UTC offset (10:00 → 08:00 in summer) on any device
+    // not set to Europe/Brussels. See lib/datetime/brussels-input.js.
+    const [startDay, startClock] = toBrusselsInputValue(item.startDate).split("T");
+    const [endDay, endClock] = toBrusselsInputValue(item.endDate).split("T");
+    setStartDate(startDay);
+    setEndDate(endDay);
     setIsFullDay(item.isFullDay !== false);
     if (item.isFullDay === false) {
-      const s = new Date(item.startDate);
-      const e = new Date(item.endDate);
-      setStartTime(`${String(s.getHours()).padStart(2, "0")}:${String(s.getMinutes()).padStart(2, "0")}`);
-      setEndTime(`${String(e.getHours()).padStart(2, "0")}:${String(e.getMinutes()).padStart(2, "0")}`);
+      setStartTime(startClock);
+      setEndTime(endClock);
     }
     setReason(item.reason ?? "");
     setErrors({});
@@ -385,10 +391,12 @@ function TimeOffSection({ staffId, items, onChanged }) {
       } else if (res.errors) {
         setErrors(res.errors);
         const first = Object.values(res.errors).find(Boolean);
+        // A meaningful server message always wins; the generic text is only
+        // a last resort when there is genuinely nothing useful to show.
         if (first) toast.error(first);
-        else toast.error(res.message);
+        else toast.error(res.message || "Une erreur est survenue.");
       } else {
-        toast.error(res.message);
+        toast.error(res.message || "Une erreur est survenue.");
       }
     });
   }

@@ -15,6 +15,7 @@ export async function generateMetadata({ params }) {
   return {
     title: `${animator.name} — Meri Beauty`,
     description: animator.bio,
+    alternates: { canonical: `/animateurs/${id}` },
   };
 }
 

@@ -99,6 +99,18 @@ function DeliveryCell({ doc, peppolApplicable }) {
 const actionButton =
   "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40";
 
+// The table scrolls sideways on a laptop; the buttons must not scroll away
+// with it. The column stays pinned to the right edge, opaque (each cell sets
+// its row's background), with a soft edge over whatever scrolls beneath.
+const stickyActions = "sticky right-0 z-10 border-l border-stroke shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.15)] dark:border-dark-3";
+
+/** What « Aperçu » previews: the pending row's own accept target. */
+function previewHref(pending) {
+  const { kind, rentId, orderId, paymentId } = pending.accept;
+  const id = kind === "RENT" ? rentId : kind === "MANUAL_SALE" ? orderId : kind === "TRANSFER" ? paymentId : null;
+  return id ? `/api/invoices/preview?kind=${kind}&id=${encodeURIComponent(id)}` : null;
+}
+
 /**
  * The same buttons for an invoice and for its credit note: Voir (opens the
  * PDF in a new tab — saving it from there, never a forced download),
@@ -158,8 +170,22 @@ function PaymentCell({ pending }) {
  * anything other than "the whole balance arrived by transfer".
  */
 function PendingActions({ pending, busy, onAccept, onSettle }) {
+  // A row already invoiced has its own « Voir »; the others show, before the
+  // tick, the invoice the tick would issue — or why there would be none.
+  const preview = pending.invoiceNumber ? null : previewHref(pending);
   return (
     <>
+      {preview && (
+        <a
+          href={preview}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Voir la facture que l'acceptation émettra — sans l'émettre"
+          className={`${actionButton} border-[#2f3a2e] text-[#2f3a2e] hover:bg-[#f4f7f3]`}
+        >
+          <Eye size={13} /> Aperçu
+        </a>
+      )}
       <button
         type="button"
         disabled={busy}
@@ -337,7 +363,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
               <th className="px-4 py-3 text-right">Montant</th>
               <th className="px-4 py-3">Paiement</th>
               <th className="px-4 py-3">Envoi</th>
-              <th className="px-4 py-3 text-right">Actions</th>
+              <th className={`${stickyActions} bg-white px-4 py-3 text-right dark:bg-gray-dark`}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -371,7 +397,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                   <PaymentCell pending={pending} />
                 </td>
                 <td className="px-4 py-3 text-xs text-gray-400">—</td>
-                <td className="px-4 py-3">
+                <td className={`${stickyActions} bg-amber-50 px-4 py-3 dark:bg-[#2a2415]`}>
                   <div className="flex justify-end gap-1.5 whitespace-nowrap">
                     <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />
                   </div>
@@ -427,7 +453,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                     <td className="px-4 py-3">
                       <DeliveryCell doc={invoice} peppolApplicable={invoice.peppolApplicable} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className={`${stickyActions} bg-white px-4 py-3 dark:bg-gray-dark`}>
                       <div className="flex justify-end gap-1.5 whitespace-nowrap">
                         {pending && (
                           <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />

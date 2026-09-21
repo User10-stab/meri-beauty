@@ -9,7 +9,7 @@ import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { issueInvoice } from "@/lib/invoicing";
 import { isBelgianVatNumber } from "@/lib/peppyrus";
 import { buildStaffCustomer } from "@/lib/staff-monthly-billing";
-import { pendingRentPaymentData } from "@/lib/staff-rent-payment";
+import { pendingRentPaymentData, rentInvoiceInput } from "@/lib/staff-rent-payment";
 
 /**
  * Staff rent awaiting its transfer — the « Loyers staff en attente de
@@ -219,13 +219,10 @@ async function acceptDueRent(session, rentId, reference) {
       const { received, previousStatus } = await recordRentTransfer(tx, rent.paymentId, reference);
 
       // Paid → invoiced, in the same transaction: either both or neither.
-      const invoice = await issueInvoice(tx, {
-        paymentId: rent.paymentId,
-        source: "STAFF_CONTRACT",
-        totalInclVat: amount,
-        customer,
-        lines: [{ description: rent.lineDescription || "Location d'espace", quantity: 1, unitPrice: amount }],
-      });
+      const invoice = await issueInvoice(
+        tx,
+        rentInvoiceInput({ paymentId: rent.paymentId, amount, lineDescription: rent.lineDescription, customer })
+      );
       await tx.staffMonthlyInvoice.update({ where: { id: rent.id }, data: { invoiceId: invoice.id } });
 
       await tx.auditLog.create({

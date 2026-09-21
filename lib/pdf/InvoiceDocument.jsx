@@ -60,8 +60,14 @@ function dueDateLine(invoice, payment) {
   return `Échéance : ${formatDate(invoice.dueDate)}`;
 }
 
+// An unissued invoice rendered for review before « Accepter »
+// (lib/invoices/invoice-preview.js): no number exists yet, and it says so.
+const PREVIEW_STATUS = { label: "APERÇU — NON ÉMISE", tone: "credit" };
+const PREVIEW_PAYMENT_NOTE = "Aperçu : la facture est numérotée et émise, payée, à l'acceptation du paiement";
+
 export function InvoiceDocument({ invoice, contact = null, rental = null }) {
   const payment = invoice.payment ?? null;
+  const preview = Boolean(invoice.isPreview);
 
   return (
     <Document
@@ -74,7 +80,7 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
           title="FACTURE"
           number={invoice.number}
           issuedAt={invoice.issuedAt}
-          status={paymentStatus(payment)}
+          status={preview ? PREVIEW_STATUS : paymentStatus(payment)}
         />
 
         <View style={styles.parties}>
@@ -100,7 +106,12 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
         <View style={styles.bottom}>
           <TermsBlock
             items={[
-              { label: "Règlement", value: paymentLine(payment) ?? dueDateLine(invoice, payment) ?? "Paiement sécurisé — dû à réception de la facture" },
+              {
+                label: "Règlement",
+                value: preview
+                  ? PREVIEW_PAYMENT_NOTE
+                  : paymentLine(payment) ?? dueDateLine(invoice, payment) ?? "Paiement sécurisé — dû à réception de la facture",
+              },
               rental?.reference ? { label: "Référence contrat", value: rental.reference } : null,
               rental?.period ? { label: "Période de location", value: rental.period } : null,
               { label: "Devise", value: "Euro (EUR)" },
@@ -124,7 +135,7 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
           sellerVatNumber={invoice.sellerVatNumber}
           rib={contact?.rib}
           contact={contact}
-          reference={`Facture ${invoice.number}`}
+          reference={preview ? "Aperçu — facture non émise, sans valeur comptable" : `Facture ${invoice.number}`}
         />
       </Page>
     </Document>

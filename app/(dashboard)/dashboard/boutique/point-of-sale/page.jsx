@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { requireTillCashOperator } from "@/lib/route-protection";
 import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator } from "@/lib/authorization";
 import { CounterSurface } from "@/components/dashboard/boutique/counter/CounterSurface";
+import { listPendingManualSales } from "@/actions/invoices/manual-invoice";
 
 export const metadata = { title: "Caisse — Meri Beauty" };
 
@@ -28,12 +29,15 @@ export default async function PointOfSalePage({ searchParams }) {
   // routing a boutique pickup code needs ORDERS. Someone holding none of
   // these would only ever see a panel with nothing it can act on — hide it
   // outright instead.
-  const [canAdjustStock, canAppointments, canWorkshops, canFormations, canOrders] = await Promise.all([
+  const [canAdjustStock, canAppointments, canWorkshops, canFormations, canOrders, pendingManualSales] = await Promise.all([
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.BOUTIQUE_STOCK),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS),
     hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS),
     isTillCashOperator(session.user),
+    // Invoice sales paid by acompte or later (actions/invoices/manual-invoice.js):
+    // collected — and invoiced once fully paid — from right here.
+    listPendingManualSales(),
   ]);
 
   return (
@@ -50,6 +54,7 @@ export default async function PointOfSalePage({ searchParams }) {
       // step is hidden from them (server enforces it regardless).
       canCollectCash={isTillCashOperator(session.user)}
       sourceOrderId={sourceOrderId}
+      pendingManualSales={pendingManualSales.success ? pendingManualSales.data : null}
     />
   );
 }

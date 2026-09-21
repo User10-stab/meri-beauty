@@ -236,7 +236,10 @@ function InPersonLegRow({ leg, onDone }) {
   const [handedOver, setHandedOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const isCard = leg.method === "CARD";
+  const isTransfer = leg.method === "TRANSFER";
+  // A bank transfer back is evidenced by its reference, exactly like a
+  // terminal ticket — only the wording differs.
+  const isCard = leg.method === "CARD" || isTransfer;
   const canConfirm = isCard ? reference.trim().length > 0 : handedOver;
 
   async function handleConfirm() {
@@ -262,7 +265,7 @@ function InPersonLegRow({ leg, onDone }) {
         <div className="min-w-[220px]">
           <p className="flex items-center gap-2 text-sm font-semibold text-gray-900">
             {isCard ? <CreditCard size={15} /> : <Banknote size={15} />}
-            {money(leg.amount)} — {isCard ? "carte, terminal en boutique" : "espèces"}
+            {money(leg.amount)} — {isTransfer ? "virement bancaire" : isCard ? "carte, terminal en boutique" : "espèces"}
           </p>
           <OperationMeta leg={leg} />
           {leg.pieceNumber && (
@@ -272,7 +275,9 @@ function InPersonLegRow({ leg, onDone }) {
 
         <div className="min-w-[280px] flex-1">
           <p className="mb-2 text-[12px] font-medium text-amber-900">
-            {isCard
+            {isTransfer
+              ? "Effectuez d'abord le virement de remboursement depuis le compte du salon, puis saisissez sa référence."
+              : isCard
               ? "Effectuez d'abord le remboursement sur le terminal, puis saisissez la référence du ticket."
               : "Remettez d'abord les espèces au client, puis confirmez ci-dessous."}
           </p>
@@ -282,7 +287,7 @@ function InPersonLegRow({ leg, onDone }) {
               type="text"
               value={reference}
               onChange={(event) => setReference(event.target.value)}
-              placeholder="Référence du ticket du terminal"
+              placeholder={isTransfer ? "Référence du virement" : "Référence du ticket du terminal"}
               className="mb-2 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-[13px] focus:border-gray-900 focus:outline-none"
             />
           ) : (

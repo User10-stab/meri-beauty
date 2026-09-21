@@ -132,7 +132,8 @@ describe("a ticket is e-mailed after settlement only when the acting staff holds
   test("manage-appointment.js sends the settlement e-mail only when a balance was actually collected", () => {
     const code = source("actions/appointment/manage-appointment.js");
     expect(code).toContain('import { sendSettlementEmail } from "@/lib/payments/send-settlement-email"');
-    expect(code).toContain("if (balance > 0) {");
+    // An awaited transfer collected nothing, so it has no ticket to send.
+    expect(code).toContain("if (balance > 0 && result.collection) {");
     // The acting user decides ticket vs. ticket-free confirmation.
     expect(code).toContain("sendSettlementEmail(authCheck.user, result.collection.paymentId");
   });

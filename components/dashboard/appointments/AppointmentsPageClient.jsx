@@ -11,6 +11,10 @@ import { acceptAppointment, rejectAppointment, completeAppointment, markAppointm
 import { resendPaymentEmail } from "@/actions/payment/resend-payment-email";
 import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
+import {
+  CounterPaymentMethodTiles,
+  CounterTerminalReference,
+} from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 
 const STATUS_LABEL = {
   PENDING: "En attente",
@@ -715,25 +719,16 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               sur place. Une facture sera émise pour le montant total dès l'encaissement.
             </p>
 
-            <label className="mt-4 block text-xs font-medium text-gray-500">Mode de paiement</label>
-            <select
-              value={completeMethod}
-              onChange={(e) => setCompleteMethod(e.target.value)}
-              className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e]"
-            >
-              <option value="CASH">Espèces</option>
-              <option value="EXTERNAL_TERMINAL">Carte — terminal</option>
-            </select>
+            {/* Same tiles as the counter (CounterPaymentMethods) — one look
+                and one set of labels for every payment on the site. */}
+            <div className="mt-4">
+              <CounterPaymentMethodTiles methods={["CASH", "EXTERNAL_TERMINAL"]} value={completeMethod} onChange={setCompleteMethod} />
+            </div>
 
             {completeMethod === "EXTERNAL_TERMINAL" && (
-              <input
-                value={terminalReference}
-                onChange={(e) => setTerminalReference(e.target.value)}
-                maxLength={100}
-                placeholder="Référence du ticket du terminal"
-                aria-label="Référence du ticket du terminal"
-                className="mt-2 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e]"
-              />
+              <div className="mt-2">
+                <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />
+              </div>
             )}
 
             <label className="mt-4 flex items-start gap-2 text-xs font-medium text-gray-700">

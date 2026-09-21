@@ -206,8 +206,8 @@ export async function getReportsData({ months } = {}) {
     ];
 
     // ── Cash vs bank ──────────────────────────────────────────────────────
-    const netByMethod = { CASH: 0, CARD: 0, ONLINE: 0 };
-    const refundByMethod = { CASH: 0, CARD: 0, ONLINE: 0 };
+    const netByMethod = { CASH: 0, CARD: 0, ONLINE: 0, TRANSFER: 0 };
+    const refundByMethod = { CASH: 0, CARD: 0, ONLINE: 0, TRANSFER: 0 };
     for (const row of methodRows) {
       const amount = Number(row._sum.amount ?? 0);
       if (!(row.method in netByMethod)) continue;

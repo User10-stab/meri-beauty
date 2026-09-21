@@ -23,6 +23,10 @@ import { acceptAppointment, rejectAppointment, completeAppointment, markAppointm
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
 import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import { getStaffColor } from "./staffColors";
+import {
+  CounterPaymentMethodTiles,
+  CounterTerminalReference,
+} from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -473,25 +477,20 @@ export function AppointmentDrawer({
                 </span>{" "}
                 sur place. Une facture sera émise pour le montant total dès l&apos;encaissement.
               </p>
-              <label className="mt-3 block text-xs font-medium text-gray-500 dark:text-gray-400">{t("appointmentPayment.paymentMethod")}</label>
-              <select
-                value={completeMethod}
-                onChange={(e) => setCompleteMethod(e.target.value)}
-                className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200"
-              >
-                <option value="CASH">Espèces</option>
-                <option value="EXTERNAL_TERMINAL">Carte — terminal</option>
-              </select>
+              {/* Same tiles as the counter (CounterPaymentMethods). */}
+              <div className="mt-3">
+                <CounterPaymentMethodTiles
+                  methods={["CASH", "EXTERNAL_TERMINAL"]}
+                  value={completeMethod}
+                  onChange={setCompleteMethod}
+                  label={t("appointmentPayment.paymentMethod")}
+                />
+              </div>
 
               {completeMethod === "EXTERNAL_TERMINAL" && (
-                <input
-                  value={terminalReference}
-                  onChange={(e) => setTerminalReference(e.target.value)}
-                  maxLength={100}
-                  placeholder="Référence du ticket du terminal"
-                  aria-label="Référence du ticket du terminal"
-                  className="mt-2 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-                />
+                <div className="mt-2">
+                  <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />
+                </div>
               )}
               <label className="mt-3 flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-200">
                 <input

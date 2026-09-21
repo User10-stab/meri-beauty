@@ -123,12 +123,13 @@ describe("the server applies the same rule, and is the one that matters", () => 
     // receipt reference; bare "CARD" was accepted with no evidence at all.
     expect(action).toContain("const offTill = !isTillCashOperator(authCheck.user)");
     expect(action).toContain("const collectsAtTill = collectsMoney && !offTill");
-    expect(action).toContain('if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL"].includes(method))');
+    expect(action).toContain('if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL", AWAITED_TRANSFER_METHOD, COUNTER_QR_METHOD].includes(method))');
     expect(action, "a card collection was accepted without a terminal reference").not.toContain(
       '["CASH", "CARD", "EXTERNAL_TERMINAL"]',
     );
     expect(action).toContain('if (collectsAtTill && method === "EXTERNAL_TERMINAL"');
-    expect(action).toContain("if (collectsAtTill && paymentConfirmed !== true)");
+    // Nor a QR: Stripe is asked directly (lib/counter/qr-checkout.js).
+    expect(action).toContain("if (collectsAtTill && !awaitsTransfer && !paidByQr && paymentConfirmed !== true)");
     // And none are left behind on the raw balance flag.
     expect(action).not.toMatch(/if \(hasBalanceDue &&/);
   });

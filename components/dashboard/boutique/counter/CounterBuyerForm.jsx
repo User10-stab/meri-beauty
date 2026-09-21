@@ -61,6 +61,9 @@ import { Loader2, ShieldQuestion, UserRound } from "lucide-react";
  *   composer passes false — a booking sale has no "decline the invoice" UX
  *   of its own yet, only the retail till does, so it keeps the plain
  *   explanatory paragraph instead of an inert checkbox.
+ * @param {string} [props.addressReason] Why the address is required, shown
+ *   after « Adresse de facturation obligatoire » — the till and the booking
+ *   composer require it for different reasons.
  */
 export function CounterBuyerForm({
   customer,
@@ -86,6 +89,7 @@ export function CounterBuyerForm({
   invoiceRequested = true,
   onInvoiceRequestedChange,
   showInvoiceOptOut = true,
+  addressReason = "pour ce client (nouveau ou sans adresse enregistrée)",
 }) {
   return (
     <>
@@ -166,39 +170,7 @@ export function CounterBuyerForm({
       )}
 
       {!isWalkIn && (
-        <div className="space-y-1.5">
-          <p className="text-xs text-gray-500 dark:text-dark-6">
-            Numéro de TVA (facultatif) — pour un client professionnel (B2B). Laissez vide pour un client particulier (B2C).
-          </p>
-          <div className="flex gap-2">
-            <input
-              value={customer.vatNumber}
-              onChange={(event) => updateCustomerVat(event.target.value)}
-              placeholder="BE0123456789 ou FRXX123456789"
-              autoComplete="off"
-              className="h-10 min-w-0 flex-1 rounded-lg border border-gray-200 px-3 text-sm uppercase tracking-wide outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-            />
-            <button
-              type="button"
-              onClick={handleVerifyVat}
-              disabled={customer.vatInvoiceReady || vatCheck?.loading}
-              className="flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] disabled:opacity-50 dark:border-dark-3 dark:text-dark-6"
-            >
-              {vatCheck?.loading ? <Loader2 size={14} className="animate-spin" /> : <ShieldQuestion size={14} />}
-              {customer.vatInvoiceReady ? "Validée" : "Vérifier"}
-            </button>
-          </div>
-          {customer.vatInvoiceReady && (
-            <p className="text-xs font-medium text-emerald-600">
-              TVA déjà validée via VIES{customer.vatValidationName ? ` — ${customer.vatValidationName}` : ""}. La facture sera créée, puis envoyée manuellement depuis Opérations.
-            </p>
-          )}
-          {vatCheck && !vatCheck.loading && (
-            <p className={`text-xs font-medium ${vatCheck.error || vatCheck.valid === false ? "text-red-600" : "text-emerald-600"}`}>
-              {vatCheck.message}
-            </p>
-          )}
-        </div>
+        <CounterVatField value={customer.vatNumber} onChange={updateCustomerVat} onVerify={handleVerifyVat} vatCheck={vatCheck} validated={customer.vatInvoiceReady} validatedName={customer.vatValidationName} />
       )}
 
       {!isWalkIn && (
@@ -239,46 +211,80 @@ export function CounterBuyerForm({
       {!isWalkIn && needsAddress && (
         <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-900/10">
           <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
-            Adresse de facturation obligatoire pour ce client (nouveau ou sans adresse enregistrée).
+            Adresse de facturation obligatoire {addressReason}.
           </p>
-          <input
-            required
-            value={customer.addressLine1}
-            onChange={(event) => updateCustomerAddress("addressLine1", event.target.value)}
-            placeholder="Rue et numéro"
-            className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-          />
-          <input
-            value={customer.addressLine2}
-            onChange={(event) => updateCustomerAddress("addressLine2", event.target.value)}
-            placeholder="Boîte, étage (facultatif)"
-            className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-          />
-          <div className="flex gap-2">
-            <input
-              required
-              value={customer.addressPostalCode}
-              onChange={(event) => updateCustomerAddress("addressPostalCode", event.target.value)}
-              placeholder="Code postal"
-              className="h-10 w-24 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-            />
-            <input
-              required
-              value={customer.addressCity}
-              onChange={(event) => updateCustomerAddress("addressCity", event.target.value)}
-              placeholder="Ville"
-              className="h-10 flex-1 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-            />
-            <input
-              value={customer.addressCountry}
-              onChange={(event) => updateCustomerAddress("addressCountry", event.target.value.toUpperCase())}
-              placeholder="BE"
-              maxLength={2}
-              className="h-10 w-16 rounded-lg border border-gray-200 px-3 text-center text-sm uppercase outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-            />
-          </div>
+          <CounterAddressFields address={customer} onChange={updateCustomerAddress} required />
         </div>
       )}
     </>
+  );
+}
+
+const fieldClass =
+  "h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white";
+
+/**
+ * VAT number + « Vérifier » (VIES preview). Shared by every counter screen
+ * that captures or completes a buyer (this form, FicheBuyerAction).
+ */
+export function CounterVatField({ value, onChange, onVerify, vatCheck, validated = false, validatedName = null }) {
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs text-gray-500 dark:text-dark-6">
+        Numéro de TVA (facultatif) — pour un client professionnel (B2B). Laissez vide pour un client particulier (B2C).
+      </p>
+      <div className="flex gap-2">
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="BE0123456789 ou FRXX123456789"
+          aria-label="Numéro de TVA"
+          autoComplete="off"
+          className={`${fieldClass} min-w-0 flex-1 uppercase tracking-wide`}
+        />
+        <button
+          type="button"
+          onClick={onVerify}
+          disabled={validated || vatCheck?.loading || !value?.trim()}
+          className="flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] disabled:opacity-50 dark:border-dark-3 dark:text-dark-6"
+        >
+          {vatCheck?.loading ? <Loader2 size={14} className="animate-spin" /> : <ShieldQuestion size={14} />}
+          {validated ? "Validée" : "Vérifier"}
+        </button>
+      </div>
+      {validated && (
+        <p className="text-xs font-medium text-emerald-600">
+          TVA déjà validée via VIES{validatedName ? ` — ${validatedName}` : ""}. La facture sera créée, puis envoyée manuellement depuis Opérations.
+        </p>
+      )}
+      {vatCheck && !vatCheck.loading && (
+        <p className={`text-xs font-medium ${vatCheck.error || vatCheck.valid === false ? "text-red-600" : "text-emerald-600"}`}>{vatCheck.message}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Billing address — street, box/floor, postcode, city, country, in that
+ * order and with the same placeholders on every counter screen.
+ */
+export function CounterAddressFields({ address, onChange, required = false }) {
+  return (
+    <div className="space-y-2">
+      <input required={required} value={address.addressLine1} onChange={(event) => onChange("addressLine1", event.target.value)} placeholder="Rue et numéro" className={`${fieldClass} w-full`} />
+      <input value={address.addressLine2 ?? ""} onChange={(event) => onChange("addressLine2", event.target.value)} placeholder="Boîte, étage (facultatif)" className={`${fieldClass} w-full`} />
+      <div className="flex gap-2">
+        <input required={required} value={address.addressPostalCode} onChange={(event) => onChange("addressPostalCode", event.target.value)} placeholder="Code postal" className={`${fieldClass} w-24`} />
+        <input required={required} value={address.addressCity} onChange={(event) => onChange("addressCity", event.target.value)} placeholder="Ville" className={`${fieldClass} min-w-0 flex-1`} />
+        <input
+          value={address.addressCountry}
+          onChange={(event) => onChange("addressCountry", event.target.value.toUpperCase())}
+          placeholder="BE"
+          aria-label="Pays (code à 2 lettres)"
+          maxLength={2}
+          className={`${fieldClass} w-16 text-center uppercase`}
+        />
+      </div>
+    </div>
   );
 }

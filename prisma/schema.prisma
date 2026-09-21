@@ -111,6 +111,10 @@ enum InvoiceSource {
   WORKSHOP
   FORMATION
   STAFF_CONTRACT
+  // Composed by hand by an admin on /dashboard/factures/nouvelle — still
+  // anchored to a Payment on an Order (source MANUAL), see
+  // actions/invoices/manual-invoice.js.
+  MANUAL
 }
 
 enum PromoCodeType {
@@ -146,6 +150,9 @@ enum TransactionMethod {
   CASH
   CARD
   ONLINE
+  // Virement bancaire — only recorded by hand when settling a manual
+  // invoice. Never Stripe: a refund of it is a manual transfer back.
+  TRANSFER
 }
 
 enum TransactionType {
@@ -393,6 +400,10 @@ enum OrderStatus {
 enum OrderSource {
   ONLINE
   POS
+  // The sale behind a hand-composed invoice (actions/invoices/manual-invoice.js).
+  // Always status COMPLETED — whether it is paid lives on Payment.status only,
+  // so lib/orders/expire-stale-orders.js can never cancel it.
+  MANUAL
 }
 
 enum WeekDay {
@@ -1402,6 +1413,13 @@ model Order {
 
   notes String?
 
+  // source MANUAL only (actions/invoices/manual-invoice.js). A manual sale
+  // paid by acompte or later is only invoiced once fully paid, so the
+  // comment to print on that invoice and the balance's due date wait here
+  // until then. Never read for any other source.
+  invoiceNotes   String?
+  paymentDueDate DateTime?
+
   // POS walk-in ("client de passage") ticket e-mail — set the moment the
   // cashier submits an address, before knowing whether the send actually
   // succeeds. posTicketEmailSentAt only gets set on a confirmed Resend
@@ -1840,6 +1858,19 @@ model Payment {
   workshopReservation    WorkshopReservation?  @relation(fields: [workshopReservationId], references: [id])
   formationReservationId String?               @unique
   formationReservation   FormationReservation? @relation(fields: [formationReservationId], references: [id])
+  // Set when the client said they would pay by bank transfer but it has not
+  // reached the account yet: the amount expected. Nothing is recorded as
+  // received — no Transaction, no invoice — until an admin accepts it
+  // (« Virement reçu », actions/payments/awaited-transfer.js). Cleared by the
+  // payment that follows. Used by every counter flow: manual sales, booking
+  // balances, pickup orders and counter reservations.
+  awaitedTransferAmount Decimal? @db.Decimal(10, 2)
+
+  // Staff rent (lib/staff-rent-payment.js): the rent contract this monthly
+  // payment belongs to. Not unique — the same contract is billed every month.
+  // Fifth source of the Payment_exactly_one_source CHECK.
+  staffContractId        String?
+  staffContract          Contract?             @relation("StaffRentPayments", fields: [staffContractId], references: [id])
   depositAmount          Decimal               @default(0)
   totalAmount            Decimal
   paidAmount             Decimal
@@ -1927,6 +1958,8 @@ model Payment {
   // flight at a time, enforced by a partial unique index — see
   // model RefundOperation's closing comment.
   refundOperations      RefundOperation[]
+  // Staff rent: the rent period this payment settles (lib/staff-rent-payment.js).
+  staffRentPeriod       StaffMonthlyInvoice? @relation("StaffRentPeriod")
 
   // Whose money this is, frozen when the payment is created
   // (lib/payments/resolve-payee.js). Null = the salon. Set = an independent
@@ -1943,6 +1976,7 @@ model Payment {
   @@index([promoCodeId])
   @@index([ticketKind])
   @@index([payeeStaffId])
+  @@index([staffContractId])
 }
 
 enum TicketKind {
@@ -2087,6 +2121,10 @@ model Invoice {
   taxCountryCode  String       @default("BE")
   vatTreatment    VatTreatment @default(DOMESTIC)
   taxNote         String?
+
+  // Free-text comment typed by the admin on a manual invoice, printed on the
+  // PDF and sent as the UBL cbc:Note. Frozen at issue like every other column.
+  notes String?
 
   // Set only after Resend confirms that the invoice e-mail was accepted for
   // delivery. The invoice's customerEmail remains the legal recipient
@@ -2682,6 +2720,7 @@ model Contract {
   updatedAt            DateTime       @updatedAt
 
   rentalRequest RentalRequest?
+  rentPayments  Payment[]      @relation("StaffRentPayments")
 
   // ─── ANNIVERSARY-BASED BILLING ────────────────────────────────────────────
   // For FIXED_RENT contracts, nextInvoiceDate tracks the next anniversary date
@@ -2729,6 +2768,10 @@ enum StaffMonthlyInvoiceStatus {
   EMAIL_FAILED // invoice issued, email delivery failed
   SKIPPED      // staff or contract ineligible — no invoice created
   ERROR        // unexpected error during generation (emailError holds detail)
+  // Rent due, transfer not accepted yet: a PENDING Payment exists, NO invoice
+  // (and no number). « Accepter le paiement » (Factures) issues the invoice,
+  // already paid, and moves the row to GENERATED.
+  AWAITING_PAYMENT
 }
 
 model StaffMonthlyInvoice {
@@ -2743,9 +2786,18 @@ model StaffMonthlyInvoice {
   billingYear  Int
   billingMonth Int // 1–12
 
-  // The issued invoice — null only if status is SKIPPED or ERROR.
+  // The issued invoice — null if status is SKIPPED, ERROR or AWAITING_PAYMENT.
   invoiceId String?  @unique
   invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+
+  // AWAITING_PAYMENT: the rent due and its pending transfer Payment. The
+  // invoice is only issued when the payment is accepted, from exactly these
+  // (lib/staff-rent-payment.js, actions/invoices/staff-rent.js).
+  paymentId       String?   @unique
+  payment         Payment?  @relation("StaffRentPeriod", fields: [paymentId], references: [id])
+  amount          Decimal?  @db.Decimal(10, 2)
+  lineDescription String?
+  dueDate         DateTime?
 
   // The contract whose fixedRent was billed. Nullable: if a staff member
   // has no active contract we record a SKIPPED row so the admin can see it.

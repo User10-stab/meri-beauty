@@ -638,7 +638,7 @@ function refundableByOwner(row) {
 
 function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpenTransfer, onRefund, readOnly = false }) {
   return (
-    <Table>
+    <Table className="[&_td]:px-3 [&_th]:px-3 [&_td:first-child]:pl-6 [&_th:first-child]:pl-6 [&_td:last-child]:pr-6 [&_th:last-child]:pr-6">
       <TableHeader>
         <TableRow>
           <TableHead className="pl-6">Date</TableHead>
@@ -651,7 +651,13 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
           <TableHead>Règlement</TableHead>
           <TableHead>Facture</TableHead>
           <TableHead className="text-right">Montant</TableHead>
-          <TableHead className="pr-6 text-right">Actions</TableHead>
+          {/* Pinned: with eleven columns the table always scrolls sideways on
+              a laptop or a phone, and an action column parked off the right
+              edge is an action nobody finds. It stays put over the scrolling
+              content, hence its own opaque background. */}
+          <TableHead className="sticky right-0 z-20 border-l border-stroke bg-white pr-6 text-right shadow-[-12px_0_14px_-12px_rgba(0,0,0,0.18)] dark:border-dark-3 dark:bg-gray-dark">
+            Actions
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -666,7 +672,7 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
           const vatNumber = invoice?.customerVatNumber ?? customer?.vatNumber ?? null;
           const transaction = latestTransaction(row);
           return (
-            <TableRow key={row.id}>
+            <TableRow key={row.id} className="group">
               <TableCell className="pl-6">{described.dateLabel}</TableCell>
               <TableCell>
                 {described.href ? (
@@ -721,7 +727,7 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
               <TableCell>
                 <PaymentBreakdown row={row} />
                 {!row.operationOnly && (
-                  <details className="mt-2 min-w-[220px] text-xs">
+                  <details className="mt-2 text-xs open:min-w-[220px]">
                     <summary className="cursor-pointer font-medium text-[#2f3a2e]">Historique des transactions</summary>
                     <ul className="mt-2 space-y-2">
                       {(row.payment?.transactions ?? []).filter((event) => !event.isDeleted).map((event) => {
@@ -749,7 +755,7 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
                 {described.amountLabel ?? `${described.isRefundEvent ? "−" : ""}${money(described.totalAmount)}`}
                 {described.amountNote && <span className="block max-w-28 text-xs font-normal text-gray-400">{described.amountNote}</span>}
               </TableCell>
-              <TableCell className="pr-6">
+              <TableCell className="sticky right-0 z-10 border-l border-stroke bg-white pr-6 align-top shadow-[-12px_0_14px_-12px_rgba(0,0,0,0.18)] group-hover:bg-[#fafafa] dark:border-dark-3 dark:bg-gray-dark dark:group-hover:bg-dark-2">
                 {readOnly ? (
                   refundableByOwner(row) ? (
                     <button
@@ -886,7 +892,12 @@ export function AdminOperationsClient({ result, basePath = "/dashboard/operation
   }
 
   return (
-    <div className="rounded-[10px] border border-stroke bg-white shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+    // Full-bleed on purpose: the dashboard shell pads <main>, and the ledger
+    // is the widest thing in the app — those gutters are worth more as table
+    // width than as framing. The negative margins mirror the shell's padding
+    // scale exactly (p-3 / sm:p-4 / md:p-6 / 2xl:p-10), so the card lands on
+    // the padding-box edge and never overflows.
+    <div className="-mx-3 border-x-0 border-y border-stroke bg-white shadow-1 sm:-mx-4 md:-mx-6 2xl:-mx-10 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
       <div className="flex flex-wrap gap-2 border-b border-stroke px-4 py-3">
         {TABS.map(({ key, label, icon: Icon }) => (
           <Link

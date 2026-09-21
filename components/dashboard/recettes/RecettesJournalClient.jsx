@@ -12,6 +12,7 @@ import {
   FileSpreadsheet,
   Printer,
   ChevronRight,
+  Landmark,
 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { groupRowsByDay, formatDayLabel } from "@/lib/livre-de-recettes/day-groups";
@@ -195,6 +196,12 @@ export function RecettesJournalClient({ data }) {
           label="En ligne (Stripe)"
           value={formatEuro(methodCard("ONLINE").net)}
           note={methodCard("ONLINE").refunded > 0 ? `−${formatEuro(methodCard("ONLINE").refunded)} remboursé` : null}
+        />
+        <StatCard
+          icon={<Landmark size={20} />}
+          label="Virement bancaire"
+          value={formatEuro(methodCard("TRANSFER").net)}
+          note={methodCard("TRANSFER").refunded > 0 ? `−${formatEuro(methodCard("TRANSFER").refunded)} remboursé` : null}
         />
         <StatCard icon={<Undo2 size={20} />} label="Remboursements" value={formatEuro(summary.refundTotal)} />
         <StatCard icon={<ListOrdered size={20} />} label="Écritures" value={summary.count} />

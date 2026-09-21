@@ -72,7 +72,8 @@ describe("the shared filter vocabulary stays out of the server action", () => {
 describe("cash and bank are told apart", () => {
   test("every method lands on exactly one side of the reconciliation", () => {
     const methods = Object.keys(METHOD_LABELS);
-    expect(methods.sort()).toEqual(["CARD", "CASH", "ONLINE"]);
+    // TRANSFER: a bank transfer settling a manual invoice (bank side).
+    expect(methods.sort()).toEqual(["CARD", "CASH", "ONLINE", "TRANSFER"]);
     for (const method of methods) {
       const inCash = CASH_METHODS.includes(method);
       const inBank = BANK_METHODS.includes(method);

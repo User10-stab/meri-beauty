@@ -4,6 +4,7 @@ import {
   DocumentHeader,
   LegalFooter,
   LineItemsTable,
+  NotesBlock,
   SellerBlock,
   TermsBlock,
   TotalsBlock,
@@ -42,7 +43,11 @@ function paymentStatus(payment) {
 
 function paymentLine(payment) {
   if (!payment?.paidAt) return null;
-  const method = payment.transactionReference ? "carte bancaire (Stripe)" : "sur place";
+  const method = payment.transactionReference
+    ? "carte bancaire (Stripe)"
+    : payment.method === "TRANSFER"
+    ? "virement bancaire"
+    : "sur place";
   return `Réglée le ${formatDate(payment.paidAt)} par ${method}`;
 }
 
@@ -89,6 +94,8 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
             InvoiceLine carried its net twin — newer lines print their own
             stored figures and ignore it. */}
         <LineItemsTable lines={invoice.lines} vatRate={invoice.vatRate} />
+
+        <NotesBlock notes={invoice.notes} />
 
         <View style={styles.bottom}>
           <TermsBlock

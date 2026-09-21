@@ -30,6 +30,7 @@ const METHOD_LABEL = Object.freeze({
   CASH: "espèces",
   CARD: "carte — terminal en boutique",
   ONLINE: "carte en ligne",
+  TRANSFER: "virement bancaire",
 });
 
 function Row({ label, value, tone = "default" }) {

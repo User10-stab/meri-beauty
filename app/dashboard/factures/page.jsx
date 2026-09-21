@@ -4,9 +4,8 @@ import { requireAdmin } from "@/lib/route-protection";
 import { listInvoices } from "@/actions/dashboard/invoices";
 import { InvoicesClient } from "@/components/dashboard/invoices/InvoicesClient";
 import { listPendingManualSales } from "@/actions/invoices/manual-invoice";
-import { PendingManualSales } from "@/components/dashboard/invoices/PendingManualSales";
 import { listPendingStaffRent } from "@/actions/invoices/staff-rent";
-import { PendingStaffRent } from "@/components/dashboard/invoices/PendingStaffRent";
+import { buildPendingPaymentRows } from "@/lib/invoices/pending-rows";
 
 export const metadata = {
   title: "Factures — Dashboard",
@@ -34,6 +33,13 @@ export default async function FacturesPage({ searchParams }) {
     listPendingStaffRent(),
   ]);
 
+  // Everything still owed sits in the invoice table itself, beside the send
+  // buttons — one place, one tick (see lib/invoices/pending-rows.js).
+  const pendingRows = buildPendingPaymentRows({
+    manualSales: pending.success ? pending.data.rows : [],
+    staffRent: staffRent.success ? staffRent.data.rows : [],
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -52,14 +58,12 @@ export default async function FacturesPage({ searchParams }) {
           <Store size={16} /> Vendre avec facture
         </Link>
       </div>
-      {pending.success && <PendingManualSales data={pending.data} />}
-      {staffRent.success && <PendingStaffRent data={staffRent.data} />}
       {!result.success ? (
         <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {result.message}
         </div>
       ) : (
-        <InvoicesClient data={result.data} />
+        <InvoicesClient data={result.data} pendingRows={pendingRows} />
       )}
     </div>
   );

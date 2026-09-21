@@ -91,14 +91,14 @@ const HOLDER_SELECT = {
 const RESERVATION_INCLUDE = {
   [CHECK_IN_KINDS.WORKSHOP]: {
     customer: { select: HOLDER_SELECT },
-    payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true } },
+    payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true, payeeStaffId: true } },
     session: {
       select: { startDate: true, endDate: true, workshop: { select: { title: true, type: true } } },
     },
   },
   [CHECK_IN_KINDS.FORMATION]: {
     customer: { select: HOLDER_SELECT },
-    payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true } },
+    payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true, payeeStaffId: true } },
     session: {
       select: { startDate: true, endDate: true, formation: { select: { title: true, type: true } } },
     },
@@ -112,7 +112,10 @@ const RESERVATION_INCLUDE = {
         staff: { select: { user: { select: { fullName: true } } } },
       },
     },
-    payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true } },
+    // With no Payment row yet the practitioner decides whose sale it is, so
+    // the counter can tell before offering « Virement » (resolve-payee.js).
+    staff: { select: { type: true } },
+    payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true, payeeStaffId: true } },
   },
 };
 
@@ -161,6 +164,12 @@ function presentAppointment(appointment) {
     balanceDue: Number(appointment.payment?.remainingAmount ?? appointment.staffService.price ?? 0),
     totalPrice: Number(appointment.payment?.totalAmount ?? appointment.staffService.price ?? 0),
     paidAmount: Number(appointment.payment?.paidAmount ?? 0),
+    // An independent practitioner's sale: off-till, so the salon neither
+    // banks nor invoices it — and « Virement » cannot be announced for it.
+    // The Payment decides once it exists; before that, the practitioner does.
+    independent: appointment.payment
+      ? Boolean(appointment.payment.payeeStaffId)
+      : appointment.staff?.type === "INDEPENDENT",
     admissible: blockedReason === null,
     blockedReason,
   };
@@ -210,6 +219,9 @@ function presentReservation(reservation, kind) {
     balanceDue: Number(reservation.payment?.remainingAmount ?? reservation.balanceDue),
     totalPrice: Number(reservation.payment?.totalAmount ?? reservation.totalPrice),
     paidAmount: Number(reservation.payment?.paidAmount ?? (Number(reservation.totalPrice) - Number(reservation.balanceDue))),
+    // Only a formation can belong to an independent animator; a workshop is
+    // always the salon's (resolvePayeeForWorkshopSession).
+    independent: Boolean(reservation.payment?.payeeStaffId),
     admissible: blockedReason === null,
     blockedReason,
   };

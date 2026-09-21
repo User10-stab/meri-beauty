@@ -160,7 +160,7 @@ export async function searchCounterTickets(query) {
               checkedInAt: true,
               user: { select: { fullName: true } },
               staffService: { select: { price: true, service: { select: { name: true } } } },
-              payment: { select: { remainingAmount: true, totalAmount: true, paidAmount: true } },
+              payment: { select: { remainingAmount: true, totalAmount: true, paidAmount: true, payeeStaffId: true } },
             },
             orderBy: { startTime: "desc" },
             take: RESULT_LIMIT,
@@ -180,7 +180,7 @@ export async function searchCounterTickets(query) {
               checkedInSeats: true,
               customer: { select: { fullName: true } },
               session: { select: { startDate: true, workshop: { select: { title: true, type: true } } } },
-              payment: { select: { remainingAmount: true, totalAmount: true, paidAmount: true } },
+              payment: { select: { remainingAmount: true, totalAmount: true, paidAmount: true, payeeStaffId: true } },
             },
             orderBy: { session: { startDate: "desc" } },
             take: RESULT_LIMIT,
@@ -200,7 +200,7 @@ export async function searchCounterTickets(query) {
               checkedInSeats: true,
               customer: { select: { fullName: true } },
               session: { select: { startDate: true, formation: { select: { title: true } } } },
-              payment: { select: { remainingAmount: true, totalAmount: true, paidAmount: true } },
+              payment: { select: { remainingAmount: true, totalAmount: true, paidAmount: true, payeeStaffId: true } },
             },
             orderBy: { session: { startDate: "desc" } },
             take: RESULT_LIMIT,
@@ -242,6 +242,9 @@ export async function searchCounterTickets(query) {
         totalAmount: Number(appointment.payment?.totalAmount ?? appointment.staffService?.price ?? 0),
         paidAmount: Number(appointment.payment?.paidAmount ?? 0),
         checkedIn: Boolean(appointment.checkedInAt),
+        // An independent practitioner's sale: off-till, so no salon ticket,
+        // no salon invoice and no awaited transfer (resolve-payee.js).
+        independent: Boolean(appointment.payment?.payeeStaffId),
       })),
       ...workshops.map((reservation) => ({
         kind: "workshop",
@@ -254,6 +257,7 @@ export async function searchCounterTickets(query) {
         totalAmount: Number(reservation.payment?.totalAmount ?? 0),
         paidAmount: Number(reservation.payment?.paidAmount ?? 0),
         checkedIn: reservation.checkedInSeats >= reservation.seatsCount,
+        independent: Boolean(reservation.payment?.payeeStaffId),
       })),
       ...formations.map((reservation) => ({
         kind: "formation",
@@ -265,6 +269,7 @@ export async function searchCounterTickets(query) {
         totalAmount: Number(reservation.payment?.totalAmount ?? 0),
         paidAmount: Number(reservation.payment?.paidAmount ?? 0),
         checkedIn: reservation.checkedInSeats >= reservation.seatsCount,
+        independent: Boolean(reservation.payment?.payeeStaffId),
       })),
     ];
 

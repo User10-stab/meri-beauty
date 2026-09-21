@@ -8,6 +8,8 @@ import { searchCounterServices } from "@/actions/counter/walk-in-service";
 import { searchPointOfSaleProducts } from "@/actions/boutique/point-of-sale";
 import { searchCounterPickups } from "@/actions/boutique/orders";
 import { OCCUPANCY_KINDS, sessionOccupancyByIds } from "@/lib/reservations/session-occupancy";
+import { COUNTER_SELLABLE_CATALOGUE_STATUSES } from "@/lib/counter/catalogue-availability";
+import { resolvePayeeForFormationSession } from "@/lib/payments/resolve-payee";
 
 /**
  * The one search behind the counter's omnibar: typing three letters must
@@ -52,6 +54,11 @@ async function canSearchSessions() {
  * session here is the first step of selling a reservation, the same
  * capability a counter booking is created under, not the capability that
  * manages the catalogue itself.
+ *
+ * A brouillon or archivé catalogue entry is findable here on purpose — the
+ * counter sells what the salon actually runs, not what the website happens
+ * to show (COUNTER_SELLABLE_CATALOGUE_STATUSES). Each row carries its
+ * catalogueStatus so the result list can say so out loud.
  */
 async function searchCounterSessions(query) {
   const guard = await canSearchSessions();
@@ -67,13 +74,16 @@ async function searchCounterSessions(query) {
             where: {
               status: "SCHEDULED",
               startDate: { gte: startOfToday() },
-              workshop: { status: "PUBLISHED", title: { contains: value, mode: "insensitive" } },
+              workshop: {
+                status: { in: COUNTER_SELLABLE_CATALOGUE_STATUSES },
+                title: { contains: value, mode: "insensitive" },
+              },
             },
             select: {
               id: true,
               startDate: true,
               capacity: true,
-              workshop: { select: { id: true, title: true, type: true, price: true, depositPercentage: true, capacity: true } },
+              workshop: { select: { id: true, title: true, type: true, price: true, depositPercentage: true, capacity: true, status: true } },
             },
             orderBy: { startDate: "asc" },
             take: SESSION_RESULT_LIMIT,
@@ -84,19 +94,35 @@ async function searchCounterSessions(query) {
             where: {
               status: "SCHEDULED",
               startDate: { gte: startOfToday() },
-              formation: { status: "PUBLISHED", title: { contains: value, mode: "insensitive" } },
+              formation: {
+                status: { in: COUNTER_SELLABLE_CATALOGUE_STATUSES },
+                title: { contains: value, mode: "insensitive" },
+              },
             },
             select: {
               id: true,
               startDate: true,
               capacity: true,
-              formation: { select: { id: true, title: true, price: true, depositPercentage: true, capacity: true } },
+              formation: { select: { id: true, title: true, price: true, depositPercentage: true, capacity: true, status: true } },
             },
             orderBy: { startDate: "asc" },
             take: SESSION_RESULT_LIMIT,
           })
         : [],
     ]);
+
+    // Only a formation can belong to an independent animator
+    // (resolvePayeeForWorkshopSession is always the salon). The counter needs
+    // to know before offering « Virement »: the salon can only bank — and
+    // later accept — a transfer on its own sale.
+    const formationPayees = new Map(
+      await Promise.all(
+        formationSessions.map(async (session) => [
+          session.id,
+          Boolean((await resolvePayeeForFormationSession(prisma, { sessionId: session.id })).payeeStaffId),
+        ])
+      )
+    );
 
     const [workshopOccupancy, formationOccupancy] = await Promise.all([
       sessionOccupancyByIds(prisma, {
@@ -119,11 +145,13 @@ async function searchCounterSessions(query) {
           sessionId: session.id,
           title: session.workshop.title,
           activityType: session.workshop.type,
+          catalogueStatus: session.workshop.status,
           startDate: session.startDate,
           unitPrice: Number(session.workshop.price),
           depositPercentage: session.workshop.depositPercentage,
           capacity,
           seatsAvailable: Math.max(0, capacity - taken),
+          independent: false,
         };
       }),
       ...formationSessions.map((session) => {
@@ -135,11 +163,13 @@ async function searchCounterSessions(query) {
           sessionId: session.id,
           title: session.formation.title,
           activityType: null,
+          catalogueStatus: session.formation.status,
           startDate: session.startDate,
           unitPrice: Number(session.formation.price),
           depositPercentage: session.formation.depositPercentage,
           capacity,
           seatsAvailable: Math.max(0, capacity - taken),
+          independent: formationPayees.get(session.id) ?? false,
         };
       }),
     ];

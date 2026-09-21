@@ -40,31 +40,53 @@ async function uniqueBrandSlug(base, excludeId = null) {
   }
 }
 
+/**
+ * Produits par marque, en une seule agrégation.
+ *
+ * Product ne pointe que vers sa sous-catégorie : la marque est deux jointures
+ * plus haut. Compter marque par marque donnait un COUNT par marque (N+1) —
+ * un GROUP BY unique rend la même chose. Les jointures internes reproduisent
+ * exactement le filtre précédent (sous-catégorie ET catégorie non nulles) ;
+ * les produits sans sous-catégorie (subcategoryId est nullable) restent donc
+ * hors comptage, comme avant.
+ */
+async function countProductsByBrand() {
+  const rows = await prisma.$queryRaw`
+    SELECT c."brandId" AS "brandId", COUNT(p.id)::int AS "count"
+    FROM "Product" p
+    JOIN "ProductSubcategory" s ON s.id = p."subcategoryId"
+    JOIN "ProductCategory" c ON c.id = s."categoryId"
+    GROUP BY c."brandId"
+  `;
+  return Object.fromEntries(rows.map((r) => [r.brandId, Number(r.count)]));
+}
+
 export async function getBrands({ includeInactive = false } = {}) {
   try {
-    const brands = await prisma.brand.findMany({
-      where: {
-        isDeleted: false,
-        ...(includeInactive ? {} : { isActive: true }),
-      },
-      orderBy: { name: "asc" },
-      include: { _count: { select: { categories: true } } },
-    });
+    const [brands, productCounts] = await Promise.all([
+      prisma.brand.findMany({
+        where: {
+          isDeleted: false,
+          ...(includeInactive ? {} : { isActive: true }),
+        },
+        orderBy: { name: "asc" },
+        include: { _count: { select: { categories: true } } },
+      }),
+      countProductsByBrand(),
+    ]);
 
     return {
       success: true,
-      data: await Promise.all(
-        brands.map(async (b) => ({
-          id: b.id,
-          name: b.name,
-          slug: b.slug,
-          logo: b.logo,
-          description: b.description,
-          isActive: b.isActive,
-          categoryCount: b._count.categories,
-          productCount: await prisma.product.count({ where: { subcategory: { category: { brandId: b.id } } } }),
-        }))
-      ),
+      data: brands.map((b) => ({
+        id: b.id,
+        name: b.name,
+        slug: b.slug,
+        logo: b.logo,
+        description: b.description,
+        isActive: b.isActive,
+        categoryCount: b._count.categories,
+        productCount: productCounts[b.id] ?? 0,
+      })),
     };
   } catch (error) {
     console.error("[getBrands]", error);

@@ -7,6 +7,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 export const metadata = {
   title: "Formations — Meri Beauty",
   description: "Formations professionnelles privées et de groupe animées par nos expertes.",
+  alternates: { canonical: "/formations" },
 };
 
 function CalendarIcon() {

@@ -12,6 +12,7 @@ export async function generateMetadata() {
   return {
     title: t("metadataTitle"),
     description: t("metadataDescription"),
+    alternates: { canonical: "/evenements" },
   };
 }
 

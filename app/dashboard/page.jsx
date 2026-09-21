@@ -7,6 +7,7 @@ import { isCurrentUserAdmin } from "@/lib/route-protection";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { OverdueOrdersCarousel } from "@/components/dashboard/OverdueOrdersCarousel";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
+import { RevenueTrendChart } from "@/components/dashboard/RevenueTrendChart";
 
 // Mirrors messages/fr.json's dashboardBoutique.orders.overdue.* copy — this
 // page doesn't use next-intl (see ORDER_STATUS_LABEL below), so the strings
@@ -72,7 +73,6 @@ export default async function Home({ searchParams }) {
   }
 
   const data = result.data;
-  const maxDailyRevenue = Math.max(1, ...data.revenueTrend.map((d) => d.total));
   const monthLabel = data.monthLabel;
 
   // ── Card deep-links ──────────────────────────────────────────────────
@@ -173,40 +173,14 @@ export default async function Home({ searchParams }) {
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         {/* ── Revenue trend ────────────────────────────────────────────── */}
-        <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card xl:col-span-2">
-          <h2 className="mb-5 text-lg font-bold text-dark dark:text-white">
-            Revenus — {monthLabel}
-          </h2>
-          <div className="flex h-52 gap-3 overflow-x-auto pt-8">
-            {data.revenueTrend.map((day) => {
-              const heightPct = Math.max(4, (day.total / maxDailyRevenue) * 100);
-              const dayNumber = new Intl.DateTimeFormat("fr-FR", { day: "numeric", timeZone: "Europe/Brussels" }).format(
-                new Date(`${day.date}T12:00:00`)
-              );
-              const valueLabel = day.total > 0 ? formatEuro(day.total) : "";
-              return (
-                <div
-                  key={day.date}
-                  title={valueLabel ? `${dayNumber} — ${valueLabel}` : dayNumber}
-                  aria-label={valueLabel ? `Jour ${dayNumber} : ${valueLabel}` : `Jour ${dayNumber} : 0 €`}
-                  className="group flex min-w-8 flex-1 flex-col items-center justify-end gap-2"
-                >
-                  <div className="relative flex w-full flex-1 items-end">
-                    {valueLabel ? (
-                      <span className="pointer-events-none absolute left-1/2 top-0 z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-[#2f3a2e] px-2 py-1 text-[11px] font-medium text-white opacity-0 shadow-md transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 dark:bg-white dark:text-dark">
-                        {valueLabel}
-                      </span>
-                    ) : null}
-                    <div
-                      className="w-full rounded-t-md bg-[#2f3a2e] dark:bg-white"
-                      style={{ height: `${heightPct}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-400">{dayNumber}</span>
-                </div>
-              );
-            })}
-          </div>
+        <div className="xl:col-span-2">
+          <RevenueTrendChart
+            days={data.revenueTrend}
+            monthLabel={monthLabel}
+            todayKey={todayKey}
+            isCurrentMonth={data.isCurrentMonth}
+            href={revenueHref}
+          />
         </div>
 
         {/* ── Low stock alerts ─────── */}

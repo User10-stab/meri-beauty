@@ -4,6 +4,12 @@ import ReservationCategoryPicker from "@/components/reservation/ReservationCateg
 import { getTranslations } from "next-intl/server";
 import { Headset } from "lucide-react";
 
+// Titre et description restent ceux du layout racine ; seule la canonique
+// manquait.
+export const metadata = {
+  alternates: { canonical: "/reservation" },
+};
+
 export default async function Page() {
   const t = await getTranslations();
 

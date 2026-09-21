@@ -4,6 +4,7 @@ import { getPublicAnimators } from "@/actions/workshops/get-public-animators";
 export const metadata = {
   title: "Nos Animateurs — Meri Beauty",
   description: "Découvrez les professionnels qui animent nos ateliers et événements beauté.",
+  alternates: { canonical: "/animateurs" },
 };
 
 function formatDate(dateStr) {

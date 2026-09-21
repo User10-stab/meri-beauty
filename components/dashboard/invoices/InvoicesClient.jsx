@@ -2,10 +2,16 @@
 
 import { Fragment, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, Mail, RotateCcw, Search, Send } from "lucide-react";
+import { toast } from "sonner";
+import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, HandCoins, Hourglass, Mail, RotateCcw, Search, Send } from "lucide-react";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { GenerateCreditNoteDialog } from "@/components/dashboard/operations/GenerateCreditNoteDialog";
+import { SettleManualInvoiceDialog } from "@/components/dashboard/invoices/SettleManualInvoiceDialog";
 import { INVOICE_SOURCE_LABELS } from "@/lib/invoices/list-filters";
+import { pendingPaymentState } from "@/lib/invoices/pending-rows";
+import { settleManualInvoice } from "@/actions/invoices/manual-invoice";
+import { acceptAwaitedTransfer } from "@/actions/payments/awaited-transfer";
+import { acceptStaffRentPayment } from "@/actions/invoices/staff-rent";
 
 /**
  * Factures — every issued invoice in one list with Voir / E-mail / Peppol.
@@ -14,6 +20,12 @@ import { INVOICE_SOURCE_LABELS } from "@/lib/invoices/list-filters";
  * reuses the Opérations delivery card and the credit note reuses its
  * "Générer une note de crédit" flow. No delete, on purpose: see
  * actions/dashboard/invoices.js.
+ *
+ * What is still owed lives in this same table rather than in panels above it
+ * (user's call, 2026-09-21): the « Paiement » column says waiting or late, and
+ * one tick accepts the money — same row, same place as the send buttons. A
+ * pending row whose invoice already exists (a rent invoiced before the
+ * payment-first rule) is drawn on that invoice's own row, not twice.
  */
 
 const euro = (value) => new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
@@ -112,7 +124,61 @@ function DocumentActions({ pdfHref, peppolApplicable, onSend, tone }) {
   );
 }
 
-export function InvoicesClient({ data }) {
+/**
+ * The « Paiement » column. An issued invoice is only ever issued paid in this
+ * app, so it reads as settled unless a pending row is still attached to it.
+ */
+function PaymentCell({ pending }) {
+  if (!pending) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+        <Check size={11} /> Payé
+      </span>
+    );
+  }
+  const { late, dueDate } = pendingPaymentState(pending);
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+          late ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+        }`}
+      >
+        <Hourglass size={11} /> {late ? "En retard" : "En attente"}
+      </span>
+      {dueDate && <span className="text-[11px] text-gray-400">Échéance {formatDate(dueDate)}</span>}
+      <span className="text-[11px] font-semibold text-gray-600 dark:text-dark-6">Reste {euro(pending.remainingAmount)}</span>
+    </div>
+  );
+}
+
+/**
+ * The tick that accepts the money, and — for a manual sale only, which can
+ * also be paid in cash, by card or in several times — the dialog that does
+ * anything other than "the whole balance arrived by transfer".
+ */
+function PendingActions({ pending, busy, onAccept, onSettle }) {
+  return (
+    <>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onAccept(pending)}
+        title="Le paiement est arrivé : l'enregistrer (et émettre la facture si elle est due)"
+        className={`${actionButton} border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700`}
+      >
+        <Check size={13} /> {busy ? "…" : "Accepter"}
+      </button>
+      {pending.settleOrderId && (
+        <button type="button" disabled={busy} onClick={() => onSettle(pending)} className={`${actionButton} border-sky-300 text-sky-800 hover:bg-sky-50`}>
+          <HandCoins size={13} /> Autre
+        </button>
+      )}
+    </>
+  );
+}
+
+export function InvoicesClient({ data, pendingRows = [] }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -121,8 +187,41 @@ export function InvoicesClient({ data }) {
   const [draft, setDraft] = useState(filters);
   const [delivery, setDelivery] = useState(null); // { kind, document, invoice, channel }
   const [creditNoteFor, setCreditNoteFor] = useState(null); // invoice row
+  const [acceptingKey, setAcceptingKey] = useState(null);
+  const [settling, setSettling] = useState(null); // manual sale, richer settlement
+  const [issuedInvoice, setIssuedInvoice] = useState(null); // « proposer l'envoi »
 
   useEffect(() => setDraft(filters), [filters]);
+
+  // A pending row whose invoice is on screen is drawn on that row; the others
+  // get one of their own above the list, so nothing owed is ever unreachable
+  // behind a filter or a page.
+  const shownNumbers = new Set(rows.map((invoice) => invoice.number));
+  const pendingByNumber = new Map(
+    pendingRows.filter((row) => row.invoiceNumber && shownNumbers.has(row.invoiceNumber)).map((row) => [row.invoiceNumber, row])
+  );
+  const looseRows = pendingRows.filter((row) => !row.invoiceNumber || !shownNumbers.has(row.invoiceNumber));
+
+  /** One tick, whatever the row is: the whole balance, received by transfer. */
+  async function acceptPending(row) {
+    if (acceptingKey) return;
+    setAcceptingKey(row.key);
+    const { kind } = row.accept;
+    const result =
+      kind === "RENT" || kind === "LEGACY_INVOICE"
+        ? await acceptStaffRentPayment(row.accept)
+        : kind === "TRANSFER"
+          ? await acceptAwaitedTransfer({ paymentId: row.accept.paymentId })
+          : await settleManualInvoice({ orderId: row.accept.orderId, method: "TRANSFER" });
+    setAcceptingKey(null);
+    if (!result?.success) {
+      toast.error(result?.message ?? "Paiement non enregistré.");
+      return;
+    }
+    toast.success(result.message);
+    if (result.data?.invoice) setIssuedInvoice(result.data.invoice);
+    router.refresh();
+  }
 
   function navigate(next) {
     const params = new URLSearchParams(searchParams?.toString() ?? "");
@@ -236,20 +335,59 @@ export function InvoicesClient({ data }) {
               <th className="px-4 py-3">Client</th>
               <th className="px-4 py-3">Origine</th>
               <th className="px-4 py-3 text-right">Montant</th>
+              <th className="px-4 py-3">Paiement</th>
               <th className="px-4 py-3">Envoi</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && (
+            {/* Owed, not invoiced yet — no number, nothing to send. */}
+            {looseRows.map((pending) => (
+              <tr key={pending.key} className="border-b border-stroke bg-amber-50/40 align-top dark:border-dark-3 dark:bg-amber-900/10">
+                <td className="px-4 py-3">
+                  <p className="font-semibold text-dark dark:text-white">{pending.label}</p>
+                  <p className="text-xs text-gray-400">Pas encore facturé</p>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-gray-700 dark:text-dark-6">{formatDate(pending.createdAt)}</td>
+                <td className="px-4 py-3">
+                  <p className="font-medium text-dark dark:text-white">{pending.customerName}</p>
+                  <p className="text-xs text-gray-500">{pending.customerEmail || "— pas d'e-mail"}</p>
+                </td>
+                <td className="px-4 py-3 text-gray-700 dark:text-dark-6">
+                  {pending.origin}
+                  {pending.summary && (
+                    <p className="max-w-xs truncate text-xs text-gray-400" title={pending.summary}>
+                      {pending.summary}
+                    </p>
+                  )}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-right">
+                  <p className="font-semibold text-dark dark:text-white">{euro(pending.remainingAmount)}</p>
+                  {pending.totalAmount != null && pending.paidAmount > 0 && (
+                    <p className="text-xs text-gray-400">sur {euro(pending.totalAmount)} TTC</p>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <PaymentCell pending={pending} />
+                </td>
+                <td className="px-4 py-3 text-xs text-gray-400">—</td>
+                <td className="px-4 py-3">
+                  <div className="flex justify-end gap-1.5 whitespace-nowrap">
+                    <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && looseRows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-500">
+                <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-500">
                   Aucune facture ne correspond à ces filtres.
                 </td>
               </tr>
             )}
             {rows.map((invoice) => {
               const noteCount = invoice.creditNotes.length;
+              const pending = pendingByNumber.get(invoice.number) ?? null;
               return (
                 <Fragment key={invoice.id}>
                   <tr className="border-b border-stroke align-top last:border-0 hover:bg-gray-50/60 dark:border-dark-3 dark:hover:bg-dark-2/40">
@@ -284,10 +422,16 @@ export function InvoicesClient({ data }) {
                       </p>
                     </td>
                     <td className="px-4 py-3">
+                      <PaymentCell pending={pending} />
+                    </td>
+                    <td className="px-4 py-3">
                       <DeliveryCell doc={invoice} peppolApplicable={invoice.peppolApplicable} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1.5 whitespace-nowrap">
+                        {pending && (
+                          <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />
+                        )}
                         <DocumentActions
                           pdfHref={`/api/invoices/${invoice.id}/pdf`}
                           peppolApplicable={invoice.peppolApplicable}
@@ -365,6 +509,18 @@ export function InvoicesClient({ data }) {
         kind={delivery?.kind ?? "INVOICE"}
         initialChannel={delivery?.channel ?? null}
         onDelivered={() => router.refresh()}
+      />
+
+      {/* A manual sale settled any other way: cash, card, or an acompte. */}
+      <SettleManualInvoiceDialog sale={settling} onClose={() => setSettling(null)} onInvoiceIssued={setIssuedInvoice} />
+
+      {/* The invoice the accepted payment just issued — offer to send it. */}
+      <DocumentDeliveryDialog
+        open={Boolean(issuedInvoice)}
+        onClose={() => setIssuedInvoice(null)}
+        document={issuedInvoice}
+        invoice={issuedInvoice}
+        kind="INVOICE"
       />
 
       {creditNoteFor && (

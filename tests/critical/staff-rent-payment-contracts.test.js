@@ -335,12 +335,15 @@ describe("the « Facturation mensuelle » page is gone, the logic stays", () => 
     expect(existsSync(`${root}app/api/cron/monthly-staff-billing/route.js`)).toBe(true);
   });
 
-  it("the Factures page shows the rent awaiting its transfer", () => {
+  it("the Factures page shows the rent awaiting its transfer, in the invoice table itself", () => {
     const page = source("app/dashboard/factures/page.jsx");
     expect(page).toContain("listPendingStaffRent()");
-    expect(page).toContain("<PendingStaffRent data={staffRent.data} />");
-    const panel = source("components/dashboard/invoices/PendingStaffRent.jsx");
-    expect(panel).toContain("Accepter le paiement");
-    expect(panel).toContain("<DocumentDeliveryDialog");
+    expect(page).toContain("buildPendingPaymentRows({");
+    expect(page).toContain("<InvoicesClient data={result.data} pendingRows={pendingRows} />");
+    // The separate panel is gone: one table, one « Paiement » column, one tick.
+    expect(existsSync(`${root}components/dashboard/invoices/PendingStaffRent.jsx`)).toBe(false);
+    const client = source("components/dashboard/invoices/InvoicesClient.jsx");
+    expect(client).toContain("acceptStaffRentPayment(row.accept)");
+    expect(client).toContain("<DocumentDeliveryDialog");
   });
 });

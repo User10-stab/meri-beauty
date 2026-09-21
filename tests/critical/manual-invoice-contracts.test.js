@@ -470,10 +470,16 @@ describe("a bank transfer stays pending until staff approve it", () => {
     expect(mocks.tx.payment.create.mock.calls[1][0].data.awaitedTransferAmount).toBeNull();
   });
 
-  it("« Virement reçu » needs the bank reference", async () => {
+  it("« Accepter » takes one tick: the bank reference is optional, a card's terminal ticket is not", async () => {
     mocks.prisma.order.findUnique.mockResolvedValue(pendingSale());
-    const result = await settleManualInvoice({ orderId: "o_1", method: "TRANSFER", reference: "" });
-    expect(result).toMatchObject({ success: false, message: expect.stringContaining("référence du virement") });
+    const accepted = await settleManualInvoice({ orderId: "o_1", method: "TRANSFER" });
+    expect(accepted).toMatchObject({ success: true, data: { fullyPaid: true } });
+    expect(mocks.tx.transaction.create.mock.calls[0][0].data).toMatchObject({ method: "TRANSFER", manualReference: null });
+
+    mocks.prisma.$transaction.mockClear();
+    mocks.prisma.order.findUnique.mockResolvedValue(pendingSale());
+    const card = await settleManualInvoice({ orderId: "o_1", method: "CARD", reference: "" });
+    expect(card).toMatchObject({ success: false, message: expect.stringContaining("ticket terminal") });
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 

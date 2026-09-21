@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isTillCashOperator } from "@/lib/authorization";
 import { roundMoney } from "@/lib/tax-policy";
+import { isBelgianVatNumber } from "@/lib/peppyrus";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { sendSettlementEmail } from "@/lib/payments/send-settlement-email";
 import { sendReservationConfirmation } from "@/lib/reservations/send-reservation-confirmation";
@@ -110,7 +111,8 @@ export async function acceptAwaitedTransfer(input) {
   const paymentId = typeof input?.paymentId === "string" ? input.paymentId.trim() : "";
   const reference = typeof input?.reference === "string" ? input.reference.trim().slice(0, 100) : "";
   if (!paymentId) return { success: false, message: "Virement introuvable." };
-  if (!reference) return { success: false, message: "Indiquez la référence du virement (communication ou n° d'opération)." };
+  // The bank reference is optional: « Accepter » on the Factures page is one
+  // tick and asks for nothing (user's call, 2026-09-21).
 
   let outcome;
   try {
@@ -188,6 +190,25 @@ export async function acceptAwaitedTransfer(input) {
   revalidatePath("/dashboard/operations");
   return {
     success: true,
+    // Same shape the other accept paths return, so the caller can offer to
+    // send the invoice this transfer just issued without a second lookup.
+    data: {
+      invoice: outcome.invoice
+        ? {
+            id: outcome.invoice.id,
+            number: outcome.invoice.number,
+            customerName: outcome.invoice.customerName,
+            customerLegalName: outcome.invoice.customerLegalName,
+            customerEmail: outcome.invoice.customerEmail,
+            customerType: outcome.invoice.customerType,
+            customerVatNumber: outcome.invoice.customerVatNumber,
+            totalInclVat: Number(outcome.invoice.totalInclVat),
+            emailSentAt: outcome.invoice.emailSentAt ?? null,
+            peppyrusSentAt: outcome.invoice.peppyrusSentAt ?? null,
+            peppolApplicable: outcome.invoice.customerType === "B2B" && isBelgianVatNumber(outcome.invoice.customerVatNumber),
+          }
+        : null,
+    },
     message: outcome.invoice
       ? `Virement de ${euro(outcome.received)} enregistré — facture ${outcome.invoice.number} émise.`
       : outcome.fullyPaid

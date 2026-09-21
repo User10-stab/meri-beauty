@@ -28,7 +28,9 @@ export function isPaymentComplete({ method, cashReceived, reference }, total) {
     const received = Number(cashReceived);
     return cashReceived !== "" && !Number.isNaN(received) && received + 0.001 >= total;
   }
-  return Boolean(reference?.trim());
+  // A card's terminal ticket is its receipt, so it stays required; a transfer's
+  // bank reference does not (see lib/validations/manual-invoice.js).
+  return method !== "CARD" || Boolean(reference?.trim());
 }
 
 // `lockedMethod` hides the method choice — « Virement reçu » only ever

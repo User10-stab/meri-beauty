@@ -11,6 +11,8 @@ import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines, resolveSettlementInvoice } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
+import { AWAITED_TRANSFER_METHOD, AWAITED_TRANSFER_OFF_TILL_MESSAGE, isAwaitedTransfer, markPaymentAwaitingTransfer } from "@/lib/payments/awaited-transfer";
+import { COUNTER_QR_MESSAGES, COUNTER_QR_METHOD, COUNTER_QR_SURFACES, isCounterQr, verifyCounterQrPayment } from "@/lib/counter/qr-checkout";
 import { resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
@@ -768,7 +770,7 @@ export async function markAppointmentNoShow(appointmentId) {
  */
 export async function completeAppointment(
   appointmentId,
-  { method, paymentConfirmed, terminalApproved, terminalReference, finalTotal, adjustmentReason } = {}
+  { method, paymentConfirmed, terminalApproved, terminalReference, qrSessionId, finalTotal, adjustmentReason } = {}
 ) {
   try {
     if (!appointmentId) {
@@ -879,7 +881,32 @@ export async function completeAppointment(
     // nothing. The boutique POS (lib/validations/point-of-sale.js) and the
     // refund path (validateManualRefundConfirmation) already required this —
     // settlement was the one place that did not.
-    if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL"].includes(method)) {
+    // TRANSFER is not a collection: the client leaves without paying and the
+    // money is only recorded when an admin accepts the transfer — see
+    // lib/payments/awaited-transfer.js. So no attestation, no till session
+    // and no invoice here; only the amount expected is written down.
+    const awaitsTransfer = collectsAtTill && isAwaitedTransfer(method);
+    // Off-till (a non-operator, or an independent's appointment): refuse
+    // rather than fall into the collection branch below, which would record
+    // the visit as paid although nothing was received.
+    if (collectsMoney && !collectsAtTill && isAwaitedTransfer(method)) {
+      return { success: false, message: AWAITED_TRANSFER_OFF_TILL_MESSAGE };
+    }
+    // « Carte QR »: Stripe is the attestation, asked before anything is
+    // recorded — for this appointment and this exact amount.
+    const paidByQr = collectsAtTill && isCounterQr(method);
+    let qrPayment = null;
+    if (paidByQr) {
+      qrPayment = await verifyCounterQrPayment(qrSessionId, {
+        surface: COUNTER_QR_SURFACES.APPOINTMENT,
+        targetId: appointmentId,
+        amount: priceAdjustment.amountDue,
+      });
+      if (!qrPayment.paid) {
+        return { success: false, message: COUNTER_QR_MESSAGES[qrPayment.reason] ?? "Paiement par QR non confirmé." };
+      }
+    }
+    if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL", AWAITED_TRANSFER_METHOD, COUNTER_QR_METHOD].includes(method)) {
       return {
         success: false,
         message: hasBalanceDue
@@ -898,7 +925,7 @@ export async function completeAppointment(
     // POS terminal-sale risk this mirrors. See docs/PRODUCTION_ISSUES.md #2.
     // Only asked of a till operator — an off-till collection never enters the
     // drawer total, so there is nothing to reconcile it against.
-    if (collectsAtTill && paymentConfirmed !== true) {
+    if (collectsAtTill && !awaitsTransfer && !paidByQr && paymentConfirmed !== true) {
       return { success: false, message: "Confirmez avoir bien reçu le paiement avant de terminer le rendez-vous.", requiresPaymentConfirmation: true };
     }
     // Cash with no till open used to be accepted and left unassigned
@@ -955,7 +982,31 @@ export async function completeAppointment(
         }
       }
 
-      if (collectsMoney) {
+      // The client leaves without paying: the appointment is completed, the
+      // balance stays due and the transfer is expected. No Transaction, no
+      // ticket, no invoice until it is accepted.
+      if (collectsMoney && awaitsTransfer) {
+        updatedPayment = payment
+          ? await markPaymentAwaitingTransfer(tx, {
+              paymentId: payment.id,
+              amount: priceAdjustment.amountDue,
+              totalAmount: priceAdjustment.finalTotal,
+            })
+          : await tx.payment.create({
+              data: {
+                appointmentId,
+                ...payeePaymentData(await resolvePayeeForAppointment(tx, { staffId: appointment.staffId })),
+                depositAmount: 0,
+                totalAmount: priceAdjustment.finalTotal,
+                paidAmount: 0,
+                remainingAmount: priceAdjustment.amountDue,
+                awaitedTransferAmount: priceAdjustment.amountDue,
+                paymentType: "ON_SITE",
+                status: "PENDING",
+              },
+            });
+        balance = priceAdjustment.amountDue;
+      } else if (collectsMoney) {
         balance = priceAdjustment.amountDue;
 
         // Payment.appointmentId is @unique, so if the customer's own online
@@ -996,6 +1047,8 @@ export async function completeAppointment(
         // collection is deliberately detached (no session, no piece number).
         const useTill = !offTill && method === "CASH";
         const isTerminalCard = !offTill && method === "EXTERNAL_TERMINAL";
+        // A QR charge lives on Stripe, never in the drawer.
+        const isQr = !offTill && isCounterQr(method);
         const openCashSession = useTill
           ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
           : null;
@@ -1010,12 +1063,12 @@ export async function completeAppointment(
             amount: balance,
             // A card terminal collection records as CARD; a cash handover —
             // whether it joins the till or is taken off-till — records as CASH.
-            method: isTerminalCard ? "CARD" : "CASH",
+            method: isQr ? "ONLINE" : isTerminalCard ? "CARD" : "CASH",
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
             cashSessionId: useTill ? openCashSession.id : null,
             pieceNumber,
-            manualReference: isTerminalCard ? terminalReference.trim() : null,
+            manualReference: isTerminalCard ? terminalReference.trim() : isQr ? qrPayment.paymentIntentId : null,
           },
         });
 
@@ -1131,7 +1184,9 @@ export async function completeAppointment(
     // turn a successful settlement into an error response — same as the
     // legally-required Invoice, issued above inside the transaction, which
     // is never auto-sent either (Marie sends it manually from Opérations).
-    if (balance > 0) {
+    // An awaited transfer collected nothing, so there is no ticket to send
+    // yet — accepting it later does that (actions/payments/awaited-transfer.js).
+    if (balance > 0 && result.collection) {
       sendSettlementEmail(authCheck.user, result.collection.paymentId, { transactionId: result.collection.id }).catch((err) =>
         console.error("[completeAppointment] ticket send failed", err),
       );
@@ -1145,7 +1200,9 @@ export async function completeAppointment(
     revalidatePath("/dashboard/operations");
     return {
       success: true,
-      message: collectsOnSite
+      message: awaitsTransfer
+        ? `Rendez-vous terminé — virement de ${priceAdjustment.amountDue.toFixed(2)} € attendu. Acceptez-le dans « Ventes en attente de paiement » à sa réception.`
+        : collectsOnSite
         ? offTill
           ? "Rendez-vous terminé — paiement enregistré."
           : "Rendez-vous terminé — paiement encaissé et enregistré."

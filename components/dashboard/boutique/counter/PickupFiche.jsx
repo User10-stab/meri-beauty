@@ -7,27 +7,47 @@ import { completeOrderPickup } from "@/actions/boutique/orders";
 import { formatPrice } from "@/components/dashboard/boutique/counter/counter-format";
 import { useCashSessionOpen } from "@/components/dashboard/boutique/counter/useCashSessionOpen";
 import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSessionGate";
+import {
+  CounterCashReceived,
+  CounterPaymentMethodTiles,
+  CounterTerminalReference,
+} from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
+import { CounterQrDialog } from "@/components/dashboard/boutique/counter/CounterQrDialog";
 
 /** A boutique pickup order — a different world entirely (Order, not a ticket), routed to the same scan box. */
 export function PickupFiche({ order, onSettled, canCollectCash = false }) {
-  const [method, setMethod] = useState("CASH");
+  // Same default as every other Pointage screen: the terminal, whose
+  // reference field is then on screen from the start.
+  const [method, setMethod] = useState("EXTERNAL_TERMINAL");
   const [terminalReference, setTerminalReference] = useState("");
+  // Change helper only — completeOrderPickup records the order total.
+  const [cashReceived, setCashReceived] = useState("");
   const [saving, setSaving] = useState(false);
   const needsPayment = !order.hasPayment;
   // Only Marie / an admin takes money at the counter; for everyone else
   // completeOrderPickup records it off-till, so there's no method to pick.
   const collectsAtTill = needsPayment && canCollectCash;
   const isExternalTerminal = method === "EXTERNAL_TERMINAL";
+  const awaitsTransfer = method === "TRANSFER";
+  // « Carte QR »: the client pays on their own phone before the goods are
+  // handed over. The server re-verifies the session with Stripe.
+  const paysByQr = method === "CARD_QR";
+  const [qrOpen, setQrOpen] = useState(false);
   const { open: cashSessionOpen, markOpen: markCashSessionOpen, markClosed: markCashSessionClosed } = useCashSessionOpen();
 
   function selectMethod(next) {
     setMethod(next);
     if (next !== "EXTERNAL_TERMINAL") setTerminalReference("");
+    if (next !== "CASH") setCashReceived("");
   }
 
-  async function handleConfirm() {
+  async function handleConfirm(qrSessionId = null) {
     if (collectsAtTill && isExternalTerminal && !terminalReference.trim()) {
       toast.error("Indiquez la référence du ticket du terminal.");
+      return;
+    }
+    if (collectsAtTill && paysByQr && !qrSessionId) {
+      setQrOpen(true);
       return;
     }
     setSaving(true);
@@ -37,8 +57,10 @@ export function PickupFiche({ order, onSettled, canCollectCash = false }) {
       ...(collectsAtTill && isExternalTerminal
         ? { terminalApproved: true, terminalReference: terminalReference.trim() }
         : {}),
+      ...(qrSessionId ? { qrSessionId } : {}),
     });
     setSaving(false);
+    setQrOpen(false);
 
     if (!result.success) {
       toast.error(result.message);
@@ -74,25 +96,19 @@ export function PickupFiche({ order, onSettled, canCollectCash = false }) {
             </p>
             {collectsAtTill && (
               <>
-                <div className="flex items-center gap-3">
-                  {["CASH", "EXTERNAL_TERMINAL"].map((value) => (
-                    <label key={value} className="flex items-center gap-1.5 text-sm text-dark dark:text-white">
-                      <input type="radio" checked={method === value} onChange={() => selectMethod(value)} />
-                      {value === "CASH" ? "Espèces" : "Carte — terminal"}
-                    </label>
-                  ))}
-                </div>
-                {isExternalTerminal && (
-                  <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-stroke bg-gray-50 p-3 dark:border-dark-3 dark:bg-dark-2">
-                    <input
-                      value={terminalReference}
-                      onChange={(event) => setTerminalReference(event.target.value)}
-                      maxLength={100}
-                      aria-label="Référence du ticket du terminal"
-                      placeholder="Référence du ticket du terminal"
-                      className="min-w-[220px] flex-1 rounded-[7px] border border-stroke bg-white px-3 py-2 text-sm outline-none focus:border-primary dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-                    />
+                <CounterPaymentMethodTiles methods={["CARD_QR", "CASH", "EXTERNAL_TERMINAL", "TRANSFER"]} value={method} onChange={selectMethod} />
+                {awaitsTransfer && (
+                  <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-900/10 dark:text-sky-200">
+                    <p className="font-semibold">Virement en attente de validation</p>
+                    <p className="mt-1">
+                      La commande est remise mais rien n&apos;est encaissé. À la réception du virement, acceptez-le dans « Ventes en attente de
+                      paiement » : c&apos;est là que le paiement, le ticket et la facture sont créés.
+                    </p>
                   </div>
+                )}
+                {isExternalTerminal && <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />}
+                {method === "CASH" && (
+                  <CounterCashReceived id={`pickup-cash-${order.id}`} value={cashReceived} onChange={setCashReceived} amountDue={Number(order.totalAmount)} />
                 )}
                 {method === "CASH" && !cashSessionOpen && (
                   <CashSessionGate onOpened={markCashSessionOpen} />
@@ -112,7 +128,7 @@ export function PickupFiche({ order, onSettled, canCollectCash = false }) {
               (collectsAtTill && isExternalTerminal && !terminalReference.trim()) ||
               (collectsAtTill && method === "CASH" && !cashSessionOpen)
             }
-            onClick={handleConfirm}
+            onClick={() => handleConfirm()}
             className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <CheckCircle2 className="h-4 w-4" strokeWidth={2} />
@@ -120,12 +136,25 @@ export function PickupFiche({ order, onSettled, canCollectCash = false }) {
               ? "Traitement…"
               : !needsPayment
                 ? "Remettre la commande"
+                : collectsAtTill && awaitsTransfer
+                  ? `Remettre — virement de ${formatPrice(order.totalAmount)} attendu`
+                : collectsAtTill && paysByQr
+                  ? `Afficher le QR — ${formatPrice(order.totalAmount)}`
                 : collectsAtTill
-                  ? "Encaisser et remettre"
+                  ? `J'ai bien reçu ${formatPrice(order.totalAmount)} — encaisser et remettre`
                   : "Enregistrer et remettre"}
           </button>
         )}
       </div>
+      {qrOpen && (
+        <CounterQrDialog
+          surface="order"
+          targetId={order.id}
+          amount={Number(order.totalAmount)}
+          onPaid={(qrSessionId) => handleConfirm(qrSessionId)}
+          onClose={() => setQrOpen(false)}
+        />
+      )}
     </div>
   );
 }

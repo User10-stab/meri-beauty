@@ -5,6 +5,22 @@ import { KIND_LABEL, formatDateTime, formatPrice } from "@/components/dashboard/
 
 const SESSION_KIND_LABEL = { workshop: "Atelier / Événement", formation: "Formation" };
 
+// A brouillon/archivé atelier-formation and a prestation désactivée are
+// sellable at the counter (lib/counter/catalogue-availability.js), so they
+// show up here next to published ones. This badge is what keeps that from
+// being silent: the cashier still needs to see that what they are about to
+// ring up is not what the website is offering.
+const CATALOGUE_STATUS_LABEL = { DRAFT: "Brouillon", ARCHIVED: "Archivé" };
+
+function OffCatalogueBadge({ label }) {
+  if (!label) return null;
+  return (
+    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+      {label}
+    </span>
+  );
+}
+
 function rowKey(row) {
   if (row.type === "BOOKING") return `booking:${row.kind}:${row.id}`;
   if (row.type === "PICKUP") return `pickup:${row.orderId}`;
@@ -75,7 +91,10 @@ function ServiceRow({ row }) {
     <>
       <Scissors className="h-4 w-4 shrink-0 text-gray-400" strokeWidth={1.75} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold text-dark dark:text-white">{row.serviceName}</p>
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-bold text-dark dark:text-white">{row.serviceName}</p>
+          <OffCatalogueBadge label={row.isActive === false ? "Désactivée" : null} />
+        </div>
         <p className="truncate text-xs text-gray-500 dark:text-dark-6">
           Prestation · {row.staffName}
           {row.categoryName ? ` · ${row.categoryName}` : ""}
@@ -91,7 +110,10 @@ function SessionRow({ row }) {
     <>
       <Calendar className="h-4 w-4 shrink-0 text-gray-400" strokeWidth={1.75} />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold text-dark dark:text-white">{row.title}</p>
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-bold text-dark dark:text-white">{row.title}</p>
+          <OffCatalogueBadge label={CATALOGUE_STATUS_LABEL[row.catalogueStatus]} />
+        </div>
         <p className="truncate text-xs text-gray-500 dark:text-dark-6">
           {SESSION_KIND_LABEL[row.kind]} · {row.seatsAvailable} place{row.seatsAvailable > 1 ? "s" : ""} restante
           {row.seatsAvailable > 1 ? "s" : ""}

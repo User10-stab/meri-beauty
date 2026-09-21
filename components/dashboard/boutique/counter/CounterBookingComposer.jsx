@@ -10,6 +10,11 @@ import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { CounterBuyerForm } from "@/components/dashboard/boutique/counter/CounterBuyerForm";
 import { useCashSessionOpen } from "@/components/dashboard/boutique/counter/useCashSessionOpen";
 import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSessionGate";
+import {
+  CounterCashReceived,
+  CounterPaymentMethodTiles,
+  CounterTerminalReference,
+} from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 
 function money(value) {
   return new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value) || 0);
@@ -100,7 +105,8 @@ export function CounterBookingComposer({
   // Card is EXTERNAL_TERMINAL only — see SettleAction.
   const [method, setMethod] = useState("EXTERNAL_TERMINAL");
   const [terminalReference, setTerminalReference] = useState("");
-  const [received, setReceived] = useState(false);
+  // Change helper only (CounterCashReceived) — the action records the price.
+  const [cashReceived, setCashReceived] = useState("");
   const [saving, setSaving] = useState(false);
 
   // ── SESSION mode ──────────────────────────────────────────────────────
@@ -111,7 +117,7 @@ export function CounterBookingComposer({
   const [sessionReason, setSessionReason] = useState("");
   const [sessionMethod, setSessionMethod] = useState("EXTERNAL_TERMINAL");
   const [sessionTerminalReference, setSessionTerminalReference] = useState("");
-  const [sessionReceived, setSessionReceived] = useState(false);
+  const [sessionCashReceived, setSessionCashReceived] = useState("");
   const [sessionSaving, setSessionSaving] = useState(false);
 
   // Derived, never chosen: exactly one of the two pending props fires at a
@@ -176,7 +182,7 @@ export function CounterBookingComposer({
     // the form in a state the server refuses.
     setMethod("EXTERNAL_TERMINAL");
     setTerminalReference("");
-    setReceived(false);
+    setCashReceived("");
     setSession(null);
     setSeatsCount(1);
     setPaymentMode("DEPOSIT");
@@ -184,7 +190,7 @@ export function CounterBookingComposer({
     setSessionReason("");
     setSessionMethod("EXTERNAL_TERMINAL");
     setSessionTerminalReference("");
-    setSessionReceived(false);
+    setSessionCashReceived("");
   }
 
   // Only the address fields the server's counterCustomerSchema actually
@@ -218,8 +224,9 @@ export function CounterBookingComposer({
   // amount, not after a round trip that undoes nothing since nothing was
   // created yet.
   function buyerValidationError() {
-    const hasIdentity = buyer.id || (buyer.fullName.trim() && buyer.email.trim() && buyer.phone.trim());
-    if (!hasIdentity) return "Choisissez ou créez le client — nom, e-mail et téléphone sont requis.";
+    // Phone optional, as on the till and in counterCustomerSchema.
+    const hasIdentity = buyer.id || (buyer.fullName.trim() && buyer.email.trim());
+    if (!hasIdentity) return "Choisissez ou créez le client — nom et e-mail sont requis.";
     if (buyerNeedsAddress && !buyer.addressLine1.trim()) {
       return "Adresse de facturation obligatoire pour un client avec un numéro de TVA.";
     }
@@ -234,7 +241,7 @@ export function CounterBookingComposer({
     const amount = Number(finalTotal);
     const changed = Number.isFinite(amount) && amount !== selectedService.price;
     if (changed && reason.trim().length < 3) return toast.error("Indiquez la raison de l'ajustement de prix.");
-    if (!received) return toast.error("Confirmez avoir reçu le paiement.");
+    if (method === "EXTERNAL_TERMINAL" && !terminalReference.trim()) return toast.error("Indiquez la référence du ticket du terminal.");
 
     setSaving(true);
     const result = await createCounterWalkInService({
@@ -346,6 +353,11 @@ export function CounterBookingComposer({
   const sessionDepositAmount = session ? round2((sessionTotal * (session.depositPercentage ?? 50)) / 100) : 0;
   const sessionCollected = paymentMode === "FULL" ? sessionTotal : sessionDepositAmount;
   const sessionPriceChanged = session != null && sessionTotal !== round2(session.unitPrice * seatsCount);
+  // A formation run by an independent animator is her sale: the salon never
+  // banks it, so no transfer can be announced for it — createCounterReservation
+  // refuses it, and it could never be accepted from « Ventes en attente de
+  // paiement », which lists salon payments only.
+  const sessionMethods = session?.independent ? ["CASH", "EXTERNAL_TERMINAL"] : ["CASH", "EXTERNAL_TERMINAL", "TRANSFER"];
 
   async function submitSession(event) {
     event.preventDefault();
@@ -354,7 +366,6 @@ export function CounterBookingComposer({
     if (buyerError) return toast.error(buyerError);
     if (sessionPriceChanged && sessionReason.trim().length < 3) return toast.error("Indiquez la raison de l'ajustement de prix.");
     if (sessionMethod === "EXTERNAL_TERMINAL" && !sessionTerminalReference.trim()) return toast.error("Indiquez la référence du ticket du terminal.");
-    if (!sessionReceived) return toast.error("Confirmez avoir reçu le paiement.");
 
     setSessionSaving(true);
     const result = await createCounterReservation({
@@ -429,6 +440,7 @@ export function CounterBookingComposer({
             willBeBelgianB2B={buyerWillBeBelgianB2B}
             allowWalkIn={false}
             showInvoiceOptOut={false}
+            addressReason="pour un client avec un numéro de TVA"
           />
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -440,15 +452,35 @@ export function CounterBookingComposer({
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center gap-4">
-            {["CASH", "EXTERNAL_TERMINAL"].map((value) => <label key={value} className="flex items-center gap-1.5 text-sm"><input type="radio" checked={method === value} onChange={() => setMethod(value)} />{value === "CASH" ? "Espèces" : "Carte — terminal"}</label>)}
-          </div>
-          {method === "EXTERNAL_TERMINAL" && <input required value={terminalReference} onChange={(e) => setTerminalReference(e.target.value)} maxLength={100} placeholder="Référence du ticket du terminal" aria-label="Référence du ticket du terminal" className="h-10 w-full rounded-[7px] border border-stroke bg-white px-3 text-sm dark:border-dark-3 dark:bg-dark-2" />}
+          <CounterPaymentMethodTiles
+            methods={["CASH", "EXTERNAL_TERMINAL", "TRANSFER"]}
+            value={method}
+            onChange={(next) => {
+              setMethod(next);
+              if (next !== "EXTERNAL_TERMINAL") setTerminalReference("");
+              if (next !== "CASH") setCashReceived("");
+            }}
+          />
+          {method === "EXTERNAL_TERMINAL" && <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />}
+          {method === "CASH" && <CounterCashReceived id="composer-service-cash" value={cashReceived} onChange={setCashReceived} amountDue={Number(finalTotal) || 0} />}
+          {method === "TRANSFER" && <AwaitedTransferNote />}
           {tillGateApplies && method === "CASH" && !cashSessionOpen && <CashSessionGate onOpened={markCashSessionOpen} />}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke pt-3 dark:border-dark-3">
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={received} onChange={(e) => setReceived(e.target.checked)} />J&apos;ai bien reçu {money(finalTotal)}</label>
-            <button type="submit" disabled={saving || !received || (tillGateApplies && method === "CASH" && !cashSessionOpen)} className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{saving && <Loader2 className="h-4 w-4 animate-spin" />}{saving ? "Encaissement…" : "Encaisser et enregistrer"}</button>
+          {/* The button is the attestation, as on every counter screen: it
+              names the amount received. */}
+          <div className="flex justify-end border-t border-stroke pt-3 dark:border-dark-3">
+            <button
+              type="submit"
+              disabled={saving || (method === "EXTERNAL_TERMINAL" && !terminalReference.trim()) || (tillGateApplies && method === "CASH" && !cashSessionOpen)}
+              className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {saving
+                ? "Encaissement…"
+                : method === "TRANSFER"
+                  ? `Enregistrer — virement de ${money(finalTotal)} attendu`
+                  : `J'ai bien reçu ${money(finalTotal)} — encaisser et enregistrer`}
+            </button>
           </div>
         </form>
       )}
@@ -507,45 +539,63 @@ export function CounterBookingComposer({
             willBeBelgianB2B={buyerWillBeBelgianB2B}
             allowWalkIn={false}
             showInvoiceOptOut={false}
+            addressReason="pour un client avec un numéro de TVA"
           />
 
-          <div className="flex flex-wrap items-center gap-4 border-t border-stroke pt-3 dark:border-dark-3">
-            {["CASH", "EXTERNAL_TERMINAL"].map((value) => (
-              <label key={value} className="flex items-center gap-1.5 text-sm">
-                <input type="radio" checked={sessionMethod === value} onChange={() => setSessionMethod(value)} />
-                {value === "CASH" ? "Espèces" : "Carte — terminal"}
-              </label>
-            ))}
-          </div>
-          {sessionMethod === "EXTERNAL_TERMINAL" && (
-            <input
-              required
-              value={sessionTerminalReference}
-              onChange={(e) => setSessionTerminalReference(e.target.value)}
-              maxLength={100}
-              placeholder="Référence du ticket du terminal"
-              aria-label="Référence du ticket du terminal"
-              className="h-10 w-full rounded-[7px] border border-stroke bg-white px-3 text-sm dark:border-dark-3 dark:bg-dark-2"
+          <div className="border-t border-stroke pt-3 dark:border-dark-3">
+            <CounterPaymentMethodTiles
+              methods={sessionMethods}
+              value={sessionMethod}
+              onChange={(next) => {
+                setSessionMethod(next);
+                if (next !== "EXTERNAL_TERMINAL") setSessionTerminalReference("");
+                if (next !== "CASH") setSessionCashReceived("");
+              }}
             />
+          </div>
+          {sessionMethod === "EXTERNAL_TERMINAL" && <CounterTerminalReference value={sessionTerminalReference} onChange={setSessionTerminalReference} />}
+          {sessionMethod === "CASH" && (
+            <CounterCashReceived id="composer-session-cash" value={sessionCashReceived} onChange={setSessionCashReceived} amountDue={sessionCollected} />
           )}
+          {sessionMethod === "TRANSFER" && <AwaitedTransferNote />}
           {tillGateApplies && sessionMethod === "CASH" && !cashSessionOpen && <CashSessionGate onOpened={markCashSessionOpen} />}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-stroke pt-3 dark:border-dark-3">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={sessionReceived} onChange={(e) => setSessionReceived(e.target.checked)} />
-              J&apos;ai bien reçu {money(sessionCollected)}
-            </label>
+          <div className="flex justify-end border-t border-stroke pt-3 dark:border-dark-3">
             <button
               type="submit"
-              disabled={sessionSaving || !sessionReceived || (tillGateApplies && sessionMethod === "CASH" && !cashSessionOpen)}
+              disabled={
+                sessionSaving ||
+                (sessionMethod === "EXTERNAL_TERMINAL" && !sessionTerminalReference.trim()) ||
+                (tillGateApplies && sessionMethod === "CASH" && !cashSessionOpen)
+              }
               className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
             >
               {sessionSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {sessionSaving ? "Encaissement…" : "Encaisser et réserver"}
+              {sessionSaving
+                ? "Encaissement…"
+                : sessionMethod === "TRANSFER"
+                  ? `Réserver — virement de ${money(sessionCollected)} attendu`
+                  : `J'ai bien reçu ${money(sessionCollected)} — encaisser et réserver`}
             </button>
           </div>
         </form>
       )}
+    </div>
+  );
+}
+
+/**
+ * « Virement »: nothing is collected now — the money is only recorded when
+ * an admin accepts the transfer (lib/payments/awaited-transfer.js).
+ */
+function AwaitedTransferNote() {
+  return (
+    <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-900/10 dark:text-sky-200">
+      <p className="font-semibold">Virement en attente de validation</p>
+      <p className="mt-1">
+        Rien n&apos;est encaissé maintenant. À la réception du virement, acceptez-le dans « Ventes en attente de paiement » : c&apos;est là que le
+        paiement, le ticket et la facture sont créés.
+      </p>
     </div>
   );
 }

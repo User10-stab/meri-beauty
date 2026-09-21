@@ -133,9 +133,10 @@ test.describe("the unified counter creates a sale from its one search box", () =
     // Country defaults to BE — nothing to fill.
 
     // ── Deposit, by card — see the file header for why ────────────────────
-    await counter.getByLabel(/carte.*terminal/i).check();
+    await counter.getByRole("radio", { name: /terminal externe/i }).click();
     await counter.getByLabel(/r[ée]f[ée]rence du ticket du terminal/i).fill(terminalRef);
-    await counter.getByLabel(/j.?ai bien re[çc]u/i).check();
+    // No separate "j'ai bien reçu" tick any more: the submit button names the
+    // amount, so pressing it IS the attestation — same on every counter screen.
 
     await counter.getByRole("button", { name: /encaisser et r[ée]server/i }).click();
 
@@ -263,9 +264,10 @@ test.describe("the unified counter creates a sale from its one search box", () =
     // in here).
     await expect(counter.getByText(/adresse de facturation obligatoire/i)).toHaveCount(0);
 
-    await counter.getByLabel(/carte.*terminal/i).check();
+    await counter.getByRole("radio", { name: /terminal externe/i }).click();
     await counter.getByLabel(/r[ée]f[ée]rence du ticket du terminal/i).fill(terminalRef);
-    await counter.getByLabel(/j.?ai bien re[çc]u/i).check();
+    // No separate "j'ai bien reçu" tick any more: the submit button names the
+    // amount, so pressing it IS the attestation — same on every counter screen.
 
     await counter.getByRole("button", { name: /encaisser et enregistrer/i }).click();
 

@@ -47,6 +47,8 @@ import { getOrderPaymentMethod, refundMethodLabel } from "@/lib/payments/refund-
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
+import { AWAITED_TRANSFER_METHOD, AWAITED_TRANSFER_OFF_TILL_MESSAGE, isAwaitedTransfer } from "@/lib/payments/awaited-transfer";
+import { COUNTER_QR_MESSAGES, COUNTER_QR_METHOD, COUNTER_QR_SURFACES, isCounterQr, verifyCounterQrPayment } from "@/lib/counter/qr-checkout";
 
 /**
  * Checkout + order fulfilment.
@@ -1378,7 +1380,7 @@ export async function searchCounterPickups(query) {
  * — and stock is only decremented now, since it was only ever reserved.
  * If a Payment already exists (prepaid), this just records the handover.
  */
-export async function completeOrderPickup({ orderId, pickupCode, method, terminalApproved, terminalReference }) {
+export async function completeOrderPickup({ orderId, pickupCode, method, terminalApproved, terminalReference, qrSessionId }) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
 
@@ -1450,8 +1452,31 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     // nothing. The boutique POS (lib/validations/point-of-sale.js) and the
     // refund path (validateManualRefundConfirmation) already required this —
     // settlement was the one place that did not.
-    if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL"].includes(method)) {
-      return { success: false, message: "Mode de paiement invalide — espèces, ou carte via le terminal avec sa référence." };
+    // TRANSFER is not a collection: the client takes the goods and pays by
+    // bank transfer later. Nothing is recorded — no Transaction, no ticket,
+    // no invoice — until an admin accepts it, see lib/payments/awaited-transfer.js.
+    const awaitsTransfer = collectsAtTill && isAwaitedTransfer(method);
+    // Off-till: refuse rather than record the pickup as paid for money that
+    // never arrived.
+    if (needsPayment && !collectsAtTill && isAwaitedTransfer(method)) {
+      return { success: false, message: AWAITED_TRANSFER_OFF_TILL_MESSAGE };
+    }
+    // « Carte QR »: Stripe is the attestation, checked for this order and
+    // this exact amount before the goods are handed over.
+    const paidByQr = collectsAtTill && isCounterQr(method);
+    let qrPayment = null;
+    if (paidByQr) {
+      qrPayment = await verifyCounterQrPayment(qrSessionId, {
+        surface: COUNTER_QR_SURFACES.ORDER,
+        targetId: order.id,
+        amount: Number(order.totalAmount),
+      });
+      if (!qrPayment.paid) {
+        return { success: false, message: COUNTER_QR_MESSAGES[qrPayment.reason] ?? "Paiement par QR non confirmé." };
+      }
+    }
+    if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL", AWAITED_TRANSFER_METHOD, COUNTER_QR_METHOD].includes(method)) {
+      return { success: false, message: "Mode de paiement invalide — espèces, carte via le terminal avec sa référence, ou virement." };
     }
     if (collectsAtTill && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
       return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket." };
@@ -1477,7 +1502,43 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
       let invoice = null;
       let ticketNumber = null;
 
-      if (needsPayment) {
+      // The goods are handed over, the money is expected by transfer: the
+      // Payment is created PENDING with the amount awaited, and nothing else
+      // is written until it is accepted.
+      if (needsPayment && awaitsTransfer) {
+        await tx.payment.create({
+          data: {
+            orderId: order.id,
+            totalAmount: order.totalAmount,
+            paidAmount: 0,
+            remainingAmount: order.totalAmount,
+            awaitedTransferAmount: order.totalAmount,
+            paymentType: "ON_SITE",
+            status: "PENDING",
+            promoCodeId: order.promoCodeId,
+            discountAmount: order.discountAmount,
+          },
+        });
+
+        // The stock still leaves with the client.
+        for (const item of order.items) {
+          const updated = await tx.productVariant.update({
+            where: { id: item.variantId },
+            data: { stockQuantity: { decrement: item.quantity }, reservedQuantity: { decrement: item.quantity } },
+          });
+          await tx.inventoryMovement.create({
+            data: {
+              variantId: item.variantId,
+              type: "SALE",
+              quantity: -item.quantity,
+              previousStock: updated.stockQuantity + item.quantity,
+              newStock: updated.stockQuantity,
+              reason: `Commande n°${order.orderNumber} — virement attendu`,
+              createdById: guard.session.user.id,
+            },
+          });
+        }
+      } else if (needsPayment) {
         const payment = await tx.payment.create({
           data: {
             orderId: order.id,
@@ -1504,6 +1565,8 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
         // off-till pickup is deliberately detached (no session, no piece).
         const useTill = !offTill && method === "CASH";
         const isTerminalCard = !offTill && method === "EXTERNAL_TERMINAL";
+        // A QR charge lives on Stripe, never in the drawer.
+        const isQr = !offTill && isCounterQr(method);
         const openCashSession = useTill
           ? await tx.cashSession.findFirst({ where: { closedAt: null }, select: { id: true } })
           : null;
@@ -1518,12 +1581,12 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
             amount: order.totalAmount,
             // A card terminal collection records as CARD; a cash handover —
             // at the till or off-till — records as CASH.
-            method: isTerminalCard ? "CARD" : "CASH",
+            method: isQr ? "ONLINE" : isTerminalCard ? "CARD" : "CASH",
             transactionType: "FINAL_PAYMENT",
             paidAt: new Date(),
             cashSessionId: useTill ? openCashSession.id : null,
             pieceNumber,
-            manualReference: isTerminalCard ? terminalReference.trim() : null,
+            manualReference: isTerminalCard ? terminalReference.trim() : isQr ? qrPayment.paymentIntentId : null,
           },
         });
 
@@ -1593,7 +1656,9 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
     // 20s/10s gives real headroom.
     }, { timeout: 20000, maxWait: 10000 });
 
-    if (needsPayment) {
+    // An awaited transfer has no ticket and no invoice yet: both are created
+    // when it is accepted, and the ticket goes out from there.
+    if (needsPayment && !awaitsTransfer) {
       // The invoice PDF is never auto-e-mailed here either, even when one
       // was created (VIES-valid company) — only a ticket goes out
       // automatically. Marie sends the real invoice manually from
@@ -1647,7 +1712,13 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
 
     revalidatePath("/dashboard/boutique/orders");
     if (needsPayment && !offTill && method === "CASH") revalidateCaisseRoutes();
-    return { success: true, message: `Commande n°${order.orderNumber} remise au client.` };
+    if (awaitsTransfer) revalidatePath("/dashboard/factures");
+    return {
+      success: true,
+      message: awaitsTransfer
+        ? `Commande n°${order.orderNumber} remise — virement de ${Number(order.totalAmount).toFixed(2)} € attendu. Acceptez-le dans « Ventes en attente de paiement » à sa réception.`
+        : `Commande n°${order.orderNumber} remise au client.`,
+    };
   } catch (error) {
     if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {
       return { success: false, message: "Identité légale du salon incomplète — complétez Réglages > Salon avant d'émettre des factures." };

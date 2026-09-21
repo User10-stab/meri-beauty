@@ -888,7 +888,7 @@ export async function changeWorkshopReservationSeatsFree(reservationId, { newSea
  */
 export async function completeWorkshopReservation(
   reservationId,
-  { method, paymentConfirmed, terminalApproved, terminalReference, finalTotal, adjustmentReason } = {}
+  { method, paymentConfirmed, terminalApproved, terminalReference, qrSessionId, finalTotal, adjustmentReason } = {}
 ) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
@@ -907,6 +907,7 @@ export async function completeWorkshopReservation(
     paymentConfirmed,
     terminalApproved,
     terminalReference,
+    qrSessionId,
     finalTotal,
     adjustmentReason,
     actorId: session.user.id,

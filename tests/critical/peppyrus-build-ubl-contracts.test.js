@@ -53,6 +53,36 @@ describe("lib/peppyrus/build-ubl", () => {
     expect(xml).not.toMatch(/<cbc:PriceAmount[^>]*>0(\.0+)?<\/cbc:PriceAmount>/);
   });
 
+  // PaymentTerms carries its own cbc:Note (BT-20); only the document-level
+  // one (BT-22, at most one — PEPPOL-EN16931-R002) is the admin's comment.
+  const documentNotes = (xml) =>
+    xml.replace(/<cac:PaymentTerms>[\s\S]*?<\/cac:PaymentTerms>/g, "").match(/<cbc:Note>[\s\S]*?<\/cbc:Note>/g) ?? [];
+
+  it("sends a manual invoice's comment as the single document-level cbc:Note, XML-escaped", () => {
+    const xml = buildInvoiceUbl({
+      invoice: baseInvoice({ notes: "  Prestation du 18/09 <sur site> & déplacement inclus  " }),
+      salon,
+      buyerParticipantId: "9925:0999999999",
+    });
+    const notes = documentNotes(xml);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain("Prestation du 18/09 &lt;sur site&gt; &amp; déplacement inclus");
+  });
+
+  it("emits no document-level cbc:Note for an invoice without comment", () => {
+    const xml = buildInvoiceUbl({ invoice: baseInvoice(), salon, buyerParticipantId: "9925:0999999999" });
+    expect(documentNotes(xml)).toHaveLength(0);
+  });
+
+  it("an invoice is always issued settled: nothing prepaid, the whole total payable, 'acquittée'", () => {
+    const xml = buildInvoiceUbl({
+      invoice: baseInvoice({ source: "WORKSHOP", payment: { status: "PARTIALLY_PAID", paidAmount: "50.00" } }),
+      salon,
+      buyerParticipantId: "9925:0999999999",
+    });
+    expect(xml).toMatch(/<cbc:PayableAmount currencyID="EUR">121(\.00?)?<\/cbc:PayableAmount>/);
+  });
+
   it("throws if the app's own stored totals disagree with the computed line totals", () => {
     const invoice = baseInvoice({ totalInclVat: 999 });
     expect(() => buildInvoiceUbl({ invoice, salon, buyerParticipantId: "9925:0999999999" })).toThrow(/Incohérence/);

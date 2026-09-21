@@ -44,7 +44,7 @@ export function InvoiceRowActions({ invoice = null, creditNote = null, creditNot
         <button
           type="button"
           onClick={onOpenDetail}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-[#2f3a2e] hover:bg-[#f4f7f3] hover:text-[#2f3a2e]"
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-[#2f3a2e] hover:bg-[#f4f7f3] hover:text-[#2f3a2e]"
         >
           <Eye size={14} /> Voir / gérer
         </button>
@@ -52,7 +52,7 @@ export function InvoiceRowActions({ invoice = null, creditNote = null, creditNot
         <button
           type="button"
           onClick={() => setDocumentsOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-[#2f3a2e] hover:bg-[#f4f7f3] hover:text-[#2f3a2e]"
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-[#2f3a2e] hover:bg-[#f4f7f3] hover:text-[#2f3a2e]"
         >
           <FolderOpen size={14} /> Gérer les documents
         </button>
@@ -60,7 +60,7 @@ export function InvoiceRowActions({ invoice = null, creditNote = null, creditNot
         <button
           type="button"
           onClick={() => setCancelRefundOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
         >
           <FilePlus2 size={14} /> Gérer l'annulation
         </button>

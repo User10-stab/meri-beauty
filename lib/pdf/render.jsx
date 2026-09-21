@@ -20,15 +20,31 @@ import { getSellerContact } from "./seller-contact";
  * A failure here degrades to "status not shown", never to a failed render.
  */
 async function resolvePayment(invoice) {
-  if (invoice.payment?.paidAt) return invoice.payment;
-  if (!invoice.paymentId) return null;
+  if (!invoice.paymentId) return invoice.payment?.paidAt ? invoice.payment : null;
   try {
-    return await prisma.payment.findUnique({
+    const payment = await prisma.payment.findUnique({
       where: { id: invoice.paymentId },
-      select: { paidAt: true, transactionReference: true },
+      select: {
+        paidAt: true,
+        transactionReference: true,
+        // Only read to name a bank transfer (a manual invoice settled by
+        // virement) — every other method keeps its historical wording.
+        transactions: {
+          where: { isDeleted: false, transactionType: "FINAL_PAYMENT" },
+          orderBy: { paidAt: "desc" },
+          take: 1,
+          select: { method: true },
+        },
+      },
     });
+    if (!payment) return invoice.payment?.paidAt ? invoice.payment : null;
+    return {
+      paidAt: payment.paidAt,
+      transactionReference: payment.transactionReference,
+      method: payment.transactions[0]?.method ?? null,
+    };
   } catch {
-    return null;
+    return invoice.payment?.paidAt ? invoice.payment : null;
   }
 }
 /**

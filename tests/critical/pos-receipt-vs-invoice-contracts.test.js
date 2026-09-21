@@ -101,7 +101,7 @@ describe("the till mirrors the VIES-only invoice rule", () => {
 
   test("a saved reusable VIES proof is carried into the till and does not ask for another check", () => {
     expect(clientSource).toContain("vatInvoiceReady: Boolean(match.vatInvoiceReady)");
-    expect(buyerFormSource).toContain('customer.vatInvoiceReady ? "Validée" : "Vérifier"');
+    expect(buyerFormSource).toContain('validated ? "Validée" : "Vérifier"');
     expect(buyerFormSource).toContain("TVA déjà validée via VIES");
   });
 

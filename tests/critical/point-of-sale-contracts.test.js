@@ -80,7 +80,9 @@ describe("point-of-sale security contracts", () => {
     expect(ui).toContain("cancelPointOfSaleCheckout");
     expect(ui).toContain('localStorage.setItem("meri-pos-attempt-key"');
     expect(ui).toContain("QR code Stripe Checkout");
-    expect(ui).toContain("Terminal externe");
+    // The method tiles are shared with « Pointage & encaissement ».
+    expect(ui).toContain("<CounterPaymentMethodTiles");
+    expect(source("components/dashboard/boutique/counter/CounterPaymentMethods.jsx")).toContain("Terminal externe");
   });
 
   test("POS identity and idempotency are database-enforced", () => {
@@ -107,8 +109,8 @@ describe("point-of-sale security contracts", () => {
     expect(schema).toContain("changeGiven");
 
     const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
-    expect(ui).toContain("pos-cash-received");
-    expect(ui).toContain("Monnaie à rendre");
+    expect(ui).toContain('id="pos-cash-received"');
+    expect(source("components/dashboard/boutique/counter/CounterPaymentMethods.jsx")).toContain("Monnaie à rendre");
   });
 
   test("billing address is required only when the resolved customer doesn't already have one on file", () => {

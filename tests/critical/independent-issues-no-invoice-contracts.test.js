@@ -152,10 +152,15 @@ describe("une indépendante n'émet aucune facture au nom du salon", () => {
     // seller and the independent is the customer. Gating it on the actor
     // would stop the salon invoicing its own tenants — the opposite of what
     // this whole rule is for.
+    // Since 2026-09-21 the rent due is recorded without an invoice
+    // (lib/staff-monthly-billing.js, lib/staff-invoice.js) and the invoice is
+    // issued when an admin accepts the transfer (actions/invoices/staff-rent.js).
     const billing = source("lib/staff-monthly-billing.js");
     const contract = source("lib/staff-invoice.js");
-    expect(issueInvoiceLines(billing).length).toBeGreaterThan(0);
-    expect(issueInvoiceLines(contract).length).toBeGreaterThan(0);
-    expect(billing + contract).not.toContain("isTillCashOperator");
+    const accept = source("actions/invoices/staff-rent.js");
+    expect(billing).toContain("createPendingRent(tx, {");
+    expect(contract).toContain("createPendingRent(tx, {");
+    expect(issueInvoiceLines(accept).length).toBeGreaterThan(0);
+    expect(billing + contract + accept).not.toContain("isTillCashOperator");
   });
 });

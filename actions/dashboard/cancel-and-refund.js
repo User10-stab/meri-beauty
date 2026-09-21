@@ -361,6 +361,7 @@ export async function confirmManualRefundLeg({ legId, terminalReference = null, 
       LEG_NOT_FOUND: "Remboursement introuvable.",
       ALREADY_SETTLED: "Ce remboursement est déjà confirmé.",
       TERMINAL_REFERENCE_REQUIRED: "La référence du ticket du terminal est obligatoire.",
+      TRANSFER_REFERENCE_REQUIRED: "La référence du virement de remboursement est obligatoire.",
       CASH_HANDOVER_NOT_CONFIRMED: "Confirmez que les espèces ont bien été remises au client.",
     };
     return { success: false, message: messages[result.reason] ?? "Confirmation impossible." };

@@ -335,6 +335,21 @@ export function LineItemsTable({ lines, vatRate = null, title = "DÉTAIL" }) {
   );
 }
 
+/**
+ * The free-text comment typed on a manual invoice (Invoice.notes), printed
+ * under the lines. Renders nothing for every other invoice.
+ */
+export function NotesBlock({ notes }) {
+  const text = notes?.toString().trim();
+  if (!text) return null;
+  return (
+    <View style={[styles.notice, { marginTop: 16, marginBottom: 0 }]} wrap={false}>
+      <Text style={[styles.termsLabel, { marginBottom: 3 }]}>COMMENTAIRE</Text>
+      <Text>{text}</Text>
+    </View>
+  );
+}
+
 export function TermsBlock({ items }) {
   const visible = items.filter((item) => item?.value);
   if (!visible.length) return null;

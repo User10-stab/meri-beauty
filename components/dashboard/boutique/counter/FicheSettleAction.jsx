@@ -9,6 +9,12 @@ import { completeFormationReservation } from "@/actions/formations/manage-reserv
 import { formatPrice } from "@/components/dashboard/boutique/counter/counter-format";
 import { useCashSessionOpen } from "@/components/dashboard/boutique/counter/useCashSessionOpen";
 import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSessionGate";
+import {
+  CounterCashReceived,
+  CounterPaymentMethodTiles,
+  CounterTerminalReference,
+} from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
+import { CounterQrDialog } from "@/components/dashboard/boutique/counter/CounterQrDialog";
 
 const SETTLE_BY_KIND = {
   appointment: completeAppointment,
@@ -45,7 +51,7 @@ const SETTLE_BY_KIND = {
  * is a plain "Enregistrer et clôturer".
  */
 export function FicheSettleAction({ ticket, onChanged, canCollectCash = false }) {
-  // "Carte — terminal" is the only card option: a card collection has to carry
+  // « Terminal externe » is the only card option: a card collection has to carry
   // the terminal's receipt reference, or nothing ties the row to a real
   // charge. Defaulting to it means the reference field is on screen from the
   // start rather than appearing after a choice.
@@ -57,10 +63,28 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
       // the terminal approving. One attestation, one piece of evidence. The
       // receipt reference stays required, because that is the evidence.
   const [terminalReference, setTerminalReference] = useState("");
+  // Change helper only — the settle action records the amount due.
+  const [cashReceived, setCashReceived] = useState("");
   const [saving, setSaving] = useState(false);
   const [finalTotal, setFinalTotal] = useState(String(ticket.totalPrice ?? 0));
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const isExternalTerminal = method === "EXTERNAL_TERMINAL";
+  // Nothing is collected now: the client pays by transfer and an admin
+  // accepts it later — see lib/payments/awaited-transfer.js.
+  const awaitsTransfer = method === "TRANSFER";
+  // An independent's sale is settled off-till: the salon never banks it, so a
+  // transfer cannot be announced here — the server refuses it
+  // (AWAITED_TRANSFER_OFF_TILL_MESSAGE) and it would never reach « Ventes en
+  // attente de paiement », which lists salon payments only.
+  const settleMethods = ticket.independent
+    ? ["CASH", "EXTERNAL_TERMINAL"]
+    : ["CARD_QR", "CASH", "EXTERNAL_TERMINAL", "TRANSFER"];
+  // « Carte QR »: the client pays on their own phone. The QR is generated for
+  // the amount due AFTER any price adjustment, and the settle call carries
+  // both the adjustment and the session id — so the server reconciles them in
+  // one go and refuses a session whose amount no longer matches.
+  const paysByQr = method === "CARD_QR";
+  const [qrOpen, setQrOpen] = useState(false);
   const { open: cashSessionOpen, markOpen: markCashSessionOpen, markClosed: markCashSessionClosed } = useCashSessionOpen();
   const parsedFinalTotal = Number(finalTotal);
   const priceChanged = Number.isFinite(parsedFinalTotal) && parsedFinalTotal !== Number(ticket.totalPrice ?? 0);
@@ -74,9 +98,10 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
   function selectMethod(next) {
     setMethod(next);
     if (next !== "EXTERNAL_TERMINAL") setTerminalReference("");
+    if (next !== "CASH") setCashReceived("");
   }
 
-  async function handleSettle() {
+  async function handleSettle(qrSessionId = null) {
     if (!Number.isFinite(parsedFinalTotal) || parsedFinalTotal < Number(ticket.paidAmount ?? 0)) {
       toast.error("Le prix final doit être valide et ne peut pas être inférieur au montant déjà encaissé.");
       return;
@@ -89,6 +114,12 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
       toast.error("Indiquez la référence du ticket du terminal.");
       return;
     }
+    // Nothing is settled until the client has actually paid: the dialog polls
+    // Stripe and calls back with the session id, which the server re-verifies.
+    if (takesMoneyAtTill && paysByQr && !qrSessionId) {
+      setQrOpen(true);
+      return;
+    }
     setSaving(true);
     const settle = SETTLE_BY_KIND[ticket.kind];
     const result = await settle(ticket.reservationId, {
@@ -97,15 +128,18 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
       ...(takesMoneyAtTill
         ? {
             method,
-            paymentConfirmed: true,
+            // An awaited transfer attests nothing: no money changed hands.
+            paymentConfirmed: !awaitsTransfer,
             ...(isExternalTerminal
               ? { terminalApproved: true, terminalReference: terminalReference.trim() }
               : {}),
+            ...(qrSessionId ? { qrSessionId } : {}),
           }
         : {}),
       ...(priceChanged ? { finalTotal: parsedFinalTotal, adjustmentReason: adjustmentReason.trim() } : {}),
     });
     setSaving(false);
+    setQrOpen(false);
 
     if (!result.success) {
       toast.error(result.message);
@@ -113,9 +147,11 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
       return;
     }
     toast.success(
-      amountDue > 0
-        ? `${formatPrice(amountDue)} encaissés — ${ticket.holderName}`
-        : `Prix ajusté et dossier clôturé — ${ticket.holderName}`
+      amountDue <= 0
+        ? `Prix ajusté et dossier clôturé — ${ticket.holderName}`
+        : awaitsTransfer
+          ? `Virement de ${formatPrice(amountDue)} attendu — ${ticket.holderName}`
+          : `${formatPrice(amountDue)} encaissés — ${ticket.holderName}`
     );
     onChanged();
   }
@@ -161,24 +197,20 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
           </div>
           {takesMoneyAtTill && (
             <>
-          <div className="flex items-center gap-3">
-            {["CASH", "EXTERNAL_TERMINAL"].map((value) => (
-              <label key={value} className="flex items-center gap-1.5 text-sm">
-                <input type="radio" checked={method === value} onChange={() => selectMethod(value)} />
-                {value === "CASH" ? "Espèces" : "Carte — terminal"}
-              </label>
-            ))}
+          <div className="w-full space-y-2 text-dark dark:text-white">
+            <CounterPaymentMethodTiles methods={settleMethods} value={method} onChange={selectMethod} />
+            {awaitsTransfer && (
+              <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-900/10 dark:text-sky-200">
+                <p className="font-semibold">Virement en attente de validation</p>
+                <p className="mt-1">
+                  Le dossier est clôturé mais rien n&apos;est encaissé. À la réception du virement, acceptez-le dans « Ventes en attente de paiement » :
+                  c&apos;est là que le paiement et la facture sont créés.
+                </p>
+              </div>
+            )}
+            {isExternalTerminal && <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />}
+            {method === "CASH" && <CounterCashReceived id={`settle-cash-${ticket.reservationId}`} value={cashReceived} onChange={setCashReceived} amountDue={amountDue} />}
           </div>
-          {isExternalTerminal && (
-            <input
-              value={terminalReference}
-              onChange={(event) => setTerminalReference(event.target.value)}
-              maxLength={100}
-              placeholder="Référence du ticket du terminal"
-              aria-label="Référence du ticket du terminal"
-              className="min-w-[220px] flex-1 rounded-[7px] border border-orange-dark/20 bg-white px-3 py-2 text-sm outline-none focus:border-orange-dark dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-            />
-          )}
           {method === "CASH" && !cashSessionOpen && (
             <CashSessionGate onOpened={markCashSessionOpen} />
           )}
@@ -198,11 +230,15 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
               (takesMoneyAtTill && isExternalTerminal && !terminalReference.trim()) ||
               (takesMoneyAtTill && method === "CASH" && !cashSessionOpen)
             }
-            onClick={handleSettle}
+            onClick={() => handleSettle()}
             className="ml-auto inline-flex items-center gap-2 rounded-[7px] bg-dark px-4 py-2 text-sm font-semibold text-white hover:bg-opacity-90 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-white dark:text-dark"
           >
             {saving
               ? "Traitement…"
+              : takesMoneyAtTill && awaitsTransfer
+                ? `Clôturer — virement de ${formatPrice(amountDue)} attendu`
+              : takesMoneyAtTill && paysByQr
+                ? `Afficher le QR — ${formatPrice(amountDue)}`
               : takesMoneyAtTill
                 ? `J'ai bien reçu ${formatPrice(amountDue)} — encaisser et facturer`
                 : amountDue > 0
@@ -210,6 +246,15 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
                   : "Je confirme cet ajustement — clôturer"}
           </button>
       </div>
+      {qrOpen && (
+        <CounterQrDialog
+          surface={ticket.kind}
+          targetId={ticket.reservationId}
+          amount={amountDue}
+          onPaid={(qrSessionId) => handleSettle(qrSessionId)}
+          onClose={() => setQrOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -138,4 +138,16 @@ describe("the same inputs as the accept paths — the preview cannot drift from 
     expect(client).toContain('const stickyActions = "sticky right-0');
     expect(client.match(/\$\{stickyActions\}/g)).toHaveLength(3);
   });
+
+  it("the action buttons are icons only, each still named by a tooltip and for screen readers", () => {
+    const client = source("components/dashboard/invoices/InvoicesClient.jsx");
+    expect(client).toContain('"inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border');
+    for (const label of ["Voir le PDF", "Envoyer par e-mail", "Envoyer via Peppol", "Aperçu de la facture", "Accepter le paiement", "Encaisser autrement", "Générer une note de crédit"]) {
+      expect(client, label).toContain(`aria-label="${label}"`);
+    }
+    // No text label left beside an icon in the Actions column.
+    expect(client).not.toMatch(/size=\{ICON\} \/> [A-ZÉ]/);
+    // The status badge no longer breaks « En attente » over two lines.
+    expect(client).toContain("inline-flex items-center gap-1 whitespace-nowrap rounded-full");
+  });
 });

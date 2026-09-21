@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, HandCoins, Hourglass, Mail, RotateCcw, Search, Send } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, FileSearch, HandCoins, Hourglass, Loader2, Mail, RotateCcw, Search, Send } from "lucide-react";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { GenerateCreditNoteDialog } from "@/components/dashboard/operations/GenerateCreditNoteDialog";
 import { SettleManualInvoiceDialog } from "@/components/dashboard/invoices/SettleManualInvoiceDialog";
@@ -96,8 +96,12 @@ function DeliveryCell({ doc, peppolApplicable }) {
   );
 }
 
+// Icon-only, so the pinned Actions column stays narrow enough not to cover
+// the columns scrolling beneath it (user's call, 2026-09-21). Every button
+// carries its name as a tooltip (title) and for screen readers (aria-label).
 const actionButton =
-  "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-40";
+const ICON = 15;
 
 // The table scrolls sideways on a laptop; the buttons must not scroll away
 // with it. The column stays pinned to the right edge, opaque (each cell sets
@@ -121,15 +125,15 @@ function previewHref(pending) {
 function DocumentActions({ pdfHref, peppolApplicable, onSend, tone }) {
   return (
     <>
-      <a href={pdfHref} target="_blank" rel="noopener noreferrer" className={`${actionButton} ${tone}`}>
-        <Eye size={13} /> Voir
+      <a href={pdfHref} target="_blank" rel="noopener noreferrer" title="Voir le PDF" aria-label="Voir le PDF" className={`${actionButton} ${tone}`}>
+        <Eye size={ICON} />
       </a>
-      <button type="button" onClick={() => onSend("EMAIL")} className={`${actionButton} ${tone}`}>
-        <Mail size={13} /> E-mail
+      <button type="button" onClick={() => onSend("EMAIL")} title="Envoyer par e-mail" aria-label="Envoyer par e-mail" className={`${actionButton} ${tone}`}>
+        <Mail size={ICON} />
       </button>
       {peppolApplicable && (
-        <button type="button" onClick={() => onSend("PEPPYRUS")} className={`${actionButton} ${tone}`}>
-          <Send size={13} /> Peppol
+        <button type="button" onClick={() => onSend("PEPPYRUS")} title="Envoyer via Peppol" aria-label="Envoyer via Peppol" className={`${actionButton} ${tone}`}>
+          <Send size={ICON} />
         </button>
       )}
     </>
@@ -152,7 +156,7 @@ function PaymentCell({ pending }) {
   return (
     <div className="flex flex-col items-start gap-1">
       <span
-        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+        className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${
           late ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
         }`}
       >
@@ -180,24 +184,33 @@ function PendingActions({ pending, busy, onAccept, onSettle }) {
           href={preview}
           target="_blank"
           rel="noopener noreferrer"
-          title="Voir la facture que l'acceptation émettra — sans l'émettre"
+          title="Aperçu : la facture que l'acceptation émettra, sans l'émettre"
+          aria-label="Aperçu de la facture"
           className={`${actionButton} border-[#2f3a2e] text-[#2f3a2e] hover:bg-[#f4f7f3]`}
         >
-          <Eye size={13} /> Aperçu
+          <FileSearch size={ICON} />
         </a>
       )}
       <button
         type="button"
         disabled={busy}
         onClick={() => onAccept(pending)}
-        title="Le paiement est arrivé : l'enregistrer (et émettre la facture si elle est due)"
+        title="Accepter : le paiement est arrivé (émet la facture si elle est due)"
+        aria-label="Accepter le paiement"
         className={`${actionButton} border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700`}
       >
-        <Check size={13} /> {busy ? "…" : "Accepter"}
+        {busy ? <Loader2 size={ICON} className="animate-spin" /> : <Check size={ICON} strokeWidth={2.5} />}
       </button>
       {pending.settleOrderId && (
-        <button type="button" disabled={busy} onClick={() => onSettle(pending)} className={`${actionButton} border-sky-300 text-sky-800 hover:bg-sky-50`}>
-          <HandCoins size={13} /> Autre
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onSettle(pending)}
+          title="Encaisser autrement : espèces, carte ou acompte"
+          aria-label="Encaisser autrement"
+          className={`${actionButton} border-sky-300 text-sky-800 hover:bg-sky-50`}
+        >
+          <HandCoins size={ICON} />
         </button>
       )}
     </>
@@ -470,9 +483,10 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                             onClick={() => setCreditNoteFor(invoice)}
                             disabled={!invoice.canGenerateCreditNote}
                             title={invoice.canGenerateCreditNote ? "Générer une note de crédit" : invoice.creditNoteBlockedReason ?? undefined}
+                            aria-label="Générer une note de crédit"
                             className={`${actionButton} border-amber-300 text-amber-800 hover:bg-amber-50`}
                           >
-                            <FilePlus2 size={13} /> Note de crédit
+                            <FilePlus2 size={ICON} />
                           </button>
                         )}
                       </div>

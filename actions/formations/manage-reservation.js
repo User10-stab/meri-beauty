@@ -735,7 +735,7 @@ export async function changeFormationReservationSeatsFree(reservationId, { newSe
  */
 export async function completeFormationReservation(
   reservationId,
-  { method, paymentConfirmed, terminalApproved, terminalReference, finalTotal, adjustmentReason } = {}
+  { method, paymentConfirmed, terminalApproved, terminalReference, qrSessionId, finalTotal, adjustmentReason } = {}
 ) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
@@ -754,6 +754,7 @@ export async function completeFormationReservation(
     paymentConfirmed,
     terminalApproved,
     terminalReference,
+    qrSessionId,
     finalTotal,
     adjustmentReason,
     actorId: session.user.id,

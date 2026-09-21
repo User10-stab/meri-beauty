@@ -10,6 +10,8 @@ import { CHECK_IN_KINDS, ensureCheckInCode } from "@/lib/activities/check-in-cod
 import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator } from "@/lib/authorization";
 import { counterCustomerSchema } from "@/lib/validations/counter-customer";
 import { resolveCounterCustomer } from "@/lib/counter/resolve-counter-customer";
+import { isCounterSellableCatalogueStatus } from "@/lib/counter/catalogue-availability";
+import { AWAITED_TRANSFER_OFF_TILL_MESSAGE, isAwaitedTransfer } from "@/lib/payments/awaited-transfer";
 import { CounterCustomerError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
 import { resolveServiceVatPolicy, repriceTtcCataloguePrice, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer } from "@/lib/tax-policy";
 import { resolveCounterPriceAdjustment } from "@/lib/payments/counter-price-adjustment";
@@ -104,7 +106,9 @@ const createReservationSchema = z.object({
   adjustmentReason: z.string().trim().max(250).optional(),
   payment: z.object({
     mode: z.enum(["FULL", "DEPOSIT"]),
-    method: z.enum(["CASH", "EXTERNAL_TERMINAL"]),
+    // TRANSFER: nothing is collected now — the client pays by bank transfer
+    // and an admin accepts it later (lib/payments/awaited-transfer.js).
+    method: z.enum(["CASH", "EXTERNAL_TERMINAL", "TRANSFER"]),
     paymentConfirmed: z.literal(true),
     terminalReference: z.string().trim().max(100).optional(),
   }),
@@ -116,7 +120,7 @@ function money(value) {
 
 const ERROR_MESSAGES = {
   SESSION_NOT_FOUND: "Séance introuvable.",
-  SESSION_NOT_AVAILABLE: "Cette séance n'est plus planifiée ou n'est plus publiée.",
+  SESSION_NOT_AVAILABLE: "Cette séance n'est plus planifiée ou a été annulée.",
   SESSION_ENDED: "Cette séance est déjà terminée.",
   INVALID_SESSION_CAPACITY: "Capacité de séance invalide.",
   SESSION_FULL: "Pas assez de places disponibles sur cette séance.",
@@ -186,6 +190,14 @@ export async function createCounterReservation(input) {
   const offTill = !isTillCashOperator(guard.session.user) || Boolean(payee.payeeStaffId);
   const useTill = !offTill && data.payment.method === "CASH";
 
+  // A transfer on an off-till sale (an independent animator's formation, or a
+  // non-operator) would be written with both awaitedTransferAmount and
+  // payeeStaffId — and listAwaitedTransfers filters payeeStaffId: null, so it
+  // could never be accepted and the money would be unrecoverable.
+  if (isAwaitedTransfer(data.payment.method) && offTill) {
+    return { success: false, message: AWAITED_TRANSFER_OFF_TILL_MESSAGE };
+  }
+
   if (data.payment.method === "EXTERNAL_TERMINAL" && !data.payment.terminalReference?.trim()) {
     return { success: false, message: "Indiquez la référence du ticket du terminal." };
   }
@@ -229,7 +241,11 @@ export async function createCounterReservation(input) {
         });
         if (!session) throw new Error("SESSION_NOT_FOUND");
         const catalogue = session[config.catalogueKey];
-        if (session.status !== "SCHEDULED" || catalogue.status !== "PUBLISHED") {
+        // Publication status is not a till gate: a brouillon or archivé
+        // atelier/formation is sellable at the counter exactly like a
+        // published one (same allow-list the omnibar searches on). CANCELLED
+        // still is one — that event is not happening.
+        if (session.status !== "SCHEDULED" || !isCounterSellableCatalogueStatus(catalogue.status)) {
           throw new Error("SESSION_NOT_AVAILABLE");
         }
         // Deliberately laxer than changeReservationSession's `startDate > now`
@@ -284,21 +300,27 @@ export async function createCounterReservation(input) {
           },
         });
 
+        // Announced by transfer: the seat is booked, but nothing is received
+        // yet — no Transaction, no ticket, no invoice until an admin accepts
+        // it (lib/payments/awaited-transfer.js). `collected` is then what the
+        // client promised to transfer, not what they handed over.
+        const awaitsTransfer = !offTill && isAwaitedTransfer(data.payment.method);
         const payment = await tx.payment.create({
           data: {
             [data.kind === "WORKSHOP" ? "workshopReservationId" : "formationReservationId"]: reservation.id,
             ...payeePaymentData(payee),
             depositAmount: isFullPayment ? 0 : collected,
             totalAmount: total,
-            paidAmount: collected,
-            remainingAmount: balanceDue,
+            paidAmount: awaitsTransfer ? 0 : collected,
+            remainingAmount: awaitsTransfer ? total : balanceDue,
+            ...(awaitsTransfer ? { awaitedTransferAmount: collected } : {}),
             paymentType: isFullPayment ? "ON_SITE" : "DEPOSIT",
-            status: balanceDue <= 0.01 ? "PAID" : "PARTIALLY_PAID",
-            paidAt: new Date(),
+            status: awaitsTransfer ? "PENDING" : balanceDue <= 0.01 ? "PAID" : "PARTIALLY_PAID",
+            ...(awaitsTransfer ? {} : { paidAt: new Date() }),
           },
         });
 
-        if (payment.status === "PAID") {
+        if (!awaitsTransfer && payment.status === "PAID") {
           await allocatePaymentTicketNumber(
             tx,
             payment.id,
@@ -309,23 +331,25 @@ export async function createCounterReservation(input) {
           );
         }
 
-        const series = config.seriesOf(catalogue);
-        // Piece number only for a till operator's cash — an off-till row
-        // never enters the Livre de caisse, which requires both.
-        const pieceNumber = useTill ? await allocatePieceNumber(tx, series) : null;
+        if (!awaitsTransfer) {
+          const series = config.seriesOf(catalogue);
+          // Piece number only for a till operator's cash — an off-till row
+          // never enters the Livre de caisse, which requires both.
+          const pieceNumber = useTill ? await allocatePieceNumber(tx, series) : null;
 
-        await tx.transaction.create({
-          data: {
-            paymentId: payment.id,
-            amount: collected,
-            method: data.payment.method === "CASH" ? "CASH" : "CARD",
-            transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
-            paidAt: new Date(),
-            cashSessionId: openCashSession?.id ?? null,
-            pieceNumber,
-            manualReference: data.payment.method === "EXTERNAL_TERMINAL" ? data.payment.terminalReference.trim() : null,
-          },
-        });
+          await tx.transaction.create({
+            data: {
+              paymentId: payment.id,
+              amount: collected,
+              method: data.payment.method === "CASH" ? "CASH" : "CARD",
+              transactionType: isFullPayment ? "FINAL_PAYMENT" : "DEPOSIT",
+              paidAt: new Date(),
+              cashSessionId: openCashSession?.id ?? null,
+              pieceNumber,
+              manualReference: data.payment.method === "EXTERNAL_TERMINAL" ? data.payment.terminalReference.trim() : null,
+            },
+          });
+        }
 
         // A deposit is never invoiced — the legally-required invoice is
         // issued once the full amount is settled, exactly like every other
@@ -334,7 +358,7 @@ export async function createCounterReservation(input) {
         // non-privileged staff member (offTill) can never cause an Invoice
         // to be created — see isTillCashOperator — the reservation still
         // completes, it simply never gets an invoice.
-        const invoiceDue = isFullPayment && hasInvoiceableVatIdentity(user) && !offTill;
+        const invoiceDue = isFullPayment && !awaitsTransfer && hasInvoiceableVatIdentity(user) && !offTill;
         const invoice = invoiceDue
           ? await issueInvoice(tx, {
               paymentId: payment.id,
@@ -373,9 +397,10 @@ export async function createCounterReservation(input) {
           sessionStartDate: session.startDate,
           customer: { fullName: user.fullName, email: user.email, isCompany: user.isCompany, vatNumber: user.vatNumber, vatValidatedAt: user.vatValidatedAt },
           seatsCount: data.seatsCount,
-          paidAmount: collected,
+          paidAmount: awaitsTransfer ? 0 : collected,
+          awaitedTransferAmount: awaitsTransfer ? collected : null,
           totalAmount: total,
-          balanceDue,
+          balanceDue: awaitsTransfer ? total : balanceDue,
           isFullPayment,
           invoice: invoice ? { number: invoice.number } : null,
           method: data.payment.method,
@@ -426,27 +451,33 @@ export async function createCounterReservation(input) {
       ? `Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément via le réseau Peppol, conformément à la réglementation belge.`
       : `Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément par e-mail.`;
 
-  const emailResult = await sendEmail({
-    to: result.customer.email,
-    ...config.buildConfirmationEmail({
-      customerName: result.customer.fullName,
-      title: result.title,
-      sessionDate: formatSessionDate(result.sessionStartDate),
-      seatsCount: result.seatsCount,
-      paidAmount: result.paidAmount,
-      totalAmount: result.totalAmount,
-      balanceDue: result.balanceDue,
-      isFullPayment: result.isFullPayment,
-      salonPhone: salon?.phone,
-      salonEmail: salon?.email,
-      pendingInvoiceNote,
-      checkInCode,
-    }),
-    ...(ticketQr ? { attachments: [ticketQr] } : {}),
-  }).catch((error) => {
-    console.error("[createCounterReservation] confirmation email failed:", error);
-    return { success: false };
-  });
+  // Announced by transfer: nothing was received, so the client is NOT told
+  // the seat is confirmed and gets no check-in QR. That confirmation is sent
+  // only when an admin accepts the transfer — actions/payments/awaited-transfer.js.
+  const awaitsTransfer = result.awaitedTransferAmount != null;
+  const emailResult = awaitsTransfer
+    ? null
+    : await sendEmail({
+        to: result.customer.email,
+        ...config.buildConfirmationEmail({
+          customerName: result.customer.fullName,
+          title: result.title,
+          sessionDate: formatSessionDate(result.sessionStartDate),
+          seatsCount: result.seatsCount,
+          paidAmount: result.paidAmount,
+          totalAmount: result.totalAmount,
+          balanceDue: result.balanceDue,
+          isFullPayment: result.isFullPayment,
+          salonPhone: salon?.phone,
+          salonEmail: salon?.email,
+          pendingInvoiceNote,
+          checkInCode,
+        }),
+        ...(ticketQr ? { attachments: [ticketQr] } : {}),
+      }).catch((error) => {
+        console.error("[createCounterReservation] confirmation email failed:", error);
+        return { success: false };
+      });
 
   config.lowSeatsBroadcast(data.sessionId).catch((error) =>
     console.error("[createCounterReservation] low-seats broadcast failed:", error)
@@ -458,9 +489,11 @@ export async function createCounterReservation(input) {
 
   return {
     success: true,
-    message: emailResult?.success
-      ? "Réservation enregistrée et e-mail de confirmation envoyé."
-      : "Réservation enregistrée, mais l'e-mail n'a pas pu être envoyé.",
+    message: awaitsTransfer
+      ? "Réservation enregistrée — virement attendu. Le client sera confirmé par e-mail à l'acceptation du virement."
+      : emailResult?.success
+        ? "Réservation enregistrée et e-mail de confirmation envoyé."
+        : "Réservation enregistrée, mais l'e-mail n'a pas pu être envoyé.",
     emailSent: Boolean(emailResult?.success),
     data: {
       reservationId: result.reservationId,

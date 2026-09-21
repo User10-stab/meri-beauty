@@ -70,6 +70,10 @@ describe("filters never widen or break the query", () => {
     });
   });
 
+  it("manual invoices have their own origin filter", () => {
+    expect(buildInvoiceWhere(normalizeInvoiceFilters({ source: "MANUAL" }))).toEqual({ AND: [{ source: "MANUAL" }] });
+  });
+
   it("no filter means every invoice", () => {
     expect(buildInvoiceWhere(normalizeInvoiceFilters({}))).toEqual({});
   });
@@ -136,11 +140,17 @@ describe("listInvoices is admin only", () => {
     });
     expect(result.data.stats).toMatchObject({ count: 1, totalInclVat: 15 });
   });
+
 });
 
 describe("the page", () => {
   it("is admin-guarded and listed under Ventes & paiements", () => {
     expect(source("app/dashboard/factures/page.jsx")).toContain("await requireAdmin(false)");
+    // « Vendre avec facture » opens la caisse, where invoice sales are composed.
+    expect(source("app/dashboard/factures/page.jsx")).toContain('href="/dashboard/boutique/point-of-sale#counter-cart"');
+    // Manual sales paid by acompte or later have no invoice yet: their own panel.
+    expect(source("app/dashboard/factures/page.jsx")).toContain("listPendingManualSales()");
+    expect(source("app/dashboard/factures/page.jsx")).toContain("<PendingManualSales data={pending.data} />");
     expect(source("components/dashboard/Layouts/sidebar/data/index.js")).toContain(
       '{ title: "Factures", url: "/dashboard/factures", roles: [ROLES.OWNER, ROLES.ADMIN] }'
     );

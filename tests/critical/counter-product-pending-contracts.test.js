@@ -32,21 +32,22 @@ describe("selecting a product from the counter search adds it straight to the ti
   });
 
   test("the cart still queues the line even with no till session open — cart state isn't gated on that render branch", () => {
-    // addProductToCart writes straight to `cart` state via setCart, entirely
-    // outside the `if (!cashSessionOpen) return (...)` early-return branch —
-    // so a product added while the till is closed is simply invisible until
-    // a session opens, not lost.
-    const closedBranchStart = cart.indexOf("if (tillGateApplies && !cashSessionOpen) {");
+    // addProductToCart writes straight to `cart` state via setCart. A closed
+    // till no longer replaces the cart with a lock screen: the « Caisse
+    // fermée » card renders above it (a transfer / pay-later invoice sale can
+    // still be recorded), so a product added while closed stays in the cart.
+    const closedCardStart = cart.indexOf("const closedTillCard = tillClosed && (");
     const addProductStart = cart.indexOf("const addProductToCart = useCallback");
-    expect(closedBranchStart).toBeGreaterThan(-1);
+    expect(closedCardStart).toBeGreaterThan(-1);
     expect(addProductStart).toBeGreaterThan(-1);
-    expect(addProductStart).toBeLessThan(closedBranchStart);
+    expect(addProductStart).toBeLessThan(closedCardStart);
+    expect(cart).not.toContain("if (tillGateApplies && !cashSessionOpen) {");
   });
 
   test("the till section carries a stable id so the page can scroll to it after adding", () => {
     const occurrences = cart.split('id="counter-cart"').length - 1;
-    // Both render branches (open and closed) need it — whichever is live.
-    expect(occurrences).toBe(2);
+    // One cart, rendered whether the till is open or closed.
+    expect(occurrences).toBe(1);
     expect(cart).toContain('document.getElementById("counter-cart")?.scrollIntoView(');
   });
 

@@ -40,7 +40,7 @@ describe("reservation settlement — collecting the on-site balance", () => {
     // number and an open till session behind it. The boutique POS and the
     // refund path already refused a referenceless card; settlement was the
     // last place that did not.
-    expect(lib).toContain('!["CASH", "EXTERNAL_TERMINAL"].includes(method)');
+    expect(lib).toContain('!["CASH", "EXTERNAL_TERMINAL", AWAITED_TRANSFER_METHOD, COUNTER_QR_METHOD].includes(method)');
     expect(lib, "a card collection was accepted without a terminal reference").not.toContain(
       '["CASH", "CARD", "EXTERNAL_TERMINAL"]',
     );
@@ -54,8 +54,9 @@ describe("reservation settlement — collecting the on-site balance", () => {
     // `isTerminalCard` is `!offTill && method === "EXTERNAL_TERMINAL"` — an
     // off-till collection always records as CASH with no reference.
     expect(lib).toContain("const isTerminalCard = !offTill && method === \"EXTERNAL_TERMINAL\"");
-    expect(lib).toContain("manualReference: isTerminalCard ? terminalReference.trim() : null");
-    expect(lib).toContain("method: isTerminalCard ? \"CARD\" : \"CASH\"");
+    // A QR charge carries its Stripe payment intent instead of a terminal slip.
+    expect(lib).toContain("manualReference: isTerminalCard ? terminalReference.trim() : isQr ? qrPayment.paymentIntentId : null");
+    expect(lib).toContain("method: isQr ? \"ONLINE\" : isTerminalCard ? \"CARD\" : \"CASH\"");
   });
 
   test("claims the reservation atomically before invoicing, so a double-click can't invoice twice", () => {
@@ -84,7 +85,9 @@ describe("reservation settlement — collecting the on-site balance", () => {
     // The attestation / method / open-till pre-checks only apply on the
     // operator path.
     expect(lib).toContain("const collectsAtTill = hasBalanceDue && !offTill");
-    expect(lib).toContain("if (collectsAtTill && paymentConfirmed !== true)");
+    // A transfer attests nothing — nothing was received (awaited-transfer.js).
+    // Nor does a QR: Stripe is asked directly (lib/counter/qr-checkout.js).
+    expect(lib).toContain("if (collectsAtTill && !awaitsTransfer && !paidByQr && paymentConfirmed !== true)");
   });
 
   // See tests/critical/till-settlement-contracts.test.js for the full

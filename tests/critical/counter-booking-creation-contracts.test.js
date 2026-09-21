@@ -39,7 +39,7 @@ describe("counter booking creation — createCounterReservation", () => {
     // A non-privileged staff actor (offTill) can never issue an invoice at
     // all — see isTillCashOperator — the reservation still completes, it
     // simply never gets an invoice.
-    expect(action).toContain("const invoiceDue = isFullPayment && hasInvoiceableVatIdentity(user) && !offTill;");
+    expect(action).toContain("const invoiceDue = isFullPayment && !awaitsTransfer && hasInvoiceableVatIdentity(user) && !offTill;");
   });
 
   test("session capacity is re-checked under a row lock before the seat count is trusted", () => {
@@ -163,18 +163,22 @@ describe("a billing address is required, not just requested, once a VAT number i
   const buyerForm = source("components/dashboard/boutique/counter/CounterBuyerForm.jsx");
 
   test("the street, postal code and city inputs carry the HTML required attribute", () => {
-    const start = buyerForm.indexOf("needsAddress && (");
-    const block = buyerForm.slice(start, start + 2200);
+    // The fields live in CounterAddressFields, shared with FicheBuyerAction so
+    // every counter screen asks for the address the same way; `required` is
+    // passed only where the address is mandatory (this block).
+    expect(buyerForm).toContain("<CounterAddressFields address={customer} onChange={updateCustomerAddress} required />");
+    const start = buyerForm.indexOf("export function CounterAddressFields");
+    const block = buyerForm.slice(start);
     for (const field of ["addressLine1", "addressPostalCode", "addressCity"]) {
-      const fieldIndex = block.indexOf(`value={customer.${field}}`);
+      const fieldIndex = block.indexOf(`value={address.${field}}`);
       expect(fieldIndex).toBeGreaterThan(-1);
       // The <input ...> tag opens some lines above the value prop — "required"
       // must appear somewhere between that opening tag and the value prop.
       const tagStart = block.lastIndexOf("<input", fieldIndex);
-      expect(block.slice(tagStart, fieldIndex)).toContain("required");
+      expect(block.slice(tagStart, fieldIndex)).toContain("required={required}");
     }
     // addressLine2 (optional) must NOT be required.
-    const line2Index = block.indexOf("value={customer.addressLine2}");
+    const line2Index = block.indexOf("value={address.addressLine2");
     const line2TagStart = block.lastIndexOf("<input", line2Index);
     expect(block.slice(line2TagStart, line2Index)).not.toContain("required");
   });

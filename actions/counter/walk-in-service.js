@@ -34,7 +34,9 @@ const saleSchema = z.object({
   staffServiceId: z.string().min(1),
   customer: customerSchema,
   // Card is EXTERNAL_TERMINAL only — see the note in completeAppointment.
-  method: z.enum(["CASH", "EXTERNAL_TERMINAL"]),
+  // TRANSFER collects nothing now: the client pays by bank transfer and an
+  // admin accepts it later (lib/payments/awaited-transfer.js).
+  method: z.enum(["CASH", "EXTERNAL_TERMINAL", "TRANSFER"]),
   paymentConfirmed: z.literal(true),
   terminalApproved: z.boolean().optional(),
   terminalReference: z.string().trim().max(100).optional(),
@@ -63,7 +65,16 @@ function serviceCode(value) {
   return String(value ?? "").trim().replace(/^S(?:ERVICE)?[:\-]/i, "");
 }
 
-/** Search the real service catalogue. A QR may contain S:<staffServiceId>. */
+/**
+ * Search the real service catalogue. A QR may contain S:<staffServiceId>.
+ *
+ * A prestation désactivée (`isActive: false` — the services catalogue's
+ * equivalent of "archivée") is deliberately still findable and sellable
+ * here: deactivation hides it from online booking, it does not mean the
+ * salon refuses to do it for someone standing at the counter. Rows carry
+ * `isActive` so the result list can flag it. Soft-deleted rows, an inactive
+ * or deleted staff member, and a zero price/duration stay excluded.
+ */
 export async function searchCounterServices(query) {
   const guard = await authorizeCounterAppointments();
   if (guard.error) return { success: false, message: guard.error, data: [] };
@@ -75,7 +86,6 @@ export async function searchCounterServices(query) {
   try {
     const rows = await prisma.staffService.findMany({
       where: {
-        isActive: true,
         isDeleted: false,
         price: { gt: 0 },
         duration: { gt: 0 },
@@ -93,6 +103,7 @@ export async function searchCounterServices(query) {
         id: true,
         price: true,
         duration: true,
+        isActive: true,
         service: { select: { name: true, category: { select: { name: true } } } },
         staff: { select: { id: true, user: { select: { fullName: true } } } },
       },
@@ -110,6 +121,7 @@ export async function searchCounterServices(query) {
         staffId: row.staff.id,
         price: Number(row.price),
         duration: row.duration,
+        isActive: row.isActive,
         qrValue: `S:${row.id}`,
       })),
     };
@@ -140,7 +152,8 @@ export async function createCounterWalkInService(input) {
     const staffService = await prisma.staffService.findFirst({
       where: {
         id: data.staffServiceId,
-        isActive: true,
+        // No isActive filter, matching searchCounterServices: a deactivated
+        // prestation is off the online booking page, not off the counter.
         isDeleted: false,
         staff: { isActive: true, isDeleted: false },
         service: { isDeleted: false },

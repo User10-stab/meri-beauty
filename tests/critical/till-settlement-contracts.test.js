@@ -258,7 +258,15 @@ describe("nothing is marked paid before the money is in hand", () => {
     // open till session behind it.
     expect(panel).toContain('"EXTERNAL_TERMINAL"');
     expect(panel).toContain("terminalReference: terminalReference.trim()");
-    expect(panel).toContain('{value === "CASH" ? "Espèces" : "Carte — terminal"}');
+    // Same tiles as the till and every other counter screen — except that a
+    // transfer is withheld on an independent's sale, which the salon never
+    // banks and could never accept from « Ventes en attente de paiement ».
+    expect(panel).toContain("<CounterPaymentMethodTiles methods={settleMethods}");
+    expect(panel).toContain(
+      `const settleMethods = ticket.independent
+    ? ["CASH", "EXTERNAL_TERMINAL"]
+    : ["CARD_QR", "CASH", "EXTERNAL_TERMINAL", "TRANSFER"]`
+    );
     expect(panel, "a card option with no reference came back").not.toContain(
       '"CASH", "CARD", "EXTERNAL_TERMINAL"',
     );

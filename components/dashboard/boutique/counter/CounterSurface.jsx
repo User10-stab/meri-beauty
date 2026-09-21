@@ -13,6 +13,7 @@ import { CounterFiche } from "@/components/dashboard/boutique/counter/CounterFic
 import { PickupFiche } from "@/components/dashboard/boutique/counter/PickupFiche";
 import { CounterBookingComposer } from "@/components/dashboard/boutique/counter/CounterBookingComposer";
 import { CounterCart } from "@/components/dashboard/boutique/counter/CounterCart";
+import { PendingManualSales } from "@/components/dashboard/invoices/PendingManualSales";
 
 // Route only exact known code shapes. A customer may legitimately be stored
 // under a single name, so generic alphanumeric text must remain a name search.
@@ -59,6 +60,7 @@ export function CounterSurface({
   canOpenCashSession = false,
   canCollectCash = false,
   sourceOrderId = null,
+  pendingManualSales = null,
 }) {
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -317,6 +319,8 @@ export function CounterSurface({
         onConsumePendingProduct={() => setPendingProduct(null)}
         sourceOrderId={sourceOrderId}
       />
+
+      {pendingManualSales && <PendingManualSales data={pendingManualSales} />}
     </div>
   );
 }

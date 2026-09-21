@@ -171,7 +171,7 @@ test.describe("counter price adjustment vs. the ticket email", () => {
     // ── Case 1: discount 60 -> 40 (still owes 10), settle in cash ─────────
     await openFiche(page, customerA);
     await setFinalPrice(page, 40, "Geste commercial — cliente fidèle");
-    await page.getByRole("radio", { name: "Espèces" }).check();
+    await page.getByRole("radio", { name: "Espèces" }).click();
     await page.getByRole("button", { name: /encaisser et facturer/i }).click();
     await expect(page.locator("[data-sonner-toast]").first()).toBeVisible({ timeout: 20_000 });
 
@@ -358,7 +358,7 @@ test.describe("counter price adjustment vs. the ticket email", () => {
     // Now move the price under that already-sent ticket.
     await openFiche(page, customerC);
     await setFinalPrice(page, 45, "Geste commercial — après envoi du ticket");
-    await page.getByRole("radio", { name: "Espèces" }).check();
+    await page.getByRole("radio", { name: "Espèces" }).click();
     await page.getByRole("button", { name: /encaisser et facturer/i }).click();
     await expect(page.locator("[data-sonner-toast]").first()).toBeVisible({ timeout: 30_000 });
 

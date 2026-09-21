@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Building2, CheckCircle2, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { completeCounterBuyer } from "@/actions/counter/update-buyer";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
+import { CounterAddressFields, CounterVatField } from "@/components/dashboard/boutique/counter/CounterBuyerForm";
 
 const EMPTY_ADDRESS = { addressLine1: "", addressLine2: "", addressCity: "", addressPostalCode: "", addressCountry: "BE" };
 
@@ -19,8 +20,8 @@ const EMPTY_ADDRESS = { addressLine1: "", addressLine2: "", addressCity: "", add
 export function FicheBuyerAction({ ticket, onChanged }) {
   const [open, setOpen] = useState(false);
   const [vatNumber, setVatNumber] = useState(ticket.holderVatNumber ?? "");
+  // Same shape as CounterBuyerForm's: { loading } | { valid, message } | { error, message }.
   const [vatCheck, setVatCheck] = useState(null);
-  const [checkingVat, setCheckingVat] = useState(false);
   const [address, setAddress] = useState(EMPTY_ADDRESS);
   const [saving, setSaving] = useState(false);
 
@@ -29,14 +30,13 @@ export function FicheBuyerAction({ ticket, onChanged }) {
 
   async function handleVerifyVat() {
     if (!vatNumber.trim()) return;
-    setCheckingVat(true);
+    setVatCheck({ loading: true });
     const result = await verifyVatNumber(vatNumber);
-    setCheckingVat(false);
     if (!result.success || !result.valid) {
-      setVatCheck({ error: result.message ?? "Ce numéro n'est pas valide." });
+      setVatCheck({ error: true, message: result.message ?? "Ce numéro n'est pas reconnu par le registre européen VIES." });
       return;
     }
-    setVatCheck({ valid: true, name: result.name });
+    setVatCheck({ valid: true, message: result.name ? `Actif — enregistré au nom de « ${result.name} ».` : "Actif dans le registre VIES." });
   }
 
   async function handleSave() {
@@ -87,68 +87,21 @@ export function FicheBuyerAction({ ticket, onChanged }) {
 
       {open && (
         <div className="mt-3 space-y-3 border-t border-stroke pt-3 dark:border-dark-3">
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-dark dark:text-white">
-              Numéro de TVA (facultatif)
-            </label>
-            <div className="flex gap-2">
-              <input
-                value={vatNumber}
-                onChange={(event) => {
-                  setVatNumber(event.target.value);
-                  setVatCheck(null);
-                }}
-                placeholder="BE0123456789"
-                className="h-10 flex-1 rounded-[7px] border border-stroke bg-white px-3 text-sm dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-              />
-              <button
-                type="button"
-                onClick={handleVerifyVat}
-                disabled={checkingVat || !vatNumber.trim()}
-                className="rounded-[7px] border border-stroke px-3 text-xs font-semibold disabled:opacity-50 dark:border-dark-3"
-              >
-                {checkingVat ? <Loader2 className="h-4 w-4 animate-spin" /> : "Vérifier"}
-              </button>
-            </div>
-            {vatCheck?.error && <p className="mt-1 text-xs text-red-dark dark:text-red">{vatCheck.error}</p>}
-            {vatCheck?.valid && (
-              <p className="mt-1 text-xs text-green-dark dark:text-green">Validé — {vatCheck.name ?? "TVA active"}</p>
-            )}
-          </div>
+          <CounterVatField
+            value={vatNumber}
+            onChange={(value) => {
+              setVatNumber(value);
+              setVatCheck(null);
+            }}
+            onVerify={handleVerifyVat}
+            vatCheck={vatCheck}
+          />
 
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold text-dark dark:text-white">
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-gray-500 dark:text-dark-6">
               Adresse de facturation {hasVat ? "(obligatoire pour la facture)" : "(facultatif)"}
-            </label>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <input
-                value={address.addressLine1}
-                onChange={(event) => setAddress((value) => ({ ...value, addressLine1: event.target.value }))}
-                placeholder="Rue et numéro"
-                className="h-10 rounded-[7px] border border-stroke bg-white px-3 text-sm sm:col-span-2 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-              />
-              <input
-                value={address.addressCity}
-                onChange={(event) => setAddress((value) => ({ ...value, addressCity: event.target.value }))}
-                placeholder="Ville"
-                className="h-10 rounded-[7px] border border-stroke bg-white px-3 text-sm dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-              />
-              <input
-                value={address.addressPostalCode}
-                onChange={(event) => setAddress((value) => ({ ...value, addressPostalCode: event.target.value }))}
-                placeholder="Code postal"
-                className="h-10 rounded-[7px] border border-stroke bg-white px-3 text-sm dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-              />
-              <input
-                value={address.addressCountry}
-                onChange={(event) =>
-                  setAddress((value) => ({ ...value, addressCountry: event.target.value.toUpperCase() }))
-                }
-                placeholder="Pays (BE, FR…)"
-                maxLength={2}
-                className="h-10 rounded-[7px] border border-stroke bg-white px-3 text-sm dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-              />
-            </div>
+            </p>
+            <CounterAddressFields address={address} onChange={(field, value) => setAddress((current) => ({ ...current, [field]: value }))} />
           </div>
 
           <button

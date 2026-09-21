@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Banknote, Camera, CameraOff, CreditCard, ImageOff, Loader2, Lock, Minus, PackageSearch, Plus, ScanLine, Search, SlidersHorizontal, Trash2, Wallet, X } from "lucide-react";
+import { Camera, CameraOff, FileText, ImageOff, Loader2, Lock, Minus, PackageSearch, Plus, ScanLine, Search, SlidersHorizontal, Trash2, Wallet, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import QRCode from "qrcode";
 import { toast } from "sonner";
@@ -23,6 +23,10 @@ import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { isCashSessionOpen, getSuggestedOpeningFloat, openCashSession, tryAutoOpenCashSession } from "@/actions/dashboard/cash-sessions";
 import { createBrowserUuid } from "@/lib/browser-uuid";
 import { CounterBuyerForm } from "@/components/dashboard/boutique/counter/CounterBuyerForm";
+import { CounterCashReceived, CounterPaymentMethodTiles, CounterTerminalReference } from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
+import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
+import { createManualInvoice } from "@/actions/invoices/manual-invoice";
+import { MANUAL_INVOICE_NOTES_MAX } from "@/lib/invoices/manual-invoice-constants";
 
 const emptyAddress = {
   addressLine1: "",
@@ -116,10 +120,54 @@ export function CounterCart({
   const [sourceOrder, setSourceOrder] = useState(null);
   const [loadingSourceOrder, setLoadingSourceOrder] = useState(Boolean(sourceOrderId));
 
-  const total =useMemo(() => cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0), [cart]);
+  // ── Invoice sale ────────────────────────────────────────────────────
+  // A free line, a transfer, an acompte, « payer plus tard » or an invoice
+  // comment turns the sale into an invoice sale, recorded by
+  // actions/invoices/manual-invoice.js instead of completePointOfSaleSale:
+  // VAT number mandatory, and — like every deposit on the site — the invoice
+  // is only issued once the sale is fully paid. A plain paid sale is
+  // untouched and still goes through the ticket path below.
+  const [settleMode, setSettleMode] = useState("NOW"); // NOW | DEPOSIT | LATER
+  const [depositInput, setDepositInput] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [invoiceNotes, setInvoiceNotes] = useState("");
+  const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false);
+  const [issuedInvoice, setIssuedInvoice] = useState(null);
+  // Same people as the till's own money (isTillCashOperator) — the server
+  // refuses anyone else.
+  const canInvoiceSale = canCollectCash;
+
+  const total = useMemo(
+    () => Math.round(cart.reduce((sum, item) => sum + Number(item.unitPrice || 0) * item.quantity, 0) * 100) / 100,
+    [cart]
+  );
+  const hasFreeLines = cart.some((item) => item.type === "FREE");
+  const invoiceFlow =
+    canInvoiceSale && !sourceOrder && (hasFreeLines || method === "TRANSFER" || settleMode !== "NOW" || invoiceNotes.trim() !== "");
+  const depositAmount = Math.round(Number(depositInput) * 100) / 100;
+  const depositValid = depositAmount > 0 && depositAmount < total;
+  const collectsNow = !invoiceFlow || settleMode !== "LATER";
+  // A transfer is never accepted at the till: it takes days to arrive. The
+  // sale is recorded unpaid, « virement attendu », and only counts as paid
+  // (and gets its invoice) once staff approve it — « Virement reçu », with
+  // the bank reference, from « Ventes en attente de paiement ».
+  const transferAwaited = invoiceFlow && collectsNow && method === "TRANSFER";
+  // What changes hands now: the whole total, an acompte, or nothing.
+  const collectedNow =
+    transferAwaited ? 0 : !invoiceFlow || settleMode === "NOW" ? total : settleMode === "DEPOSIT" ? (depositValid ? depositAmount : 0) : 0;
+  // The invoice is issued by this very sale only when it is paid in full now.
+  const issuesInvoiceNow = invoiceFlow && settleMode === "NOW" && !transferAwaited;
   const cashReceivedNumber = Number(cashReceived);
-  const changeDue = cashReceived !== "" && !Number.isNaN(cashReceivedNumber) ? cashReceivedNumber - total : null;
+  const changeDue = cashReceived !== "" && !Number.isNaN(cashReceivedNumber) ? cashReceivedNumber - collectedNow : null;
+  // With no till session, only what never touches the drawer can be
+  // recorded: an invoice sale paid by transfer, or not paid yet.
+  const tillClosed = tillGateApplies && !cashSessionOpen;
+  const allowedWhileClosed = invoiceFlow && (settleMode === "LATER" || method === "TRANSFER");
   const walkInEmailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkInEmail.trim());
+
+  useEffect(() => {
+    if (invoiceFlow && method === "CARD_QR") setMethod("EXTERNAL_TERMINAL");
+  }, [invoiceFlow, method]);
 
   function resetAttempt() {
     const next = createBrowserUuid();
@@ -518,6 +566,19 @@ export function CounterCart({
     };
   }, [scannerOpen, addBarcode]);
 
+  // Free text, editable price (TTC) — a service, a fee, a flat rate. Only on
+  // an invoice sale: the ticket path sells catalogue products only.
+  function addFreeLine() {
+    setCart((current) => [
+      ...current,
+      { key: `free-${createBrowserUuid()}`, type: "FREE", description: "", unitPrice: "", quantity: 1, availableQuantity: 999 },
+    ]);
+  }
+
+  function updateFreeLine(key, patch) {
+    setCart((current) => current.map((item) => (item.key === key ? { ...item, ...patch } : item)));
+  }
+
   function changeQuantity(key, delta) {
     setCart((current) =>
       current
@@ -620,7 +681,8 @@ export function CounterCart({
   const willBeBelgianB2B = willHaveVatInvoice && customer.vatNumber.trim().toUpperCase().startsWith("BE");
 
   function selectMethod(next) {
-    if (next === "CARD_QR" && (isWalkIn || sourceOrder)) return; // blocked for a client de passage and for a taken-over order
+    if (next === "CARD_QR" && (isWalkIn || sourceOrder || invoiceFlow)) return; // blocked for a client de passage, a taken-over order and an invoice sale
+    if (next === "TRANSFER" && (isWalkIn || sourceOrder || !canInvoiceSale)) return; // a transfer is always an invoice sale
     setMethod(next);
     if (next !== "EXTERNAL_TERMINAL") {
       setTerminalApproved(false);
@@ -634,7 +696,123 @@ export function CounterCart({
     if (next && method === "CARD_QR") setMethod("CASH");
   }
 
+  function resetInvoiceSale() {
+    setCart([]);
+    setCustomer(emptyCustomer);
+    setAddressOnFile(false);
+    setVatCheck(null);
+    setInvoiceNotes("");
+    setSettleMode("NOW");
+    setDepositInput("");
+    setDueDate("");
+    setCashReceived("");
+    setTerminalApproved(false);
+    setTerminalReference("");
+    setMethod("CARD_QR");
+  }
+
+  /**
+   * An invoice sale (see invoiceFlow): recorded by createManualInvoice. Paid
+   * in full, its invoice is issued at once and the sending card opens; with
+   * an acompte or nothing collected it joins « Ventes en attente de
+   * paiement » below, and is invoiced by the payment that clears it.
+   */
+  function submitInvoiceSale() {
+    if (!cart.length) return toast.error("Ajoutez au moins une ligne.");
+    if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
+    if (!customer.fullName.trim() || !customer.email.trim()) return toast.error("Nom et e-mail du client obligatoires pour une facture.");
+    if (!customer.vatNumber.trim()) return toast.error("Une facture exige le numéro de TVA du client.");
+    if (needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim())) {
+      return toast.error("L'adresse de facturation du client est obligatoire.");
+    }
+    if (cart.some((item) => item.type === "FREE" && (!item.description.trim() || !(Number(item.unitPrice) > 0)))) {
+      return toast.error("Chaque ligne libre doit avoir une description et un prix supérieur à 0.");
+    }
+    if (settleMode === "DEPOSIT" && !depositValid) return toast.error("L'acompte doit être supérieur à 0 et inférieur au total.");
+    if (tillClosed && !allowedWhileClosed) {
+      return toast.error("Caisse fermée : ouvrez-la, ou encaissez par virement, ou choisissez « Payer plus tard ».");
+    }
+    if (collectsNow) {
+      if (method === "CASH" && (cashReceived === "" || Number.isNaN(cashReceivedNumber) || cashReceivedNumber < collectedNow)) {
+        return toast.error("Le montant reçu doit couvrir la somme encaissée.");
+      }
+      // The terminal dialog doubles as this sale's confirmation.
+      if (method === "EXTERNAL_TERMINAL" && !terminalConfirmOpen) {
+        setTerminalConfirmOpen(true);
+        return;
+      }
+    }
+    if (!(collectsNow && method === "EXTERNAL_TERMINAL") && !invoiceConfirmOpen) {
+      setInvoiceConfirmOpen(true);
+      return;
+    }
+
+    startTransition(async () => {
+      const result = await createManualInvoice({
+        attemptKey,
+        customer: {
+          id: customer.id,
+          fullName: customer.fullName,
+          email: customer.email,
+          phone: customer.phone,
+          vatNumber: customer.vatNumber,
+          addressLine1: customer.addressLine1,
+          addressLine2: customer.addressLine2,
+          addressCity: customer.addressCity,
+          addressPostalCode: customer.addressPostalCode,
+          addressCountry: customer.addressCountry,
+        },
+        lines: cart.map((item) =>
+          item.type === "FREE"
+            ? { type: "FREE", description: item.description.trim(), quantity: item.quantity, unitPrice: Number(item.unitPrice) }
+            : { type: "PRODUCT", variantId: item.variantId, quantity: item.quantity }
+        ),
+        notes: invoiceNotes,
+        dueDate: issuesInvoiceNow ? null : dueDate || null,
+        settlement:
+          settleMode === "LATER"
+            ? { mode: "LATER" }
+            : transferAwaited
+            ? { mode: "LATER", awaitedTransferAmount: settleMode === "DEPOSIT" ? depositAmount : total }
+            : {
+                mode: settleMode,
+                ...(settleMode === "DEPOSIT" ? { amount: depositAmount } : {}),
+                // The external terminal is recorded as a CARD receipt, exactly
+                // like a ticket sale paid there.
+                method: method === "EXTERNAL_TERMINAL" ? "CARD" : method,
+                cashReceived: method === "CASH" ? cashReceivedNumber : null,
+                reference:
+                  method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
+              },
+      });
+      setTerminalConfirmOpen(false);
+      setInvoiceConfirmOpen(false);
+      if (!result?.success) {
+        toast.error(result?.message ?? "Impossible d'enregistrer la vente.");
+        if (result?.requiresCashSession) setCashSessionOpen(false);
+        return;
+      }
+
+      localStorage.removeItem("meri-pos-attempt-key");
+      resetAttempt();
+      resetInvoiceSale();
+      const { invoice, sale } = result.data;
+      if (invoice) {
+        toast.success(`Facture ${invoice.number} émise — vente n°${sale.orderNumber} encaissée.`);
+        setIssuedInvoice(invoice); // « proposer l'envoi »
+      } else {
+        toast.success(
+          transferAwaited
+            ? `Vente n°${sale.orderNumber} enregistrée — virement attendu. Cliquez « Virement reçu » quand il arrive : la facture sera émise au paiement complet.`
+            : `Vente n°${sale.orderNumber} enregistrée — reste ${sale.remainingAmount.toFixed(2)} € à encaisser. La facture sera émise au paiement du solde.`
+        );
+      }
+      router.refresh();
+    });
+  }
+
   function submitSale() {
+    if (invoiceFlow) return submitInvoiceSale();
     if (!cart.length) return toast.error("Ajoutez au moins un produit.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
     if (isWalkIn && collectWalkInEmail && !walkInEmailReady) {
@@ -756,16 +934,21 @@ export function CounterCart({
     }
   }
 
-  if (tillGateApplies && !cashSessionOpen) {
-    return (
-      <div id="counter-cart" className="mx-auto max-w-md rounded-[10px] border border-stroke bg-white p-8 text-center shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+  // No till session: the cart stays usable, but only for what never touches
+  // the drawer (allowedWhileClosed) — every ticket sale, and any cash, card
+  // or QR receipt, still needs the till open (completePointOfSaleSale and
+  // createManualInvoice both enforce it server-side).
+  const closedTillCard = tillClosed && (
+      <div className="mx-auto max-w-md rounded-[10px] border border-stroke bg-white p-8 text-center shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300">
           <Lock size={22} strokeWidth={1.75} />
         </div>
         <h1 className="mt-4 text-lg font-bold text-dark dark:text-white">Caisse fermée</h1>
         <p className="mt-2 text-sm text-gray-500 dark:text-dark-6">
-          Aucune session de caisse n&apos;est ouverte. Ouvrez-la avant d&apos;encaisser une vente — quel que soit le
-          mode de paiement.
+          Aucune session de caisse n&apos;est ouverte. Ouvrez-la avant d&apos;encaisser une vente en espèces, au
+          terminal ou par QR.
+          {canInvoiceSale &&
+            " En attendant, seule une vente avec facture réglée par virement, ou à payer plus tard, peut être enregistrée ci-dessous."}
         </p>
         {canOpenCashSession ? (
           <>
@@ -815,10 +998,11 @@ export function CounterCart({
           </p>
         )}
       </div>
-    );
-  }
+  );
 
   return (
+    <div className="space-y-6">
+    {closedTillCard}
     <div id="counter-cart" className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
       <section className="space-y-5 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <div>
@@ -1010,11 +1194,61 @@ export function CounterCart({
           )}
         </div>
 
+        {canInvoiceSale && (
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-gray-500 dark:text-dark-6">
+              Prestation, frais ou forfait hors catalogue : ajoutez une ligne libre (vente avec facture).
+            </p>
+            <button
+              type="button"
+              onClick={addFreeLine}
+              disabled={isWalkIn || Boolean(sourceOrder)}
+              title={isWalkIn ? "Indisponible en mode client de passage : une ligne libre exige une facture" : sourceOrder ? "Indisponible sur une commande reprise" : undefined}
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2f3a2e] px-3 text-xs font-semibold text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/5 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Plus size={14} />
+              Ligne libre
+            </button>
+          </div>
+        )}
+
         {cart.length === 0 ? (
           <div className="rounded-lg border border-dashed border-gray-200 px-5 py-12 text-center text-sm text-gray-500">Le panier est vide.</div>
         ) : (
           <div className="divide-y divide-gray-100 rounded-lg border border-gray-100 dark:divide-dark-3 dark:border-dark-3">
-            {cart.map((item) => (
+            {cart.map((item) => item.type === "FREE" ? (
+              <div key={item.key} className="flex flex-wrap items-center gap-3 p-3">
+                <input
+                  value={item.description}
+                  onChange={(event) => updateFreeLine(item.key, { description: event.target.value })}
+                  maxLength={200}
+                  placeholder="Description (ex. Formation privée — 2 h)"
+                  aria-label="Description de la ligne libre"
+                  className="h-9 min-w-0 flex-1 rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                />
+                <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-1 dark:border-dark-3">
+                  <button type="button" onClick={() => changeQuantity(item.key, -1)} aria-label="Diminuer la quantité" className="rounded p-1 hover:bg-gray-100 dark:hover:bg-dark-2"><Minus size={14} /></button>
+                  <span className="w-6 text-center text-sm font-semibold">{item.quantity}</span>
+                  <button type="button" onClick={() => changeQuantity(item.key, 1)} disabled={item.quantity >= item.availableQuantity} aria-label="Augmenter la quantité" className="rounded p-1 hover:bg-gray-100 disabled:opacity-30 dark:hover:bg-dark-2"><Plus size={14} /></button>
+                </div>
+                <label className="flex items-center gap-1 text-xs text-gray-500">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={item.unitPrice}
+                    onChange={(event) => updateFreeLine(item.key, { unitPrice: event.target.value })}
+                    aria-label="Prix unitaire TTC"
+                    placeholder="Prix TTC"
+                    className="h-9 w-24 rounded-lg border border-gray-200 px-2 text-right text-sm text-dark outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                  />
+                  €
+                </label>
+                <p className="w-20 text-right text-sm font-semibold text-gray-900 dark:text-white">{(Number(item.unitPrice || 0) * item.quantity).toFixed(2)} €</p>
+                <button type="button" onClick={() => changeQuantity(item.key, -item.quantity)} aria-label="Supprimer la ligne" className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
+              </div>
+            ) : (
               <div key={item.key} className="flex items-center gap-3 p-3">
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{item.productName}</p>
@@ -1056,39 +1290,161 @@ export function CounterCart({
           onCollectWalkInEmailChange={setCollectWalkInEmail}
           invoiceRequested={invoiceRequested}
           onInvoiceRequestedChange={setInvoiceRequested}
+          // An invoice sale always ends in an invoice: no anonymous client,
+          // no opting out of it.
+          allowWalkIn={!invoiceFlow}
+          showInvoiceOptOut={!invoiceFlow}
         />
 
-        <div className="space-y-2 border-t border-gray-100 pt-5 dark:border-dark-3">
-          <p className="text-sm font-medium text-gray-700 dark:text-dark-6">Paiement encaissé</p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <button type="button" onClick={() => selectMethod("CARD_QR")} disabled={isWalkIn || Boolean(sourceOrder)} title={isWalkIn ? "Indisponible en mode client de passage" : sourceOrder ? "Une commande reprise se règle en espèces ou au terminal" : undefined} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${method === "CARD_QR" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Carte QR</button>
-            <button type="button" onClick={() => selectMethod("CASH")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "CASH" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><Banknote size={16} />Espèces</button>
-            <button type="button" onClick={() => selectMethod("EXTERNAL_TERMINAL")} className={`flex items-center justify-center gap-2 rounded-lg border p-3 text-sm font-medium ${method === "EXTERNAL_TERMINAL" ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}><CreditCard size={16} />Terminal externe</button>
+        {invoiceFlow && (
+          <div className="flex items-start gap-2 rounded-lg border border-[#2f3a2e]/20 bg-[#f4f7f3] px-3 py-2.5 text-xs text-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6">
+            <FileText size={15} className="mt-0.5 shrink-0" />
+            <p>
+              <span className="font-semibold">Vente avec facture</span> — numéro de TVA du client obligatoire.{" "}
+              {issuesInvoiceNow
+                ? "La facture est émise à l'encaissement."
+                : "La facture ne sera émise qu'au paiement complet, depuis « Ventes en attente de paiement »."}
+            </p>
           </div>
-          {method === "CASH" && (
-            <div className="space-y-2 rounded-lg border border-gray-200 p-3 dark:border-dark-3">
-              <label className="text-xs font-medium text-gray-500" htmlFor="pos-cash-received">Montant reçu du client</label>
-              <input
-                id="pos-cash-received"
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                min="0"
-                value={cashReceived}
-                onChange={(event) => setCashReceived(event.target.value)}
-                placeholder="0.00"
-                className="h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-              />
-              {changeDue !== null && (
-                <p className={`text-sm font-medium ${changeDue < 0 ? "text-red-600" : "text-gray-700 dark:text-dark-6"}`}>
-                  {changeDue < 0 ? `Il manque ${Math.abs(changeDue).toFixed(2)} €` : `Monnaie à rendre : ${changeDue.toFixed(2)} €`}
-                </p>
+        )}
+
+        {canInvoiceSale && !isWalkIn && !sourceOrder && (
+          <label className="block text-xs font-medium text-gray-500 dark:text-dark-6">
+            Commentaire imprimé sur la facture (facultatif)
+            <textarea
+              value={invoiceNotes}
+              onChange={(event) => setInvoiceNotes(event.target.value.slice(0, MANUAL_INVOICE_NOTES_MAX))}
+              rows={2}
+              placeholder="Ex. Prestation réalisée le 18/09 dans vos locaux."
+              className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-dark outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+            />
+          </label>
+        )}
+
+        <div className="space-y-2 border-t border-gray-100 pt-5 dark:border-dark-3">
+          {canInvoiceSale && !isWalkIn && !sourceOrder && (
+            <>
+              <p className="text-sm font-medium text-gray-700 dark:text-dark-6">Règlement</p>
+              <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Règlement de la vente">
+                {[
+                  ["NOW", "Payé maintenant"],
+                  ["DEPOSIT", "Acompte"],
+                  ["LATER", "Payer plus tard"],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={settleMode === value}
+                    onClick={() => setSettleMode(value)}
+                    className={`rounded-lg border p-2.5 text-sm font-medium ${settleMode === value ? "border-[#2f3a2e] bg-[#2f3a2e]/5 text-[#2f3a2e]" : "border-gray-200 text-gray-600 dark:border-dark-3"}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {settleMode === "DEPOSIT" && (
+                <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-900 dark:bg-amber-900/10">
+                  <label className="block text-xs font-medium text-gray-600 dark:text-dark-6" htmlFor="pos-deposit">Montant de l&apos;acompte (TTC)</label>
+                  <div className="flex gap-2">
+                    <input
+                      id="pos-deposit"
+                      type="number"
+                      inputMode="decimal"
+                      min="0.01"
+                      step="0.01"
+                      value={depositInput}
+                      onChange={(event) => setDepositInput(event.target.value)}
+                      placeholder="0.00"
+                      className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                    />
+                    {[30, 50].map((percent) => (
+                      <button
+                        key={percent}
+                        type="button"
+                        disabled={total <= 0}
+                        onClick={() => setDepositInput((Math.round(total * percent) / 100).toFixed(2))}
+                        className="shrink-0 rounded-lg border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        {percent} %
+                      </button>
+                    ))}
+                  </div>
+                  {depositInput !== "" && !depositValid && (
+                    <p className="text-xs font-medium text-red-600">L&apos;acompte doit être supérieur à 0 et inférieur au total.</p>
+                  )}
+                </div>
               )}
-            </div>
+              {(settleMode !== "NOW" || transferAwaited) && (
+                <label className="block text-xs font-medium text-gray-500 dark:text-dark-6">
+                  Échéance du solde (facultatif)
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(event) => setDueDate(event.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-gray-200 px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white"
+                  />
+                </label>
+              )}
+            </>
+          )}
+
+          {collectsNow && (
+            <>
+              <p className="pt-2 text-sm font-medium text-gray-700 dark:text-dark-6">
+                {invoiceFlow && settleMode === "DEPOSIT" ? "Paiement de l'acompte" : "Paiement encaissé"}
+              </p>
+              <CounterPaymentMethodTiles
+                label=""
+                methods={canInvoiceSale ? ["CARD_QR", "CASH", "EXTERNAL_TERMINAL", "TRANSFER"] : ["CARD_QR", "CASH", "EXTERNAL_TERMINAL"]}
+                value={method}
+                onChange={selectMethod}
+                disabled={{
+                  CARD_QR: isWalkIn
+                    ? "Indisponible en mode client de passage"
+                    : sourceOrder
+                    ? "Une commande reprise se règle en espèces ou au terminal"
+                    : invoiceFlow
+                    ? "Indisponible pour une vente avec facture"
+                    : tillClosed
+                    ? "Caisse fermée"
+                    : undefined,
+                  CASH: tillClosed ? "Caisse fermée" : undefined,
+                  EXTERNAL_TERMINAL: tillClosed ? "Caisse fermée" : undefined,
+                  // A transfer never touches the drawer, so a closed till
+                  // does not block it — see allowedWhileClosed.
+                  TRANSFER: isWalkIn
+                    ? "Indisponible en mode client de passage : un virement exige une facture"
+                    : sourceOrder
+                    ? "Une commande reprise se règle en espèces ou au terminal"
+                    : undefined,
+                }}
+              />
+              {method === "CASH" && (
+                <CounterCashReceived id="pos-cash-received" value={cashReceived} onChange={setCashReceived} amountDue={collectedNow} />
+              )}
+              {method === "TRANSFER" && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-900/10 dark:text-sky-200">
+                  <p className="font-semibold">Virement en attente de validation</p>
+                  <p className="mt-1">
+                    La vente est enregistrée sans paiement. Quand le virement arrive sur le compte, cliquez « Virement reçu » dans « Ventes en
+                    attente de paiement » et saisissez sa référence : c&apos;est seulement là qu&apos;il est accepté et que la facture est émise.
+                  </p>
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        <div className="flex items-end justify-between border-t border-gray-100 pt-5 dark:border-dark-3"><span className="text-sm text-gray-500">Total</span><strong className="text-3xl text-[#2f3a2e]">{total.toFixed(2)} €</strong></div>
+        <div className="space-y-1 border-t border-gray-100 pt-5 dark:border-dark-3">
+          <div className="flex items-end justify-between"><span className="text-sm text-gray-500">Total</span><strong className="text-3xl text-[#2f3a2e]">{total.toFixed(2)} €</strong></div>
+          {invoiceFlow && (settleMode !== "NOW" || transferAwaited) && (
+            <p className="text-right text-sm text-gray-500">
+              Encaissé maintenant : <span className="font-semibold text-emerald-700">{collectedNow.toFixed(2)} €</span> · reste{" "}
+              {(total - collectedNow).toFixed(2)} €
+            </p>
+          )}
+        </div>
         <Button
           className="w-full"
           onClick={submitSale}
@@ -1097,25 +1453,34 @@ export function CounterCart({
             !attemptKey ||
             cart.length === 0 ||
             (isWalkIn && collectWalkInEmail && !walkInEmailReady) ||
-            (method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
+            (collectsNow && method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
+            (invoiceFlow && (!customer.vatNumber.trim() || (settleMode === "DEPOSIT" && !depositValid))) ||
+            (tillClosed && !allowedWhileClosed) ||
             (!isWalkIn && needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim()))
           }
         >
           {isPending
             ? "Enregistrement…"
+            : invoiceFlow
+            ? issuesInvoiceNow
+              ? "Encaisser et émettre la facture"
+              : "Enregistrer la vente"
             : method === "CARD_QR"
             ? "Générer le QR de paiement"
-            : isWalkIn
-            ? "Encaisser et envoyer le ticket"
             : "Encaisser et envoyer le ticket"}
         </Button>
+        {invoiceFlow && !customer.vatNumber.trim() && (
+          <p className="text-xs font-medium text-amber-700">Renseignez le numéro de TVA du client : une vente avec facture l&apos;exige.</p>
+        )}
       </aside>
 
       <ConfirmDialog
         open={terminalConfirmOpen}
         title="Confirmer le paiement par terminal externe"
-        message={`Vérifiez que le terminal affiche « APPROUVÉ » avant de continuer — ${total.toFixed(2)} € pour ${customer.fullName || "ce client"}.`}
-        confirmLabel="Encaisser et envoyer le reçu"
+        message={`Vérifiez que le terminal affiche « APPROUVÉ » avant de continuer — ${collectedNow.toFixed(2)} € pour ${customer.fullName || "ce client"}.${
+          invoiceFlow ? (settleMode === "NOW" ? " La facture sera émise à l'encaissement." : " Acompte : la facture sera émise au paiement du solde.") : ""
+        }`}
+        confirmLabel={invoiceFlow ? "Encaisser et enregistrer" : "Encaisser et envoyer le reçu"}
         loading={isPending}
         confirmDisabled={!terminalApproved || !terminalReference.trim()}
         onConfirm={submitSale}
@@ -1131,13 +1496,9 @@ export function CounterCart({
             />
             Je confirme que le terminal affiche « APPROUVÉ » pour ce paiement.
           </label>
-          <input
-            value={terminalReference}
-            onChange={(event) => setTerminalReference(event.target.value)}
-            maxLength={100}
-            placeholder="Référence / numéro du ticket terminal (obligatoire)"
-            className="mt-3 w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#2f3a2e]"
-          />
+          <div className="mt-3">
+            <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />
+          </div>
         </div>
       </ConfirmDialog>
 
@@ -1197,6 +1558,35 @@ export function CounterCart({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={invoiceConfirmOpen}
+        title={issuesInvoiceNow ? "Encaisser et émettre la facture ?" : "Enregistrer la vente ?"}
+        message={`${customer.fullName || "Client"} — ${total.toFixed(2)} € TTC. ${
+          issuesInvoiceNow
+            ? "La facture est émise tout de suite ; son numéro est définitif, une erreur ne se corrige ensuite que par une note de crédit."
+            : `${
+                transferAwaited
+                  ? `Virement attendu de ${(settleMode === "DEPOSIT" ? depositAmount : total).toFixed(2)} € : rien n'est enregistré comme payé avant « Virement reçu ».`
+                  : settleMode === "DEPOSIT"
+                  ? `Acompte de ${collectedNow.toFixed(2)} € encaissé maintenant, solde de ${(total - collectedNow).toFixed(2)} € plus tard.`
+                  : "Rien n'est encaissé maintenant."
+              } Aucune facture n'est émise avant le paiement complet : la vente rejoint « Ventes en attente de paiement ».`
+        }`}
+        confirmLabel={issuesInvoiceNow ? "Encaisser et émettre" : "Enregistrer"}
+        loading={isPending}
+        onConfirm={submitSale}
+        onCancel={() => !isPending && setInvoiceConfirmOpen(false)}
+      />
+
+      <DocumentDeliveryDialog
+        open={Boolean(issuedInvoice)}
+        onClose={() => setIssuedInvoice(null)}
+        document={issuedInvoice}
+        invoice={issuedInvoice}
+        kind="INVOICE"
+      />
+    </div>
     </div>
   );
 }

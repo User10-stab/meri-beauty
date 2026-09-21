@@ -80,16 +80,20 @@ test.describe("the daily till", () => {
     await disconnect();
   });
 
-  test("with no till open, the counter refuses to sell anything", async () => {
+  test("with no till open, the counter takes no cash, terminal or QR payment", async () => {
     await page.goto(POS_PAGE);
 
     await expect(page.getByRole("heading", { name: /caisse fermée/i })).toBeVisible();
-    // The wording matters as much as the block: staff need to know this is
-    // not a cash-only restriction.
-    await expect(page.getByText(/quel que soit le mode de paiement/i)).toBeVisible();
+    // Staff need to know exactly what the block covers: every drawer-side
+    // payment. Since invoice sales moved into la caisse (2026-09-21), a sale
+    // paid by transfer or « payer plus tard » — which never touches the
+    // drawer — can still be recorded while it is closed.
+    await expect(page.getByText(/en espèces, au terminal ou par QR/i)).toBeVisible();
 
-    // And no sale surface is offered at all — not a disabled one.
-    await expect(page.getByRole("button", { name: /encaisser|payer/i })).toHaveCount(0);
+    const till = page.locator("#counter-cart");
+    for (const method of [/^espèces$/i, /^terminal externe$/i, /^carte qr$/i]) {
+      await expect(till.getByRole("radio", { name: method })).toBeDisabled();
+    }
   });
 
   test("a cashier can open the till from the counter itself", async () => {

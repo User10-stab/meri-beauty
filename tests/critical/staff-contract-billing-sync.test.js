@@ -129,12 +129,34 @@ describe("rent money shows in Opérations, as it does in the livre de recettes",
     expect(actions).toContain("hydrateStaffRentTransactions(idsBySource.STAFF_RENT),");
   });
 
-  it("the table labels it and sends « Voir » to the Factures page", () => {
+  it("the table labels it and opens « Voir / gérer » like any other transaction", () => {
     const client = source("components/dashboard/operations/AdminOperationsClient.jsx");
     expect(client).toContain('kind: "Loyer staff",');
-    expect(client).toContain('row.sourceType === "STAFF_RENT" ? (');
-    expect(client).toContain("Voir dans Factures");
+    expect(client).toContain('if (row.sourceType === "APPOINTMENT" || row.sourceType === "STAFF_RENT") {');
+    // No detour to the Factures page any more (user, 2026-09-22).
+    expect(client).not.toContain("Voir dans Factures");
     expect(client).toContain('event.method === "TRANSFER" ? "Virement"');
+  });
+
+  it("the detail drawer describes a rent and hides the booking cancel / refund / ticket flows", () => {
+    const drawer = source("components/dashboard/operations/TransactionDetailDrawer.jsx");
+    expect(drawer).toContain('kind: "Loyer staff",');
+    expect(drawer).toContain("{isRent && <StaffRentSection payment={payment} />}");
+    expect(drawer).toContain("const canGenerateNote = !isRent && isRefund");
+    expect(drawer).toMatch(/const canCancelAndRefund =\n\s+!isRent &&/);
+    expect(drawer).toMatch(/const canGenerateCreditNote =\n\s+!isRent &&/);
+    expect(drawer).toContain("{payment?.id && !isRent && (");
+    const detail = source("actions/dashboard/admin-operations.js");
+    expect(detail).toContain("staffContract: { select: { fixedRent: true, startDate: true, dueDate: true,");
+    expect(detail).toContain("staffRentPeriod: { select: { billingYear: true, billingMonth: true, lineDescription: true, dueDate: true, status: true } },");
+  });
+
+  it("Factures opens the same drawer: « Détails du paiement » on every invoice row", () => {
+    const client = source("components/dashboard/invoices/InvoicesClient.jsx");
+    expect(client).toContain("onClick={() => setDetailTransactionId(invoice.latestTransactionId)}");
+    expect(client).toContain("disabled={!invoice.latestTransactionId}");
+    expect(client).toContain("<TransactionDetailDrawer transactionId={detailTransactionId} onClose={() => setDetailTransactionId(null)} />");
+    expect(source("actions/dashboard/invoices.js")).toContain("latestTransactionId: invoice.payment?.transactions?.[0]?.id ?? null,");
   });
 
   it("the livre de recettes already counts it: salon-owned rent payments, category « Loyers staff »", () => {

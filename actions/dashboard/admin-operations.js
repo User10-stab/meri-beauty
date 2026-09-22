@@ -1096,6 +1096,8 @@ export async function getTransactionDetail(transactionId) {
                 id: true,
                 number: true,
                 issuedAt: true,
+                // Only a staff rent invoice carries one (its échéance).
+                dueDate: true,
                 subtotalExclVat: true,
                 vatRate: true,
                 vatAmount: true,
@@ -1145,6 +1147,9 @@ export async function getTransactionDetail(transactionId) {
             workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             formationReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             appointment: { select: { id: true, date: true, status: true, checkInCode: true, checkedInAt: true, user: { select: { fullName: true, email: true } }, staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
+            // Staff rent (« Loyer staff »): the contract and the billed period.
+            staffContract: { select: { fixedRent: true, startDate: true, dueDate: true, staff: { select: { user: { select: { fullName: true, email: true } } } } } },
+            staffRentPeriod: { select: { billingYear: true, billingMonth: true, lineDescription: true, dueDate: true, status: true } },
           },
         },
       },

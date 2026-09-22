@@ -82,6 +82,9 @@ export async function listInvoices(rawFilters = {}) {
               // The Paiement column reads this, never an assumption: a rent
               // invoice is issued before it is paid.
               status: true,
+              // « Détails du paiement » opens the Opérations detail drawer on
+              // the latest money event; none yet = nothing received.
+              transactions: { where: { isDeleted: false }, orderBy: [{ paidAt: "desc" }, { id: "desc" }], take: 1, select: { id: true } },
               order: { select: { orderNumber: true, status: true } },
               appointment: { select: { status: true } },
               workshopReservation: { select: { status: true } },
@@ -128,6 +131,7 @@ export async function listInvoices(rawFilters = {}) {
         refundOperationCount: invoice.payment?._count?.refundOperations ?? 0,
         paidAmount: money(invoice.payment?.paidAmount ?? 0),
         paymentStatus: invoice.payment?.status ?? null,
+        latestTransactionId: invoice.payment?.transactions?.[0]?.id ?? null,
         ...item,
       };
       const eligibility = creditNoteEligibility(base);

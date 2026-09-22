@@ -8,16 +8,7 @@ import { roundMoney } from "@/lib/tax-policy";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { isBelgianVatNumber } from "@/lib/peppyrus";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
-import {
-  buildStaffCustomer,
-  issueRentInvoiceNow,
-  olderUnissuedRents,
-  pendingRentPaymentData,
-  rentInvoiceInput,
-  UNISSUED_RENT_ORDER,
-  UNISSUED_RENT_WHERE,
-} from "@/lib/staff-rent-payment";
-import { buildPendingInvoicePreview } from "@/lib/invoices/invoice-preview";
+import { buildStaffCustomer, pendingRentPaymentData, rentInvoiceInput, UNISSUED_RENT_ORDER, UNISSUED_RENT_WHERE } from "@/lib/staff-rent-payment";
 
 /**
  * Staff rent on the Factures page.
@@ -25,8 +16,8 @@ import { buildPendingInvoicePreview } from "@/lib/invoices/invoice-preview";
  * Since 2026-09-22 a rent is invoiced when it falls due — automatically
  * (lib/staff-monthly-billing.js, lib/staff-invoice.js), unpaid, with its
  * échéance — so the invoice can be sent before the staff member pays.
- *   - « Émettre la facture »: a rent recorded but not invoiced (the automatic
- *     issue was refused, or it predates this rule) gets its invoice now.
+ *   Never issued by hand (user's call, 2026-09-22): a rent recorded without
+ *   its invoice gets it on the next daily run (issueMissingRentInvoices).
  *   - « Accepter »: the transfer arrived — records the money, the salon's
  *     income. On an invoiced rent that is all it does; on one not invoiced
  *     yet it also issues the invoice, so a paid rent never lacks one.
@@ -121,10 +112,8 @@ export async function listPendingStaffRent() {
   }
 
   const rows = [
-    ...dueRents.map((rent, index) => ({
+    ...dueRents.map((rent) => ({
       kind: "RENT",
-      // Numbers follow the rents' age: only the oldest can be issued now.
-      issueAfter: index > 0 ? dueRents[0].staff?.user?.fullName || "le loyer plus ancien" : null,
       rentId: rent.id,
       invoiceId: null,
       number: null,
@@ -360,7 +349,6 @@ export async function acceptStaffRentPayment(input) {
 
 const RENT_ERROR_MESSAGES = {
   STAFF_RENT_NOT_FOUND: "Ce loyer est introuvable.",
-  STAFF_RENT_ALREADY_INVOICED: "Ce loyer a déjà sa facture.",
   STAFF_RENT_CREDITED: "Cette facture est déjà entièrement créditée.",
   STAFF_RENT_CREDIT_AMOUNT: "Le montant de la note de crédit doit être supérieur à 0 et ne pas dépasser ce qui reste à créditer.",
   STAFF_RENT_CREDIT_REASON: "Indiquez le motif de la note de crédit (3 caractères au moins).",
@@ -374,67 +362,6 @@ function rentErrorMessage(error, context) {
   if (error?.userMessage) return error.userMessage;
   if (!RENT_ERROR_MESSAGES[error?.message]) console.error(`[${context}]`, error);
   return RENT_ERROR_MESSAGES[error?.message] ?? "Opération impossible sur ce loyer.";
-}
-
-/**
- * What the send card shows for a rent not invoiced yet, BEFORE anything is
- * issued: the customer the invoice would carry (its e-mail, Peppol or not)
- * and the number it should get. Nothing is written, no number is taken —
- * « Émettre la facture » opens this card first, and the invoice is issued only
- * when the channels are chosen and confirmed (user's call, 2026-09-22).
- */
-export async function getStaffRentIssueDraft(input) {
-  const guard = await requireAdminSession();
-  if (guard.error) return { success: false, message: guard.error };
-
-  const rentId = typeof input?.rentId === "string" ? input.rentId.trim() : "";
-  if (!rentId) return { success: false, message: RENT_ERROR_MESSAGES.STAFF_RENT_NOT_FOUND };
-
-  const preview = await buildPendingInvoicePreview({ kind: "RENT", id: rentId });
-  if (!preview.invoice) {
-    return { success: false, message: preview.reason === "ALREADY_INVOICED" ? RENT_ERROR_MESSAGES.STAFF_RENT_ALREADY_INVOICED : preview.message };
-  }
-  return { success: true, data: { draft: { ...serializeInvoice({ ...preview.invoice, id: `draft-${rentId}` }), isDraft: true } } };
-}
-
-/**
- * « Émettre la facture » on a rent recorded without one — its automatic
- * issue was refused (missing data, since fixed), or it was recorded before
- * rents were invoiced up front. Issued unpaid, with its échéance. Called by
- * the send card once the channels are confirmed, right before sending.
- */
-export async function issueStaffRentInvoice(input) {
-  const guard = await requireAdminSession();
-  if (guard.error) return { success: false, message: guard.error };
-
-  const rentId = typeof input?.rentId === "string" ? input.rentId.trim() : "";
-  if (!rentId) return { success: false, message: RENT_ERROR_MESSAGES.STAFF_RENT_NOT_FOUND };
-
-  // Numbers follow the rents' age (oldest = lowest): refuse to jump the queue.
-  const rent = await prisma.staffMonthlyInvoice.findUnique({ where: { id: rentId }, select: { id: true, generatedAt: true } });
-  if (!rent) return { success: false, message: RENT_ERROR_MESSAGES.STAFF_RENT_NOT_FOUND };
-  const older = await olderUnissuedRents(prisma, rent);
-  if (older.length > 0) {
-    const first = older[0];
-    return {
-      success: false,
-      message: `Émettez d'abord la facture de ${first.staff?.user?.fullName ?? "ce loyer"} (${first.lineDescription ?? "loyer plus ancien"}) : les numéros suivent l'ordre des loyers.`,
-    };
-  }
-
-  let invoice;
-  try {
-    invoice = await issueRentInvoiceNow(rentId, { actor: guard.session.user });
-  } catch (error) {
-    return { success: false, message: rentErrorMessage(error, "issueStaffRentInvoice") };
-  }
-
-  revalidatePath("/dashboard/factures");
-  return {
-    success: true,
-    message: `Facture ${invoice.number} émise — ${euro(invoice.totalInclVat)}, à payer par virement.`,
-    data: { invoice: serializeInvoice(invoice) },
-  };
 }
 
 /**

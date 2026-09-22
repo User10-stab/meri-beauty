@@ -29,8 +29,16 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/invoicing", () => ({ issueInvoice: mocks.issueInvoice, issueCreditNote: mocks.issueCreditNote }));
 vi.mock("@/lib/peppyrus", () => ({ isBelgianVatNumber: (vat) => String(vat ?? "").startsWith("BE") }));
 
+vi.mock("@/lib/email", () => ({ sendEmail: vi.fn() }));
+vi.mock("@/lib/pdf/render", () => ({ renderInvoicePdf: vi.fn() }));
+vi.mock("@/lib/monitoring", () => ({ captureCriticalError: vi.fn() }));
+vi.mock("@/lib/email-templates", () => ({ invoiceEmail: vi.fn() }));
+
 import { issueRentInvoiceNow } from "@/lib/staff-rent-payment";
-import { creditStaffRentInvoice, issueStaffRentInvoice } from "@/actions/invoices/staff-rent";
+import { issueMissingRentInvoices } from "@/lib/staff-monthly-billing";
+import * as staffRentActions from "@/actions/invoices/staff-rent";
+
+const { creditStaffRentInvoice } = staffRentActions;
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g, "\n");
@@ -112,17 +120,6 @@ describe("a rent is invoiced when it falls due — unpaid, with its échéance",
 
     mocks.prisma.staffMonthlyInvoice.findUnique.mockResolvedValue({ ...RENT, status: "GENERATED", invoiceId: "inv_13" });
     await expect(issueRentInvoiceNow("smi_lyly")).rejects.toThrow("STAFF_RENT_ALREADY_INVOICED");
-  });
-
-  it("« Émettre la facture » is admin-only, names who did it, and offers the invoice for sending", async () => {
-    mocks.auth.mockResolvedValue({ user: { id: "u_julie", role: "STAFF" } });
-    expect((await issueStaffRentInvoice({ rentId: "smi_lyly" })).success).toBe(false);
-    expect(mocks.issueInvoice).not.toHaveBeenCalled();
-
-    mocks.auth.mockResolvedValue({ user: ADMIN });
-    const result = await issueStaffRentInvoice({ rentId: "smi_lyly" });
-    expect(result).toMatchObject({ success: true, data: { invoice: { number: "F-2026-000013", peppolApplicable: true } } });
-    expect(mocks.tx.auditLog.create.mock.calls[0][0].data).toMatchObject({ actorId: "u_admin", actorRole: "ADMIN" });
   });
 
   it("the billing job issues right after recording, and a refused invoice leaves the rent recorded", () => {
@@ -212,31 +209,41 @@ describe("a credit note on a rent invoice, for a mistake", () => {
     const client = source("components/dashboard/invoices/InvoicesClient.jsx");
     expect(client).toContain('invoice.source === "STAFF_CONTRACT" ? setRentCreditFor(invoice) : setCreditNoteFor(invoice)');
     expect(client).toContain("<CreditStaffRentDialog invoice={rentCreditFor}");
-    expect(client).toContain('aria-label="Émettre la facture"');
+    // Rent invoices are issued by the daily job only — no button issues one.
+    expect(client).not.toContain('aria-label="Émettre la facture"');
     const dialog = source("components/dashboard/invoices/CreditStaffRentDialog.jsx");
     expect(dialog).toContain("const canSubmit = amountValid && reason.trim().length >= 3 && (!paid || refundSent);");
   });
 });
 
-describe("« Émettre la facture » asks how to send it first, and never marks it paid (user's call, 2026-09-22)", () => {
-  const client = source("components/dashboard/invoices/InvoicesClient.jsx");
-  const card = source("components/dashboard/operations/DocumentDeliveryDialog.jsx");
 
-  it("the button only opens the send card on a draft — nothing is issued by the click", () => {
-    const issueRent = client.slice(client.indexOf("async function issueRent("), client.indexOf("async function issueRentNow("));
-    expect(issueRent).toContain("getStaffRentIssueDraft(");
-    expect(issueRent).not.toContain("issueStaffRentInvoice(");
-    expect(client).toContain("issue={issueRentNow}");
+describe("rent invoices are issued automatically; nothing is issued by hand (user's call, 2026-09-22)", () => {
+  const client = source("components/dashboard/invoices/InvoicesClient.jsx");
+
+  it("no action issues a rent invoice from the Factures page, and no order is imposed on sending", () => {
+    expect(staffRentActions.issueStaffRentInvoice).toBeUndefined();
+    expect(staffRentActions.getStaffRentIssueDraft).toBeUndefined();
+    expect(client).not.toContain("issueAfter");
+    expect(source("actions/invoices/staff-rent.js")).not.toContain("olderUnissuedRents");
   });
 
-  it("the card issues the invoice only on the final confirm, then sends it", () => {
-    const deliver = card.slice(card.indexOf("async function deliver("), card.indexOf("return (\n    <>"));
-    const issued = deliver.indexOf("await issue()");
-    expect(issued).toBeGreaterThan(-1);
-    expect(deliver.indexOf("sendInvoiceByEmail(documentId")).toBeGreaterThan(issued);
-    expect(deliver.indexOf("sendInvoiceToPeppyrus(documentId")).toBeGreaterThan(issued);
-    // A refused issue stops there: nothing is sent.
-    expect(deliver.slice(issued, deliver.indexOf("setIssued("))).toContain("return;");
+  it("every daily run invoices each rent still without one, oldest first, one at a time", async () => {
+    mocks.prisma.staffMonthlyInvoice.findMany.mockResolvedValue([
+      { id: "smi_lyly", staffId: "s_lyly", billingYear: 2026, billingMonth: 9 },
+      { id: "smi_julie", staffId: "s_julie", billingYear: 2026, billingMonth: 9 },
+    ]);
+    expect(await issueMissingRentInvoices()).toEqual({ issued: 2, failed: 0 });
+    expect(mocks.prisma.staffMonthlyInvoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ generatedAt: "asc" }, { id: "asc" }] })
+    );
+    expect(mocks.issueInvoice).toHaveBeenCalledTimes(2);
+    expect(source("lib/staff-monthly-billing.js")).toContain("catchUp = await issueMissingRentInvoices();");
+  });
+
+  it("a rent whose invoice is refused stays recorded and is retried next run", async () => {
+    mocks.prisma.staffMonthlyInvoice.findMany.mockResolvedValue([{ id: "smi_lyly", staffId: "s_lyly", billingYear: 2026, billingMonth: 9 }]);
+    mocks.issueInvoice.mockRejectedValueOnce(new Error("SELLER_LEGAL_DATA_INCOMPLETE"));
+    expect(await issueMissingRentInvoices()).toEqual({ issued: 0, failed: 1 });
   });
 
   it("the Paiement column reads the real payment status: issued or sent is not paid", () => {
@@ -245,34 +252,8 @@ describe("« Émettre la facture » asks how to send it first, and never marks i
     expect(client).toContain("<PaymentCell pending={pending} invoice={invoice} />");
   });
 
-  it("the draft shows the number it should get, read without taking it", () => {
-    const peek = source("lib/invoicing.js");
-    const body = peek.slice(peek.indexOf("export async function peekNextInvoiceNumber("));
-    expect(body.slice(0, body.indexOf("\n}\n"))).not.toMatch(/INSERT|update|upsert/);
-    expect(source("lib/invoices/invoice-preview.js")).toContain("await peekNextInvoiceNumber(prisma, planned.ahead ?? 0)");
-  });
-});
-
-describe("rent invoices take successive numbers, oldest rent first (user's call, 2026-09-22)", () => {
-  it("a younger rent cannot be issued while an older one waits — nothing is numbered", async () => {
-    mocks.prisma.staffMonthlyInvoice.findMany.mockResolvedValue([
-      { id: "smi_old", lineDescription: "Location d'espace — septembre 2026", staff: { user: { fullName: "Lyly" } } },
-    ]);
-    const result = await issueStaffRentInvoice({ rentId: "smi_rose" });
-    expect(result.success).toBe(false);
-    expect(result.message).toContain("Lyly");
-    expect(mocks.issueInvoice).not.toHaveBeenCalled();
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
-  });
-
-  it("the queue is the rents' age, and each draft counts the older ones ahead of it", () => {
-    const helper = source("lib/staff-rent-payment.js");
-    expect(helper).toContain('export const UNISSUED_RENT_ORDER = [{ generatedAt: "asc" }, { id: "asc" }];');
-    expect(helper).toContain("OR: [{ generatedAt: { lt: rent.generatedAt } }, { generatedAt: rent.generatedAt, id: { lt: rent.id } }]");
-    expect(source("lib/invoicing.js")).toContain('+ 1 + ahead).padStart(6, "0")');
-    const actions = source("actions/invoices/staff-rent.js");
-    expect(actions).toContain("orderBy: UNISSUED_RENT_ORDER,");
-    expect(actions).toContain("issueAfter: index > 0 ?");
-    expect(source("components/dashboard/invoices/InvoicesClient.jsx")).toContain("disabled={busy || Boolean(pending.issueAfter)}");
+  it("one origin label for rent invoices, wherever they are listed", () => {
+    expect(source("lib/invoices/list-filters.js")).toContain('STAFF_CONTRACT: "Loyer staff",');
+    expect(source("lib/invoices/pending-rows.js")).toContain('RENT: "Loyer staff",');
   });
 });

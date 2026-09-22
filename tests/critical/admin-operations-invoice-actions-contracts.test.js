@@ -158,8 +158,8 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     expect(delivery).toContain("useState(false)"); // emailChecked / peppyrusChecked default off
     // The e-mail send now carries the dialog's recipient choices; the
     // Peppyrus call is unchanged.
-    expect(delivery).toContain("sendInvoiceByEmail(documentId, opts)");
-    expect(delivery).toContain("sendInvoiceToPeppyrus(documentId)");
+    expect(delivery).toContain("sendInvoiceByEmail(documentRecord.id, opts)");
+    expect(delivery).toContain("sendInvoiceToPeppyrus(documentRecord.id)");
     // Nothing fires straight from a channel checkbox — a shared confirm step does.
     expect(delivery).toContain("setConfirming(true)");
     expect(delivery).toContain("onClick={deliver}");

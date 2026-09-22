@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, FileSearch, HandCoins, Hourglass, Loader2, Mail, Receipt, RotateCcw, Search, Send } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, FileSearch, HandCoins, Hourglass, Loader2, Mail, RotateCcw, Search, Send } from "lucide-react";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { GenerateCreditNoteDialog } from "@/components/dashboard/operations/GenerateCreditNoteDialog";
 import { SettleManualInvoiceDialog } from "@/components/dashboard/invoices/SettleManualInvoiceDialog";
@@ -12,7 +12,7 @@ import { INVOICE_SOURCE_LABELS } from "@/lib/invoices/list-filters";
 import { pendingPaymentState } from "@/lib/invoices/pending-rows";
 import { settleManualInvoice } from "@/actions/invoices/manual-invoice";
 import { acceptAwaitedTransfer } from "@/actions/payments/awaited-transfer";
-import { acceptStaffRentPayment, getStaffRentIssueDraft, issueStaffRentInvoice } from "@/actions/invoices/staff-rent";
+import { acceptStaffRentPayment } from "@/actions/invoices/staff-rent";
 
 /**
  * Factures — every issued invoice in one list with Voir / E-mail / Peppol.
@@ -117,11 +117,12 @@ function previewHref(pending) {
 }
 
 /**
- * The same buttons for an invoice and for its credit note: Voir (opens the
- * PDF in a new tab — saving it from there, never a forced download),
- * E-mail, and Peppol (Belgian B2B only — the rule the server enforces). Each
- * send button opens the shared delivery card with its own channel
- * pre-ticked; the card's confirm step still gates the send.
+ * The same three buttons on every invoice and every credit note (user's
+ * call, 2026-09-22): Voir (opens the PDF in a new tab — saving it from
+ * there, never a forced download), E-mail, and Peppol. Peppol is always
+ * shown, greyed out when the customer is not a Belgian business — the rule
+ * the server enforces. Each send button opens the shared delivery card with
+ * its own channel pre-ticked; the card's confirm step still gates the send.
  */
 function DocumentActions({ pdfHref, peppolApplicable, onSend, tone }) {
   return (
@@ -132,11 +133,16 @@ function DocumentActions({ pdfHref, peppolApplicable, onSend, tone }) {
       <button type="button" onClick={() => onSend("EMAIL")} title="Envoyer par e-mail" aria-label="Envoyer par e-mail" className={`${actionButton} ${tone}`}>
         <Mail size={ICON} />
       </button>
-      {peppolApplicable && (
-        <button type="button" onClick={() => onSend("PEPPYRUS")} title="Envoyer via Peppol" aria-label="Envoyer via Peppol" className={`${actionButton} ${tone}`}>
-          <Send size={ICON} />
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => onSend("PEPPYRUS")}
+        disabled={!peppolApplicable}
+        title={peppolApplicable ? "Envoyer via Peppol" : "Peppol : uniquement pour un client professionnel belge (n° de TVA BE)"}
+        aria-label="Envoyer via Peppol"
+        className={`${actionButton} ${tone}`}
+      >
+        <Send size={ICON} />
+      </button>
     </>
   );
 }
@@ -184,13 +190,11 @@ function PaymentCell({ pending, invoice = null }) {
  * also be paid in cash, by card or in several times — the dialog that does
  * anything other than "the whole balance arrived by transfer".
  */
-function PendingActions({ pending, busy, onAccept, onSettle, onIssue }) {
+function PendingActions({ pending, busy, onAccept, onSettle }) {
   // A row already invoiced has its own « Voir »; the others show, before the
-  // tick, the invoice they would get — or why there would be none.
+  // tick, the invoice they would get — or why there would be none. Rent
+  // invoices are never issued from here: the daily job issues them.
   const preview = pending.invoiceNumber ? null : previewHref(pending);
-  // A rent recorded without its invoice (the automatic issue was refused, or
-  // it predates rents being invoiced up front) can be invoiced before payment.
-  const canIssue = pending.accept.kind === "RENT";
   return (
     <>
       {preview && (
@@ -204,22 +208,6 @@ function PendingActions({ pending, busy, onAccept, onSettle, onIssue }) {
         >
           <FileSearch size={ICON} />
         </a>
-      )}
-      {canIssue && (
-        <button
-          type="button"
-          disabled={busy || Boolean(pending.issueAfter)}
-          onClick={() => onIssue(pending)}
-          title={
-            pending.issueAfter
-              ? `Émettez d'abord la facture de ${pending.issueAfter} : les numéros suivent l'ordre des loyers, du plus ancien au plus récent`
-              : "Émettre et envoyer la facture : choisissez d'abord l'envoi (e-mail, Peppol). Le paiement reste en attente jusqu'à « Accepter »"
-          }
-          aria-label="Émettre la facture"
-          className={`${actionButton} border-[#2f3a2e] bg-[#2f3a2e] text-white hover:bg-[#1f291f]`}
-        >
-          <Receipt size={ICON} />
-        </button>
       )}
       <button
         type="button"
@@ -260,7 +248,6 @@ export function InvoicesClient({ data, pendingRows = [] }) {
   const [settling, setSettling] = useState(null); // manual sale, richer settlement
   const [issuedInvoice, setIssuedInvoice] = useState(null); // « proposer l'envoi »
   const [rentCreditFor, setRentCreditFor] = useState(null); // rent invoice row
-  const [rentToIssue, setRentToIssue] = useState(null); // { rentId, draft } — issued only once the send is confirmed
 
   useEffect(() => setDraft(filters), [filters]);
 
@@ -274,28 +261,6 @@ export function InvoicesClient({ data, pendingRows = [] }) {
   const looseRows = pendingRows.filter((row) => !row.invoiceNumber || !shownNumbers.has(row.invoiceNumber));
 
   /** One tick, whatever the row is: the whole balance, received by transfer. */
-  /**
-   * « Émettre la facture » on a rent: nothing is issued yet. The send card
-   * opens on a draft first; the invoice gets its number and goes out only
-   * once the channels are chosen and confirmed. Its payment stays pending.
-   */
-  async function issueRent(row) {
-    if (acceptingKey) return;
-    setAcceptingKey(row.key);
-    const result = await getStaffRentIssueDraft({ rentId: row.accept.rentId });
-    setAcceptingKey(null);
-    if (!result?.success) {
-      toast.error(result?.message ?? "Facture non émise.");
-      return;
-    }
-    setRentToIssue({ rentId: row.accept.rentId, draft: result.data.draft });
-  }
-
-  async function issueRentNow() {
-    const result = await issueStaffRentInvoice({ rentId: rentToIssue.rentId });
-    return { success: Boolean(result?.success), message: result?.message, invoice: result?.data?.invoice ?? null };
-  }
-
   async function acceptPending(row) {
     if (acceptingKey) return;
     setAcceptingKey(row.key);
@@ -466,7 +431,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                 <td className="px-4 py-3 text-xs text-gray-400">—</td>
                 <td className={`${stickyActions} bg-amber-50 px-4 py-3 dark:bg-[#2a2415]`}>
                   <div className="flex justify-end gap-1.5 whitespace-nowrap">
-                    <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} onIssue={issueRent} />
+                    <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />
                   </div>
                 </td>
               </tr>
@@ -523,7 +488,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                     <td className={`${stickyActions} bg-white px-4 py-3 dark:bg-gray-dark`}>
                       <div className="flex justify-end gap-1.5 whitespace-nowrap">
                         {pending && (
-                          <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} onIssue={issueRent} />
+                          <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />
                         )}
                         <DocumentActions
                           pdfHref={`/api/invoices/${invoice.id}/pdf`}
@@ -629,18 +594,6 @@ export function InvoicesClient({ data, pendingRows = [] }) {
         document={issuedInvoice}
         invoice={issuedInvoice}
         kind="INVOICE"
-      />
-
-      {/* « Émettre la facture » on a rent: choose the channels, then issue + send. */}
-      <DocumentDeliveryDialog
-        open={Boolean(rentToIssue)}
-        onClose={() => setRentToIssue(null)}
-        document={rentToIssue?.draft ?? null}
-        invoice={rentToIssue?.draft ?? null}
-        kind="INVOICE"
-        issue={issueRentNow}
-        onIssued={() => router.refresh()}
-        onDelivered={() => router.refresh()}
       />
 
       <CreditStaffRentDialog invoice={rentCreditFor} onClose={() => setRentCreditFor(null)} />

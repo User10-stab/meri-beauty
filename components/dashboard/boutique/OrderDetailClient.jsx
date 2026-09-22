@@ -8,8 +8,15 @@ import { ArrowLeft, Loader2, Mail, Phone, MapPin, Truck, KeyRound, Download, Fil
 import Button from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { PickupConfirmDialog } from "@/components/dashboard/boutique/PickupConfirmDialog";
-import { markOrderReadyForPickup, markOrderShipped, markOrderCompleted, cancelOrder, reviewOrderCancellationRequest } from "@/actions/boutique/orders";
-import { generateShippingLabel } from "@/actions/boutique/mondial-relay";
+import {
+  markOrderReadyForPickup,
+  markOrderShipped,
+  markOrderCompleted,
+  cancelOrder,
+  reviewOrderCancellationRequest,
+  markOrderReturnedUndelivered,
+} from "@/actions/boutique/orders";
+import { generateShippingLabel, clearStuckLabelClaim } from "@/actions/boutique/mondial-relay";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 
 const MODE_LABEL = {
@@ -66,7 +73,7 @@ function formatDate(d) {
   return d ? new Date(d).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short", timeZone: "Europe/Brussels" }) : "—";
 }
 
-export function OrderDetailClient({ order }) {
+export function OrderDetailClient({ order, isAdmin = false }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [pickupDialogOrder, setPickupDialogOrder] = useState(null);
@@ -76,6 +83,13 @@ export function OrderDetailClient({ order }) {
   const [closingShipped, setClosingShipped] = useState(false);
   const [collectedAt, setCollectedAt] = useState("");
   const [deliveryDoc, setDeliveryDoc] = useState(null);
+  // "Annuler quand même" — set when a plain cancel attempt comes back
+  // blocked specifically because a Mondial Relay label was already bought
+  // (cancelOrder's requiresLabelAcknowledgement).
+  const [labelOverridePrompt, setLabelOverridePrompt] = useState(false);
+  const [labelOverrideReason, setLabelOverrideReason] = useState("");
+  const [undeliveredPrompt, setUndeliveredPrompt] = useState(false);
+  const [undeliveredNote, setUndeliveredNote] = useState("");
   const isB2B = order.invoice?.customerType === "B2B";
 
   function runAction(action, ...args) {
@@ -106,7 +120,23 @@ export function OrderDetailClient({ order }) {
       if (result.success) {
         toast.success(result.message);
         if (result.data?.trackingCode) setTrackingCode(result.data.trackingCode);
-        if (result.data?.labelUrl) window.open(result.data.labelUrl, "_blank");
+        // Our own stable, authenticated route — not Mondial Relay's raw URL
+        // (unconfirmed lifetime, carries the customer's address/phone). If
+        // the popup is blocked, the permanent link in Documents below still
+        // works — nothing is lost the way it used to be.
+        if (result.data?.trackingCode) window.open(`/api/orders/${order.id}/shipping-label`, "_blank");
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
+
+  function handleClearStuckClaim() {
+    startTransition(async () => {
+      const result = await clearStuckLabelClaim(order.id);
+      if (result.success) {
+        toast.success(result.message);
         router.refresh();
       } else {
         toast.error(result.message);
@@ -134,9 +164,46 @@ export function OrderDetailClient({ order }) {
         toast.success(result.message);
         setCancelling(false);
         router.refresh();
+      } else if (result.requiresLabelAcknowledgement && isAdmin) {
+        // Blocked specifically by the Mondial Relay label, not by status —
+        // offer the deliberate override instead of just an error toast.
+        setCancelling(false);
+        setLabelOverridePrompt(true);
       } else {
         toast.error(result.message);
         setCancelling(false);
+      }
+    });
+  }
+
+  function handleCancelWithLabelLoss() {
+    startTransition(async () => {
+      const result = await cancelOrder({
+        orderId: order.id,
+        reason: labelOverrideReason.trim(),
+        acknowledgeLabelLoss: true,
+      });
+      if (result.success) {
+        toast.success(result.message);
+        setLabelOverridePrompt(false);
+        setLabelOverrideReason("");
+        router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
+
+  function handleMarkUndelivered() {
+    startTransition(async () => {
+      const result = await markOrderReturnedUndelivered({ orderId: order.id, note: undeliveredNote.trim() || null });
+      if (result.success) {
+        toast.success(result.message);
+        setUndeliveredPrompt(false);
+        setUndeliveredNote("");
+        router.refresh();
+      } else {
+        toast.error(result.message);
       }
     });
   }
@@ -159,6 +226,11 @@ export function OrderDetailClient({ order }) {
   const canShip = !isPickupMode && order.status === "PROCESSING";
   const canCloseShipped = !isPickupMode && order.status === "SHIPPED";
   const canCancel = CANCELLABLE.includes(order.status);
+  // A generation whose outcome Mondial Relay never confirmed (timeout/lost
+  // response) — labelRequestedAt stays set, trackingCode stays null, until
+  // an admin checks the MR portal and clears it.
+  const hasStuckLabelClaim = !isPickupMode && Boolean(order.labelRequestedAt) && !order.trackingCode;
+  const canMarkUndelivered = !isPickupMode && isAdmin && order.status === "SHIPPED";
 
   return (
     <div className="space-y-6">
@@ -368,6 +440,20 @@ export function OrderDetailClient({ order }) {
               ) : (
               <p className="text-sm text-gray-500">Pas encore de reçu — il est émis à l&apos;encaissement de la commande.</p>
               )}
+              {/* Persistent link, not just the post-generation window.open in
+                  handleGenerateLabel — a blocked popup or a closed tab used
+                  to lose an already-purchased label with no way back. */}
+              {order.trackingCode && (
+              <a
+                href={`/api/orders/${order.id}/shipping-label`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 transition-colors hover:border-[#2f3a2e] hover:text-[#2f3a2e] dark:border-dark-3 dark:text-dark-6"
+              >
+                <span>Étiquette Mondial Relay ({order.trackingCode})</span>
+                <Printer size={14} />
+              </a>
+              )}
               {order.invoice && (
               <div className="flex items-center gap-2">
                 <a
@@ -463,9 +549,28 @@ export function OrderDetailClient({ order }) {
           )}
 
           {/* Actions */}
-          {(canMarkReady || canCompletePickup || canShip || canCloseShipped || canCancel) && (
+          {(canMarkReady || canCompletePickup || canShip || canCloseShipped || canCancel || canMarkUndelivered) && (
             <div className="space-y-3 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
               <h2 className="font-semibold text-gray-800 dark:text-white">Actions</h2>
+
+              {hasStuckLabelClaim && (
+                <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <p>
+                    Mondial Relay n&apos;a pas répondu à la dernière demande d&apos;étiquette — impossible de savoir si
+                    elle a été créée. Vérifiez le portail Mondial Relay avant de réessayer.
+                  </p>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={handleClearStuckClaim}
+                      disabled={isPending}
+                      className="w-full rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      Débloquer (aucune étiquette trouvée sur le portail)
+                    </button>
+                  )}
+                </div>
+              )}
 
               {canMarkReady && (
                 <Button className="w-full" onClick={() => runAction(markOrderReadyForPickup, order.id)} disabled={isPending}>
@@ -535,6 +640,17 @@ export function OrderDetailClient({ order }) {
                   Annuler la commande
                 </button>
               )}
+
+              {canMarkUndelivered && (
+                <button
+                  type="button"
+                  onClick={() => setUndeliveredPrompt(true)}
+                  disabled={isPending}
+                  className="w-full rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+                >
+                  Colis non retiré / retourné par Mondial Relay
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -585,6 +701,53 @@ export function OrderDetailClient({ order }) {
         onConfirm={handleCancel}
         onCancel={() => setCancelling(false)}
       />
+
+      <ConfirmDialog
+        open={labelOverridePrompt}
+        title="Annuler quand même ?"
+        message={`Une étiquette Mondial Relay a déjà été achetée pour cette commande (n° de suivi : ${order.trackingCode ?? ""}). Le port déjà payé n'est pas récupérable via cette action — pensez aussi à vérifier s'il faut annuler l'expédition côté Mondial Relay. Indiquez pourquoi vous annulez quand même.`}
+        confirmLabel="Annuler quand même"
+        danger
+        loading={isPending}
+        confirmDisabled={!labelOverrideReason.trim()}
+        onConfirm={handleCancelWithLabelLoss}
+        onCancel={() => {
+          setLabelOverridePrompt(false);
+          setLabelOverrideReason("");
+        }}
+      >
+        <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Raison (obligatoire)</label>
+        <textarea
+          value={labelOverrideReason}
+          onChange={(e) => setLabelOverrideReason(e.target.value)}
+          rows={3}
+          placeholder="ex : cliente injoignable, adresse erronée…"
+          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
+        />
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={undeliveredPrompt}
+        title="Colis non retiré au point relais ?"
+        message="À utiliser une fois confirmé sur le portail Mondial Relay que le colis a été retourné (le client ne l'a jamais récupéré). La commande sera annulée, le stock remis en vente, et le remboursement mis en attente de traitement par l'équipe si elle était payée."
+        confirmLabel="Confirmer et annuler"
+        danger
+        loading={isPending}
+        onConfirm={handleMarkUndelivered}
+        onCancel={() => {
+          setUndeliveredPrompt(false);
+          setUndeliveredNote("");
+        }}
+      >
+        <label className="text-xs font-semibold uppercase tracking-wide text-gray-600">Note (optionnel)</label>
+        <textarea
+          value={undeliveredNote}
+          onChange={(e) => setUndeliveredNote(e.target.value)}
+          rows={2}
+          placeholder="ex : référence du retour Mondial Relay"
+          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10"
+        />
+      </ConfirmDialog>
 
       <DocumentDeliveryDialog
         open={Boolean(deliveryDoc)}

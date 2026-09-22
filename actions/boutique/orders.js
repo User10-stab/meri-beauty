@@ -16,6 +16,7 @@ import {
   shipOrderSchema,
   cancelOrderSchema,
   closeShippedOrderSchema,
+  markOrderReturnedUndeliveredSchema,
   submitOrderCancellationRequestSchema,
   reviewOrderCancellationRequestSchema,
 } from "@/lib/validations/commerce";
@@ -46,7 +47,7 @@ import {
 import { getOrderPaymentMethod, refundMethodLabel } from "@/lib/payments/refund-method";
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
-import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
+import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabledFor } from "@/lib/commerce-availability";
 import { AWAITED_TRANSFER_METHOD, AWAITED_TRANSFER_OFF_TILL_MESSAGE, isAwaitedTransfer } from "@/lib/payments/awaited-transfer";
 import { COUNTER_QR_MESSAGES, COUNTER_QR_METHOD, COUNTER_QR_SURFACES, isCounterQr, verifyCounterQrPayment } from "@/lib/counter/qr-checkout";
 
@@ -250,6 +251,11 @@ function serializeOrder(order) {
     pickupPointPostalCode: order.pickupPointPostalCode,
     pickupPointCity: order.pickupPointCity,
     trackingCode: order.trackingCode,
+    // Set (with trackingCode still null) when a Mondial Relay label request
+    // timed out or its response was lost — OrderDetailClient surfaces this
+    // as a distinct "needs admin review" state (clearStuckLabelClaim),
+    // never as a plain retry.
+    labelRequestedAt: order.labelRequestedAt,
     shippedAt: order.shippedAt,
     collectedAt: order.collectedAt,
     pickupCode: order.pickupCode,
@@ -464,8 +470,11 @@ export async function createOrderFromCart(input) {
 
   // This action is public: hiding delivery in Checkout is only a convenience,
   // not a protection. Refuse it before creating a customer, reserving stock,
-  // or opening a Stripe checkout if the carrier is paused in production.
-  if (fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabled()) {
+  // or opening a Stripe checkout if the carrier is paused in production, or
+  // (Mondial Relay pilot) if this customer isn't in the allowlist — keyed on
+  // customerInfo.email rather than the session, since guest checkout is
+  // allowed here and has no session at all.
+  if (fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabledFor(customerInfo.email)) {
     return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
   }
 
@@ -973,8 +982,11 @@ export async function createOrderCheckoutSession(orderId, checkoutToken) {
 
     // Orders created before delivery was paused remain visible to staff, but a
     // pending one must not become a new paid shipping commitment through a
-    // direct checkout-session call or a previously issued resume token.
-    if (order.fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabled()) {
+    // direct checkout-session call or a previously issued resume token. Also
+    // covers the Mondial Relay pilot allowlist — an order that was created
+    // while the pilot account held shipping open must not be payable by a
+    // resume link forwarded to (or guessed by) anyone else.
+    if (order.fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabledFor(order.user?.email)) {
       return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
     }
 
@@ -1986,7 +1998,29 @@ export async function markOrderCompleted(input) {
 // carrier-claim process).
 const CANCELLABLE_ORDER_STATUSES = ["PENDING_PAYMENT", "PENDING_PICKUP", "PAID", "PROCESSING", "READY_FOR_PICKUP"];
 
-async function performOrderCancellation(order, reason, actor = {}) {
+/**
+ * @param {object} order
+ * @param {string} reason
+ * @param {object} actor
+ * @param {{ allowLabelledOverride?: boolean, extraClaimableStatuses?: string[] }} [options]
+ *   allowLabelledOverride lets this cancel an order that already has a
+ *   purchased Mondial Relay label (trackingCode set) — normally blocked (see
+ *   the claim below), since the postage cost isn't recoverable through the
+ *   app. Only cancelOrder's explicit admin "annuler quand même" path and
+ *   markOrderReturnedUndelivered set this; every other caller
+ *   (reviewOrderCancellationRequest's approval, etc.) leaves it false, so a
+ *   labelled order stays uncancellable through those paths.
+ *   extraClaimableStatuses adds to CANCELLABLE_ORDER_STATUSES — only
+ *   markOrderReturnedUndelivered uses this, to reach a SHIPPED order (every
+ *   SHIPPED order has a trackingCode by definition, so it also always
+ *   implies allowLabelledOverride: true).
+ */
+async function performOrderCancellation(
+  order,
+  reason,
+  actor = {},
+  { allowLabelledOverride = false, extraClaimableStatuses = [] } = {}
+) {
   const orderId = order.id;
   try {
     const wasSold = Boolean(order.payment); // stock already decremented via SALE
@@ -2035,7 +2069,15 @@ async function performOrderCancellation(order, reason, actor = {}) {
       // and both restock + refund + credit-note. Only the request that actually
       // flips the row wins; everyone else gets a clean "already processed".
       const claim = await tx.order.updateMany({
-        where: { id: orderId, status: { in: CANCELLABLE_ORDER_STATUSES } },
+        where: {
+          id: orderId,
+          status: { in: [...CANCELLABLE_ORDER_STATUSES, ...extraClaimableStatuses] },
+          // A purchased Mondial Relay label means real, billed postage —
+          // block cancelling it by default (same shape as the SHIPPED
+          // refusal above it in cancelOrder); allowLabelledOverride is the
+          // deliberate, audited exception.
+          ...(allowLabelledOverride ? {} : { trackingCode: null }),
+        },
         data: { status: "CANCELLED", cancelledAt: new Date(), cancelReason: reason ?? null },
       });
       if (claim.count === 0) {
@@ -2183,7 +2225,7 @@ export async function cancelOrder(input) {
     const errors = parsed.error.flatten().fieldErrors;
     return { success: false, message: errors.orderId?.[0] ?? "Données invalides." };
   }
-  const { orderId, reason } = parsed.data;
+  const { orderId, reason, acknowledgeLabelLoss } = parsed.data;
 
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -2201,6 +2243,38 @@ export async function cancelOrder(input) {
     return { success: false, message: "Cette commande est déjà expédiée. Attendez le retour physique des articles avant de procéder au remboursement." };
   }
 
+  // A purchased Mondial Relay label (still PROCESSING/PAID, not yet marked
+  // SHIPPED above) means real postage was already bought and billed —
+  // blocked by default, same as the SHIPPED case. acknowledgeLabelLoss is
+  // the deliberate admin override: the postage cost is a sunk loss, logged
+  // below, not something the app can claw back.
+  if (order.trackingCode && !acknowledgeLabelLoss) {
+    return {
+      success: false,
+      message: `Cette commande a déjà une étiquette Mondial Relay (n° de suivi : ${order.trackingCode}) — le port déjà payé n'est pas récupérable. Un administrateur peut annuler quand même.`,
+      requiresLabelAcknowledgement: true,
+    };
+  }
+  if (order.trackingCode && acknowledgeLabelLoss) {
+    if (!isAdminRole(guard.session.user.role)) {
+      return {
+        success: false,
+        message: "Seul un administrateur peut annuler une commande dont l'étiquette Mondial Relay a déjà été achetée.",
+      };
+    }
+    if (!reason?.trim()) {
+      return { success: false, message: "Indiquez une raison pour annuler une commande déjà étiquetée." };
+    }
+    captureWarning("Admin cancelled an order with an already-purchased Mondial Relay label — postage cost lost", {
+      area: "mondial-relay",
+      orderId,
+      orderNumber: order.orderNumber,
+      trackingCode: order.trackingCode,
+      actorId: guard.session.user.id,
+      reason,
+    });
+  }
+
   // Cancelling an unpaid order is routine order management — but cancelling
   // a paid one triggers restock + a real Stripe refund, which per policy
   // only OWNER/ADMIN may issue. STAFF can still cancel unpaid/pending orders.
@@ -2211,10 +2285,68 @@ export async function cancelOrder(input) {
     };
   }
 
-  return performOrderCancellation(order, reason, {
-    actorId: guard.session.user.id,
-    actorRole: guard.session.user.role,
+  return performOrderCancellation(
+    order,
+    reason,
+    { actorId: guard.session.user.id, actorRole: guard.session.user.role },
+    { allowLabelledOverride: Boolean(order.trackingCode && acknowledgeLabelLoss) }
+  );
+}
+
+const UNDELIVERED_PARCEL_REASON = "Colis non retiré — retourné par Mondial Relay";
+
+/**
+ * Admin-only close-out for a Mondial Relay parcel the customer never
+ * collected. Mondial Relay returns an uncollected parcel to the sender
+ * after its own holding period; returns.js only allows a return once an
+ * order reaches COMPLETED, which only happens once staff sets a real
+ * collectedAt — an order nobody ever collects can never get there, so
+ * without this it would sit SHIPPED forever with no way to refund, restock
+ * or close it (only the NOT_CONFIRMED_DELIVERED overdue reminder, which
+ * never resolves anything on its own).
+ *
+ * Deliberately no timer/threshold: Mondial Relay's actual holding period
+ * isn't something this app tracks reliably, so this is meant to be used
+ * once an admin has actually confirmed on the Mondial Relay portal that the
+ * parcel came back — not on a guessed schedule.
+ */
+export async function markOrderReturnedUndelivered(input) {
+  const guard = await requireOrdersAccess();
+  if (guard.error) return { success: false, message: guard.error };
+  if (!isAdminRole(guard.session.user.role)) {
+    return { success: false, message: "Seul un administrateur peut clôturer un colis non retiré." };
+  }
+
+  const parsed = markOrderReturnedUndeliveredSchema.safeParse(input);
+  if (!parsed.success) {
+    return { success: false, message: parsed.error.issues[0]?.message ?? "Données invalides." };
+  }
+  const { orderId, note } = parsed.data;
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: true,
+      payment: { include: { invoice: true, transactions: true } },
+      user: { select: { fullName: true, email: true } },
+    },
   });
+  if (!order) return { success: false, message: "Commande introuvable." };
+  if (order.status !== "SHIPPED") {
+    return { success: false, message: "Seule une commande expédiée et non retirée peut être clôturée ainsi." };
+  }
+
+  const reason = note?.trim() ? `${UNDELIVERED_PARCEL_REASON} — ${note.trim()}` : UNDELIVERED_PARCEL_REASON;
+
+  // Every SHIPPED order has a trackingCode by construction (markOrderShipped
+  // requires one) — allowLabelledOverride is therefore always implied here,
+  // not a separate admin choice the way it is in cancelOrder.
+  return performOrderCancellation(
+    order,
+    reason,
+    { actorId: guard.session.user.id, actorRole: guard.session.user.role },
+    { allowLabelledOverride: true, extraClaimableStatuses: ["SHIPPED"] }
+  );
 }
 
 /**
@@ -2385,6 +2517,19 @@ export async function reviewOrderCancellationRequest(input) {
       }).catch((error) => console.error("[reviewOrderCancellationRequest] rejection email", error));
     }
     return { success: true, message: "Demande d'annulation refusée." };
+  }
+
+  // A purchased Mondial Relay label means real, billed postage —
+  // performOrderCancellation blocks this by default and there's no override
+  // wired up on this approval path (that's cancelOrder's admin-only
+  // "annuler quand même" — see the order detail page instead). Checked
+  // before claiming APPROVED so the request stays PENDING rather than
+  // getting stuck mid-approval.
+  if (request.order.trackingCode) {
+    return {
+      success: false,
+      message: `Cette commande a déjà une étiquette Mondial Relay (n° de suivi : ${request.order.trackingCode}) — le port déjà payé n'est pas récupérable via cette approbation. Utilisez « Annuler quand même » depuis la fiche de la commande si nécessaire.`,
+    };
   }
 
   const claimed = await prisma.orderCancellationRequest.updateMany({

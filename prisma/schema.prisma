@@ -1374,6 +1374,32 @@ model Order {
   pickupPointCity       String?
   trackingCode          String?
 
+  // Claim marker written BEFORE calling Mondial Relay's creation API — not
+  // after. Two concurrent generateShippingLabel calls on the same order both
+  // used to reach the carrier; only the one that wins an atomic
+  // `trackingCode: null, labelRequestedAt: null` update is allowed to call
+  // out. Left set (with trackingCode still null) after a timeout/network
+  // error — an outcome Mondial Relay may or may not have received — is a
+  // deliberate "uncertain, needs human review" state: cleared only by
+  // clearStuckLabelClaim once staff confirms on the MR portal nothing was
+  // created, never automatically. See actions/boutique/mondial-relay.js.
+  labelRequestedAt DateTime?
+
+  // Mondial Relay's own label PDF URL — kept only as a fallback reference.
+  // The real, durable copy is fetched once at creation time and stored on
+  // disk (private-uploads/mondial-relay-labels/<orderId>.pdf, served via
+  // app/api/orders/[id]/shipping-label), since this URL's lifetime was never
+  // confirmed and the PDF carries the customer's name/address/phone, so it
+  // shouldn't be handed to the browser as a bare external link either way.
+  labelUrl String?
+
+  // Full raw response (or error body) from the last label-creation attempt —
+  // success or failure. The regex-based parse in lib/mondial-relay.js has
+  // never been checked against a real Mondial Relay response; this is what
+  // lets a wrong classification be diagnosed and corrected after the fact
+  // instead of guessed at.
+  labelRawResponse String? @db.Text
+
   // Pickup (PICKUP_PREPAID / PICKUP_ON_SITE)
   pickupCode        String?   @unique // QR payload scanned by staff at collection
   pickedUpAt        DateTime?

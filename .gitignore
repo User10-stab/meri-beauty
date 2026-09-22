@@ -41,6 +41,10 @@ yarn-error.log*
 /env.*
 # User-uploaded files
 /public/uploads/
+# Downloaded Mondial Relay label PDFs (carries customer name/address/phone —
+# never under public/, served only via the authenticated shipping-label
+# route). See lib/mondial-relay-label-storage.js.
+/private-uploads/
 # vercel
 .vercel
 

@@ -267,7 +267,7 @@ function describeUnifiedRow(row) {
       dateLabel: date(row.paidAt),
       kind: "Loyer staff",
       title: invoice?.number ?? "Loyer",
-      href: invoice?.number ? `/dashboard/factures?q=${encodeURIComponent(invoice.number)}` : "/dashboard/factures",
+      href: null,
       detail: `${PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType} · Virement${reference}${due}`,
       lifecycleStatus: null,
       customer: row.staffMember,
@@ -300,7 +300,8 @@ function describeUnifiedRow(row) {
 // an appointment row already IS that transaction.
 function latestTransaction(row) {
   if (row.operationOnly) return null;
-  if (row.sourceType === "APPOINTMENT") {
+  // Event-grained rows: the row IS the transaction (a rent payment too).
+  if (row.sourceType === "APPOINTMENT" || row.sourceType === "STAFF_RENT") {
     return { id: row.id, transactionType: row.transactionType };
   }
   if (!row.latestTransactionId) return null;
@@ -754,7 +755,7 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
                         const label = `${date(event.paidAt)} · ${PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · ${event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : event.method === "TRANSFER" ? "Virement" : "En ligne"} · ${event.transactionType === "REFUND" ? "−" : ""}${money(event.amount)}`;
                         return (
                           <li key={event.id}>
-                            {readOnly || row.sourceType === "STAFF_RENT" ? (
+                            {readOnly ? (
                               <span className="text-left">{label}</span>
                             ) : (
                               <button type="button" onClick={() => onOpenDetail(event.id)} className="text-left underline underline-offset-2">
@@ -788,15 +789,6 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
                   ) : (
                     <span className="text-xs text-gray-400">—</span>
                   )
-                ) : row.sourceType === "STAFF_RENT" ? (
-                  // Sent, accepted and credited from the Factures page — the
-                  // booking refund flows here know nothing about a rent.
-                  <Link
-                    href={describeUnifiedRow(row).href}
-                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-[#2f3a2e] hover:bg-[#f4f7f3] hover:text-[#2f3a2e]"
-                  >
-                    <Eye size={14} /> Voir dans Factures
-                  </Link>
                 ) : row.operationOnly ? (
                   <button
                     type="button"

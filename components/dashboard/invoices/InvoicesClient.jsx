@@ -3,8 +3,9 @@
 import { Fragment, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, FileSearch, HandCoins, Hourglass, Loader2, Mail, RotateCcw, Search, Send } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, FileSearch, HandCoins, Hourglass, Loader2, Mail, RotateCcw, Search, Send, Wallet } from "lucide-react";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
+import { TransactionDetailDrawer } from "@/components/dashboard/operations/TransactionDetailDrawer";
 import { GenerateCreditNoteDialog } from "@/components/dashboard/operations/GenerateCreditNoteDialog";
 import { SettleManualInvoiceDialog } from "@/components/dashboard/invoices/SettleManualInvoiceDialog";
 import { CreditStaffRentDialog } from "@/components/dashboard/invoices/CreditStaffRentDialog";
@@ -248,6 +249,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
   const [settling, setSettling] = useState(null); // manual sale, richer settlement
   const [issuedInvoice, setIssuedInvoice] = useState(null); // « proposer l'envoi »
   const [rentCreditFor, setRentCreditFor] = useState(null); // rent invoice row
+  const [detailTransactionId, setDetailTransactionId] = useState(null); // « Détails du paiement »
 
   useEffect(() => setDraft(filters), [filters]);
 
@@ -490,6 +492,17 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                         {pending && (
                           <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />
                         )}
+                        {/* The same detail drawer as « Voir / gérer » in Opérations. */}
+                        <button
+                          type="button"
+                          onClick={() => setDetailTransactionId(invoice.latestTransactionId)}
+                          disabled={!invoice.latestTransactionId}
+                          title={invoice.latestTransactionId ? "Détails du paiement et des transactions" : "Aucune transaction : aucun paiement reçu pour cette facture"}
+                          aria-label="Détails du paiement"
+                          className={`${actionButton} border-[#2f3a2e] text-[#2f3a2e] hover:bg-[#f4f7f3]`}
+                        >
+                          <Wallet size={ICON} />
+                        </button>
                         <DocumentActions
                           pdfHref={`/api/invoices/${invoice.id}/pdf`}
                           peppolApplicable={invoice.peppolApplicable}
@@ -595,6 +608,8 @@ export function InvoicesClient({ data, pendingRows = [] }) {
         invoice={issuedInvoice}
         kind="INVOICE"
       />
+
+      <TransactionDetailDrawer transactionId={detailTransactionId} onClose={() => setDetailTransactionId(null)} />
 
       <CreditStaffRentDialog invoice={rentCreditFor} onClose={() => setRentCreditFor(null)} />
 

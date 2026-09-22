@@ -3,15 +3,16 @@
 import { Fragment, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, HandCoins, Hourglass, Mail, RotateCcw, Search, Send } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, FileSearch, HandCoins, Hourglass, Loader2, Mail, Receipt, RotateCcw, Search, Send } from "lucide-react";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { GenerateCreditNoteDialog } from "@/components/dashboard/operations/GenerateCreditNoteDialog";
 import { SettleManualInvoiceDialog } from "@/components/dashboard/invoices/SettleManualInvoiceDialog";
+import { CreditStaffRentDialog } from "@/components/dashboard/invoices/CreditStaffRentDialog";
 import { INVOICE_SOURCE_LABELS } from "@/lib/invoices/list-filters";
 import { pendingPaymentState } from "@/lib/invoices/pending-rows";
 import { settleManualInvoice } from "@/actions/invoices/manual-invoice";
 import { acceptAwaitedTransfer } from "@/actions/payments/awaited-transfer";
-import { acceptStaffRentPayment } from "@/actions/invoices/staff-rent";
+import { acceptStaffRentPayment, issueStaffRentInvoice } from "@/actions/invoices/staff-rent";
 
 /**
  * Factures — every issued invoice in one list with Voir / E-mail / Peppol.
@@ -96,8 +97,12 @@ function DeliveryCell({ doc, peppolApplicable }) {
   );
 }
 
+// Icon-only, so the pinned Actions column stays narrow enough not to cover
+// the columns scrolling beneath it (user's call, 2026-09-21). Every button
+// carries its name as a tooltip (title) and for screen readers (aria-label).
 const actionButton =
-  "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition disabled:cursor-not-allowed disabled:opacity-40";
+const ICON = 15;
 
 // The table scrolls sideways on a laptop; the buttons must not scroll away
 // with it. The column stays pinned to the right edge, opaque (each cell sets
@@ -121,15 +126,15 @@ function previewHref(pending) {
 function DocumentActions({ pdfHref, peppolApplicable, onSend, tone }) {
   return (
     <>
-      <a href={pdfHref} target="_blank" rel="noopener noreferrer" className={`${actionButton} ${tone}`}>
-        <Eye size={13} /> Voir
+      <a href={pdfHref} target="_blank" rel="noopener noreferrer" title="Voir le PDF" aria-label="Voir le PDF" className={`${actionButton} ${tone}`}>
+        <Eye size={ICON} />
       </a>
-      <button type="button" onClick={() => onSend("EMAIL")} className={`${actionButton} ${tone}`}>
-        <Mail size={13} /> E-mail
+      <button type="button" onClick={() => onSend("EMAIL")} title="Envoyer par e-mail" aria-label="Envoyer par e-mail" className={`${actionButton} ${tone}`}>
+        <Mail size={ICON} />
       </button>
       {peppolApplicable && (
-        <button type="button" onClick={() => onSend("PEPPYRUS")} className={`${actionButton} ${tone}`}>
-          <Send size={13} /> Peppol
+        <button type="button" onClick={() => onSend("PEPPYRUS")} title="Envoyer via Peppol" aria-label="Envoyer via Peppol" className={`${actionButton} ${tone}`}>
+          <Send size={ICON} />
         </button>
       )}
     </>
@@ -152,7 +157,7 @@ function PaymentCell({ pending }) {
   return (
     <div className="flex flex-col items-start gap-1">
       <span
-        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+        className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${
           late ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400" : "bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
         }`}
       >
@@ -169,10 +174,13 @@ function PaymentCell({ pending }) {
  * also be paid in cash, by card or in several times — the dialog that does
  * anything other than "the whole balance arrived by transfer".
  */
-function PendingActions({ pending, busy, onAccept, onSettle }) {
+function PendingActions({ pending, busy, onAccept, onSettle, onIssue }) {
   // A row already invoiced has its own « Voir »; the others show, before the
-  // tick, the invoice the tick would issue — or why there would be none.
+  // tick, the invoice they would get — or why there would be none.
   const preview = pending.invoiceNumber ? null : previewHref(pending);
+  // A rent recorded without its invoice (the automatic issue was refused, or
+  // it predates rents being invoiced up front) can be invoiced before payment.
+  const canIssue = pending.accept.kind === "RENT";
   return (
     <>
       {preview && (
@@ -180,24 +188,45 @@ function PendingActions({ pending, busy, onAccept, onSettle }) {
           href={preview}
           target="_blank"
           rel="noopener noreferrer"
-          title="Voir la facture que l'acceptation émettra — sans l'émettre"
+          title="Aperçu : la facture que l'acceptation émettra, sans l'émettre"
+          aria-label="Aperçu de la facture"
           className={`${actionButton} border-[#2f3a2e] text-[#2f3a2e] hover:bg-[#f4f7f3]`}
         >
-          <Eye size={13} /> Aperçu
+          <FileSearch size={ICON} />
         </a>
+      )}
+      {canIssue && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onIssue(pending)}
+          title="Émettre la facture maintenant, avant le paiement — pour pouvoir l'envoyer"
+          aria-label="Émettre la facture"
+          className={`${actionButton} border-[#2f3a2e] bg-[#2f3a2e] text-white hover:bg-[#1f291f]`}
+        >
+          <Receipt size={ICON} />
+        </button>
       )}
       <button
         type="button"
         disabled={busy}
         onClick={() => onAccept(pending)}
-        title="Le paiement est arrivé : l'enregistrer (et émettre la facture si elle est due)"
+        title="Accepter : le paiement est arrivé — l'argent est enregistré pour le salon"
+        aria-label="Accepter le paiement"
         className={`${actionButton} border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700`}
       >
-        <Check size={13} /> {busy ? "…" : "Accepter"}
+        {busy ? <Loader2 size={ICON} className="animate-spin" /> : <Check size={ICON} strokeWidth={2.5} />}
       </button>
       {pending.settleOrderId && (
-        <button type="button" disabled={busy} onClick={() => onSettle(pending)} className={`${actionButton} border-sky-300 text-sky-800 hover:bg-sky-50`}>
-          <HandCoins size={13} /> Autre
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onSettle(pending)}
+          title="Encaisser autrement : espèces, carte ou acompte"
+          aria-label="Encaisser autrement"
+          className={`${actionButton} border-sky-300 text-sky-800 hover:bg-sky-50`}
+        >
+          <HandCoins size={ICON} />
         </button>
       )}
     </>
@@ -216,6 +245,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
   const [acceptingKey, setAcceptingKey] = useState(null);
   const [settling, setSettling] = useState(null); // manual sale, richer settlement
   const [issuedInvoice, setIssuedInvoice] = useState(null); // « proposer l'envoi »
+  const [rentCreditFor, setRentCreditFor] = useState(null); // rent invoice row
 
   useEffect(() => setDraft(filters), [filters]);
 
@@ -229,6 +259,21 @@ export function InvoicesClient({ data, pendingRows = [] }) {
   const looseRows = pendingRows.filter((row) => !row.invoiceNumber || !shownNumbers.has(row.invoiceNumber));
 
   /** One tick, whatever the row is: the whole balance, received by transfer. */
+  /** « Émettre la facture » on a rent: issued unpaid, then offered for sending. */
+  async function issueRent(row) {
+    if (acceptingKey) return;
+    setAcceptingKey(row.key);
+    const result = await issueStaffRentInvoice({ rentId: row.accept.rentId });
+    setAcceptingKey(null);
+    if (!result?.success) {
+      toast.error(result?.message ?? "Facture non émise.");
+      return;
+    }
+    toast.success(result.message);
+    if (result.data?.invoice) setIssuedInvoice(result.data.invoice);
+    router.refresh();
+  }
+
   async function acceptPending(row) {
     if (acceptingKey) return;
     setAcceptingKey(row.key);
@@ -399,7 +444,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                 <td className="px-4 py-3 text-xs text-gray-400">—</td>
                 <td className={`${stickyActions} bg-amber-50 px-4 py-3 dark:bg-[#2a2415]`}>
                   <div className="flex justify-end gap-1.5 whitespace-nowrap">
-                    <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />
+                    <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} onIssue={issueRent} />
                   </div>
                 </td>
               </tr>
@@ -456,7 +501,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                     <td className={`${stickyActions} bg-white px-4 py-3 dark:bg-gray-dark`}>
                       <div className="flex justify-end gap-1.5 whitespace-nowrap">
                         {pending && (
-                          <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} />
+                          <PendingActions pending={pending} busy={acceptingKey === pending.key} onAccept={acceptPending} onSettle={setSettling} onIssue={issueRent} />
                         )}
                         <DocumentActions
                           pdfHref={`/api/invoices/${invoice.id}/pdf`}
@@ -467,15 +512,30 @@ export function InvoicesClient({ data, pendingRows = [] }) {
                         {noteCount === 0 && (
                           <button
                             type="button"
-                            onClick={() => setCreditNoteFor(invoice)}
+                            // A rent invoice has no sale to cancel: its own dialog.
+                            onClick={() => (invoice.source === "STAFF_CONTRACT" ? setRentCreditFor(invoice) : setCreditNoteFor(invoice))}
                             disabled={!invoice.canGenerateCreditNote}
                             title={invoice.canGenerateCreditNote ? "Générer une note de crédit" : invoice.creditNoteBlockedReason ?? undefined}
+                            aria-label="Générer une note de crédit"
                             className={`${actionButton} border-amber-300 text-amber-800 hover:bg-amber-50`}
                           >
-                            <FilePlus2 size={13} /> Note de crédit
+                            <FilePlus2 size={ICON} />
                           </button>
                         )}
                       </div>
+                      {noteCount > 0 && invoice.source === "STAFF_CONTRACT" && invoice.canGenerateCreditNote && (
+                        <div className="mt-2 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => setRentCreditFor(invoice)}
+                            title="Nouvelle note de crédit sur ce loyer"
+                            aria-label="Nouvelle note de crédit"
+                            className={`${actionButton} border-amber-300 text-amber-800 hover:bg-amber-50`}
+                          >
+                            <FilePlus2 size={ICON} />
+                          </button>
+                        </div>
+                      )}
                       {invoice.creditNotes.map((note) => (
                         <div key={note.id} className="mt-2 flex flex-col items-end gap-1">
                           <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold text-violet-800" title={note.reason ?? undefined}>
@@ -548,6 +608,8 @@ export function InvoicesClient({ data, pendingRows = [] }) {
         invoice={issuedInvoice}
         kind="INVOICE"
       />
+
+      <CreditStaffRentDialog invoice={rentCreditFor} onClose={() => setRentCreditFor(null)} />
 
       {creditNoteFor && (
         <GenerateCreditNoteDialog

@@ -77,6 +77,8 @@ export async function listInvoices(rawFilters = {}) {
           },
           payment: {
             select: {
+              // A rent credit note refunds a paid rent: the dialog needs to know.
+              paidAmount: true,
               order: { select: { orderNumber: true, status: true } },
               appointment: { select: { status: true } },
               workshopReservation: { select: { status: true } },
@@ -121,6 +123,7 @@ export async function listInvoices(rawFilters = {}) {
         creditNotes,
         creditedTotal,
         refundOperationCount: invoice.payment?._count?.refundOperations ?? 0,
+        paidAmount: money(invoice.payment?.paidAmount ?? 0),
         ...item,
       };
       const eligibility = creditNoteEligibility(base);

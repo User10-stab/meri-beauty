@@ -63,11 +63,19 @@ function dueDateLine(invoice, payment) {
 // An unissued invoice rendered for review before « Accepter »
 // (lib/invoices/invoice-preview.js): no number exists yet, and it says so.
 const PREVIEW_STATUS = { label: "APERÇU — NON ÉMISE", tone: "credit" };
-const PREVIEW_PAYMENT_NOTE = "Aperçu : la facture est numérotée et émise, payée, à l'acceptation du paiement";
+const PREVIEW_PAYMENT_NOTE = "Aperçu : cette facture n'est pas encore émise — son numéro est attribué à l'émission";
+
+// Only a staff rent invoice carries an échéance (lib/staff-rent-payment.js):
+// it is issued before it is paid. Shown paid or not — it is part of what was
+// invoiced — and no other invoice ever gets one.
+function rentDueDate(invoice) {
+  return invoice.source === "STAFF_CONTRACT" && invoice.dueDate ? formatDate(invoice.dueDate) : null;
+}
 
 export function InvoiceDocument({ invoice, contact = null, rental = null }) {
   const payment = invoice.payment ?? null;
   const preview = Boolean(invoice.isPreview);
+  const rentDue = rentDueDate(invoice);
 
   return (
     <Document
@@ -110,8 +118,11 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
                 label: "Règlement",
                 value: preview
                   ? PREVIEW_PAYMENT_NOTE
-                  : paymentLine(payment) ?? dueDateLine(invoice, payment) ?? "Paiement sécurisé — dû à réception de la facture",
+                  : paymentLine(payment) ??
+                    (rentDue ? "Par virement sur le compte bancaire ci-dessous" : dueDateLine(invoice, payment)) ??
+                    "Paiement sécurisé — dû à réception de la facture",
               },
+              rentDue ? { label: "Échéance", value: rentDue } : null,
               rental?.reference ? { label: "Référence contrat", value: rental.reference } : null,
               rental?.period ? { label: "Période de location", value: rental.period } : null,
               { label: "Devise", value: "Euro (EUR)" },

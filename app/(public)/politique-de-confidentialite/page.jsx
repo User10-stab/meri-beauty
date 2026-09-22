@@ -129,8 +129,9 @@ export default function PolitiqueConfidentialitePage() {
 
       <H2>9. Avis publiés sur le Site</H2>
       <P>
-        Lorsque vous déposez un avis depuis votre espace client après un rendez-vous terminé,
-        votre note, votre commentaire, la prestation concernée ainsi que votre prénom suivi de
+        Lorsque vous déposez un avis depuis votre espace client après un rendez-vous, un atelier,
+        un événement ou une formation terminé(e), votre note, votre commentaire, la prestation
+        concernée ainsi que votre prénom suivi de
         l'initiale de votre nom de famille (par exemple « Camille R. ») peuvent être affichés
         publiquement sur la page d'accueil du Site. Votre nom complet, votre email et vos
         coordonnées ne sont jamais publiés — ils restent visibles uniquement de l'équipe Meri

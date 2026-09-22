@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ArrowLeft, Calendar, CheckCircle, Bell, AlertTriangle, BadgeCheck, BadgeX, ShieldQuestion } from "lucide-react";
-import { useSession } from "next-auth/react";
+import { useSession, signIn } from "next-auth/react";
 import { checkFormationSessionAvailability, createFormationReservation } from "@/actions/formations/create-formation-reservation";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
 import {
@@ -15,10 +15,10 @@ import {
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { getMyCheckoutProfile } from "@/actions/customer/settings";
-import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
+import { validatePassword } from "@/lib/validations/password";
 import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
 
 // Taken from the signed-in account rather than the form, so this page renders
@@ -76,6 +76,8 @@ function ReservationFormationContent() {
     fullName: "",
     email: "",
     phone: "",
+    password: "",
+    isCompany: false,
     vatNumber: "",
     addressLine1: "",
     addressLine2: "",
@@ -91,7 +93,9 @@ function ReservationFormationContent() {
   const [savedVatProfile, setSavedVatProfile] = useState(null);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
-  // null = not checked yet | "exists" = verified account found | "dismissed" = user chose to continue as guest
+  // null = not checked yet | "exists" = verified account found (inline login
+  // card shown instead of the register fields — no redirect to /login, so
+  // nothing already selected on this page is lost)
   const [emailStatus, setEmailStatus] = useState(null);
   const [checkingEmail, setCheckingEmail] = useState(false);
 
@@ -135,6 +139,7 @@ function ReservationFormationContent() {
   }
 
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
+  const [pendingVerificationEmailFailed, setPendingVerificationEmailFailed] = useState(false);
 
   // Waiting list state
   const [wlSuccess, setWlSuccess] = useState(null); // { position }
@@ -195,13 +200,16 @@ function ReservationFormationContent() {
   }, [formationId, sessionId, isPriority, waitingListId]);
 
   useEffect(() => {
-    if (session?.user) {
+    const authedUser = session?.user;
+    if (authedUser) {
       setForm((prev) => ({
         ...prev,
-        fullName: session.user.fullName || session.user.name || prev.fullName,
-        email: session.user.email || prev.email,
-        phone: session.user.phone?.startsWith("temp-") ? prev.phone : (session.user.phone || prev.phone),
+        fullName: authedUser.fullName || authedUser.name || prev.fullName,
+        email: authedUser.email || prev.email,
+        phone: authedUser.phone?.startsWith("temp-") ? prev.phone : (authedUser.phone || prev.phone),
+        password: "",
       }));
+      setEmailStatus(null);
 
       let active = true;
       getMyCheckoutProfile().then((result) => {
@@ -211,6 +219,7 @@ function ReservationFormationContent() {
           fullName: result.data.fullName || prev.fullName,
           email: result.data.email || prev.email,
           phone: result.data.phone || prev.phone,
+          isCompany: Boolean(result.data.isCompany) || prev.isCompany,
           vatNumber: result.data.vatNumber || prev.vatNumber,
           addressLine1: result.data.addressLine1 || prev.addressLine1,
           addressLine2: result.data.addressLine2 || prev.addressLine2,
@@ -230,15 +239,20 @@ function ReservationFormationContent() {
 
   const depositPct = formation?.depositPercentage ?? 50;
   const hasSavedVatProof = isAuthed && hasReusableVatValidation(savedVatProfile, form.vatNumber);
+  // Used only to decide the live price preview below (VAT is applied once a
+  // number is actually verified/reusable, not just once "Entreprise" is
+  // toggled) — kept separate from form.isCompany, which decides what's shown.
   const isBusinessBooking = hasReusableVatValidation(savedVatProfile, form.vatNumber);
   const vatPolicy = resolveServiceVatPolicy({
     customer: isBusinessBooking ? savedVatProfile : null,
   });
-  // A VAT number makes this an invoiceable B2B sale — issueInvoice refuses to
-  // issue without a billing address on file (see the create-formation
-  // -reservation.js comment at the same check). B2C guests never hit that
-  // gate at all, so they are never asked for an address here.
-  const needsBillingAddress = isBusinessBooking && !hasAddressOnFile;
+  // Particulier / Entreprise is now an explicit choice (form.isCompany), not
+  // inferred from whether a VAT number happens to be typed — a brand-new
+  // guest choosing "Entreprise" needs the address before their VAT is ever
+  // verified, otherwise create-formation-reservation.js's own
+  // validateBillingAddress gate (vatNumberToSave && !user.addressLine1)
+  // rejects the booking with nowhere on screen to fix it.
+  const needsBillingAddress = form.isCompany && !hasAddressOnFile;
   const catalogueUnitPrice = Number(formation?.price || 0);
   const unitPrice = repriceTtcCataloguePrice(catalogueUnitPrice, vatPolicy.vatRate);
   const totalPrice = unitPrice * seats;
@@ -262,6 +276,10 @@ function ReservationFormationContent() {
     if (!isAuthed && !form.fullName.trim()) requiredErrors.fullName = "Le nom complet est obligatoire.";
     if (!form.email.trim()) requiredErrors.email = "L'adresse e-mail est obligatoire.";
     if (!form.phone.trim()) requiredErrors.phone = "Le numéro de téléphone est obligatoire.";
+    if (!isAuthed && emailStatus !== "exists") {
+      const passwordIssue = validatePassword(form.password);
+      if (passwordIssue) requiredErrors.password = "Le mot de passe doit contenir au moins 8 caractères.";
+    }
     if (needsBillingAddress) {
       if (!form.addressLine1.trim()) requiredErrors.addressLine1 = "L'adresse est obligatoire.";
       if (!form.addressCity.trim()) requiredErrors.addressCity = "La ville est obligatoire.";
@@ -278,7 +296,7 @@ function ReservationFormationContent() {
     }
 
     if (!isAuthed && emailStatus === "exists") {
-      setError("Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même ».");
+      setError("Cette adresse e-mail est déjà associée à un compte. Connectez-vous ci-dessus pour continuer.");
       return;
     }
 
@@ -292,23 +310,32 @@ function ReservationFormationContent() {
       return;
     }
 
+    if (form.isCompany && !hasSavedVatProof && !form.vatNumber.trim()) {
+      setFieldErrors({ vatNumber: "Veuillez indiquer votre numéro de TVA, ou repassez sur « Particulier »." });
+      return;
+    }
+
     setSubmitting(true);
+
+    // Only send a VAT number when "Entreprise" is selected — toggling back to
+    // "Particulier" must not silently keep treating this booking as a
+    // business one just because a number is still sitting in the field.
+    const submittedCustomerInfo = form.isCompany ? form : { ...form, vatNumber: "" };
 
     if (showWaitingListForm) {
       const result = await joinFormationWaitingList({
         sessionId,
-        customerInfo: { ...form, seatsRequested: isPrivate ? 1 : seats },
+        customerInfo: { ...submittedCustomerInfo, seatsRequested: isPrivate ? 1 : seats },
         // Re-checked and recorded server-side — the guard above is only a
         // courtesy message, the action is a public endpoint.
         termsAccepted: acceptedTerms,
       });
 
       if (result.success) {
-        if (result.isNewUser) {
-          sessionStorage.setItem("workshop_signin", JSON.stringify({
-            email: result.email,
-            password: result.temporaryPassword,
-          }));
+        if (result.isNewUser && !isAuthed) {
+          // The account was just created with the password typed above —
+          // sign in with it directly, no emailed credentials, no redirect.
+          await signIn("credentials", { email: form.email.toLowerCase(), password: form.password, redirect: false }).catch(() => {});
         }
         setWlSuccess({
           position: result.position,
@@ -332,7 +359,7 @@ function ReservationFormationContent() {
       sessionId,
       formationId,
       seatsCount: isPrivate ? 1 : seats,
-      customerInfo: form,
+      customerInfo: submittedCustomerInfo,
       paymentMethod,
       isPriority: priorityValid,
       waitingListEntryId: waitingListId,
@@ -357,6 +384,7 @@ function ReservationFormationContent() {
       router.push(`/reservation-formation/succes?reservation_id=${result.reservationId}`);
     } else if (result.success && result.requiresEmailVerification) {
       setPendingVerificationEmail(result.email);
+      setPendingVerificationEmailFailed(Boolean(result.emailDeliveryFailed));
       setSubmitting(false);
     } else {
       if (result.field) {
@@ -374,6 +402,43 @@ function ReservationFormationContent() {
       setSubmitting(false);
     }
   }
+
+  // Particulier / Entreprise — explicit choice rather than "typing a VAT
+  // number implies a business" (same pattern as the boutique checkout).
+  const companyToggle = (
+    <div role="radiogroup" aria-label="Type de compte" className="flex rounded-lg border border-ink/15 p-1">
+      <label
+        className={`flex flex-1 cursor-pointer items-center justify-center rounded-md py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors ${
+          !form.isCompany ? "bg-ink text-white" : "text-ink/50 hover:text-ink"
+        }`}
+      >
+        <input
+          type="radio"
+          name="isCompany"
+          value="false"
+          checked={!form.isCompany}
+          onChange={() => setForm((p) => ({ ...p, isCompany: false }))}
+          className="sr-only"
+        />
+        Particulier
+      </label>
+      <label
+        className={`flex flex-1 cursor-pointer items-center justify-center rounded-md py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors ${
+          form.isCompany ? "bg-ink text-white" : "text-ink/50 hover:text-ink"
+        }`}
+      >
+        <input
+          type="radio"
+          name="isCompany"
+          value="true"
+          checked={Boolean(form.isCompany)}
+          onChange={() => setForm((p) => ({ ...p, isCompany: true }))}
+          className="sr-only"
+        />
+        Entreprise
+      </label>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -400,11 +465,25 @@ function ReservationFormationContent() {
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gold/10 text-gold">
           <CheckCircle size={28} />
         </div>
-        <h1 className="text-xl font-bold text-ink">Confirmez votre email</h1>
+        <h1 className="text-xl font-bold text-ink">
+          {pendingVerificationEmailFailed ? "Réservation enregistrée" : "Confirmez votre email"}
+        </h1>
+        {pendingVerificationEmailFailed ? (
+          <p className="max-w-md text-sm text-ink/60">
+            Votre réservation est bien enregistrée, mais nous n&apos;avons pas pu envoyer l&apos;e-mail de confirmation à{" "}
+            <strong>{pendingVerificationEmail}</strong> tout de suite.{" "}
+            <Link href="/verify-email" className="font-semibold text-gold underline hover:text-gold/80">
+              Demandez un nouveau lien
+            </Link>{" "}
+            pour activer votre compte et finaliser votre paiement.
+          </p>
+        ) : (
         <p className="max-w-md text-sm text-ink/60">
-          Nous avons envoyé un email de confirmation à <strong>{pendingVerificationEmail}</strong>. Une fois confirmée,
-          vous recevrez vos identifiants de connexion par email et pourrez finaliser votre paiement.
+          Nous avons envoyé un lien de confirmation à <strong>{pendingVerificationEmail}</strong>. Cliquez dessus pour
+          activer votre compte — vous reviendrez directement ici pour finaliser votre paiement, avec le mot de passe
+          que vous venez de choisir.
         </p>
+        )}
       </div>
     );
   }
@@ -634,104 +713,118 @@ function ReservationFormationContent() {
                       />
                       {fieldErrors.phone && <p id="formation-phone-error" className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
                     </div>
-                    {hasSavedVatProof ? (
-                      <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-emerald-800">
-                        <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                    {companyToggle}
+                    {form.isCompany && (
+                      <>
+                        {hasSavedVatProof ? (
+                          <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-emerald-800">
+                            <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                            <div>
+                              <p className="text-sm font-semibold">TVA {form.vatNumber} vérifiée</p>
+                              <p className="mt-0.5 text-xs text-emerald-700">
+                                Validation VIES réutilisée pendant 90 jours. Modifiez ce numéro depuis votre{" "}
+                                <Link href="/profile" className="underline underline-offset-2">profil</Link>.
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
                         <div>
-                          <p className="text-sm font-semibold">TVA {form.vatNumber} vérifiée</p>
-                          <p className="mt-0.5 text-xs text-emerald-700">
-                            Validation VIES réutilisée pendant 90 jours. Modifiez ce numéro depuis votre{" "}
-                            <Link href="/profile" className="underline underline-offset-2">profil</Link>.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA (optionnel)</label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={form.vatNumber}
-                          onChange={(e) => {
-                            setForm((p) => ({ ...p, vatNumber: e.target.value }));
-                            setFieldErrors((p) => ({ ...p, vatNumber: undefined }));
-                            setVatCheck(null);
-                            setSavedVatProfile(null);
-                          }}
-                          className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                          placeholder="BE0123456789 ou FRXX123456789"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleVerifyVat}
-                          disabled={vatCheck?.loading}
-                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink/15 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
-                        >
-                          {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
-                          Vérifier
-                        </button>
-                      </div>
-                      {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
-                      {vatCheck && !vatCheck.loading && (
-                        <p
-                          className={`mt-1 flex items-center gap-1.5 text-xs font-medium ${
-                            vatCheck.error ? "text-amber-600" : vatCheck.valid ? "text-emerald-600" : "text-red-600"
-                          }`}
-                        >
-                          {vatCheck.error ? (
-                            <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />
-                          ) : vatCheck.valid ? (
-                            <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
-                          ) : (
-                            <BadgeX className="h-3.5 w-3.5 shrink-0" />
+                          <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA *</label>
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={form.vatNumber}
+                              onChange={(e) => {
+                                setForm((p) => ({ ...p, vatNumber: e.target.value }));
+                                setFieldErrors((p) => ({ ...p, vatNumber: undefined }));
+                                setVatCheck(null);
+                                setSavedVatProfile(null);
+                              }}
+                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                              placeholder="BE0123456789 ou FRXX123456789"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleVerifyVat}
+                              disabled={vatCheck?.loading}
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink/15 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
+                            >
+                              {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
+                              Vérifier
+                            </button>
+                          </div>
+                          {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
+                          {vatCheck && !vatCheck.loading && (
+                            <p
+                              className={`mt-1 flex items-center gap-1.5 text-xs font-medium ${
+                                vatCheck.error ? "text-amber-600" : vatCheck.valid ? "text-emerald-600" : "text-red-600"
+                              }`}
+                            >
+                              {vatCheck.error ? (
+                                <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />
+                              ) : vatCheck.valid ? (
+                                <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+                              ) : (
+                                <BadgeX className="h-3.5 w-3.5 shrink-0" />
+                              )}
+                              {vatCheck.message}
+                            </p>
                           )}
-                          {vatCheck.message}
-                        </p>
-                      )}
-                    </div>
-                    )}
-                    {needsBillingAddress && (
-                      <div className="space-y-2 rounded-lg border border-ink/10 bg-ink/[0.02] p-3">
-                        <p className="text-xs text-ink/50">
-                          Adresse de facturation obligatoire pour une facture avec numéro de TVA.
-                        </p>
-                        <div>
-                          <input
-                            type="text"
-                            value={form.addressLine1}
-                            onChange={(e) => { setForm((p) => ({ ...p, addressLine1: e.target.value })); setFieldErrors((p) => ({ ...p, addressLine1: undefined })); }}
-                            className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressLine1 ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                            placeholder="Rue et numéro *"
-                          />
-                          {fieldErrors.addressLine1 && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressLine1}</p>}
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <input
-                              type="text"
-                              value={form.addressPostalCode}
-                              onChange={(e) => { setForm((p) => ({ ...p, addressPostalCode: e.target.value })); setFieldErrors((p) => ({ ...p, addressPostalCode: undefined })); }}
-                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressPostalCode ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                              placeholder="Code postal *"
-                            />
-                            {fieldErrors.addressPostalCode && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressPostalCode}</p>}
+                        )}
+                        {needsBillingAddress && (
+                          <div className="space-y-2 rounded-lg border border-ink/10 bg-ink/[0.02] p-3">
+                            <p className="text-xs text-ink/50">
+                              Adresse de facturation obligatoire pour une facture d&apos;entreprise.
+                            </p>
+                            <div>
+                              <input
+                                type="text"
+                                value={form.addressLine1}
+                                onChange={(e) => { setForm((p) => ({ ...p, addressLine1: e.target.value })); setFieldErrors((p) => ({ ...p, addressLine1: undefined })); }}
+                                className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressLine1 ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                                placeholder="Rue et numéro *"
+                              />
+                              {fieldErrors.addressLine1 && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressLine1}</p>}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <input
+                                  type="text"
+                                  value={form.addressPostalCode}
+                                  onChange={(e) => { setForm((p) => ({ ...p, addressPostalCode: e.target.value })); setFieldErrors((p) => ({ ...p, addressPostalCode: undefined })); }}
+                                  className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressPostalCode ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                                  placeholder="Code postal *"
+                                />
+                                {fieldErrors.addressPostalCode && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressPostalCode}</p>}
+                              </div>
+                              <div>
+                                <input
+                                  type="text"
+                                  value={form.addressCity}
+                                  onChange={(e) => { setForm((p) => ({ ...p, addressCity: e.target.value })); setFieldErrors((p) => ({ ...p, addressCity: undefined })); }}
+                                  className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressCity ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                                  placeholder="Ville *"
+                                />
+                                {fieldErrors.addressCity && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressCity}</p>}
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <input
-                              type="text"
-                              value={form.addressCity}
-                              onChange={(e) => { setForm((p) => ({ ...p, addressCity: e.target.value })); setFieldErrors((p) => ({ ...p, addressCity: undefined })); }}
-                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressCity ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                              placeholder="Ville *"
-                            />
-                            {fieldErrors.addressCity && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressCity}</p>}
-                          </div>
-                        </div>
-                      </div>
+                        )}
+                      </>
                     )}
                   </div>
                 ) : (
                   <div className="space-y-3">
+                    <p className="text-[13px] text-ink/60">
+                      Vous avez déjà un compte ?{" "}
+                      <Link
+                        href={`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`}
+                        className="font-semibold text-ink underline decoration-gold underline-offset-2 transition-colors hover:text-gold"
+                      >
+                        Se connecter
+                      </Link>
+                    </p>
                     <div>
                       <label className="mb-1 block text-xs font-medium text-ink/60">Nom complet *</label>
                       <input
@@ -765,116 +858,149 @@ function ReservationFormationContent() {
                         )}
                       </div>
                       {fieldErrors.email && <p className="mt-1 text-xs text-red-600">{fieldErrors.email}</p>}
-                      {emailStatus === "exists" && (
-                        <div className="mt-3">
-                          <ExistingAccountBanner
-                            email={form.email}
-                            callbackUrl={callbackUrl}
-                            onDismiss={() => setEmailStatus("dismissed")}
-                          />
-                        </div>
-                      )}
                     </div>
-                    <div>
-                      <label htmlFor="formation-phone" className="mb-1 block text-xs font-medium text-ink/60">Téléphone *</label>
-                      <input
-                        id="formation-phone"
-                        name="phone"
-                        type="tel"
-                        required
-                        autoComplete="tel"
-                        value={form.phone}
-                        onChange={(e) => { setForm((p) => ({ ...p, phone: e.target.value })); setFieldErrors((p) => ({ ...p, phone: undefined })); }}
-                        className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.phone ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                        placeholder="+32 4XX XX XX XX"
-                        aria-invalid={Boolean(fieldErrors.phone)}
-                        aria-describedby={fieldErrors.phone ? "formation-phone-error" : undefined}
-                      />
-                      {fieldErrors.phone && <p id="formation-phone-error" className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA (optionnel)</label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={form.vatNumber}
-                          onChange={(e) => {
-                            setForm((p) => ({ ...p, vatNumber: e.target.value }));
-                            setFieldErrors((p) => ({ ...p, vatNumber: undefined }));
-                            setVatCheck(null);
-                            setSavedVatProfile(null);
-                          }}
-                          className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                          placeholder="BE0123456789 ou FRXX123456789"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleVerifyVat}
-                          disabled={vatCheck?.loading}
-                          className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink/15 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
+
+                    {emailStatus === "exists" ? (
+                      <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+                        <p className="text-xs leading-relaxed text-amber-800">
+                          Un compte existe déjà avec cette adresse e-mail.
+                        </p>
+                        <Link
+                          href={`/login?${new URLSearchParams({
+                            email: form.email,
+                            callbackUrl,
+                          }).toString()}`}
+                          className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-ink/80"
                         >
-                          {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
-                          Vérifier
-                        </button>
+                          Se connecter
+                        </Link>
                       </div>
-                      {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
-                      {vatCheck && !vatCheck.loading && (
-                        <p
-                          className={`mt-1 flex items-center gap-1.5 text-xs font-medium ${
-                            vatCheck.error ? "text-amber-600" : vatCheck.valid ? "text-emerald-600" : "text-red-600"
-                          }`}
-                        >
-                          {vatCheck.error ? (
-                            <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />
-                          ) : vatCheck.valid ? (
-                            <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
-                          ) : (
-                            <BadgeX className="h-3.5 w-3.5 shrink-0" />
-                          )}
-                          {vatCheck.message}
-                        </p>
-                      )}
-                    </div>
-                    {needsBillingAddress && (
-                      <div className="space-y-2 rounded-lg border border-ink/10 bg-ink/[0.02] p-3">
-                        <p className="text-xs text-ink/50">
-                          Adresse de facturation obligatoire pour une facture avec numéro de TVA.
-                        </p>
+                    ) : (
+                      <>
                         <div>
+                          <label htmlFor="formation-phone" className="mb-1 block text-xs font-medium text-ink/60">Téléphone *</label>
                           <input
-                            type="text"
-                            value={form.addressLine1}
-                            onChange={(e) => { setForm((p) => ({ ...p, addressLine1: e.target.value })); setFieldErrors((p) => ({ ...p, addressLine1: undefined })); }}
-                            className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressLine1 ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                            placeholder="Rue et numéro *"
+                            id="formation-phone"
+                            name="phone"
+                            type="tel"
+                            required
+                            autoComplete="tel"
+                            value={form.phone}
+                            onChange={(e) => { setForm((p) => ({ ...p, phone: e.target.value })); setFieldErrors((p) => ({ ...p, phone: undefined })); }}
+                            className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.phone ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                            placeholder="+32 4XX XX XX XX"
+                            aria-invalid={Boolean(fieldErrors.phone)}
+                            aria-describedby={fieldErrors.phone ? "formation-phone-error" : undefined}
                           />
-                          {fieldErrors.addressLine1 && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressLine1}</p>}
+                          {fieldErrors.phone && <p id="formation-phone-error" className="mt-1 text-xs text-red-600">{fieldErrors.phone}</p>}
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <input
-                              type="text"
-                              value={form.addressPostalCode}
-                              onChange={(e) => { setForm((p) => ({ ...p, addressPostalCode: e.target.value })); setFieldErrors((p) => ({ ...p, addressPostalCode: undefined })); }}
-                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressPostalCode ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                              placeholder="Code postal *"
-                            />
-                            {fieldErrors.addressPostalCode && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressPostalCode}</p>}
-                          </div>
-                          <div>
-                            <input
-                              type="text"
-                              value={form.addressCity}
-                              onChange={(e) => { setForm((p) => ({ ...p, addressCity: e.target.value })); setFieldErrors((p) => ({ ...p, addressCity: undefined })); }}
-                              className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressCity ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
-                              placeholder="Ville *"
-                            />
-                            {fieldErrors.addressCity && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressCity}</p>}
-                          </div>
+                        <div>
+                          <label htmlFor="formation-password" className="mb-1 block text-xs font-medium text-ink/60">Mot de passe *</label>
+                          <input
+                            id="formation-password"
+                            name="password"
+                            type="password"
+                            required
+                            autoComplete="new-password"
+                            value={form.password}
+                            onChange={(e) => { setForm((p) => ({ ...p, password: e.target.value })); setFieldErrors((p) => ({ ...p, password: undefined })); }}
+                            className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.password ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                            placeholder="8 caractères minimum"
+                            aria-invalid={Boolean(fieldErrors.password)}
+                            aria-describedby={fieldErrors.password ? "formation-password-error" : undefined}
+                          />
+                          {fieldErrors.password && <p id="formation-password-error" className="mt-1 text-xs text-red-600">{fieldErrors.password}</p>}
                         </div>
-                      </div>
+                        {companyToggle}
+                        {form.isCompany && (
+                          <>
+                            <div>
+                              <label className="mb-1 block text-xs font-medium text-ink/60">Numéro de TVA *</label>
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  value={form.vatNumber}
+                                  onChange={(e) => {
+                                    setForm((p) => ({ ...p, vatNumber: e.target.value }));
+                                    setFieldErrors((p) => ({ ...p, vatNumber: undefined }));
+                                    setVatCheck(null);
+                                    setSavedVatProfile(null);
+                                  }}
+                                  className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.vatNumber ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                                  placeholder="BE0123456789 ou FRXX123456789"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={handleVerifyVat}
+                                  disabled={vatCheck?.loading}
+                                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-ink/15 px-3 text-xs font-semibold text-ink/60 transition-colors hover:border-gold hover:text-ink disabled:opacity-50"
+                                >
+                                  {vatCheck?.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldQuestion className="h-3.5 w-3.5" />}
+                                  Vérifier
+                                </button>
+                              </div>
+                              {fieldErrors.vatNumber && <p className="mt-1 text-xs text-red-600">{fieldErrors.vatNumber}</p>}
+                              {vatCheck && !vatCheck.loading && (
+                                <p
+                                  className={`mt-1 flex items-center gap-1.5 text-xs font-medium ${
+                                    vatCheck.error ? "text-amber-600" : vatCheck.valid ? "text-emerald-600" : "text-red-600"
+                                  }`}
+                                >
+                                  {vatCheck.error ? (
+                                    <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />
+                                  ) : vatCheck.valid ? (
+                                    <BadgeCheck className="h-3.5 w-3.5 shrink-0" />
+                                  ) : (
+                                    <BadgeX className="h-3.5 w-3.5 shrink-0" />
+                                  )}
+                                  {vatCheck.message}
+                                </p>
+                              )}
+                            </div>
+                            {needsBillingAddress && (
+                              <div className="space-y-2 rounded-lg border border-ink/10 bg-ink/[0.02] p-3">
+                                <p className="text-xs text-ink/50">
+                                  Adresse de facturation obligatoire pour une facture d&apos;entreprise.
+                                </p>
+                                <div>
+                                  <input
+                                    type="text"
+                                    value={form.addressLine1}
+                                    onChange={(e) => { setForm((p) => ({ ...p, addressLine1: e.target.value })); setFieldErrors((p) => ({ ...p, addressLine1: undefined })); }}
+                                    className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressLine1 ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                                    placeholder="Rue et numéro *"
+                                  />
+                                  {fieldErrors.addressLine1 && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressLine1}</p>}
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <input
+                                      type="text"
+                                      value={form.addressPostalCode}
+                                      onChange={(e) => { setForm((p) => ({ ...p, addressPostalCode: e.target.value })); setFieldErrors((p) => ({ ...p, addressPostalCode: undefined })); }}
+                                      className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressPostalCode ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                                      placeholder="Code postal *"
+                                    />
+                                    {fieldErrors.addressPostalCode && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressPostalCode}</p>}
+                                  </div>
+                                  <div>
+                                    <input
+                                      type="text"
+                                      value={form.addressCity}
+                                      onChange={(e) => { setForm((p) => ({ ...p, addressCity: e.target.value })); setFieldErrors((p) => ({ ...p, addressCity: undefined })); }}
+                                      className={`h-10 w-full rounded-lg border px-3 text-sm text-ink outline-none focus:ring-2 ${fieldErrors.addressCity ? "border-red-400 focus:border-red-400 focus:ring-red-100" : "border-ink/15 focus:border-gold/50 focus:ring-gold/10"}`}
+                                      placeholder="Ville *"
+                                    />
+                                    {fieldErrors.addressCity && <p className="mt-1 text-xs text-red-600">{fieldErrors.addressCity}</p>}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        <p className="text-xs text-ink/40">Votre compte est créé avec le mot de passe choisi ci-dessus.</p>
+                      </>
                     )}
-                    <p className="text-xs text-ink/40">Un compte sera créé automatiquement avec votre email.</p>
                   </div>
                 )}
               </div>

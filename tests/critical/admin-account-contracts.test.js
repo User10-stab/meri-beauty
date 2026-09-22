@@ -54,7 +54,13 @@ describe("createAdminAccount is gated and never self-service", () => {
 
   test("handles a duplicate e-mail as a normal validation error, not a 500", () => {
     expect(actions).toContain('error?.code === "P2002"');
-    expect(actions).toContain('error.meta?.target?.includes?.("email")');
+    // user_active_email_idx is a partial index on lower(email) (raw-SQL
+    // migration, not a schema.prisma @@unique) — Prisma can report its
+    // index name rather than a plain "email" field in meta.target for this
+    // shape, so the match has to run against the stringified target, not a
+    // direct .includes() call (which silently missed it and fell through
+    // to a generic "erreur inattendue" instead of naming the email field).
+    expect(actions).toContain('JSON.stringify(error.meta?.target ?? "").toLowerCase().includes("email")');
   });
 
   test("listAdminAccounts returns every ADMIN/OWNER row, including soft-deleted ones", () => {

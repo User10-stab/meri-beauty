@@ -586,6 +586,7 @@ model WorkshopReservation {
   updatedAt DateTime @updatedAt
 
   cancellationRequest ReservationCancellationRequest?
+  review              Review?
 
   @@index([sessionId])
   @@index([customerId])
@@ -747,6 +748,7 @@ model FormationReservation {
   updatedAt DateTime @updatedAt
 
   cancellationRequest ReservationCancellationRequest?
+  review              Review?
 
   @@index([sessionId])
   @@index([customerId])
@@ -2870,14 +2872,23 @@ model TimeOff {
 }
 
 // REVIEW
+// Polymorphic: exactly one of appointmentId / workshopReservationId /
+// formationReservationId is set, enforced by a raw-SQL CHECK constraint
+// (Review_exactly_one_source) — same pattern as Payment_exactly_one_source.
 model Review {
   id String @id @default(cuid())
 
-  userId        String
-  appointmentId String @unique
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
 
-  user        User        @relation(fields: [userId], references: [id])
-  appointment Appointment @relation(fields: [appointmentId], references: [id])
+  appointmentId String?      @unique
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id])
+
+  workshopReservationId String?              @unique
+  workshopReservation   WorkshopReservation? @relation(fields: [workshopReservationId], references: [id])
+
+  formationReservationId String?               @unique
+  formationReservation   FormationReservation? @relation(fields: [formationReservationId], references: [id])
 
   rating  Int
   comment String?

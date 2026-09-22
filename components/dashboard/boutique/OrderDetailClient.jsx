@@ -16,7 +16,7 @@ import {
   reviewOrderCancellationRequest,
   markOrderReturnedUndelivered,
 } from "@/actions/boutique/orders";
-import { generateShippingLabel, clearStuckLabelClaim } from "@/actions/boutique/mondial-relay";
+import { generateShippingLabel, clearStuckLabelClaim, getShipmentTracing } from "@/actions/boutique/mondial-relay";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 
 const MODE_LABEL = {
@@ -90,6 +90,8 @@ export function OrderDetailClient({ order, isAdmin = false }) {
   const [labelOverrideReason, setLabelOverrideReason] = useState("");
   const [undeliveredPrompt, setUndeliveredPrompt] = useState(false);
   const [undeliveredNote, setUndeliveredNote] = useState("");
+  const [tracingEvents, setTracingEvents] = useState(null);
+  const [loadingTracing, setLoadingTracing] = useState(false);
   const isB2B = order.invoice?.customerType === "B2B";
 
   function runAction(action, ...args) {
@@ -126,6 +128,19 @@ export function OrderDetailClient({ order, isAdmin = false }) {
         // works — nothing is lost the way it used to be.
         if (result.data?.trackingCode) window.open(`/api/orders/${order.id}/shipping-label`, "_blank");
         router.refresh();
+      } else {
+        toast.error(result.message);
+      }
+    });
+  }
+
+  function handleFetchTracing() {
+    setLoadingTracing(true);
+    getShipmentTracing(order.id).then((result) => {
+      setLoadingTracing(false);
+      if (result.success) {
+        setTracingEvents(result.events);
+        if (result.events.length === 0) toast.info("Mondial Relay n'a encore enregistré aucun événement.");
       } else {
         toast.error(result.message);
       }
@@ -411,9 +426,30 @@ export function OrderDetailClient({ order, isAdmin = false }) {
                   </span>
                 </p>
                 {order.trackingCode && (
-                  <p className="flex items-center gap-2 text-gray-500">
-                    <Truck size={14} /> Suivi Mondial Relay : {order.trackingCode}
-                  </p>
+                  <>
+                    <p className="flex items-center gap-2 text-gray-500">
+                      <Truck size={14} /> Suivi Mondial Relay : {order.trackingCode}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleFetchTracing}
+                      disabled={loadingTracing}
+                      className="text-xs font-medium text-primary hover:underline disabled:opacity-60"
+                    >
+                      {loadingTracing ? "Chargement du suivi…" : "Voir le suivi Mondial Relay"}
+                    </button>
+                    {tracingEvents && tracingEvents.length > 0 && (
+                      <ul className="mt-1 space-y-1 border-l border-stroke pl-3 dark:border-dark-3">
+                        {tracingEvents.map((event, index) => (
+                          <li key={`${event.date}-${event.time}-${index}`} className="text-xs text-gray-500">
+                            <span className="font-medium text-gray-700 dark:text-gray-300">{event.label}</span>
+                            {(event.date || event.time) && <> — {event.date} {event.time}</>}
+                            {event.location && <> · {event.location}</>}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
                 )}
                 {order.shippedAt && <p className="text-gray-400">Expédiée le {formatDate(order.shippedAt)}</p>}
                 {order.collectedAt && <p className="text-gray-400">Récupérée le {formatDate(order.collectedAt)}</p>}

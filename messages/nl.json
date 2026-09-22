@@ -840,7 +840,7 @@
       }
     },
     "mondialRelay": {
-      "autoSearchComing": "Automatische zoekfunctie voor afhaalpunten komt binnenkort. In de tussentijd voert u het Mondial Relay afhaalpunt van uw keuze in (te vinden op mondialrelay.fr).",
+      "autoSearchComing": "Automatische zoekfunctie voor afhaalpunten komt binnenkort. In de tussentijd voert u het Mondial Relay afhaalpunt van uw keuze in (te vinden op mondialrelay.be).",
       "pointName": "Naam afhaalpunt",
       "pointAddress": "Adres afhaalpunt",
       "postalCode": "Postcode",
@@ -2357,11 +2357,6 @@
       "reservationFailed": "Fout bij het aanmaken van reservering"
     },
     "stepOf": "Stap {current} van {total}"
-  },
-  "existingAccountBanner": {
-    "title": "Er bestaat al een account voor dit e-mailadres.",
-    "description": "Log in om deze reservering aan uw bestaande account te koppelen, of ga verder als gast als u een nieuw account wilt aanmaken.",
-    "signIn": "Inloggen"
   },
   "promoCode": {
     "placeholder": "Promocode",

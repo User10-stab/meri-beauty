@@ -10,10 +10,10 @@ import { getCartShippingCost, requestShippingQuote } from "@/actions/boutique/sh
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { validatePromoCode } from "@/actions/promo-codes";
-import { ExistingAccountBanner } from "@/components/shared/ExistingAccountBanner";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { MondialRelayPicker } from "@/components/boutique/MondialRelayPicker";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
+import { validatePassword } from "@/lib/validations/password";
 import { resolveGoodsVatPolicy, hasReusableVatValidation, applyVatRate, roundMoney, BELGIUM_VAT_RATE, VAT_LEGAL_NOTES } from "@/lib/tax-policy";
 
 const MODES = [
@@ -39,13 +39,14 @@ const MODES = [
 
 export function CheckoutPageClient({ cart, customerSession, shippingEnabled = true }) {
   const router = useRouter();
-  const isAuthenticated = Boolean(customerSession);
+  const effectiveSession = customerSession;
+  const isAuthenticated = Boolean(effectiveSession);
   // A signed-in customer can still reach checkout with no address on file —
   // an account created before the mandatory-address rule, or never completed
   // in /mon-compte. Only that case, not "is authenticated", decides whether
   // the billing address is still required below: a guest always needs it,
   // a returning customer only needs it once.
-  const hasAddressOnFile = isAuthenticated && Boolean(customerSession.addressLine1);
+  const hasAddressOnFile = isAuthenticated && Boolean(effectiveSession.addressLine1);
 
   const [fulfilmentMode, setFulfilmentMode] = useState(null);
   const [customerInfo, setCustomerInfo] = useState(
@@ -53,7 +54,9 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       fullName: "",
       email: "",
       phone: "",
+      password: "",
       newsletterSubscribed: false,
+      isCompany: false,
       addressLine1: "",
       addressLine2: "",
       addressCity: "",
@@ -62,10 +65,12 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       vatNumber: "",
     }
   );
+
   const [pickupPoint, setPickupPoint] = useState(null);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
+  const [pendingVerificationEmailFailed, setPendingVerificationEmailFailed] = useState(false);
   const [shippingDetails, setShippingDetails] = useState({ cost: 0, isFree: true, loading: true, quoteRequired: false });
   const [quoteRequest, setQuoteRequest] = useState({ submitting: false, sent: false });
 
@@ -303,18 +308,27 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
         return;
       }
       if (emailStatus === "exists") {
-        toast.error(
-          "Cette adresse email est déjà associée à un compte. Connectez-vous ou cliquez sur « Continuer quand même »."
-        );
+        toast.error("Cette adresse e-mail est déjà associée à un compte. Connectez-vous ci-dessus pour continuer.");
+        return;
+      }
+      if (validatePassword(customerInfo.password)) {
+        toast.error("Veuillez choisir un mot de passe d'au moins 8 caractères.");
         return;
       }
     }
-    // Also runs for a signed-in customer whose account has no address yet —
-    // an invoice cannot legally exist without one (art. 226(5)), and this is
-    // the last chance to catch it before the button below charges Stripe.
-    if (!hasAddressOnFile) {
+    if (customerInfo.isCompany && !hasSavedVatProof && !customerInfo.vatNumber?.trim()) {
+      toast.error("Veuillez indiquer votre numéro de TVA, ou repasser sur « Particulier ».");
+      return;
+    }
+    // Only an Entreprise order gets a real invoice (a particulier gets a
+    // plain ticket, see hasInvoiceableVatIdentity) — so the address is only
+    // required for Entreprise, and only once, for a signed-in customer whose
+    // account doesn't already have one on file. An invoice cannot legally
+    // exist without a buyer address (art. 226(5)), and this is the last
+    // chance to catch it before the button below charges Stripe.
+    if (customerInfo.isCompany && !hasAddressOnFile) {
       if (!customerInfo.addressLine1.trim() || !customerInfo.addressCity.trim() || !customerInfo.addressPostalCode.trim()) {
-        toast.error("Veuillez indiquer votre adresse de facturation — elle est obligatoire pour la facture.");
+        toast.error("Veuillez indiquer votre adresse de facturation — elle est obligatoire pour la facture d'entreprise.");
         return;
       }
     }
@@ -331,24 +345,28 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
         fulfilmentMode,
         customerInfo: isAuthenticated
           ? {
-              userId: customerSession.id,
+              userId: effectiveSession.id,
               // Identity fields come from the trusted session, never from
               // what the client typed (resolveOrCreateCustomer's IDOR note).
               // The address is the exception: when hasAddressOnFile is false
               // there is no server-known value yet, so what was just typed
               // into the form below is the only source — resolveOrCreateCustomer
               // persists it onto this same account.
-              fullName: customerSession.fullName,
-              email: customerSession.email,
-              phone: customerSession.phone,
-              vatNumber: customerInfo.vatNumber || "",
+              fullName: effectiveSession.fullName,
+              email: effectiveSession.email,
+              phone: effectiveSession.phone,
+              // Only sent when "Entreprise" is selected — switching back to
+              // "Particulier" must not silently keep charging/invoicing as a
+              // business just because a VAT number is still sitting in the
+              // field from an earlier toggle.
+              vatNumber: customerInfo.isCompany ? customerInfo.vatNumber || "" : "",
               addressLine1: customerInfo.addressLine1,
               addressLine2: customerInfo.addressLine2,
               addressCity: customerInfo.addressCity,
               addressPostalCode: customerInfo.addressPostalCode,
               addressCountry: customerInfo.addressCountry,
             }
-          : customerInfo,
+          : { ...customerInfo, vatNumber: customerInfo.isCompany ? customerInfo.vatNumber || "" : "" },
         pickupPoint: fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint : null,
         notes: notes || null,
         promoCode: appliedPromo?.code ?? null,
@@ -366,6 +384,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
 
       if (result.data.requiresEmailVerification) {
         setPendingVerificationEmail(result.data.email);
+        setPendingVerificationEmailFailed(Boolean(result.data.emailDeliveryFailed));
         setSubmitting(false);
         return;
       }
@@ -409,7 +428,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
   }
 
   async function handleRequestQuote() {
-    const info = isAuthenticated ? customerSession : customerInfo;
+    const info = isAuthenticated ? effectiveSession : customerInfo;
     if (!info?.fullName?.trim() || !info?.email?.trim() || !info?.phone?.trim()) {
       toast.error("Veuillez compléter vos informations de contact.");
       return;
@@ -441,10 +460,49 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     }
   }
 
+  // Particulier / Entreprise — explicit choice rather than "typing a VAT
+  // number implies a business", so a returning company account can also
+  // switch back to buying as an individual without dragging their VAT
+  // number along.
+  const companyToggle = (
+    <div role="radiogroup" aria-label="Type de compte" className="flex border border-neutral-200 p-1">
+      <label
+        className={`flex flex-1 cursor-pointer items-center justify-center px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
+          !customerInfo.isCompany ? "bg-[#2F3A2E] text-white" : "text-gray-500 hover:text-[#2F3A2E]"
+        }`}
+      >
+        <input
+          type="radio"
+          name="isCompany"
+          value="false"
+          checked={!customerInfo.isCompany}
+          onChange={() => setCustomerInfo((prev) => ({ ...prev, isCompany: false }))}
+          className="sr-only"
+        />
+        Particulier
+      </label>
+      <label
+        className={`flex flex-1 cursor-pointer items-center justify-center px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
+          customerInfo.isCompany ? "bg-[#2F3A2E] text-white" : "text-gray-500 hover:text-[#2F3A2E]"
+        }`}
+      >
+        <input
+          type="radio"
+          name="isCompany"
+          value="true"
+          checked={Boolean(customerInfo.isCompany)}
+          onChange={() => setCustomerInfo((prev) => ({ ...prev, isCompany: true }))}
+          className="sr-only"
+        />
+        Entreprise
+      </label>
+    </div>
+  );
+
   const vatField = (
     <div className="space-y-2">
       <label className="block text-xs font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
-        Numéro de TVA (optionnel)
+        Numéro de TVA
       </label>
       <div className="flex gap-2">
         <input
@@ -487,17 +545,95 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     </div>
   );
 
+  // Only required when the order will actually be invoiced (Entreprise +
+  // VAT number) — a particulier gets a plain ticket and never needs one,
+  // same rule as hasInvoiceableVatIdentity everywhere else. Shared between
+  // the guest form and a signed-in Entreprise customer whose account
+  // doesn't have one on file yet.
+  const addressFields = (
+    <div className="space-y-3 border-t border-neutral-100 pt-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
+        Adresse de facturation
+      </p>
+      <input
+        type="text"
+        name="addressLine1"
+        value={customerInfo.addressLine1}
+        onChange={handleCustomerChange}
+        autoComplete="address-line1"
+        placeholder="Rue et numéro"
+        className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+      />
+      <input
+        type="text"
+        name="addressLine2"
+        value={customerInfo.addressLine2}
+        onChange={handleCustomerChange}
+        autoComplete="address-line2"
+        placeholder="Boîte, étage, complément (optionnel)"
+        className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+      />
+      <div className="grid grid-cols-3 gap-3">
+        <input
+          type="text"
+          name="addressPostalCode"
+          value={customerInfo.addressPostalCode}
+          onChange={handleCustomerChange}
+          autoComplete="postal-code"
+          placeholder="Code postal"
+          className="col-span-1 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+        />
+        <input
+          type="text"
+          name="addressCity"
+          value={customerInfo.addressCity}
+          onChange={handleCustomerChange}
+          autoComplete="address-level2"
+          placeholder="Ville"
+          className="col-span-2 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+        />
+      </div>
+      <select
+        name="addressCountry"
+        value={customerInfo.addressCountry}
+        onChange={handleCustomerChange}
+        autoComplete="country"
+        className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+      >
+        <option value="BE">Belgique</option>
+        <option value="FR">France</option>
+        <option value="LU">Luxembourg</option>
+        <option value="NL">Pays-Bas</option>
+        <option value="DE">Allemagne</option>
+      </select>
+    </div>
+  );
+
   if (pendingVerificationEmail) {
     return (
       <div className="mx-auto max-w-[600px] px-6 py-20 text-center md:px-10">
         <div className="mb-6 inline-flex h-16 w-16 items-center justify-center rounded-full bg-[#C8A46A]/10">
           <CheckCircle2 className="h-8 w-8 text-[#C8A46A]" />
         </div>
-        <h1 className="text-2xl font-bold text-[#2F3A2E]">Confirmez votre email</h1>
-        <p className="mx-auto mt-3 max-w-md text-ink/60 text-gray-500">
-          Nous avons envoyé un email de confirmation à <strong>{pendingVerificationEmail}</strong>. Une fois confirmée,
-          vous recevrez vos identifiants de connexion par email et pourrez finaliser votre paiement.
-        </p>
+        <h1 className="text-2xl font-bold text-[#2F3A2E]">
+          {pendingVerificationEmailFailed ? "Commande enregistrée" : "Confirmez votre email"}
+        </h1>
+        {pendingVerificationEmailFailed ? (
+          <p className="mx-auto mt-3 max-w-md text-ink/60 text-gray-500">
+            Votre commande est bien enregistrée, mais nous n&apos;avons pas pu envoyer l&apos;e-mail de confirmation à{" "}
+            <strong>{pendingVerificationEmail}</strong> tout de suite.{" "}
+            <Link href="/verify-email" className="font-semibold text-[#2F3A2E] underline hover:text-[#3d4d3c]">
+              Demandez un nouveau lien
+            </Link>{" "}
+            pour activer votre compte et finaliser votre paiement.
+          </p>
+        ) : (
+          <p className="mx-auto mt-3 max-w-md text-ink/60 text-gray-500">
+            Nous avons envoyé un lien de confirmation à <strong>{pendingVerificationEmail}</strong>. Cliquez dessus pour
+            activer votre compte — vous reviendrez directement ici pour finaliser votre paiement, avec le mot de passe
+            que vous venez de choisir.
+          </p>
+        )}
       </div>
     );
   }
@@ -553,22 +689,33 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
           )}
 
           {isAuthenticated && (
-            <section className="border border-neutral-200 p-6">
-              <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
-                Facturation professionnelle
+            <section className="border border-neutral-200 p-6 space-y-4">
+              <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
+                Facturation
               </h2>
-              {hasSavedVatProof ? (
-                <div className="flex items-start gap-3 bg-emerald-50 px-4 py-3 text-emerald-800">
-                  <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" />
-                  <div className="text-sm">
-                    <p className="font-semibold">TVA {customerInfo.vatNumber} vérifiée</p>
-                    <p className="mt-0.5 text-xs text-emerald-700">
-                      La validation VIES est réutilisée pendant 90 jours. Pour changer ce numéro, utilisez votre{" "}
-                      <Link href="/profile" className="underline underline-offset-2">profil</Link>.
-                    </p>
-                  </div>
-                </div>
-              ) : vatField}
+              {companyToggle}
+              {customerInfo.isCompany && (
+                <>
+                  {hasSavedVatProof ? (
+                    <div className="flex items-start gap-3 bg-emerald-50 px-4 py-3 text-emerald-800">
+                      <BadgeCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                      <div className="text-sm">
+                        <p className="font-semibold">TVA {customerInfo.vatNumber} vérifiée</p>
+                        <p className="mt-0.5 text-xs text-emerald-700">
+                          La validation VIES est réutilisée pendant 90 jours. Pour changer ce numéro, utilisez votre{" "}
+                          <Link href="/profile" className="underline underline-offset-2">profil</Link>.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    vatField
+                  )}
+                  {/* Only a signed-in customer whose account has no address on
+                      file yet needs to type one here — everyone else's is
+                      already known (customerSession / a saved profile). */}
+                  {!hasAddressOnFile && addressFields}
+                </>
+              )}
             </section>
           )}
 
@@ -577,6 +724,15 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
             <section className="border border-neutral-200 p-6">
               <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">Vos informations</h2>
               <div className="space-y-4">
+                <p className="text-[13px] text-neutral-500">
+                  Vous avez déjà un compte ?{" "}
+                  <Link
+                    href={`/login?callbackUrl=${encodeURIComponent("/boutique/checkout")}`}
+                    className="font-semibold text-[#2F3A2E] underline decoration-[#C8A46A] underline-offset-2 transition-colors hover:text-[#C8A46A]"
+                  >
+                    Se connecter
+                  </Link>
+                </p>
                 <input
                   name="fullName"
                   value={customerInfo.fullName}
@@ -604,13 +760,23 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                     </div>
                   )}
                 </div>
-                {emailStatus === "exists" && (
-                  <ExistingAccountBanner
-                    email={customerInfo.email}
-                    callbackUrl="/boutique/checkout"
-                    onDismiss={() => setEmailStatus("dismissed")}
-                  />
-                )}
+                {emailStatus === "exists" ? (
+                  <div role="status" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3">
+                    <p className="text-xs leading-relaxed text-amber-800">
+                      Un compte existe déjà avec cette adresse e-mail.
+                    </p>
+                    <Link
+                      href={`/login?${new URLSearchParams({
+                        email: customerInfo.email,
+                        callbackUrl: "/boutique/checkout",
+                      }).toString()}`}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-[#2F3A2E] px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#212a20]"
+                    >
+                      Se connecter
+                    </Link>
+                  </div>
+                ) : (
+                  <>
                 <input
                   type="tel"
                   name="phone"
@@ -620,72 +786,23 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                   className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
                   required
                 />
-                {vatField}
-
-                {/* Billing address — mandatory for every invoice (Belgian legal
-                    requirement). Not marked required at the HTML level since a
-                    returning customer whose account already has an address on
-                    file doesn't need to resubmit it (it arrives pre-filled via
-                    customerSession). The submit handler enforces it above
-                    whenever !hasAddressOnFile, and resolveOrCreateCustomer
-                    enforces the same rule server-side — before Stripe is
-                    charged, not after: see cmtbaqxua0003gczkbigl9x23. */}
-                <div className="space-y-3 border-t border-neutral-100 pt-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#2F3A2E]">
-                    Adresse de facturation
-                  </p>
-                  <input
-                    type="text"
-                    name="addressLine1"
-                    value={customerInfo.addressLine1}
-                    onChange={handleCustomerChange}
-                    autoComplete="address-line1"
-                    placeholder="Rue et numéro"
-                    className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                  />
-                  <input
-                    type="text"
-                    name="addressLine2"
-                    value={customerInfo.addressLine2}
-                    onChange={handleCustomerChange}
-                    autoComplete="address-line2"
-                    placeholder="Boîte, étage, complément (optionnel)"
-                    className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                  />
-                  <div className="grid grid-cols-3 gap-3">
-                    <input
-                      type="text"
-                      name="addressPostalCode"
-                      value={customerInfo.addressPostalCode}
-                      onChange={handleCustomerChange}
-                      autoComplete="postal-code"
-                      placeholder="Code postal"
-                      className="col-span-1 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      name="addressCity"
-                      value={customerInfo.addressCity}
-                      onChange={handleCustomerChange}
-                      autoComplete="address-level2"
-                      placeholder="Ville"
-                      className="col-span-2 w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                    />
-                  </div>
-                  <select
-                    name="addressCountry"
-                    value={customerInfo.addressCountry}
-                    onChange={handleCustomerChange}
-                    autoComplete="country"
-                    className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-                  >
-                    <option value="BE">Belgique</option>
-                    <option value="FR">France</option>
-                    <option value="LU">Luxembourg</option>
-                    <option value="NL">Pays-Bas</option>
-                    <option value="DE">Allemagne</option>
-                  </select>
-                </div>
+                <input
+                  type="password"
+                  name="password"
+                  value={customerInfo.password ?? ""}
+                  onChange={handleCustomerChange}
+                  placeholder="Mot de passe (8 caractères minimum)"
+                  autoComplete="new-password"
+                  className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+                  required
+                />
+                {companyToggle}
+                {customerInfo.isCompany && (
+                  <>
+                    {vatField}
+                    {addressFields}
+                  </>
+                )}
 
                 <label className="flex cursor-pointer items-start gap-3">
                   <input
@@ -697,7 +814,9 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                   />
                   <span className="text-sm text-gray-600">Je souhaite recevoir des offres exclusives par email</span>
                 </label>
-                <p className="text-xs text-gray-400">Un compte sera créé automatiquement pour suivre votre commande.</p>
+                <p className="text-xs text-gray-400">Votre compte est créé avec le mot de passe choisi ci-dessus.</p>
+                  </>
+                )}
               </div>
             </section>
           )}

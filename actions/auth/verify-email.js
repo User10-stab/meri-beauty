@@ -4,7 +4,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
-import { emailVerificationEmail, welcomeWithCredentialsEmail } from "@/lib/email-templates";
+import { emailVerificationEmail } from "@/lib/email-templates";
 import { resendVerificationSchema } from "@/lib/validations/resend-verification";
 import { getClientIp, consumeSharedRateLimit, hashRateLimitValue } from "@/lib/rate-limit";
 import { retryCheckoutSession } from "@/actions/shared/resume-checkout-after-verification";
@@ -16,16 +16,9 @@ const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 24 * 60; // 24 hours instead of 15 minutes
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
-const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
-  ? `${process.env.NEXT_PUBLIC_APP_URL}/login`
-  : "https://meribeauty.com/login";
 
 async function hashToken(token) {
   return bcrypt.hash(token, BCRYPT_SALT_ROUNDS);
-}
-
-function generateTemporaryPassword() {
-  return crypto.randomBytes(9).toString("base64url");
 }
 
 export async function sendVerificationEmail(user, opts = {}) {
@@ -168,28 +161,19 @@ export async function verifyEmail(rawToken) {
     let resumeToken = null;
 
     if (matchedToken.resumeType && CHECKOUT_RESUME_TYPES.includes(matchedToken.resumeType)) {
-      // Checkout-issued token: generate real credentials (the placeholder
-      // password set at submit time was never shown to anyone) and try to
-      // actually start payment. Deliberately done here, inline, using the
-      // user.id this same function just resolved from the validated token —
-      // never as a separately "use server"-exported function taking a
-      // client-supplied userId. That used to be resumeCheckoutAfterVerification
-      // in actions/shared/resume-checkout-after-verification.js: any caller
+      // Checkout-issued token: the account already has the password the
+      // customer chose on the booking/checkout form (see
+      // actions/shared/init-customer-verification.js and the guest-creation
+      // branches in create-formation-reservation.js / create-workshop
+      // -reservation.js / actions/boutique/orders.js) — nothing to generate,
+      // nothing to email. Just resume payment. Deliberately done here,
+      // inline, using the user.id this same function just resolved from the
+      // validated token — never as a separately "use server"-exported
+      // function taking a client-supplied userId. That used to be
+      // resumeCheckoutAfterVerification in
+      // actions/shared/resume-checkout-after-verification.js: any caller
       // could invoke it directly with an arbitrary userId and force-overwrite
       // that account's password (a forced-reset/lockout + email-spam vector).
-      const temporaryPassword = generateTemporaryPassword();
-      const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
-      await prisma.user.update({ where: { id: user.id }, data: { password: hashedPassword } });
-
-      sendEmail({
-        to: matchedToken.email,
-        ...welcomeWithCredentialsEmail({
-          customerName: user.fullName,
-          email: matchedToken.email,
-          temporaryPassword,
-          loginUrl: LOGIN_URL,
-        }),
-      }).catch((err) => console.error("[verifyEmail] credentials email failed:", err));
 
       // A resumeToken authorizes the manual "Réessayer le paiement" button to
       // re-enter this checkout: retryCheckoutSession is a public "use server"

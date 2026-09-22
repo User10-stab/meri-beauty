@@ -12,32 +12,23 @@ export default async function ReviewsPage() {
   const t = await getTranslations("dashboard.reviews");
 
   const result = await getReviewDashboardData();
-  const reviews = result.data?.reviews ?? [];
-  const averageRating = result.data?.averageRating ?? 0;
-  const totalReviews = result.data?.totalReviews ?? 0;
+  const EMPTY_POOL = { averageRating: 0, totalReviews: 0, reviews: [] };
+  const pools = result.data ?? {
+    appointments: EMPTY_POOL,
+    workshops: EMPTY_POOL,
+    formations: EMPTY_POOL,
+  };
 
   return (
     <div className="space-y-6">
       {/* ── Page header ───────────────────────────────────────────────── */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-dark dark:text-white">
-            {t("title")}
-          </h1>
-          <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-            {t("subtitle")}
-          </p>
-        </div>
-
-        {/* Stats strip */}
-        <div className="flex items-center gap-3">
-          <StatBadge
-            label={t("totalLabel")}
-            value={totalReviews}
-            color="bg-[rgba(47,58,46,0.08)] text-[#2f3a2e] dark:bg-[#FFFFFF1A] dark:text-white"
-          />
-         
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold text-dark dark:text-white">
+          {t("title")}
+        </h1>
+        <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
+          {t("subtitle")}
+        </p>
       </div>
 
       {/* ── Error banner ──────────────────────────────────────────────── */}
@@ -51,24 +42,15 @@ export default async function ReviewsPage() {
         </div>
       )}
 
-      {/* ── Client shell ───────────────────────────────────────────────── */}
+      {/* ── Client shell — its own tab per reservation kind ─────────────── */}
       <Suspense fallback={<ReviewsTableSkeleton />}>
-        <ReviewsPageClient initialData={reviews} />
+        <ReviewsPageClient initialData={pools} />
       </Suspense>
     </div>
   );
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function StatBadge({ label, value, color }) {
-  return (
-    <div className={`flex items-center gap-2 rounded-xl px-3.5 py-2 ${color}`}>
-      <span className="text-xl font-bold leading-none">{value}</span>
-      <span className="text-xs font-medium">{label}</span>
-    </div>
-  );
-}
 
 function ReviewsTableSkeleton() {
   return (

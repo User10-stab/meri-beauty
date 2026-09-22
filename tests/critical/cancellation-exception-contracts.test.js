@@ -14,7 +14,11 @@ describe("late cancellation exception requests", () => {
 
   test("stores one current review request per appointment", () => {
     expect(schema).toContain("model AppointmentCancellationRequest");
-    expect(schema).toContain("appointmentId String @unique");
+    // Not a plain toContain: Prisma's formatter column-aligns this field's
+    // spacing against its sibling `appointment` relation line, so a literal
+    // single-space string only matched by coincidence (against Review's own
+    // unrelated appointmentId field) before Review became polymorphic.
+    expect(schema).toMatch(/appointmentId\s+String\s+@unique/);
     expect(schema).toContain("cancellationRequests AppointmentCancellationRequest[]");
     expect(schema).toContain("enum AppointmentCancellationRequestStatus");
   });

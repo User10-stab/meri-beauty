@@ -241,6 +241,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
     handleSubmit,
     control,
     setValue,
+    setError,
     watch,
     formState: { errors },
   } = useForm({
@@ -291,8 +292,15 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
         onClose();
       } else {
         if (res.errors) {
+          // Attach each server-only error (duplicate email/phone/VAT, VIES
+          // failure...) to its actual field — a toast alone left the admin
+          // hunting through this 5-section scrollable form for which of ~20
+          // fields it meant, same class of bug as the checkout email issue.
+          Object.entries(res.errors).forEach(([field, message]) => {
+            if (message) setError(field, { type: "server", message });
+          });
           const first = Object.values(res.errors).find(Boolean);
-          if (first) toast.error(first);
+          toast.error(first ?? res.message);
         } else {
           toast.error(res.message);
         }

@@ -8,7 +8,15 @@ import { roundMoney } from "@/lib/tax-policy";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { isBelgianVatNumber } from "@/lib/peppyrus";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
-import { buildStaffCustomer, issueRentInvoiceNow, pendingRentPaymentData, rentInvoiceInput } from "@/lib/staff-rent-payment";
+import {
+  buildStaffCustomer,
+  issueRentInvoiceNow,
+  olderUnissuedRents,
+  pendingRentPaymentData,
+  rentInvoiceInput,
+  UNISSUED_RENT_ORDER,
+  UNISSUED_RENT_WHERE,
+} from "@/lib/staff-rent-payment";
 import { buildPendingInvoicePreview } from "@/lib/invoices/invoice-preview";
 
 /**
@@ -66,8 +74,9 @@ export async function listPendingStaffRent() {
   try {
     [dueRents, legacyInvoices] = await Promise.all([
       prisma.staffMonthlyInvoice.findMany({
-        where: { status: "AWAITING_PAYMENT", invoiceId: null, payment: { is: { status: { in: OPEN_PAYMENT_STATUSES } } } },
-        orderBy: [{ billingYear: "desc" }, { billingMonth: "desc" }, { generatedAt: "desc" }],
+        where: UNISSUED_RENT_WHERE,
+        // Oldest first: the order their invoices must take numbers in.
+        orderBy: UNISSUED_RENT_ORDER,
         take: 200,
         select: {
           id: true,
@@ -112,8 +121,10 @@ export async function listPendingStaffRent() {
   }
 
   const rows = [
-    ...dueRents.map((rent) => ({
+    ...dueRents.map((rent, index) => ({
       kind: "RENT",
+      // Numbers follow the rents' age: only the oldest can be issued now.
+      issueAfter: index > 0 ? dueRents[0].staff?.user?.fullName || "le loyer plus ancien" : null,
       rentId: rent.id,
       invoiceId: null,
       number: null,
@@ -398,6 +409,18 @@ export async function issueStaffRentInvoice(input) {
 
   const rentId = typeof input?.rentId === "string" ? input.rentId.trim() : "";
   if (!rentId) return { success: false, message: RENT_ERROR_MESSAGES.STAFF_RENT_NOT_FOUND };
+
+  // Numbers follow the rents' age (oldest = lowest): refuse to jump the queue.
+  const rent = await prisma.staffMonthlyInvoice.findUnique({ where: { id: rentId }, select: { id: true, generatedAt: true } });
+  if (!rent) return { success: false, message: RENT_ERROR_MESSAGES.STAFF_RENT_NOT_FOUND };
+  const older = await olderUnissuedRents(prisma, rent);
+  if (older.length > 0) {
+    const first = older[0];
+    return {
+      success: false,
+      message: `Émettez d'abord la facture de ${first.staff?.user?.fullName ?? "ce loyer"} (${first.lineDescription ?? "loyer plus ancien"}) : les numéros suivent l'ordre des loyers.`,
+    };
+  }
 
   let invoice;
   try {

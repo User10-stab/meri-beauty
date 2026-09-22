@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   prisma: {
-    staffMonthlyInvoice: { findUnique: vi.fn() },
+    staffMonthlyInvoice: { findUnique: vi.fn(), findMany: vi.fn() },
     user: { findUnique: vi.fn() },
     $transaction: vi.fn(),
   },
@@ -80,6 +80,7 @@ beforeEach(() => {
   mocks.tx = makeTx();
   mocks.prisma.$transaction.mockImplementation((fn) => fn(mocks.tx));
   mocks.prisma.staffMonthlyInvoice.findUnique.mockResolvedValue(RENT);
+  mocks.prisma.staffMonthlyInvoice.findMany.mockResolvedValue([]);
   mocks.prisma.user.findUnique.mockResolvedValue(null);
   mocks.issueInvoice.mockResolvedValue(ISSUED);
   mocks.issueCreditNote.mockResolvedValue({ id: "cn_1", number: "NC2026-000001" });
@@ -248,6 +249,30 @@ describe("« Émettre la facture » asks how to send it first, and never marks i
     const peek = source("lib/invoicing.js");
     const body = peek.slice(peek.indexOf("export async function peekNextInvoiceNumber("));
     expect(body.slice(0, body.indexOf("\n}\n"))).not.toMatch(/INSERT|update|upsert/);
-    expect(source("lib/invoices/invoice-preview.js")).toContain("await peekNextInvoiceNumber(prisma)");
+    expect(source("lib/invoices/invoice-preview.js")).toContain("await peekNextInvoiceNumber(prisma, planned.ahead ?? 0)");
+  });
+});
+
+describe("rent invoices take successive numbers, oldest rent first (user's call, 2026-09-22)", () => {
+  it("a younger rent cannot be issued while an older one waits — nothing is numbered", async () => {
+    mocks.prisma.staffMonthlyInvoice.findMany.mockResolvedValue([
+      { id: "smi_old", lineDescription: "Location d'espace — septembre 2026", staff: { user: { fullName: "Lyly" } } },
+    ]);
+    const result = await issueStaffRentInvoice({ rentId: "smi_rose" });
+    expect(result.success).toBe(false);
+    expect(result.message).toContain("Lyly");
+    expect(mocks.issueInvoice).not.toHaveBeenCalled();
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it("the queue is the rents' age, and each draft counts the older ones ahead of it", () => {
+    const helper = source("lib/staff-rent-payment.js");
+    expect(helper).toContain('export const UNISSUED_RENT_ORDER = [{ generatedAt: "asc" }, { id: "asc" }];');
+    expect(helper).toContain("OR: [{ generatedAt: { lt: rent.generatedAt } }, { generatedAt: rent.generatedAt, id: { lt: rent.id } }]");
+    expect(source("lib/invoicing.js")).toContain('+ 1 + ahead).padStart(6, "0")');
+    const actions = source("actions/invoices/staff-rent.js");
+    expect(actions).toContain("orderBy: UNISSUED_RENT_ORDER,");
+    expect(actions).toContain("issueAfter: index > 0 ?");
+    expect(source("components/dashboard/invoices/InvoicesClient.jsx")).toContain("disabled={busy || Boolean(pending.issueAfter)}");
   });
 });

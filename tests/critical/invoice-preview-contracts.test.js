@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
     salon: { findUnique: vi.fn() },
     payment: { findUnique: vi.fn() },
     user: { findUnique: vi.fn() },
-    staffMonthlyInvoice: { findUnique: vi.fn() },
+    staffMonthlyInvoice: { findUnique: vi.fn(), findMany: vi.fn() },
     numberingCounter: { findUnique: vi.fn() },
     order: { findUnique: vi.fn() },
     invoice: { create: vi.fn() },
@@ -60,6 +60,7 @@ beforeEach(() => {
   mocks.prisma.payment.findUnique.mockResolvedValue({ payeeStaffId: null });
   mocks.prisma.user.findUnique.mockResolvedValue(LYLY);
   mocks.prisma.staffMonthlyInvoice.findUnique.mockResolvedValue(RENT);
+  mocks.prisma.staffMonthlyInvoice.findMany.mockResolvedValue([]);
   mocks.prisma.numberingCounter.findUnique.mockResolvedValue({ lastNumber: 12 });
 });
 
@@ -83,6 +84,12 @@ describe("« Aperçu » shows the invoice « Accepter » would issue, without is
     // The gapless legal sequence is untouched and no Invoice row exists.
     expect(mocks.prisma.$queryRaw).not.toHaveBeenCalled();
     expect(mocks.prisma.invoice.create).not.toHaveBeenCalled();
+  });
+
+  it("each rent draft shows its own number: the older unissued rents come first", async () => {
+    mocks.prisma.staffMonthlyInvoice.findMany.mockResolvedValue([{ id: "smi_a" }, { id: "smi_b" }]);
+    const result = await buildPendingInvoicePreview({ kind: "RENT", id: "smi_lyly" });
+    expect(result.invoice.number).toMatch(/^F-\d{4}-000015$/);
   });
 
   it("an accept that would fail says so before anyone clicks — incomplete salon data", async () => {

@@ -208,9 +208,13 @@ function PendingActions({ pending, busy, onAccept, onSettle, onIssue }) {
       {canIssue && (
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || Boolean(pending.issueAfter)}
           onClick={() => onIssue(pending)}
-          title="Émettre et envoyer la facture : choisissez d'abord l'envoi (e-mail, Peppol). Le paiement reste en attente jusqu'à « Accepter »"
+          title={
+            pending.issueAfter
+              ? `Émettez d'abord la facture de ${pending.issueAfter} : les numéros suivent l'ordre des loyers, du plus ancien au plus récent`
+              : "Émettre et envoyer la facture : choisissez d'abord l'envoi (e-mail, Peppol). Le paiement reste en attente jusqu'à « Accepter »"
+          }
           aria-label="Émettre la facture"
           className={`${actionButton} border-[#2f3a2e] bg-[#2f3a2e] text-white hover:bg-[#1f291f]`}
         >

@@ -6,25 +6,23 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { roundMoney } from "@/lib/tax-policy";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
-import { issueInvoice } from "@/lib/invoicing";
 import { isBelgianVatNumber } from "@/lib/peppyrus";
-import { buildStaffCustomer } from "@/lib/staff-monthly-billing";
-import { pendingRentPaymentData } from "@/lib/staff-rent-payment";
+import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
+import { buildStaffCustomer, pendingRentPaymentData, rentInvoiceInput, UNISSUED_RENT_ORDER, UNISSUED_RENT_WHERE } from "@/lib/staff-rent-payment";
 
 /**
- * Staff rent awaiting its transfer — the « Loyers staff en attente de
- * paiement » panel on the Factures page, which replaced the old
- * /dashboard/staff-invoices page.
+ * Staff rent on the Factures page.
  *
- * The rent due is recorded automatically (lib/staff-monthly-billing.js,
- * lib/staff-invoice.js) WITHOUT an invoice: a StaffMonthlyInvoice row
- * AWAITING_PAYMENT with a PENDING Payment (lib/staff-rent-payment.js).
- * « Accepter le paiement » records the TRANSFER and issues the invoice,
- * already paid, in one transaction — a staff member who never pays never gets
- * an invoice, and no number is ever used for one.
- *
- * Rent invoices issued before 2026-09-21 (invoice first, no payment) can
- * still be accepted: the payment is recorded against the existing invoice.
+ * Since 2026-09-22 a rent is invoiced when it falls due — automatically
+ * (lib/staff-monthly-billing.js, lib/staff-invoice.js), unpaid, with its
+ * échéance — so the invoice can be sent before the staff member pays.
+ *   Never issued by hand (user's call, 2026-09-22): a rent recorded without
+ *   its invoice gets it on the next daily run (issueMissingRentInvoices).
+ *   - « Accepter »: the transfer arrived — records the money, the salon's
+ *     income. On an invoiced rent that is all it does; on one not invoiced
+ *     yet it also issues the invoice, so a paid rent never lacks one.
+ *   - Note de crédit: corrects a rent invoice, before or after payment. Once
+ *     paid, the refund transfer Marie made is recorded with it.
  */
 
 const OPEN_PAYMENT_STATUSES = ["PENDING", "PARTIALLY_PAID"];
@@ -67,8 +65,9 @@ export async function listPendingStaffRent() {
   try {
     [dueRents, legacyInvoices] = await Promise.all([
       prisma.staffMonthlyInvoice.findMany({
-        where: { status: "AWAITING_PAYMENT", invoiceId: null, payment: { is: { status: { in: OPEN_PAYMENT_STATUSES } } } },
-        orderBy: [{ billingYear: "desc" }, { billingMonth: "desc" }, { generatedAt: "desc" }],
+        where: UNISSUED_RENT_WHERE,
+        // Oldest first: the order their invoices must take numbers in.
+        orderBy: UNISSUED_RENT_ORDER,
         take: 200,
         select: {
           id: true,
@@ -80,7 +79,8 @@ export async function listPendingStaffRent() {
           payment: { select: { paidAmount: true } },
         },
       }),
-      // Before 2026-09-21 the invoice came first: accepting records its payment.
+      // Rent already invoiced (the normal case since 2026-09-22, and the
+      // invoices issued before 2026-09-21): accepting records its payment.
       prisma.invoice.findMany({
         where: {
           source: "STAFF_CONTRACT",
@@ -101,7 +101,7 @@ export async function listPendingStaffRent() {
           totalInclVat: true,
           lines: { select: { description: true }, take: 1 },
           creditNotes: { select: { totalInclVat: true } },
-          payment: { select: { paidAmount: true } },
+          payment: { select: { totalAmount: true, paidAmount: true } },
         },
       }),
     ]);
@@ -137,7 +137,10 @@ export async function listPendingStaffRent() {
         staffName: invoice.customerLegalName || invoice.customerName,
         staffEmail: invoice.customerEmail,
         period: invoice.lines[0]?.description ?? "",
-        remainingAmount: roundMoney(Number(invoice.totalInclVat) - Number(invoice.payment?.paidAmount ?? 0)),
+        // A credit note on an unpaid rent lowers what its Payment expects.
+        remainingAmount: invoice.payment
+          ? roundMoney(Number(invoice.payment.totalAmount) - Number(invoice.payment.paidAmount))
+          : roundMoney(Number(invoice.totalInclVat) - creditedTotal(invoice)),
       })),
   ];
 
@@ -197,6 +200,7 @@ async function acceptDueRent(session, rentId, reference) {
       paymentId: true,
       amount: true,
       lineDescription: true,
+      dueDate: true,
       staff: { select: { id: true, vatNumber: true, user: true } },
     },
   });
@@ -219,13 +223,10 @@ async function acceptDueRent(session, rentId, reference) {
       const { received, previousStatus } = await recordRentTransfer(tx, rent.paymentId, reference);
 
       // Paid → invoiced, in the same transaction: either both or neither.
-      const invoice = await issueInvoice(tx, {
-        paymentId: rent.paymentId,
-        source: "STAFF_CONTRACT",
-        totalInclVat: amount,
-        customer,
-        lines: [{ description: rent.lineDescription || "Location d'espace", quantity: 1, unitPrice: amount }],
-      });
+      const invoice = await issueInvoice(
+        tx,
+        rentInvoiceInput({ paymentId: rent.paymentId, amount, lineDescription: rent.lineDescription, customer, dueDate: rent.dueDate })
+      );
       await tx.staffMonthlyInvoice.update({ where: { id: rent.id }, data: { invoiceId: invoice.id } });
 
       await tx.auditLog.create({
@@ -247,8 +248,8 @@ async function acceptDueRent(session, rentId, reference) {
   );
 }
 
-/** A rent invoice issued before this rule (invoice first): record its payment only. */
-async function acceptLegacyInvoice(session, invoiceId, reference) {
+/** An invoiced rent: record its payment only — the invoice already exists. */
+async function acceptInvoicedRent(session, invoiceId, reference) {
   return prisma.$transaction(
     async (tx) => {
       const invoice = await tx.invoice.findUnique({
@@ -273,7 +274,7 @@ async function acceptLegacyInvoice(session, invoiceId, reference) {
         const contractId = invoice.contractId ?? invoice.staffMonthlyInvoice?.contractId ?? null;
         if (!contractId) throw new Error("STAFF_RENT_NO_CONTRACT");
         const created = await tx.payment.create({
-          data: pendingRentPaymentData(Number(invoice.totalInclVat), contractId),
+          data: pendingRentPaymentData(roundMoney(Number(invoice.totalInclVat) - creditedTotal(invoice)), contractId),
           select: { id: true },
         });
         // Claimed on paymentId still null, so a double click cannot attach two.
@@ -305,8 +306,9 @@ async function acceptLegacyInvoice(session, invoiceId, reference) {
 
 /**
  * « Accepter le paiement »: the rent transfer reached the account.
- * `{ rentId }` for a rent due (the invoice is issued now), `{ invoiceId }` for
- * a rent invoice issued before 2026-09-21. The bank reference is optional.
+ * `{ invoiceId }` for an invoiced rent (records the money only), `{ rentId }`
+ * for one not invoiced yet (also issues its invoice). The bank reference is
+ * optional.
  */
 export async function acceptStaffRentPayment(input) {
   const guard = await requireAdminSession();
@@ -320,7 +322,7 @@ export async function acceptStaffRentPayment(input) {
 
   let outcome;
   try {
-    outcome = rentId ? await acceptDueRent(session, rentId, reference) : await acceptLegacyInvoice(session, invoiceId, reference);
+    outcome = rentId ? await acceptDueRent(session, rentId, reference) : await acceptInvoicedRent(session, invoiceId, reference);
   } catch (error) {
     const messages = {
       STAFF_RENT_NOT_FOUND: "Ce loyer est introuvable.",
@@ -342,5 +344,153 @@ export async function acceptStaffRentPayment(input) {
       ? `Paiement de ${euro(outcome.received)} accepté — facture ${outcome.number} émise.`
       : `Paiement de ${euro(outcome.received)} accepté — facture ${outcome.number} payée.`,
     data: { invoice: outcome.invoice ? serializeInvoice(outcome.invoice) : null },
+  };
+}
+
+const RENT_ERROR_MESSAGES = {
+  STAFF_RENT_NOT_FOUND: "Ce loyer est introuvable.",
+  STAFF_RENT_CREDITED: "Cette facture est déjà entièrement créditée.",
+  STAFF_RENT_CREDIT_AMOUNT: "Le montant de la note de crédit doit être supérieur à 0 et ne pas dépasser ce qui reste à créditer.",
+  STAFF_RENT_CREDIT_REASON: "Indiquez le motif de la note de crédit (3 caractères au moins).",
+  STAFF_RENT_REFUND_NOT_CONFIRMED: "Ce loyer est déjà payé : confirmez que le remboursement a bien été viré avant d'enregistrer la note de crédit.",
+  STAFF_RENT_CHANGED: "Ce loyer vient d'être modifié ailleurs (paiement ou note de crédit). Rechargez la page.",
+  SELLER_LEGAL_DATA_INCOMPLETE: "Les données légales du salon sont incomplètes (Paramètres > Salon) : la facture ne peut pas être émise.",
+  CREDIT_NOTE_EXCEEDS_INVOICE: "La note de crédit dépasserait le montant de la facture.",
+};
+
+function rentErrorMessage(error, context) {
+  if (error?.userMessage) return error.userMessage;
+  if (!RENT_ERROR_MESSAGES[error?.message]) console.error(`[${context}]`, error);
+  return RENT_ERROR_MESSAGES[error?.message] ?? "Opération impossible sur ce loyer.";
+}
+
+/**
+ * Note de crédit on a rent invoice, for a mistake — before or after payment.
+ *
+ * Unpaid: the credit note lowers what the rent's Payment still expects (fully
+ * credited, nothing is owed and the row leaves the list).
+ *
+ * Paid: the money has to go back. The app never refunds by itself — Marie
+ * makes the transfer from the bank — so the credit note is recorded together
+ * with that refund, once she confirms it was sent: a REFUND transfer linked to
+ * the note, which the livre de recettes subtracts from « Loyers staff ».
+ *
+ * @param {{ invoiceId: string, amount?: number|null, reason: string,
+ *           refundSent?: boolean, refundReference?: string }} input
+ *   `amount` defaults to everything not yet credited.
+ */
+export async function creditStaffRentInvoice(input) {
+  const guard = await requireAdminSession();
+  if (guard.error) return { success: false, message: guard.error };
+  const { session } = guard;
+
+  const invoiceId = typeof input?.invoiceId === "string" ? input.invoiceId.trim() : "";
+  const reason = typeof input?.reason === "string" ? input.reason.trim().slice(0, 300) : "";
+  const refundReference = typeof input?.refundReference === "string" ? input.refundReference.trim().slice(0, 100) : "";
+  const requested = input?.amount == null || input.amount === "" ? null : roundMoney(Number(input.amount));
+  if (!invoiceId) return { success: false, message: RENT_ERROR_MESSAGES.STAFF_RENT_NOT_FOUND };
+  if (reason.length < 3) return { success: false, message: RENT_ERROR_MESSAGES.STAFF_RENT_CREDIT_REASON };
+
+  let outcome;
+  try {
+    outcome = await prisma.$transaction(
+      async (tx) => {
+        const invoice = await tx.invoice.findUnique({
+          where: { id: invoiceId },
+          select: {
+            id: true,
+            number: true,
+            source: true,
+            supersededAt: true,
+            totalInclVat: true,
+            paymentId: true,
+            creditNotes: { select: { totalInclVat: true } },
+            payment: {
+              select: {
+                id: true,
+                status: true,
+                totalAmount: true,
+                paidAmount: true,
+                transactions: { where: { isDeleted: false, transactionType: "REFUND" }, select: { amount: true } },
+              },
+            },
+          },
+        });
+        if (!invoice || invoice.source !== "STAFF_CONTRACT" || invoice.supersededAt) throw new Error("STAFF_RENT_NOT_FOUND");
+
+        const creditable = roundMoney(Number(invoice.totalInclVat) - creditedTotal(invoice));
+        if (!(creditable > 0.001)) throw new Error("STAFF_RENT_CREDITED");
+        const amount = requested ?? creditable;
+        if (!(amount > 0) || amount > creditable + 0.001) throw new Error("STAFF_RENT_CREDIT_AMOUNT");
+
+        const payment = invoice.payment;
+        const paid = Number(payment?.paidAmount ?? 0) > 0.001;
+        if (paid && input?.refundSent !== true) throw new Error("STAFF_RENT_REFUND_NOT_CONFIRMED");
+
+        const creditNote = await issueCreditNote(tx, { invoiceId: invoice.id, reason, totalInclVat: amount });
+
+        let refunded = null;
+        if (payment && !paid) {
+          // Claimed on what was just read, so a payment accepted at the same
+          // moment is not silently reduced underneath it.
+          const lowered = Math.max(0, roundMoney(Number(payment.totalAmount) - amount));
+          const claim = await tx.payment.updateMany({
+            where: { id: payment.id, status: payment.status, paidAmount: payment.paidAmount, totalAmount: payment.totalAmount },
+            data: { totalAmount: lowered, remainingAmount: lowered },
+          });
+          if (claim.count === 0) throw new Error("STAFF_RENT_CHANGED");
+        } else if (payment && paid) {
+          const alreadyRefunded = payment.transactions.reduce((sum, row) => sum + Number(row.amount), 0);
+          const refundedAfter = roundMoney(alreadyRefunded + amount);
+          const claim = await tx.payment.updateMany({
+            where: { id: payment.id, status: payment.status, paidAmount: payment.paidAmount },
+            data: { status: refundedAfter + 0.001 >= Number(payment.paidAmount) ? "REFUNDED" : "PARTIALLY_REFUNDED" },
+          });
+          if (claim.count === 0) throw new Error("STAFF_RENT_CHANGED");
+          await tx.transaction.create({
+            data: {
+              paymentId: payment.id,
+              amount,
+              method: "TRANSFER",
+              transactionType: "REFUND",
+              paidAt: new Date(),
+              manualReference: refundReference || null,
+              creditNoteId: creditNote.id,
+              cashSessionId: null,
+              pieceNumber: null,
+            },
+          });
+          refunded = amount;
+        }
+
+        await tx.auditLog.create({
+          data: {
+            actorId: session.user.id,
+            actorRole: session.user.role,
+            action: AUDIT_ACTIONS.STAFF_RENT_CREDITED,
+            entityType: "Invoice",
+            entityId: invoice.id,
+            before: { creditable, paymentStatus: payment?.status ?? null },
+            after: { creditNote: creditNote.number, amount, refundedByTransfer: refunded, refundReference: refundReference || null },
+            metadata: { invoiceNumber: invoice.number, paymentId: payment?.id ?? null, reason },
+          },
+        });
+
+        return { creditNote, invoiceNumber: invoice.number, amount, refunded };
+      },
+      { timeout: 20000, maxWait: 10000 }
+    );
+  } catch (error) {
+    return { success: false, message: rentErrorMessage(error, "creditStaffRentInvoice") };
+  }
+
+  revalidatePath("/dashboard/factures");
+  revalidatePath("/dashboard/livre-de-recettes");
+  return {
+    success: true,
+    message: outcome.refunded
+      ? `Note de crédit ${outcome.creditNote.number} (${euro(outcome.amount)}) enregistrée avec le remboursement par virement.`
+      : `Note de crédit ${outcome.creditNote.number} (${euro(outcome.amount)}) enregistrée sur la facture ${outcome.invoiceNumber}.`,
+    data: { creditNoteNumber: outcome.creditNote.number },
   };
 }

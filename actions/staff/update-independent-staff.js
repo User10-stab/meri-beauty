@@ -9,6 +9,8 @@ import { updateIndependentStaffSchema } from "@/lib/validations/independent-staf
 import { sendVerificationEmail } from "@/actions/auth/verify-email";
 import { syncAccountVatNumber, verifyStaffVatNumber } from "@/lib/vat/account-vat";
 import { normalizeVatNumber } from "@/lib/vat-validation";
+import { applyContractEdit } from "@/lib/staff-contract-sync";
+import { createAndSendStaffContractInvoice } from "@/lib/staff-invoice";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -182,6 +184,7 @@ export async function updateIndependentStaff(input) {
 
   // ── 4. Transaction ───────────────────────────────────────────────────────
   try {
+    let contractChange = null;
     await prisma.$transaction(async (tx) => {
 
       // 4a. Update User (only fields that were provided)
@@ -342,27 +345,24 @@ export async function updateIndependentStaff(input) {
             });
           }
         } else {
-          // Terminate the current active contract (if different) and create new one
-          await tx.contract.updateMany({
-            where: { staffId: id, status: "ACTIVE" },
-            data:  { status: "TERMINATED" },
-          });
-          await tx.contract.create({
-            data: {
-              staffId:   id,
-              type:      "FIXED_RENT",
-              fixedRent: contract.fixedRent,
-              startDate: new Date(contract.startDate),
-              endDate:   contract.endDate ? new Date(contract.endDate) : null,
-              dueDate:  contract.dueDate != null && String(contract.dueDate).trim() !== "" ? String(contract.dueDate).trim() : null,
-              status:    "ACTIVE",
-              notes:     contract.notes ?? null,
-            },
-          });
+          // In place when only the terms change (rent, delay, end); a new
+          // contract only when the start date moves — lib/staff-contract-sync.js.
+          contractChange = await applyContractEdit(tx, id, contract);
         }
       }
     });
 
+    // Billing follows the contract by itself (errors never fail the save): a
+    // new contract gets its first-period invoice. New terms (rent, delay)
+    // apply from the next invoice — an invoice already created never changes.
+    if (contractChange?.created) {
+      try {
+        await createAndSendStaffContractInvoice({ contract: contractChange.created });
+      } catch (err) {
+        console.error("[updateIndependentStaff] first rent invoice failed (non-blocking):", err);
+      }
+    }
+    revalidatePath("/dashboard/factures");
     revalidatePath(REVALIDATE_PATH);
 
     if (emailChanged) {

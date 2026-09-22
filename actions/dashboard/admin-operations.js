@@ -237,6 +237,12 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
   // unrestricted ledger and in the Ateliers & événements / Formations
   // presets, while excluding it from payment-event filters so it can never
   // be mistaken for a deposit, balance payment or refund.
+  // Staff rent (« Loyer staff »): the salon's own income, once « Accepter »
+  // records the transfer (or a credit note records its refund). Event-grained
+  // like appointments — one row per payment event — and only in the salon's
+  // unrestricted ledger: a rent has no lifecycle status to filter on, and an
+  // independent's own ledger never shows what she pays the salon.
+  const includeStaffRent = !sourceTypes && lifecycleStatus === "ALL" && scope.mode !== "STAFF";
   const includeWorkshopTransfers =
     (!sourceTypes || sourceTypes.includes("WORKSHOP")) && paymentEvent === "ALL";
   const includeFormationTransfers =
@@ -327,6 +333,18 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
         AND p."appointmentId" IS NOT NULL
         AND ${paymentOwned("p")}
         ${lifecycleStatus !== "ALL" ? Prisma.sql`AND a."status"::text = ${lifecycleStatus}` : Prisma.empty}
+        ${paymentEvent !== "ALL" ? Prisma.sql`AND t."transactionType"::text = ${paymentEvent}` : Prisma.empty}
+    `);
+  }
+
+  if (includeStaffRent) {
+    arms.push(Prisma.sql`
+      SELECT t.id AS id, 'STAFF_RENT' AS "sourceType", t."paidAt" AS "sortAt"
+      FROM "Transaction" t
+      JOIN "Payment" p ON p.id = t."paymentId"
+      WHERE t."isDeleted" = false
+        AND p."staffContractId" IS NOT NULL
+        AND p."payeeStaffId" IS NULL
         ${paymentEvent !== "ALL" ? Prisma.sql`AND t."transactionType"::text = ${paymentEvent}` : Prisma.empty}
     `);
   }
@@ -619,6 +637,52 @@ async function hydrateAppointmentTransactions(ids) {
       },
     };
   });
+}
+
+/** One row per staff-rent payment event (received transfer, or refund). */
+async function hydrateStaffRentTransactions(ids) {
+  if (ids.length === 0) return [];
+  const rows = await prisma.transaction.findMany({
+    where: { id: { in: ids } },
+    include: {
+      payment: {
+        select: {
+          id: true,
+          status: true,
+          paymentType: true,
+          paidAmount: true,
+          remainingAmount: true,
+          invoice: {
+            select: {
+              id: true,
+              number: true,
+              dueDate: true,
+              totalInclVat: true,
+              emailSentAt: true,
+              peppyrusSentAt: true,
+              customerType: true,
+              customerVatNumber: true,
+              customerName: true,
+              customerEmail: true,
+              creditNotes: {
+                orderBy: { issuedAt: "asc" },
+                select: { id: true, number: true, totalInclVat: true, emailSentAt: true, peppyrusSentAt: true },
+              },
+            },
+          },
+          transactions: { orderBy: [{ paidAt: "asc" }, { id: "asc" }], select: { id: true, amount: true, method: true, manualReference: true, paidAt: true, transactionType: true, isDeleted: true } },
+          staffContract: { select: { staff: { select: { user: { select: { fullName: true, email: true, vatNumber: true } } } } } },
+        },
+      },
+    },
+  });
+  return rows.map((row) => ({
+    ...row,
+    sourceType: "STAFF_RENT",
+    staffMember: row.payment?.staffContract?.staff?.user ?? null,
+    // Its invoice is issued by the billing job, before payment: never "à émettre".
+    customerInvoiceEligible: false,
+  }));
 }
 
 /**
@@ -931,20 +995,21 @@ export async function getAdminOperations(params = {}) {
       take: PAGE_SIZE,
     });
 
-    const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [], ADJUSTMENT: [], TRANSFER: [] };
+    const idsBySource = { ORDER: [], WORKSHOP: [], FORMATION: [], APPOINTMENT: [], ADJUSTMENT: [], TRANSFER: [], STAFF_RENT: [] };
     for (const row of idRows) idsBySource[row.sourceType]?.push(row.id);
 
-    const [orders, workshops, formations, appointments, adjustments, transfers] = await Promise.all([
+    const [orders, workshops, formations, appointments, adjustments, transfers, staffRent] = await Promise.all([
       hydrateOrders(idsBySource.ORDER),
       hydrateWorkshops(idsBySource.WORKSHOP),
       hydrateFormations(idsBySource.FORMATION),
       hydrateAppointmentTransactions(idsBySource.APPOINTMENT),
       hydrateAdjustments(idsBySource.ADJUSTMENT),
       hydrateTransfers(idsBySource.TRANSFER),
+      hydrateStaffRentTransactions(idsBySource.STAFF_RENT),
     ]);
 
     const byId = new Map();
-    for (const row of [...orders, ...workshops, ...formations, ...appointments, ...adjustments, ...transfers]) {
+    for (const row of [...orders, ...workshops, ...formations, ...appointments, ...adjustments, ...transfers, ...staffRent]) {
       byId.set(row.id, row);
     }
     // Stage A already sorted by sortAt DESC; findMany({ id: { in } }) does
@@ -1031,6 +1096,8 @@ export async function getTransactionDetail(transactionId) {
                 id: true,
                 number: true,
                 issuedAt: true,
+                // Only a staff rent invoice carries one (its échéance).
+                dueDate: true,
                 subtotalExclVat: true,
                 vatRate: true,
                 vatAmount: true,
@@ -1080,6 +1147,9 @@ export async function getTransactionDetail(transactionId) {
             workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             formationReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             appointment: { select: { id: true, date: true, status: true, checkInCode: true, checkedInAt: true, user: { select: { fullName: true, email: true } }, staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
+            // Staff rent (« Loyer staff »): the contract and the billed period.
+            staffContract: { select: { fixedRent: true, startDate: true, dueDate: true, staff: { select: { user: { select: { fullName: true, email: true } } } } } },
+            staffRentPeriod: { select: { billingYear: true, billingMonth: true, lineDescription: true, dueDate: true, status: true } },
           },
         },
       },

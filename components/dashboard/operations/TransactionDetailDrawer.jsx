@@ -97,7 +97,48 @@ function describeSource(payment) {
       performedByText: performedByLabel(payment.appointment.performedBy),
     };
   }
+  if (payment?.staffContract) {
+    // A staff member's rent — she is the "customer" here.
+    const period = payment.staffRentPeriod;
+    return {
+      kind: "Loyer staff",
+      title: payment.invoice?.number ?? period?.lineDescription ?? "Loyer",
+      status: null,
+      extra: period?.lineDescription ?? null,
+      customer: payment.staffContract.staff?.user ?? null,
+      performedByText: null,
+    };
+  }
   return { kind: "—", title: "—", status: null, extra: null, customer: null };
+}
+
+const dateOnly = (value) =>
+  value ? new Date(value).toLocaleDateString("fr-BE", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" }) : "—";
+
+/**
+ * What a rent payment is about: the period, its échéance, the contract. Its
+ * corrections (credit note, refund transfer) live on the Factures page — the
+ * booking cancel / refund flows of this drawer know nothing about a rent.
+ */
+function StaffRentSection({ payment }) {
+  const contract = payment.staffContract;
+  const period = payment.staffRentPeriod;
+  const due = payment.invoice?.dueDate ?? period?.dueDate ?? null;
+  const delay = contract?.dueDate != null && String(contract.dueDate).trim() !== "" ? Number(contract.dueDate) : 7;
+  return (
+    <div>
+      <SectionTitle>Loyer</SectionTitle>
+      <Row label="Staff" value={contract?.staff?.user?.fullName} />
+      <Row label="Période" value={period?.lineDescription} />
+      <Row label="Échéance" value={due ? dateOnly(due) : null} />
+      <Row label="Loyer du contrat" value={contract?.fixedRent != null ? `${money(contract.fixedRent)} / mois` : null} />
+      <Row label="Contrat depuis le" value={contract?.startDate ? dateOnly(contract.startDate) : null} />
+      <Row label="Délai de paiement" value={`${delay} jour${delay === 1 ? "" : "s"} après la date de facturation`} />
+      <p className="mt-2 text-xs text-gray-500">
+        Note de crédit ou remboursement d&apos;un loyer : depuis la page Factures.
+      </p>
+    </div>
+  );
 }
 
 const FULFILMENT_MODE_LABELS = {
@@ -434,7 +475,10 @@ export function TransactionDetailDrawer({ transactionId = null, orderId = null, 
   // that moved money but never got its paperwork). Tested against the whole
   // list, not just this row's own note, so an invoice that already carries
   // one is never offered a second.
-  const canGenerateNote = isRefund && Boolean(invoice) && creditNotes.length === 0;
+  // A rent is corrected from the Factures page (its own credit-note dialog),
+  // never through the booking cancel / refund flows below.
+  const isRent = Boolean(payment?.staffContract);
+  const canGenerateNote = !isRent && isRefund && Boolean(invoice) && creditNotes.length === 0;
   const refundOperation = detail?.settledRefundLeg?.refundOperation ?? null;
   const hasB2CCustomer = isRefund && refundOperation?.status === "COMPLETED" && !creditNote && !invoice;
   // A cancellation already opened on this payment means both buttons below
@@ -450,6 +494,7 @@ export function TransactionDetailDrawer({ transactionId = null, orderId = null, 
   // `!onOpenDetail` branch, which AdminOperationsClient never reaches for a
   // row that has a transaction — this drawer is the live surface.
   const canCancelAndRefund =
+    !isRent &&
     Boolean(payment?.id) &&
     ["DEPOSIT", "FINAL_PAYMENT"].includes(detail?.transactionType) &&
     !detail?.refundState?.fullyCredited &&
@@ -476,6 +521,7 @@ export function TransactionDetailDrawer({ transactionId = null, orderId = null, 
   // existing operation (no second credit note), which reads to an admin as
   // the button silently doing nothing.
   const canGenerateCreditNote =
+    !isRent &&
     Boolean(payment?.id) &&
     ["DEPOSIT", "FINAL_PAYMENT"].includes(detail?.transactionType) &&
     isPostCompletionEligible &&
@@ -624,7 +670,10 @@ export function TransactionDetailDrawer({ transactionId = null, orderId = null, 
                 </div>
               )}
 
-              {payment?.id && (
+              {isRent && <StaffRentSection payment={payment} />}
+
+              {/* A rent has no till ticket: its document is the invoice. */}
+              {payment?.id && !isRent && (
                 <div>
                   <SectionTitle>Reçu / ticket de caisse</SectionTitle>
                   {/* A boutique order's ticket has no permission gate (its own
@@ -706,6 +755,7 @@ export function TransactionDetailDrawer({ transactionId = null, orderId = null, 
                   <>
                     <Row label="Numéro" value={invoice.number} />
                     <Row label="Émise le" value={dateTime(invoice.issuedAt)} />
+                    <Row label="Échéance" value={invoice.dueDate ? dateOnly(invoice.dueDate) : null} />
                     <Row label="Total HT" value={money(invoice.subtotalExclVat)} />
                     <Row label={`TVA (${Number(invoice.vatRate)} %)`} value={money(invoice.vatAmount)} />
                     <Row label="Total TTC" value={money(invoice.totalInclVat)} />

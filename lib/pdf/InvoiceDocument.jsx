@@ -60,8 +60,22 @@ function dueDateLine(invoice, payment) {
   return `Échéance : ${formatDate(invoice.dueDate)}`;
 }
 
+// An unissued invoice rendered for review (lib/invoices/invoice-preview.js).
+// It shows the number it should get — the next free one — and says so.
+const PREVIEW_STATUS = { label: "APERÇU — NON ÉMISE", tone: "credit" };
+const PREVIEW_PAYMENT_NOTE = "Aperçu : cette facture n'est pas encore émise — numéro prévu, attribué définitivement à l'émission";
+
+// Only a staff rent invoice carries an échéance (lib/staff-rent-payment.js):
+// it is issued before it is paid. Shown paid or not — it is part of what was
+// invoiced — and no other invoice ever gets one.
+function rentDueDate(invoice) {
+  return invoice.source === "STAFF_CONTRACT" && invoice.dueDate ? formatDate(invoice.dueDate) : null;
+}
+
 export function InvoiceDocument({ invoice, contact = null, rental = null }) {
   const payment = invoice.payment ?? null;
+  const preview = Boolean(invoice.isPreview);
+  const rentDue = rentDueDate(invoice);
 
   return (
     <Document
@@ -74,7 +88,7 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
           title="FACTURE"
           number={invoice.number}
           issuedAt={invoice.issuedAt}
-          status={paymentStatus(payment)}
+          status={preview ? PREVIEW_STATUS : paymentStatus(payment)}
         />
 
         <View style={styles.parties}>
@@ -100,7 +114,15 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
         <View style={styles.bottom}>
           <TermsBlock
             items={[
-              { label: "Règlement", value: paymentLine(payment) ?? dueDateLine(invoice, payment) ?? "Paiement sécurisé — dû à réception de la facture" },
+              {
+                label: "Règlement",
+                value: preview
+                  ? PREVIEW_PAYMENT_NOTE
+                  : paymentLine(payment) ??
+                    (rentDue ? "Par virement sur le compte bancaire ci-dessous" : dueDateLine(invoice, payment)) ??
+                    "Paiement sécurisé — dû à réception de la facture",
+              },
+              rentDue ? { label: "Échéance", value: rentDue } : null,
               rental?.reference ? { label: "Référence contrat", value: rental.reference } : null,
               rental?.period ? { label: "Période de location", value: rental.period } : null,
               { label: "Devise", value: "Euro (EUR)" },
@@ -124,7 +146,7 @@ export function InvoiceDocument({ invoice, contact = null, rental = null }) {
           sellerVatNumber={invoice.sellerVatNumber}
           rib={contact?.rib}
           contact={contact}
-          reference={`Facture ${invoice.number}`}
+          reference={preview ? "Aperçu — facture non émise, sans valeur comptable" : `Facture ${invoice.number}`}
         />
       </Page>
     </Document>

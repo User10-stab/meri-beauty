@@ -257,6 +257,26 @@ function describeUnifiedRow(row) {
     };
   }
 
+  if (row.sourceType === "STAFF_RENT") {
+    // A staff member's rent: the transfer « Accepter » recorded (or the
+    // refund a credit note recorded) — the salon's own income.
+    const invoice = row.payment?.invoice ?? null;
+    const reference = row.manualReference ? ` · réf. ${row.manualReference}` : "";
+    const due = invoice?.dueDate ? ` · échéance ${date(invoice.dueDate)}` : "";
+    return {
+      dateLabel: date(row.paidAt),
+      kind: "Loyer staff",
+      title: invoice?.number ?? "Loyer",
+      href: null,
+      detail: `${PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType} · Virement${reference}${due}`,
+      lifecycleStatus: null,
+      customer: row.staffMember,
+      customerFallback: "—",
+      totalAmount: row.amount,
+      isRefundEvent: row.transactionType === "REFUND",
+    };
+  }
+
   // A stale browser can briefly receive a row type added by a newer server
   // during a deployment. Never render internal `undefined` values: keep the
   // row readable and tell the operator how to load its dedicated renderer.
@@ -280,7 +300,8 @@ function describeUnifiedRow(row) {
 // an appointment row already IS that transaction.
 function latestTransaction(row) {
   if (row.operationOnly) return null;
-  if (row.sourceType === "APPOINTMENT") {
+  // Event-grained rows: the row IS the transaction (a rent payment too).
+  if (row.sourceType === "APPOINTMENT" || row.sourceType === "STAFF_RENT") {
     return { id: row.id, transactionType: row.transactionType };
   }
   if (!row.latestTransactionId) return null;
@@ -731,7 +752,7 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
                     <summary className="cursor-pointer font-medium text-[#2f3a2e]">Historique des transactions</summary>
                     <ul className="mt-2 space-y-2">
                       {(row.payment?.transactions ?? []).filter((event) => !event.isDeleted).map((event) => {
-                        const label = `${date(event.paidAt)} · ${PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · ${event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : "En ligne"} · ${event.transactionType === "REFUND" ? "−" : ""}${money(event.amount)}`;
+                        const label = `${date(event.paidAt)} · ${PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · ${event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : event.method === "TRANSFER" ? "Virement" : "En ligne"} · ${event.transactionType === "REFUND" ? "−" : ""}${money(event.amount)}`;
                         return (
                           <li key={event.id}>
                             {readOnly ? (

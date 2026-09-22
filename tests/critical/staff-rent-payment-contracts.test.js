@@ -3,13 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 /**
- * Staff rent (« location de poste »), since 2026-09-21:
- *   - the « Facturation mensuelle » page (/dashboard/staff-invoices) is gone;
- *   - a rent falling due is recorded WITHOUT an invoice — a StaffMonthlyInvoice
- *     row AWAITING_PAYMENT with a PENDING transfer Payment;
- *   - « Accepter le paiement » (Factures page) records the transfer and issues
- *     the invoice, paid, in one transaction. A staff member who never pays
- *     never gets an invoice, and no number is used.
+ * Staff rent (« location de poste »):
+ *   - the « Facturation mensuelle » page (/dashboard/staff-invoices) is gone
+ *     (2026-09-21);
+ *   - a rent falling due is recorded — a StaffMonthlyInvoice row with a
+ *     PENDING transfer Payment — and, since 2026-09-22, invoiced straight away
+ *     (see staff-rent-invoice-first-contracts.test.js);
+ *   - « Accepter le paiement » (Factures page) records the transfer; on a rent
+ *     not invoiced yet it also issues the invoice, in one transaction.
  */
 
 const mocks = vi.hoisted(() => ({
@@ -28,7 +29,7 @@ vi.mock("@/auth", () => ({ auth: mocks.auth }));
 vi.mock("@/lib/prisma", () => ({ prisma: mocks.prisma }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/invoicing", () => ({ issueInvoice: mocks.issueInvoice, buildRentalDescription: () => "Location d'espace — octobre 2026" }));
-vi.mock("@/lib/staff-monthly-billing", () => ({ buildStaffCustomer: mocks.buildStaffCustomer }));
+vi.mock("@/lib/staff-rent-payment", async (importOriginal) => ({ ...(await importOriginal()), buildStaffCustomer: mocks.buildStaffCustomer }));
 vi.mock("@/lib/peppyrus", () => ({ isBelgianVatNumber: (vat) => String(vat ?? "").startsWith("BE") }));
 
 import { createPendingRent, pendingRentPaymentData } from "@/lib/staff-rent-payment";
@@ -50,6 +51,7 @@ const DUE_RENT = {
   paymentId: "p_rent",
   amount: "500.00",
   lineDescription: "Location d'espace — octobre 2026",
+  dueDate: new Date("2026-10-08"),
   staff: { id: "s_lyly", vatNumber: "BE0123456789", user: { id: "u_lyly", fullName: "Lyly", email: "lyly@example.com" } },
 };
 
@@ -149,11 +151,13 @@ describe("a rent falling due is recorded without an invoice", () => {
     expect(tx.transaction.create).not.toHaveBeenCalled();
   });
 
-  it("both rent paths record it and neither issues an invoice any more", () => {
+  it("both rent paths record it, then invoice it through the one shared issuing path", () => {
     for (const file of ["lib/staff-monthly-billing.js", "lib/staff-invoice.js"]) {
       const code = source(file);
       expect(code).toContain("createPendingRent(tx, {");
+      // Never issueInvoice directly: issueRentInvoiceNow claims the row first.
       expect(code).not.toMatch(/await issueInvoice\(/);
+      expect(code).toContain("issueRentInvoiceNow(");
     }
     // A 0 € contract owes nothing.
     expect(source("lib/staff-invoice.js")).toContain("amount > 0");
@@ -198,6 +202,8 @@ describe("« Accepter le paiement » on a rent due", () => {
       source: "STAFF_CONTRACT",
       totalInclVat: 500,
       customer: expect.objectContaining({ fullName: "Lyly", vatNumber: "BE0123456789" }),
+      // A rent invoice carries its échéance — the only invoice that does.
+      dueDate: new Date("2026-10-08"),
       lines: [{ description: "Location d'espace — octobre 2026", quantity: 1, unitPrice: 500 }],
     });
     expect(mocks.tx.staffMonthlyInvoice.update).toHaveBeenCalledWith({ where: { id: "smi_1" }, data: { invoiceId: "inv_new" } });
@@ -297,8 +303,13 @@ describe("accepted rent is salon revenue, in its own category", () => {
     expect(RECETTES_CATEGORIES).toContain("STAFF_RENT");
   });
 
-  it("a rent invoice still offers no credit-note path, payment or not", () => {
-    expect(creditNoteEligibility({ source: "STAFF_CONTRACT", paymentId: "p_rent", totalInclVat: 500 }).allowed).toBe(false);
+  it("a rent invoice can be credited, paid or not, until it is fully credited", () => {
+    expect(creditNoteEligibility({ source: "STAFF_CONTRACT", paymentId: "p_rent", totalInclVat: 500 }).allowed).toBe(true);
+    // Sabrina's invoice from before rents carried a Payment still qualifies.
+    expect(creditNoteEligibility({ source: "STAFF_CONTRACT", paymentId: null, totalInclVat: 500 }).allowed).toBe(true);
+    expect(creditNoteEligibility({ source: "STAFF_CONTRACT", totalInclVat: 500, creditNotes: [{ totalInclVat: 200 }] }).allowed).toBe(true);
+    expect(creditNoteEligibility({ source: "STAFF_CONTRACT", totalInclVat: 500, creditNotes: [{ totalInclVat: 500 }] }).allowed).toBe(false);
+    expect(creditNoteEligibility({ source: "STAFF_CONTRACT", totalInclVat: 500, supersededAt: new Date() }).allowed).toBe(false);
   });
 });
 
@@ -335,12 +346,15 @@ describe("the « Facturation mensuelle » page is gone, the logic stays", () => 
     expect(existsSync(`${root}app/api/cron/monthly-staff-billing/route.js`)).toBe(true);
   });
 
-  it("the Factures page shows the rent awaiting its transfer", () => {
+  it("the Factures page shows the rent awaiting its transfer, in the invoice table itself", () => {
     const page = source("app/dashboard/factures/page.jsx");
     expect(page).toContain("listPendingStaffRent()");
-    expect(page).toContain("<PendingStaffRent data={staffRent.data} />");
-    const panel = source("components/dashboard/invoices/PendingStaffRent.jsx");
-    expect(panel).toContain("Accepter le paiement");
-    expect(panel).toContain("<DocumentDeliveryDialog");
+    expect(page).toContain("buildPendingPaymentRows({");
+    expect(page).toContain("<InvoicesClient data={result.data} pendingRows={pendingRows} />");
+    // The separate panel is gone: one table, one « Paiement » column, one tick.
+    expect(existsSync(`${root}components/dashboard/invoices/PendingStaffRent.jsx`)).toBe(false);
+    const client = source("components/dashboard/invoices/InvoicesClient.jsx");
+    expect(client).toContain("acceptStaffRentPayment(row.accept)");
+    expect(client).toContain("<DocumentDeliveryDialog");
   });
 });

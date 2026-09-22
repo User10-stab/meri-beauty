@@ -2,8 +2,11 @@
 
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
-import { isTillCashOperator } from "@/lib/authorization";
+import { isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { createShipmentLabel } from "@/lib/mondial-relay";
+import { storeShippingLabel } from "@/lib/mondial-relay-label-storage";
+import { isBoutiqueShippingEnabledFor } from "@/lib/commerce-availability";
+import { captureCriticalError } from "@/lib/monitoring";
 
 // MONDIAL_RELAY_API_LOGIN / _API_PASSWORD / _CUSTOMER_ID are the "Connect"
 // API V2.0 credentials — generated from Marie's Mondial Relay Connect
@@ -38,11 +41,17 @@ function missingConfig() {
   return REQUIRED_ENV.filter((key) => !process.env[key]);
 }
 
-export async function generateShippingLabel(orderId) {
+async function requireLabelAccess() {
   const session = await auth();
   if (!session?.user || !isTillCashOperator(session.user)) {
-    return { success: false, message: "Accès non autorisé." };
+    return { error: "Accès non autorisé." };
   }
+  return { session };
+}
+
+export async function generateShippingLabel(orderId) {
+  const guard = await requireLabelAccess();
+  if (guard.error) return { success: false, message: guard.error };
 
   const missing = missingConfig();
   if (missing.length > 0) {
@@ -60,9 +69,20 @@ export async function generateShippingLabel(orderId) {
       items: { include: { variant: { select: { weightGrams: true } } } },
     },
   });
+  // labelRequestedAt/trackingCode/pickupPointId etc. all come through via
+  // the model's own scalar fields on `order` above (findUnique returns
+  // every scalar column by default) — no separate select needed.
   if (!order) return { success: false, message: "Commande introuvable." };
   if (order.fulfilmentMode !== "SHIPPING_PREPAID") {
     return { success: false, message: "Cette commande n'est pas à expédier." };
+  }
+  // Defense in depth on top of the checkout-time gate (createOrderFromCart):
+  // while the Mondial Relay pilot allowlist is configured, no non-pilot
+  // order should exist as SHIPPING_PREPAID at all — but a stale order from
+  // before the pilot started, or a manually edited one, shouldn't silently
+  // buy a real label outside the pilot either.
+  if (!isBoutiqueShippingEnabledFor(order.user?.email)) {
+    return { success: false, message: "La livraison Mondial Relay est actuellement limitée au pilote interne." };
   }
   // A real label costs real postage — refuse to buy one for an order that
   // hasn't actually been paid (PENDING_PAYMENT), or that's no longer
@@ -71,19 +91,42 @@ export async function generateShippingLabel(orderId) {
   if (!["PAID", "PROCESSING"].includes(order.status)) {
     return { success: false, message: "Cette commande n'est pas payée ou n'est plus dans un état permettant de générer une étiquette." };
   }
-  // Idempotency: a second call would buy and pay for a second real label,
-  // and overwrite the first trackingCode with no way to reconcile which
-  // label actually got used.
+  // Idempotency (fast-path message only — the atomic claim below is what
+  // actually closes the race). A second call would buy and pay for a second
+  // real label, and overwrite the first trackingCode with no way to
+  // reconcile which label actually got used.
   if (order.trackingCode) {
     return {
       success: false,
       message: `Une étiquette a déjà été générée pour cette commande (n° de suivi : ${order.trackingCode}).`,
     };
   }
+  if (order.labelRequestedAt) {
+    return {
+      success: false,
+      message: "Une génération d'étiquette est déjà en cours ou son résultat n'a pas encore été confirmé pour cette commande. Vérifiez le portail Mondial Relay ; un administrateur peut débloquer la commande si aucune étiquette n'a été créée.",
+    };
+  }
   if (!order.pickupPointId) {
     return {
       success: false,
       message: "Point relais non renseigné via le widget — impossible de générer une étiquette automatiquement pour cette commande.",
+    };
+  }
+
+  // Atomic claim, BEFORE calling Mondial Relay — this, not the write after
+  // the call, is what actually prevents two concurrent clicks (two tabs,
+  // two staff, a slow network) from both reaching the carrier and buying
+  // two real, billed shipments for the same order. Only the request that
+  // wins this update is allowed to call out.
+  const claim = await prisma.order.updateMany({
+    where: { id: orderId, trackingCode: null, labelRequestedAt: null },
+    data: { labelRequestedAt: new Date() },
+  });
+  if (claim.count === 0) {
+    return {
+      success: false,
+      message: "Une étiquette a déjà été générée, ou une génération est déjà en cours pour cette commande.",
     };
   }
 
@@ -136,30 +179,92 @@ export async function generateShippingLabel(orderId) {
   });
 
   if (!result.success) {
+    if (result.uncertain) {
+      // We never got a response — Mondial Relay may have created the
+      // shipment anyway. Deliberately do NOT clear labelRequestedAt here: a
+      // retry on this outcome is exactly what could buy a second real,
+      // billed shipment. Only clearStuckLabelClaim (admin, after checking
+      // the MR portal) can unblock this order again.
+      await prisma.order.update({
+        where: { id: orderId },
+        data: { labelRawResponse: result.rawResponse ?? null },
+      });
+      captureCriticalError(new Error("Mondial Relay label creation outcome unknown"), {
+        area: "mondial-relay",
+        orderId,
+        orderNumber: order.orderNumber,
+      });
+      return { success: false, message: result.message };
+    }
+
+    // A confirmed rejection (bad credentials, invalid pickup point, weight
+    // out of range, …) — Mondial Relay told us nothing was created, so the
+    // claim is released and staff can fix the input and retry immediately.
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { labelRequestedAt: null, labelRawResponse: result.rawResponse ?? null },
+    });
     return { success: false, message: result.message || "Échec de la génération de l'étiquette Mondial Relay." };
   }
 
-  // Atomic, re-checking trackingCode is still unset — the label was already
-  // bought from Mondial Relay above regardless, but this stops a second
-  // concurrent click from silently overwriting the tracking code of the
-  // first (already-paid-for, possibly already-printed) label.
-  const claim = await prisma.order.updateMany({
-    where: { id: orderId, trackingCode: null },
-    data: { trackingCode: result.shipmentNumber },
-  });
-  if (claim.count === 0) {
-    console.error(
-      `[generateShippingLabel] order ${orderId} got a trackingCode concurrently — label ${result.shipmentNumber} was purchased but not saved, reconcile manually.`
-    );
-    return {
-      success: false,
-      message: "Une étiquette a été achetée mais une autre était déjà en cours d'enregistrement pour cette commande — contactez le support pour réconcilier.",
-    };
+  // The label is bought and billed regardless of what happens next — keep
+  // our own copy so a blocked popup or a closed tab never loses it (see
+  // lib/mondial-relay-label-storage.js). Best-effort: a failure here must
+  // not be treated as the label purchase having failed.
+  const stored = await storeShippingLabel(orderId, result.labelUrl);
+  if (!stored) {
+    captureCriticalError(new Error("Mondial Relay label PDF could not be stored locally"), {
+      area: "mondial-relay",
+      orderId,
+      orderNumber: order.orderNumber,
+      shipmentNumber: result.shipmentNumber,
+    });
   }
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      trackingCode: result.shipmentNumber,
+      labelUrl: result.labelUrl,
+      labelRawResponse: result.rawResponse ?? null,
+    },
+  });
 
   return {
     success: true,
     message: "Étiquette Mondial Relay générée avec succès.",
     data: { trackingCode: result.shipmentNumber, labelUrl: result.labelUrl },
+  };
+}
+
+/**
+ * Admin-only escape hatch for an order stuck in the "uncertain" state above
+ * (labelRequestedAt set, trackingCode still null) — a timeout or lost
+ * response left the app unable to tell whether Mondial Relay created the
+ * shipment. This must only be used after a human has actually checked the
+ * Mondial Relay portal and confirmed nothing was created; it does not check
+ * that itself, it just records who cleared it.
+ */
+export async function clearStuckLabelClaim(orderId) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Seul un administrateur peut débloquer une génération d'étiquette." };
+  }
+
+  const claim = await prisma.order.updateMany({
+    where: { id: orderId, trackingCode: null, labelRequestedAt: { not: null } },
+    data: { labelRequestedAt: null },
+  });
+  if (claim.count === 0) {
+    return {
+      success: false,
+      message: "Rien à débloquer pour cette commande — vérifiez qu'aucune étiquette n'a déjà été enregistrée.",
+    };
+  }
+
+  console.log(`[clearStuckLabelClaim] order ${orderId} unblocked by ${session.user.email ?? session.user.id}`);
+  return {
+    success: true,
+    message: "Verrou levé. Une nouvelle génération est possible — vérifiez d'abord sur le portail Mondial Relay qu'aucune étiquette n'existe déjà pour cette commande.",
   };
 }

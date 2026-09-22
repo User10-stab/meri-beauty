@@ -70,7 +70,9 @@ describe("invoice lines carry their VAT-exclusive twin", () => {
 
   test("issueInvoice stores the allocation instead of raw gross lines", () => {
     const invoicing = source("lib/invoicing.js");
-    expect(invoicing).toContain("create: allocateNetLines(lines, vatRate, totals.totalExclVat)");
+    // prepareInvoice allocates; issueInvoice stores exactly that allocation.
+    expect(invoicing).toContain("lines: allocateNetLines(lines, vatRate, totals.totalExclVat)");
+    expect(invoicing).toContain("lines: { create: draft.lines }");
   });
 
   test("the PDF prints the net unit price, as the directive requires", () => {

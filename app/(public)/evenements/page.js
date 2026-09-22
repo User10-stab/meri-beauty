@@ -91,7 +91,7 @@ async function ActivityCard({ activity }) {
         )}
       </div>
 
-      <div className="flex flex-1 flex-col gap-2.5 p-5">
+      <div className="flex flex-1 flex-col gap-2.5 p-5 text-center sm:text-left md:text-center lg:text-left">
         <h3 className="text-[17px] font-bold leading-snug text-ink transition-colors group-hover:text-gold">
           {activity.title}
         </h3>
@@ -102,7 +102,7 @@ async function ActivityCard({ activity }) {
           </p>
         )}
 
-        <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 pt-3 text-[13px] text-ink/55">
+        <div className="mt-auto flex flex-wrap items-center justify-center gap-x-4 gap-y-1 pt-3 text-[13px] text-ink/55 sm:justify-start md:justify-center lg:justify-start">
           {dateStr && (
             <span className="flex items-center gap-1.5">
               <CalendarIcon /> {dateStr}
@@ -130,7 +130,7 @@ async function ActivityCard({ activity }) {
         )}
 
         {activity.animator && (
-          <div className="flex items-center gap-2 border-t border-cream/80 pt-3">
+          <div className="flex items-center justify-center gap-2 border-t border-cream/80 pt-3 sm:justify-start md:justify-center lg:justify-start">
             {activity.animator.avatar ? (
               <img
                 src={activity.animator.avatar}
@@ -210,7 +210,7 @@ export default async function EvenementsPage({ searchParams }) {
   return (
     <>
       {/* Hero */}
-      <section className="relative w-full bg-primary py-20 lg:py-28">
+      <section className="relative w-full bg-primary py-10 2xl:py-16">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 opacity-[0.03]"
@@ -227,13 +227,13 @@ export default async function EvenementsPage({ searchParams }) {
             </span>
             <span className="h-px w-8 bg-gold" />
           </div>
-          <h1 className="text-[2.6rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3.2rem] lg:text-[3.8rem]">
+          <h1 className="text-[2.4rem] sm:text-[3.2rem] 2xl:text-[3.8rem] font-bold leading-[1.1] tracking-tight text-white">
             {showAllWorkshops ? t("heroTitleWorkshops") : showAllEvents ? t("heroTitleEvents") : t("heroTitleAll")}{" "}
             <em className="font-light text-gold/80 not-italic">{showAllWorkshops || showAllEvents ? "" : t("heroTitleUniques")}</em>
           </h1>
-          <p className="mx-auto mt-5 max-w-3xl text-[17px] leading-relaxed text-white/60">
+          <p className="mx-auto mt-5 max-w-3xl text-[14px] sm:text-[16px] xl:text-[15px] 2xl:text-[16px] leading-relaxed text-white/60">
             {t("heroSubtitle1")}<br></br>
-            {t("heroSubtitle2")}
+            {/* {t("heroSubtitle2")} */}
           </p>
         </div>
       </section>
@@ -260,7 +260,7 @@ export default async function EvenementsPage({ searchParams }) {
                 </svg>
                 {t("backToOverview")}
               </Link>
-              <div className="mb-6 inline-flex items-center gap-3">
+              <div className="mb-6 flex items-center justify-center gap-3 sm:justify-start md:justify-center lg:justify-start">
                 <span className="h-px w-6 bg-gold" />
                 <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
                   {t("allWorkshops", { count: workshops.length })}
@@ -285,7 +285,7 @@ export default async function EvenementsPage({ searchParams }) {
                 </svg>
                 {t("backToOverview")}
               </Link>
-              <div className="mb-6 inline-flex items-center gap-3">
+              <div className="mb-6 flex items-center justify-center gap-3 sm:justify-start md:justify-center lg:justify-start">
                 <span className="h-px w-6 bg-gold" />
                 <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
                   {t("allEvents", { count: events.length })}
@@ -304,7 +304,7 @@ export default async function EvenementsPage({ searchParams }) {
               {/* Workshops */}
               {workshops.length > 0 && (
                 <section>
-                  <div className="mb-6 inline-flex items-center gap-3">
+                  <div className="mb-6 flex items-center justify-center gap-3 sm:justify-start md:justify-center lg:justify-start">
                     <span className="h-px w-6 bg-gold" />
                     <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
                       {t("workshops", { count: workshops.length })}
@@ -333,7 +333,7 @@ export default async function EvenementsPage({ searchParams }) {
               {/* Events */}
               {events.length > 0 && (
                 <section>
-                  <div className="mb-6 inline-flex items-center gap-3">
+                  <div className="mb-6 flex items-center justify-center gap-3 sm:justify-start md:justify-center lg:justify-start">
                     <span className="h-px w-6 bg-gold" />
                     <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
                       {t("events", { count: events.length })}
@@ -371,7 +371,7 @@ export default async function EvenementsPage({ searchParams }) {
           <AnimatedBlock
             reverse={false}
             text={
-              <div>
+              <div className="text-center sm:text-left md:text-center lg:text-left">
                 <span className="mb-4 inline-flex items-center gap-3">
                   <span className="h-px w-6 bg-gold" />
                   <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold">{t("meetingsEyebrow")}</span>
@@ -379,7 +379,7 @@ export default async function EvenementsPage({ searchParams }) {
                 <h2 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[2.4rem]">
                   {t("meetingsTitle")}
                 </h2>
-                <div className="mt-5 space-y-4 text-[15px] leading-[1.9] text-ink/65">
+                <div className="mt-5 text-[14px] sm:text-[16px] xl:text-[15px] 2xl:text-[16px] leading-[1.9] text-ink/65">
                   <p>{t("meetingsP1")}</p>
                   <p>{t("meetingsP2")}</p>
                   <p>{t("meetingsP3")}</p>
@@ -399,7 +399,7 @@ export default async function EvenementsPage({ searchParams }) {
           <AnimatedBlock
             reverse={true}
             text={
-              <div>
+              <div className="text-center sm:text-left md:text-center lg:text-left">
                 <span className="mb-4 inline-flex items-center gap-3">
                   <span className="h-px w-6 bg-gold" />
                   <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold">{t("eveningsEyebrow")}</span>
@@ -407,7 +407,7 @@ export default async function EvenementsPage({ searchParams }) {
                 <h2 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[2.4rem]">
                   {t("eveningsTitle")}
                 </h2>
-                <div className="mt-5 space-y-4 text-[15px] leading-[1.9] text-ink/65">
+                <div className="mt-5 text-[14px] sm:text-[16px] xl:text-[15px] 2xl:text-[16px] leading-[1.9] text-ink/65">
                   <p>{t("eveningsP1")}</p>
                   <p>{t("eveningsP2")}</p>
                   <p>{t("eveningsP3")}</p>
@@ -426,7 +426,7 @@ export default async function EvenementsPage({ searchParams }) {
           <AnimatedBlock
             reverse={false}
             text={
-              <div>
+              <div className="text-center sm:text-left md:text-center lg:text-left">
                 <span className="mb-4 inline-flex items-center gap-3">
                   <span className="h-px w-6 bg-gold" />
                   <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-gold">{t("ateliersEyebrow")}</span>
@@ -434,7 +434,7 @@ export default async function EvenementsPage({ searchParams }) {
                 <h2 className="text-[2rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[2.4rem]">
                   {t("ateliersTitle")}
                 </h2>
-                <div className="mt-5 space-y-4 text-[15px] leading-[1.9] text-ink/65">
+                <div className="mt-5 text-[14px] sm:text-[16px] xl:text-[15px] 2xl:text-[16px] leading-[1.9] text-ink/65">
                   <p>{t("ateliersP1")}</p>
                   <p>{t("ateliersP2")}</p>
                   <p>{t("ateliersP3")}</p>

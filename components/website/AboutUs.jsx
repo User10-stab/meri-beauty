@@ -120,7 +120,7 @@ export default function AboutUs() {
 
         <div
           ref={textRef}
-          className={`flex flex-col justify-center px-4 py-10 sm:px-6 sm:py-12 md:px-12 lg:px-16 lg:py-16 xl:px-16 transition-all duration-700 ease-out ${textInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
+          className={`flex flex-col items-center justify-center px-4 py-10 sm:items-start sm:px-6 sm:py-12 md:items-center md:px-12 lg:items-start lg:px-16 lg:py-16 xl:px-16 transition-all duration-700 ease-out ${textInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
         >
           <div className="mb-4 sm:mb-5 inline-flex items-center gap-2 sm:gap-3">
             <span className="h-px w-6 sm:w-8 bg-gold" />
@@ -129,7 +129,7 @@ export default function AboutUs() {
             </span>
           </div>
 
-          <h2 className="text-[1.5rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-[1.8rem] md:text-[2.2rem] lg:text-[2.6rem]">
+          <h2 className="text-center text-[1.5rem] font-bold leading-[1.1] tracking-tight text-ink sm:text-left sm:text-[1.8rem] md:text-center md:text-[2.2rem] lg:text-left lg:text-[2.6rem]">
             {t("aboutTitle")}
           </h2>
 
@@ -139,19 +139,19 @@ export default function AboutUs() {
             <span className="h-px w-4 sm:w-6 bg-gold/20" />
           </div>
 
-          <p className="max-w-[420px] text-[13px] sm:text-[14px] md:text-[14.5px] leading-[1.7] sm:leading-[1.8] text-ink/55">
+          <p className="text-center text-[13px] sm:text-left sm:text-[14px] md:text-center md:text-[14.5px] lg:text-left leading-[1.7] sm:leading-[1.8] text-ink/55">
             {t("aboutBody1")}
           </p>
 
-          <p className="mt-3 sm:mt-4 max-w-[420px] text-[13px] sm:text-[14px] md:text-[14.5px] leading-[1.7] sm:leading-[1.8] text-ink/55">
+          <p className="mt-3 sm:mt-4 text-center text-[13px] sm:text-left sm:text-[14px] md:text-center md:text-[14.5px] lg:text-left leading-[1.7] sm:leading-[1.8] text-ink/55">
             {t("aboutBody2")}
           </p>
 
-          <p className="mt-3 sm:mt-4 max-w-[420px] text-[13px] sm:text-[14px] md:text-[14.5px] leading-[1.7] sm:leading-[1.8] text-ink/55">
+          <p className="mt-3 sm:mt-4 text-center text-[13px] sm:text-left sm:text-[14px] md:text-center md:text-[14.5px] lg:text-left leading-[1.7] sm:leading-[1.8] text-ink/55">
             {t("aboutBody3")}
           </p>
 
-          <div className="mt-6 sm:mt-8">
+          <div className="mt-6 sm:mt-8 flex justify-center sm:justify-start md:justify-center lg:justify-start">
             <Link href="/reservation#booking" scroll={false} className="group inline-flex items-center gap-2.5 rounded-full border border-gold/40 px-5 sm:px-6 py-2.5 sm:py-3 text-[12px] sm:text-[13px] font-semibold text-gold transition-all duration-300 hover:bg-gold hover:text-white hover:shadow-lg hover:shadow-gold/20">
               {t("aboutCta")}
               <ArrowIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5 transition-transform duration-300 group-hover:translate-x-1" />
@@ -163,8 +163,8 @@ export default function AboutUs() {
       <div className="mx-auto max-w-[1400px] border-t border-gold/15 px-4 py-12 sm:px-6 sm:py-16 md:py-20">
         <div className="grid grid-cols-1 gap-10 sm:grid-cols-3 sm:gap-8 md:gap-12">
           {concepts.map(({ icon, title, desc }) => (
-            <div key={title} className="flex gap-5">
-              <div className="mb-2 sm:mb-3">
+            <div key={title} className="flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:text-left sm:gap-5 md:flex-col md:items-center md:text-center lg:flex-row lg:items-start lg:text-left">
+              <div className="mb-0 sm:mb-3">
                 {icon}
               </div>
              <div>

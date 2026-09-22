@@ -99,8 +99,10 @@ export default async function Hero() {
           <div className="absolute inset-x-0 bottom-0 h-48 bg-gradient-to-t from-primary/25 to-transparent" />
         </div>
 
-        {/* Hero content — flex-1 so marquee is pushed to the bottom */}
-        <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col items-center text-center justify-center px-4 py-16 pr-4 sm:items-start sm:text-left sm:px-6 sm:py-20 md:px-10 md:py-28 lg:px-14 lg:py-36 lg:pr-[380px]">
+        {/* Hero content — flex-1 so marquee is pushed to the bottom.
+            Centered on phone + tablet, left-aligned on desktop (lg restores
+            the sm: left alignment which would otherwise also hit tablet). */}
+        <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col items-center text-center justify-center px-4 py-16 pr-4 sm:items-start sm:text-left sm:px-6 sm:py-20 md:items-center md:text-center md:px-10 md:py-28 lg:items-start lg:text-left lg:px-14 lg:py-36 lg:pr-[380px]">
 
           {/* Eyebrow */}
           <div className="mb-5 inline-flex items-center gap-2 sm:mb-7 sm:gap-3">
@@ -111,7 +113,7 @@ export default async function Hero() {
           </div>
 
           {/* Headline */}
-          <h1 className="w-full text-[2rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[2.5rem] md:text-[3.5rem] lg:text-[5.5rem]">
+          <h1 className="w-full text-[2.4rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[2.5rem] md:text-[3.5rem] lg:text-[4rem] 2xl:text-[5.5rem]">
            {t("heroHeadline")}{" "}
             <em className="block font-light text-gold/90 italic">
               {t("heroTitleAccent")}
@@ -119,7 +121,7 @@ export default async function Hero() {
           </h1>
 
           {/* Sub-copy */}
-          <p className="mt-4 max-w-md text-[15px] leading-relaxed text-white/70 sm:mt-6 sm:max-w-xl sm:text-[16px] md:mt-8 md:text-[17px] lg:text-[19px]">
+          <p className="mt-4 max-w-md text-[15px] leading-relaxed text-white/70 sm:mt-6 sm:max-w-xl sm:text-[16px] md:mt-8 md:text-[17px] 2xl:text-[19px]">
             {t("heroDescription")}
           </p>
 

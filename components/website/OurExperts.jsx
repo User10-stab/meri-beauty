@@ -189,10 +189,10 @@ export default function OurExperts() {
   return (
     <section id="equipe" className="relative w-full overflow-hidden bg-[#fdf8f0]">
       <div className="mx-auto max-w-[1400px] px-4 py-14 sm:px-6 sm:py-16 md:px-10 md:py-20 lg:px-14 lg:py-24">
-        {/* Header row */}
+        {/* Header row — stacked + centered on phone and tablet, split row on desktop */}
         <div
           ref={headerRef}
-          className={`mb-8 sm:mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between transition-all duration-700 ease-out ${headerInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
+          className={`mb-8 sm:mb-10 flex flex-col items-center gap-4 text-center sm:flex-row sm:items-end sm:justify-between sm:text-left md:flex-col md:items-center md:justify-center md:text-center lg:flex-row lg:items-end lg:justify-between lg:text-left transition-all duration-700 ease-out ${headerInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-6"}`}
         >
           <div>
             <div className="mb-3 inline-flex items-center gap-2 sm:gap-3">

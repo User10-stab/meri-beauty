@@ -153,7 +153,7 @@ export default async function FormationDetailPage({ params }) {
         />
       )}
       {/* Hero / Cover */}
-      <section className="relative w-full overflow-hidden bg-primary" style={{ minHeight: "50vh" }}>
+      <section className="relative flex flex-col justify-center w-full overflow-hidden bg-primary" style={{ minHeight: "30vh" }}>
         {formation.cover ? (
           <>
             <img
@@ -176,7 +176,7 @@ export default async function FormationDetailPage({ params }) {
           }}
         />
 
-        <div className="relative mx-auto flex h-full max-w-[1400px] flex-col justify-end px-6 pb-12 pt-32 md:px-10 lg:px-14 lg:pb-16 text-center">
+        <div className="relative mx-auto flex h-full max-w-[1400px] flex-col justify-end px-6 md:px-10 lg:px-14 text-center">
           <div className="mb-4 inline-flex items-center gap-3 self-center">
             <span className="h-px w-8 bg-gold" />
             <span
@@ -189,7 +189,7 @@ export default async function FormationDetailPage({ params }) {
             <span className="h-px w-8 bg-gold" />
           </div>
 
-          <h1 className="mx-auto text-[2.4rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3rem] lg:text-[3.6rem]">
+          <h1 className="mx-auto max-w-4xl break-words text-[1.8rem] xsm:text-[2.1rem] sm:text-[3rem] lg:text-[3.6rem] font-bold leading-[1.1] tracking-tight text-white ">
             {formation.title}
           </h1>
         </div>
@@ -197,17 +197,27 @@ export default async function FormationDetailPage({ params }) {
 
       {/* Details */}
       <section className="w-full bg-cream">
-        <div className="mx-auto max-w-[1400px] px-6 py-12 md:px-10 lg:px-14 lg:py-16">
+        <div className="mx-auto max-w-[1400px] px-6 py-8 md:px-10 lg:px-14 lg:py-16">
+           <Link
+                href="/formations"
+                className="mb-6 mx-auto flex w-fit items-center gap-2 text-sm font-medium text-ink/50 transition-colors hover:text-gold sm:mx-0"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
+                  <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Retour aux formations
+              </Link>
+
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-3">
             {/* Main content */}
             <div className="lg:col-span-2 space-y-10">
               {formation.description && (
                 <div className="rounded-2xl border border-ink/8 bg-white p-6 shadow-sm sm:p-8">
-                  <div className="mb-5 flex items-center gap-3">
+                  <div className="mb-5 flex items-center justify-center gap-3 sm:justify-start">
                     <span className="h-px w-6 bg-gold" />
                     <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">À propos</h2>
                   </div>
-                  <div className="space-y-4 text-[15.5px] leading-[1.9] text-ink/70">
+                  <div className="space-y-4 text-center text-[15.5px] leading-[1.9] text-ink/70 sm:text-left">
                     {formation.description
                       .split(/\n+/)
                       .map((s) => s.trim())
@@ -221,7 +231,7 @@ export default async function FormationDetailPage({ params }) {
 
               {formation.sessions?.length > 0 && (
                 <div>
-                  <h2 className="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-gold">
+                  <h2 className="mb-5 text-center text-sm font-semibold uppercase tracking-[0.18em] text-gold sm:text-left">
                     {formation.sessions.length > 1
                       ? `Sessions disponibles (${formation.sessions.length})`
                       : "Date et horaire"}
@@ -234,14 +244,15 @@ export default async function FormationDetailPage({ params }) {
 
                       return (
                         <div key={session.id} className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div className="space-y-2">
+                          
+                          <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:text-left">
+                            <div className="flex flex-col items-center space-y-2 sm:items-start">
                               {formation.sessions.length > 1 && (
                                 <span className="text-xs font-semibold uppercase tracking-wide text-gold">
                                   Session #{index + 1}
                                 </span>
                               )}
-                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink/65">
+                              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-ink/65 sm:justify-start">
                                 <span className="flex items-center gap-1.5">
                                   <CalendarIcon />
                                   {formatDate(session.startDate)}
@@ -252,7 +263,7 @@ export default async function FormationDetailPage({ params }) {
                                   {session.endDate && ` – ${formatTime(session.endDate)}`}
                                 </span>
                               </div>
-                              <div className="space-y-1.5 mt-2">
+                              <div className="mt-2 flex flex-col items-center space-y-1.5 sm:items-start">
                                 <span className="flex items-center gap-1.5 text-sm text-ink/55">
                                   <UsersIcon />
                                   <span>{isPrivate ? "Formation individuelle" : `${taken} / ${cap} places occupées`}</span>
@@ -277,7 +288,7 @@ export default async function FormationDetailPage({ params }) {
                               </div>
                             </div>
 
-                            <div className="flex flex-col items-end gap-2">
+                            <div className="flex w-full flex-col items-center gap-2 sm:w-auto sm:items-end">
                               <ActivityDepositNote priceTtc={formation.price} depositPct={depositPct} />
                               {avail === 0 ? (
                                 <span className="inline-flex shrink-0 cursor-not-allowed items-center gap-2 rounded-full bg-gray-200 px-5 py-2.5 text-[13px] font-semibold text-gray-500">
@@ -295,7 +306,7 @@ export default async function FormationDetailPage({ params }) {
                           </div>
 
                           {session.registrationDeadline && (
-                            <p className="mt-3 text-xs text-ink/40">
+                            <p className="mt-3 text-center text-xs text-ink/40 sm:text-left">
                               Inscription avant le {formatDate(session.registrationDeadline)}
                             </p>
                           )}
@@ -312,7 +323,7 @@ export default async function FormationDetailPage({ params }) {
                 </div>
               )}
 
-              <div className="rounded-xl border border-red-100 bg-red-50 p-5">
+              <div className="rounded-xl border border-red-100 bg-red-50 p-5 text-center sm:text-left">
                 <p className="text-sm text-red-800">
                   ⚠️ L&apos;acompte et le solde ne sont remboursables en aucun cas, que vous participiez ou non à la formation.
                 </p>
@@ -322,9 +333,9 @@ export default async function FormationDetailPage({ params }) {
             {/* Sidebar */}
             <div className="space-y-6">
               <div className="rounded-xl border border-ink/8 bg-white p-6 shadow-sm">
-                <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">Informations</h3>
-                <ul className="space-y-4">
-                  <li className="flex items-start gap-3">
+                <h3 className="mb-4 text-center text-xs font-semibold uppercase tracking-[0.15em] text-gold sm:text-left">Informations</h3>
+                <ul className="grid grid-cols-2 xl:grid-cols-1 gap-4">
+                  <li className="flex   gap-3 sm:justify-start sm:text-left">
                     <EuroIcon className="mt-0.5" />
                     <div>
                       <ActivityPriceTag priceTtc={formation.price} className="text-sm font-semibold text-ink" />
@@ -333,24 +344,24 @@ export default async function FormationDetailPage({ params }) {
                       </p>
                     </div>
                   </li>
-                  <li className="flex items-center gap-3">
+                  <li className="flex  gap-3 sm:justify-start">
                     <ClockIcon />
-                    <div>
+                    <div className="text-center sm:text-left">
                       <p className="text-sm font-semibold text-ink">{formation.duration} min</p>
                       <p className="text-xs text-ink/45">Durée</p>
                     </div>
                   </li>
-                  <li className="flex items-center gap-3">
+                  <li className="flex   gap-3 sm:justify-start">
                     <UsersIcon />
-                    <div>
+                    <div className="text-center sm:text-left">
                       <p className="text-sm font-semibold text-ink">{isPrivate ? "1 personne" : `${formation.capacity} personnes`}</p>
                       <p className="text-xs text-ink/45">Capacité</p>
                     </div>
                   </li>
                   {formation.language && (
-                    <li className="flex items-center gap-3">
+                    <li className="flex   gap-3 sm:justify-start">
                       <GlobeIcon />
-                      <div>
+                      <div className="text-center sm:text-left">
                         <p className="text-sm font-semibold text-ink">{formation.language}</p>
                         <p className="text-xs text-ink/45">Langue</p>
                       </div>
@@ -361,8 +372,8 @@ export default async function FormationDetailPage({ params }) {
 
               {formation.animator && (
                 <div className="rounded-xl border border-ink/8 bg-white p-6 shadow-sm">
-                  <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">Animée par</h3>
-                  <Link href={`/animateurs/${formation.animator.id}`} className="group flex items-center gap-4">
+                  <h3 className="mb-4 text-center text-xs font-semibold uppercase tracking-[0.15em] text-gold sm:text-left">Animée par</h3>
+                  <Link href={`/animateurs/${formation.animator.id}`} className="group flex items-center justify-center gap-4 text-center sm:justify-start sm:text-left">
                     <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-cream">
                       {formation.animator.avatar ? (
                         <img
@@ -388,15 +399,6 @@ export default async function FormationDetailPage({ params }) {
                 </div>
               )}
 
-              <Link
-                href="/formations"
-                className="inline-flex items-center gap-2 text-sm font-medium text-ink/50 transition-colors hover:text-gold"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
-                  <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Retour aux formations
-              </Link>
             </div>
           </div>
         </div>

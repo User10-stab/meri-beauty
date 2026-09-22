@@ -333,9 +333,9 @@ export default function BecomePartner() {
 
         {/* ── LEFT: Dark green content panel ── */}
         <div
-          className={`relative z-10 flex w-full flex-col justify-center bg-primary px-6 py-12 sm:px-10 sm:py-16
+          className={`relative z-10 flex w-full flex-col items-center justify-center bg-primary px-6 py-12 text-center sm:px-10 sm:py-16
             transition-all duration-700 ease-out
-            lg:w-[30%] lg:px-14 lg:py-20
+            lg:w-[40%] 2xl:w-[30%] lg:items-start lg:px-14 lg:py-20 lg:text-left
             ${sectionInView ? "opacity-80 translate-x-0" : "opacity-0 -translate-x-8"}`}
         >
           {/* Eyebrow */}
@@ -360,7 +360,7 @@ export default function BecomePartner() {
           </p>
 
           {/* Benefits */}
-          <ul className="mb-10 flex flex-col gap-3">
+          <ul className="mb-10 flex flex-col items-center gap-3 lg:items-start">
             {[
               t("benefit1"),
               t("benefit2"),
@@ -402,10 +402,10 @@ export default function BecomePartner() {
 
           <div className="relative z-10 mx-4 my-8 w-full max-w-[450px] bg-white/97 px-6 py-8 shadow-2xl shadow-black/20 sm:mx-6 sm:px-8 sm:py-10 lg:mx-0 lg:mr-0 lg:rounded lg:px-10 lg:py-8">
             {/* Form heading */}
-            <h3 className="mb-1 text-[1.35rem] font-bold leading-tight text-ink">
+            <h3 className="mb-1 text-center text-[1.35rem] font-bold leading-tight text-ink lg:text-left">
               {t("formTitle")}
             </h3>
-            <p className="mb-7 text-[12.5px] leading-relaxed text-ink/45">
+            <p className="mb-7 text-center text-[12.5px] leading-relaxed text-ink/45 lg:text-left">
               {t("formSubtitle")}
             </p>
 

@@ -49,7 +49,7 @@ export default async function AnimatorDetailPage({ params }) {
   return (
     <>
       {/* Hero */}
-      <section className="relative w-full bg-primary py-20 lg:py-28">
+      <section className="relative w-full bg-primary py-10 2xl:py-16">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 opacity-[0.03]"

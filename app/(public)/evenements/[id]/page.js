@@ -161,7 +161,7 @@ export default async function EvenementDetailPage({ params }) {
         />
       ))}
       {/* Hero / Cover */}
-      <section className="relative w-full overflow-hidden bg-primary" style={{ minHeight: "50vh" }}>
+      <section className="relative flex flex-col justify-center w-full overflow-hidden bg-primary" style={{ minHeight: "30vh" }}>
         {activity.cover ? (
           <>
             <img
@@ -184,7 +184,7 @@ export default async function EvenementDetailPage({ params }) {
           }}
         />
 
-        <div className="relative mx-auto flex h-full max-w-[1400px] flex-col justify-end px-6 pb-12 pt-32 md:px-10 lg:px-14 lg:pb-16 text-center">
+        <div className="relative mx-auto h-full max-w-[1400px] flex flex-col justify-center px-6 md:px-10 lg:px-14 text-center">
           <div className="mb-4 inline-flex items-center gap-3 self-center">
             <span className="h-px w-8 bg-gold" />
             <span
@@ -198,7 +198,7 @@ export default async function EvenementDetailPage({ params }) {
             <span className="h-px w-8 bg-gold" />
           </div>
 
-          <h1 className="mx-auto text-[2.4rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3rem] lg:text-[3.6rem]">
+          <h1 className="mx-auto max-w-4xl break-words text-[1.8rem] font-bold leading-[1.1] tracking-tight text-white xsm:text-[2.1rem] sm:text-[3rem] lg:text-[3.6rem]">
             {activity.title}
           </h1>
 
@@ -213,19 +213,29 @@ export default async function EvenementDetailPage({ params }) {
       {/* Details */}
       <section className="w-full bg-cream">
         <div className="mx-auto max-w-[1400px] px-6 py-12 md:px-10 lg:px-14 lg:py-16">
+           {/* Back link */}
+              <Link
+                href="/evenements"
+                className="mb-4 mx-auto flex w-fit items-center gap-2 text-sm font-medium text-ink/50 transition-colors hover:text-gold sm:mx-0"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
+                  <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Retour aux activités
+              </Link>
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-3">
             {/* Main content */}
             <div className="lg:col-span-2 space-y-10">
               {/* About */}
               {activity.description && (
                 <div className="rounded-2xl border border-ink/8 bg-white p-6 shadow-sm sm:p-8">
-                  <div className="mb-5 flex items-center gap-3">
+                  <div className="mb-5 flex items-center justify-center gap-3 sm:justify-start">
                     <span className="h-px w-6 bg-gold" />
                     <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-gold">
                       À propos
                     </h2>
                   </div>
-                  <div className="space-y-4 text-[15.5px] leading-[1.9] text-ink/70">
+                  <div className="space-y-4 text-center text-[15px] leading-[1.9] text-ink/70 sm:text-left sm:text-[15.5px]">
                     {activity.description
                       .split(/\n+/)
                       .map((s) => s.trim())
@@ -240,7 +250,7 @@ export default async function EvenementDetailPage({ params }) {
               {/* Sessions */}
               {activity.sessions?.length > 0 && (
                 <div>
-                  <h2 className="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-gold">
+                  <h2 className="mb-5 text-center text-sm font-semibold uppercase tracking-[0.18em] text-gold sm:text-left">
                     {activity.sessions.length > 1
                       ? `Sessions disponibles (${activity.sessions.length})`
                       : "Date et horaire"}
@@ -251,14 +261,14 @@ export default async function EvenementDetailPage({ params }) {
                         key={session.id}
                         className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm"
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div className="space-y-2">
+                        <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:text-left">
+                          <div className="flex flex-col items-center space-y-2 sm:items-start">
                             {activity.sessions.length > 1 && (
                               <span className="text-xs font-semibold uppercase tracking-wide text-gold">
                                 Session #{index + 1}
                               </span>
                             )}
-                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink/65">
+                            <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-ink/65 sm:justify-start">
                               <span className="flex items-center gap-1.5">
                                 <CalendarIcon />
                                 {formatDate(session.startDate)}
@@ -274,7 +284,7 @@ export default async function EvenementDetailPage({ params }) {
                               const cap = session.capacity ?? activity.capacity;
                               const avail = Math.max(0, cap - taken);
                               return (
-                                <div className="space-y-1.5 mt-2">
+                                <div className="mt-2 flex flex-col items-center space-y-1.5 sm:items-start">
                                   <span className="flex items-center gap-1.5 text-sm text-ink/55">
                                     <UsersIcon className="h-4 w-4" />
                                     <span>
@@ -299,7 +309,7 @@ export default async function EvenementDetailPage({ params }) {
                             })()}
                           </div>
 
-                          <div className="flex flex-col items-end gap-2">
+                          <div className="flex w-full flex-col items-center gap-2 sm:w-auto sm:items-end">
                             <ActivityDepositNote priceTtc={activity.price} depositPct={depositPct} />
                             {(() => {
                               const taken = session.reservations?.reduce((sum, r) => sum + r.seatsCount, 0) ?? 0;
@@ -330,7 +340,7 @@ export default async function EvenementDetailPage({ params }) {
                         </div>
 
                         {session.registrationDeadline && (
-                          <p className="mt-3 text-xs text-ink/40">
+                          <p className="mt-3 text-center text-xs text-ink/40 sm:text-left">
                             Inscription avant le {formatDate(session.registrationDeadline)}
                           </p>
                         )}
@@ -350,11 +360,11 @@ export default async function EvenementDetailPage({ params }) {
             {/* Sidebar */}
             <div className="space-y-6">
               <div className="rounded-xl border border-ink/8 bg-white p-6 shadow-sm">
-                <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">
+                <h3 className="mb-4 text-center text-xs font-semibold uppercase tracking-[0.15em] text-gold sm:text-left">
                   Informations
                 </h3>
-                <ul className="space-y-4">
-                  <li className="flex items-start gap-3">
+                <ul className="grid grid-cols-2 xl:grid-cols-1 gap-4">
+                  <li className="flex  justify-center gap-3 xl:text-center sm:justify-start sm:text-left">
                     <EuroIcon className="mt-0.5" />
                     <div>
                       <ActivityPriceTag priceTtc={activity.price} className="text-sm font-semibold text-ink" />
@@ -363,24 +373,24 @@ export default async function EvenementDetailPage({ params }) {
                       </p>
                     </div>
                   </li>
-                  <li className="flex items-center gap-3">
+                  <li className="flex  justify-center gap-3 sm:justify-start">
                     <ClockIcon />
-                    <div>
+                    <div className="text-center sm:text-left">
                       <p className="text-sm font-semibold text-ink">{activity.duration} min</p>
                       <p className="text-xs text-ink/45">Durée</p>
                     </div>
                   </li>
-                  <li className="flex items-center gap-3">
+                  <li className="flex  justify-center gap-3 sm:justify-start">
                     <UsersIcon />
-                    <div>
+                    <div className="text-center sm:text-left">
                       <p className="text-sm font-semibold text-ink">{activity.capacity} personnes</p>
                       <p className="text-xs text-ink/45">Capacité</p>
                     </div>
                   </li>
                   {activity.language && (
-                    <li className="flex items-center gap-3">
+                    <li className="flex  justify-center gap-3 sm:justify-start">
                       <GlobeIcon />
-                      <div>
+                      <div className="text-center sm:text-left">
                         <p className="text-sm font-semibold text-ink">{activity.language}</p>
                         <p className="text-xs text-ink/45">Langue</p>
                       </div>
@@ -392,12 +402,12 @@ export default async function EvenementDetailPage({ params }) {
               {/* Animator */}
               {activity.animator && (
                 <div className="rounded-xl border border-ink/8 bg-white p-6 shadow-sm">
-                  <h3 className="mb-4 text-xs font-semibold uppercase tracking-[0.15em] text-gold">
+                  <h3 className="mb-4 text-center text-xs font-semibold uppercase tracking-[0.15em] text-gold sm:text-left">
                     Animé par
                   </h3>
                   <Link
                     href={`/animateurs/${activity.animator.id}`}
-                    className="group flex items-center gap-4"
+                    className="group flex items-center justify-center gap-4 text-center sm:justify-start sm:text-left"
                   >
                     <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-cream">
                       {activity.animator.avatar ? (
@@ -426,16 +436,7 @@ export default async function EvenementDetailPage({ params }) {
                 </div>
               )}
 
-              {/* Back link */}
-              <Link
-                href="/evenements"
-                className="inline-flex items-center gap-2 text-sm font-medium text-ink/50 transition-colors hover:text-gold"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true">
-                  <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                Retour aux activités
-              </Link>
+             
             </div>
           </div>
         </div>

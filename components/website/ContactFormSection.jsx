@@ -80,7 +80,7 @@ export default function ContactFormSection({ salon }) {
   const workingHours = salon?.workingDays ? formatHours(salon.workingDays) : [];
 
   return (
-    <section className="w-full bg-cream py-16 lg:py-24">
+    <section className="w-full bg-cream pt-16">
       <div className="mx-auto max-w-[1400px] px-6 lg:px-14 xl:px-20">
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
           <div className="flex flex-col">

@@ -192,7 +192,7 @@ export default async function FormationsPage() {
   return (
     <>
       {/* Hero */}
-      <section className="relative w-full bg-primary py-20 lg:py-28">
+      <section className="relative w-full bg-primary py-10 2xl:py-16">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 opacity-[0.03]"
@@ -207,10 +207,10 @@ export default async function FormationsPage() {
             <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gold">{t("eyebrow")}</span>
             <span className="h-px w-8 bg-gold" />
           </div>
-          <h1 className="text-[2.6rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3.2rem] lg:text-[3.8rem]">
+          <h1 className="text-[2.4rem] sm:text-[3.4rem] 2xl:text-[3.8rem] font-bold leading-[1.1] tracking-tight text-white ">
             {t.rich("title", { accent: (chunks) => <em className="font-light text-gold/80 not-italic">{chunks}</em> })}
           </h1>
-          <p className="mx-auto mt-5 max-w-3xl text-[17px] leading-relaxed text-white/60">
+          <p className="mx-auto mt-5 max-w-3xl text-[14px] sm:text-[18px] xl:text-[15px] 2xl:text-[16px] leading-relaxed text-white/60">
             {t("description")}
           </p>
         </div>

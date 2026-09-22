@@ -370,7 +370,7 @@ function InstagramDetails({ post, profile }) {
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, y: -16 }}
         transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
-        className="flex h-full flex-col justify-center gap-4 px-2 py-3 lg:py-0"
+        className="flex h-full flex-col items-center justify-center gap-4 px-2 py-3 text-center lg:items-start lg:py-0 lg:text-left"
       >
         {/* Avatar + username + date */}
         <div className="flex items-center gap-3">

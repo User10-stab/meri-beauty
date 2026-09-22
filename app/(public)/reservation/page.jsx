@@ -41,7 +41,7 @@ export default async function Page() {
       </div>
 
       {/* Category picker */}
-      <div id="booking" className="relative overflow-hidden bg-[#fdf8f0] pb-20 sm:pb-28">
+      <div id="booking" className="relative overflow-hidden bg-[#fdf8f0] pb-2 xl:pb-20">
         <div aria-hidden="true" className="pointer-events-none absolute left-[-82px] top-20 hidden h-56 w-56 rounded-full border border-[#b89664]/40 lg:block">
           <div className="absolute inset-5 rounded-full border border-[#b89664]/30" />
           <div className="absolute inset-11 rounded-full border border-[#b89664]/20" />

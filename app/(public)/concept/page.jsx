@@ -579,25 +579,25 @@ function Reveal({ children, className = "", delay = 0, direction = "up" }) {
 function HeroSection() {
   const t = useTranslations("concept.hero");
   return (
-    <section className="relative h-[700px] overflow-hidden bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url('/Images/heroImage.webp')` }}>
+    <section className="relative h-[360px] 2xl:h-[480px] overflow-hidden bg-cover bg-center bg-no-repeat" style={{ backgroundImage: `url('/Images/heroImage.webp')` }}>
       <div className="mx-auto grid h-full w-full items-center lg:grid-cols-2">
-        <div className="relative z-10 flex h-full w-full flex-col items-center bg-[#2F3A2E]/90 px-6 py-24">
+        <div className="relative z-10 flex h-full w-full flex-col justify-center items-center bg-[#2F3A2E]/90 px-6 ">
           <div className=" w-full max-w-2xl px-2 text-center sm:w-3/4 sm:px-0 lg:text-left">
-            <span className="mb-5 inline-block text-sm font-semibold uppercase tracking-[0.32em] text-[#C8A46A]">
+            <span className=" inline-block text-[12px] lg-text-sm font-semibold uppercase tracking-[0.32em] text-[#C8A46A]">
               {t("eyebrow")}
             </span>
-            <h1 className="w-full text-[2.2rem] font-bold leading-tight text-[#F8F6F2] xs:text-[2.6rem] sm:text-5xl lg:text-[3.6rem] xl:text-[4rem]">
+            <h1 className="w-full text-[2.2rem] font-bold leading-tight text-[#F8F6F2] xs:text-[2.6rem] sm:text-5xl lg:text-[3rem] 2xl:text-[4rem]">
               {t("titleLine1")}
               <br />
-              <em className="font-light italic text-[#C8A46A]/90">{t("titleAccent")}</em>
+              <em className="font-light italic text-[30px] lg:text-[3rem] 2xl:text-[4rem] text-[#C8A46A]/90">{t("titleAccent")}</em>
             </h1>
-            <div className="mx-auto mt-8 h-[3px] w-20 rounded-full bg-[#C8A46A] lg:mx-0" />
-            <p className="mx-auto mt-8 max-w-lg text-[15px] leading-7 text-gray-300 sm:text-[17px] sm:leading-9 lg:mx-0">
+            <div className="mx-auto mt-4 h-[3px] w-20 rounded-full bg-[#C8A46A] lg:mx-0" />
+            <p className="mx-auto mt-4 max-w-xl text-[17px] 2xl:text-[19px] leading-7 text-gray-300 sm:leading-9 lg:mx-0">
               {t("description1")} {t("description2")}
               <br />
               <em className="text-gray-200/70">{t("welcome")}</em>
             </p>
-            <Botanical className="h-45 w-40 rotate-[90deg] text-gold" />
+            {/* <Botanical className="h-45 w-40 rotate-[90deg] text-gold" /> */}
           </div>
         </div>
         <div className="relative hidden h-full w-full bg-black/20 lg:block lg:col-span-1">
@@ -631,16 +631,16 @@ function StorySection() {
       {/* Top botanical flourish — centred */}
       <div
         aria-hidden="true"
-        className="mx-auto flex justify-center pt-16 text-gold"
-        style={{ height: 80 }}
+        className="mx-auto flex justify-center pt-6 xl-pt-16 text-gold h-[0px] xl-h-[80px]"
+       
       >
         <BotanicalSprig className="h-full" />
       </div>
 
-      <div className="mx-auto max-w-[1400px] px-6 pb-20 pt-8 sm:px-10 lg:px-16 lg:pb-28 lg:pt-10 xl:px-24">  
+      <div className="mx-auto w-full xl:max-w-[1400px] pt-8 lg:pb-28 lg:pt-10 px-6 sm:px-10 lg:px-16 xl:px-24">  
 
         {/* Two-column layout: image left, text right */}
-        <div className="grid grid-cols-1 gap-12 lg:grid-cols-2 lg:gap-16 xl:gap-24">
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-2 lg:gap-16 xl:gap-24">
 
           {/* ── Image column ── */}
           <div
@@ -669,8 +669,8 @@ function StorySection() {
               {/* <LeftBotanical className="h-full w-full text-gold pr-10" /> */}
             </div>
 
-            {/* Main portrait image */}
-            <div className="relative aspect-[3/4] w-full max-w-[480px] overflow-hidden">
+            {/* Main portrait image — centered on phone/tablet, natural flow on desktop */}
+            <div className="relative aspect-[3/4] w-full max-w-[480px] overflow-hidden md:mx-auto lg:mx-0">
               <Image
                 src="/Images/histoire.webp"
                 alt={t("imageAlt")}
@@ -689,21 +689,21 @@ function StorySection() {
 
           </div>
 
-          {/* ── Text column ── */}
+          {/* ── Text column — centered on phone + tablet, left on desktop ── */}
           <div
             ref={textRef}
-            className={`flex flex-col justify-center pt-4 transition-all duration-1000 ease-out delay-200 lg:pt-0 ${
+            className={`flex flex-col items-center justify-center pt-4 text-center transition-all duration-1000 ease-out delay-200 sm:items-start sm:text-left md:items-center md:text-center lg:items-start lg:text-left lg:pt-0 ${
               textInView ? "opacity-100 translate-x-0" : "opacity-0 translate-x-8"
             }`}
           >
              {/* Eyebrow */}
-        <div className="mb-4 flex items-center gap-3 lg:mb-3">
-          {/* <span className="h-px w-8 bg-gold/50" /> */}
-             <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gold/90">
-            {t("eyebrow")}
-          </span>
-        </div>
-            <h2 className="mb-6 text-[1.7rem] font-semibold leading-[1.15] tracking-tight text-ink xs:text-[2rem] sm:mb-8 sm:text-[2.4rem] lg:text-[2.8rem]">
+            <div className="mb-2 flex items-center gap-3 lg:mb-3">
+              {/* <span className="h-px w-8 bg-gold/50" /> */}
+                <span className="text-[11px] font-semibold uppercase tracking-[0.24em] text-gold/90">
+                {t("eyebrow")}
+              </span>
+            </div>
+            <h2 className="w-full mb-3 text-[1.7rem]  xs:text-[2rem]  sm:text-[2.4rem] 2xl:text-[2.8rem] font-semibold leading-[1.15] tracking-tight text-ink">
               {t("title1")}
               <br />
               {t("title2a")}{" "}
@@ -714,7 +714,7 @@ function StorySection() {
               </span>
             </h2>
 
-            <div className="space-y-3 text-[14px] leading-[1.9] text-ink/65 sm:text-[15px]">
+            <div className="space-y-2 text-[14px] leading-[1.9] text-ink/65 sm:text-[16px]">
               <p>{t("p1")}</p>
               <p>{t("p2")}</p>
               <p>{t("p3")}</p>
@@ -723,7 +723,7 @@ function StorySection() {
             </div>
 
             {/* Signature */}
-            <div className="mt-8 flex justify-between gap-4 xs:flex-row sm:mt-10 items-center">
+            <div className="mt-2 flex justify-between w-full  xs:flex-row items-center">
               <div>
                <p
                   style={{ fontFamily: "var(--font-betania-patmos)" }}
@@ -743,6 +743,7 @@ function StorySection() {
                  sizes="width:100px " />
               </div>
             </div>
+
           </div>
         </div>
       </div>
@@ -784,13 +785,13 @@ function AtmosphereSection() {
       />
 
       {/* Top botanical flourish — centred */}
-      <div
+      {/* <div
         aria-hidden="true"
-        className="mx-auto flex justify-center pt-12 text-gold/40"
+        className="mx-auto flex justify-center pt-6 xl-pt-12 text-gold"
         style={{ height: 70 }}
       >
         <BotanicalSprig className="h-full" />
-      </div>
+      </div> */}
 
       {/* Left botanical decoration */}
       <div
@@ -803,13 +804,13 @@ function AtmosphereSection() {
         />
       </div>
 
-      <div className="mx-auto max-w-[1530px] px-6 py-20 sm:px-10 lg:px-16 lg:py-28 xl:px-16">
+      <div className="mx-auto max-w-[1530px] px-6 py-10 lg-py-20 sm:px-10 lg:px-16 ">
         <div className="flex flex-col gap-14 lg:flex-row lg:gap-16 xl:gap-20">
 
-          {/* ── Left: Editorial text ── */}
+          {/* ── Left: Editorial text — centered on phone + tablet, left on desktop ── */}
           <div
             ref={leftRef}
-            className={`flex w-full flex-col justify-center transition-all duration-1000 ease-out lg:w-2/5 ${
+            className={`flex w-full flex-col items-center justify-center text-center transition-all duration-1000 ease-out sm:items-start sm:text-left md:items-center md:text-center lg:w-2/5 lg:items-start lg:text-left ${
               leftInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-8"
             }`}
           >
@@ -820,7 +821,7 @@ function AtmosphereSection() {
               </span>
             </div>
 
-            <h2 className="mb-6 text-[1.8rem] font-bold leading-[1.1] tracking-tight text-cream xs:text-[2rem] sm:mb-8 sm:text-[2.4rem] lg:text-[2.9rem]">
+            <h2 className="font-bold leading-[1.1] tracking-tight text-cream mb-3 2xlm:mb-8 text-[1.8rem] xs:text-[2rem] sm:text-[2.2rem] 2xl:text-[2.9rem]">
               {t("title1")}
               <br />
               <em className="font-light no-italic ">
@@ -837,9 +838,9 @@ function AtmosphereSection() {
               <p>{t("p6")}</p>
             </div>
 
-            {/* Italic pull-quote */}
+            {/* Italic pull-quote — top border when centered on tablet, left border otherwise */}
             <blockquote
-              className="mt-8 border-l-2 border-gold/40 pl-5 sm:mt-10 sm:pl-6"
+              className="mt-8 border-l-2 border-gold/40 pl-5 sm:mt-10 sm:pl-6 md:border-l-0 md:border-t-2 md:pl-0 md:pt-5 lg:border-l-2 lg:border-t-0 lg:pl-6 lg:pt-0"
             >
               <p
                 className="whitespace-pre-line text-[1.15rem] italic leading-[1.7] text-gold/50 sm:text-[1.3rem]"
@@ -850,8 +851,8 @@ function AtmosphereSection() {
             </blockquote>
           </div>
 
-          {/* ── Right: Photo composition ── */}
-          <div className="flex w-full flex-col gap-3 sm:gap-4 lg:w-3/5 lg:flex-row lg:gap-4 ">
+          {/* ── Right: Photo composition — centered stack on tablet, side row on desktop ── */}
+          <div className="flex w-full justify-center gap-3 sm:justify-start sm:gap-4 md:items-center lg:w-3/5 flex-row lg:items-stretch lg:gap-4 ">
             <div className="flex flex-col gap-4">
                <Image
                   src="/Images/studio-1.webp"
@@ -963,8 +964,8 @@ function UniverseCard({ item, index }) {
           </div>
         </div>
 
-        {/* Text */}
-        <div className="flex flex-1 flex-col px-6 pb-8 pt-12">
+        {/* Text — centered on phone + tablet (cards keep their own design) */}
+        <div className="flex flex-1 flex-col px-6 pb-8 pt-12 text-center sm:text-left">
           <p className="mb-2  text-[12px] font-semibold uppercase tracking-[0.18em] text-[#2f3a2e]">
             {item.eyebrow.split("\n").map((l, i) => (
               <span key={i} className={i > 0 ? "block" : ""}>{l}</span>
@@ -978,7 +979,7 @@ function UniverseCard({ item, index }) {
           <Link
             href={item.href}
             scroll={false}
-            className="group/link mt-5 inline-flex items-center gap-1.5 text-[12px] font-medium tracking-[0.02em] text-[#3e4a3b] underline decoration-[#d8cfba] underline-offset-[4px] transition-colors hover:text-ink hover:decoration-gold"
+            className="group/link mt-5 inline-flex items-center justify-center lg-justify-start gap-1.5 text-[12px] font-medium tracking-[0.02em] text-[#3e4a3b] underline decoration-[#d8cfba] underline-offset-[4px] transition-colors hover:text-ink hover:decoration-gold"
           >
             {item.cta}
             <span aria-hidden="true" className="transition-transform duration-200 group-hover/link:translate-x-0.5">→</span>
@@ -1002,7 +1003,7 @@ function UniversesSection() {
     heading: t(`items.${idx}.eyebrow`),
   }));
   return (
-    <section className="relative w-full overflow-hidden bg-[#fdf8f0] py-16" aria-label={t("eyebrow")}>
+    <section className="relative w-full overflow-hidden bg-[#fdf8f0] xl:py-14" aria-label={t("eyebrow")}>
       {/* Subtle warm texture */}
       <div
         aria-hidden="true"
@@ -1015,10 +1016,10 @@ function UniversesSection() {
       <div className="relative mx-auto max-w-[1530px] px-6 py-16 sm:px-8 lg:px-10 lg:py-20 xl:px-12 xl:py-24">
         {/* Desktop: intro left (280-320) + 4 cards | Tablet/Mobile: stacked */}
         <div className="flex flex-col gap-10 lg:flex-row lg:items-start lg:gap-8 xl:gap-10">
-          {/* Intro */}
+          {/* Intro — centered on phone + tablet, left on desktop */}
           <div
             ref={headRef}
-            className={`relative flex w-full shrink-0 flex-col lg:w-[270px] xl:w-[300px] transition-all duration-700 ease-out ${
+            className={`relative flex w-full shrink-0 flex-col items-center text-center transition-all duration-700 ease-out sm:items-start sm:text-left md:items-center md:text-center lg:w-[270px] lg:items-start lg:text-left xl:w-[300px] ${
               headInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
@@ -1033,7 +1034,7 @@ function UniversesSection() {
               aria-hidden="true"
               className="pointer-events-none mt-6 hidden select-none text-[#c8b9a0] lg:block"
             >
-              <div className="relative h-[380px] w-[160px] -ml-2 overflow-visible  rotate-[-18deg]">
+              <div className="relative hidden md:block h-[380px] w-[160px] -ml-2 overflow-visible  rotate-[-18deg]">
                 {/* Use the existing detailed Botanical Illustration scaled to reference: pale, thin, organic */}
                 <Botanical className=" w-full h-full" />
                
@@ -1041,10 +1042,7 @@ function UniversesSection() {
                 <div className="absolute inset-0 bg-gradient-to-t from-[#fdf8f0] via-transparent to-transparent" />
               </div>
             </div>
-            {/* Mobile: much smaller sprig below heading */}
-            <div aria-hidden="true" className="pointer-events-none mt-4 flex justify-start text-[#d6cbb6] opacity-60 lg:hidden">
-              <BotanicalBranch className="h-20 w-14 rotate-[18deg]" />
-            </div>
+           
           </div>
 
           {/* Cards — responsive: 1 col xs, 2 cols sm, 4 cols lg, gap scales */}
@@ -1111,9 +1109,10 @@ function HumanSection() {
             <BotanicalBranch className="h-full w-full -rotate-12 text-[#d6cbb6]" />
           </div>
 
+          {/* Content — centered on phone + tablet, left on desktop */}
           <div
             ref={contentRef}
-            className={`relative mx-auto w-full max-w-[700px] px-6 py-12 sm:px-10 sm:py-14 lg:px-12 lg:py-10 xl:px-16 xl:py-12 2xl:px-2 transition-all duration-700 ease-out ${
+            className={`relative mx-auto w-full max-w-[700px] px-6 py-12 text-center sm:px-10 sm:py-14 sm:text-left md:text-center lg:px-12 lg:py-10 lg:text-left xl:px-16 xl:py-12 2xl:px-2 transition-all duration-700 ease-out ${
               contentInView ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"
             }`}
           >
@@ -1155,7 +1154,7 @@ function FinalCtaSection() {
 
   return (
     <section
-      className="relative min-h-[620px] overflow-hidden bg-cover bg-center bg-no-repeat sm:min-h-[700px] lg:h-[75vh] z-0" style={{ backgroundImage: `url('/Images/FINAL CTA.webp')` }}
+      className="relative overflow-hidden bg-cover bg-center bg-no-repeat sm:min-h-[50vh] lg:h-[75vh] z-0" style={{ backgroundImage: `url('/Images/FINAL CTA.webp')` }}
       aria-label="Prêt à pousser la porte"
     >
       {/* Parallax background */}

@@ -77,7 +77,7 @@ export default async function ContactPage() {
           </div>
 
           {/* Address Card Below Map */}
-          <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-8  grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             <div className="rounded-xl bg-white p-6 shadow-md">
               <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-[0.13em] text-gold">
                 {t("addressLabel")}

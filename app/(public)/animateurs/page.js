@@ -41,7 +41,7 @@ export default async function AnimateursPage() {
             </span>
             <span className="h-px w-8 bg-gold" />
           </div>
-          <h1 className="text-[2.6rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3.2rem] lg:text-[3.8rem]">
+          <h1 className="text-[2.4rem] sm:text-[3.2rem] 2xl:text-[3.8rem] font-bold leading-[1.1] tracking-tight text-white sm:text-[3.2rem] lg:text-[3.8rem]">
             Des professionnels{" "}
             <em className="font-light text-gold/80 not-italic">passionnés.</em>
           </h1>

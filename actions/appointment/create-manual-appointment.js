@@ -338,6 +338,23 @@ export async function createManualAppointment(input) {
         return { success: false, message: "Client introuvable." };
       }
     } else {
+      // Manual "new client" must neither duplicate nor silently reuse an
+      // existing account: if the e-mail already belongs to an active client,
+      // refuse and point at the existing-client picker instead (same
+      // active-only rule as checkEmailExists and the partial unique indexes —
+      // a soft-deleted account never blocks reuse of its e-mail). This check
+      // stays in the manual flow only: the public flow intentionally reuses
+      // the matching account via resolveOrCreateCustomer below.
+      const emailInUse = await prisma.user.findFirst({
+        where: { email: customer.email.trim().toLowerCase(), isDeleted: false },
+        select: { id: true },
+      });
+      if (emailInUse) {
+        const message =
+          "Cette adresse e-mail est déjà utilisée par un client existant. Veuillez sélectionner le client existant plutôt que de créer un nouveau compte.";
+        return { success: false, field: "email", errors: { customer: message }, message };
+      }
+
       let isNewUser = false;
       let temporaryPassword = null;
       try {

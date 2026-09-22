@@ -216,3 +216,38 @@ describe("a credit note on a rent invoice, for a mistake", () => {
     expect(dialog).toContain("const canSubmit = amountValid && reason.trim().length >= 3 && (!paid || refundSent);");
   });
 });
+
+describe("« Émettre la facture » asks how to send it first, and never marks it paid (user's call, 2026-09-22)", () => {
+  const client = source("components/dashboard/invoices/InvoicesClient.jsx");
+  const card = source("components/dashboard/operations/DocumentDeliveryDialog.jsx");
+
+  it("the button only opens the send card on a draft — nothing is issued by the click", () => {
+    const issueRent = client.slice(client.indexOf("async function issueRent("), client.indexOf("async function issueRentNow("));
+    expect(issueRent).toContain("getStaffRentIssueDraft(");
+    expect(issueRent).not.toContain("issueStaffRentInvoice(");
+    expect(client).toContain("issue={issueRentNow}");
+  });
+
+  it("the card issues the invoice only on the final confirm, then sends it", () => {
+    const deliver = card.slice(card.indexOf("async function deliver("), card.indexOf("return (\n    <>"));
+    const issued = deliver.indexOf("await issue()");
+    expect(issued).toBeGreaterThan(-1);
+    expect(deliver.indexOf("sendInvoiceByEmail(documentId")).toBeGreaterThan(issued);
+    expect(deliver.indexOf("sendInvoiceToPeppyrus(documentId")).toBeGreaterThan(issued);
+    // A refused issue stops there: nothing is sent.
+    expect(deliver.slice(issued, deliver.indexOf("setIssued("))).toContain("return;");
+  });
+
+  it("the Paiement column reads the real payment status: issued or sent is not paid", () => {
+    expect(source("actions/dashboard/invoices.js")).toContain("paymentStatus: invoice.payment?.status ?? null");
+    expect(client).toContain('const OPEN_PAYMENT = ["PENDING", "PARTIALLY_PAID"];');
+    expect(client).toContain("<PaymentCell pending={pending} invoice={invoice} />");
+  });
+
+  it("the draft shows the number it should get, read without taking it", () => {
+    const peek = source("lib/invoicing.js");
+    const body = peek.slice(peek.indexOf("export async function peekNextInvoiceNumber("));
+    expect(body.slice(0, body.indexOf("\n}\n"))).not.toMatch(/INSERT|update|upsert/);
+    expect(source("lib/invoices/invoice-preview.js")).toContain("await peekNextInvoiceNumber(prisma)");
+  });
+});

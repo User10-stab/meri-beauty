@@ -31,9 +31,21 @@ import { isBelgianVatNumber } from "@/lib/peppyrus";
  * any mix of the two receives the document, and the client's own copy can
  * be omitted when only internal copies are wanted. The client's address is
  * always the one frozen on the document — it is never retyped here.
+ *
+ * `issue` (Factures page, « Émettre la facture » on a staff rent): the
+ * document is still a draft — no invoice exists and its number is only the
+ * one it should get. The channels are chosen first; confirming issues the
+ * invoice (`issue()` resolves `{ success, message, invoice }`) and then sends
+ * it. Closing the card before that issues nothing.
  */
-export function DocumentDeliveryDialog({ open, onClose, document: documentRecord, invoice, kind = "INVOICE", onDelivered, initialChannel = null }) {
+export function DocumentDeliveryDialog({ open, onClose, document: draftOrDocument, invoice: draftOrInvoice, kind = "INVOICE", onDelivered, initialChannel = null, issue = null, onIssued }) {
   const closeRef = useRef(null);
+
+  // Once `issue()` has run, the card works on the real invoice.
+  const [issued, setIssued] = useState(null);
+  const documentRecord = issued ?? draftOrDocument;
+  const invoice = issued ?? draftOrInvoice;
+  const pendingIssue = Boolean(issue) && !issued;
 
   const isCreditNote = kind === "CREDIT_NOTE";
   const label = isCreditNote ? "note de crédit" : "facture";
@@ -80,6 +92,7 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
     // pre-ticks its own channel — the shared confirm step still gates the send.
     setEmailChecked(initialChannel === "EMAIL");
     setPeppyrusChecked(initialChannel === "PEPPYRUS" && canUsePeppyrus);
+    setIssued(null);
     setIncludeClient(true);
     setCheckedIds(new Set());
     setAdding(false);
@@ -216,18 +229,35 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
     setSending(true);
     const outcomes = {};
 
+    // A draft is issued now — only now, the channels being confirmed.
+    let documentId = documentRecord.id;
+    let issuedNumber = null;
+    if (pendingIssue) {
+      const result = await issue();
+      if (!result?.success || !result.invoice?.id) {
+        setSending(false);
+        setConfirming(false);
+        toast.error(result?.message ?? "Facture non émise.");
+        return;
+      }
+      setIssued(result.invoice);
+      onIssued?.(result.invoice);
+      documentId = result.invoice.id;
+      issuedNumber = result.invoice.number;
+    }
+
     if (emailChecked) {
       // Only ask for the client's copy when the document actually carries an
       // address — otherwise the send would reject an internal-only delivery.
       const opts = { extraRecipients: selectedEmails, includeClient: includeClient && Boolean(clientEmail) };
       outcomes.email = await (isCreditNote
-        ? sendCreditNoteByEmail(documentRecord.id, opts)
-        : sendInvoiceByEmail(documentRecord.id, opts));
+        ? sendCreditNoteByEmail(documentId, opts)
+        : sendInvoiceByEmail(documentId, opts));
     }
     if (peppyrusChecked) {
       outcomes.peppyrus = await (isCreditNote
-        ? sendCreditNoteToPeppyrus(documentRecord.id)
-        : sendInvoiceToPeppyrus(documentRecord.id));
+        ? sendCreditNoteToPeppyrus(documentId)
+        : sendInvoiceToPeppyrus(documentId));
     }
 
     setSending(false);
@@ -252,7 +282,8 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
       return;
     }
     if (succeeded.length === 0) {
-      toast.error(failed.join(" "));
+      // Issued but not sent: the card stays open on the real invoice to retry.
+      toast.error(issuedNumber ? `Facture ${issuedNumber} émise, mais non envoyée — ${failed.join(" ")}` : failed.join(" "));
       return;
     }
     // Partial success: keep the card open, but untick whatever already went
@@ -278,10 +309,18 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">Livraison B2B</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">
+              {pendingIssue ? "Émission et envoi" : "Livraison B2B"}
+            </p>
             <h2 id="delivery-title" className="mt-1 text-lg font-semibold text-gray-900">
-              Envoyer la {label} {number}
+              {pendingIssue ? `Émettre et envoyer la facture ${number}` : `Envoyer la ${label} ${number}`}
             </h2>
+            {pendingIssue && (
+              <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                Pas encore émise : choisissez d'abord comment l'envoyer. La facture reçoit son numéro (prévu : {number}) à la
+                confirmation, puis part aussitôt. Elle reste « en attente de paiement » jusqu'à ce que vous l'acceptiez.
+              </p>
+            )}
             <p className="mt-2 text-sm leading-6 text-gray-600">
               {canUsePeppyrus
                 ? "Cochez les canaux d'envoi souhaités — e-mail, Peppol (Peppyrus), ou les deux. Rien n'est envoyé avant votre confirmation."
@@ -534,6 +573,8 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
                 </span>
               </span>
             </label>
+            {/* The Peppol document is built from an issued invoice only. */}
+            {!pendingIssue && (
             <div className="border-t border-gray-100 px-4 py-2">
               <button
                 type="button"
@@ -544,6 +585,7 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
                 <Eye size={14} /> Aperçu du document avant envoi
               </button>
             </div>
+            )}
           </div>
           )}
         </div>
@@ -551,7 +593,9 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
         {/* ── Confirm / send ───────────────────────────────────────────── */}
         {confirming ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <p className="text-sm font-semibold text-amber-950">Confirmer l'envoi ?</p>
+            <p className="text-sm font-semibold text-amber-950">
+              {pendingIssue ? `Émettre la facture ${number} et l'envoyer ?` : "Confirmer l'envoi ?"}
+            </p>
             {emailChecked && (
               <p className="mt-1 text-xs leading-5 text-amber-900">E-mail à : {recipientSummary || "—"}</p>
             )}
@@ -575,7 +619,7 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
                 disabled={sending}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3 py-2 text-xs font-semibold text-white hover:bg-[#1f291f] disabled:opacity-50"
               >
-                {sending && <Loader2 size={13} className="animate-spin" />} Envoyer
+                {sending && <Loader2 size={13} className="animate-spin" />} {pendingIssue ? "Émettre et envoyer" : "Envoyer"}
               </button>
             </div>
           </div>
@@ -587,7 +631,7 @@ export function DocumentDeliveryDialog({ open, onClose, document: documentRecord
               disabled={!canSend}
               className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1f291f] disabled:opacity-40"
             >
-              <Send size={15} /> Envoyer
+              <Send size={15} /> {pendingIssue ? "Émettre et envoyer" : "Envoyer"}
             </button>
           </div>
         )}

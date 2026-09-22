@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     payment: { findUnique: vi.fn() },
     user: { findUnique: vi.fn() },
     staffMonthlyInvoice: { findUnique: vi.fn() },
+    numberingCounter: { findUnique: vi.fn() },
     order: { findUnique: vi.fn() },
     invoice: { create: vi.fn() },
   },
@@ -59,14 +60,16 @@ beforeEach(() => {
   mocks.prisma.payment.findUnique.mockResolvedValue({ payeeStaffId: null });
   mocks.prisma.user.findUnique.mockResolvedValue(LYLY);
   mocks.prisma.staffMonthlyInvoice.findUnique.mockResolvedValue(RENT);
+  mocks.prisma.numberingCounter.findUnique.mockResolvedValue({ lastNumber: 12 });
 });
 
 describe("« Aperçu » shows the invoice « Accepter » would issue, without issuing it", () => {
-  it("a rent due previews as its invoice: same figures and buyer, no number taken, nothing written", async () => {
+  it("a rent due previews as its invoice: same figures and buyer, its forecast number, nothing taken or written", async () => {
     const preview = await buildPendingInvoicePreview({ kind: "RENT", id: "smi_lyly" });
     expect(preview.invoice).toMatchObject({
       isPreview: true,
-      number: "—",
+      // The next free number, read — not taken (the counter is never incremented).
+      number: expect.stringMatching(/^F-\d{4}-000013$/),
       source: "STAFF_CONTRACT",
       customerName: "Lyly Hannecart",
       // Her VAT number sits on her staff record: a B2B document, like the real one.

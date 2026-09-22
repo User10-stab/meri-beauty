@@ -257,6 +257,26 @@ function describeUnifiedRow(row) {
     };
   }
 
+  if (row.sourceType === "STAFF_RENT") {
+    // A staff member's rent: the transfer « Accepter » recorded (or the
+    // refund a credit note recorded) — the salon's own income.
+    const invoice = row.payment?.invoice ?? null;
+    const reference = row.manualReference ? ` · réf. ${row.manualReference}` : "";
+    const due = invoice?.dueDate ? ` · échéance ${date(invoice.dueDate)}` : "";
+    return {
+      dateLabel: date(row.paidAt),
+      kind: "Loyer staff",
+      title: invoice?.number ?? "Loyer",
+      href: invoice?.number ? `/dashboard/factures?q=${encodeURIComponent(invoice.number)}` : "/dashboard/factures",
+      detail: `${PAYMENT_EVENT_LABELS[row.transactionType] ?? row.transactionType} · Virement${reference}${due}`,
+      lifecycleStatus: null,
+      customer: row.staffMember,
+      customerFallback: "—",
+      totalAmount: row.amount,
+      isRefundEvent: row.transactionType === "REFUND",
+    };
+  }
+
   // A stale browser can briefly receive a row type added by a newer server
   // during a deployment. Never render internal `undefined` values: keep the
   // row readable and tell the operator how to load its dedicated renderer.
@@ -731,10 +751,10 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
                     <summary className="cursor-pointer font-medium text-[#2f3a2e]">Historique des transactions</summary>
                     <ul className="mt-2 space-y-2">
                       {(row.payment?.transactions ?? []).filter((event) => !event.isDeleted).map((event) => {
-                        const label = `${date(event.paidAt)} · ${PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · ${event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : "En ligne"} · ${event.transactionType === "REFUND" ? "−" : ""}${money(event.amount)}`;
+                        const label = `${date(event.paidAt)} · ${PAYMENT_EVENT_LABELS[event.transactionType] ?? event.transactionType} · ${event.method === "CASH" ? "Espèces" : event.method === "CARD" ? "Carte" : event.method === "TRANSFER" ? "Virement" : "En ligne"} · ${event.transactionType === "REFUND" ? "−" : ""}${money(event.amount)}`;
                         return (
                           <li key={event.id}>
-                            {readOnly ? (
+                            {readOnly || row.sourceType === "STAFF_RENT" ? (
                               <span className="text-left">{label}</span>
                             ) : (
                               <button type="button" onClick={() => onOpenDetail(event.id)} className="text-left underline underline-offset-2">
@@ -768,6 +788,15 @@ function UnifiedOperationsTable({ rows, onOpenDetail, onOpenPendingOrder, onOpen
                   ) : (
                     <span className="text-xs text-gray-400">—</span>
                   )
+                ) : row.sourceType === "STAFF_RENT" ? (
+                  // Sent, accepted and credited from the Factures page — the
+                  // booking refund flows here know nothing about a rent.
+                  <Link
+                    href={describeUnifiedRow(row).href}
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:border-[#2f3a2e] hover:bg-[#f4f7f3] hover:text-[#2f3a2e]"
+                  >
+                    <Eye size={14} /> Voir dans Factures
+                  </Link>
                 ) : row.operationOnly ? (
                   <button
                     type="button"

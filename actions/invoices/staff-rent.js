@@ -9,6 +9,7 @@ import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { isBelgianVatNumber } from "@/lib/peppyrus";
 import { issueInvoice, issueCreditNote } from "@/lib/invoicing";
 import { buildStaffCustomer, issueRentInvoiceNow, pendingRentPaymentData, rentInvoiceInput } from "@/lib/staff-rent-payment";
+import { buildPendingInvoicePreview } from "@/lib/invoices/invoice-preview";
 
 /**
  * Staff rent on the Factures page.
@@ -365,10 +366,31 @@ function rentErrorMessage(error, context) {
 }
 
 /**
+ * What the send card shows for a rent not invoiced yet, BEFORE anything is
+ * issued: the customer the invoice would carry (its e-mail, Peppol or not)
+ * and the number it should get. Nothing is written, no number is taken —
+ * « Émettre la facture » opens this card first, and the invoice is issued only
+ * when the channels are chosen and confirmed (user's call, 2026-09-22).
+ */
+export async function getStaffRentIssueDraft(input) {
+  const guard = await requireAdminSession();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const rentId = typeof input?.rentId === "string" ? input.rentId.trim() : "";
+  if (!rentId) return { success: false, message: RENT_ERROR_MESSAGES.STAFF_RENT_NOT_FOUND };
+
+  const preview = await buildPendingInvoicePreview({ kind: "RENT", id: rentId });
+  if (!preview.invoice) {
+    return { success: false, message: preview.reason === "ALREADY_INVOICED" ? RENT_ERROR_MESSAGES.STAFF_RENT_ALREADY_INVOICED : preview.message };
+  }
+  return { success: true, data: { draft: { ...serializeInvoice({ ...preview.invoice, id: `draft-${rentId}` }), isDraft: true } } };
+}
+
+/**
  * « Émettre la facture » on a rent recorded without one — its automatic
  * issue was refused (missing data, since fixed), or it was recorded before
- * rents were invoiced up front. Issued unpaid, with its échéance; the caller
- * then offers to send it.
+ * rents were invoiced up front. Issued unpaid, with its échéance. Called by
+ * the send card once the channels are confirmed, right before sending.
  */
 export async function issueStaffRentInvoice(input) {
   const guard = await requireAdminSession();

@@ -60,10 +60,10 @@ function dueDateLine(invoice, payment) {
   return `Échéance : ${formatDate(invoice.dueDate)}`;
 }
 
-// An unissued invoice rendered for review before « Accepter »
-// (lib/invoices/invoice-preview.js): no number exists yet, and it says so.
+// An unissued invoice rendered for review (lib/invoices/invoice-preview.js).
+// It shows the number it should get — the next free one — and says so.
 const PREVIEW_STATUS = { label: "APERÇU — NON ÉMISE", tone: "credit" };
-const PREVIEW_PAYMENT_NOTE = "Aperçu : cette facture n'est pas encore émise — son numéro est attribué à l'émission";
+const PREVIEW_PAYMENT_NOTE = "Aperçu : cette facture n'est pas encore émise — numéro prévu, attribué définitivement à l'émission";
 
 // Only a staff rent invoice carries an échéance (lib/staff-rent-payment.js):
 // it is issued before it is paid. Shown paid or not — it is part of what was

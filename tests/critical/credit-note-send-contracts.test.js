@@ -102,8 +102,8 @@ describe("credit-note delivery is a deliberate action from the operation detail"
   test("opens the same delivery card for the note", () => {
     expect(drawer).toContain('kind: "CREDIT_NOTE"');
     expect(drawer).toContain("Envoyer la note de crédit");
-    expect(delivery).toContain("sendCreditNoteByEmail(documentRecord.id, opts)");
-    expect(delivery).toContain("sendCreditNoteToPeppyrus(documentRecord.id)");
+    expect(delivery).toContain("sendCreditNoteByEmail(documentId, opts)");
+    expect(delivery).toContain("sendCreditNoteToPeppyrus(documentId)");
     expect(delivery).toContain("Envoyer via Peppol (Peppyrus)");
   });
 

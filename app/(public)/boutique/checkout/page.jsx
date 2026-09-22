@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { CheckoutPageClient } from "@/components/boutique/CheckoutPageClient";
 import { getTranslations } from "next-intl/server";
-import { isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
+import { isBoutiqueShippingEnabledFor } from "@/lib/commerce-availability";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +60,14 @@ export default async function CheckoutPage() {
     <CheckoutPageClient
       cart={cart}
       customerSession={customerSession}
-      shippingEnabled={isBoutiqueShippingEnabled()}
+      // UI convenience only, same caveat as the base flag it wraps — the
+      // real enforcement is server-side in createOrderFromCart, keyed on
+      // customerInfo.email so it also covers guest checkout. A guest here
+      // (no session, or a logged-in visitor with no CUSTOMER session yet)
+      // simply never sees delivery during the pilot — they're not in
+      // MONDIAL_RELAY_PILOT_EMAILS by definition since we don't know their
+      // e-mail yet.
+      shippingEnabled={isBoutiqueShippingEnabledFor(session?.user?.email)}
     />
   );
 }

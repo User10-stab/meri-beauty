@@ -8,14 +8,19 @@ import { shippingQuoteRequestOwnerEmail, shippingQuoteRequestConfirmationEmail }
 import { shippingQuoteRequestSchema } from "@/lib/validations/commerce";
 import { calculateShippingCost, calculateTotalWeight, getShippingDetails } from "@/lib/shipping";
 import { applyVatRate, repriceTtcCataloguePrice, resolveGoodsVatPolicy } from "@/lib/tax-policy";
-import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabled } from "@/lib/commerce-availability";
+import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabledFor } from "@/lib/commerce-availability";
 
 /**
  * Get current cart shipping calculation for checkout display
  * Returns the same shipping cost that will be charged at checkout
  */
 export async function getCartShippingCost() {
-  if (!isBoutiqueShippingEnabled()) {
+  // Fetched up front (not just further down for the VAT policy) so the
+  // Mondial Relay pilot allowlist can be checked before the base flag —
+  // see isBoutiqueShippingEnabledFor. A guest (no session) is simply never
+  // in the pilot.
+  const session = await auth();
+  if (!isBoutiqueShippingEnabledFor(session?.user?.email)) {
     return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
   }
 
@@ -34,7 +39,6 @@ export async function getCartShippingCost() {
       return { success: true, data: { cost: 0, isFree: true, details: null } };
     }
 
-    const session = await auth();
     const customer = session?.user?.role === "CUSTOMER"
       ? await prisma.user.findUnique({
           where: { id: session.user.id },
@@ -95,10 +99,6 @@ export async function getCartShippingCost() {
  * the client submits.
  */
 export async function requestShippingQuote(input) {
-  if (!isBoutiqueShippingEnabled()) {
-    return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
-  }
-
   const parsed = shippingQuoteRequestSchema.safeParse(input);
   if (!parsed.success) {
     const errors = parsed.error.flatten().fieldErrors;
@@ -108,6 +108,12 @@ export async function requestShippingQuote(input) {
     };
   }
   const { fullName, email, phone, pickupPoint, notes } = parsed.data;
+
+  // Checked against the submitted e-mail, not the session — this form is
+  // reachable by a guest (no CUSTOMER session at all).
+  if (!isBoutiqueShippingEnabledFor(email)) {
+    return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
+  }
 
   try {
     const cart = await getOrCreateActiveCart();

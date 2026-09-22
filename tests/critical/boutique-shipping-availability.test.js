@@ -18,11 +18,16 @@ describe("boutique shipping availability", () => {
     const orders = read("actions/boutique/orders.js");
     const shipping = read("actions/boutique/shipping.js");
 
-    expect(orders).toContain('fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabled()');
+    // isBoutiqueShippingEnabledFor wraps isBoutiqueShippingEnabled with the
+    // Mondial Relay pilot allowlist (see boutique-mondial-relay-pilot.test.js)
+    // — every real call site goes through the wrapper, never the bare flag.
+    expect(orders).toContain('fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabledFor(customerInfo.email)');
+    expect(orders).toContain("!isBoutiqueShippingEnabledFor(order.user?.email)");
     expect(orders).toContain("BOUTIQUE_SHIPPING_DISABLED_MESSAGE");
     expect(shipping).toContain("export async function getCartShippingCost()");
     expect(shipping).toContain("export async function requestShippingQuote(input)");
-    expect(shipping).toContain("!isBoutiqueShippingEnabled()");
+    expect(shipping).toContain("!isBoutiqueShippingEnabledFor(session?.user?.email)");
+    expect(shipping).toContain("!isBoutiqueShippingEnabledFor(email)");
     expect(BOUTIQUE_SHIPPING_DISABLED_MESSAGE).toContain("temporairement indisponible");
   });
 });

@@ -1,14 +1,14 @@
 "use server";
 
-import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcrypt";
 import { auth } from "@/auth";
 import { isCheckoutAuthorized } from "@/lib/resume-checkout-token";
 import { sendEmail } from "@/lib/email";
-import { welcomeWithCredentialsEmail, waitingListJoinConfirmationEmail } from "@/lib/email-templates";
+import { waitingListJoinConfirmationEmail } from "@/lib/email-templates";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
+import { validatePassword } from "@/lib/validations/password";
 import {
   TERMS_CONSENT_REQUIRED_MESSAGE,
   buildTermsAcceptanceUpdate,
@@ -33,10 +33,6 @@ function formatSessionDate(date) {
 }
 
 const BCRYPT_SALT_ROUNDS = 12;
-
-function generateTemporaryPassword() {
-  return randomBytes(9).toString("base64url");
-}
 
 /**
  * Join the waiting list for a workshop session.
@@ -122,7 +118,6 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
       }
     }
 
-    let temporaryPassword = null;
     let isNewUser = false;
 
     if (!user) {
@@ -138,13 +133,18 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
         }
       }
 
-      temporaryPassword = generateTemporaryPassword();
-      const hashedPassword = await bcrypt.hash(temporaryPassword, BCRYPT_SALT_ROUNDS);
+      // The account is created with the password the client chose on the
+      // page — never generated, never emailed. The caller signs in with it
+      // directly right after this returns.
+      const passwordIssue = validatePassword(customerInfo.password);
+      if (passwordIssue) {
+        return { success: false, field: "password", message: "Veuillez choisir un mot de passe d'au moins 8 caractères." };
+      }
       user = await prisma.user.create({
         data: {
           fullName: customerInfo.fullName,
           email,
-          password: hashedPassword,
+          password: await bcrypt.hash(customerInfo.password, BCRYPT_SALT_ROUNDS),
           phone,
           role: "CUSTOMER",
           isCompany: Boolean(vatNumber),
@@ -155,16 +155,6 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
       });
 
       isNewUser = true;
-
-      // Send welcome email
-      const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://meribeauty.com"}/login`;
-      const emailTemplate = welcomeWithCredentialsEmail({
-        customerName: customerInfo.fullName,
-        email,
-        temporaryPassword,
-        loginUrl,
-      });
-      sendEmail({ to: email, ...emailTemplate }).catch(() => {});
     } else if (vatNumber && !hasReusableVatValidation(user, vatNumber)) {
       user = await prisma.user.update({
         where: { id: user.id },
@@ -258,7 +248,6 @@ export async function joinWaitingList({ sessionId, customerInfo: submittedCustom
       entryId: entry.id,
       seatsRequested,
       isNewUser,
-      temporaryPassword,
       email,
     };
   } catch (error) {

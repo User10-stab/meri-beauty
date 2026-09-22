@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { signIn, getSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { checkEmailExists } from "@/actions/shared/check-email-exists";
-import { initCustomerVerification } from "@/actions/reservation/init-customer-verification";
+import { initCustomerVerification } from "@/actions/shared/init-customer-verification";
 import { resendVerificationEmail } from "@/actions/auth/verify-email";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";

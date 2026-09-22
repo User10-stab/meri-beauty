@@ -840,7 +840,7 @@
       }
     },
     "mondialRelay": {
-      "autoSearchComing": "Recherche automatique des points relais bientôt disponible. En attendant, indiquez le point relais Mondial Relay de votre choix (trouvable sur mondialrelay.fr).",
+      "autoSearchComing": "Recherche automatique des points relais bientôt disponible. En attendant, indiquez le point relais Mondial Relay de votre choix (trouvable sur mondialrelay.be).",
       "pointName": "Nom du point relais",
       "pointAddress": "Adresse du point relais",
       "postalCode": "Code postal",
@@ -2371,11 +2371,6 @@
       "reservationFailed": "Erreur lors de la création de la réservation"
     },
     "stepOf": "Étape {current} sur {total}"
-  },
-  "existingAccountBanner": {
-    "title": "Un compte existe déjà pour cette adresse email.",
-    "description": "Connectez-vous pour associer cette réservation à votre compte existant, ou continuez en tant qu'invité si vous souhaitez créer un nouveau compte.",
-    "signIn": "Se connecter"
   },
   "promoCode": {
     "placeholder": "Code promo",

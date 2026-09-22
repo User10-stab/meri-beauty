@@ -287,7 +287,17 @@ export async function createAdminAccount(input) {
       temporaryPassword: emailResult?.success ? undefined : plainPassword,
     };
   } catch (error) {
-    if (error?.code === "P2002" && error.meta?.target?.includes?.("email")) {
+    // user_active_email_idx is a partial index on lower(email), created by
+    // raw SQL (prisma/migrations/20260817153631_active_only_uniqueness) since
+    // it can't be expressed as a schema.prisma @@unique — Prisma reports the
+    // index name, not a plain "email" field, in meta.target for this shape
+    // (sometimes even omitting target entirely), so a direct .includes("email")
+    // call missed it and fell through to the generic message below instead of
+    // naming the actual duplicate-email field. Same substring-match-on-the
+    // -stringified-target fix already used for this exact index in
+    // create-independent-staff.js / update-independent-staff.js /
+    // create-staff-from-rental.js.
+    if (error?.code === "P2002" && JSON.stringify(error.meta?.target ?? "").toLowerCase().includes("email")) {
       return {
         success: false,
         message: "Cette adresse e-mail est déjà utilisée par un autre compte.",

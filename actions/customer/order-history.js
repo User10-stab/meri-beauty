@@ -117,6 +117,7 @@ export async function getMyOrderHistory() {
         // only route is an exception request (see
         // actions/reservations/cancellation-request.js).
         cancellationRequest: { select: { status: true, decisionNote: true } },
+        review: { select: { id: true, rating: true, comment: true, createdAt: true } },
       },
       orderBy: { createdAt: "desc" },
     }),
@@ -132,6 +133,7 @@ export async function getMyOrderHistory() {
         },
         payment: paymentSelect,
         cancellationRequest: { select: { status: true, decisionNote: true } },
+        review: { select: { id: true, rating: true, comment: true, createdAt: true } },
       },
       orderBy: { createdAt: "desc" },
     }),

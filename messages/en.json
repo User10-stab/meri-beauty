@@ -840,7 +840,7 @@
       }
     },
     "mondialRelay": {
-      "autoSearchComing": "Automatic relay point search coming soon. In the meantime, enter the Mondial Relay pickup point of your choice (findable on mondialrelay.fr).",
+      "autoSearchComing": "Automatic relay point search coming soon. In the meantime, enter the Mondial Relay pickup point of your choice (findable on mondialrelay.be).",
       "pointName": "Pickup point name",
       "pointAddress": "Pickup point address",
       "postalCode": "Postal code",
@@ -2357,11 +2357,6 @@
       "reservationFailed": "Error creating reservation"
     },
     "stepOf": "Step {current} of {total}"
-  },
-  "existingAccountBanner": {
-    "title": "An account already exists for this email address.",
-    "description": "Sign in to link this reservation to your existing account, or continue as a guest if you would like to create a new account.",
-    "signIn": "Sign in"
   },
   "promoCode": {
     "placeholder": "Promo code",

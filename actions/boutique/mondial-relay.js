@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { isAdminRole, isTillCashOperator } from "@/lib/authorization";
 import { createShipmentLabel } from "@/lib/mondial-relay";
 import { storeShippingLabel } from "@/lib/mondial-relay-label-storage";
+import { fetchShipmentTracing } from "@/lib/mondial-relay-tracking";
 import { isBoutiqueShippingEnabledFor } from "@/lib/commerce-availability";
 import { captureCriticalError } from "@/lib/monitoring";
 
@@ -267,4 +268,35 @@ export async function clearStuckLabelClaim(orderId) {
     success: true,
     message: "Verrou levé. Une nouvelle génération est possible — vérifiez d'abord sur le portail Mondial Relay qu'aucune étiquette n'existe déjà pour cette commande.",
   };
+}
+
+/**
+ * Read-only lookup of where the parcel currently is, straight from Mondial
+ * Relay's tracing webservice (API1/SOAP — a different API and a different
+ * credential pair from label creation, see lib/mondial-relay-tracking.js).
+ *
+ * Staff-triggered on purpose rather than polled: Mondial Relay asks that a
+ * shipment not be queried more than 4-6 times a day, and nothing here writes
+ * to the order — the collection date stays a human decision until a real
+ * tracing response has been seen and its wording verified.
+ */
+export async function getShipmentTracing(orderId) {
+  const guard = await requireLabelAccess();
+  if (guard.error) return { success: false, message: guard.error, events: [] };
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { trackingCode: true },
+  });
+
+  if (!order?.trackingCode) {
+    return { success: false, message: "Cette commande n'a pas encore de numéro d'expédition.", events: [] };
+  }
+
+  const result = await fetchShipmentTracing(order.trackingCode);
+  if (!result.success) {
+    return { success: false, message: result.message ?? "Suivi indisponible.", events: [] };
+  }
+
+  return { success: true, events: result.events, trackingCode: order.trackingCode };
 }

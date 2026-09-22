@@ -45,7 +45,7 @@ export default async function AllAppointmentsPage() {
         </div>
       )}
 
-      <ReviewsDashboardCard data={reviewsResult.data} />
+      <ReviewsDashboardCard data={reviewsResult.data?.appointments} />
 
       <AppointmentsPageClient
         initialAppointments={appointmentsResult.data ?? []}

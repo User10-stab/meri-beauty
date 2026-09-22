@@ -35,6 +35,7 @@ import { resolvePromoCode } from "@/lib/promo-codes";
 import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-order-payment";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
+import { validatePassword } from "@/lib/validations/password";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
 import { captureError, captureWarning } from "@/lib/monitoring";
 import { calculateVatTotals, applyVatRate, repriceTtcCataloguePrice, resolveGoodsVatPolicy, hasInvoiceableVatIdentity, isPeppolMandatoryCustomer } from "@/lib/tax-policy";
@@ -137,16 +138,22 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
       }
     : null;
 
+  // A particulier never gets an invoice — only a VIES-identified VAT account
+  // does (same rule as lib/orders/fulfill-order-payment.js and the POS
+  // counter-sale path below in this file) — so the billing address is only
+  // actually required when this order will be invoiced. Checked against both
+  // the freshly-submitted VAT number and whatever the resolved account
+  // already carries, so a pre-existing VAT-verified account with no address
+  // on file can't dodge the requirement by toggling to "Particulier" for one
+  // order and hitting assertBuyerLegalDataComplete only after Stripe has
+  // already been charged — that gap is what left order
+  // cmtbaqxua0003gczkbigl9x23 paid-but-stuck in the first place.
+  const willBeInvoiced = (user) => Boolean(customerInfo.vatNumber?.trim()) || hasInvoiceableVatIdentity(user);
+
   if (authenticatedUserId) {
     const user = await prisma.user.findUnique({ where: { id: authenticatedUserId, isDeleted: false } });
     if (user) {
-      // Same rule as a guest: an account reaching checkout with no address on
-      // file (pre-dates the mandatory-address rule, or was never completed in
-      // /mon-compte) must not be allowed to pay for something that can never
-      // be invoiced. issueInvoice's assertBuyerLegalDataComplete would refuse
-      // it anyway — this stops it before Stripe is charged rather than after,
-      // which is what left order cmtbaqxua0003gczkbigl9x23 paid-but-stuck.
-      if (!user.addressLine1) {
+      if (!user.addressLine1 && willBeInvoiced(user)) {
         if (!suppliedAddress) throw new Error("ADDRESS_REQUIRED");
         const updated = await prisma.user.update({ where: { id: user.id }, data: suppliedAddress });
         return { user: updated, isNewUser: false, temporaryPassword: null };
@@ -166,12 +173,25 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
   // quoted an address the buyer had never seen and could not open.
   const existing = await prisma.user.findFirst({ where: { email, isDeleted: false } });
   if (existing) {
-    if (!existing.addressLine1) {
+    let user = existing;
+    if (!authenticatedUserId && !existing.emailVerified) {
+      // Existing-but-unverified account (an earlier incomplete checkout
+      // under this email) retrying — refresh the password to whatever was
+      // just typed, same as actions/shared/init-customer-verification.js.
+      // Never touches a *verified* account's password without authentication.
+      const passwordIssue = validatePassword(customerInfo.password);
+      if (passwordIssue) throw new Error("PASSWORD_REQUIRED");
+      user = await prisma.user.update({
+        where: { id: existing.id },
+        data: { password: await bcrypt.hash(customerInfo.password, BCRYPT_SALT_ROUNDS) },
+      });
+    }
+    if (!user.addressLine1 && willBeInvoiced(user)) {
       if (!suppliedAddress) throw new Error("ADDRESS_REQUIRED");
-      const updated = await prisma.user.update({ where: { id: existing.id }, data: suppliedAddress });
+      const updated = await prisma.user.update({ where: { id: user.id }, data: suppliedAddress });
       return { user: updated, isNewUser: false, temporaryPassword: null };
     }
-    return { user: existing, isNewUser: false, temporaryPassword: null };
+    return { user, isNewUser: false, temporaryPassword: null };
   }
 
   // New email, but the number is already on a different account. Refuse rather
@@ -186,15 +206,17 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
     if (phoneOwner) throw new Error("PHONE_ALREADY_REGISTERED");
   }
 
-  // Brand-new account — mandatory-address rule applies the same as normal
-  // registration (lib/validations/register.js), since this is the moment
-  // the account is created.
-  if (!suppliedAddress) throw new Error("ADDRESS_REQUIRED");
+  // Brand-new account — address is only mandatory when this first order will
+  // be invoiced (Entreprise + VAT number); a particulier's plain ticket
+  // doesn't need one.
+  if (willBeInvoiced(null) && !suppliedAddress) throw new Error("ADDRESS_REQUIRED");
 
-  // Throwaway placeholder — never shown to anyone. The real, usable
-  // password is generated once the email is confirmed (see
-  // actions/shared/resume-checkout-after-verification.js).
-  const placeholderHash = await bcrypt.hash(randomBytes(9).toString("base64url"), BCRYPT_SALT_ROUNDS);
+  // The account is created with the password the client chose at checkout —
+  // never generated, never emailed. Mirrors
+  // actions/shared/init-customer-verification.js.
+  const passwordIssue = validatePassword(customerInfo.password);
+  if (passwordIssue) throw new Error("PASSWORD_REQUIRED");
+  const passwordHash = await bcrypt.hash(customerInfo.password, BCRYPT_SALT_ROUNDS);
 
   let user;
   try {
@@ -203,7 +225,7 @@ async function resolveOrCreateCustomer(customerInfo, authenticatedUserId) {
         fullName: customerInfo.fullName.trim(),
         email,
         phone,
-        password: placeholderHash,
+        password: passwordHash,
         role: "CUSTOMER",
         isActive: true,
         ...suppliedAddress,
@@ -785,6 +807,13 @@ export async function createOrderFromCart(input) {
     // belongs to them. Awaited — the interstitial we show next promises
     // "check your inbox", so we need to know it actually sent.
     if (!user.emailVerified) {
+      // The commande above is already committed — stock decremented, cart
+      // converted (on-site) or held. A failed *delivery* attempt must not be
+      // reported as a failed order (the customer would retry and double up),
+      // and sendCheckoutVerificationEmail already writes the verification
+      // token row before it ever tries to send, so "Renvoyer le lien" on
+      // /verify-email picks this exact token straight back up.
+      let emailDeliveryFailed = false;
       try {
         await sendCheckoutVerificationEmail({
           email: user.email,
@@ -794,10 +823,16 @@ export async function createOrderFromCart(input) {
         });
       } catch (err) {
         console.error("[createOrderFromCart] verification email failed:", err);
-        return { success: false, message: "Impossible d'envoyer l'email de confirmation. Veuillez réessayer." };
+        emailDeliveryFailed = true;
       }
 
-      return { success: true, message: "Vérifiez votre email pour confirmer.", data: { requiresEmailVerification: true, email: user.email } };
+      return {
+        success: true,
+        message: emailDeliveryFailed
+          ? "Votre commande est enregistrée, mais l'e-mail de confirmation n'a pas pu être envoyé. Demandez un nouveau lien depuis la page de vérification."
+          : "Vérifiez votre email pour confirmer.",
+        data: { requiresEmailVerification: true, email: user.email, emailDeliveryFailed },
+      };
     }
 
     if (isOnSite) {
@@ -851,6 +886,13 @@ export async function createOrderFromCart(input) {
         message: "L'adresse de facturation est obligatoire.",
         requiresAddress: true,
         errors: { addressLine1: "Obligatoire", addressCity: "Obligatoire", addressPostalCode: "Obligatoire" },
+      };
+    }
+    if (error.message === "PASSWORD_REQUIRED") {
+      return {
+        success: false,
+        message: "Veuillez choisir un mot de passe d'au moins 8 caractères.",
+        field: "password",
       };
     }
     captureError(error, { area: "stock-capacity", context: "createOrderFromCart" });

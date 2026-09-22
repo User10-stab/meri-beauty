@@ -9,6 +9,7 @@ import { TERMS_CONSENT_REQUIRED_MESSAGE, buildTermsAcceptanceUpdate, recordTerms
 import { validateCustomerIdentity } from "@/lib/validations/customer-identity";
 import { refineCompanyVat } from "@/lib/validations/register";
 import { isSafeReturnPath } from "@/lib/verify-email-link";
+import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from "@/lib/validations/password";
 import countriesData from "@/data/countries.json";
 
 const BCRYPT_SALT_ROUNDS = 12;
@@ -17,7 +18,7 @@ const RATE_LIMIT_MAX_REQUESTS = 3;
 
 /**
  * Resolves a 2-letter country code from either a code ("BE") or a localized
- * country name ("Belgique") — the reservation form stores names while VAT
+ * country name ("Belgique") — the booking forms store names while VAT
  * validation reasons in codes. Falls back to "BE".
  */
 function resolveCountryCode(value) {
@@ -29,14 +30,17 @@ function resolveCountryCode(value) {
 
 /**
  * Creates or finds a pending customer, then sends a verification email.
- * 
- * Only advances the user past the CustomerInfoStep once their email has been
- * verified via the link sent to their inbox.
+ *
+ * Shared by every guest checkout/booking surface (appointment reservation,
+ * formation, workshop, boutique order): the caller supplies which flow this
+ * is for (resumeType/resumeId/emailVariant/newsletterSource) and the visitor
+ * never advances past the account step until their email is verified via the
+ * link sent to their inbox.
  *
  * The account is always created with the password the client chose in the
- * reservation form — no password is ever auto-generated here and no email
- * containing credentials is ever sent.
- * 
+ * form — no password is ever auto-generated here and no email containing
+ * credentials is ever sent.
+ *
  * @param {{
  *   fullName: string,
  *   email: string,
@@ -53,13 +57,16 @@ function resolveCountryCode(value) {
  *   addressPostalCode?: string,
  *   addressCountry?: string,
  *   returnTo?: string,
+ *   resumeType?: "RESERVATION" | "FORMATION" | "WORKSHOP" | "ORDER",
+ *   emailVariant?: string | null,
+ *   newsletterSource?: string,
  * }} input
  * @returns {Promise<{ verified: boolean, message: string }>}
  */
-export async function initCustomerVerification({ 
-  fullName, 
-  email, 
-  phone, 
+export async function initCustomerVerification({
+  fullName,
+  email,
+  phone,
   password,
   newsletterSubscribed,
   termsAccepted,
@@ -72,6 +79,9 @@ export async function initCustomerVerification({
   addressPostalCode,
   addressCountry,
   returnTo,
+  resumeType = "RESERVATION",
+  emailVariant = "reservation",
+  newsletterSource = "appointment_booking",
 }) {
   // Same rule as signup and every other purchase path: the account cannot be
   // created without CGV consent, and this public action must not rely on the
@@ -100,7 +110,7 @@ export async function initCustomerVerification({
       message: "Veuillez choisir un mot de passe.",
     };
   }
-  if (providedPassword.length < 8 || providedPassword.length > 72) {
+  if (providedPassword.length < MIN_PASSWORD_LENGTH || providedPassword.length > MAX_PASSWORD_LENGTH) {
     return {
       verified: false,
       field: "password",
@@ -108,7 +118,7 @@ export async function initCustomerVerification({
     };
   }
 
-  // Post-verification return path (the reservation the client was
+  // Post-verification return path (the booking/order the client was
   // completing). Strictly validated: an invalid value is dropped, never
   // trusted — verification itself does not depend on it.
   const safeReturnTo = isSafeReturnPath(returnTo) ? String(returnTo) : null;
@@ -197,7 +207,7 @@ export async function initCustomerVerification({
         addressCity: addressCity?.trim() || null,
         addressPostalCode: addressPostalCode?.trim() || null,
         addressCountry: addressCountry?.trim() || "BE",
-        ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
+        ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, newsletterSource),
         ...buildTermsAcceptanceUpdate(),
       },
     });
@@ -225,7 +235,7 @@ export async function initCustomerVerification({
         addressCity: addressCity?.trim() || null,
         addressPostalCode: addressPostalCode?.trim() || null,
         addressCountry: addressCountry?.trim() || "BE",
-        ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "appointment_booking"),
+        ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, newsletterSource),
       },
     });
 
@@ -244,18 +254,18 @@ export async function initCustomerVerification({
 
   // 3. Send the verification email (fire-and-forget the result is irrelevant —
   //    the action always succeeds if email is reachable; failures are logged
-  //    internally by sendVerificationEmail). The token carries the reservation
-  //    return context so one click verifies the address and brings the client
-  //    straight back to their booking.
+  //    internally by sendVerificationEmail). The token carries the resume
+  //    context so one click verifies the address and brings the client
+  //    straight back to their booking/order.
   await sendVerificationEmail(
     {
       fullName: validFullName,
       email: normalizedEmail,
     },
     {
-      resumeType: "RESERVATION",
+      resumeType,
       resumeId: safeReturnTo,
-      emailVariant: "reservation",
+      emailVariant,
     }
   );
 

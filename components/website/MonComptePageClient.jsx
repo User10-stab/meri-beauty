@@ -3,10 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Package, Sparkles, GraduationCap, Loader2, FileDown, ExternalLink, Truck, AlertTriangle } from "lucide-react";
+import { Package, Sparkles, GraduationCap, Loader2, FileDown, ExternalLink, Truck, AlertTriangle, Star } from "lucide-react";
 import { cancelMyOrder, submitOrderCancellationRequest } from "@/actions/boutique/orders";
 import { submitReservationCancellationRequest } from "@/actions/reservations/cancellation-request";
+import { createWorkshopReservationReview, createFormationReservationReview } from "@/actions/review/review-actions";
+import { REVIEW_COMMENT_MAX_LENGTH } from "@/lib/review-eligibility";
 import { MONDIAL_RELAY_TRACKING_URL } from "@/lib/mondial-relay-tracking";
+import { StarRatingInput, StaticStars } from "@/components/shared/StarRating";
 
 const CUSTOMER_CANCELLABLE_STATUSES = ["PENDING_PICKUP"];
 const CUSTOMER_CANCELLATION_REQUESTABLE_STATUSES = ["PAID", "PROCESSING", "READY_FOR_PICKUP"];
@@ -74,6 +77,15 @@ function formatSessionDate(date) {
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "Europe/Brussels",
+  });
+}
+
+function formatReviewDate(date) {
+  return new Date(date).toLocaleDateString("fr-FR", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
     timeZone: "Europe/Brussels",
   });
 }
@@ -507,7 +519,146 @@ function CheckInTicket({ reservation, typeLabel }) {
   );
 }
 
-function ReservationCard({ reservation, kind }) {
+const RESERVATION_REVIEW_ACTIONS = {
+  workshop: createWorkshopReservationReview,
+  formation: createFormationReservationReview,
+};
+
+/**
+ * Same modal as ProfilePageClient's appointment ReviewModal, pointed at a
+ * workshop or formation reservation instead — copies its logic rather than
+ * building a parallel review UI.
+ */
+function ReservationReviewModal({ target, onClose, onSaved }) {
+  const { reservation, kind, typeLabel, item } = target;
+  const [rating, setRating] = useState(reservation.review?.rating ?? 0);
+  const [comment, setComment] = useState(reservation.review?.comment ?? "");
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSubmitting(true);
+    setErrors({});
+
+    const submitReview = RESERVATION_REVIEW_ACTIONS[kind];
+    const result = await submitReview({ reservationId: reservation.id, rating, comment });
+
+    setSubmitting(false);
+
+    if (result.success) {
+      toast.success(result.message);
+      onSaved({
+        id: result.data.id,
+        rating: result.data.rating,
+        comment: result.data.comment,
+        createdAt: result.data.createdAt,
+      });
+      return;
+    }
+
+    if (result.errors) {
+      setErrors(result.errors);
+    }
+    toast.error(result.message);
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="w-full max-w-lg border border-neutral-200 bg-white p-6 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">Laisser un avis</p>
+            <h3 className="mt-1 text-xl font-bold text-primary">{item.title}</h3>
+            <p className="mt-1 text-sm text-neutral-500">
+              {typeLabel} · {formatSessionDate(reservation.session.startDate)}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-sm font-semibold text-neutral-400 hover:text-neutral-600">
+            Fermer
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-ink/50">Votre note</label>
+            <StarRatingInput value={rating} onChange={setRating} />
+            {errors.rating && <p className="mt-1 text-xs text-red-600">{errors.rating}</p>}
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-ink/50">
+              Commentaire (optionnel)
+            </label>
+            <textarea
+              rows={5}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              maxLength={REVIEW_COMMENT_MAX_LENGTH}
+              placeholder="Partagez votre expérience…"
+              className="w-full resize-none border border-neutral-200 px-4 py-3 text-sm focus:border-gold focus:outline-none"
+            />
+            {errors.comment && <p className="mt-1 text-xs text-red-600">{errors.comment}</p>}
+          </div>
+
+          <div className="flex justify-end gap-3 border-t border-neutral-200 pt-5">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="border border-neutral-200 px-5 py-3 text-sm font-semibold text-neutral-600 hover:bg-neutral-50"
+            >
+              Annuler
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center gap-2 bg-gold px-5 py-3 text-sm font-semibold uppercase tracking-wide text-white hover:bg-gold/90 disabled:opacity-60"
+            >
+              {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Envoyer l&apos;avis
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/** "Laisser un avis" CTA or the already-submitted review, once the booking is COMPLETED. */
+function ReservationReviewStatus({ reservation, kind, typeLabel, item, onOpenReview }) {
+  if (reservation.status !== "COMPLETED") return null;
+
+  if (reservation.review) {
+    return (
+      <div className="mt-3 border-t border-ink/8 pt-3">
+        <StaticStars rating={reservation.review.rating} />
+        <p className="mt-1 text-xs text-ink/45">Avis envoyé le {formatReviewDate(reservation.review.createdAt)}</p>
+        {reservation.review.comment && <p className="mt-2 text-sm text-ink/65">{reservation.review.comment}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 flex justify-end border-t border-ink/8 pt-3">
+      <button
+        type="button"
+        onClick={() => onOpenReview({ reservation, kind, typeLabel, item })}
+        className="inline-flex items-center gap-2 border border-gold px-4 py-2 text-xs font-semibold text-gold hover:bg-gold/5"
+      >
+        <Star className="h-3.5 w-3.5 fill-current" />
+        Laisser un avis
+      </button>
+    </div>
+  );
+}
+
+function ReservationCard({ reservation, kind, onOpenReview }) {
   const item = kind === "workshop" ? reservation.session.workshop : reservation.session.formation;
   const typeLabel =
     kind === "workshop"
@@ -554,6 +705,14 @@ function ReservationCard({ reservation, kind }) {
         <CheckInTicket reservation={reservation} typeLabel={typeLabel} />
 
         <ReservationCancellationRequest reservation={reservation} kind={kind} />
+
+        <ReservationReviewStatus
+          reservation={reservation}
+          kind={kind}
+          typeLabel={typeLabel}
+          item={item}
+          onOpenReview={onOpenReview}
+        />
       </div>
     </div>
   );
@@ -565,14 +724,25 @@ const TABS = [
   { key: "formations", label: "Formations", icon: GraduationCap },
 ];
 
-export function MonComptePageClient({ orders, workshopReservations, formationReservations }) {
+export function MonComptePageClient({ orders, workshopReservations: initialWorkshopReservations, formationReservations: initialFormationReservations }) {
   const [activeTab, setActiveTab] = useState("orders");
+  const [workshopReservations, setWorkshopReservations] = useState(initialWorkshopReservations);
+  const [formationReservations, setFormationReservations] = useState(initialFormationReservations);
+  const [reviewModalTarget, setReviewModalTarget] = useState(null);
 
   const counts = {
     orders: orders.length,
     workshops: workshopReservations.length,
     formations: formationReservations.length,
   };
+
+  function handleReviewSaved(review) {
+    const setter = reviewModalTarget.kind === "workshop" ? setWorkshopReservations : setFormationReservations;
+    setter((current) =>
+      current.map((r) => (r.id === reviewModalTarget.reservation.id ? { ...r, review } : r))
+    );
+    setReviewModalTarget(null);
+  }
 
   return (
     <>
@@ -631,7 +801,9 @@ export function MonComptePageClient({ orders, workshopReservations, formationRes
               <EmptyState icon={Sparkles} text="Vous n'avez pas encore réservé d'atelier ou d'événement." />
             ) : (
               <div className="space-y-4">
-                {workshopReservations.map((r) => <ReservationCard key={r.id} reservation={r} kind="workshop" />)}
+                {workshopReservations.map((r) => (
+                  <ReservationCard key={r.id} reservation={r} kind="workshop" onOpenReview={setReviewModalTarget} />
+                ))}
               </div>
             )
           )}
@@ -641,12 +813,22 @@ export function MonComptePageClient({ orders, workshopReservations, formationRes
               <EmptyState icon={GraduationCap} text="Vous n'avez pas encore réservé de formation." />
             ) : (
               <div className="space-y-4">
-                {formationReservations.map((r) => <ReservationCard key={r.id} reservation={r} kind="formation" />)}
+                {formationReservations.map((r) => (
+                  <ReservationCard key={r.id} reservation={r} kind="formation" onOpenReview={setReviewModalTarget} />
+                ))}
               </div>
             )
           )}
         </div>
       </section>
+
+      {reviewModalTarget && (
+        <ReservationReviewModal
+          target={reviewModalTarget}
+          onClose={() => setReviewModalTarget(null)}
+          onSaved={handleReviewSaved}
+        />
+      )}
     </>
   );
 }

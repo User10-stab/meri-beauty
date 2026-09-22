@@ -276,6 +276,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
     register,
     handleSubmit,
     control,
+    setError,
     formState: { errors, isDirty },
   } = useForm({
     resolver: zodResolver(updateIndependentStaffSchema),
@@ -329,8 +330,11 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
         onSuccess();
       } else {
         if (res.errors) {
+          Object.entries(res.errors).forEach(([field, message]) => {
+            if (message) setError(field, { type: "server", message });
+          });
           const first = Object.values(res.errors).find(Boolean);
-          if (first) toast.error(first);
+          toast.error(first ?? res.message);
         } else {
           toast.error(res.message);
         }

@@ -214,10 +214,10 @@ export default function CGVPage() {
       <H2>15. Avis clients publiés sur le Site</H2>
       <P>
         Les avis affichés sur le Site proviennent exclusivement de personnes ayant réservé et
-        effectivement bénéficié d'une prestation au salon : seul un rendez-vous marqué comme
-        terminé permet techniquement de déposer un avis, depuis l'espace client de la personne
-        concernée. Meri Beauty ne rédige, ne commande ni n'achète aucun avis, et n'en publie
-        aucun qui ne serait pas issu de ce processus.
+        effectivement bénéficié d'une prestation au salon : seul un rendez-vous, un atelier, un
+        événement ou une formation marqué(e) comme terminé(e) permet techniquement de déposer un
+        avis, depuis l'espace client de la personne concernée. Meri Beauty ne rédige, ne commande
+        ni n'achète aucun avis, et n'en publie aucun qui ne serait pas issu de ce processus.
       </P>
       <P>
         Les avis sont affichés du plus récent au plus ancien, sans sélection ni tri fondés sur la

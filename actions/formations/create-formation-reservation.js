@@ -1,6 +1,5 @@
 "use server";
 
-import { randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { auth } from "@/auth";
@@ -33,6 +32,7 @@ import {
   buildTermsAcceptanceUpdate,
   recordTermsAcceptance,
 } from "@/lib/terms-consent";
+import { validatePassword } from "@/lib/validations/password";
 
 const BCRYPT_SALT_ROUNDS = 12;
 
@@ -42,10 +42,6 @@ const BCRYPT_SALT_ROUNDS = 12;
 // that email yet.
 const GUEST_HOLD_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
 const GUEST_HOLD_RATE_LIMIT_MAX = 5;
-
-function generateTemporaryPassword() {
-  return randomBytes(9).toString("base64url");
-}
 
 /**
  * Builds the Stripe Checkout Session for an already-created, still-pending
@@ -373,21 +369,42 @@ export async function createFormationReservation(data) {
         };
       }
 
-      // Throwaway placeholder — never shown to anyone. The real, usable
-      // password is generated once the email is confirmed (see
-      // actions/shared/resume-checkout-after-verification.js).
-      const placeholderHash = await bcrypt.hash(generateTemporaryPassword(), BCRYPT_SALT_ROUNDS);
+      // The account is created with the password the client chose in the
+      // booking form — never generated, never emailed. Mirrors
+      // actions/shared/init-customer-verification.js.
+      const passwordIssue = validatePassword(customerInfo.password);
+      if (passwordIssue) {
+        return { success: false, field: "password", message: "Veuillez choisir un mot de passe d'au moins 8 caractères." };
+      }
       user = await prisma.user.create({
         data: {
           fullName: customerInfo.fullName,
           email,
-          password: placeholderHash,
+          password: await bcrypt.hash(customerInfo.password, BCRYPT_SALT_ROUNDS),
           phone,
           role: "CUSTOMER",
           isCompany: Boolean(vatNumberToSave),
           vatNumber: vatNumberToSave,
           ...(vatValidation ?? {}),
           ...buildTermsAcceptanceUpdate(),
+        },
+      });
+    } else if (!authenticatedUser && !user.emailVerified) {
+      // Existing-but-unverified account (an earlier incomplete booking
+      // attempt under this email) retrying — refresh the password to
+      // whatever was just typed, same as the shared init-customer-verification
+      // "existing unverified user" branch. Never touches a *verified*
+      // account's password without authentication (see the vatNumber-only
+      // branch below).
+      const passwordIssue = validatePassword(customerInfo.password);
+      if (passwordIssue) {
+        return { success: false, field: "password", message: "Veuillez choisir un mot de passe d'au moins 8 caractères." };
+      }
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          password: await bcrypt.hash(customerInfo.password, BCRYPT_SALT_ROUNDS),
+          ...(vatNumberToSave ? { isCompany: true, vatNumber: vatNumberToSave, ...(vatValidation ?? {}) } : {}),
         },
       });
     } else if (vatNumberToSave && (user.vatNumber !== vatNumberToSave || !user.isCompany || vatValidation)) {
@@ -601,6 +618,13 @@ export async function createFormationReservation(data) {
     // (unlike the later credentials email) — the interstitial we show next
     // promises "check your inbox", so we need to know it actually sent.
     if (!user.emailVerified) {
+      // The seat above is already held — a failed *delivery* attempt must
+      // not be reported as a failed reservation (the customer would retry
+      // and double-book), and sendCheckoutVerificationEmail already writes
+      // the verification token row before it ever tries to send, so
+      // "Renvoyer le lien" on /verify-email picks this exact token straight
+      // back up.
+      let emailDeliveryFailed = false;
       try {
         await sendCheckoutVerificationEmail({
           email,
@@ -610,10 +634,10 @@ export async function createFormationReservation(data) {
         });
       } catch (err) {
         console.error("[createFormationReservation] verification email failed:", err);
-        return { success: false, message: "Impossible d'envoyer l'email de confirmation. Veuillez réessayer." };
+        emailDeliveryFailed = true;
       }
 
-      return { success: true, requiresEmailVerification: true, email };
+      return { success: true, requiresEmailVerification: true, email, emailDeliveryFailed };
     }
 
     // Also handed back to the client below so it can prove authorization on

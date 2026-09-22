@@ -308,8 +308,8 @@ export default function VerifyEmailForm({
           </div>
           <h2 className="text-xl font-bold text-[#2F3A2E] dark:text-[#a8c4a2] font-serif">Email confirmé</h2>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
-            Vos identifiants viennent de vous être envoyés par email. En revanche, le paiement n&apos;a pas pu démarrer
-            {effectivePaymentFailedMessage ? ` (${effectivePaymentFailedMessage})` : ""}.
+            Votre compte est vérifié et vous pouvez vous connecter avec le mot de passe choisi. En revanche, le paiement
+            n&apos;a pas pu démarrer{effectivePaymentFailedMessage ? ` (${effectivePaymentFailedMessage})` : ""}.
           </p>
           {retryError && (
             <div className="flex items-center gap-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-800 dark:bg-red-950/30 dark:border-red-900/50 dark:text-red-300 text-sm text-left">

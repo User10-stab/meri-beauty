@@ -162,6 +162,7 @@ function BusinessInfoSection({ salon, onSuccess }) {
     register,
     handleSubmit,
     watch,
+    setError,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(updateSalonSchema),
@@ -223,8 +224,14 @@ function BusinessInfoSection({ salon, onSuccess }) {
         onSuccess(res.data);
       } else {
         if (res.errors) {
+          // This form spans several sections (contact, social, legal
+          // identity, banking) — a toast alone left no way to tell which of
+          // ~20 fields was wrong, so attach each error to its actual field.
+          Object.entries(res.errors).forEach(([field, message]) => {
+            if (message) setError(field, { type: "server", message });
+          });
           const first = Object.values(res.errors).find(Boolean);
-          if (first) toast.error(first);
+          toast.error(first ?? res.message);
         } else {
           toast.error(res.message);
         }
@@ -900,6 +907,7 @@ function AdminAccountsSection({ initialAdmins, currentUserId }) {
     register,
     handleSubmit,
     reset,
+    setError,
     formState: { errors },
   } = useForm({
     resolver: zodResolver(createAdminAccountSchema),
@@ -911,9 +919,11 @@ function AdminAccountsSection({ initialAdmins, currentUserId }) {
       const res = await createAdminAccount(data);
       if (!res.success) {
         if (res.errors) {
+          Object.entries(res.errors).forEach(([field, message]) => {
+            if (message) setError(field, { type: "server", message });
+          });
           const first = Object.values(res.errors).find(Boolean);
-          if (first) toast.error(first);
-          else toast.error(res.message);
+          toast.error(first ?? res.message);
         } else {
           toast.error(res.message);
         }

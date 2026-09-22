@@ -251,8 +251,8 @@ describe("the page", () => {
     expect(client).toContain('pdfHref={`/api/credit-notes/${note.id}/pdf`}');
     expect(client).toContain('onSend={(channel) => setDelivery({ kind: "CREDIT_NOTE", document: note, invoice, channel })}');
     expect(client).toContain('onClick={() => onSend("EMAIL")}');
-    // Peppol only where the server would accept it.
-    expect(client).toContain('{peppolApplicable && (\n        <button type="button" onClick={() => onSend("PEPPYRUS")}');
+    // Peppol on every row (same buttons everywhere), usable only where the server would accept it.
+    expect(client).toContain('onClick={() => onSend("PEPPYRUS")}\n        disabled={!peppolApplicable}');
     expect(client).toContain("initialChannel={delivery?.channel ?? null}");
   });
 

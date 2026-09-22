@@ -35,7 +35,7 @@ vi.mock("@/lib/monitoring", () => ({ captureCriticalError: vi.fn() }));
 vi.mock("@/lib/email-templates", () => ({ invoiceEmail: vi.fn() }));
 
 import { issueRentInvoiceNow } from "@/lib/staff-rent-payment";
-import { issueMissingRentInvoices } from "@/lib/staff-monthly-billing";
+import { issueMissingRentInvoices, resolveDueDate } from "@/lib/staff-monthly-billing";
 import * as staffRentActions from "@/actions/invoices/staff-rent";
 
 const { creditStaffRentInvoice } = staffRentActions;
@@ -255,5 +255,28 @@ describe("rent invoices are issued automatically; nothing is issued by hand (use
   it("one origin label for rent invoices, wherever they are listed", () => {
     expect(source("lib/invoices/list-filters.js")).toContain('STAFF_CONTRACT: "Loyer staff",');
     expect(source("lib/invoices/pending-rows.js")).toContain('RENT: "Loyer staff",');
+  });
+});
+
+describe("the échéance is the billing date + N days, every month (user's call, 2026-09-22)", () => {
+  it("billed on the 8th with N = 7 → due the 15th", () => {
+    expect(resolveDueDate("7", new Date("2026-10-08T00:00:00Z")).toISOString().slice(0, 10)).toBe("2026-10-15");
+  });
+
+  it("an anniversary late in the month is never due before its invoice", () => {
+    const billed = new Date("2026-10-20T00:00:00Z");
+    const due = resolveDueDate("7", billed);
+    expect(due.toISOString().slice(0, 10)).toBe("2026-10-27");
+    expect(due.getTime()).toBeGreaterThan(billed.getTime());
+  });
+
+  it("7 days when the contract sets none (or an invalid value); 0 = due the billing day", () => {
+    expect(resolveDueDate(null, new Date("2026-11-28T00:00:00Z")).toISOString().slice(0, 10)).toBe("2026-12-05");
+    expect(resolveDueDate("abc", new Date("2026-11-28T00:00:00Z")).toISOString().slice(0, 10)).toBe("2026-12-05");
+    expect(resolveDueDate("0", new Date("2026-11-28T00:00:00Z")).toISOString().slice(0, 10)).toBe("2026-11-28");
+  });
+
+  it("the monthly job counts from the billing date, not the 1st of the month", () => {
+    expect(source("lib/staff-monthly-billing.js")).toContain("const dueDate = resolveDueDate(contract.dueDate, billingDate);");
   });
 });

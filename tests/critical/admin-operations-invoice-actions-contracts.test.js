@@ -49,9 +49,10 @@ describe("the operations ledger can act on an invoice, not just list it", () => 
     // relation: hydrateOrders' user, hydrateWorkshops' customer,
     // hydrateFormations' customer, hydrateAppointmentTransactions'
     // appointment.user, plus hydrateTransfers' current reservation customer
-    // for BOTH a workshop and a formation transfer (it now hydrates either).
+    // for BOTH a workshop and a formation transfer (it now hydrates either),
+    // plus hydrateStaffRentTransactions' staff member (« Loyer staff »).
     const vatNumberOccurrences = actions.split("vatNumber: true").length - 1;
-    expect(vatNumberOccurrences).toBe(6);
+    expect(vatNumberOccurrences).toBe(7);
   });
 
   test("the ledger shows the invoice's frozen VAT number, falling back to the customer's current one", () => {

@@ -46,6 +46,13 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
 
   const timeRange = `${startLabel}${endLabel ? ` - ${endLabel}` : ""}`;
 
+  const staffAndClient = [
+    appointment.staffName,
+    appointment.customerName ? `Client : ${appointment.customerName}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <button
       onClick={() => onClick(appointment)}
@@ -99,25 +106,16 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
           {timeRange}
         </span>
 
-        {/* Staff member */}
-        {appointment.staffName && (
+        {/* Staff + client — one line so both stay visible even on a short
+            (compact) card, instead of the client being the one dropped for
+            lack of room. */}
+        {staffAndClient && (
           <span
             className={`truncate font-medium leading-tight ${compact ? "text-[9px]" : "text-[10px]"}`}
             style={{ color: color.text, opacity: 0.75 }}
-            title={appointment.staffName}
+            title={staffAndClient}
           >
-            {appointment.staffName}
-          </span>
-        )}
-
-        {/* Client */}
-        {appointment.customerName && !compact && (
-          <span
-            className="truncate text-[10px] font-medium leading-tight"
-            style={{ color: color.text, opacity: 0.7 }}
-            title={appointment.customerName}
-          >
-            Client : {appointment.customerName}
+            {staffAndClient}
           </span>
         )}
       </div>

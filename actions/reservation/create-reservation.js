@@ -40,6 +40,7 @@ import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
 import { resolvePayeeForAppointment, payeePaymentData } from "@/lib/payments/resolve-payee";
+import { trackNewUser } from "@/lib/prospects/track-prospect";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -131,9 +132,23 @@ export async function resolveOrCreateCustomer(customerInfo, authenticatedUserId)
       },
     });
 
+    // Hook marketing : compte invité créé depuis une réservation (fire-and-forget).
+    trackNewUser({
+      email: user.email,
+      fullName: user.fullName,
+      phone: user.phone,
+      source: "reservation",
+      userId: user.id,
+      activityType: "appointment_booked",
+      activityDescription: "Compte créé via une réservation de rendez-vous",
+      refModel: "User",
+      refId: user.id,
+      promoteTo: "demo_essai",
+      promoteNote: "Rendez-vous réservé",
+    });
+
     return { user, isNewUser: true, temporaryPassword };
-  } catch (createError) {
-    // P2002 = unique constraint violation — another request already
+  } catch (createError) {    // P2002 = unique constraint violation — another request already
     // created this user between our findFirst and this create. The unique
     // indexes backing email/phone are active-only (partial indexes, see
     // migration 20260817153631_active_only_uniqueness), so a collision here

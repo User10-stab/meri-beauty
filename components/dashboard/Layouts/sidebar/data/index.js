@@ -101,6 +101,8 @@ const ALL_NAV_DATA = [
           { title: "Auto-Entrepreneur", url: "/dashboard/staff/auto-entrepreneur", roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT },
           { title: "Comptes Stripe", url: "/dashboard/staff/stripe-accounts", roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT },
           { title: "Newsletter", url: "/dashboard/newsletter", roles: DASHBOARD_PERMISSIONS.NEWSLETTER, permission: STAFF_PERMISSIONS.NEWSLETTER },
+          { title: "Prospects", url: "/dashboard/marketing/prospects", roles: DASHBOARD_PERMISSIONS.MARKETING },
+          { title: "Campagnes", url: "/dashboard/marketing/campagnes", roles: DASHBOARD_PERMISSIONS.MARKETING },
           { title: "Demandes de location", url: "/dashboard/rental-requests", roles: DASHBOARD_PERMISSIONS.RENTAL_REQUESTS },
           { title: "Avis clients", url: "/dashboard/reviews", roles: DASHBOARD_PERMISSIONS.REVIEWS },
           { title: "Rapports", url: "/dashboard/reports", roles: DASHBOARD_PERMISSIONS.REPORTS },

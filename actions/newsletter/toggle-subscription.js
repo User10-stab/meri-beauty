@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
+import { trackNewUser, trackExistingProspect } from "@/lib/prospects/track-prospect";
 
 /**
  * Toggles the newsletter subscription for the currently authenticated user.
@@ -26,7 +27,7 @@ export async function toggleNewsletterSubscription() {
   try {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { id: true, newsletterSubscribed: true },
+      select: { id: true, email: true, fullName: true, newsletterSubscribed: true },
     });
 
     if (!user) {
@@ -41,6 +42,26 @@ export async function toggleNewsletterSubscription() {
     });
 
     revalidatePath("/");
+
+    // Hook marketing : inscription -> prospect + promotion `engage` ;
+    // désinscription -> activité sur le prospect existant.
+    if (newStatus) {
+      trackNewUser({
+        email: user.email,
+        fullName: user.fullName,
+        source: "email",
+        userId: user.id,
+        activityType: "newsletter_subscribed",
+        activityDescription: "Inscription à la newsletter",
+        promoteTo: "engage",
+        promoteNote: "Inscription newsletter",
+      });
+    } else {
+      trackExistingProspect(user.email, {
+        type: "newsletter_unsubscribed",
+        description: "Désinscription de la newsletter",
+      });
+    }
 
     return {
       success: true,

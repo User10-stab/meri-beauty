@@ -8,6 +8,8 @@ import { Style_Script, Cormorant_Garamond , Betania_Patmos } from "next/font/goo
 
 import { Providers } from "@/components/providers";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
+import { UtmTracker } from "@/components/analytics/UtmTracker";
+import { Suspense } from "react";
 import NextTopLoader from "nextjs-toploader";
 import { AppToaster } from "@/components/AppToaster";
 
@@ -83,6 +85,9 @@ export default async function RootLayout({ children }) {
           <Providers session={session}>
             <ConfirmProvider>
               <NextTopLoader color="#5750F1" showSpinner={false} />
+              <Suspense fallback={null}>
+                <UtmTracker />
+              </Suspense>
               {children}
               <AppToaster />
             </ConfirmProvider>

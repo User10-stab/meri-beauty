@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { unsubscribeFromNewsletter } from "@/actions/newsletter/unsubscribe";
+import { unsubscribeProspect } from "@/lib/campaigns/campaign-unsubscribe";
 
 export async function generateMetadata() {
   const t = await getTranslations("newsletter");
@@ -16,10 +17,17 @@ export default async function NewsletterUnsubscribePage({ searchParams }) {
   const t = await getTranslations("newsletter");
   const userId = params?.u || "";
   const token = params?.t || "";
+  // e = désinscription campagne d'un prospect sans compte (token HMAC sur l'email).
+  const prospectEmail = params?.e || "";
 
-  const result = userId && token
-    ? await unsubscribeFromNewsletter(userId, token)
-    : { success: false, message: t("invalidLink") };
+  let result;
+  if (userId && token) {
+    result = await unsubscribeFromNewsletter(userId, token);
+  } else if (prospectEmail && token) {
+    result = await unsubscribeProspect(prospectEmail, token);
+  } else {
+    result = { success: false, message: t("invalidLink") };
+  }
 
   return (
     <div className="min-h-[60vh] flex items-center justify-center px-4 py-20">

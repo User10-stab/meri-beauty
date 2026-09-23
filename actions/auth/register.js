@@ -11,6 +11,7 @@ import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate } from "@/lib/terms-consent";
 import { verifyVatWithVies } from "@/lib/vat-validation";
 import { buildVerifyEmailUrl } from "@/lib/verify-email-link";
+import { trackNewUser } from "@/lib/prospects/track-prospect";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const TOKEN_EXPIRY_MINUTES = 15;
@@ -225,6 +226,21 @@ export async function registerUser(input) {
       emailDeliveryFailed = true;
       console.error("[registerUser] account created but verification email delivery failed", emailError);
     }
+
+    // Hook marketing : crée le prospect (idempotent, fire-and-forget —
+    // n'échoue jamais l'inscription). Voir lib/prospects/track-prospect.js.
+    trackNewUser({
+      email: user.email,
+      firstName: user.fullName?.split(/\s+/)[0] ?? null,
+      lastName: user.fullName?.split(/\s+/).slice(1).join(" ") || null,
+      phone: user.phone,
+      source: "site_web",
+      userId: user.id,
+      activityType: "registration",
+      activityDescription: "Inscription d'un nouveau compte",
+      refModel: "User",
+      refId: user.id,
+    });
 
     return {
       success: true,

@@ -21,6 +21,7 @@ import {
   getRentalRequestNotificationRecipients,
 } from "@/lib/notifications";
 import { isViesOutage, verifyVatWithVies } from "@/lib/vat-validation";
+import { trackNewUser } from "@/lib/prospects/track-prospect";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 // Admin/owner only — see the matching note in [id]/route.js. Any STAFF
@@ -255,6 +256,20 @@ export async function POST(request) {
         }).catch((err) => console.error("[POST /api/rental-requests] admin email failed:", err));
       }
     }
+
+    // Hook marketing : prospect + activité (fire-and-forget).
+    trackNewUser({
+      email: result.rentalRequest.user?.email,
+      fullName: result.rentalRequest.user?.fullName,
+      source: "site_web",
+      userId: session.user.id,
+      activityType: "rental_request",
+      activityDescription: `Demande de location (${result.rentalRequest.rentalType})`,
+      refModel: "RentalRequest",
+      refId: result.rentalRequest.id,
+      promoteTo: "interesse",
+      promoteNote: "Demande de location déposée",
+    });
 
     return created(result.rentalRequest, "Demande de location créée avec succès.");
   } catch (error) {

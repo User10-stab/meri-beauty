@@ -8,6 +8,7 @@ import {
 } from "@/lib/email-templates";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
+import { trackNewUser } from "@/lib/prospects/track-prospect";
 
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 3;
@@ -95,6 +96,16 @@ export async function sendContactMessage(input) {
       subject: autoReply.subject,
       text: autoReply.text,
       html: autoReply.html,
+    });
+
+    // Hook marketing : prospect + activité (fire-and-forget).
+    trackNewUser({
+      email,
+      fullName: name,
+      phone: phone || null,
+      source: "contact",
+      activityType: "contact_message",
+      activityDescription: `Message via le formulaire de contact : ${subject}`,
     });
 
     return {

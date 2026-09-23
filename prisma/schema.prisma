@@ -931,6 +931,8 @@ model User {
   confirmedRefundLegs            RefundLeg[]            @relation("RefundLegConfirmedBy")
   resolvedManualRefundCases       ManualRefundCase[]    @relation("ManualRefundCaseResolvedBy")
   googleConnection               GoogleConnection?
+  prospects                      Prospect[]
+  prospectActivitiesCreated      ProspectActivity[] @relation("ProspectActivityCreatedBy")
 
   @@index([role])
   @@index([isActive, isDeleted])
@@ -3064,4 +3066,249 @@ model GoogleConnection {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ─── MARKETING — CAMPAGNES & PROSPECTS ───────────────────────────────────────
+// Module Marketing Campaign + Prospect Tracking (dashboard admin).
+//
+// Contexte métier Meri Beauty (salon de beauté — PAS de licences/abonnements) :
+// - `demo_essai` = la personne a déjà testé un service (RDV, atelier,
+//   formation, commande boutique) mais n'est pas encore cliente payée/récurrente.
+// - `client` = au moins un Payment PAID (boutique, RDV, atelier, formation).
+// - `interesse` = réservation/demande en cours non encore payée.
+// La promotion de statut ne fait que monter (jamais de downgrade), via
+// lib/prospects/prospect-service.js — voir STATUS_RANK là-bas.
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+  CANCELLED
+}
+
+enum ProspectSource {
+  google
+  google_ads
+  linkedin
+  facebook
+  instagram
+  email
+  campagne
+  salon_evenement
+  recommandation
+  site_web
+  // Sources propres au salon :
+  reservation // réservation RDV / atelier / formation
+  boutique // commande boutique (en ligne ou caisse)
+  atelier // atelier & événement
+  formation // formation pro
+  contact // formulaire de contact
+  autre
+}
+
+enum ProspectStatus {
+  nouveau
+  contacte
+  engage
+  interesse
+  demo_essai
+  client
+  perdu
+}
+
+enum ProspectActivityType {
+  prospect_created
+  email_sent
+  email_delivered
+  email_opened
+  email_clicked
+  campaign_sent
+  registration
+  appointment_booked
+  appointment_completed
+  order_placed
+  workshop_booked
+  formation_booked
+  contact_message
+  newsletter_subscribed
+  newsletter_unsubscribed
+  rental_request
+  status_changed
+  note_added
+  manual_contact
+  call
+  other
+}
+
+enum NextActionType {
+  envoyer_email
+  relancer_email
+  appeler
+  envoyer_campagne
+  proposer_demo
+  suivre_essai
+  autre
+  aucune
+}
+
+model Campaign {
+  id String @id @default(cuid())
+
+  title         String
+  subject       String
+  preheader     String?
+  content       String  @db.Text
+  imageUrl      String?
+  attachmentUrl String?
+
+  // Segment d'audience — voir getSegmentRecipients() dans
+  // lib/campaigns/send-campaign.js pour la liste exacte.
+  targetSegment String @default("newsletter")
+
+  ctaText String?
+  ctaUrl  String?
+
+  utmSource   String  @default("email")
+  utmMedium   String  @default("email")
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+
+  totalSenders Int @default(0)
+  openedCount  Int @default(0)
+  clickedCount Int @default(0)
+
+  status        CampaignStatus @default(DRAFT)
+  scheduledDate DateTime?
+  sentAt        DateTime?
+
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clicks     CampaignClick[]
+  openings   MailOpening[]
+  activities ProspectActivity[]
+  prospects  Prospect[]
+
+  @@index([status, scheduledDate])
+}
+
+model Prospect {
+  id String @id @default(cuid())
+
+  // Toujours stocké en minuscules + trimé (voir prospect-service.js).
+  email     String  @unique
+  firstName String?
+  lastName  String?
+  phone     String?
+  company   String?
+  city      String?
+  website   String?
+  country   String? @default("BE")
+
+  source ProspectSource @default(autre)
+
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+
+  status ProspectStatus @default(nouveau)
+  // [{ status, changedAt, byUserId, note }] — JSON plutôt qu'une table
+  // dédiée : historique d'audit, jamais requêté autrement que par lecture.
+  statusHistory Json @default("[]")
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  lastActivityAt DateTime?
+  lastEventType  String?
+  lastCampaignId String?
+  lastCampaign   Campaign? @relation(fields: [lastCampaignId], references: [id], onDelete: SetNull)
+
+  nextActionType    NextActionType?
+  nextActionDueDate DateTime?
+  nextActionNote    String?
+
+  // Opt-out marketing (lien de désinscription des campagnes). Distinct de
+  // User.newsletterSubscribed (réservé aux comptes) : un prospect sans
+  // compte qui se désinscrit est exclu des futurs envois via ce flag.
+  marketingOptOut Boolean @default(false)
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  activities ProspectActivity[]
+
+  @@index([status, createdAt])
+  @@index([lastActivityAt])
+  @@index([source])
+}
+
+model ProspectActivity {
+  id String @id @default(cuid())
+
+  prospectId String
+  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  type ProspectActivityType
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  refId    String?
+  refModel String?
+  metadata Json?
+  description String? @db.Text
+
+  createdById String?
+  createdBy   User?   @relation("ProspectActivityCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([prospectId, createdAt])
+  @@index([campaignId])
+}
+
+model CampaignClick {
+  id String @id @default(cuid())
+
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  userId    String?
+  email     String?
+  ctaUrl    String?
+  ip        String?
+  userAgent String? @db.Text
+  referer   String?
+
+  clickedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([campaignId, clickedAt])
+  @@index([email])
+}
+
+model MailOpening {
+  id String @id @default(cuid())
+
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  userId    String?
+  email     String?
+  ip        String?
+  userAgent String? @db.Text
+
+  openedAt  DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([campaignId, openedAt])
+  @@index([email])
 }

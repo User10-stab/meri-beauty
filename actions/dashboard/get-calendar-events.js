@@ -99,7 +99,10 @@ export async function getCalendarEvents({ from, to }) {
               capacity: true,
               formation: { select: { title: true, type: true } },
               animator: { select: { name: true } },
-              reservations: { where: liveSeatFilter(), select: { seatsCount: true } },
+              reservations: {
+                where: liveSeatFilter(),
+                select: { seatsCount: true, customer: { select: { fullName: true } } },
+              },
             },
             orderBy: { startDate: "asc" },
           }),
@@ -132,12 +135,18 @@ export async function getCalendarEvents({ from, to }) {
 
     const formationEvents = formationSessions.map((s) => {
       const seatsTaken = s.reservations.reduce((sum, r) => sum + r.seatsCount, 0);
+      // PRIVATE formations always carry a single reservation (seatsCount is
+      // pinned to 1), so the client's name can stand in for the seat count.
+      const isPrivate = s.formation.type === "PRIVATE";
+      const clientName = isPrivate ? (s.reservations[0]?.customer?.fullName ?? null) : null;
       return {
         id: s.id,
         kind: "formation",
         animatorId: s.animatorId ?? null,
         title: s.formation.title,
-        subtitle: `${s.formation.type === "PRIVATE" ? "Formation individuelle" : "Formation groupe"}${s.animator ? ` · ${s.animator.name}` : ""} · ${seatsTaken}/${s.capacity} places`,
+        subtitle: `${isPrivate ? "Formation individuelle" : "Formation groupe"}${s.animator ? ` · ${s.animator.name}` : ""}${
+          clientName ? ` - Client : ${clientName}` : ` · ${seatsTaken}/${s.capacity} places`
+        }`,
         start: s.startDate.toISOString(),
         end: (s.endDate ?? s.startDate).toISOString(),
         status: null,

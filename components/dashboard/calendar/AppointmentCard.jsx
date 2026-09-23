@@ -101,12 +101,23 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
 
         {/* Staff member */}
         {appointment.staffName && (
-          <span 
+          <span
             className={`truncate font-medium leading-tight ${compact ? "text-[9px]" : "text-[10px]"}`}
             style={{ color: color.text, opacity: 0.75 }}
             title={appointment.staffName}
           >
             {appointment.staffName}
+          </span>
+        )}
+
+        {/* Client */}
+        {appointment.customerName && !compact && (
+          <span
+            className="truncate text-[10px] font-medium leading-tight"
+            style={{ color: color.text, opacity: 0.7 }}
+            title={appointment.customerName}
+          >
+            Client : {appointment.customerName}
           </span>
         )}
       </div>

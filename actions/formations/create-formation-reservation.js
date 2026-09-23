@@ -16,6 +16,7 @@ import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { resolvePayeeForFormationSession, payeeCanChargeOnline, payeeCheckoutMetadata, payeeStripeOptions, PAYEE_ONLINE_UNAVAILABLE_MESSAGE } from "@/lib/payments/resolve-payee";
 import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
+import { sessionDatesRefusal } from "@/lib/formations/session-bookability";
 import { RELANCE_KINDS, buildActivityCheckoutParams } from "@/lib/reservations/activity-payment-relance";
 import {
   buildFormationReservationCreatedNotification,
@@ -85,6 +86,14 @@ export async function createFormationReservationCheckoutSession(reservationId, c
     }
 
     const { session } = reservation;
+
+    // The hold was taken while the session was open, so a registration
+    // deadline passed since (e.g. while the client confirmed their e-mail)
+    // does not void it — but a session that has already started can't be
+    // paid for any more.
+    if (new Date(session.startDate) <= new Date()) {
+      return { success: false, message: "Cette session a déjà eu lieu ou a déjà commencé." };
+    }
 
     // Whose money this seat is: the session's animator when she is an
     // independent (charged on her own Stripe account), otherwise the salon.
@@ -240,6 +249,12 @@ export async function createFormationReservation(data) {
     const session = formation.sessions[0];
     if (!session || session.status !== "SCHEDULED") {
       return { success: false, message: "Session non disponible." };
+    }
+    // A past session, or one past its registration deadline, is no longer on
+    // sale — the public pages hide it, but an old link still lands here.
+    const datesRefusal = sessionDatesRefusal(session);
+    if (datesRefusal) {
+      return { success: false, message: datesRefusal };
     }
 
     // Refused here, before a seat is held, rather than only at checkout.

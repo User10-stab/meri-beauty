@@ -58,7 +58,7 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
     >
       <div
         className={`relative flex min-w-0 flex-1 flex-col ${
-          compact ? "gap-0 px-2.5 py-1.5" : "gap-0.5 px-3 py-2"
+          compact ? "gap-0 px-2.5 py-1" : "gap-0.5 px-3 py-1.5"
         }`}
       >
         {/* Header: Service name + RDV badge */}
@@ -91,30 +91,28 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
           )}
         </div>
 
-        {/* Time range */}
-        <span 
-          className={`tabular-nums font-semibold leading-tight ${compact ? "text-[10px]" : "text-[11px]"}`}
-          style={{ color: color.text, opacity: 0.85 }}
+        {/* Staff shares the time line so the client line below still fits
+            on the shortest (48px) card instead of being clipped. */}
+        <span
+          className={`truncate leading-tight ${compact ? "text-[10px]" : "text-[11px]"}`}
+          style={{ color: color.text }}
+          title={appointment.staffName}
         >
-          {timeRange}
+          <span className="tabular-nums font-semibold" style={{ opacity: 0.85 }}>
+            {timeRange}
+          </span>
+          {appointment.staffName && (
+            <span className="font-medium" style={{ opacity: 0.75 }}>
+              {" · "}
+              {appointment.staffName}
+            </span>
+          )}
         </span>
 
-        {/* Staff member */}
-        {appointment.staffName && (
+        {appointment.customerName && (
           <span
-            className={`truncate font-medium leading-tight ${compact ? "text-[9px]" : "text-[10px]"}`}
-            style={{ color: color.text, opacity: 0.75 }}
-            title={appointment.staffName}
-          >
-            {appointment.staffName}
-          </span>
-        )}
-
-        {/* Client */}
-        {appointment.customerName && !compact && (
-          <span
-            className="truncate text-[10px] font-medium leading-tight"
-            style={{ color: color.text, opacity: 0.7 }}
+            className={`truncate font-semibold leading-tight ${compact ? "text-[9.5px]" : "text-[10.5px]"}`}
+            style={{ color: color.text, opacity: 0.9 }}
             title={appointment.customerName}
           >
             Client : {appointment.customerName}

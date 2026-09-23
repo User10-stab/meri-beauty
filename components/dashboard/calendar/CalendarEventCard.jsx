@@ -76,7 +76,7 @@ export function CalendarEventCard({ event, compact = false }) {
         backgroundColor: styles.bg,
         border: `1px solid ${styles.borderColor}`,
       }}
-      title={`${typeLabel} — ${event.title}${event.subtitle ? ` — ${event.subtitle}` : ""} (${timeRange})`}
+      title={`${typeLabel} — ${event.title}${event.subtitle ? ` — ${event.subtitle}` : ""}${event.clientName ? ` — Client : ${event.clientName}` : ""} (${timeRange})`}
     >
       <div
         className={`relative flex min-w-0 flex-1 flex-col ${
@@ -122,6 +122,16 @@ export function CalendarEventCard({ event, compact = false }) {
             title={event.subtitle}
           >
             {event.subtitle}
+          </span>
+        )}
+
+        {event.clientName && (
+          <span
+            className={`truncate font-semibold leading-tight ${compact ? "text-[9.5px]" : "text-[10.5px]"}`}
+            style={{ color: styles.textColor, opacity: 0.9 }}
+            title={event.clientName}
+          >
+            Client : {event.clientName}
           </span>
         )}
       </div>

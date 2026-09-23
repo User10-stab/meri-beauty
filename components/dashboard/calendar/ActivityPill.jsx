@@ -75,6 +75,9 @@ export function ActivityPill({ event }) {
         
         {/* Subtitle */}
         <p className="truncate text-[10px] opacity-70 mt-0.5">{event.subtitle}</p>
+        {event.clientName && (
+          <p className="truncate text-[10px] font-semibold mt-0.5">Client : {event.clientName}</p>
+        )}
       </div>
     </div>
   );

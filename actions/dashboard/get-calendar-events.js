@@ -145,8 +145,9 @@ export async function getCalendarEvents({ from, to }) {
         animatorId: s.animatorId ?? null,
         title: s.formation.title,
         subtitle: `${isPrivate ? "Formation individuelle" : "Formation groupe"}${s.animator ? ` · ${s.animator.name}` : ""}${
-          clientName ? ` - Client : ${clientName}` : ` · ${seatsTaken}/${s.capacity} places`
+          clientName ? "" : ` · ${seatsTaken}/${s.capacity} places`
         }`,
+        clientName,
         start: s.startDate.toISOString(),
         end: (s.endDate ?? s.startDate).toISOString(),
         status: null,

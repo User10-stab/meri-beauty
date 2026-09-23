@@ -46,13 +46,6 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
 
   const timeRange = `${startLabel}${endLabel ? ` - ${endLabel}` : ""}`;
 
-  const staffAndClient = [
-    appointment.staffName,
-    appointment.customerName ? `Client : ${appointment.customerName}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
   return (
     <button
       onClick={() => onClick(appointment)}
@@ -98,24 +91,40 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
           )}
         </div>
 
-        {/* Time range */}
-        <span 
-          className={`tabular-nums font-semibold leading-tight ${compact ? "text-[10px]" : "text-[11px]"}`}
-          style={{ color: color.text, opacity: 0.85 }}
+        {/* Time range — on a short (compact) card the staff name shares this
+            line so the client still gets a line of its own below. */}
+        <span
+          className={`truncate leading-tight ${compact ? "text-[10px]" : "text-[11px]"}`}
+          style={{ color: color.text }}
         >
-          {timeRange}
+          <span className="tabular-nums font-semibold" style={{ opacity: 0.85 }}>
+            {timeRange}
+          </span>
+          {compact && appointment.staffName && (
+            <span className="font-medium" style={{ opacity: 0.75 }} title={appointment.staffName}>
+              {" · "}
+              {appointment.staffName}
+            </span>
+          )}
         </span>
 
-        {/* Staff + client — one line so both stay visible even on a short
-            (compact) card, instead of the client being the one dropped for
-            lack of room. */}
-        {staffAndClient && (
+        {!compact && appointment.staffName && (
+          <span
+            className="truncate text-[10px] font-medium leading-tight"
+            style={{ color: color.text, opacity: 0.75 }}
+            title={appointment.staffName}
+          >
+            {appointment.staffName}
+          </span>
+        )}
+
+        {appointment.customerName && (
           <span
             className={`truncate font-medium leading-tight ${compact ? "text-[9px]" : "text-[10px]"}`}
             style={{ color: color.text, opacity: 0.75 }}
-            title={staffAndClient}
+            title={appointment.customerName}
           >
-            {staffAndClient}
+            Client : {appointment.customerName}
           </span>
         )}
       </div>

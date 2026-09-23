@@ -74,6 +74,9 @@ process.env.AUTH_SECRET ??= "test-secret-at-least-32-chars-long-for-hmac";
 process.env.NEXT_PUBLIC_APP_URL ??= "https://test.meribeauty.com";
 
 const SESSION_ID = "session-1";
+// Always in the future: a session that already ran is refused before any
+// hold is taken (lib/formations/session-bookability.js).
+const SESSION_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 const FORMATION_ID = "formation-1";
 
 const booking = {
@@ -120,7 +123,7 @@ beforeEach(() => {
     price: 2200,
     capacity: 1,
     depositPercentage: 30,
-    sessions: [{ id: SESSION_ID, status: "SCHEDULED", capacity: 1, animatorId: null, startDate: new Date("2026-09-22T08:00:00Z") }],
+    sessions: [{ id: SESSION_ID, status: "SCHEDULED", capacity: 1, animatorId: null, startDate: SESSION_START }],
   });
   mocks.aggregate.mockResolvedValue({ _sum: { seatsCount: 0 } });
   mocks.sessionFindUnique.mockResolvedValue(null);
@@ -135,7 +138,7 @@ beforeEach(() => {
     id: "reservation-new",
     session: {
       id: SESSION_ID,
-      startDate: new Date("2026-09-22T08:00:00Z"),
+      startDate: SESSION_START,
       formation: { id: FORMATION_ID, title: "ACOMPTE BASE PRO - Victoria", type: "PRIVATE" },
     },
     customer: { id: "user-1", email: "v.guillaume0605@gmail.com" },

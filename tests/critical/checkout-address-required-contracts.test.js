@@ -35,9 +35,12 @@ describe("a signed-in customer with no billing address cannot reach Stripe", () 
 
     // The authenticated branch must inspect the user's own address and use
     // the same ADDRESS_REQUIRED / persist-supplied-address pattern as the
-    // guest path below it, not return the user unconditionally.
+    // guest path below it, not return the user unconditionally. Narrowed to
+    // only fire when the order will actually be invoiced (willBeInvoiced) —
+    // a particulier account never needs an address on file, only an
+    // Entreprise/VAT one does; the ADDRESS_REQUIRED guard itself is unchanged.
     const authBranch = fn.slice(authBranchIdx, fn.indexOf("const email = customerInfo.email"));
-    expect(authBranch).toContain("if (!user.addressLine1)");
+    expect(authBranch).toContain("if (!user.addressLine1 && willBeInvoiced(user))");
     expect(authBranch).toContain('throw new Error("ADDRESS_REQUIRED")');
     expect(authBranch).toContain("prisma.user.update({ where: { id: user.id }, data: suppliedAddress })");
   });
@@ -51,8 +54,14 @@ describe("a signed-in customer with no billing address cannot reach Stripe", () 
 
   test("the client requires the address whenever the account doesn't already have one — not just for guests", () => {
     const checkout = source("components/boutique/CheckoutPageClient.jsx");
-    expect(checkout).toContain("const hasAddressOnFile = isAuthenticated && Boolean(customerSession.addressLine1)");
-    expect(checkout).toContain("if (!hasAddressOnFile) {");
+    // `effectiveSession` is a local alias for the `customerSession` prop
+    // introduced alongside the checkout identity-verification refactor —
+    // same value, just not read as the raw prop name inline anymore.
+    expect(checkout).toContain("const effectiveSession = customerSession");
+    expect(checkout).toContain("const hasAddressOnFile = isAuthenticated && Boolean(effectiveSession.addressLine1)");
+    // Narrowed to Entreprise orders only (see actions/boutique/orders.js's
+    // willBeInvoiced) — a particulier checkout never needs a billing address.
+    expect(checkout).toContain("if (customerInfo.isCompany && !hasAddressOnFile) {");
     // The address check must not still be nested inside the guest-only
     // `if (!isAuthenticated)` block — it needs its own top-level gate so it
     // also runs for an authenticated customer with no address on file.
@@ -65,11 +74,11 @@ describe("a signed-in customer with no billing address cannot reach Stripe", () 
   test("a signed-in customer's typed address actually reaches the server", () => {
     const checkout = source("components/boutique/CheckoutPageClient.jsx");
     const payloadIdx = checkout.indexOf("customerInfo: isAuthenticated");
-    const authenticatedPayload = checkout.slice(payloadIdx, payloadIdx + 1000);
+    const authenticatedPayload = checkout.slice(payloadIdx, payloadIdx + 1400);
     // Identity fields stay session-sourced (IDOR guard); the address is the
     // one field that has to come from what was just typed, since there is
     // no server-known value yet when hasAddressOnFile is false.
-    expect(authenticatedPayload).toContain("fullName: customerSession.fullName");
+    expect(authenticatedPayload).toContain("fullName: effectiveSession.fullName");
     expect(authenticatedPayload).toContain("addressLine1: customerInfo.addressLine1");
     expect(authenticatedPayload).toContain("addressPostalCode: customerInfo.addressPostalCode");
   });

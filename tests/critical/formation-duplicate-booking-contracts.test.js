@@ -81,7 +81,7 @@ const booking = {
   formationId: FORMATION_ID,
   termsAccepted: true,
   paymentMethod: "DEPOSIT",
-  customerInfo: { fullName: "Victoria Guillaume", email: "v.guillaume0605@gmail.com", phone: "+32470112233" },
+  customerInfo: { fullName: "Victoria Guillaume", email: "v.guillaume0605@gmail.com", phone: "+32470112233", password: "TestPass1234" },
 };
 
 function customer({ emailVerified }) {
@@ -201,6 +201,10 @@ describe("the refusal is narrow enough not to break normal booking", () => {
     // would break resubmitting the form before confirming the email.
     mocks.userFindFirst.mockResolvedValue(customer({ emailVerified: false }));
     mocks.reservationFindFirst.mockResolvedValue(liveHold);
+    // Existing-but-unverified retry path refreshes the password on the same
+    // row (actions/formations/create-formation-reservation.js's "existing
+    // unverified account" branch) — mock the update it performs.
+    mocks.userUpdate.mockResolvedValue(customer({ emailVerified: false }));
 
     const result = await createFormationReservation(booking);
 

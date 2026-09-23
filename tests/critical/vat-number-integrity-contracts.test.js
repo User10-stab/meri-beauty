@@ -152,7 +152,9 @@ describe("a VAT number is never stored apart from its verification proof", () =>
   test("product checkout exposes the same VIES field used by reservations", () => {
     const checkout = source("components/boutique/CheckoutPageClient.jsx");
     expect(checkout).toContain("verifyVatNumber(customerInfo.vatNumber)");
-    expect(checkout).toContain("Numéro de TVA (optionnel)");
+    // Label dropped "(optionnel)" once the field moved inside the
+    // Entreprise-only toggle (it's never shown to a particulier checkout).
+    expect(checkout).toContain("Numéro de TVA");
     expect(checkout).toContain("Vérifier");
   });
 

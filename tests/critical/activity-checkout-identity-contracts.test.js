@@ -20,7 +20,11 @@ describe("activity checkout identity", () => {
     const page = source(file);
 
     expect(page).toContain("getMyCheckoutProfile");
-    expect(page).toContain("session.user.fullName");
+    // Destructured from the session ("const authedUser = session?.user")
+    // rather than read inline as session.user.fullName — same source, just a
+    // local alias introduced by the checkout identity-verification refactor.
+    expect(page).toContain("const authedUser = session?.user");
+    expect(page).toContain("authedUser.fullName");
     expect(page).toContain("result.data.phone || prev.phone");
     expect(page).not.toContain('phone: "",\n      }));');
     expect(page).toContain('requiredErrors.phone = "Le numéro de téléphone est obligatoire."');

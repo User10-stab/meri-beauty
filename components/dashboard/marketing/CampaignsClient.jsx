@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { fetchJson } from "@/lib/api-client";
-import { renderCampaignContent } from "@/lib/campaigns/render-content";
+import { CampaignBodyPreview } from "@/components/dashboard/marketing/CampaignBodyPreview";
 
 const STATUS_LABELS = {
   DRAFT: "Brouillon",
@@ -17,6 +17,7 @@ export function CampaignsClient() {
   const [error, setError] = useState("");
   const [showWizard, setShowWizard] = useState(false);
   const [sendingId, setSendingId] = useState(null);
+  const [viewCampaign, setViewCampaign] = useState(null);
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true);
@@ -132,6 +133,12 @@ export function CampaignsClient() {
                 <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-dark-2 dark:text-dark-6">
                   {STATUS_LABELS[c.status] ?? c.status}
                 </span>
+                <button
+                  onClick={() => setViewCampaign(c)}
+                  className="rounded-lg border border-stroke px-3 py-1.5 text-xs font-semibold hover:bg-gray-50 dark:border-dark-3 dark:hover:bg-dark-2"
+                >
+                  👁 Aperçu
+                </button>
                 {(c.status === "DRAFT" || c.status === "SCHEDULED") && (
                   <button
                     disabled={sendingId === c.id}
@@ -163,6 +170,42 @@ export function CampaignsClient() {
             fetchCampaigns();
           }}
         />
+      )}
+
+      {viewCampaign && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4" onClick={() => setViewCampaign(null)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="my-8 w-full max-w-2xl space-y-4 rounded-2xl bg-white p-6 dark:bg-gray-dark"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-dark dark:text-white">{viewCampaign.title}</h2>
+                <p className="mt-1 text-sm text-gray-500">Objet : {viewCampaign.subject}</p>
+                <p className="mt-1 text-xs text-gray-400">
+                  Segment : {viewCampaign.targetSegment}
+                  {viewCampaign.utmCampaign ? ` · UTM : ${viewCampaign.utmCampaign}` : ""}
+                  {viewCampaign.preheader ? ` · Pré-header : ${viewCampaign.preheader}` : ""}
+                  {viewCampaign.sentAt ? ` · Envoyée le ${new Date(viewCampaign.sentAt).toLocaleDateString("fr-BE")}` : ""}
+                  {viewCampaign.status === "SCHEDULED" && viewCampaign.scheduledDate
+                    ? ` · Planifiée le ${new Date(viewCampaign.scheduledDate).toLocaleString("fr-BE")}`
+                    : ""}
+                  {viewCampaign.attachmentUrl ? ` · 📎 ${viewCampaign.attachmentUrl.split("/").pop()}` : ""}
+                </p>
+              </div>
+              <button onClick={() => setViewCampaign(null)} className="text-sm text-gray-500">✕</button>
+            </div>
+            <CampaignBodyPreview campaign={viewCampaign} />
+            <div className="flex justify-end">
+              <button
+                onClick={() => setViewCampaign(null)}
+                className="rounded-lg border border-stroke px-4 py-2 text-sm dark:border-dark-3"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -335,26 +378,7 @@ function CampaignWizard({ onClose, onDone }) {
                 <p className="text-gray-500">📎 Pièce jointe : {form.attachmentUrl.split("/").pop()}</p>
               )}
               {/* Aperçu fidèle du corps envoyé : bonjour auto + image + contenu + bouton */}
-              <div className="mt-3 rounded-lg bg-gray-50 p-4 dark:bg-dark-2">
-                <p className="mb-1 text-gray-700 dark:text-dark-6">
-                  Bonjour {"{entreprise ou nom du destinataire}"},
-                </p>
-                <p className="mb-2 text-[11px] italic text-gray-400">
-                  (personnalisé à l'envoi : entreprise, sinon prénom + nom — ne l'écris pas dans le contenu)
-                </p>
-                {form.imageUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={form.imageUrl} alt="" className="mb-2 max-h-48 rounded-xl" />
-                )}
-                <div className="text-gray-700 dark:text-dark-6" dangerouslySetInnerHTML={{ __html: renderCampaignContent(form.content) || "<p>(contenu vide)</p>" }} />
-                {form.ctaUrl && (
-                  <p className="mt-4 text-center">
-                    <span className="inline-block rounded-full bg-[#2f3a2e] px-6 py-2.5 font-semibold text-white">
-                      {form.ctaText || "Découvrir"}
-                    </span>
-                  </p>
-                )}
-              </div>
+              <CampaignBodyPreview campaign={form} />
               <p className="mt-3 text-xs text-gray-400">
                 L'e-mail contiendra automatiquement le pixel de suivi d'ouverture, le lien de tracking sur le bouton et un lien de désinscription.
               </p>

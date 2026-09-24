@@ -2,6 +2,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  UserPlus,
+  Mail,
+  Eye,
+  MousePointerClick,
+  Heart,
+  FlaskConical,
+  BadgeCheck,
+  UserX,
+} from "lucide-react";
 import { fetchJson } from "@/lib/api-client";
 import {
   PROSPECT_SOURCE_CHOICES,
@@ -9,8 +19,29 @@ import {
   getSourceLabel,
 } from "@/lib/prospects/prospect-choices";
 
-const STATUS_COLORS = {
-  nouveau: "bg-gray-100 text-gray-700 dark:bg-dark-2 dark:text-dark-6",
+const STATUS_ICONS = {
+  nouveau: UserPlus,
+  contacte: Mail,
+  lecteur: Eye,
+  engage: MousePointerClick,
+  interesse: Heart,
+  demo_essai: FlaskConical,
+  client: BadgeCheck,
+  perdu: UserX,
+};
+
+const STATUS_BORDERS = {
+  nouveau: "border-gray-200 dark:border-dark-3",
+  contacte: "border-blue-200 dark:border-blue-900/50",
+  lecteur: "border-sky-200 dark:border-sky-900/50",
+  engage: "border-violet-200 dark:border-violet-900/50",
+  interesse: "border-amber-200 dark:border-amber-900/50",
+  demo_essai: "border-teal-200 dark:border-teal-900/50",
+  client: "border-emerald-200 dark:border-emerald-900/50",
+  perdu: "border-red-200 dark:border-red-900/50",
+};
+
+const STATUS_COLORS = {  nouveau: "bg-gray-100 text-gray-700 dark:bg-dark-2 dark:text-dark-6",
   contacte: "bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400",
   lecteur: "bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-400",
   engage: "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400",
@@ -76,23 +107,29 @@ export function ProspectsClient() {
     <div className="space-y-6">
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {Object.entries(PROSPECT_STATUS_LABELS).map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setStatus(status === key ? "" : key)}
-              className={`rounded-xl border px-3 py-2 text-left transition-all ${
-                status === key
-                  ? "border-[#2f3a2e] ring-1 ring-[#2f3a2e]"
-                  : "border-stroke dark:border-dark-3"
-              } bg-white dark:bg-gray-dark`}
-            >
-              <div className="text-xl font-bold text-dark dark:text-white">
-                {stats.byStatus?.[key] ?? 0}
-              </div>
-              <div className="text-xs font-medium text-gray-500 dark:text-dark-6">{label}</div>
-            </button>
-          ))}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+          {Object.entries(PROSPECT_STATUS_LABELS).map(([key, label]) => {
+            const Icon = STATUS_ICONS[key];
+            return (
+              <button
+                key={key}
+                onClick={() => setStatus(status === key ? "" : key)}
+                className={`rounded-xl border-2 px-3 py-2 text-left transition-all ${STATUS_COLORS[key] ?? ""} ${
+                  status === key
+                    ? "border-[#2f3a2e] ring-1 ring-[#2f3a2e]"
+                    : STATUS_BORDERS[key] ?? "border-stroke dark:border-dark-3"
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {Icon && <Icon className="h-4 w-4" />}
+                  <span className="text-xl font-bold leading-none">
+                    {stats.byStatus?.[key] ?? 0}
+                  </span>
+                </div>
+                <div className="mt-0.5 text-xs font-medium opacity-80">{label}</div>
+              </button>
+            );
+          })}
         </div>
       )}
 

@@ -1,4 +1,4 @@
-import { Bell } from "lucide-react";
+import { Bell, Megaphone } from "lucide-react";
 import * as Icons from "../icons";
 import { ROLES, DASHBOARD_PERMISSIONS, STAFF_PERMISSIONS, canAccessStaffPermission, isAdminRole } from "@/lib/authorization";
 
@@ -95,21 +95,27 @@ const ALL_NAV_DATA = [
         ],
       },
       {
+        title: "Marketing",
+        icon: Megaphone,
+        items: [
+          { title: "Prospects", url: "/dashboard/marketing/prospects", roles: DASHBOARD_PERMISSIONS.MARKETING },
+          { title: "Campagnes", url: "/dashboard/marketing/campagnes", roles: DASHBOARD_PERMISSIONS.MARKETING },
+          // Search Console : la connexion OAuth vaut pour tout le salon et
+          // ses jetons ouvrent les données de référencement du site, d'où
+          // OWNER/ADMIN en dur plutôt qu'une permission délégable.
+          { title: "Référencement Google", url: "/dashboard/seo", roles: [ROLES.OWNER, ROLES.ADMIN] },
+        ],
+      },
+      {
         title: "Équipe & administration",
         icon: Icons.User,
         items: [
           { title: "Auto-Entrepreneur", url: "/dashboard/staff/auto-entrepreneur", roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT },
           { title: "Comptes Stripe", url: "/dashboard/staff/stripe-accounts", roles: DASHBOARD_PERMISSIONS.STAFF_MANAGEMENT },
           { title: "Newsletter", url: "/dashboard/newsletter", roles: DASHBOARD_PERMISSIONS.NEWSLETTER, permission: STAFF_PERMISSIONS.NEWSLETTER },
-          { title: "Prospects", url: "/dashboard/marketing/prospects", roles: DASHBOARD_PERMISSIONS.MARKETING },
-          { title: "Campagnes", url: "/dashboard/marketing/campagnes", roles: DASHBOARD_PERMISSIONS.MARKETING },
           { title: "Demandes de location", url: "/dashboard/rental-requests", roles: DASHBOARD_PERMISSIONS.RENTAL_REQUESTS },
           { title: "Avis clients", url: "/dashboard/reviews", roles: DASHBOARD_PERMISSIONS.REVIEWS },
           { title: "Rapports", url: "/dashboard/reports", roles: DASHBOARD_PERMISSIONS.REPORTS },
-          // Search Console : la connexion OAuth vaut pour tout le salon et
-          // ses jetons ouvrent les données de référencement du site, d'où
-          // OWNER/ADMIN en dur plutôt qu'une permission délégable.
-          { title: "Référencement Google", url: "/dashboard/seo", roles: [ROLES.OWNER, ROLES.ADMIN] },
         ],
       },
     ],

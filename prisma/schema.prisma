@@ -3151,6 +3151,48 @@ enum NextActionType {
   aucune
 }
 
+// File d'attente d'envoi d'une campagne (quota journalier Resend).
+enum CampaignRecipientStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// Une ligne par destinataire et par campagne : c'est elle qui permet la
+// reprise le lendemain quand le quota du jour est épuisé (100/jour sur
+// Resend gratuit). attempts borne les réessais (toilettage auto après
+// 3 échecs : adresse en erreur durable, on arrête d'insister).
+model CampaignRecipient {
+  id String @id @default(cuid())
+
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  email  String
+  userId String?
+
+  status   CampaignRecipientStatus @default(PENDING)
+  attempts Int                     @default(0)
+  error    String?
+  sentAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([campaignId, email])
+  @@index([campaignId, status])
+}
+
+// Compteur journalier d'e-mails sortants (quota Resend partagé entre
+// campagnes et transactionnel). Clé = jour calendaire Europe/Brussels
+// (YYYY-MM-DD), jamais remis à zéro autrement.
+model EmailQuotaDay {
+  day   String @id // "2026-09-24"
+  count Int    @default(0)
+
+  updatedAt DateTime @updatedAt
+}
+
 model Campaign {
   id String @id @default(cuid())
 
@@ -3175,6 +3217,11 @@ model Campaign {
   utmTerm     String?
 
   totalSenders Int @default(0)
+  // Progression d'envoi (file d'attente quota Resend) : nombre de
+  // destinataires effectivement envoyés. totalSenders = taille de la file.
+  // Tant que sentCount < totalSenders, la campagne reste SCHEDULED avec
+  // scheduledDate = prochaine reprise (lendemain), voir lib/campaigns/.
+  sentCount      Int @default(0)
   openedCount  Int @default(0)
   clickedCount Int @default(0)
 
@@ -3191,6 +3238,7 @@ model Campaign {
   openings   MailOpening[]
   activities ProspectActivity[]
   prospects  Prospect[]
+  recipients CampaignRecipient[]
 
   @@index([status, scheduledDate])
 }

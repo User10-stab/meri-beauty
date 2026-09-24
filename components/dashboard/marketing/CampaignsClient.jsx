@@ -122,6 +122,12 @@ export function CampaignsClient() {
                       👁️ {c.openedCount}/{c.totalSenders} ouvertures ({c.openRate} %) · 👆 {c.clickedCount} clics ({c.clickRate} %)
                     </p>
                   )}
+                  {c.status === "SCHEDULED" && (c.totalSenders || 0) > 0 && (
+                    <p className="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+                      ⏳ File d'attente : {c.sentCount || 0}/{c.totalSenders} envoyés
+                      {c.scheduledDate ? ` · reprise auto le ${new Date(c.scheduledDate).toLocaleDateString("fr-BE")}` : ""}
+                    </p>
+                  )}
                 </div>
                 <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-dark-2 dark:text-dark-6">
                   {STATUS_LABELS[c.status] ?? c.status}

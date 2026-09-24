@@ -27,6 +27,12 @@ import { buildGreeting } from "@/lib/campaigns/campaign-email";
 import { renderCampaignContent, looksLikeHtml } from "@/lib/campaigns/render-content";
 import { campaignEmail } from "@/lib/campaigns/campaign-email";
 import { toAbsoluteUrl, absolutizeContentUrls } from "@/lib/campaigns/campaign-email";
+import {
+  getDailyLimit,
+  brusselsDayKey,
+  computeBatchSize,
+  nextResumeAt,
+} from "@/lib/campaigns/email-quota";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -271,5 +277,31 @@ describe("images e-mail (URLs absolues pour Gmail)", () => {
       baseUrl: "https://meribeautystudio.com",
     });
     expect(html).toContain('src="https://meribeautystudio.com/uploads/campaigns/a.jpg"');
+  });
+});
+
+describe("email-quota (file Resend 100/jour)", () => {
+  it("computeBatchSize : min(quota restant, file restante)", () => {
+    expect(computeBatchSize(100, 150)).toBe(100); // 150 prospects -> 100 partent, 50 en attente
+    expect(computeBatchSize(50, 50)).toBe(50);
+    expect(computeBatchSize(0, 50)).toBe(0); // quota épuisé -> reprise demain
+    expect(computeBatchSize(100, 0)).toBe(0);
+    expect(computeBatchSize(-5, 10)).toBe(0);
+  });
+  it("brusselsDayKey au format jour calendaire", () => {
+    expect(brusselsDayKey(new Date("2026-09-24T10:00:00Z"))).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+  it("nextResumeAt = +24h", () => {
+    const from = new Date("2026-09-24T08:00:00Z");
+    expect(nextResumeAt(from).toISOString()).toBe("2026-09-25T08:00:00.000Z");
+  });
+  it("getDailyLimit configurable, défaut 100", () => {
+    delete process.env.RESEND_DAILY_LIMIT;
+    expect(getDailyLimit()).toBe(100);
+    process.env.RESEND_DAILY_LIMIT = "200";
+    expect(getDailyLimit()).toBe(200);
+    process.env.RESEND_DAILY_LIMIT = "nawak";
+    expect(getDailyLimit()).toBe(100);
+    delete process.env.RESEND_DAILY_LIMIT;
   });
 });

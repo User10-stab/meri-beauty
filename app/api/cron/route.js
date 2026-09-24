@@ -116,6 +116,7 @@ export async function GET(req) {
         missedCheckoutsFlaggedForReview: results.reconcileMissedCheckouts?.flagged ?? null,
         scheduledCampaignsChecked: results.sendScheduledCampaigns?.checked ?? null,
         scheduledCampaignsSent: results.sendScheduledCampaigns?.sentCount ?? null,
+        scheduledCampaignsQueued: results.sendScheduledCampaigns?.queuedCount ?? null,
         failedJobs: settled
           .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
           .filter(Boolean),

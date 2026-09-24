@@ -78,10 +78,12 @@ async function logOpening({ campaignId, email, userId, request }) {
           lastEventType: "email_opened",
           ...(campaignId ? { lastCampaignId: campaignId } : {}),
         },
-      }).catch(() => {});
+      }).catch((err) => console.error("[mail-openings/track] prospect update failed:", err?.message ?? err));
       // Ouverture seule (sans clic) -> statut `lecteur`. Ne monte que :
       // un `engage`/`client` existant n'est jamais rétrogradé.
-      await promoteToStatus(prospect, "lecteur", { note: "Ouverture d'une campagne" }).catch(() => {});
+      await promoteToStatus(prospect, "lecteur", { note: "Ouverture d'une campagne" }).catch((err) =>
+        console.error("[mail-openings/track] promote lecteur failed:", err?.message ?? err)
+      );
     }
   }
 }

@@ -76,8 +76,10 @@ async function logClick({ campaignId, email, userId, ctaUrl, request }) {
           lastEventType: "email_clicked",
           lastCampaignId: campaignId,
         },
-      }).catch(() => {});
-      await promoteToStatus(prospect, "engage", { note: "Clic sur une campagne" }).catch(() => {});
+      }).catch((err) => console.error("[campaign-clicks/track] prospect update failed:", err?.message ?? err));
+      await promoteToStatus(prospect, "engage", { note: "Clic sur une campagne" }).catch((err) =>
+        console.error("[campaign-clicks/track] promote engage failed:", err?.message ?? err)
+      );
     }
   }
 }

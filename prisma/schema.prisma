@@ -3109,6 +3109,7 @@ enum ProspectSource {
 enum ProspectStatus {
   nouveau
   contacte
+  lecteur
   engage
   interesse
   demo_essai

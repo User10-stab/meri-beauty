@@ -33,6 +33,7 @@ import {
   computeBatchSize,
   nextResumeAt,
 } from "@/lib/campaigns/email-quota";
+import { buildTimeline, buildCampaignEngagement } from "@/lib/prospects/timeline";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -42,6 +43,10 @@ describe("STATUS_RANK — promotion montante uniquement", () => {
     expect(STATUS_RANK.perdu).toBe(-1);
     expect(STATUS_RANK.client).toBeGreaterThan(STATUS_RANK.demo_essai);
     expect(STATUS_RANK.demo_essai).toBeGreaterThan(STATUS_RANK.interesse);
+  });
+  it("lecteur entre contacte et engage (ouvert sans cliquer)", () => {
+    expect(STATUS_RANK.lecteur).toBeGreaterThan(STATUS_RANK.contacte);
+    expect(STATUS_RANK.engage).toBeGreaterThan(STATUS_RANK.lecteur);
   });
   it("tous les statuts ont un label FR", () => {
     for (const status of Object.keys(STATUS_RANK)) {
@@ -102,6 +107,11 @@ describe("segments", () => {  it("tous les segments métier salon existent", () 
       expect(isValidSegment(s)).toBe(true);
     }
     expect(isValidSegment("licences")).toBe(false);
+  });
+  it("segments unitaires par statut (engagé / essai / intéressé / lecteur)", () => {
+    for (const s of ["prospects_engage", "prospects_essai", "prospects_interesse", "prospects_lecteur"]) {
+      expect(isValidSegment(s)).toBe(true);
+    }
   });
   it("dedupe par email en gardant le userId", () => {
     const out = dedupeRecipients([
@@ -303,5 +313,48 @@ describe("email-quota (file Resend 100/jour)", () => {
     process.env.RESEND_DAILY_LIMIT = "nawak";
     expect(getDailyLimit()).toBe(100);
     delete process.env.RESEND_DAILY_LIMIT;
+  });
+});
+
+describe("buildTimeline (anti doublon ouverture/clic)", () => {
+  const d = (s) => new Date(s);
+  it("une ouverture = UNE ligne (pas activité + événement)", () => {
+    const timeline = buildTimeline({
+      activities: [
+        { id: "1", type: "email_opened", createdAt: d("2026-09-24T15:38:54"), description: "E-mail de campagne ouvert", campaign: { id: "c", title: "Boutique lancement" }, metadata: null },
+        { id: "2", type: "note_added", createdAt: d("2026-09-24T15:00:00"), description: "Appelée", campaign: null, metadata: null },
+      ],
+      openings: [
+        { id: "9", openedAt: d("2026-09-24T15:38:54"), campaignId: "c", campaign: { id: "c", title: "Boutique lancement" } },
+      ],
+      clicks: [],
+    });
+    // note + 1 ouverture (l'activité email_opened legacy est exclue)
+    expect(timeline).toHaveLength(2);
+    expect(timeline.filter((t) => t.kind === "open")).toHaveLength(1);
+    expect(timeline[0].kind).toBe("open"); // tri desc : le plus récent d'abord
+  });
+  it("un clic = UNE ligne, URL conservée", () => {
+    const timeline = buildTimeline({
+      activities: [
+        { id: "3", type: "email_clicked", createdAt: d("2026-09-24T15:38:54"), description: "Lien cliqué", campaign: null, metadata: null },
+      ],
+      openings: [],
+      clicks: [
+        { id: "7", clickedAt: d("2026-09-24T15:38:54"), campaignId: "c", campaign: { id: "c", title: "C" }, ctaUrl: "https://x.test/offre" },
+      ],
+    });
+    expect(timeline).toHaveLength(1);
+    expect(timeline[0].metadata).toEqual({ url: "https://x.test/offre" });
+  });
+  it("buildCampaignEngagement groupe par campagne", () => {
+    const engagement = buildCampaignEngagement({
+      openings: [
+        { campaignId: "c", campaign: { id: "c", title: "C" } },
+        { campaignId: "c", campaign: { id: "c", title: "C" } },
+      ],
+      clicks: [{ campaignId: "c", campaign: { id: "c", title: "C" } }],
+    });
+    expect(engagement).toEqual([{ campaign: { id: "c", title: "C" }, opens: 2, clicks: 1 }]);
   });
 });

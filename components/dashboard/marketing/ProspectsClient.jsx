@@ -12,6 +12,7 @@ import {
 const STATUS_COLORS = {
   nouveau: "bg-gray-100 text-gray-700 dark:bg-dark-2 dark:text-dark-6",
   contacte: "bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400",
+  lecteur: "bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-400",
   engage: "bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400",
   interesse: "bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400",
   demo_essai: "bg-teal-50 text-teal-700 dark:bg-teal-900/20 dark:text-teal-400",
@@ -75,7 +76,7 @@ export function ProspectsClient() {
     <div className="space-y-6">
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           {Object.entries(PROSPECT_STATUS_LABELS).map(([key, label]) => (
             <button
               key={key}

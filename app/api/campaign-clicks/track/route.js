@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { normalizeEmail, findProspectByEmail, addActivity, promoteToStatus } from "@/lib/prospects/prospect-service";
+import { normalizeEmail, findProspectByEmail, promoteToStatus } from "@/lib/prospects/prospect-service";
 
 /**
  * GET /api/campaign-clicks/track?c&url&e&u — PUBLIC, sans auth.
@@ -67,11 +67,15 @@ async function logClick({ campaignId, email, userId, ctaUrl, request }) {
   if (email) {
     const prospect = await findProspectByEmail(email);
     if (prospect) {
-      await addActivity(prospect, {
-        type: "email_clicked",
-        campaignId,
-        metadata: { url: ctaUrl?.slice(0, 500) },
-        description: "Lien de campagne cliqué",
+      // PAS d'activité `email_clicked` : la ligne CampaignClick ci-dessus
+      // EST l'événement (sinon doublon 📝+👆 dans la timeline).
+      await prisma.prospect.update({
+        where: { id: prospect.id },
+        data: {
+          lastActivityAt: new Date(),
+          lastEventType: "email_clicked",
+          lastCampaignId: campaignId,
+        },
       }).catch(() => {});
       await promoteToStatus(prospect, "engage", { note: "Clic sur une campagne" }).catch(() => {});
     }

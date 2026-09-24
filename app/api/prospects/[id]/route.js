@@ -2,8 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { ok, badRequest, notFound, serverError, prismaError } from "@/lib/api-response";
 import { requireMarketingApi } from "@/lib/prospects/require-marketing";
 import { normalizeEmail } from "@/lib/prospects/prospect-service";
-
-const TIMELINE_LIMIT = 200;
+import { buildTimeline, buildCampaignEngagement, TIMELINE_LIMIT } from "@/lib/prospects/timeline";
 
 // ─── GET /api/prospects/:id — prospect + timeline fusionnée + engagement ─────
 export async function GET(request, { params }) {
@@ -43,52 +42,10 @@ export async function GET(request, { params }) {
       }),
     ]);
 
-    const timeline = [
-      ...activities.map((a) => ({
-        kind: "activity",
-        type: a.type,
-        date: a.createdAt,
-        description: a.description,
-        campaign: a.campaign,
-        metadata: a.metadata,
-        id: `a-${a.id}`,
-      })),
-      ...openings.map((o) => ({
-        kind: "open",
-        type: "email_opened",
-        date: o.openedAt,
-        description: `E-mail ouvert${o.campaign ? ` — ${o.campaign.title}` : ""}`,
-        campaign: o.campaign,
-        id: `o-${o.id}`,
-      })),
-      ...clicks.map((c) => ({
-        kind: "click",
-        type: "email_clicked",
-        date: c.clickedAt,
-        description: `Lien cliqué${c.campaign ? ` — ${c.campaign.title}` : ""}`,
-        campaign: c.campaign,
-        metadata: c.ctaUrl ? { url: c.ctaUrl } : null,
-        id: `c-${c.id}`,
-      })),
-    ]
-      .sort((a, b) => new Date(b.date) - new Date(a.date))
-      .slice(0, TIMELINE_LIMIT);
+    const timeline = buildTimeline({ activities, openings, clicks });
 
     // Engagement par campagne (ouvertures + clics groupés).
-    const engagementMap = new Map();
-    for (const o of openings) {
-      const key = o.campaignId || "hors-campagne";
-      const entry = engagementMap.get(key) || { campaign: o.campaign, opens: 0, clicks: 0 };
-      entry.opens += 1;
-      engagementMap.set(key, entry);
-    }
-    for (const c of clicks) {
-      const key = c.campaignId || "hors-campagne";
-      const entry = engagementMap.get(key) || { campaign: c.campaign, opens: 0, clicks: 0 };
-      entry.clicks += 1;
-      engagementMap.set(key, entry);
-    }
-    const campaignEngagement = [...engagementMap.values()];
+    const campaignEngagement = buildCampaignEngagement({ openings, clicks });
 
     return ok({ prospect, timeline, campaignEngagement }, "Prospect récupéré.");
   } catch (error) {

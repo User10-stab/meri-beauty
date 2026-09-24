@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { normalizeEmail, findProspectByEmail, addActivity } from "@/lib/prospects/prospect-service";
+import { normalizeEmail, findProspectByEmail, promoteToStatus } from "@/lib/prospects/prospect-service";
 
 // Pixel transparent 1x1.
 const PIXEL = Buffer.from(
@@ -68,11 +68,20 @@ async function logOpening({ campaignId, email, userId, request }) {
   if (email) {
     const prospect = await findProspectByEmail(email);
     if (prospect) {
-      await addActivity(prospect, {
-        type: "email_opened",
-        campaignId: campaignId || null,
-        description: "E-mail de campagne ouvert",
+      // PAS d'activité `email_opened` : la ligne MailOpening ci-dessus EST
+      // l'événement (sinon doublon 📝+👁️ dans la timeline). On met juste à
+      // jour le pointeur de dernière activité du prospect.
+      await prisma.prospect.update({
+        where: { id: prospect.id },
+        data: {
+          lastActivityAt: new Date(),
+          lastEventType: "email_opened",
+          ...(campaignId ? { lastCampaignId: campaignId } : {}),
+        },
       }).catch(() => {});
+      // Ouverture seule (sans clic) -> statut `lecteur`. Ne monte que :
+      // un `engage`/`client` existant n'est jamais rétrogradé.
+      await promoteToStatus(prospect, "lecteur", { note: "Ouverture d'une campagne" }).catch(() => {});
     }
   }
 }

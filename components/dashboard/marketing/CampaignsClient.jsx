@@ -173,10 +173,10 @@ export function CampaignsClient() {
       )}
 
       {viewCampaign && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4" onClick={() => setViewCampaign(null)}>
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 p-4" onClick={() => setViewCampaign(null)}>
           <div
             onClick={(e) => e.stopPropagation()}
-            className="my-8 w-full max-w-2xl space-y-4 rounded-2xl bg-white p-6 dark:bg-gray-dark"
+            className="mx-auto my-8 w-full max-w-2xl space-y-4 rounded-2xl bg-white p-6 dark:bg-gray-dark"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -291,10 +291,10 @@ function CampaignWizard({ onClose, onDone }) {
   const audienceCount = counts?.[form.targetSegment] ?? "?";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 p-4" onClick={onClose}>
       <div
         onClick={(e) => e.stopPropagation()}
-        className="my-8 w-full max-w-2xl space-y-4 rounded-2xl bg-white p-6 dark:bg-gray-dark"
+        className="mx-auto my-8 w-full max-w-2xl space-y-4 rounded-2xl bg-white p-6 dark:bg-gray-dark"
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-dark dark:text-white">

@@ -67,7 +67,7 @@ describe("cash-session wiring", () => {
   // contract. 9 Sep 2026: a non-operator cashier (see isTillCashOperator)
   // rings the sale up off-till instead — `useTill` gates the session lookup.
   test("a till operator's POS CASH sale attaches to the open session, and refuses to sell with none", () => {
-    expect(pos).toContain("const offTill = !isTillCashOperator(guard.session.user)");
+    expect(pos).toContain("const offTill = !(await canUseSalonTill(guard.session.user));");
     expect(pos).toContain("cashSession.findFirst({");
     expect(pos).toContain("where: { closedAt: null }");
     expect(pos).toContain('const useTill = !offTill && method === "CASH"');

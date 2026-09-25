@@ -57,8 +57,9 @@ describe("issueInvoice refuses an independent's payment outright", () => {
 describe("every settlement path asks the payment who owns it", () => {
   test("settle-reservation: off-till for her sale, including the kept no-show deposit", () => {
     const code = source("lib/reservations/settle-reservation.js");
-    expect(code).toContain("const offTill = !isTillCashOperator(actor) || Boolean(payment.payeeStaffId);");
-    expect(code).toContain("const offTillActor = !isTillCashOperator(actor) || Boolean(payment.payeeStaffId);");
+    expect(code).toContain("const offTill = Boolean(payment.payeeStaffId) || !(await canUseSalonTill(actor));");
+    expect(code).toContain("const actorUsesTill = await canUseSalonTill(actor);");
+    expect(code).toContain("const offTillActor = !actorUsesTill || Boolean(payment.payeeStaffId);");
   });
 
   test("completeAppointment: the payment decides, or the practitioner when there is no payment yet", () => {
@@ -67,14 +68,15 @@ describe("every settlement path asks the payment who owns it", () => {
     expect(code).toContain(
       ": Boolean((await resolvePayeeForAppointment(prisma, { staffId: appointment.staffId })).payeeStaffId);"
     );
-    expect(code).toContain("const offTill = !isTillCashOperator(authCheck.user) || independentSale;");
-    expect(code).toContain("const offTillActor = !isTillCashOperator(authCheck.user) || Boolean(noShowPayment.payeeStaffId);");
+    expect(code).toContain("const offTill = independentSale || !(await canUseSalonTill(authCheck.user));");
+    expect(code).toContain("const actorUsesTill = await canUseSalonTill(authCheck.user);");
+    expect(code).toContain("const offTillActor = !actorUsesTill || Boolean(noShowPayment.payeeStaffId);");
     expect(code).toContain("!payment.invoice && !payment.payeeStaffId && hasInvoiceableVatIdentity(appointment.user)");
   });
 
   test("counter seat sale: off-till when the session's animator is independent", () => {
     const code = source("actions/counter/create-reservation.js");
-    expect(code).toContain("const offTill = !isTillCashOperator(guard.session.user) || Boolean(payee.payeeStaffId);");
+    expect(code).toContain("const offTill = Boolean(payee.payeeStaffId) || !(await canUseSalonTill(guard.session.user));");
     // one payee, resolved once, written on the Payment it decides for
     expect(code.match(/const payee =/g)).toHaveLength(1);
   });
@@ -118,6 +120,7 @@ describe("every settlement path asks the payment who owns it", () => {
 
   test("the client of her sale gets the plain confirmation, never the salon ticket", () => {
     const code = source("lib/payments/send-settlement-email.js");
-    expect(code).toContain("if (isTillCashOperator(actor) && !owner?.payeeStaffId) return sendTicketByEmail(");
+    expect(code).toContain("salonTicket = !owner?.payeeStaffId && (await canUseSalonTill(actor));");
+    expect(code).toContain("if (salonTicket) return emailPaymentTicket(");
   });
 });

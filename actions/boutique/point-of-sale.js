@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isAdminRole, isTillCashOperator } from "@/lib/authorization";
+import { isAdminRole, isTillCashOperator, canUseSalonTill } from "@/lib/authorization";
 import { pointOfSaleSaleSchema } from "@/lib/validations/point-of-sale";
 import { issueInvoice, buildInvoiceCustomer } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
@@ -32,10 +32,12 @@ import { POS_HANDOFF_STATUSES, canSettleOrderAtPointOfSale } from "@/lib/orders/
 const BCRYPT_SALT_ROUNDS = 12;
 const POS_CHECKOUT_SECONDS = 31 * 60;
 
+// The till: Marie, the admins, and any staff member granted CAISSE
+// (canUseSalonTill). Everything sold here is boutique stock — the salon's.
 async function requirePointOfSaleAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
-  if (!isTillCashOperator(session.user)) {
+  if (!(await canUseSalonTill(session.user))) {
     return { error: "Accès non autorisé." };
   }
   return { session };
@@ -183,6 +185,9 @@ export async function searchPointOfSaleCustomers(query) {
 export async function getPointOfSaleOrderDraft(orderId) {
   const guard = await requirePointOfSaleAccess();
   if (guard.error) return { success: false, message: guard.error };
+  // Settling a boutique pickup order is the salon's own worklist (Commandes),
+  // not part of the CAISSE permission.
+  if (!isTillCashOperator(guard.session.user)) return { success: false, message: "Accès non autorisé." };
   if (typeof orderId !== "string" || !orderId) return { success: false, message: "Commande introuvable." };
 
   try {
@@ -420,11 +425,13 @@ export async function completePointOfSaleSale(input) {
   const guard = await requirePointOfSaleAccess();
   if (guard.error) return { success: false, message: guard.error };
 
-  // Only Marie and OWNER/ADMIN put cash into the Livre de caisse. Anyone
-  // else still rings up the sale, but off-till: no open-till requirement and
-  // the CASH Transaction is detached from every session, so it shows in
-  // Opérations but never in the drawer's book or its X/Z reconciliation.
-  const offTill = !isTillCashOperator(guard.session.user);
+  // A boutique sale is ALWAYS the salon's money, whoever rings it up: on-till,
+  // salon ticket, salon revenue (Payment.payeeStaffId stays null). Everyone
+  // who passed requirePointOfSaleAccess may put it in the Livre de caisse —
+  // Marie, the admins, and a staff member granted CAISSE — so this is false
+  // for every caller today; it is kept as the one switch every till branch
+  // below reads.
+  const offTill = !(await canUseSalonTill(guard.session.user));
 
   // Every POS sale — whatever the payment method — must belong to a till
   // session, not just CASH ones. Before this gate, a card/QR sale rung up
@@ -450,6 +457,11 @@ export async function completePointOfSaleSale(input) {
   }
 
   const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived, invoiceRequested, sourceOrderId } = parsed.data;
+  // Closing a boutique pickup order from the till is the salon's own
+  // worklist (see getPointOfSaleOrderDraft), not part of CAISSE.
+  if (sourceOrderId && !isTillCashOperator(guard.session.user)) {
+    return { success: false, message: "Accès non autorisé." };
+  }
   if (items.some((item) => item.type === "SERVICE")) {
     return {
       success: false,

@@ -65,9 +65,11 @@ export async function getReportsData({ months } = {}) {
   try {
     const scope = await resolveSalonScope(prisma);
     const salonPayment = SALON_PAYMENT_WHERE;
-    // An Order is the salon's when a salon account rang it up, or nobody did
-    // (the customer's own online purchase). Order.createdByStaffId → User.id.
-    const salonOrder = { OR: [{ createdByStaffId: { in: scope.salonUserIds } }, { createdByStaffId: null }] };
+    // Every boutique Order is the salon's — online, or rung up at the till by
+    // anyone (Marie, an admin, or a staff member granted CAISSE). Who rang it
+    // up never moves boutique revenue out of the salon's books. Its Payment
+    // is filtered on SALON_PAYMENT_WHERE below all the same.
+    const salonOrder = {};
 
     const [
       boutiquePayments,

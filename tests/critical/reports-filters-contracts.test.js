@@ -135,8 +135,9 @@ describe("the report is the salon's alone — independents are never summed in o
     expect(action.match(/\.\.\.salonPayment,/g)?.length).toBeGreaterThanOrEqual(2);
     expect(action.match(/\.\.\.salonPayment \}/g)?.length).toBeGreaterThanOrEqual(3);
     expect(action).toContain("payment: salonPayment,");
-    // Orders also still follow who rang them up (User.id).
-    expect(action).toContain("{ createdByStaffId: { in: scope.salonUserIds } }, { createdByStaffId: null }");
+    // 25/09/2026: every boutique order is the salon's, whoever rang it up.
+    expect(action).toContain("const salonOrder = {};");
+    expect(action).not.toContain("createdByStaffId: { in: scope.salonUserIds }");
     expect(action).toContain("order: salonOrder } })");
   });
 

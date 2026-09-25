@@ -76,9 +76,10 @@ function normalizeParams(params = {}) {
  *   SALON (the default) — the salon's own activity. Money rows (appointments,
  *   atelier and formation seats) are the salon's when their Payment's frozen
  *   owner is (`Payment.payeeStaffId` null, see lib/payments/resolve-payee.js);
- *   a seat not paid yet follows its session's animator. Orders and audit rows
- *   follow who rang them up: the ADMIN/OWNER accounts plus Marie Mercier
- *   (resolveSalonScope), and rows nobody stamped.
+ *   a seat not paid yet follows its session's animator. Every boutique order
+ *   is the salon's, whoever rang it up. Audit rows follow who did them: the
+ *   ADMIN/OWNER accounts plus Marie Mercier (resolveSalonScope), and rows
+ *   nobody stamped.
  *
  *   STAFF — a practitioner reading her OWN ledger on /dashboard/mes-operations.
  *   Only ever the session's own Staff row. There is no way to pick one: every
@@ -171,11 +172,10 @@ async function listUnifiedOperationIds({ scope, sourceTypes, type, lifecycleStat
       ? Prisma.sql`AND (${column} IN (${Prisma.join(ids)}) OR ${column} IS NULL)`
       : Prisma.sql`AND ${column} IN (${Prisma.join(ids)})`;
 
-  // An Order is stamped with a User.id (Order.createdByStaffId → User), an
-  // Appointment with a Staff.id (the denormalized, indexed Appointment.staffId
-  // — never the three-hop join through StaffService). The two id spaces are
-  // not interchangeable: crossing them matches nothing, silently.
-  const orderScope = ownedBy(Prisma.sql`o."createdByStaffId"`, scope.userIds);
+  // Boutique orders are ALWAYS the salon's money, whoever rang them up at the
+  // till (a staff member granted CAISSE sells for the salon): every order in
+  // the salon's ledger, none in a practitioner's own.
+  const orderScope = scope.mode === "STAFF" ? Prisma.sql`AND false` : Prisma.empty;
 
   // Money rows follow the Payment's frozen owner (Payment.payeeStaffId, null =
   // the salon) — never who clicked. See lib/payments/resolve-payee.js.

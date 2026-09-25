@@ -321,7 +321,7 @@ describe("the entry scanner lives at the till", () => {
     expect(lookup).toContain("parsed?.kind === PICKUP_KIND");
     expect(lookup).toContain("lookupOrderByPickupCode(parsed.code)");
     expect(orders).toContain('["PAID", "READY_FOR_PICKUP", "PENDING_PICKUP"].includes(order.status)');
-    expect(page).toContain("canPickup={canOrders}");
+    expect(page).toContain("canPickup={isSalonAccount}");
   });
 
   test("the standalone page and its bespoke sidebar gate are gone", () => {

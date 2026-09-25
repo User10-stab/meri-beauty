@@ -6,6 +6,7 @@ import {
   ROLES,
   getStaffId,
   hasDashboardPermission,
+  isTillCashOperator,
   STAFF_PERMISSIONS,
 } from "@/lib/authorization";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
@@ -114,7 +115,7 @@ const RESERVATION_INCLUDE = {
     },
     // With no Payment row yet the practitioner decides whose sale it is, so
     // the counter can tell before offering « Virement » (resolve-payee.js).
-    staff: { select: { type: true } },
+    staff: { select: { type: true, user: { select: { email: true, role: true } } } },
     payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true, payeeStaffId: true } },
   },
 };
@@ -167,9 +168,12 @@ function presentAppointment(appointment) {
     // An independent practitioner's sale: off-till, so the salon neither
     // banks nor invoices it — and « Virement » cannot be announced for it.
     // The Payment decides once it exists; before that, the practitioner does.
+    // Marie is INDEPENDENT on paper but IS the salon (isTillCashOperator —
+    // the same exemption resolvePayeeForStaff applies through
+    // resolveSalonScope), so the type alone would call her sale someone else's.
     independent: appointment.payment
       ? Boolean(appointment.payment.payeeStaffId)
-      : appointment.staff?.type === "INDEPENDENT",
+      : appointment.staff?.type === "INDEPENDENT" && !isTillCashOperator(appointment.staff.user),
     admissible: blockedReason === null,
     blockedReason,
   };

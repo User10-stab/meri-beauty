@@ -3,7 +3,7 @@
 import { auth } from "@/auth";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS, isTillCashOperator } from "@/lib/authorization";
+import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS, canUseSalonTill } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { sendEmail } from "@/lib/email";
 import { createAppointmentConfirmToken } from "@/lib/appointment-confirm-token";
@@ -667,6 +667,8 @@ export async function markAppointmentNoShow(appointmentId) {
     }
 
     const markedNote = `Marqué absent le ${new Date().toLocaleDateString("fr-FR", { timeZone: "Europe/Brussels" })}`;
+    // Resolved before the transaction: it reads the actor's permissions.
+    const actorUsesTill = await canUseSalonTill(authCheck.user);
 
     const claimed = await prisma.$transaction(async (tx) => {
       // Atomic claim, gated on CONFIRMED — a no-show only makes sense for an
@@ -699,10 +701,10 @@ export async function markAppointmentNoShow(appointmentId) {
           data: { status: "PAID" },
         });
         // A non-privileged staff member (offTillActor) can never cause an
-        // Invoice to be created — see isTillCashOperator. The no-show still
+        // Invoice to be created — see canUseSalonTill. The no-show still
         // gets recorded and the deposit kept, it simply never gets an
         // invoice.
-        const offTillActor = !isTillCashOperator(authCheck.user) || Boolean(noShowPayment.payeeStaffId);
+        const offTillActor = !actorUsesTill || Boolean(noShowPayment.payeeStaffId);
         await allocatePaymentTicketNumber(tx, noShowPayment.id, "APPOINTMENT", null, new Date(), offTillActor);
 
         if (hasInvoiceableVatIdentity(appointment.user) && !offTillActor) {
@@ -869,7 +871,9 @@ export async function completeAppointment(
     const independentSale = payment
       ? Boolean(payment.payeeStaffId)
       : Boolean((await resolvePayeeForAppointment(prisma, { staffId: appointment.staffId })).payeeStaffId);
-    const offTill = !isTillCashOperator(authCheck.user) || independentSale;
+    // The salon's sale enters the till when the collector may run it
+    // (canUseSalonTill: Marie, the admins, a CAISSE staff member).
+    const offTill = independentSale || !(await canUseSalonTill(authCheck.user));
     const collectsAtTill = collectsMoney && !offTill;
 
     // A card payment is only accepted as EXTERNAL_TERMINAL, which carries the
@@ -1077,7 +1081,7 @@ export async function completeAppointment(
         // Same rule everywhere: a particulier never gets an invoice, only a
         // VIES-valid VAT identity does (see settleReservation). A
         // non-privileged staff member (offTill) can never cause an Invoice
-        // to be created — see isTillCashOperator — resolveSettlementInvoice
+        // to be created — see canUseSalonTill — resolveSettlementInvoice
         // is a hard no-op for them: nothing invoice-related is touched, not
         // even superseding an existing one.
         const completionVatPolicy = resolveServiceVatPolicy({ customer: appointment.user });

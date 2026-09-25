@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isTillCashOperator } from "@/lib/authorization";
+import { canUseSalonTill } from "@/lib/authorization";
 import { resolveCounterCustomer } from "@/lib/counter/resolve-counter-customer";
 import { CounterCustomerError } from "@/lib/reservation-errors";
 
@@ -29,7 +29,7 @@ const completeBuyerSchema = z.object({
 export async function completeCounterBuyer(input) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
-  if (!isTillCashOperator(session.user)) {
+  if (!(await canUseSalonTill(session.user))) {
     return { success: false, message: "Accès non autorisé." };
   }
 

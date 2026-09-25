@@ -93,7 +93,10 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
     : Number(ticket.balanceDue ?? 0);
   // A balance is taken *at the till* only when this cashier may — otherwise
   // it's recorded off-till by the settle action, with no method to pick.
-  const takesMoneyAtTill = canCollectCash && amountDue > 0;
+  // An independent's own sale is never taken at the salon's till, whoever
+  // collects it: the server records it off-till with no ticket or invoice
+  // (settleReservation / completeAppointment), so no method, no "facturer".
+  const takesMoneyAtTill = canCollectCash && !ticket.independent && amountDue > 0;
 
   function selectMethod(next) {
     setMethod(next);

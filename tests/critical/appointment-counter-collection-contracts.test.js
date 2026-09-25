@@ -117,11 +117,11 @@ describe("the server applies the same rule, and is the one that matters", () => 
     // to — which is the exact risk the guards were written for.
     // They apply on the *till operator* path only: `collectsAtTill` is
     // `collectsMoney && !offTill`, and an off-till collection (see
-    // isTillCashOperator) never enters the drawer, so there is nothing to
+    // canUseSalonTill) never enters the drawer, so there is nothing to
     // attest against. A card collection is accepted only as
     // EXTERNAL_TERMINAL, which carries the terminal's approval and its
     // receipt reference; bare "CARD" was accepted with no evidence at all.
-    expect(action).toContain("const offTill = !isTillCashOperator(authCheck.user)");
+    expect(action).toContain("const offTill = independentSale || !(await canUseSalonTill(authCheck.user));");
     expect(action).toContain("const collectsAtTill = collectsMoney && !offTill");
     expect(action).toContain('if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL", AWAITED_TRANSFER_METHOD, COUNTER_QR_METHOD].includes(method))');
     expect(action, "a card collection was accepted without a terminal reference").not.toContain(

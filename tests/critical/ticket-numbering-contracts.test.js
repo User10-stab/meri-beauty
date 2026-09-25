@@ -102,7 +102,9 @@ describe("every hook point that settles a sale allocates a ticket number", () =>
     expect(code).toContain('allocatePaymentTicketNumber(tx, noShowPayment.id, "APPOINTMENT", null, new Date(), offTillActor)');
   });
 
-  test("every staff-reachable site's isStaffActor traces back to isTillCashOperator, not a bare role check", () => {
+  // 25/09/2026: or to canUseSalonTill, which starts from isTillCashOperator
+  // and adds a staff member granted CAISSE.
+  test("every staff-reachable site's isStaffActor traces back to the till predicate, not a bare role check", () => {
     for (const file of [
       "actions/boutique/point-of-sale.js",
       "actions/boutique/orders.js",
@@ -110,7 +112,7 @@ describe("every hook point that settles a sale allocates a ticket number", () =>
       "lib/reservations/settle-reservation.js",
       "actions/appointment/manage-appointment.js",
     ]) {
-      expect(source(file)).toContain("isTillCashOperator");
+      expect(source(file)).toMatch(/isTillCashOperator|canUseSalonTill/);
     }
   });
 });

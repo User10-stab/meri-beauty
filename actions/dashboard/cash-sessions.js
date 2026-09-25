@@ -3,7 +3,7 @@
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { canAccessDashboard, isTillCashOperator } from "@/lib/authorization";
+import { canAccessDashboard, isTillCashOperator, canUseSalonTill } from "@/lib/authorization";
 import {
   openCashSessionInternal,
   closeCashSessionInternal,
@@ -42,7 +42,10 @@ async function requireCashSessionOpeningAccess() {
   const session = await auth();
   if (!session?.user) return { error: "Non authentifié." };
 
-  if (!isTillCashOperator(session.user)) return { error: "Accès non autorisé." };
+  // Opening follows the till itself: a CAISSE staff member rings boutique
+  // sales into the salon's drawer, so she must be able to start the day.
+  // Reviewing and closing sessions stays isTillCashOperator (above).
+  if (!(await canUseSalonTill(session.user))) return { error: "Accès non autorisé." };
   return { session };
 }
 

@@ -29,7 +29,7 @@ describe("a booking's buyer can be completed without being reassigned", () => {
   });
 
   test("completing a buyer is gated behind the counter (salon accounts only), not a booking-specific permission", () => {
-    expect(action).toContain("if (!isTillCashOperator(session.user)) {");
+    expect(action).toContain("if (!(await canUseSalonTill(session.user))) {");
   });
 
   test("the action only ever looks up the buyer by id — it cannot be used to swap who they are", () => {

@@ -25,32 +25,42 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 // near sufficient — every staff account created before today still carries
 // the key in Staff.dashboardPermissions, so a permission check would hand it
 // straight back. See canSendTicketEmail() in lib/authorization.js.
+// 25 Sep 2026 — the send itself moved to lib/tickets/email-payment-ticket.js
+// (no auth of its own, not "use server") so sendSettlementEmail can mail the
+// salon's ticket after a CAISSE staff member collected the salon's own sale.
+// sendTicketByEmail is now just the gate in front of it.
 describe("sendTicketByEmail stays a deliberate, gated exception", () => {
   const action = source("actions/payments/send-ticket-email.js");
+  const sender = source("lib/tickets/email-payment-ticket.js");
 
   test("is gated on canSendTicketEmail(), awaited since the permission check is async", () => {
     expect(action).toContain("await canSendTicketEmail(session.user)");
+    expect(action).toContain("return emailPaymentTicket(paymentId, { transactionId, actor: session.user });");
+  });
+
+  test("the shared sender is never a server action", () => {
+    expect(sender).not.toContain('"use server"');
   });
 
   test("never takes the recipient address from the caller — same reasoning as sendInvoiceByEmail", () => {
     expect(action).toContain("export async function sendTicketByEmail(paymentId, { transactionId = null } = {})");
-    expect(action).toContain("customer?.email?.trim()");
+    expect(sender).toContain("customer?.email?.trim()");
   });
 
   test("shares ticket assembly with the staff reprint route instead of re-querying the payment", () => {
-    expect(action).toContain('import { buildPaymentTicket } from "@/lib/cash-book/build-payment-ticket"');
-    expect(action).toContain("buildPaymentTicket(paymentId, { transactionId })");
-    expect(action).not.toContain("prisma.payment.findUnique");
+    expect(sender).toContain('import { buildPaymentTicket } from "@/lib/cash-book/build-payment-ticket"');
+    expect(sender).toContain("buildPaymentTicket(paymentId, { transactionId })");
+    expect(sender).not.toContain("prisma.payment.findUnique");
   });
 
   test("treats a provider failure as a failure, never a silent success", () => {
-    expect(action).toContain("sendResult.success === false");
+    expect(sender).toContain("sendResult.success === false");
   });
 
   test("records both a durable flag and an audit trail on success, not just one", () => {
-    expect(action).toContain("data: { ticketEmailedAt: new Date() }");
-    expect(action).toContain("AUDIT_ACTIONS.TICKET_EMAILED");
-    expect(action).toContain("writeAuditLog(prisma,");
+    expect(sender).toContain("data: { ticketEmailedAt: new Date() }");
+    expect(sender).toContain("AUDIT_ACTIONS.TICKET_EMAILED");
+    expect(sender).toContain("writeAuditLog(prisma,");
   });
 });
 

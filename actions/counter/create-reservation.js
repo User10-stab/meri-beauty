@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { qrPngAttachment } from "@/lib/qrcode";
 import { CHECK_IN_KINDS, ensureCheckInCode } from "@/lib/activities/check-in-code";
-import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, hasDashboardPermission, canUseSalonTill } from "@/lib/authorization";
 import { counterCustomerSchema } from "@/lib/validations/counter-customer";
 import { resolveCounterCustomer } from "@/lib/counter/resolve-counter-customer";
 import { isCounterSellableCatalogueStatus } from "@/lib/counter/catalogue-availability";
@@ -138,7 +138,7 @@ async function authorizeCounterBooking(kind) {
   if (!session?.user) return { error: "Non authentifié." };
   const config = COUNTER_CREATE_KINDS[kind];
   const [canUseTill, canReserve] = await Promise.all([
-    isTillCashOperator(session.user),
+    canUseSalonTill(session.user),
     hasDashboardPermission(session.user, config.reservationPermission),
   ]);
   if (!canUseTill || !canReserve) return { error: "Accès non autorisé." };
@@ -176,10 +176,8 @@ export async function createCounterReservation(input) {
   const guard = await authorizeCounterBooking(data.kind);
   if (guard.error) return { success: false, message: guard.error };
 
-  // Only Marie and OWNER/ADMIN put cash into the Livre de caisse. Anyone else
-  // still creates the booking and still records the deposit/full payment, but
-  // off-till: no open-till requirement and the CASH Transaction is detached
-  // from every session, so it shows in Opérations, not in the drawer's book.
+  // The salon's seat goes into the Livre de caisse when the seller may run the
+  // till (canUseSalonTill: Marie, the admins, a CAISSE staff member).
   // A seat an independent animates is her sale: off-till whoever sells it,
   // no salon ticket or invoice. Resolved once, and the same payee is written
   // on the Payment below.
@@ -187,7 +185,7 @@ export async function createCounterReservation(input) {
     data.kind === "WORKSHOP"
       ? await resolvePayeeForWorkshopSession(prisma, { sessionId: data.sessionId })
       : await resolvePayeeForFormationSession(prisma, { sessionId: data.sessionId });
-  const offTill = !isTillCashOperator(guard.session.user) || Boolean(payee.payeeStaffId);
+  const offTill = Boolean(payee.payeeStaffId) || !(await canUseSalonTill(guard.session.user));
   const useTill = !offTill && data.payment.method === "CASH";
 
   // A transfer on an off-till sale (an independent animator's formation, or a

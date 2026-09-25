@@ -52,8 +52,9 @@ describe("granular staff dashboard permissions", () => {
   });
 
   it("enforces sensitive boutique permissions in server actions", () => {
-    // The till, the cash book and orders are the salon's own (admin + Marie).
-    expect(read("actions/boutique/point-of-sale.js")).toContain("isTillCashOperator(session.user)");
+    // The cash book and orders are the salon's own (admin + Marie); the till
+    // is theirs plus a staff member granted CAISSE (canUseSalonTill).
+    expect(read("actions/boutique/point-of-sale.js")).toContain("await canUseSalonTill(session.user)");
     expect(read("actions/dashboard/cash-sessions.js")).toContain("isTillCashOperator(session.user)");
     expect(read("actions/boutique/orders.js")).toContain("isTillCashOperator(session.user)");
     expect(read("actions/boutique/returns.js")).toContain("STAFF_PERMISSIONS.RETURNS");
@@ -68,7 +69,7 @@ describe("granular staff dashboard permissions", () => {
     expect(dashboardStats).toContain("isAdmin ? prisma.payment.findMany");
   });
 
-  it("opening and closing a till session are both the salon's own", () => {
+  it("opening a till session follows the till (CAISSE too); closing stays the salon's own", () => {
     const cashSessions = read("actions/dashboard/cash-sessions.js");
     const openingGuard = cashSessions.slice(
       cashSessions.indexOf("async function requireCashSessionOpeningAccess()"),
@@ -80,8 +81,13 @@ describe("granular staff dashboard permissions", () => {
     );
     const closeSession = cashSessions.slice(cashSessions.indexOf("export async function closeCashSession(sessionId, countedCash, { confirmDivergence = false } = {})"));
 
-    expect(openingGuard).toContain("isTillCashOperator(session.user)");
+    expect(openingGuard).toContain("await canUseSalonTill(session.user)");
     expect(openSession).toContain("requireCashSessionOpeningAccess()");
+    const reviewGuard = cashSessions.slice(
+      cashSessions.indexOf("async function requireCashSessionAccess()"),
+      cashSessions.indexOf("async function requireCashSessionOpeningAccess()")
+    );
+    expect(reviewGuard).toContain("if (!isTillCashOperator(session.user)) {");
     expect(closeSession).toContain("requireCashSessionAccess()");
   });
 

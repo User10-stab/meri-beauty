@@ -123,7 +123,7 @@ describe("the counter offers the QR only where the salon banks the money", () =>
   });
 
   it("only till operators can open or watch a QR", () => {
-    expect(action).toContain("isTillCashOperator(session.user)");
+    expect(action).toContain("await canUseSalonTill(session.user)");
     for (const fn of ["createCounterQrCheckout", "getCounterQrStatus", "cancelCounterQrCheckout"]) {
       expect(action, fn).toContain(`export async function ${fn}`);
     }

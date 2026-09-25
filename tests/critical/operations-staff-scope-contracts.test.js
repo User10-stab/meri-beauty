@@ -71,15 +71,17 @@ beforeEach(() => {
 // and every number around them would be wrong — `totalCount` counting rows
 // the reader never sees, "Suivant" leading to a page that renders empty.
 describe("attribution rides in the SQL, not in the hydration", () => {
-  it("scopes money rows by the Payment's frozen owner, and orders by who rang them up", async () => {
+  it("scopes money rows by the Payment's frozen owner, and keeps every boutique order in the salon view", async () => {
     await getAdminOperations({});
     const query = firstQuery();
 
     // Appointments and paid seats: Payment.payeeStaffId null is the salon.
     expect(query.sql).toContain('p."payeeStaffId" IS NULL');
     expect(query.sql).toContain('po."payeeStaffId" IS NULL');
-    // Orders still follow the account that rang them up (User.id).
-    expect(query.sql).toContain('o."createdByStaffId" IN');
+    // 25/09/2026: a boutique order is the salon's whoever rang it up (a staff
+    // member granted CAISSE sells for the salon) — no createdByStaffId filter.
+    expect(query.sql).not.toContain('o."createdByStaffId"');
+    // Audit rows still follow who did them.
     expect(query.values).toContain("u_admin");
     expect(query.values).toContain("u_marie");
   });
@@ -103,10 +105,9 @@ describe("attribution rides in the SQL, not in the hydration", () => {
     expect(countQuery().values).toContain("s_julie");
   });
 
-  it("keeps an unstamped row in the salon view — nobody rang it up, so it is the salon's", async () => {
+  it("keeps an unstamped audit row in the salon view — nobody did it, so it is the salon's", async () => {
     await getAdminOperations({});
     const sql = firstQuery().sql;
-    expect(sql).toContain('o."createdByStaffId" IS NULL');
     expect(sql).toContain('al."actorId" IS NULL');
   });
 
@@ -162,6 +163,14 @@ describe("a practitioner reading her own ledger", () => {
     expect(firstQuery().values).toContain("s_julie");
     expect(firstQuery().sql).toContain('p."payeeStaffId" =');
     expect(firstQuery().sql).not.toContain('"payeeStaffId" IS NULL');
+  });
+
+  it("never sees boutique orders — even ones she rang up at the till, they are the salon's", async () => {
+    await getAdminOperations({});
+    const sql = firstQuery().sql;
+    const orderArm = sql.slice(sql.indexOf("'ORDER' AS"), sql.indexOf("'WORKSHOP' AS"));
+    expect(orderArm).toContain("AND false");
+    expect(orderArm).not.toContain('"createdByStaffId"');
   });
 
   it("sees the ateliers and formations she animates — they are her own sales", async () => {

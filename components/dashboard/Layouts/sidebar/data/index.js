@@ -64,7 +64,9 @@ const ALL_NAV_DATA = [
           // Every issued invoice + its delivery (e-mail / Peppol) and credit
           // notes. Admin only, like the send actions it calls.
           { title: "Factures", url: "/dashboard/factures", roles: [ROLES.OWNER, ROLES.ADMIN] },
-          { title: "Caisse", url: "/dashboard/boutique/point-of-sale", salonOnly: true },
+          // Caisse: the salon's accounts, or a staff member granted CAISSE
+          // (canUseSalonTill). Livre de caisse and Commandes stay salon-only.
+          { title: "Caisse", url: "/dashboard/boutique/point-of-sale", salonOnly: true, orPermission: STAFF_PERMISSIONS.CAISSE },
           { title: "Livre de caisse", url: "/dashboard/boutique/caisse", salonOnly: true },
           // Staff: read-only catalogue browsing (no cost/margin data) + stock adjustments.
           { title: "Produits", url: "/dashboard/boutique/products", roles: DASHBOARD_PERMISSIONS.BOUTIQUE_STOCK, permission: STAFF_PERMISSIONS.BOUTIQUE_STOCK },
@@ -135,7 +137,10 @@ export function getNavDataForRole(userRole, grantedPermissions = [], { isSalonAc
     // `salonOnly`: the salon's own screens (Caisse, Livre de caisse,
     // Commandes) — not a grantable permission. `isSalonAccount` is
     // isTillCashOperator, resolved server-side: admin + Marie Mercier.
-    if (item.salonOnly && !isSalonAccount) return false;
+    if (item.salonOnly && !isSalonAccount) {
+      const granted = item.orPermission && userRole === ROLES.STAFF && grantedPermissions.includes(item.orPermission);
+      if (!granted) return false;
+    }
     if (item.roles && !item.roles.includes(userRole)) return false;
     if (item.permission && !canAccessStaffPermission(userRole, grantedPermissions, item.permission)) return false;
     return true;

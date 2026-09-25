@@ -59,6 +59,7 @@ export function CounterSurface({
   canAdjustStock = false,
   canOpenCashSession = false,
   canCollectCash = false,
+  canInvoiceSale = false,
   sourceOrderId = null,
   pendingManualSales = null,
 }) {
@@ -315,6 +316,8 @@ export function CounterSurface({
         canAdjustStock={canAdjustStock}
         canOpenCashSession={canOpenCashSession}
         canCollectCash={canCollectCash}
+        canInvoiceSale={canInvoiceSale}
+        canOpenOrders={canPickup}
         pendingProduct={pendingProduct}
         onConsumePendingProduct={() => setPendingProduct(null)}
         sourceOrderId={sourceOrderId}

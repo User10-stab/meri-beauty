@@ -52,13 +52,14 @@ export function CounterCart({
   canAdjustStock = false,
   canOpenCashSession = false,
   canCollectCash = false,
+  canInvoiceSale = false,
+  canOpenOrders = false,
   pendingProduct,
   onConsumePendingProduct,
   sourceOrderId = null,
 }) {
-  // Only Marie / an admin rings a sale into the Livre de caisse. For everyone
-  // else completePointOfSaleSale records the sale off-till (see
-  // isTillCashOperator), so the "open the till first" gate never applies.
+  // A boutique sale is always the salon's, so whoever may use this till
+  // (canUseSalonTill) rings it into the Livre de caisse and needs it open.
   const tillGateApplies = canCollectCash;
   const router = useRouter();
   const [barcode, setBarcode] = useState("");
@@ -133,9 +134,9 @@ export function CounterCart({
   const [invoiceNotes, setInvoiceNotes] = useState("");
   const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false);
   const [issuedInvoice, setIssuedInvoice] = useState(null);
-  // Same people as the till's own money (isTillCashOperator) — the server
-  // refuses anyone else.
-  const canInvoiceSale = canCollectCash;
+  // `canInvoiceSale`: invoice sales stay the salon's own accounts
+  // (isTillCashOperator) — a CAISSE staff member never sees this mode, and
+  // the server refuses anyone else.
 
   const total = useMemo(
     () => Math.round(cart.reduce((sum, item) => sum + Number(item.unitPrice || 0) * item.quantity, 0) * 100) / 100,
@@ -176,6 +177,23 @@ export function CounterCart({
     return next;
   }
 
+  // After a completed sale: the salon's accounts land on the order (Commandes
+  // is theirs). A staff member granted CAISSE cannot open Commandes — she
+  // would be bounced to /dashboard after every sale — so her till simply
+  // clears for the next client, with a fresh attempt key.
+  function openSaleResult(orderId) {
+    if (canOpenOrders) {
+      router.push(`/dashboard/boutique/orders/${orderId}`);
+      return;
+    }
+    resetInvoiceSale();
+    setIsWalkIn(false);
+    setWalkInEmail("");
+    setWalkInEmailMatch(null);
+    setInvoiceRequested(true);
+    resetAttempt();
+  }
+
   useEffect(() => {
     const stored = localStorage.getItem("meri-pos-attempt-key") || createBrowserUuid();
     localStorage.setItem("meri-pos-attempt-key", stored);
@@ -183,13 +201,15 @@ export function CounterCart({
     recoverPointOfSaleCheckout(stored).then((result) => {
       if (result.success && result.data?.completed) {
         localStorage.removeItem("meri-pos-attempt-key");
-        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+        openSaleResult(result.data.orderId);
       } else if (result.success && result.data?.checkoutUrl) {
         setQrModal(result.data);
       } else if (result.terminal || result.notFound) {
         resetAttempt();
       }
     }).catch(() => {});
+    // openSaleResult only reads a prop fixed for the page's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   useEffect(() => {
@@ -305,7 +325,7 @@ export function CounterCart({
           localStorage.removeItem("meri-pos-attempt-key");
           setQrModal(null);
           toast.success("Paiement Stripe confirmé.");
-          router.push(`/dashboard/boutique/orders/${qrModal.orderId}`);
+          openSaleResult(qrModal.orderId);
         } else if (["CANCELLED", "EXPIRED"].includes(result.status)) {
           setQrModal(null);
           resetAttempt();
@@ -318,6 +338,8 @@ export function CounterCart({
     poll();
     const interval = setInterval(poll, 2500);
     return () => { active = false; clearInterval(interval); };
+    // openSaleResult only reads a prop fixed for the page's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qrModal?.orderId, router]);
 
   useEffect(() => {
@@ -850,13 +872,13 @@ export function CounterCart({
         }
         localStorage.removeItem("meri-pos-attempt-key");
         toast.success("Paiement Stripe confirmé.");
-        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+        openSaleResult(result.data.orderId);
         return;
       }
       localStorage.removeItem("meri-pos-attempt-key");
       if (result.data.alreadyProcessed) {
         toast.success(`La vente n°${result.data.orderNumber} était déjà enregistrée.`);
-        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+        openSaleResult(result.data.orderId);
         return;
       }
       if (result.data.walkIn) {
@@ -874,7 +896,7 @@ export function CounterCart({
         } else {
           toast.error(`Vente n°${result.data.orderNumber} enregistrée, mais le ticket n'a pas pu être généré.`);
         }
-        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+        openSaleResult(result.data.orderId);
         return;
       }
       // Every named-customer sale now gets the same compact receipt,
@@ -904,10 +926,10 @@ export function CounterCart({
         } else {
           toast.error(`Vente n°${result.data.orderNumber} enregistrée. Reçu prêt à imprimer, mais l'e-mail n'a pas pu être envoyé.${pendingInvoiceNote}`);
         }
-        router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+        openSaleResult(result.data.orderId);
         return;
       }
-      router.push(`/dashboard/boutique/orders/${result.data.orderId}`);
+      openSaleResult(result.data.orderId);
     });
   }
 
@@ -919,7 +941,7 @@ export function CounterCart({
       if (result.paid) {
         toast.success("Le paiement venait d'être confirmé.");
         localStorage.removeItem("meri-pos-attempt-key");
-        router.push(`/dashboard/boutique/orders/${qrModal.orderId}`);
+        openSaleResult(qrModal.orderId);
         return;
       }
       if (!result.success) {

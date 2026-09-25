@@ -3,13 +3,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const mocks = vi.hoisted(() => ({
-  sendTicketByEmail: vi.fn(),
+  emailPaymentTicket: vi.fn(),
+  staffFindFirst: vi.fn(),
   buildPaymentTicket: vi.fn(),
   sendEmail: vi.fn(),
   paymentFindUnique: vi.fn(),
 }));
 
-vi.mock("@/actions/payments/send-ticket-email", () => ({ sendTicketByEmail: mocks.sendTicketByEmail }));
+vi.mock("@/lib/tickets/email-payment-ticket", () => ({ emailPaymentTicket: mocks.emailPaymentTicket }));
 vi.mock("@/lib/cash-book/build-payment-ticket", () => ({ buildPaymentTicket: mocks.buildPaymentTicket }));
 vi.mock("@/lib/email", () => ({ sendEmail: mocks.sendEmail }));
 // sendSettlementEmail reads Payment.payeeStaffId to decide whose sale it is.
@@ -18,7 +19,10 @@ vi.mock("@/lib/email", () => ({ sendEmail: mocks.sendEmail }));
 // actually asserted, it was just what a missing row happened to look like —
 // and in CI, whose DATABASE_URL is a placeholder, the connection error was
 // swallowed by the function's own catch and no e-mail was sent at all.
-vi.mock("@/lib/prisma", () => ({ prisma: { payment: { findUnique: mocks.paymentFindUnique } } }));
+// staff.findFirst answers canUseSalonTill's CAISSE permission lookup.
+vi.mock("@/lib/prisma", () => ({
+  prisma: { payment: { findUnique: mocks.paymentFindUnique }, staff: { findFirst: mocks.staffFindFirst } },
+}));
 
 import { sendSettlementEmail } from "@/lib/payments/send-settlement-email";
 import { paymentConfirmedEmail } from "@/lib/email-templates";
@@ -29,13 +33,15 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8").replace(/\r\n/g,
 const MARIE = { id: "u_marie", role: "STAFF", email: "contact@meribeautystudio.com", fullName: "Marie Mercier" };
 const ADMIN = { id: "u_admin", role: "ADMIN", email: "admin@meribeauty.com" };
 const JULIE = { id: "u_julie", role: "STAFF", email: "julieschoemans@gmail.com", fullName: "Julie Schoemans" };
+const ROSE_WITH_CAISSE = { id: "u_rose", role: "STAFF", email: "rose@example.com", fullName: "Rose" };
 
 const JULIES_SALE = { payeeStaffId: "staff_julie" };
 const SALONS_SALE = { payeeStaffId: null };
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.sendTicketByEmail.mockResolvedValue({ success: true });
+  mocks.emailPaymentTicket.mockResolvedValue({ success: true });
+  mocks.staffFindFirst.mockResolvedValue({ dashboardPermissions: [] });
   mocks.sendEmail.mockResolvedValue({ success: true });
   mocks.paymentFindUnique.mockResolvedValue(SALONS_SALE);
   mocks.buildPaymentTicket.mockResolvedValue({
@@ -58,9 +64,24 @@ describe("the settlement e-mail depends on who collected", () => {
   it("the salon — Marie despite her STAFF role, and the admin — still sends the ticket", async () => {
     await sendSettlementEmail(MARIE, "pay_1", { transactionId: "tx_1" });
     await sendSettlementEmail(ADMIN, "pay_2");
-    expect(mocks.sendTicketByEmail).toHaveBeenNthCalledWith(1, "pay_1", { transactionId: "tx_1" });
-    expect(mocks.sendTicketByEmail).toHaveBeenNthCalledWith(2, "pay_2", { transactionId: null });
+    expect(mocks.emailPaymentTicket).toHaveBeenNthCalledWith(1, "pay_1", { transactionId: "tx_1", actor: MARIE });
+    expect(mocks.emailPaymentTicket).toHaveBeenNthCalledWith(2, "pay_2", { transactionId: null, actor: ADMIN });
     expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("a staff member granted CAISSE collecting the salon's sale sends the salon's ticket", async () => {
+    mocks.staffFindFirst.mockResolvedValue({ dashboardPermissions: ["CAISSE"] });
+    await sendSettlementEmail(ROSE_WITH_CAISSE, "pay_6", { transactionId: "tx_6" });
+    expect(mocks.emailPaymentTicket).toHaveBeenCalledWith("pay_6", { transactionId: "tx_6", actor: ROSE_WITH_CAISSE });
+    expect(mocks.sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("the same staff member collecting HER OWN sale sends no ticket, whatever she holds", async () => {
+    mocks.staffFindFirst.mockResolvedValue({ dashboardPermissions: ["CAISSE"] });
+    mocks.paymentFindUnique.mockResolvedValue({ payeeStaffId: "staff_rose" });
+    await sendSettlementEmail(ROSE_WITH_CAISSE, "pay_7");
+    expect(mocks.emailPaymentTicket).not.toHaveBeenCalled();
+    expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
   });
 
   it("an independent's client gets a plain payment confirmation, with no attachment", async () => {
@@ -68,7 +89,7 @@ describe("the settlement e-mail depends on who collected", () => {
     const result = await sendSettlementEmail(JULIE, "pay_3", { transactionId: "tx_3" });
 
     expect(result.success).toBe(true);
-    expect(mocks.sendTicketByEmail).not.toHaveBeenCalled();
+    expect(mocks.emailPaymentTicket).not.toHaveBeenCalled();
     expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
     const mail = mocks.sendEmail.mock.calls[0][0];
     expect(mail.to).toBe("cliente@example.com");
@@ -95,7 +116,7 @@ describe("the settlement e-mail depends on who collected", () => {
     const result = await sendSettlementEmail(MARIE, "pay_5", { transactionId: "tx_5" });
 
     expect(result.success).toBe(true);
-    expect(mocks.sendTicketByEmail, "Marie collected, but the sale is Julie's").not.toHaveBeenCalled();
+    expect(mocks.emailPaymentTicket, "Marie collected, but the sale is Julie's").not.toHaveBeenCalled();
     expect(mocks.sendEmail).toHaveBeenCalledTimes(1);
   });
 

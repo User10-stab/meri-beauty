@@ -8,8 +8,10 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8");
 describe("point-of-sale security contracts", () => {
   const pos = source("actions/boutique/point-of-sale.js");
 
-  test("is reserved to the salon's own accounts (admin + Marie), not a grantable permission", () => {
-    expect(pos).toContain("if (!isTillCashOperator(session.user)) {");
+  // 25/09/2026: admin + Marie, plus a staff member granted CAISSE
+  // (canUseSalonTill). A boutique sale is the salon's whoever rings it up.
+  test("is reserved to whoever may run the salon's till", () => {
+    expect(pos).toContain("if (!(await canUseSalonTill(session.user))) {");
     expect(pos).not.toContain("STAFF_PERMISSIONS.POINT_OF_SALE");
     expect(pos).toContain("requirePointOfSaleAccess");
   });

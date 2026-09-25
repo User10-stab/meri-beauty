@@ -30,14 +30,16 @@ describe("the till-cash-operator helper", () => {
 describe("every on-site money path branches on it", () => {
   // file, the expression that decides the actor is off-till
   test.each([
-    ["lib/reservations/settle-reservation.js", "const offTill = !isTillCashOperator(actor)"],
-    ["actions/appointment/manage-appointment.js", "const offTill = !isTillCashOperator(authCheck.user)"],
-    ["actions/boutique/point-of-sale.js", "const offTill = !isTillCashOperator(guard.session.user)"],
-    ["actions/counter/create-reservation.js", "const offTill = !isTillCashOperator(guard.session.user)"],
+    // 25/09/2026: canUseSalonTill = isTillCashOperator + a staff member granted
+    // CAISSE. Pickups (orders.js) stay the salon accounts' own.
+    ["lib/reservations/settle-reservation.js", "const offTill = Boolean(payment.payeeStaffId) || !(await canUseSalonTill(actor));"],
+    ["actions/appointment/manage-appointment.js", "const offTill = independentSale || !(await canUseSalonTill(authCheck.user));"],
+    ["actions/boutique/point-of-sale.js", "const offTill = !(await canUseSalonTill(guard.session.user));"],
+    ["actions/counter/create-reservation.js", "const offTill = Boolean(payee.payeeStaffId) || !(await canUseSalonTill(guard.session.user));"],
     ["actions/boutique/orders.js", "const offTill = !isTillCashOperator(guard.session.user)"],
   ])("%s decides off-till from the acting user", (file, expr) => {
     const content = source(file);
-    expect(content).toMatch(/import \{[^}]*\bisTillCashOperator\b[^}]*\} from "@\/lib\/authorization"/);
+    expect(content).toMatch(/import \{[^}]*\b(isTillCashOperator|canUseSalonTill)\b[^}]*\} from "@\/lib\/authorization"/);
     expect(content).toContain(expr);
   });
 
@@ -79,16 +81,16 @@ describe("an off-till collection is detached from the Livre de caisse", () => {
 });
 
 describe("the settlement UIs hide the espèces / carte popup for a non-operator", () => {
-  test("the page/route components compute canCollectCash from isTillCashOperator", () => {
-    for (const file of [
-      "app/dashboard/workshops/reservations/page.jsx",
-      "app/dashboard/formations/reservations/page.jsx",
-      "app/dashboard/appointments/page.jsx",
-      "app/dashboard/calendrier/page.jsx",
-      "app/(dashboard)/dashboard/boutique/point-of-sale/page.jsx",
-    ]) {
-      expect(source(file)).toContain("isTillCashOperator(");
+  test("the page/route components compute canCollectCash from the till predicate", () => {
+    for (const file of ["app/dashboard/appointments/page.jsx", "app/dashboard/calendrier/page.jsx"]) {
+      expect(source(file)).toContain("canCollectCash={isTillCashOperator(user)}");
     }
+    // A CAISSE staff member may settle the salon's own atelier seats on-till.
+    for (const file of ["app/dashboard/workshops/reservations/page.jsx", "app/dashboard/formations/reservations/page.jsx"]) {
+      expect(source(file)).toContain("canCollectCash={await canUseSalonTill(user)}");
+    }
+    // The till page is only reachable by someone who may run it.
+    expect(source("app/(dashboard)/dashboard/boutique/point-of-sale/page.jsx")).toContain("await requireSalonTill();");
   });
 
   test("SettleReservationDialog collapses to a plain confirmation off-till", () => {
@@ -100,7 +102,7 @@ describe("the settlement UIs hide the espèces / carte popup for a non-operator"
 
   test("the counter settle action drops the method picker off-till", () => {
     const fiche = source("components/dashboard/boutique/counter/FicheSettleAction.jsx");
-    expect(fiche).toContain("const takesMoneyAtTill = canCollectCash && amountDue > 0");
+    expect(fiche).toContain("const takesMoneyAtTill = canCollectCash && !ticket.independent && amountDue > 0");
     expect(fiche).toContain("{takesMoneyAtTill && (");
   });
 

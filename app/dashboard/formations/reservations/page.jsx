@@ -1,5 +1,5 @@
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS, isTillCashOperator } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, canUseSalonTill } from "@/lib/authorization";
 import { getFormationReservations } from "@/actions/formations/get-reservations";
 import { ReservationsPageClient } from "@/components/dashboard/formations/ReservationsPageClient";
 
@@ -45,7 +45,7 @@ export default async function FormationReservationsPage({ searchParams }) {
       <ReservationsPageClient
         initialReservations={reservations}
         userRole={user.role}
-        canCollectCash={isTillCashOperator(user)}
+        canCollectCash={await canUseSalonTill(user)}
         focusReservationId={focusReservationId}
       />
     </div>

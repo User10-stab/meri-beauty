@@ -80,8 +80,8 @@ describe("reservation settlement — collecting the on-site balance", () => {
   });
 
   test("a non-till-operator settles the balance off-till, never blocking on a session", () => {
-    expect(lib).toContain("import { isTillCashOperator } from \"@/lib/authorization\"");
-    expect(lib).toContain("const offTill = !isTillCashOperator(actor)");
+    expect(lib).toContain("import { canUseSalonTill } from \"@/lib/authorization\"");
+    expect(lib).toContain("const offTill = Boolean(payment.payeeStaffId) || !(await canUseSalonTill(actor));");
     // The attestation / method / open-till pre-checks only apply on the
     // operator path.
     expect(lib).toContain("const collectsAtTill = hasBalanceDue && !offTill");

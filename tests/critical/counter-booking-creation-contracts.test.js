@@ -21,8 +21,8 @@ describe("counter booking creation — createCounterReservation", () => {
   test("cash hard-blocks without an open till session; card never does; off-till never does", () => {
     // `useTill` is `!offTill && data.payment.method === "CASH"` — only a till
     // operator's cash both requires and joins a session (see isTillCashOperator).
-    expect(action).toContain("import { STAFF_PERMISSIONS, hasDashboardPermission, isTillCashOperator }");
-    expect(action).toContain("const offTill = !isTillCashOperator(guard.session.user)");
+    expect(action).toContain("import { STAFF_PERMISSIONS, hasDashboardPermission, canUseSalonTill }");
+    expect(action).toContain("const offTill = Boolean(payee.payeeStaffId) || !(await canUseSalonTill(guard.session.user));");
     expect(action).toContain('const useTill = !offTill && data.payment.method === "CASH"');
     expect(action).toContain("if (useTill) {");
     expect(action).toContain('throw new Error("CASH_SESSION_REQUIRED")');

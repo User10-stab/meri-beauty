@@ -77,7 +77,7 @@ describe("every on-site payment lands in the open till session, or is refused un
     // A till operator's POS sale still hard-blocks without a session; an
     // off-till cashier (see isTillCashOperator) rings the sale up detached,
     // so it shows in Opérations but never in the Livre de caisse.
-    expect(pos).toContain("const offTill = !isTillCashOperator(guard.session.user)");
+    expect(pos).toContain("const offTill = !(await canUseSalonTill(guard.session.user));");
     expect(pos).toContain("if (!offTill) {");
     expect(pos).toContain("const openCashSessionGate = await ensureCashSessionOpen(prisma)");
     expect(pos).toContain("requiresCashSession: true");
@@ -165,8 +165,8 @@ describe("the till lists what is still owed without re-implementing settlement",
   });
 
   test("running the till is not enough — each kind needs its own permission", () => {
-    // The till itself is the salon's (admin + Marie), not a permission.
-    expect(action).toContain("if (!isTillCashOperator(session.user)) {");
+    // The till: admin + Marie, plus a staff member granted CAISSE.
+    expect(action).toContain("if (!(await canUseSalonTill(session.user))) {");
     expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.APPOINTMENTS)");
     expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.WORKSHOP_RESERVATIONS)");
     expect(action).toContain("hasDashboardPermission(session.user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS)");
@@ -242,7 +242,7 @@ describe("nothing is marked paid before the money is in hand", () => {
     // method / terminal-reference / till-session guards apply only when this
     // cashier actually takes the money at the till. Off-till (see
     // isTillCashOperator) there is no method to pick, so no guard to fail.
-    expect(panel).toContain("const takesMoneyAtTill = canCollectCash && amountDue > 0");
+    expect(panel).toContain("const takesMoneyAtTill = canCollectCash && !ticket.independent && amountDue > 0");
     expect(panel).toContain('(takesMoneyAtTill && isExternalTerminal && !terminalReference.trim()) ||');
     expect(panel).toContain('(takesMoneyAtTill && method === "CASH" && !cashSessionOpen)');
     expect(source("lib/payments/counter-price-adjustment.js")).toContain(

@@ -114,12 +114,15 @@ describe("une indépendante n'émet aucune facture au nom du salon", () => {
     expect(code).toContain("if (!isAdminRole(session?.user?.role)) {");
   });
 
-  test.each(STAFF_REACHABLE)("%s derives that flag from isTillCashOperator, not from a role", (path) => {
+  // 25/09/2026: a staff member granted CAISSE runs the till too, so the flag
+  // may come from canUseSalonTill (which itself starts from
+  // isTillCashOperator) — still never from a role.
+  test.each(STAFF_REACHABLE)("%s derives that flag from the till predicate, not from a role", (path) => {
     const code = source(path);
     const declarations = code.match(/const (offTill|offTillActor|isStaffActor)\s*=.*/g) ?? [];
     expect(declarations.length, `${path} declares no actor flag`).toBeGreaterThan(0);
     for (const declaration of declarations) {
-      expect(declaration, `${path}: "${declaration.trim()}"`).toContain("isTillCashOperator");
+      expect(declaration, `${path}: "${declaration.trim()}"`).toMatch(/isTillCashOperator|canUseSalonTill|actorUsesTill/);
     }
 
     // The three ways this gets broken, each of which excludes Marie.

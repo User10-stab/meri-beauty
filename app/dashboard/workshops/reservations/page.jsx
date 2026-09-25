@@ -1,5 +1,5 @@
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS, isTillCashOperator } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, canUseSalonTill } from "@/lib/authorization";
 import { getWorkshopReservations } from "@/actions/workshops/get-reservations";
 import { ReservationsPageClient } from "@/components/dashboard/workshops/ReservationsPageClient";
 
@@ -45,7 +45,7 @@ export default async function WorkshopReservationsPage({ searchParams }) {
       <ReservationsPageClient
         initialReservations={reservations}
         userRole={user.role}
-        canCollectCash={isTillCashOperator(user)}
+        canCollectCash={await canUseSalonTill(user)}
         focusReservationId={focusReservationId}
       />
     </div>

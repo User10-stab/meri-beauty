@@ -2,7 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { isTillCashOperator } from "@/lib/authorization";
+import { canUseSalonTill } from "@/lib/authorization";
 import { stripe } from "@/lib/stripe";
 import { roundMoney } from "@/lib/tax-policy";
 import {
@@ -20,13 +20,13 @@ import {
  * the settle action the operator was already using does that, once it has
  * verified the session with Stripe itself (lib/counter/qr-checkout.js).
  *
- * Till operators only (admins + Marie), like every other money screen — and
+ * Whoever may run the till (canUseSalonTill: admins, Marie, CAISSE) — and
  * never for an independent's sale, which the salon does not bank.
  */
 
 async function requireOperator() {
   const session = await auth();
-  if (!session?.user || !isTillCashOperator(session.user)) return { error: "Non autorisé." };
+  if (!session?.user || !(await canUseSalonTill(session.user))) return { error: "Non autorisé." };
   return { session };
 }
 

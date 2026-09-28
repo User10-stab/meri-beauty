@@ -55,14 +55,22 @@ describe("allocateExpenseToPeriod", () => {
   it("counts a monthly charge once per whole month covered", () => {
     const result = allocateExpenseToPeriod(rent, d(2026, 9, 1), endOf(2026, 11, 30));
     expect(result.amountTtc).toBe(3600);
-    expect(result.prorated).toBe(false);
     expect(result.byMonth.map((m) => m.month)).toEqual(["2026-09", "2026-10", "2026-11"]);
   });
 
-  it("prorates by day when the period covers part of a month", () => {
-    const result = allocateExpenseToPeriod(rent, d(2026, 9, 1), endOf(2026, 9, 15));
-    expect(result.amountTtc).toBe(600); // 15/30 of September
-    expect(result.prorated).toBe(true);
+  it("never prorates: a month the period only partly covers still carries the whole charge", () => {
+    // 1–28 September (the default "month so far" view) = the full September rent.
+    expect(allocateExpenseToPeriod(rent, d(2026, 9, 1), endOf(2026, 9, 28)).amountTtc).toBe(1200);
+    // 15 September → 3 October touches two months: two whole rents.
+    const straddling = allocateExpenseToPeriod(rent, d(2026, 9, 15), endOf(2026, 10, 3));
+    expect(straddling.amountTtc).toBe(2400);
+    expect(straddling.byMonth.map((m) => m.month)).toEqual(["2026-09", "2026-10"]);
+    expect(straddling).not.toHaveProperty("prorated");
+  });
+
+  it("a charge starting after the period ends counts nothing", () => {
+    const later = { ...rent, date: d(2026, 10, 1) };
+    expect(allocateExpenseToPeriod(later, d(2026, 9, 1), endOf(2026, 9, 30)).amountTtc).toBe(0);
   });
 
   it("never counts months before the start or after the end month", () => {
@@ -144,6 +152,32 @@ describe("buildGestionReport", () => {
     expect(report.categories.find((c) => c.category === "ORDER").marginHt).toBe(60);
     expect(report.months).toEqual([
       expect.objectContaining({ month: "2026-09", revenueHt: 300, costHt: 40, chargesHt: 150, cashExpenses: 10, netProfitHt: 100 }),
+    ]);
+    // TVA per month (121 + 242 TTC at 21 %) — the « Par mois » column, adding up to the total.
+    expect(report.months[0]).toMatchObject({ revenueTtc: 363, revenueVat: 63 });
+    expect(report.summary.revenueVat).toBe(63);
+  });
+
+  it("lists the products sold without a purchase price, once per order even when paid in several parts", async () => {
+    const items = [
+      { quantity: 2, variantId: "v-nocost", variant: { costPrice: 0, name: "Sunny", product: { id: "p1", name: "Builder Gel" } } },
+      { quantity: 1, variantId: "v-ok", variant: { costPrice: 5, name: "Standard", product: { id: "p2", name: "Lime" } } },
+    ];
+    const order = { id: "o1", orderNumber: 43, items };
+    const client = clientMock({
+      transactions: [
+        { id: "t1", amount: 60.5, paidAt: d(2026, 9, 3), method: "CARD", transactionType: "DEPOSIT", payment: orderPayment },
+        { id: "t2", amount: 60.5, paidAt: d(2026, 9, 9), method: "CARD", transactionType: "FINAL_PAYMENT", payment: orderPayment },
+      ],
+      // Acompte + solde: two transactions of the SAME order.
+      orderTransactions: ["t1", "t2"].map((id) => ({ id, amount: 60.5, payment: { totalAmount: 121, order } })),
+    });
+
+    const report = await buildGestionReport(client, normalizeGestionParams({ from: "2026-09-01", to: "2026-09-30" }));
+
+    expect(report.summary.itemsWithoutCost).toBe(2); // not 4
+    expect(report.summary.productsWithoutCost).toEqual([
+      { variantId: "v-nocost", productId: "p1", productName: "Builder Gel", variantName: "Sunny", quantity: 2, orderNumbers: [43] },
     ]);
   });
 

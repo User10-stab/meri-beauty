@@ -7,6 +7,8 @@ import { RecettesJournalDocument } from "./RecettesJournalDocument";
 import { CashBookDocument } from "./CashBookDocument";
 import { InventorySnapshotDocument } from "./InventorySnapshotDocument";
 import { StockMovementsDocument } from "./StockMovementsDocument";
+import { GestionDocument } from "./GestionDocument";
+import { ProductPerformanceDocument } from "./ProductPerformanceDocument";
 import { getSellerContact } from "./seller-contact";
 
 /**
@@ -170,6 +172,19 @@ export async function renderInventorySnapshotPdf(snapshot) {
 
 export async function renderStockMovementsPdf(report) {
   return renderToBuffer(<StockMovementsDocument report={report} />);
+}
+
+/** Gestion (lib/gestion/build-gestion-report.js) — plain Numbers, as served to the page. */
+export async function renderGestionPdf(report) {
+  return renderToBuffer(<GestionDocument report={report} />);
+}
+
+/**
+ * Performance par produit — `products` / `shown` are the list and totals
+ * after the screen's search / verdict / sort view (see the route).
+ */
+export async function renderProductPerformancePdf({ report, products, shown, filterLabel }) {
+  return renderToBuffer(<ProductPerformanceDocument report={report} products={products} shown={shown} filterLabel={filterLabel} />);
 }
 
 // Refund receipts are intentionally not rendered: B2C refund communication is plain e-mail only.

@@ -14,6 +14,8 @@ import {
   ChevronRight,
   Download,
   Euro,
+  FileSpreadsheet,
+  Printer,
   Info,
   Package,
   Search,
@@ -35,6 +37,9 @@ import {
 } from "@/lib/stock/performance-filters";
 
 const PAGE_PATH = "/dashboard/boutique/stock/mouvements/performance";
+
+const EXPORT_BUTTON =
+  "inline-flex items-center gap-2 rounded-[7px] border border-stroke bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6";
 
 const TONE_CLASSES = {
   emerald: "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300",
@@ -101,6 +106,16 @@ function sinceLabel(value) {
   return months < 12 ? `il y a ${months} mois` : `il y a ${Math.floor(months / 12)} an${months >= 24 ? "s" : ""}`;
 }
 
+/** « 1 soins », « 3 soins » — always « soins » (user's call, 2026-09-28). */
+function soinsLabel(count) {
+  return `${count} soins`;
+}
+
+/** Not sold (net of returns) but used in soins — the « Prestations » case. */
+function usedInSoinsOnly(row) {
+  return row.netSold <= 0 && row.salonUsage > 0;
+}
+
 function formatCoverage(product) {
   if (product.coverageMonths === null) return product.stockNow > 0 ? "∞" : "—";
   if (product.stockNow <= 0) return "Rupture";
@@ -133,6 +148,18 @@ export function ProductPerformanceClient({ data }) {
   const visible = useMemo(() => sortProducts(filterProducts(products, view), view.sort, view.dir), [products, view]);
   const shown = useMemo(() => summarizeProducts(visible), [visible]);
   const periodLabel = filters.mode === "custom" ? "la période" : `${filters.months} mois`;
+  // Excel / PDF: the server rebuilds the period, then applies this same
+  // search / verdict / sort view — so the file is the list on screen.
+  const exportQuery = useMemo(() => {
+    const params = writeViewFilters(new URLSearchParams(), view);
+    if (filters.mode === "custom") {
+      params.set("du", filters.from);
+      params.set("au", filters.to);
+    } else {
+      params.set("mois", String(filters.months));
+    }
+    return params.toString();
+  }, [view, filters.mode, filters.from, filters.to, filters.months]);
 
   function updateView(patch) {
     setView((current) => ({ ...current, ...patch }));
@@ -235,7 +262,7 @@ export function ProductPerformanceClient({ data }) {
       "Taux de marge",
       "Stock début",
       "Réassort",
-      "Prestations",
+      "Soins",
       "Pertes",
       "Stock actuel",
       "Valeur stock (coût HT)",
@@ -317,14 +344,20 @@ export function ProductPerformanceClient({ data }) {
               ))}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={exportCsv}
-            className="inline-flex items-center gap-2 rounded-[7px] border border-stroke bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6"
-          >
-            <Download className="h-4 w-4" strokeWidth={2} />
-            Exporter (CSV)
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <a href={`/api/stock/performance-export?${exportQuery}`} className={EXPORT_BUTTON}>
+              <FileSpreadsheet className="h-4 w-4" strokeWidth={2} />
+              Exporter Excel (.xlsx)
+            </a>
+            <button type="button" onClick={exportCsv} className={EXPORT_BUTTON}>
+              <Download className="h-4 w-4" strokeWidth={2} />
+              Exporter CSV
+            </button>
+            <a href={`/api/stock/performance-pdf?${exportQuery}`} target="_blank" rel="noopener noreferrer" className={EXPORT_BUTTON}>
+              <Printer className="h-4 w-4" strokeWidth={2} />
+              Imprimer (PDF)
+            </a>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-end gap-4">
@@ -409,29 +442,31 @@ export function ProductPerformanceClient({ data }) {
           />
         </div>
 
-        {/* Several verdicts at once (e.g. « À retirer ? » + « Surstock »). */}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">Verdict</span>
-          {VERDICTS.filter((key) => verdictCounts[key] || view.verdicts.includes(key)).map((key) => (
+        {/* Several verdicts at once (e.g. « Sans vente » + « Stock excédentaire »); « Tous » clears them. */}
+        <div>
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
+            Filtrer par verdict
+          </span>
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filtrer par verdict">
             <VerdictChip
-              key={key}
-              tone={VERDICT_META[key].tone}
-              active={view.verdicts.includes(key)}
-              onClick={() => toggleVerdict(key)}
-              label={VERDICT_META[key].short}
-              count={verdictCounts[key]?.count ?? 0}
-              title={VERDICT_META[key].help}
-            />
-          ))}
-          {view.verdicts.length > 0 && (
-            <button
-              type="button"
+              active={view.verdicts.length === 0}
               onClick={() => updateView({ verdicts: [] })}
-              className="text-xs font-semibold text-gray-500 underline-offset-2 hover:text-primary hover:underline dark:text-dark-6"
-            >
-              Tous les verdicts
-            </button>
-          )}
+              label="Tous"
+              count={found.length}
+              title="Afficher tous les produits"
+            />
+            {VERDICTS.filter((key) => verdictCounts[key] || view.verdicts.includes(key)).map((key) => (
+              <VerdictChip
+                key={key}
+                tone={VERDICT_META[key].tone}
+                active={view.verdicts.includes(key)}
+                onClick={() => toggleVerdict(key)}
+                label={VERDICT_META[key].short}
+                count={verdictCounts[key]?.count ?? 0}
+                title={VERDICT_META[key].help}
+              />
+            ))}
+          </div>
         </div>
       </div>
 
@@ -444,7 +479,12 @@ export function ProductPerformanceClient({ data }) {
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatCard icon={<Euro size={20} />} label="Chiffre d'affaires TTC" value={money.format(shown.revenueTtc)} />
         <StatCard icon={<Euro size={20} />} label="Marge brute HT" value={money.format(shown.marginHt)} />
-        <StatCard icon={<ShoppingBag size={20} />} label="Unités vendues (nettes)" value={shown.unitsSold} />
+        <StatCard
+          icon={<ShoppingBag size={20} />}
+          label="Unités vendues (nettes)"
+          value={shown.unitsSold}
+          note={shown.salonUsage > 0 ? `+ ${soinsLabel(shown.salonUsage)} (non vendus)` : null}
+        />
         <StatCard icon={<Package size={20} />} label="Valeur du stock (coût HT)" value={money.format(shown.stockValueAtCost)} />
       </div>
 
@@ -553,17 +593,33 @@ function ProductRows({ product, sliceLabels, expanded, onToggle }) {
           </span>
         </TableCell>
         <TableCell className="text-right">
-          <div className="font-semibold text-gray-800 dark:text-white">{product.netSold}</div>
-          <div className="text-xs text-gray-400">
-            {product.avgPerMonth.toLocaleString("fr-BE")}/mois
-            {product.unitsReturned > 0 ? ` · ${product.unitsReturned} retour${product.unitsReturned > 1 ? "s" : ""}` : ""}
-          </div>
-          {(product.salonUsage > 0 || product.losses > 0) && (
-            <div className="text-xs text-gray-400">
-              {[product.salonUsage > 0 && `${product.salonUsage} en soin`, product.losses > 0 && `${product.losses} perdu${product.losses > 1 ? "s" : ""}`]
-                .filter(Boolean)
-                .join(" · ")}
-            </div>
+          {usedInSoinsOnly(product) ? (
+            // Not sold, only used in soins: the soins are what this product
+            // does, so they lead — shown as soins, never counted as sales
+            // (the « Unités vendues » total and the Vendus sort stay sales).
+            <>
+              <div className="font-semibold text-violet-700 dark:text-violet-300">{soinsLabel(product.salonUsage)}</div>
+              <div className="text-xs text-gray-400">
+                Aucune vente
+                {product.unitsReturned > 0 ? ` · ${product.unitsReturned} retour${product.unitsReturned > 1 ? "s" : ""}` : ""}
+                {product.losses > 0 ? ` · ${product.losses} perdu${product.losses > 1 ? "s" : ""}` : ""}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="font-semibold text-gray-800 dark:text-white">{product.netSold}</div>
+              <div className="text-xs text-gray-400">
+                {product.avgPerMonth.toLocaleString("fr-BE")}/mois
+                {product.unitsReturned > 0 ? ` · ${product.unitsReturned} retour${product.unitsReturned > 1 ? "s" : ""}` : ""}
+              </div>
+              {(product.salonUsage > 0 || product.losses > 0) && (
+                <div className="text-xs text-gray-400">
+                  {[product.salonUsage > 0 && `+ ${soinsLabel(product.salonUsage)}`, product.losses > 0 && `${product.losses} perdu${product.losses > 1 ? "s" : ""}`]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              )}
+            </>
           )}
         </TableCell>
         <TableCell>
@@ -605,8 +661,15 @@ function ProductRows({ product, sliceLabels, expanded, onToggle }) {
             </TableCell>
             <TableCell className="py-2" />
             <TableCell className="py-2 text-right text-gray-700 dark:text-dark-6">
-              {variant.netSold}
-              {variant.unitsReturned > 0 ? ` (${variant.unitsReturned} ret.)` : ""}
+              {usedInSoinsOnly(variant) ? (
+                <span className="text-violet-700 dark:text-violet-300">{soinsLabel(variant.salonUsage)}</span>
+              ) : (
+                <>
+                  {variant.netSold}
+                  {variant.unitsReturned > 0 ? ` (${variant.unitsReturned} ret.)` : ""}
+                  {variant.salonUsage > 0 ? ` + ${soinsLabel(variant.salonUsage)}` : ""}
+                </>
+              )}
             </TableCell>
             <TableCell className="py-2">
               <Sparkline values={variant.monthly} labels={sliceLabels} trend={variant.trend} small />
@@ -783,34 +846,51 @@ function Pill({ active, onClick, children }) {
   );
 }
 
-function VerdictChip({ active, onClick, label, count, tone, title }) {
+// The verdict's colour as a small dot — the filter bar itself stays neutral.
+const TONE_DOTS = {
+  emerald: "bg-emerald-500",
+  sky: "bg-sky-500",
+  amber: "bg-amber-500",
+  orange: "bg-orange-500",
+  violet: "bg-violet-500",
+  red: "bg-red-500",
+  gray: "bg-gray-400",
+};
+
+function VerdictChip({ active, onClick, label, count, tone = null, title }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
       aria-pressed={active}
-      className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset transition-colors ${
+      className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors ${
         active
-          ? "bg-[#2f3a2e] text-white ring-[#2f3a2e]"
-          : tone
-            ? TONE_CLASSES[tone]
-            : "bg-white text-gray-600 ring-stroke dark:bg-gray-dark dark:text-dark-6 dark:ring-dark-3"
+          ? "border-[#2f3a2e] bg-[#2f3a2e] text-white shadow-sm"
+          : "border-stroke bg-white text-gray-700 hover:border-[#2f3a2e]/40 hover:bg-gray-50 dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6 dark:hover:bg-dark-2"
       }`}
     >
-      {label}
-      <span className={`rounded-full px-1.5 ${active ? "bg-white/20" : "bg-black/5 dark:bg-white/10"}`}>{count}</span>
+      {tone && <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${TONE_DOTS[tone]} ${active ? "ring-2 ring-white/40" : ""}`} />}
+      <span>{label}</span>
+      <span
+        className={`min-w-[1.75rem] rounded-md px-1.5 py-0.5 text-center text-xs font-semibold tabular-nums ${
+          active ? "bg-white/15 text-white" : "bg-gray-100 text-gray-600 dark:bg-dark-2 dark:text-dark-6"
+        }`}
+      >
+        {count}
+      </span>
     </button>
   );
 }
 
-function StatCard({ icon, label, value }) {
+function StatCard({ icon, label, value, note = null }) {
   return (
     <div className="flex items-center gap-3 rounded-[10px] border border-stroke bg-white p-4 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
       <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[#2f3a2e]/10 text-[#2f3a2e]">{icon}</span>
       <div className="min-w-0">
         <div className="text-xs font-medium text-gray-500 dark:text-dark-6">{label}</div>
         <div className="text-lg font-bold text-dark dark:text-white">{value}</div>
+        {note && <div className="text-xs text-violet-700 dark:text-violet-300">{note}</div>}
       </div>
     </div>
   );

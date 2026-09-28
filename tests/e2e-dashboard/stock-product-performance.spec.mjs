@@ -7,9 +7,9 @@ import { seedAdmin, seedStockedVariant } from "./fixtures/seed-dashboard.mjs";
  * « Performance par produit » — the per-product roll-up next to the
  * Mouvements de stock ledger. A product that sold in the window must read as
  * sold (with its units), and a product with stock that never sold must be
- * flagged « À retirer ? »: that is the whole question the view answers.
+ * flagged « Sans vente »: that is the whole question the view answers.
  *
- * Products are backdated past the 60-day « Nouveau » grace period, since a
+ * Products are backdated past the 60-day « Nouveauté » grace period, since a
  * freshly seeded product is by definition too new to judge.
  */
 test.describe("product performance over a period", () => {

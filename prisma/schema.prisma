@@ -2441,9 +2441,9 @@ enum SalonExpenseCategory {
 // margin uses is derived on read (lib/gestion/build-gestion-report.js).
 //
 // A recurring row (`isRecurring`) is a MONTHLY charge from the month of
-// `date` through the month of `endDate` (open-ended when null) and is
-// prorated by day into any period that only partly covers a month. A
-// one-off row counts once, on `date`.
+// `date` through the month of `endDate` (open-ended when null), counted in
+// full for every month a period touches (never prorated by day). A one-off
+// row counts once, on `date`.
 model SalonExpense {
   id String @id @default(cuid())
 

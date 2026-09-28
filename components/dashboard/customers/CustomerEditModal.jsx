@@ -245,8 +245,8 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
               </div>
               <div className="space-y-3">
                 <div>
-                  <Label htmlFor="editAddressLine1" icon={MapPin} required>Rue et numéro</Label>
-                  <TextInput id="editAddressLine1" type="text" value={addressLine1} onChange={(e) => setAddressLine1(e.target.value)} required placeholder="Rue de la Paix 12" error={errors.addressLine1} />
+                  <Label htmlFor="editAddressLine1" icon={MapPin}>Rue et numéro</Label>
+                  <TextInput id="editAddressLine1" type="text" value={addressLine1} onChange={(e) => setAddressLine1(e.target.value)} placeholder="Rue de la Paix 12 (optionnel)" error={errors.addressLine1} />
                   <FieldError message={errors.addressLine1} />
                 </div>
                 <div>
@@ -256,18 +256,18 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
-                    <Label htmlFor="editPostalCode" required>Code postal</Label>
-                    <TextInput id="editPostalCode" type="text" value={addressPostalCode} onChange={(e) => setAddressPostalCode(e.target.value)} required placeholder="1000" error={errors.addressPostalCode} />
+                    <Label htmlFor="editPostalCode">Code postal</Label>
+                    <TextInput id="editPostalCode" type="text" value={addressPostalCode} onChange={(e) => setAddressPostalCode(e.target.value)} placeholder="1000" error={errors.addressPostalCode} />
                     <FieldError message={errors.addressPostalCode} />
                   </div>
                   <div>
-                    <Label htmlFor="editCity" required>Ville</Label>
-                    <TextInput id="editCity" type="text" value={addressCity} onChange={(e) => setAddressCity(e.target.value)} required placeholder="Bruxelles" error={errors.addressCity} />
+                    <Label htmlFor="editCity">Ville</Label>
+                    <TextInput id="editCity" type="text" value={addressCity} onChange={(e) => setAddressCity(e.target.value)} placeholder="Bruxelles" error={errors.addressCity} />
                     <FieldError message={errors.addressCity} />
                   </div>
                 </div>
                 <div>
-                  <Label htmlFor="editCountry" required>Pays</Label>
+                  <Label htmlFor="editCountry">Pays</Label>
                   <CountrySelect
                     id="editCountry"
                     value={addressCountry}

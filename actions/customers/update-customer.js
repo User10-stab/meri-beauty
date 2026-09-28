@@ -63,11 +63,13 @@ const updateCustomerSchema = z.object({
   email: customerEmailSchema,
   phone: phoneSchema,
   isActive: z.boolean().optional().default(true),
-  addressLine1: z.string().trim().min(3, "L'adresse est obligatoire.").max(150, "L'adresse ne peut pas dépasser 150 caractères."),
+  // Address is optional: staff often only need to fix an email/phone and the
+  // customer may never have given a postal address. Empty → stored as null.
+  addressLine1: z.union([z.string().trim().min(3, "L'adresse doit comporter au moins 3 caractères.").max(150, "L'adresse ne peut pas dépasser 150 caractères."), z.literal("")]).optional().nullable(),
   addressLine2: z.string().trim().max(150, "L'adresse ne peut pas dépasser 150 caractères.").optional().nullable().or(z.literal("")),
-  addressCity: z.string().trim().min(2, "La ville est obligatoire.").max(100, "La ville ne peut pas dépasser 100 caractères."),
-  addressPostalCode: z.string().trim().min(3, "Le code postal est obligatoire.").max(10, "Le code postal ne peut pas dépasser 10 caractères."),
-  addressCountry: z.string().trim().min(2, "Le pays est obligatoire.").max(100),
+  addressCity: z.union([z.string().trim().min(2, "La ville doit comporter au moins 2 caractères.").max(100, "La ville ne peut pas dépasser 100 caractères."), z.literal("")]).optional().nullable(),
+  addressPostalCode: z.union([z.string().trim().min(3, "Le code postal doit comporter au moins 3 caractères.").max(10, "Le code postal ne peut pas dépasser 10 caractères."), z.literal("")]).optional().nullable(),
+  addressCountry: z.string().trim().max(100).optional().nullable().or(z.literal("")),
 });
 
 /**
@@ -146,9 +148,18 @@ export async function updateCustomer(input) {
         isDeleted: false,
         ...(staffRelationshipFilters ? { OR: staffRelationshipFilters } : {}),
       },
-      select: { id: true, email: true, phone: true },
+      select: { id: true, email: true, phone: true, vatNumber: true },
     });
     if (!existing) return { success: false, message: "Client introuvable." };
+
+    // Address is optional — except for a B2B customer: issueInvoice refuses a
+    // VAT-registered buyer with no billing address (BUYER_LEGAL_DATA_INCOMPLETE).
+    // Same rule as lib/counter/resolve-counter-customer.js.
+    if (existing.vatNumber && !(addressLine1 && addressCity && addressPostalCode)) {
+      const field = !addressLine1 ? "addressLine1" : !addressPostalCode ? "addressPostalCode" : "addressCity";
+      const message = "L'adresse de facturation est obligatoire pour un client avec un numéro de TVA.";
+      return { success: false, message, errors: { [field]: message } };
+    }
 
     // Uniqueness — active-only, exclude self, ignore soft-deleted rows.
     if (normalizedEmail !== existing.email?.toLowerCase()) {
@@ -187,10 +198,10 @@ export async function updateCustomer(input) {
       email: normalizedEmail,
       phone: normalizedPhone,
       isActive: Boolean(isActive),
-      addressLine1: addressLine1.trim(),
+      addressLine1: addressLine1 ? String(addressLine1).trim() || null : null,
       addressLine2: addressLine2 ? String(addressLine2).trim() || null : null,
-      addressCity: addressCity.trim(),
-      addressPostalCode: addressPostalCode.trim(),
+      addressCity: addressCity ? String(addressCity).trim() || null : null,
+      addressPostalCode: addressPostalCode ? String(addressPostalCode).trim() || null : null,
       addressCountry,
       ...(emailChanged ? { emailVerified: false } : {}),
     };

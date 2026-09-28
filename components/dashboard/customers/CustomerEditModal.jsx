@@ -74,7 +74,7 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
       setFullName(customer.fullName ?? "");
       setNickName(customer.nickName ?? "");
       setEmail(customer.email ?? "");
-      setPhone(customer.phone ?? "");
+      setPhone(customer.phone?.startsWith("temp-") ? "" : (customer.phone ?? ""));
       setAddressLine1(customer.addressLine1 ?? "");
       setAddressLine2(customer.addressLine2 ?? "");
       setAddressCity(customer.addressCity ?? "");
@@ -227,8 +227,8 @@ export function CustomerEditModal({ customer, onClose, onSaved }) {
                   <FieldError message={errors.email} />
                 </div>
                 <div>
-                  <Label htmlFor="editPhone" icon={Phone} required>Téléphone</Label>
-                  <TextInput id="editPhone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required placeholder="+32 470 12 34 56" error={errors.phone} />
+                  <Label htmlFor="editPhone" icon={Phone}>Téléphone</Label>
+                  <TextInput id="editPhone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+32 470 12 34 56 (optionnel)" error={errors.phone} />
                   <FieldError message={errors.phone} />
                 </div>
               </div>

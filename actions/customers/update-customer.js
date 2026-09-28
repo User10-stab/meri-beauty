@@ -61,7 +61,7 @@ const updateCustomerSchema = z.object({
     .nullable()
     .or(z.literal("")),
   email: customerEmailSchema,
-  phone: phoneSchema,
+  phone: optionalPhoneSchema, // optional — empty is stored as null (unique index only covers non-null)
   isActive: z.boolean().optional().default(true),
   // Address is optional: staff often only need to fix an email/phone and the
   // customer may never have given a postal address. Empty → stored as null.
@@ -129,7 +129,7 @@ export async function updateCustomer(input) {
   const normalizedNickName = nickName && String(nickName).trim().length >= 2 ? String(nickName).trim() : null;
 
   const normalizedEmail = String(email).trim().toLowerCase();
-  const normalizedPhone = String(phone).trim();
+  const normalizedPhone = String(phone ?? "").trim() || null;
 
   try {
     // Scope check: STAFF may only edit customers they are related to.

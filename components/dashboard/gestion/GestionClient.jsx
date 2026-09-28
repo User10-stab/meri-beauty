@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useConfirm } from "@/components/ConfirmProvider";
-import { deleteSalonExpense } from "@/actions/dashboard/gestion";
+import { deleteSalonExpense, setVariantCostPrice } from "@/actions/dashboard/gestion";
 import { SalonExpenseModal } from "@/components/dashboard/gestion/SalonExpenseModal";
 
 function formatEuro(value) {
@@ -214,27 +214,7 @@ export function GestionClient({ data }) {
           {summary.productsWithoutCost?.length > 0 && (
             <ul className="mt-2 divide-y divide-amber-200/70 rounded-md border border-amber-200 bg-white/60 dark:divide-amber-500/20 dark:border-amber-500/30 dark:bg-transparent">
               {summary.productsWithoutCost.map((product) => (
-                <li key={product.variantId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-                  <span className="min-w-0">
-                    <span className="font-semibold">{product.productName}</span>
-                    {product.variantName && <span> — {product.variantName}</span>}
-                    <span className="text-amber-700/80 dark:text-amber-200/70">
-                      {" "}
-                      · {product.quantity} vendu{product.quantity > 1 ? "s" : ""}
-                      {product.orderNumbers.length > 0 &&
-                        ` (commande${product.orderNumbers.length > 1 ? "s" : ""} n° ${product.orderNumbers.join(", ")})`}
-                    </span>
-                  </span>
-                  {product.productId && (
-                    <Link
-                      href={`/dashboard/boutique/products/${product.productId}`}
-                      className="inline-flex shrink-0 items-center gap-1 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-200"
-                    >
-                      <Pencil className="h-3 w-3" strokeWidth={2} />
-                      Compléter le prix d&apos;achat
-                    </Link>
-                  )}
-                </li>
+                <MissingCostRow key={product.variantId} product={product} onSaved={() => startRefresh(() => router.refresh())} />
               ))}
             </ul>
           )}
@@ -554,6 +534,81 @@ export function GestionClient({ data }) {
         }}
       />
     </div>
+  );
+}
+
+/**
+ * One product sold without a purchase price: the price is entered right here
+ * (setVariantCostPrice) — a product deleted from the catalogue since has no
+ * product page left to edit it from. « Fiche produit » only for live ones.
+ */
+function MissingCostRow({ product, onSaved }) {
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function save(event) {
+    event.preventDefault();
+    setSaving(true);
+    const result = await setVariantCostPrice({ variantId: product.variantId, costPrice: value });
+    setSaving(false);
+    if (!result.success) return toast.error(result.message);
+    toast.success(result.message);
+    onSaved();
+  }
+
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2">
+      <span className="min-w-0">
+        <span className="font-semibold">{product.productName}</span>
+        {product.variantName && <span> — {product.variantName}</span>}
+        {product.productDeleted && (
+          <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">
+            produit supprimé
+          </span>
+        )}
+        <span className="block text-xs text-amber-700/80 dark:text-amber-200/70">
+          {product.quantity} vendu{product.quantity > 1 ? "s" : ""}
+          {product.orderNumbers.length > 0 &&
+            ` · commande${product.orderNumbers.length > 1 ? "s" : ""} n° ${product.orderNumbers.join(", ")}`}
+        </span>
+      </span>
+      <form onSubmit={save} className="flex shrink-0 flex-wrap items-center gap-2">
+        <label className="sr-only" htmlFor={`cost-${product.variantId}`}>
+          Prix d&apos;achat HT de {product.productName}
+        </label>
+        <div className="relative">
+          <input
+            id={`cost-${product.variantId}`}
+            type="number"
+            inputMode="decimal"
+            min="0.01"
+            step="0.01"
+            required
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            placeholder="Prix d'achat HT"
+            className="h-8 w-36 rounded-md border border-amber-300 bg-white pl-2.5 pr-6 text-sm text-dark outline-none focus:border-amber-500 dark:border-amber-500/40 dark:bg-dark-2 dark:text-white"
+          />
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">€</span>
+        </div>
+        <button
+          type="submit"
+          disabled={saving || value === ""}
+          className="inline-flex h-8 items-center rounded-md bg-[#2f3a2e] px-3 text-xs font-semibold text-white hover:bg-[#232b22] disabled:opacity-50"
+        >
+          {saving ? "Enregistrement…" : "Enregistrer"}
+        </button>
+        {product.productId && !product.productDeleted && (
+          <Link
+            href={`/dashboard/boutique/products/${product.productId}`}
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-200"
+          >
+            <Pencil className="h-3 w-3" strokeWidth={2} />
+            Fiche produit
+          </Link>
+        )}
+      </form>
+    </li>
   );
 }
 

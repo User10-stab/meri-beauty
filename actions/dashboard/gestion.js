@@ -128,3 +128,54 @@ export async function deleteSalonExpense(id) {
   revalidatePath("/dashboard/gestion");
   return { success: true, message: "Charge supprimée." };
 }
+
+/**
+ * Fills in a variant's purchase price (HT) from the Gestion page's « vendus
+ * sans prix d'achat » list. Works on a product since deleted from the
+ * catalogue — its product page 404s, yet its past sales still count in the
+ * margin, so this is the only place left to fix them. The margin reads the
+ * current costPrice (OrderItem keeps no cost snapshot), so past sales pick
+ * the new price up on the next load.
+ *
+ * @param {{ variantId: string, costPrice: number|string }} input
+ */
+export async function setVariantCostPrice({ variantId, costPrice } = {}) {
+  const guard = await requireGestionAccess();
+  if (guard.error) return { success: false, message: guard.error };
+  if (typeof variantId !== "string" || !variantId) return { success: false, message: "Produit introuvable." };
+
+  const value = Number(String(costPrice ?? "").replace(",", "."));
+  if (!Number.isFinite(value) || value <= 0) {
+    return { success: false, message: "Indiquez un prix d'achat HT supérieur à 0." };
+  }
+  if (value > 100_000) return { success: false, message: "Prix d'achat trop élevé." };
+  const rounded = Math.round(value * 100) / 100;
+
+  try {
+    const outcome = await prisma.$transaction(async (tx) => {
+      const variant = await tx.productVariant.findUnique({
+        where: { id: variantId },
+        select: { id: true, name: true, costPrice: true, product: { select: { name: true } } },
+      });
+      if (!variant) return { error: "Produit introuvable." };
+
+      await tx.productVariant.update({ where: { id: variantId }, data: { costPrice: rounded } });
+      await writeAuditLog(tx, {
+        action: AUDIT_ACTIONS.VARIANT_COST_PRICE_SET,
+        entityType: "ProductVariant",
+        entityId: variantId,
+        before: { costPrice: Number(variant.costPrice) },
+        after: { costPrice: rounded },
+        metadata: { productName: variant.product?.name ?? null, variantName: variant.name, source: "gestion" },
+      });
+      return { productName: variant.product?.name ?? "Produit" };
+    });
+
+    if (outcome.error) return { success: false, message: outcome.error };
+    revalidatePath("/dashboard/gestion");
+    return { success: true, message: `Prix d'achat de « ${outcome.productName} » enregistré.` };
+  } catch (error) {
+    console.error("[setVariantCostPrice]", error);
+    return { success: false, message: "Impossible d'enregistrer le prix d'achat." };
+  }
+}

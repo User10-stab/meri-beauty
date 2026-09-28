@@ -177,8 +177,44 @@ describe("buildGestionReport", () => {
 
     expect(report.summary.itemsWithoutCost).toBe(2); // not 4
     expect(report.summary.productsWithoutCost).toEqual([
-      { variantId: "v-nocost", productId: "p1", productName: "Builder Gel", variantName: "Sunny", quantity: 2, orderNumbers: [43] },
+      {
+        variantId: "v-nocost",
+        productId: "p1",
+        productName: "Builder Gel",
+        variantName: "Sunny",
+        productDeleted: false,
+        quantity: 2,
+        orderNumbers: [43],
+      },
     ]);
+  });
+
+  it("flags a product deleted from the catalogue since — its product page 404s (prod, SOLDE MABON)", async () => {
+    const order = {
+      id: "o51",
+      orderNumber: 51,
+      items: [{ quantity: 1, variantId: "v-gone", variant: { costPrice: 0, name: "Standard", isDeleted: true, product: { id: "p-gone", name: "SOLDE MABON", isDeleted: true } } }],
+    };
+    const client = clientMock({
+      transactions: [{ id: "t1", amount: 12.5, paidAt: d(2026, 9, 18), method: "CASH", transactionType: "FINAL_PAYMENT", payment: orderPayment }],
+      orderTransactions: [{ id: "t1", amount: 12.5, payment: { totalAmount: 12.5, order } }],
+    });
+    const report = await buildGestionReport(client, normalizeGestionParams({ from: "2026-09-01", to: "2026-09-30" }));
+    expect(report.summary.productsWithoutCost[0]).toMatchObject({ productName: "SOLDE MABON", productDeleted: true, variantName: null });
+  });
+
+  it("the purchase price is entered on the Gestion page itself, guarded and audited — no dead product link", () => {
+    const action = source("actions/dashboard/gestion.js");
+    const setCost = action.slice(action.indexOf("export async function setVariantCostPrice"));
+    expect(setCost).toContain("await requireGestionAccess()");
+    expect(setCost).toContain("AUDIT_ACTIONS.VARIANT_COST_PRICE_SET");
+    expect(setCost).toContain("value <= 0");
+    // Found by id alone, deleted or not — a deleted product is exactly the case this exists for.
+    expect(setCost).toContain("tx.productVariant.findUnique({\n        where: { id: variantId },");
+
+    const client = source("components/dashboard/gestion/GestionClient.jsx");
+    expect(client).toContain("setVariantCostPrice({ variantId: product.variantId, costPrice: value })");
+    expect(client).toContain("product.productId && !product.productDeleted");
   });
 
   it("gives a refund its share of the product cost back, and prorates cost on an acompte", async () => {

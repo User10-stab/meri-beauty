@@ -18,7 +18,7 @@ import {
 import { getReservationPaymentDecision } from "@/lib/reservation-payment";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { generateAutologinToken } from "@/lib/autologin";
-import { resolvePromoCode } from "@/lib/promo-codes";
+import { resolvePromoCode, claimPromoCodeUse, promoClaimErrorMessage } from "@/lib/promo-codes";
 import { isAdminRole } from "@/lib/authorization";
 import {
   createNotification,
@@ -382,11 +382,17 @@ export async function createReservation(data) {
 
     let promoCodeId = null;
     let discountAmount = 0;
+    let promoCaps = null;
     if (!isManuallyConfirmed && paymentMethod && promoCode) {
-      const promoResult = await resolvePromoCode(promoCode, rawTotalAmount);
+      const promoResult = await resolvePromoCode(promoCode, rawTotalAmount, {
+        scope: "APPOINTMENT",
+        serviceId: staffService.serviceId,
+        customerId: user.id,
+      });
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
+      promoCaps = { maxUses: promoResult.maxUses, maxUsesPerCustomer: promoResult.maxUsesPerCustomer };
     }
 
     // CASH_ONLY override: no online payment flows apply.
@@ -573,6 +579,9 @@ export async function createReservation(data) {
 
       let payment = null;
       if (paymentDecision.shouldCreatePaymentRecord) {
+        if (promoCodeId) {
+          await claimPromoCodeUse(tx, { promoCodeId, ...promoCaps, customerId: user.id });
+        }
         payment = await tx.payment.create({
           data: {
             appointmentId: appointment.id,
@@ -585,6 +594,8 @@ export async function createReservation(data) {
             status: "PENDING",
             promoCodeId,
             discountAmount,
+            // Claimed just above — given back if the appointment is cancelled.
+            promoUseClaimed: Boolean(promoCodeId),
           },
         });
       }
@@ -719,6 +730,8 @@ export async function createReservation(data) {
       },
     };
   } catch (error) {
+    const promoMessage = promoClaimErrorMessage(error);
+    if (promoMessage) return { success: false, message: promoMessage };
     console.error("[createReservation]", error);
     return {
       success: false,

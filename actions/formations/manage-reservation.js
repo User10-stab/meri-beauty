@@ -23,6 +23,7 @@ import { formationSessionChangeEmail } from "@/lib/email-templates";
 import { OCCUPANCY_KINDS, liveSeatFilter, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { resolvePayeeForFormationSession } from "@/lib/payments/resolve-payee";
 import { REFUND_DENIAL, refundDenialMessage } from "@/lib/refunds/authorize";
+import { releaseReservationPromoUse } from "@/lib/promo-code-release";
 
 // The transfer is a free admin correction — see changeFormationReservationSession.
 const TRANSFER_PRICE_DECISIONS = {
@@ -161,6 +162,8 @@ export async function cancelFormationReservation(reservationId, { reason, refund
         },
       });
       if (claim.count === 0) return { claimed: false, refundQueued: false, queuedRefundAmount: 0 };
+
+      await releaseReservationPromoUse(tx, "FORMATION", reservationId);
 
       // A cancelled booking never collects another cent, whatever happens to
       // the money already taken — refunded, forfeited, or neither. Set once
@@ -735,7 +738,7 @@ export async function changeFormationReservationSeatsFree(reservationId, { newSe
  */
 export async function completeFormationReservation(
   reservationId,
-  { method, paymentConfirmed, terminalApproved, terminalReference, qrSessionId, finalTotal, adjustmentReason } = {}
+  { method, paymentConfirmed, terminalApproved, qrSessionId, finalTotal, adjustmentReason } = {}
 ) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
@@ -753,7 +756,6 @@ export async function completeFormationReservation(
     method,
     paymentConfirmed,
     terminalApproved,
-    terminalReference,
     qrSessionId,
     finalTotal,
     adjustmentReason,

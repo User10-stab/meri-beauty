@@ -48,14 +48,17 @@ describe("reservation settlement — collecting the on-site balance", () => {
     expect(lib).toContain('payment.status === "PARTIALLY_PAID"');
   });
 
-  test("external terminal settlement requires approval and stores the terminal reference", () => {
+  test("external terminal settlement requires approval and stores the booking's own reference", () => {
     expect(lib).toContain('method === "EXTERNAL_TERMINAL"');
     expect(lib).toContain("terminalApproved !== true");
     // `isTerminalCard` is `!offTill && method === "EXTERNAL_TERMINAL"` — an
     // off-till collection always records as CASH with no reference.
     expect(lib).toContain("const isTerminalCard = !offTill && method === \"EXTERNAL_TERMINAL\"");
     // A QR charge carries its Stripe payment intent instead of a terminal slip.
-    expect(lib).toContain("manualReference: isTerminalCard ? terminalReference.trim() : isQr ? qrPayment.paymentIntentId : null");
+    // Nothing typed any more (2026-09-28): « Atelier n°01 », « Formation n°03 »…
+    expect(lib).toContain("const terminalReference = isTerminalCard ? await allocateBookingTerminalReference(tx, kind, activityType) : null;");
+    expect(lib).toContain("manualReference: isTerminalCard ? terminalReference : isQr ? qrPayment.paymentIntentId : null");
+    expect(lib).not.toContain("terminalReference?.trim()");
     expect(lib).toContain("method: isQr ? \"ONLINE\" : isTerminalCard ? \"CARD\" : \"CASH\"");
   });
 

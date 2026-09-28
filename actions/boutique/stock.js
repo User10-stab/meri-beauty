@@ -8,6 +8,7 @@ import { stockAdjustmentSchema, stockCountSchema } from "@/lib/validations/bouti
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { buildInventorySnapshot } from "@/lib/stock/build-inventory-snapshot";
 import { buildStockMovementsReport } from "@/lib/stock/build-stock-movements-report";
+import { buildProductPerformance } from "@/lib/stock/build-product-performance";
 
 /**
  * Stock movements.
@@ -417,5 +418,27 @@ export async function getStockMovementsReport(params = {}) {
   } catch (error) {
     console.error("[getStockMovementsReport]", error);
     return { success: false, message: "Impossible de charger les mouvements de stock." };
+  }
+}
+
+/**
+ * Per-product performance over a rolling 3/6/12-month window — units sold,
+ * revenue, margin, stock coverage and a keep/remove verdict. See
+ * lib/stock/build-product-performance.js. Params are re-normalized by the
+ * builder: `months` can only ever be 3, 6 or 12, and a custom from/to range
+ * is clamped to the same 366-day ceiling as the movement journal.
+ *
+ * @param {{ months?: number|string, from?: string, to?: string }} [params]
+ */
+export async function getProductPerformanceReport(params = {}) {
+  const guard = await requireStockAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  try {
+    const data = await buildProductPerformance(prisma, { months: params.months, from: params.from, to: params.to });
+    return { success: true, data };
+  } catch (error) {
+    console.error("[getProductPerformanceReport]", error);
+    return { success: false, message: "Impossible de charger la performance des produits." };
   }
 }

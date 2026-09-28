@@ -12,13 +12,16 @@ import {
 
 /**
  * Date range, payment method and category filters for the Livre de recettes.
+ * Also drives the Gestion page (`basePath`), which has no payment-method
+ * filter (`showMethod={false}`) — a margin does not depend on how the
+ * customer paid.
  *
  * Drives the URL rather than local state, so the server component re-runs the
  * query and re-computes the running balance for the new window: a filtered
  * journal is then a link someone can bookmark or paste to a colleague, and
  * the back button behaves.
  */
-export function RecettesFilterBar({ filters }) {
+export function RecettesFilterBar({ filters, basePath = "/dashboard/livre-de-recettes", showMethod = true }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -63,7 +66,7 @@ export function RecettesFilterBar({ filters }) {
       else params.delete(key);
     }
     startTransition(() => {
-      router.push(`/dashboard/livre-de-recettes?${params.toString()}`, { scroll: false });
+      router.push(`${basePath}?${params.toString()}`, { scroll: false });
     });
   }
 
@@ -143,21 +146,23 @@ export function RecettesFilterBar({ filters }) {
         />
       </div>
 
-      <div>
-        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
-          Moyen de paiement
-        </span>
-        <div className="flex flex-wrap gap-1.5">
-          <FilterPill active={method === "ALL"} onClick={() => setParams({ method: "ALL" })}>
-            Tous
-          </FilterPill>
-          {RECETTES_METHODS.map((value) => (
-            <FilterPill key={value} active={method === value} onClick={() => setParams({ method: value })}>
-              {METHOD_LABELS[value] ?? value}
+      {showMethod && (
+        <div>
+          <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-dark-6">
+            Moyen de paiement
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            <FilterPill active={method === "ALL"} onClick={() => setParams({ method: "ALL" })}>
+              Tous
             </FilterPill>
-          ))}
+            {RECETTES_METHODS.map((value) => (
+              <FilterPill key={value} active={method === value} onClick={() => setParams({ method: value })}>
+                {METHOD_LABELS[value] ?? value}
+              </FilterPill>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="min-w-[190px]">
         <label
@@ -185,7 +190,7 @@ export function RecettesFilterBar({ filters }) {
       {hasFilters && (
         <button
           type="button"
-          onClick={() => startTransition(() => router.push("/dashboard/livre-de-recettes", { scroll: false }))}
+          onClick={() => startTransition(() => router.push(basePath, { scroll: false }))}
           className="inline-flex items-center gap-1.5 rounded-[7px] border border-stroke px-3 py-2 text-sm font-semibold text-gray-500 hover:border-primary hover:text-primary dark:border-dark-3 dark:text-dark-6"
         >
           <RotateCcw className="h-3.5 w-3.5" strokeWidth={2} />

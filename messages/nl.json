@@ -1618,7 +1618,7 @@
       "needsPayment": "Deze bestelling is niet online betaald. Selecteer de betaalmethode die ter plaatse is geïnd:",
       "cash": "Contant",
       "card": "Kaart — terminal",
-      "terminalReference": "Referentie van de terminalbon",
+      "terminalReferenceAuto": "Geen referentie in te vullen: het bestelnummer wordt automatisch geregistreerd.",
       "totalToCollect": "Totaal te innen: €{amount}",
       "alreadyPaid": "Deze bestelling is al online betaald. Bevestig alleen de overhandiging van de artikelen aan de klant.",
       "cancel": "Annuleren",

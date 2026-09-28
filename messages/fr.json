@@ -1657,7 +1657,7 @@
       "needsPayment": "Cette commande n'a pas été payée en ligne. Sélectionnez le mode de paiement encaissé sur place :",
       "cash": "Espèces",
       "card": "Carte — terminal",
-      "terminalReference": "Référence du ticket du terminal",
+      "terminalReferenceAuto": "Aucune référence à saisir : le numéro de commande est enregistré automatiquement.",
       "totalToCollect": "Total à encaisser : €{amount}",
       "alreadyPaid": "Cette commande a déjà été payée en ligne. Confirmez uniquement la remise des articles au client.",
       "cancel": "Annuler",

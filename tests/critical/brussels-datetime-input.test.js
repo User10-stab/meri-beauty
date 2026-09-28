@@ -92,7 +92,9 @@ describe("every form and save path uses it", () => {
   );
 
   it("the promo-code expiry uses the same pair", () => {
-    expect(source("components/dashboard/promo-codes/PromoCodeModal.jsx")).toContain("toBrusselsInputValue(promoCode?.expiresAt)");
+    const editor = source("components/dashboard/promo-codes/PromoCodeEditor.jsx");
+    expect(editor).toContain("splitBrussels(promoCode?.expiresAt)");
+    expect(editor).toContain("toBrusselsInputValue(date)");
     expect(source("lib/validations/promo-codes.js")).toContain("parseBrusselsInputValue(value)");
   });
 });

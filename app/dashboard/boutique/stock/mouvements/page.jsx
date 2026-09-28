@@ -5,6 +5,7 @@ import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getStockMovementsReport } from "@/actions/boutique/stock";
 import { StockMovementsFilterBar } from "@/components/dashboard/boutique/StockMovementsFilterBar";
 import { StockMovementsClient } from "@/components/dashboard/boutique/StockMovementsClient";
+import { StockMovementsTabs } from "@/components/dashboard/boutique/StockMovementsTabs";
 
 export const metadata = {
   title: "Mouvements de stock — Dashboard",
@@ -43,6 +44,8 @@ export default async function StockMovementsPage({ searchParams }) {
           visible et exportable.
         </p>
       </div>
+
+      <StockMovementsTabs active="journal" />
 
       <StockMovementsFilterBar filters={result.data?.filters} />
 

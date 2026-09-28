@@ -19,6 +19,7 @@ import { issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines } from "@/
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { allocatePieceNumber, PIECE_SERIES, seriesForActivityType } from "@/lib/cash-book/piece-number";
 import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
+import { allocateBookingTerminalReference } from "@/lib/payments/terminal-reference";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { workshopReservationConfirmationEmail, formationReservationConfirmationEmail } from "@/lib/email-templates";
@@ -110,7 +111,6 @@ const createReservationSchema = z.object({
     // and an admin accepts it later (lib/payments/awaited-transfer.js).
     method: z.enum(["CASH", "EXTERNAL_TERMINAL", "TRANSFER"]),
     paymentConfirmed: z.literal(true),
-    terminalReference: z.string().trim().max(100).optional(),
   }),
 });
 
@@ -165,7 +165,7 @@ function formatSessionDate(date) {
  * @param {object} input.customer `{ userId }` or a new-customer shape.
  * @param {number} [input.finalTotal] Operator override of the catalogue total.
  * @param {string} [input.adjustmentReason] Required whenever finalTotal changes it.
- * @param {object} input.payment `{ mode: "FULL"|"DEPOSIT", method, paymentConfirmed, terminalReference? }`
+ * @param {object} input.payment `{ mode: "FULL"|"DEPOSIT", method, paymentConfirmed }`
  */
 export async function createCounterReservation(input) {
   const parsed = createReservationSchema.safeParse(input);
@@ -194,10 +194,6 @@ export async function createCounterReservation(input) {
   // could never be accepted and the money would be unrecoverable.
   if (isAwaitedTransfer(data.payment.method) && offTill) {
     return { success: false, message: AWAITED_TRANSFER_OFF_TILL_MESSAGE };
-  }
-
-  if (data.payment.method === "EXTERNAL_TERMINAL" && !data.payment.terminalReference?.trim()) {
-    return { success: false, message: "Indiquez la référence du ticket du terminal." };
   }
 
   // Fast-path check before the transaction opens — the authoritative one is
@@ -335,6 +331,12 @@ export async function createCounterReservation(input) {
           // never enters the Livre de caisse, which requires both.
           const pieceNumber = useTill ? await allocatePieceNumber(tx, series) : null;
 
+          // « Atelier n°01 » / « Formation n°03 » — see lib/payments/terminal-reference.js.
+          const terminalReference =
+            data.payment.method === "EXTERNAL_TERMINAL"
+              ? await allocateBookingTerminalReference(tx, data.kind, data.kind === "WORKSHOP" ? catalogue.type : null)
+              : null;
+
           await tx.transaction.create({
             data: {
               paymentId: payment.id,
@@ -344,7 +346,7 @@ export async function createCounterReservation(input) {
               paidAt: new Date(),
               cashSessionId: openCashSession?.id ?? null,
               pieceNumber,
-              manualReference: data.payment.method === "EXTERNAL_TERMINAL" ? data.payment.terminalReference.trim() : null,
+              manualReference: terminalReference,
             },
           });
         }

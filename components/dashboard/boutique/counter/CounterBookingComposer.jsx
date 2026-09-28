@@ -13,7 +13,7 @@ import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSes
 import {
   CounterCashReceived,
   CounterPaymentMethodTiles,
-  CounterTerminalReference,
+  CounterTerminalAutoReference,
 } from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 
 function money(value) {
@@ -104,7 +104,6 @@ export function CounterBookingComposer({
   const [reason, setReason] = useState("");
   // Card is EXTERNAL_TERMINAL only — see SettleAction.
   const [method, setMethod] = useState("EXTERNAL_TERMINAL");
-  const [terminalReference, setTerminalReference] = useState("");
   // Change helper only (CounterCashReceived) — the action records the price.
   const [cashReceived, setCashReceived] = useState("");
   const [saving, setSaving] = useState(false);
@@ -116,7 +115,6 @@ export function CounterBookingComposer({
   const [sessionFinalTotal, setSessionFinalTotal] = useState("0");
   const [sessionReason, setSessionReason] = useState("");
   const [sessionMethod, setSessionMethod] = useState("EXTERNAL_TERMINAL");
-  const [sessionTerminalReference, setSessionTerminalReference] = useState("");
   const [sessionCashReceived, setSessionCashReceived] = useState("");
   const [sessionSaving, setSessionSaving] = useState(false);
 
@@ -181,7 +179,6 @@ export function CounterBookingComposer({
     // "CARD" is no longer an accepted method — resetting to it would leave
     // the form in a state the server refuses.
     setMethod("EXTERNAL_TERMINAL");
-    setTerminalReference("");
     setCashReceived("");
     setSession(null);
     setSeatsCount(1);
@@ -189,7 +186,6 @@ export function CounterBookingComposer({
     setSessionFinalTotal("0");
     setSessionReason("");
     setSessionMethod("EXTERNAL_TERMINAL");
-    setSessionTerminalReference("");
     setSessionCashReceived("");
   }
 
@@ -241,7 +237,6 @@ export function CounterBookingComposer({
     const amount = Number(finalTotal);
     const changed = Number.isFinite(amount) && amount !== selectedService.price;
     if (changed && reason.trim().length < 3) return toast.error("Indiquez la raison de l'ajustement de prix.");
-    if (method === "EXTERNAL_TERMINAL" && !terminalReference.trim()) return toast.error("Indiquez la référence du ticket du terminal.");
 
     setSaving(true);
     const result = await createCounterWalkInService({
@@ -252,7 +247,6 @@ export function CounterBookingComposer({
       // Pressing the confirm button is the attestation for both facts: the
       // money arrived, and for a card that means the terminal approved it.
       terminalApproved: true,
-      terminalReference,
       finalTotal: amount,
       ...(changed ? { adjustmentReason: reason.trim() } : {}),
     });
@@ -365,7 +359,6 @@ export function CounterBookingComposer({
     const buyerError = buyerValidationError();
     if (buyerError) return toast.error(buyerError);
     if (sessionPriceChanged && sessionReason.trim().length < 3) return toast.error("Indiquez la raison de l'ajustement de prix.");
-    if (sessionMethod === "EXTERNAL_TERMINAL" && !sessionTerminalReference.trim()) return toast.error("Indiquez la référence du ticket du terminal.");
 
     setSessionSaving(true);
     const result = await createCounterReservation({
@@ -378,7 +371,6 @@ export function CounterBookingComposer({
         mode: paymentMode,
         method: sessionMethod,
         paymentConfirmed: true,
-        ...(sessionMethod === "EXTERNAL_TERMINAL" ? { terminalReference: sessionTerminalReference.trim() } : {}),
       },
     });
     setSessionSaving(false);
@@ -457,11 +449,10 @@ export function CounterBookingComposer({
             value={method}
             onChange={(next) => {
               setMethod(next);
-              if (next !== "EXTERNAL_TERMINAL") setTerminalReference("");
               if (next !== "CASH") setCashReceived("");
             }}
           />
-          {method === "EXTERNAL_TERMINAL" && <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />}
+          {method === "EXTERNAL_TERMINAL" && <CounterTerminalAutoReference />}
           {method === "CASH" && <CounterCashReceived id="composer-service-cash" value={cashReceived} onChange={setCashReceived} amountDue={Number(finalTotal) || 0} />}
           {method === "TRANSFER" && <AwaitedTransferNote />}
           {tillGateApplies && method === "CASH" && !cashSessionOpen && <CashSessionGate onOpened={markCashSessionOpen} />}
@@ -471,7 +462,7 @@ export function CounterBookingComposer({
           <div className="flex justify-end border-t border-stroke pt-3 dark:border-dark-3">
             <button
               type="submit"
-              disabled={saving || (method === "EXTERNAL_TERMINAL" && !terminalReference.trim()) || (tillGateApplies && method === "CASH" && !cashSessionOpen)}
+              disabled={saving || (tillGateApplies && method === "CASH" && !cashSessionOpen)}
               className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
             >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -548,12 +539,11 @@ export function CounterBookingComposer({
               value={sessionMethod}
               onChange={(next) => {
                 setSessionMethod(next);
-                if (next !== "EXTERNAL_TERMINAL") setSessionTerminalReference("");
                 if (next !== "CASH") setSessionCashReceived("");
               }}
             />
           </div>
-          {sessionMethod === "EXTERNAL_TERMINAL" && <CounterTerminalReference value={sessionTerminalReference} onChange={setSessionTerminalReference} />}
+          {sessionMethod === "EXTERNAL_TERMINAL" && <CounterTerminalAutoReference />}
           {sessionMethod === "CASH" && (
             <CounterCashReceived id="composer-session-cash" value={sessionCashReceived} onChange={setSessionCashReceived} amountDue={sessionCollected} />
           )}
@@ -565,7 +555,6 @@ export function CounterBookingComposer({
               type="submit"
               disabled={
                 sessionSaving ||
-                (sessionMethod === "EXTERNAL_TERMINAL" && !sessionTerminalReference.trim()) ||
                 (tillGateApplies && sessionMethod === "CASH" && !cashSessionOpen)
               }
               className="inline-flex items-center gap-2 rounded-[7px] bg-primary px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"

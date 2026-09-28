@@ -220,6 +220,17 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     ),
     [cart.items, vatPreview.vatRate]
   );
+  // Lets a code limited to certain products price only those lines.
+  const promoContext = useMemo(
+    () => ({
+      scope: "BOUTIQUE",
+      lines: cart.items.map((item) => ({
+        productId: item.variant.product.id,
+        amount: applyVatRate(item.variant.priceExclVat, vatPreview.vatRate) * item.quantity,
+      })),
+    }),
+    [cart.items, vatPreview.vatRate]
+  );
   const discountAmount = appliedPromo?.discountAmount ?? 0;
   const total = Math.max(0, vatSubtotal + shippingCost - discountAmount);
 
@@ -850,7 +861,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
             ))}
           </ul>
           <div className="mt-4">
-            <PromoCodeField subtotal={vatSubtotal} onApplied={setAppliedPromo} />
+            <PromoCodeField subtotal={vatSubtotal} context={promoContext} onApplied={setAppliedPromo} />
           </div>
 
           {/* Read in the order the price is actually built: goods HT,

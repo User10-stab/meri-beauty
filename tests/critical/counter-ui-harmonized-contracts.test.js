@@ -42,7 +42,7 @@ describe("every screen that takes money uses the same payment fields", () => {
     ]) {
       expect(shared).toContain(`${method}: { label: "${label}"`);
     }
-    expect(shared).toContain('export const TERMINAL_REFERENCE_LABEL = "Référence du ticket du terminal"');
+    expect(shared).not.toContain("TERMINAL_REFERENCE_LABEL");
   });
 
   it("no screen rolls its own method picker any more", () => {
@@ -56,13 +56,19 @@ describe("every screen that takes money uses the same payment fields", () => {
     }
   });
 
-  it("the terminal's receipt reference is asked the same way, and stays required", () => {
-    for (const path of PAYMENT_SCREENS) {
+  // 2026-09-28: no screen asks for the terminal ticket's reference any more —
+  // typing it held the queue up. The server records the sale's own number
+  // (lib/payments/terminal-reference.js); every screen says so the same way.
+  it("no screen asks for the terminal's receipt reference: it is recorded automatically", () => {
+    for (const path of [...PAYMENT_SCREENS, "components/dashboard/boutique/PickupConfirmDialog.jsx"]) {
       const code = source(path);
-      if (!code.includes("EXTERNAL_TERMINAL")) continue;
-      expect(code, path).toContain("<CounterTerminalReference");
+      expect(code, path).not.toMatch(/terminalReference(?!Auto)/);
+      expect(code, path).not.toContain("CounterTerminalReference");
+      // The till has no terminal popup at all any more, so no note either.
+      if (!code.includes("EXTERNAL_TERMINAL") || path.endsWith("PickupConfirmDialog.jsx") || path.endsWith("CounterCart.jsx")) continue;
+      expect(code, path).toContain("<CounterTerminalAutoReference");
     }
-    expect(shared).toContain('aria-label={TERMINAL_REFERENCE_LABEL}');
+    expect(shared).toContain("export function CounterTerminalAutoReference");
   });
 
   it("cash shows the change due on every screen that takes cash", () => {

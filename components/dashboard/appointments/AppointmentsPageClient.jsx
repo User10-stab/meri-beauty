@@ -13,7 +13,7 @@ import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
 import {
   CounterPaymentMethodTiles,
-  CounterTerminalReference,
+  CounterTerminalAutoReference,
 } from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 
 const STATUS_LABEL = {
@@ -225,12 +225,10 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [toComplete, setToComplete] = useState(null);
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
-  // A card collection is only accepted as EXTERNAL_TERMINAL now, and the
-  // terminal's receipt reference is what ties the row to a real charge. The
+  // A card collection is only accepted as EXTERNAL_TERMINAL now. The
   // existing "j'ai bien reçu" checkbox already says "ou carte APPROUVÉE sur le
-  // terminal", so it doubles as the approval attestation rather than adding a
-  // second tick for the same fact.
-  const [terminalReference, setTerminalReference] = useState("");
+  // terminal", so it doubles as the approval attestation. Its reference is the
+  // booking's own, recorded server-side — nothing to type.
   const [isPending, startTransition] = useTransition();
   const [rowLoadingId, setRowLoadingId] = useState(null);
   const [relancingId, setRelancingId] = useState(null);
@@ -387,7 +385,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         method: completeMethod,
         paymentConfirmed,
         ...(completeMethod === "EXTERNAL_TERMINAL"
-          ? { terminalApproved: paymentConfirmed, terminalReference: terminalReference.trim() }
+          ? { terminalApproved: paymentConfirmed }
           : {}),
       });
       setRowLoadingId(null);
@@ -727,7 +725,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
 
             {completeMethod === "EXTERNAL_TERMINAL" && (
               <div className="mt-2">
-                <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />
+                <CounterTerminalAutoReference />
               </div>
             )}
 
@@ -755,8 +753,7 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                 onClick={handleCompleteWithPayment}
                 disabled={
                   isPending ||
-                  !paymentConfirmed ||
-                  (completeMethod === "EXTERNAL_TERMINAL" && !terminalReference.trim())
+                  !paymentConfirmed
                 }
                 className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f3a2e]/90 disabled:opacity-50"
               >

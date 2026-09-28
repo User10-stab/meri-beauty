@@ -13,10 +13,8 @@ import { useTranslations } from "next-intl";
 export function PickupConfirmDialog({ order, onClose, onDone }) {
   const t = useTranslations("dashboardBoutique.pickupConfirmDialog");
   const [method, setMethod] = useState("CASH");
-  // A card collection is only accepted as EXTERNAL_TERMINAL: its receipt
-  // reference is the only thing tying the row to a real charge on the
-  // terminal, so completeOrderPickup refuses one without it.
-  const [terminalReference, setTerminalReference] = useState("");
+  // A card collection is only accepted as EXTERNAL_TERMINAL. Its reference
+  // is the order number, recorded server-side — nothing to type.
   const [loading, startLoading] = useTransition();
 
   if (!order) return null;
@@ -35,9 +33,7 @@ export function PickupConfirmDialog({ order, onClose, onDone }) {
       const result = await completeOrderPickup({
         orderId: order.id,
         method: needsPayment ? method : undefined,
-        ...(needsPayment && method === "EXTERNAL_TERMINAL"
-          ? { terminalApproved: true, terminalReference: terminalReference.trim() }
-          : {}),
+        ...(needsPayment && method === "EXTERNAL_TERMINAL" ? { terminalApproved: true } : {}),
       });
       if (result.success) {
         toast.success(result.message);
@@ -97,16 +93,7 @@ export function PickupConfirmDialog({ order, onClose, onDone }) {
               </label>
             </div>
 
-            {method === "EXTERNAL_TERMINAL" && (
-              <input
-                value={terminalReference}
-                onChange={(event) => setTerminalReference(event.target.value)}
-                maxLength={100}
-                placeholder={t("terminalReference")}
-                aria-label={t("terminalReference")}
-                className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-[#2f3a2e]"
-              />
-            )}
+            {method === "EXTERNAL_TERMINAL" && <p className="text-xs text-gray-500">{t("terminalReferenceAuto")}</p>}
             {/* Deliberately hidden rather than shown as 0,00 € when the
                 amount is missing: a wrong figure at the till is worse than
                 none, and the server recomputes the total anyway. */}
@@ -132,7 +119,7 @@ export function PickupConfirmDialog({ order, onClose, onDone }) {
           </button>
           <Button
             onClick={handleConfirm}
-            disabled={loading || (needsPayment && method === "EXTERNAL_TERMINAL" && !terminalReference.trim())}
+            disabled={loading}
           >
             {loading && <Loader2 size={14} className="animate-spin" />}
             {t("confirm")}

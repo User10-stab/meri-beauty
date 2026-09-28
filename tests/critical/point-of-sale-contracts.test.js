@@ -192,19 +192,23 @@ describe("point-of-sale security contracts", () => {
     expect(fulfillment).toContain('action: "order.point_of_sale_qr_paid"');
   });
 
-  test("external terminal sales require explicit approval and a ticket reference before completing", () => {
+  // 2026-09-28: staff no longer type the terminal ticket's reference — it
+  // held the queue up. The sale's order number is recorded in its place.
+  test("external terminal sales require explicit approval and are referenced by their order number", () => {
     const validation = source("lib/validations/point-of-sale.js");
     expect(validation).toContain('data.method !== "EXTERNAL_TERMINAL" || data.terminalApproved === true');
-    expect(validation).toContain('data.method !== "EXTERNAL_TERMINAL" || Boolean(data.terminalReference?.trim())');
+    expect(validation).not.toContain("terminalReference?.trim()");
 
-    expect(pos).toContain('manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null');
+    expect(pos).toContain('manualReference: method === "EXTERNAL_TERMINAL" ? orderTerminalReference(order.orderNumber) : null');
 
     const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
-    expect(ui).toContain("terminalApproved");
-    expect(ui).toContain("terminalReference");
-    expect(ui).toContain("APPROUVÉ");
-    expect(ui).toContain("Confirmer le paiement par terminal externe");
-    expect(ui).toContain("confirmDisabled={!terminalApproved || !terminalReference.trim()}");
+    expect(ui).not.toContain("terminalReference");
+    expect(ui).not.toContain("<CounterTerminalReference");
+    // Nor a confirmation popup (2026-09-28): pressing « Encaisser » with the
+    // terminal selected is the attestation, as on every Pointage screen.
+    expect(ui).not.toContain("Confirmer le paiement par terminal externe");
+    expect(ui).not.toContain("terminalConfirmOpen");
+    expect(ui).toContain('...(method === "EXTERNAL_TERMINAL" ? { terminalApproved: true } : {}),');
   });
 
   test("the counter accepts both USB scans and QR camera results", () => {

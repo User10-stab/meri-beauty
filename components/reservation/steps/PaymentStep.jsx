@@ -193,7 +193,7 @@ export default function PaymentStep({ data, customerSession, origin = "/reservat
           )}
         </div>
 
-        <PromoCodeField subtotal={rawTotal} onApplied={setAppliedPromo} />
+        <PromoCodeField subtotal={rawTotal} context={{ scope: "APPOINTMENT", staffServiceId }} onApplied={setAppliedPromo} />
 
         <div className="space-y-3">
           <h3 className="text-sm font-semibold tracking-wide text-[#2F3A2E]">{t("payment.paymentMethod")}</h3>

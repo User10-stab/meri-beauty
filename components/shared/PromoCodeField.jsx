@@ -11,9 +11,17 @@ import { validatePromoCode } from "@/actions/promo-codes";
  * create action re-validates the code server-side before charging, so
  * nothing here needs to be trusted.
  *
- * @param {{ subtotal: number, onApplied: (promo: {code: string, discountAmount: number} | null) => void }} props
+ * `context` tells the server which flow this is (a code can be limited to
+ * the boutique, the rendez-vous, …) plus what it needs to price a targeted
+ * code: the cart lines, or the booked prestation.
+ *
+ * @param {{
+ *   subtotal: number,
+ *   context: { scope: "BOUTIQUE"|"APPOINTMENT"|"WORKSHOP"|"FORMATION", lines?: {productId: string, amount: number}[], staffServiceId?: string },
+ *   onApplied: (promo: {code: string, discountAmount: number} | null) => void,
+ * }} props
  */
-export function PromoCodeField({ subtotal, onApplied }) {
+export function PromoCodeField({ subtotal, context, onApplied }) {
   const t = useTranslations("promoCode");
   const [input, setInput] = useState("");
   const [applied, setApplied] = useState(null);
@@ -26,7 +34,7 @@ export function PromoCodeField({ subtotal, onApplied }) {
 
     setChecking(true);
     setError(null);
-    const result = await validatePromoCode(code, subtotal);
+    const result = await validatePromoCode(code, subtotal, context);
     setChecking(false);
 
     if (!result.success) {

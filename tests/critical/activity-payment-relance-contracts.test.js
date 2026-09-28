@@ -3,8 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const tx = {
     $queryRaw: vi.fn(),
-    workshopReservation: { updateMany: vi.fn() },
-    formationReservation: { updateMany: vi.fn() },
+    // findUnique: read by reclaimReservationPromoUse — no code on these
+    // bookings, so the promo re-claim is a no-op here.
+    workshopReservation: { updateMany: vi.fn(), findUnique: vi.fn(async () => null) },
+    formationReservation: { updateMany: vi.fn(), findUnique: vi.fn(async () => null) },
   };
   return {
     tx,

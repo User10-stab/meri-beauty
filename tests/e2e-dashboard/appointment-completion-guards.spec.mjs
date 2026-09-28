@@ -89,7 +89,7 @@ test.describe("completing an appointment that still owes money", () => {
     // receipt reference is required with it — a bare card collection carried
     // no evidence tying it to a real charge.
     await dialog.getByRole("combobox").selectOption("EXTERNAL_TERMINAL");
-    await dialog.getByLabel(/référence du ticket du terminal/i).fill("E2E-TERM-GUARD");
+    // Nothing to type: the booking's own reference is recorded (2026-09-28).
     await dialog.getByRole("checkbox").check();
     await expect(confirmButton).toBeEnabled();
     await confirmButton.click();

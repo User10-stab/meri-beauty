@@ -10,16 +10,15 @@ import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSes
 import {
   CounterCashReceived,
   CounterPaymentMethodTiles,
-  CounterTerminalReference,
+  CounterTerminalAutoReference,
 } from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 import { CounterQrDialog } from "@/components/dashboard/boutique/counter/CounterQrDialog";
 
 /** A boutique pickup order — a different world entirely (Order, not a ticket), routed to the same scan box. */
 export function PickupFiche({ order, onSettled, canCollectCash = false }) {
-  // Same default as every other Pointage screen: the terminal, whose
-  // reference field is then on screen from the start.
+  // Same default as every other Pointage screen: the terminal. Its reference
+  // is the order number, recorded server-side — nothing to type.
   const [method, setMethod] = useState("EXTERNAL_TERMINAL");
-  const [terminalReference, setTerminalReference] = useState("");
   // Change helper only — completeOrderPickup records the order total.
   const [cashReceived, setCashReceived] = useState("");
   const [saving, setSaving] = useState(false);
@@ -37,15 +36,10 @@ export function PickupFiche({ order, onSettled, canCollectCash = false }) {
 
   function selectMethod(next) {
     setMethod(next);
-    if (next !== "EXTERNAL_TERMINAL") setTerminalReference("");
     if (next !== "CASH") setCashReceived("");
   }
 
   async function handleConfirm(qrSessionId = null) {
-    if (collectsAtTill && isExternalTerminal && !terminalReference.trim()) {
-      toast.error("Indiquez la référence du ticket du terminal.");
-      return;
-    }
     if (collectsAtTill && paysByQr && !qrSessionId) {
       setQrOpen(true);
       return;
@@ -54,9 +48,7 @@ export function PickupFiche({ order, onSettled, canCollectCash = false }) {
     const result = await completeOrderPickup({
       orderId: order.id,
       method: collectsAtTill ? method : undefined,
-      ...(collectsAtTill && isExternalTerminal
-        ? { terminalApproved: true, terminalReference: terminalReference.trim() }
-        : {}),
+      ...(collectsAtTill && isExternalTerminal ? { terminalApproved: true } : {}),
       ...(qrSessionId ? { qrSessionId } : {}),
     });
     setSaving(false);
@@ -106,7 +98,7 @@ export function PickupFiche({ order, onSettled, canCollectCash = false }) {
                     </p>
                   </div>
                 )}
-                {isExternalTerminal && <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />}
+                {isExternalTerminal && <CounterTerminalAutoReference reference="le numéro de commande" />}
                 {method === "CASH" && (
                   <CounterCashReceived id={`pickup-cash-${order.id}`} value={cashReceived} onChange={setCashReceived} amountDue={Number(order.totalAmount)} />
                 )}
@@ -125,7 +117,6 @@ export function PickupFiche({ order, onSettled, canCollectCash = false }) {
             type="button"
             disabled={
               saving ||
-              (collectsAtTill && isExternalTerminal && !terminalReference.trim()) ||
               (collectsAtTill && method === "CASH" && !cashSessionOpen)
             }
             onClick={() => handleConfirm()}

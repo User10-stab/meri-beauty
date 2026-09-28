@@ -13,6 +13,7 @@ import { CounterFiche } from "@/components/dashboard/boutique/counter/CounterFic
 import { PickupFiche } from "@/components/dashboard/boutique/counter/PickupFiche";
 import { CounterBookingComposer } from "@/components/dashboard/boutique/counter/CounterBookingComposer";
 import { CounterCart } from "@/components/dashboard/boutique/counter/CounterCart";
+import { looksLikeProductGtin } from "@/lib/counter/product-search";
 import { PendingManualSales } from "@/components/dashboard/invoices/PendingManualSales";
 
 // Route only exact known code shapes. A customer may legitimately be stored
@@ -71,6 +72,7 @@ export function CounterSurface({
   const [pendingService, setPendingService] = useState(null); // a SERVICE row selected from search, handed to the composer
   const [pendingSession, setPendingSession] = useState(null); // a SESSION row selected from search, handed to the composer
   const [pendingProduct, setPendingProduct] = useState(null); // a PRODUCT row selected from search, handed to the till
+  const [pendingBarcode, setPendingBarcode] = useState(null); // a product EAN scanned here, handed to the till
   const requestRef = useRef(0);
 
   const openTicket = useCallback((data) => {
@@ -213,6 +215,13 @@ export function CounterSurface({
   const handleDecoded = useCallback(
     (decoded) => {
       const value = decoded.trim();
+      // A supplier EAN/UPC (valid check digit) is a product, never a
+      // booking: the till looks it up, and offers to link it if unknown.
+      if (looksLikeProductGtin(value)) {
+        setInput("");
+        setPendingBarcode(value);
+        return;
+      }
       // A ticket/pickup code is case-insensitive hex — safe to normalise for
       // display. A service QR (S:<staffServiceId>) is not: staffService ids
       // are case-sensitive, so uppercasing here would break the exact-id
@@ -320,6 +329,8 @@ export function CounterSurface({
         canOpenOrders={canPickup}
         pendingProduct={pendingProduct}
         onConsumePendingProduct={() => setPendingProduct(null)}
+        pendingBarcode={pendingBarcode}
+        onConsumePendingBarcode={() => setPendingBarcode(null)}
         sourceOrderId={sourceOrderId}
       />
 

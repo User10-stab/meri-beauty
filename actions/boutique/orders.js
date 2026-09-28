@@ -24,6 +24,7 @@ import { getOrCreateActiveCart } from "@/actions/boutique/cart";
 import { issueInvoice, issueCreditNote, buildInvoiceCustomer, isSellerLegalDataComplete } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { allocateOrderTicketNumber } from "@/lib/tickets/allocate-ticket-number";
+import { orderTerminalReference } from "@/lib/payments/terminal-reference";
 import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { renderCreditNotePdf, renderTicketPdf } from "@/lib/pdf/render";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
@@ -31,7 +32,7 @@ import { formatSalonAddress } from "@/lib/format-address";
 import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
-import { resolvePromoCode } from "@/lib/promo-codes";
+import { resolvePromoCode, claimPromoCodeUse, promoClaimErrorMessage } from "@/lib/promo-codes";
 import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-order-payment";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
@@ -639,13 +640,17 @@ export async function createOrderFromCart(input) {
     // discount amount is never trusted from the client.
     let promoCodeId = null;
     let discountAmount = 0;
-    let promoMaxUses = null;
+    let promoCaps = null;
     if (promoCode) {
-      const promoResult = await resolvePromoCode(promoCode, subtotal);
+      const promoResult = await resolvePromoCode(promoCode, subtotal, {
+        scope: "BOUTIQUE",
+        customerId: user.id,
+        lines: pricedItems.map((item) => ({ productId: item.variant.productId, amount: item.taxUnitPrice * item.quantity })),
+      });
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
-      promoMaxUses = promoResult.maxUses;
+      promoCaps = { maxUses: promoResult.maxUses, maxUsesPerCustomer: promoResult.maxUsesPerCustomer };
     }
 
     const totalAmount = Math.max(0, subtotal + shippingCost - discountAmount);
@@ -711,6 +716,11 @@ export async function createOrderFromCart(input) {
         }
       }
 
+      // Before the order row exists, so the per-customer count excludes it.
+      if (promoCodeId) {
+        await claimPromoCodeUse(tx, { promoCodeId, ...promoCaps, customerId: user.id });
+      }
+
       const created = await tx.order.create({
         data: {
           userId: user.id,
@@ -750,20 +760,6 @@ export async function createOrderFromCart(input) {
           },
         },
       });
-
-      // Atomic conditional claim — only succeeds while usedCount is still
-      // under the cap captured moments ago at resolvePromoCode time. Two
-      // concurrent checkouts racing the last use of a capped code can't
-      // both win: the loser's WHERE clause matches zero rows.
-      if (promoCodeId && promoMaxUses != null) {
-        const claim = await tx.promoCode.updateMany({
-          where: { id: promoCodeId, usedCount: { lt: promoMaxUses } },
-          data: { usedCount: { increment: 1 } },
-        });
-        if (claim.count === 0) throw new Error("PROMO_EXHAUSTED");
-      } else if (promoCodeId) {
-        await tx.promoCode.update({ where: { id: promoCodeId }, data: { usedCount: { increment: 1 } } });
-      }
 
       // PICKUP_ON_SITE has no payment step — the order is confirmed right here, so the
       // cart empties immediately, same as any normal checkout. The two prepaid modes
@@ -864,9 +860,10 @@ export async function createOrderFromCart(input) {
       captureWarning("Stock race lost during checkout", { area: "stock-capacity" });
       return { success: false, message: "Le stock a changé entre-temps — vérifiez votre panier et réessayez." };
     }
-    if (error.message === "PROMO_EXHAUSTED") {
+    const promoMessage = promoClaimErrorMessage(error);
+    if (promoMessage) {
       captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
-      return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
+      return { success: false, message: promoMessage };
     }
     if (error.message === "EXPORT_REQUIRES_MANUAL_REVIEW") {
       return { success: false, message: "Cette destination hors UE nécessite une vérification fiscale et douanière manuelle avant paiement." };
@@ -1434,7 +1431,7 @@ export async function searchCounterPickups(query) {
  * — and stock is only decremented now, since it was only ever reserved.
  * If a Payment already exists (prepaid), this just records the handover.
  */
-export async function completeOrderPickup({ orderId, pickupCode, method, terminalApproved, terminalReference, qrSessionId }) {
+export async function completeOrderPickup({ orderId, pickupCode, method, terminalApproved, qrSessionId }) {
   const guard = await requireOrdersAccess();
   if (guard.error) return { success: false, message: guard.error };
 
@@ -1530,10 +1527,11 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
       }
     }
     if (collectsAtTill && !["CASH", "EXTERNAL_TERMINAL", AWAITED_TRANSFER_METHOD, COUNTER_QR_METHOD].includes(method)) {
-      return { success: false, message: "Mode de paiement invalide — espèces, carte via le terminal avec sa référence, ou virement." };
+      return { success: false, message: "Mode de paiement invalide — espèces, carte via le terminal, ou virement." };
     }
-    if (collectsAtTill && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
-      return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket." };
+    // No typed terminal reference any more — see lib/payments/terminal-reference.js.
+    if (collectsAtTill && method === "EXTERNAL_TERMINAL" && terminalApproved !== true) {
+      return { success: false, message: "Confirmez le paiement approuvé sur le terminal." };
     }
     // Cash with no till open used to be accepted and left unassigned
     // (cashSessionId: null), which is invisible from every Livre de caisse
@@ -1640,7 +1638,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
             paidAt: new Date(),
             cashSessionId: useTill ? openCashSession.id : null,
             pieceNumber,
-            manualReference: isTerminalCard ? terminalReference.trim() : isQr ? qrPayment.paymentIntentId : null,
+            manualReference: isTerminalCard ? orderTerminalReference(order.orderNumber) : isQr ? qrPayment.paymentIntentId : null,
           },
         });
 

@@ -122,6 +122,15 @@ enum PromoCodeType {
   FIXED
 }
 
+// Which purchase flows a promo code can be redeemed in. APPOINTMENT = a
+// prestation (rendez-vous), BOUTIQUE = products.
+enum PromoCodeScope {
+  BOUTIQUE
+  APPOINTMENT
+  WORKSHOP
+  FORMATION
+}
+
 enum ReturnStatus {
   REQUESTED // customer submitted it, awaiting staff review
   APPROVED // staff accepted it — waiting for the item to actually come back
@@ -559,6 +568,10 @@ model WorkshopReservation {
   promoCodeId       String?
   promoCode         PromoCode?                @relation(fields: [promoCodeId], references: [id])
   discountAmount    Decimal                   @default(0) @db.Decimal(10, 2)
+  // True while this booking holds one PromoCode.usedCount use — set at
+  // booking, cleared when it is cancelled (use given back), set again by a
+  // relance that revives an expired hold. See lib/promo-code-release.js.
+  promoUseClaimed   Boolean                   @default(false)
   previousSessionId String?
   previousSession   WorkshopSession?          @relation("ReservationPreviousSession", fields: [previousSessionId], references: [id])
   changeFeeAmount   Decimal                   @default(0) @db.Decimal(10, 2)
@@ -730,6 +743,8 @@ model FormationReservation {
   promoCodeId       String?
   promoCode         PromoCode?                 @relation(fields: [promoCodeId], references: [id])
   discountAmount    Decimal                    @default(0) @db.Decimal(10, 2)
+  // Same as WorkshopReservation.promoUseClaimed — see lib/promo-code-release.js.
+  promoUseClaimed   Boolean                    @default(false)
   participants      String?
   notes             String?
   cancelledAt       DateTime?
@@ -922,6 +937,7 @@ model User {
   closedCashSessions             CashSession[]          @relation("CashSessionClosedBy")
   verifiedCashSessions           CashSession[]          @relation("CashSessionVerifiedBy")
   recordedCashMovements          CashMovement[]         @relation("CashMovementRecordedBy")
+  createdSalonExpenses           SalonExpense[]         @relation("SalonExpenseCreatedBy")
   declaredBankDeposits           BankDeposit[]          @relation("BankDepositDeclaredBy")
   submittedCancellationRequests  AppointmentCancellationRequest[] @relation("CancellationRequestSubmittedBy")
   reviewedCancellationRequests   AppointmentCancellationRequest[] @relation("CancellationRequestReviewedBy")
@@ -933,6 +949,7 @@ model User {
   googleConnection               GoogleConnection?
   prospects                      Prospect[]
   prospectActivitiesCreated      ProspectActivity[] @relation("ProspectActivityCreatedBy")
+  reservedPromoCodes             PromoCode[]        @relation("PromoCodeCustomers")
 
   @@index([role])
   @@index([isActive, isDeleted])
@@ -1123,6 +1140,7 @@ model Product {
 
   variants ProductVariant[]
   images   ProductImage[]
+  promoCodes PromoCode[] @relation("PromoCodeProducts")
 
   @@index([slug])
   @@index([subcategoryId])
@@ -1611,6 +1629,7 @@ model Service {
   updatedAt DateTime @updatedAt
 
   staffServices StaffService[]
+  promoCodes    PromoCode[]    @relation("PromoCodeServices")
 
   @@index([categoryId, isDeleted])
 }
@@ -1955,6 +1974,12 @@ model Payment {
   promoCodeId    String?
   promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
   discountAmount Decimal    @default(0) @db.Decimal(10, 2)
+  // Rendez-vous only: true while this payment holds one PromoCode.usedCount
+  // use (claimPromoCodeUse at booking). Cleared when the appointment is
+  // cancelled/rejected and the use given back — see
+  // releaseAppointmentPromoUse. Appointments booked before 2026-09-28 never
+  // took a use, so they stay false and nothing is ever given back for them.
+  promoUseClaimed Boolean   @default(false)
 
   // Set only by the manual, permission-gated send (actions/payments/send-ticket-email.js).
   // completeAppointment/settleReservation never touch this — the ticket is not
@@ -2080,7 +2105,20 @@ model PromoCode {
   isActive       Boolean       @default(true)
   expiresAt      DateTime? // null = never expires
   maxUses        Int? // null = unlimited
-  usedCount      Int           @default(0) // incremented atomically at booking time, see resolvePromoCode callers
+  usedCount      Int           @default(0) // incremented atomically at booking time, see claimPromoCodeUse
+  // Internal note for the salon (never shown to customers).
+  description    String?
+  // Flows the code is valid in. Never empty — validation requires >= 1.
+  scopes         PromoCodeScope[] @default([BOUTIQUE, APPOINTMENT, WORKSHOP, FORMATION])
+  // Optional narrowing inside a scope: empty = every product / every
+  // prestation. When set, the discount only applies to the matching lines.
+  products       Product[]     @relation("PromoCodeProducts")
+  services       Service[]     @relation("PromoCodeServices")
+  // Optional: reserved for these customers only (empty = anyone).
+  customers      User[]        @relation("PromoCodeCustomers")
+  // Optional per-customer cap, counted from live sales/bookings (see
+  // countCustomerPromoUses) — null = no per-customer limit.
+  maxUsesPerCustomer Int?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -2384,6 +2422,51 @@ model CashMovement {
 
   @@index([cashSessionId, occurredAt])
   @@index([bankDepositId])
+}
+
+enum SalonExpenseCategory {
+  RENT // Meri Beauty's own premises rent — not the chair rent staff pay the salon
+  ELECTRICITY
+  WATER
+  INTERNET
+  OTHER
+}
+
+// A running cost of the salon itself (électricité, eau, internet, loyer du
+// local…), entered by hand on the Gestion page so the period's net margin can
+// subtract it. Nothing else in the app knows about these bills — they are
+// paid outside the till and outside Stripe.
+//
+// Stored TTC + rate, like every other money input here; the HT base the
+// margin uses is derived on read (lib/gestion/build-gestion-report.js).
+//
+// A recurring row (`isRecurring`) is a MONTHLY charge from the month of
+// `date` through the month of `endDate` (open-ended when null) and is
+// prorated by day into any period that only partly covers a month. A
+// one-off row counts once, on `date`.
+model SalonExpense {
+  id String @id @default(cuid())
+
+  category  SalonExpenseCategory
+  label     String
+  amountTtc Decimal              @db.Decimal(10, 2)
+  vatRate   Decimal              @default(21) @db.Decimal(4, 2)
+
+  date        DateTime
+  isRecurring Boolean   @default(false)
+  endDate     DateTime?
+  note        String?
+
+  createdById String
+  createdBy   User   @relation("SalonExpenseCreatedBy", fields: [createdById], references: [id])
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isDeleted, date])
 }
 
 // A withdrawal leaving the drawer (CashMovement WITHDRAWAL) and that cash

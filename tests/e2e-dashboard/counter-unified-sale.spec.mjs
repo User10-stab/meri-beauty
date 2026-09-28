@@ -86,7 +86,6 @@ test.describe("the unified counter creates a sale from its one search box", () =
     });
     const buyerEmail = taggedEmail("formation-buyer", runId);
     const buyerFullName = "Client Formation Automatise";
-    const terminalRef = `E2E-${runId}-FORM`;
 
     await page.goto(POS_PAGE);
     const counter = counterSection(page);
@@ -134,7 +133,7 @@ test.describe("the unified counter creates a sale from its one search box", () =
 
     // ── Deposit, by card — see the file header for why ────────────────────
     await counter.getByRole("radio", { name: /terminal externe/i }).click();
-    await counter.getByLabel(/r[ée]f[ée]rence du ticket du terminal/i).fill(terminalRef);
+    // Nothing to type: the booking's own reference is recorded (2026-09-28).
     // No separate "j'ai bien reçu" tick any more: the submit button names the
     // amount, so pressing it IS the attestation — same on every counter screen.
 
@@ -177,7 +176,7 @@ test.describe("the unified counter creates a sale from its one search box", () =
     expect(transactions, "no collection was recorded for the deposit").toHaveLength(1);
     expect(transactions[0].method).toBe("CARD");
     expect(transactions[0].transactionType).toBe("DEPOSIT");
-    expect(transactions[0].manualReference).toBe(terminalRef);
+    expect(transactions[0].manualReference).toMatch(/^Formation n°\d{2,}$/);
     // No till session was open, and none needed to be — card never blocks.
     expect(transactions[0].pieceNumber).toBeNull();
 
@@ -229,7 +228,6 @@ test.describe("the unified counter creates a sale from its one search box", () =
 
     const buyerEmail = taggedEmail("walkin-buyer", runId);
     const buyerFullName = "Client Prestation Automatise";
-    const terminalRef = `E2E-${runId}-SVC`;
 
     await page.goto(POS_PAGE);
     const counter = counterSection(page);
@@ -265,7 +263,7 @@ test.describe("the unified counter creates a sale from its one search box", () =
     await expect(counter.getByText(/adresse de facturation obligatoire/i)).toHaveCount(0);
 
     await counter.getByRole("radio", { name: /terminal externe/i }).click();
-    await counter.getByLabel(/r[ée]f[ée]rence du ticket du terminal/i).fill(terminalRef);
+    // Nothing to type: the booking's own reference is recorded (2026-09-28).
     // No separate "j'ai bien reçu" tick any more: the submit button names the
     // amount, so pressing it IS the attestation — same on every counter screen.
 
@@ -298,7 +296,7 @@ test.describe("the unified counter creates a sale from its one search box", () =
     expect(transactions).toHaveLength(1);
     expect(transactions[0].method).toBe("CARD");
     expect(transactions[0].transactionType).toBe("FINAL_PAYMENT");
-    expect(transactions[0].manualReference).toBe(terminalRef);
+    expect(transactions[0].manualReference).toMatch(/^Prestation n°\d{2,}$/);
 
     expect(appointment.user.role).toBe("CUSTOMER");
     expect(appointment.user.isCompany).toBe(false);

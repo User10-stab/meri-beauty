@@ -240,7 +240,7 @@ describe("CounterSurface routes search results into the composer's pending props
     // ever resolves R-/A-/F-/pickup codes — a scanned S:<id> service QR
     // would 404. It must branch the same way typed input already does.
     const start = surface.indexOf("const handleDecoded = useCallback(");
-    const block = surface.slice(start, start + 700);
+    const block = surface.slice(start, surface.indexOf("function handleTicketChanged", start));
     expect(block).toContain("looksLikeCode(value)");
     expect(block).toContain("runNameSearch(value)");
   });

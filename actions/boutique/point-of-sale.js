@@ -28,6 +28,14 @@ import { stripe } from "@/lib/stripe";
 import { getAppBaseUrl } from "@/lib/site-url";
 import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
 import { POS_HANDOFF_STATUSES, canSettleOrderAtPointOfSale } from "@/lib/orders/point-of-sale-handoff";
+import { orderTerminalReference } from "@/lib/payments/terminal-reference";
+import {
+  barcodeLookupCandidates,
+  buildSearchEntry,
+  isInternalBarcode,
+  linkableBarcodeError,
+  rankSearchEntries,
+} from "@/lib/counter/product-search";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const POS_CHECKOUT_SECONDS = 31 * 60;
@@ -279,7 +287,37 @@ export async function getPointOfSaleOrderDraft(orderId) {
   }
 }
 
-/** Resolves an EAN/UPC for the counter without exposing cost or margin. */
+const POS_VARIANT_CART_SELECT = {
+  id: true,
+  name: true,
+  price: true,
+  stockQuantity: true,
+  reservedQuantity: true,
+  product: { select: { name: true } },
+};
+
+function serializePointOfSaleCartVariant(variant) {
+  return {
+    variantId: variant.id,
+    productName: variant.product.name,
+    variantName: variant.name,
+    // Shelf price: the stored TTC amount the cashier reads out and
+    // collects. completePointOfSaleSale still re-reads the variant and
+    // resolves the buyer's rate server-side, so this display value is
+    // never trusted as the amount charged.
+    unitPrice: Number(variant.price),
+    availableQuantity: Math.max(0, variant.stockQuantity - variant.reservedQuantity),
+  };
+}
+
+/**
+ * Resolves an EAN/UPC for the counter without exposing cost or margin.
+ *
+ * An unknown code answers BARCODE_UNKNOWN rather than a plain error: most
+ * boxes carry a supplier EAN the catalogue simply hasn't learnt yet, and the
+ * till then offers to link it to the product the cashier picks
+ * (linkPointOfSaleBarcode) — after which this lookup finds it directly.
+ */
 export async function getPointOfSaleProductByBarcode(barcode) {
   const guard = await requirePointOfSaleAccess();
   if (guard.error) return { success: false, message: guard.error };
@@ -290,36 +328,26 @@ export async function getPointOfSaleProductByBarcode(barcode) {
   try {
     const variant = await prisma.productVariant.findFirst({
       where: {
-        barcode: code,
+        // UPC-A vs EAN-13 (a leading 0): the same box, read either way.
+        barcode: { in: barcodeLookupCandidates(code) },
         isActive: true,
         isDeleted: false,
         product: { isDeleted: false, status: "ACTIVE" },
       },
-      select: {
-        id: true,
-        name: true,
-        price: true,
-        stockQuantity: true,
-        reservedQuantity: true,
-        product: { select: { name: true } },
-      },
+      select: POS_VARIANT_CART_SELECT,
     });
-    if (!variant) return { success: false, message: "Aucun produit actif ne correspond à ce code-barres." };
+    if (!variant) {
+      return {
+        success: false,
+        code: "BARCODE_UNKNOWN",
+        barcode: code,
+        // Only a code the till would accept to link is worth offering.
+        linkable: linkableBarcodeError(code) === null,
+        message: "Aucun produit actif ne correspond à ce code-barres.",
+      };
+    }
 
-    return {
-      success: true,
-      data: {
-        variantId: variant.id,
-        productName: variant.product.name,
-        variantName: variant.name,
-        // Shelf price: the stored TTC amount the cashier reads out and
-        // collects. completePointOfSaleSale still re-reads the variant and
-        // resolves the buyer's rate server-side, so this display value is
-        // never trusted as the amount charged.
-        unitPrice: Number(variant.price),
-        availableQuantity: Math.max(0, variant.stockQuantity - variant.reservedQuantity),
-      },
-    };
+    return { success: true, data: serializePointOfSaleCartVariant(variant) };
   } catch (error) {
     console.error("[getPointOfSaleProductByBarcode]", error);
     return { success: false, message: "Impossible de lire ce produit." };
@@ -327,18 +355,130 @@ export async function getPointOfSaleProductByBarcode(barcode) {
 }
 
 /**
+ * Teaches the catalogue a supplier barcode from the till: a box scanned as
+ * unknown, then the matching product picked by name. From then on the scan
+ * alone finds it — no label to print or stick.
+ *
+ * Deliberately narrow, because a wrong link would ring up the wrong product
+ * on every later scan:
+ * - only a variant with NO barcode, or with the generated internal one
+ *   (IN…), can receive it — replacing a real supplier code is a catalogue
+ *   edit and stays in the product editor;
+ * - a code already on another variant (archived ones included — the column
+ *   is unique) is refused, never moved;
+ * - a numeric EAN/UPC must pass its check digit;
+ * - written with an audit row naming who linked it.
+ */
+export async function linkPointOfSaleBarcode({ variantId, barcode } = {}) {
+  const guard = await requirePointOfSaleAccess();
+  if (guard.error) return { success: false, message: guard.error };
+
+  const code = typeof barcode === "string" ? barcode.trim() : "";
+  const formatError = linkableBarcodeError(code);
+  if (formatError) return { success: false, message: formatError };
+  if (typeof variantId !== "string" || !variantId) return { success: false, message: "Produit introuvable." };
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const variant = await tx.productVariant.findFirst({
+        where: {
+          id: variantId,
+          isActive: true,
+          isDeleted: false,
+          product: { isDeleted: false, status: "ACTIVE" },
+        },
+        select: { ...POS_VARIANT_CART_SELECT, barcode: true },
+      });
+      if (!variant) throw new Error("POS_LINK_VARIANT_NOT_FOUND");
+      if (variant.barcode && !isInternalBarcode(variant.barcode)) {
+        const error = new Error("POS_LINK_VARIANT_HAS_BARCODE");
+        error.existingBarcode = variant.barcode;
+        throw error;
+      }
+
+      const owner = await tx.productVariant.findFirst({
+        where: { barcode: { in: barcodeLookupCandidates(code) } },
+        select: { id: true, name: true, isDeleted: true, product: { select: { name: true } } },
+      });
+      if (owner) {
+        const error = new Error("POS_LINK_BARCODE_TAKEN");
+        error.owner = owner;
+        throw error;
+      }
+
+      await tx.productVariant.update({ where: { id: variant.id }, data: { barcode: code } });
+      await tx.auditLog.create({
+        data: {
+          actorId: guard.session.user.id,
+          actorRole: guard.session.user.role,
+          action: "product_variant.barcode_linked_at_counter",
+          entityType: "ProductVariant",
+          entityId: variant.id,
+          before: { barcode: variant.barcode },
+          after: { barcode: code },
+          metadata: { productName: variant.product.name, variantName: variant.name },
+        },
+      });
+      return { variant, replacedInternalBarcode: variant.barcode };
+    }, { timeout: 15000, maxWait: 10000 });
+
+    return {
+      success: true,
+      data: serializePointOfSaleCartVariant(result.variant),
+      replacedInternalBarcode: result.replacedInternalBarcode ?? null,
+    };
+  } catch (error) {
+    if (error.message === "POS_LINK_VARIANT_NOT_FOUND") {
+      return { success: false, message: "Ce produit n'est plus en vente." };
+    }
+    if (error.message === "POS_LINK_VARIANT_HAS_BARCODE") {
+      return {
+        success: false,
+        message: `Ce produit a déjà le code-barres ${error.existingBarcode}. Pour le remplacer, modifiez la fiche produit.`,
+      };
+    }
+    if (error.message === "POS_LINK_BARCODE_TAKEN") {
+      const { owner } = error;
+      const label = owner.name && owner.name !== "Standard" ? `${owner.product.name} — ${owner.name}` : owner.product.name;
+      return {
+        success: false,
+        message: `Ce code-barres appartient déjà à « ${label} »${owner.isDeleted ? " (archivé)" : ""}.`,
+      };
+    }
+    // Two tills linking the same code at once: the unique index decides.
+    if (error.code === "P2002") {
+      return { success: false, message: "Ce code-barres vient d'être associé à un autre produit." };
+    }
+    console.error("[linkPointOfSaleBarcode]", error);
+    return { success: false, message: "Impossible d'associer ce code-barres." };
+  }
+}
+
+/**
  * Name/SKU/barcode search for the counter — the fallback for the (many)
- * products that have no barcode label on the box.
+ * products that have no barcode label on the box, and the picker used to
+ * link an unknown scanned barcode (linkPointOfSaleBarcode).
  *
  * Results are VARIANT-level, not product-level: the cart line, the stock
  * decrement and the invoice line all key on variantId, so "Popits" has to
  * come back as one row per variant rather than one row needing a second
  * disambiguating click.
  *
+ * Matching is forgiving (lib/counter/product-search): accents ignored, each
+ * typed word matched on its own in any order, by prefix, a typo or two
+ * tolerated, and the brand/category count too. That scoring runs in JS over
+ * the whole active catalogue — a few hundred variants — rather than a
+ * Postgres `contains`, which needed the exact spelling and word order.
+ * Among equally good matches, what the shop sells most comes first.
+ *
  * Same visibility filters as the barcode lookup above (ACTIVE product, live
  * variant) so the counter can never find and try to sell a draft, and the
  * same narrow select: costPrice/comparePrice must not travel to the client.
  */
+const POS_SEARCH_LIMIT = 24;
+const POS_POPULARITY_DAYS = 180;
+const POS_POPULARITY_STATUSES = ["PAID", "PROCESSING", "READY_FOR_PICKUP", "SHIPPED", "COMPLETED"];
+
 export async function searchPointOfSaleProducts(query) {
   const guard = await requirePointOfSaleAccess();
   if (guard.error) return { success: false, message: guard.error, data: [] };
@@ -349,70 +489,268 @@ export async function searchPointOfSaleProducts(query) {
   if (!value || value.length < 2) return { success: true, data: [] };
 
   try {
-    const variants = await prisma.productVariant.findMany({
-      where: {
-        isActive: true,
-        isDeleted: false,
-        product: { isDeleted: false, status: "ACTIVE" },
-        OR: [
-          { product: { name: { contains: value, mode: "insensitive" } } },
-          { name: { contains: value, mode: "insensitive" } },
-          { sku: { contains: value, mode: "insensitive" } },
-          { barcode: { contains: value, mode: "insensitive" } },
-        ],
-      },
-      orderBy: [{ product: { name: "asc" } }, { position: "asc" }],
-      take: 24,
-      select: {
-        id: true,
-        name: true,
-        price: true,
-        stockQuantity: true,
-        reservedQuantity: true,
-        lowStockThreshold: true,
-        product: {
-          select: {
-            name: true,
-            images: {
-              select: { path: true },
-              orderBy: [{ isPrimary: "desc" }, { position: "asc" }],
-              take: 1,
+    const since = new Date(Date.now() - POS_POPULARITY_DAYS * 24 * 60 * 60 * 1000);
+    const [variants, sales] = await Promise.all([
+      prisma.productVariant.findMany({
+        where: {
+          isActive: true,
+          isDeleted: false,
+          product: { isDeleted: false, status: "ACTIVE" },
+        },
+        orderBy: [{ product: { name: "asc" } }, { position: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          barcode: true,
+          price: true,
+          stockQuantity: true,
+          reservedQuantity: true,
+          lowStockThreshold: true,
+          product: {
+            select: {
+              name: true,
+              subcategory: {
+                select: {
+                  name: true,
+                  category: { select: { name: true, brand: { select: { name: true } } } },
+                },
+              },
+              images: {
+                select: { path: true },
+                orderBy: [{ isPrimary: "desc" }, { position: "asc" }],
+                take: 1,
+              },
             },
           },
         },
-      },
-    });
+      }),
+      prisma.orderItem.groupBy({
+        by: ["variantId"],
+        where: {
+          variantId: { not: null },
+          createdAt: { gte: since },
+          order: { status: { in: POS_POPULARITY_STATUSES } },
+        },
+        _sum: { quantity: true },
+      }),
+    ]);
 
-    const results = variants.map((variant) => {
+    const soldByVariant = new Map(sales.map((row) => [row.variantId, row._sum.quantity ?? 0]));
+    const ranked = rankSearchEntries(
+      variants.map((variant) => {
+        const subcategory = variant.product.subcategory;
+        return {
+          variant,
+          searchEntry: buildSearchEntry({
+            productName: variant.product.name,
+            variantName: variant.name,
+            brandName: subcategory?.category?.brand?.name,
+            categoryNames: [subcategory?.category?.name, subcategory?.name],
+            sku: variant.sku,
+            barcode: variant.barcode,
+          }),
+        };
+      }),
+      value
+    );
+
+    const results = ranked.map(({ item: { variant }, score }) => {
       // Available, not on-hand: stock already reserved for an online order
       // awaiting pickup is not sellable at the counter. Same formula as
       // getPointOfSaleProductByBarcode.
       const availableQuantity = Math.max(0, variant.stockQuantity - variant.reservedQuantity);
       return {
-        variantId: variant.id,
-        productName: variant.product.name,
-        variantName: variant.name,
-        unitPrice: Number(variant.price),
-        availableQuantity,
-        isLowStock: availableQuantity > 0 && availableQuantity <= variant.lowStockThreshold,
-        imagePath: variant.product.images[0]?.path ?? null,
+        row: {
+          variantId: variant.id,
+          productName: variant.product.name,
+          variantName: variant.name,
+          unitPrice: Number(variant.price),
+          availableQuantity,
+          isLowStock: availableQuantity > 0 && availableQuantity <= variant.lowStockThreshold,
+          imagePath: variant.product.images[0]?.path ?? null,
+          // For the « Associer » button after an unknown scan: only a variant
+          // without a real supplier code can take one (linkPointOfSaleBarcode).
+          barcodeLinkable: !variant.barcode || isInternalBarcode(variant.barcode),
+          hasInternalBarcode: isInternalBarcode(variant.barcode),
+        },
+        score,
+        sold: soldByVariant.get(variant.id) ?? 0,
       };
     });
 
     // Sellable first, out-of-stock last but still listed — staff need to see
     // that a product exists and is simply empty, not wonder if they mistyped.
-    // Array#sort is stable, so the name/position ordering above survives.
+    // Then best match, then best seller; Array#sort is stable, so the
+    // name/position ordering above breaks the remaining ties.
     results.sort((a, b) => {
-      const aSellable = a.availableQuantity > 0;
-      const bSellable = b.availableQuantity > 0;
-      if (aSellable === bSellable) return 0;
-      return aSellable ? -1 : 1;
+      const aSellable = a.row.availableQuantity > 0;
+      const bSellable = b.row.availableQuantity > 0;
+      if (aSellable !== bSellable) return aSellable ? -1 : 1;
+      if (a.score !== b.score) return b.score - a.score;
+      return b.sold - a.sold;
     });
 
-    return { success: true, data: results };
+    return { success: true, data: results.slice(0, POS_SEARCH_LIMIT).map((result) => result.row) };
   } catch (error) {
     console.error("[searchPointOfSaleProducts]", error);
     return { success: false, message: "Impossible de rechercher les produits.", data: [] };
+  }
+}
+
+/**
+ * The whole sellable catalogue for the till's photo grid, in one call.
+ *
+ * A few hundred products is small enough to ship at once and filter in the
+ * browser: brand/category chips and the search then react instantly, with
+ * no request per tap or keystroke. Re-fetched after every sale and when the
+ * window regains focus, so stock figures don't drift far.
+ *
+ * Product-level rows (one tile per product), each carrying its live
+ * variants (sizes/shades picked on the tile). Same visibility filters and
+ * the same narrow select as the search above: never a draft, never a
+ * cost price.
+ */
+export async function getPointOfSaleCatalogue() {
+  const guard = await requirePointOfSaleAccess();
+  if (guard.error) return { success: false, message: guard.error, data: null };
+
+  try {
+    const since = new Date(Date.now() - POS_POPULARITY_DAYS * 24 * 60 * 60 * 1000);
+    const liveVariant = { isActive: true, isDeleted: false };
+    const [products, sales] = await Promise.all([
+      prisma.product.findMany({
+        where: { isDeleted: false, status: "ACTIVE", variants: { some: liveVariant } },
+        orderBy: { name: "asc" },
+        select: {
+          id: true,
+          name: true,
+          subcategory: {
+            select: {
+              id: true,
+              name: true,
+              position: true,
+              category: {
+                select: { id: true, name: true, position: true, brand: { select: { id: true, name: true } } },
+              },
+            },
+          },
+          images: {
+            select: { path: true },
+            orderBy: [{ isPrimary: "desc" }, { position: "asc" }],
+            take: 1,
+          },
+          variants: {
+            where: liveVariant,
+            orderBy: { position: "asc" },
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              barcode: true,
+              price: true,
+              stockQuantity: true,
+              reservedQuantity: true,
+              lowStockThreshold: true,
+            },
+          },
+        },
+      }),
+      prisma.orderItem.groupBy({
+        by: ["variantId"],
+        where: {
+          variantId: { not: null },
+          createdAt: { gte: since },
+          order: { status: { in: POS_POPULARITY_STATUSES } },
+        },
+        _sum: { quantity: true },
+      }),
+    ]);
+
+    const soldByVariant = new Map(sales.map((row) => [row.variantId, row._sum.quantity ?? 0]));
+
+    return {
+      success: true,
+      data: products.map((product) => {
+        const subcategory = product.subcategory;
+        const category = subcategory?.category;
+        const variants = product.variants.map((variant) => {
+          // Available, not on-hand — same formula as the barcode lookup.
+          const availableQuantity = Math.max(0, variant.stockQuantity - variant.reservedQuantity);
+          return {
+            variantId: variant.id,
+            variantName: variant.name,
+            sku: variant.sku,
+            barcode: variant.barcode,
+            unitPrice: Number(variant.price),
+            availableQuantity,
+            isLowStock: availableQuantity > 0 && availableQuantity <= variant.lowStockThreshold,
+            barcodeLinkable: !variant.barcode || isInternalBarcode(variant.barcode),
+            hasInternalBarcode: isInternalBarcode(variant.barcode),
+            sold: soldByVariant.get(variant.id) ?? 0,
+          };
+        });
+        return {
+          id: product.id,
+          name: product.name,
+          imagePath: product.images[0]?.path ?? null,
+          brandId: category?.brand?.id ?? null,
+          brandName: category?.brand?.name ?? null,
+          categoryId: category?.id ?? null,
+          categoryName: category?.name ?? null,
+          categoryPosition: category?.position ?? 0,
+          subcategoryId: subcategory?.id ?? null,
+          subcategoryName: subcategory?.name ?? null,
+          subcategoryPosition: subcategory?.position ?? 0,
+          sold: variants.reduce((sum, variant) => sum + variant.sold, 0),
+          variants,
+        };
+      }),
+    };
+  } catch (error) {
+    console.error("[getPointOfSaleCatalogue]", error);
+    return { success: false, message: "Impossible de charger le catalogue.", data: null };
+  }
+}
+
+/**
+ * Live sellable stock for the variants in the till's cart (or one about to
+ * be added). The grid is a snapshot: an online order can reserve the last
+ * unit while a client stands at the counter with the same product. The till
+ * polls this so the cashier sees it before taking the money, not after.
+ *
+ * Display/guard only — completePointOfSaleSale still locks each variant
+ * row (FOR UPDATE) and re-checks stock − reserved at payment, the same lock
+ * createOrderFromCart takes online, so the two can never both sell the
+ * last unit whatever this returns.
+ */
+export async function getPointOfSaleStockLevels(variantIds) {
+  const guard = await requirePointOfSaleAccess();
+  if (guard.error) return { success: false, message: guard.error, data: {} };
+
+  const ids = Array.isArray(variantIds)
+    ? [...new Set(variantIds.filter((id) => typeof id === "string" && id.length > 0 && id.length <= 64))].slice(0, 100)
+    : [];
+  if (ids.length === 0) return { success: true, data: {} };
+
+  try {
+    const variants = await prisma.productVariant.findMany({
+      where: {
+        id: { in: ids },
+        isActive: true,
+        isDeleted: false,
+        product: { isDeleted: false, status: "ACTIVE" },
+      },
+      select: { id: true, stockQuantity: true, reservedQuantity: true },
+    });
+    const levels = Object.fromEntries(ids.map((id) => [id, 0])); // gone/unlisted = nothing to sell
+    for (const variant of variants) {
+      levels[variant.id] = Math.max(0, variant.stockQuantity - variant.reservedQuantity);
+    }
+    return { success: true, data: levels };
+  } catch (error) {
+    console.error("[getPointOfSaleStockLevels]", error);
+    return { success: false, message: "Impossible de vérifier le stock.", data: {} };
   }
 }
 
@@ -456,7 +794,7 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, terminalReference, cashReceived, invoiceRequested, sourceOrderId } = parsed.data;
+  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, cashReceived, invoiceRequested, sourceOrderId } = parsed.data;
   // Closing a boutique pickup order from the till is the salon's own
   // worklist (see getPointOfSaleOrderDraft), not part of CAISSE.
   if (sourceOrderId && !isTillCashOperator(guard.session.user)) {
@@ -772,9 +1110,9 @@ export async function completePointOfSaleSale(input) {
           method: method === "CASH" ? "CASH" : "CARD",
           transactionType: "FINAL_PAYMENT",
           paidAt: new Date(),
-          // Terminal ticket reference — the only record tying this sale to an
-          // actual approved charge on the external card terminal.
-          manualReference: method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
+          // A terminal payment is referenced by the sale's own order number —
+          // staff no longer type the terminal ticket's reference at the till.
+          manualReference: method === "EXTERNAL_TERMINAL" ? orderTerminalReference(order.orderNumber) : null,
           cashReceived: method === "CASH" ? cashReceived : null,
           changeGiven: method === "CASH" ? changeGiven : null,
           // Only a CASH row taken by a till operator belongs to the till
@@ -836,7 +1174,7 @@ export async function completePointOfSaleSale(input) {
             orderNumber: order.orderNumber,
             customerId: customer?.id ?? null,
             itemCount: saleItems.length,
-            ...(method === "EXTERNAL_TERMINAL" ? { terminalReference: terminalReference.trim() } : {}),
+            ...(method === "EXTERNAL_TERMINAL" ? { terminalReference: orderTerminalReference(order.orderNumber) } : {}),
             ...(sourceOrder ? { sourceOrderId: sourceOrder.id, sourceOrderNumber: sourceOrder.orderNumber } : {}),
           },
         },

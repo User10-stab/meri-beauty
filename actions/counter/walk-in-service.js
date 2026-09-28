@@ -39,7 +39,6 @@ const saleSchema = z.object({
   method: z.enum(["CASH", "EXTERNAL_TERMINAL", "TRANSFER"]),
   paymentConfirmed: z.literal(true),
   terminalApproved: z.boolean().optional(),
-  terminalReference: z.string().trim().max(100).optional(),
   finalTotal: z.number().nonnegative().max(100_000).optional(),
   adjustmentReason: z.string().trim().max(250).optional(),
 });
@@ -143,8 +142,8 @@ export async function createCounterWalkInService(input) {
   if (!parsed.success) return { success: false, message: "Vérifiez la prestation, le client et le paiement." };
   const data = parsed.data;
 
-  if (data.method === "EXTERNAL_TERMINAL" && (!data.terminalApproved || !data.terminalReference)) {
-    return { success: false, message: "Confirmez le terminal approuvé et indiquez sa référence." };
+  if (data.method === "EXTERNAL_TERMINAL" && !data.terminalApproved) {
+    return { success: false, message: "Confirmez le terminal approuvé." };
   }
 
   let appointmentId = null;
@@ -194,7 +193,6 @@ export async function createCounterWalkInService(input) {
       method: data.method,
       paymentConfirmed: true,
       terminalApproved: data.terminalApproved,
-      terminalReference: data.terminalReference,
       finalTotal: data.finalTotal,
       adjustmentReason: data.adjustmentReason,
     });

@@ -11,10 +11,12 @@ import { reservationAcceptedEmail, reservationRejectedEmail } from "@/lib/email-
 import { issueCreditNote, issueInvoice, buildInvoiceCustomer, buildServiceInvoiceLines, resolveSettlementInvoice } from "@/lib/invoicing";
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
+import { allocateBookingTerminalReference } from "@/lib/payments/terminal-reference";
 import { AWAITED_TRANSFER_METHOD, AWAITED_TRANSFER_OFF_TILL_MESSAGE, isAwaitedTransfer, markPaymentAwaitingTransfer } from "@/lib/payments/awaited-transfer";
 import { COUNTER_QR_MESSAGES, COUNTER_QR_METHOD, COUNTER_QR_SURFACES, isCounterQr, verifyCounterQrPayment } from "@/lib/counter/qr-checkout";
 import { resolveServiceVatPolicy, hasInvoiceableVatIdentity } from "@/lib/tax-policy";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
+import { releaseAppointmentPromoUse } from "@/lib/promo-code-release";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import { authorizeRefundActor } from "@/lib/refunds/authorize";
 import { isWithinCancellationWindow } from "@/lib/reservationRules";
@@ -444,6 +446,8 @@ export async function rejectAppointment(appointmentId, reason = null, { waiveDep
       });
       if (claim.count === 0) return false;
 
+      await releaseAppointmentPromoUse(tx, appointmentId);
+
       let creditNote = null;
       if (wasPaid && payment.invoice && remaining > REFUND_EPSILON) {
         creditNote = await issueCreditNote(tx, {
@@ -767,12 +771,12 @@ export async function markAppointmentNoShow(appointmentId) {
  * it, since the checkout webhook only invoices fully-paid-online bookings.
  *
  * @param {string} appointmentId
- * @param {{ method?: "CASH" | "EXTERNAL_TERMINAL", terminalApproved?: boolean, terminalReference?: string|null }} [options] - method is required only
+ * @param {{ method?: "CASH" | "EXTERNAL_TERMINAL", terminalApproved?: boolean }} [options] - method is required only
  *   when a balance is actually due.
  */
 export async function completeAppointment(
   appointmentId,
-  { method, paymentConfirmed, terminalApproved, terminalReference, qrSessionId, finalTotal, adjustmentReason } = {}
+  { method, paymentConfirmed, terminalApproved, qrSessionId, finalTotal, adjustmentReason } = {}
 ) {
   try {
     if (!appointmentId) {
@@ -919,8 +923,9 @@ export async function completeAppointment(
         requiresPaymentConfirmation: true,
       };
     }
-    if (collectsAtTill && method === "EXTERNAL_TERMINAL" && (terminalApproved !== true || !terminalReference?.trim())) {
-      return { success: false, message: "Confirmez le paiement approuvé sur le terminal et indiquez la référence du ticket.", requiresPaymentConfirmation: true };
+    // No typed terminal reference any more — see lib/payments/terminal-reference.js.
+    if (collectsAtTill && method === "EXTERNAL_TERMINAL" && terminalApproved !== true) {
+      return { success: false, message: "Confirmez le paiement approuvé sur le terminal.", requiresPaymentConfirmation: true };
     }
     // The system has no way to observe a physical cash handoff or a card
     // terminal's "APPROUVÉ" screen — without this, staff could mark the
@@ -1061,6 +1066,9 @@ export async function completeAppointment(
         // actually enter the till total — see model Transaction.pieceNumber.
         const pieceNumber = useTill ? await allocatePieceNumber(tx, PIECE_SERIES.APPOINTMENT) : null;
 
+        // « Prestation n°12 » — see lib/payments/terminal-reference.js.
+        const terminalReference = isTerminalCard ? await allocateBookingTerminalReference(tx, "APPOINTMENT") : null;
+
         collection = await tx.transaction.create({
           data: {
             paymentId: updatedPayment.id,
@@ -1072,7 +1080,7 @@ export async function completeAppointment(
             paidAt: new Date(),
             cashSessionId: useTill ? openCashSession.id : null,
             pieceNumber,
-            manualReference: isTerminalCard ? terminalReference.trim() : isQr ? qrPayment.paymentIntentId : null,
+            manualReference: isTerminalCard ? terminalReference : isQr ? qrPayment.paymentIntentId : null,
           },
         });
 

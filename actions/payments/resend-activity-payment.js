@@ -11,6 +11,7 @@ import { STAFF_PERMISSIONS } from "@/lib/authorization";
 import { authorizeActivityReservationOperation } from "@/lib/activity-reservation-access";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
+import { reclaimReservationPromoUse } from "@/lib/promo-code-release";
 import {
   resolvePayeeForActivitySession,
   payeeCanChargeOnline,
@@ -48,6 +49,8 @@ const ERROR_MESSAGES = {
   SESSION_FULL: "La séance est désormais complète : impossible de réserver à nouveau la place de ce client.",
   RESERVATION_CHANGED: "La réservation vient d'être modifiée. Rechargez la page et réessayez.",
   INVALID_SESSION_CAPACITY: "Capacité de séance invalide.",
+  PROMO_EXHAUSTED:
+    "Le code promo de cette réservation a atteint sa limite d'utilisation entre-temps : impossible de la relancer à ce prix. Annulez-la et créez une nouvelle réservation.",
 };
 
 function formatSessionDate(date) {
@@ -201,6 +204,11 @@ export async function resendActivityReservationPayment({ kind, id } = {}) {
         data: { status: "PENDING_DEPOSIT", holdExpiresAt, cancelledAt: null },
       });
       if (claim.count === 0) throw new Error("RESERVATION_CHANGED");
+
+      // A lapsed hold gave its promo use back when it expired; back on sale
+      // at the same discounted price, it takes it again (or the relance
+      // stops here if others have used the code up meanwhile).
+      await reclaimReservationPromoUse(tx, kind, reservation.id);
 
       await writeAuditLog(tx, {
         action: AUDIT_ACTIONS.RESERVATION_PAYMENT_RELAUNCHED,

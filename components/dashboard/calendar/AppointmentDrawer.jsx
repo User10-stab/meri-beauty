@@ -25,7 +25,7 @@ import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import { getStaffColor } from "./staffColors";
 import {
   CounterPaymentMethodTiles,
-  CounterTerminalReference,
+  CounterTerminalAutoReference,
 } from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -139,12 +139,10 @@ export function AppointmentDrawer({
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
-  // A card collection is only accepted as EXTERNAL_TERMINAL now, and the
-  // terminal's receipt reference is what ties the row to a real charge. The
+  // A card collection is only accepted as EXTERNAL_TERMINAL now. The
   // existing "j'ai bien reçu" checkbox already says "ou carte APPROUVÉE sur le
-  // terminal", so it doubles as the approval attestation rather than adding a
-  // second tick for the same fact.
-  const [terminalReference, setTerminalReference] = useState("");
+  // terminal", so it doubles as the approval attestation. Its reference is the
+  // booking's own, recorded server-side — nothing to type.
 
   // Close on Escape
   useEffect(() => {
@@ -229,7 +227,7 @@ export function AppointmentDrawer({
         method: completeMethod,
         paymentConfirmed,
         ...(completeMethod === "EXTERNAL_TERMINAL"
-          ? { terminalApproved: paymentConfirmed, terminalReference: terminalReference.trim() }
+          ? { terminalApproved: paymentConfirmed }
           : {}),
       });
       setShowPaymentDialog(false);
@@ -489,7 +487,7 @@ export function AppointmentDrawer({
 
               {completeMethod === "EXTERNAL_TERMINAL" && (
                 <div className="mt-2">
-                  <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />
+                  <CounterTerminalAutoReference />
                 </div>
               )}
               <label className="mt-3 flex items-start gap-2 text-xs font-medium text-gray-700 dark:text-gray-200">
@@ -515,8 +513,7 @@ export function AppointmentDrawer({
                   onClick={handleCompleteWithPayment}
                   disabled={
                     isPending ||
-                    !paymentConfirmed ||
-                    (completeMethod === "EXTERNAL_TERMINAL" && !terminalReference.trim())
+                    !paymentConfirmed
                   }
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#3d4e3b] disabled:opacity-60"
                 >

@@ -1618,7 +1618,7 @@
       "needsPayment": "This order was not paid online. Select the payment method collected on-site:",
       "cash": "Cash",
       "card": "Card — terminal",
-      "terminalReference": "Terminal receipt reference",
+      "terminalReferenceAuto": "No reference to type: the order number is recorded automatically.",
       "totalToCollect": "Total to collect: €{amount}",
       "alreadyPaid": "This order has already been paid online. Only confirm the handover of items to the customer.",
       "cancel": "Cancel",

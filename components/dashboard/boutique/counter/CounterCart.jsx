@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Camera, CameraOff, FileText, ImageOff, Loader2, Lock, Minus, PackageSearch, Plus, ScanLine, Search, SlidersHorizontal, Trash2, Wallet, X } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, ChevronDown, FileText, Loader2, Lock, Minus, Plus, ScanLine, Trash2, Wallet, X } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import QRCode from "qrcode";
 import { toast } from "sonner";
@@ -15,18 +15,22 @@ import {
   getPointOfSaleProductByBarcode,
   getPointOfSaleOrderDraft,
   getPointOfSaleOrderStatus,
+  getPointOfSaleStockLevels,
+  linkPointOfSaleBarcode,
   recoverPointOfSaleCheckout,
   searchPointOfSaleCustomers,
-  searchPointOfSaleProducts,
 } from "@/actions/boutique/point-of-sale";
 import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { isCashSessionOpen, getSuggestedOpeningFloat, openCashSession, tryAutoOpenCashSession } from "@/actions/dashboard/cash-sessions";
 import { createBrowserUuid } from "@/lib/browser-uuid";
 import { CounterBuyerForm } from "@/components/dashboard/boutique/counter/CounterBuyerForm";
-import { CounterCashReceived, CounterPaymentMethodTiles, CounterTerminalReference } from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
+import { CounterCatalogue } from "@/components/dashboard/boutique/counter/CounterCatalogue";
+import { CounterCashReceived, CounterPaymentMethodTiles } from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { createManualInvoice } from "@/actions/invoices/manual-invoice";
 import { MANUAL_INVOICE_NOTES_MAX } from "@/lib/invoices/manual-invoice-constants";
+
+const CART_STOCK_POLL_MS = 10_000;
 
 const emptyAddress = {
   addressLine1: "",
@@ -56,6 +60,8 @@ export function CounterCart({
   canOpenOrders = false,
   pendingProduct,
   onConsumePendingProduct,
+  pendingBarcode,
+  onConsumePendingBarcode,
   sourceOrderId = null,
 }) {
   // A boutique sale is always the salon's, so whoever may use this till
@@ -63,9 +69,16 @@ export function CounterCart({
   const tillGateApplies = canCollectCash;
   const router = useRouter();
   const [barcode, setBarcode] = useState("");
-  const [productQuery, setProductQuery] = useState("");
-  const [productResults, setProductResults] = useState([]);
-  const [searchingProducts, setSearchingProducts] = useState(false);
+  // A scanned code no product has yet (typically the supplier EAN on a box
+  // the catalogue never learnt). While set, the photo grid becomes the
+  // picker: « Associer » links the code to the chosen variant, and every
+  // later scan of it finds the product directly.
+  const [unknownBarcode, setUnknownBarcode] = useState(null);
+  const [linkCandidate, setLinkCandidate] = useState(null);
+  const [linkingBarcode, setLinkingBarcode] = useState(false);
+  // Bumped after every sale / cancelled checkout / barcode link, so the
+  // grid re-reads stock (and which variants can still take a barcode).
+  const [catalogueRefreshKey, setCatalogueRefreshKey] = useState(0);
   const [cart, setCart] = useState([]);
   // No account, no invoice — a simplified ticket is issued instead. Blocked
   // together with CARD_QR (Stripe checkout needs a real customer_email) —
@@ -101,9 +114,6 @@ export function CounterCart({
   const [openingFloatMismatch, setOpeningFloatMismatch] = useState(null);
   const [openingSessionPending, setOpeningSessionPending] = useState(false);
   const [attemptKey, setAttemptKey] = useState(null);
-  const [terminalConfirmOpen, setTerminalConfirmOpen] = useState(false);
-  const [terminalApproved, setTerminalApproved] = useState(false);
-  const [terminalReference, setTerminalReference] = useState("");
   const [cashReceived, setCashReceived] = useState("");
   const [qrModal, setQrModal] = useState(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
@@ -143,6 +153,7 @@ export function CounterCart({
     [cart]
   );
   const hasFreeLines = cart.some((item) => item.type === "FREE");
+  const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const invoiceFlow =
     canInvoiceSale && !sourceOrder && (hasFreeLines || method === "TRANSFER" || settleMode !== "NOW" || invoiceNotes.trim() !== "");
   const depositAmount = Math.round(Number(depositInput) * 100) / 100;
@@ -171,6 +182,7 @@ export function CounterCart({
   }, [invoiceFlow, method]);
 
   function resetAttempt() {
+    setCatalogueRefreshKey((key) => key + 1);
     const next = createBrowserUuid();
     localStorage.setItem("meri-pos-attempt-key", next);
     setAttemptKey(next);
@@ -450,7 +462,7 @@ export function CounterCart({
           : `${pendingProduct.productName} ajouté au panier — ouvrez la caisse ci-dessous pour l'encaisser.`
       );
     }
-    document.getElementById("counter-cart")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById("counter-basket")?.scrollIntoView({ behavior: "smooth", block: "start" });
     onConsumePendingProduct?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingProduct]);
@@ -482,6 +494,9 @@ export function CounterCart({
             unitPrice: item.unitPrice,
             availableQuantity: item.availableQuantity,
             quantity: item.quantity,
+            // Units that order already holds (reservedQuantity): released to
+            // this sale, so live stock checks add them back.
+            heldQuantity: item.quantity,
           }))
         );
         if (draft.customer) {
@@ -517,6 +532,11 @@ export function CounterCart({
     if (!code) return;
     const result = await getPointOfSaleProductByBarcode(code);
     if (!result.success) {
+      if (result.code === "BARCODE_UNKNOWN" && result.linkable) {
+        setUnknownBarcode(result.barcode);
+        setBarcode("");
+        return;
+      }
       toast.error(result.message);
       return;
     }
@@ -524,34 +544,117 @@ export function CounterCart({
     setBarcode("");
   }, [barcode, addProductToCart]);
 
-  // Debounced so a counter search doesn't fire a query per keystroke. The
-  // request id guards against an earlier, slower response overwriting a
-  // later one.
-  const productSearchRef = useRef(0);
-  useEffect(() => {
-    const value = productQuery.trim();
-    if (value.length < 2) {
-      setProductResults([]);
-      setSearchingProducts(false);
-      return undefined;
+  // A tap in the grid re-reads live stock before adding: the grid is a
+  // snapshot (refreshed every 20 s), and an online order can take the last
+  // unit in between. Returns whether the line was added.
+  const addFromCatalogue = useCallback(async (item) => {
+    const result = await getPointOfSaleStockLevels([item.variantId]);
+    if (!result.success) return addProductToCart(item); // the server still re-checks at payment
+    const held = cart.find((line) => line.variantId === item.variantId)?.heldQuantity ?? 0;
+    const live = (result.data[item.variantId] ?? 0) + held;
+    const inCart = cart.find((line) => line.variantId === item.variantId)?.quantity ?? 0;
+    if (live <= inCart) {
+      toast.error(
+        live <= 0
+          ? `« ${item.productName} » n'est plus disponible — vendu ou réservé en ligne entre-temps.`
+          : "Tout le stock disponible est déjà au panier."
+      );
+      setCatalogueRefreshKey((key) => key + 1);
+      return false;
     }
+    return addProductToCart({ ...item, availableQuantity: live });
+  }, [cart, addProductToCart]);
 
-    setSearchingProducts(true);
-    const requestId = ++productSearchRef.current;
-    const timeout = setTimeout(async () => {
-      const result = await searchPointOfSaleProducts(value);
-      if (requestId !== productSearchRef.current) return;
-      setSearchingProducts(false);
-      if (!result.success) {
-        toast.error(result.message);
-        setProductResults([]);
-        return;
-      }
-      setProductResults(result.data);
-    }, 250);
+  // What is in the cart is re-checked every CART_STOCK_POLL_MS: a client can
+  // stand at the counter with the last unit while it is bought online. Each
+  // line's ceiling follows the live figure, a line now above it is flagged
+  // (and blocks the payment button), and the cashier is told once.
+  const cartVariantKey = cart
+    .filter((line) => line.type === "PRODUCT" && line.variantId)
+    .map((line) => line.variantId)
+    .sort()
+    .join(",");
+  const warnedConflictsRef = useRef(new Set());
+  const checkCartStock = useCallback(async () => {
+    const ids = cartVariantKey ? cartVariantKey.split(",") : [];
+    if (ids.length === 0) return;
+    const result = await getPointOfSaleStockLevels(ids);
+    if (!result.success) return;
+    setCart((current) =>
+      current.map((line) => {
+        if (line.type !== "PRODUCT" || !(line.variantId in result.data)) return line;
+        const live = result.data[line.variantId] + (line.heldQuantity ?? 0);
+        if (line.quantity > live && !warnedConflictsRef.current.has(line.variantId)) {
+          warnedConflictsRef.current.add(line.variantId);
+          toast.error(
+            live <= 0
+              ? `« ${line.productName} » vient d'être vendu ou réservé en ligne — il n'est plus disponible.`
+              : `« ${line.productName} » : plus que ${live} disponible(s) — vendu ou réservé en ligne entre-temps.`
+          );
+        }
+        if (line.quantity <= live) warnedConflictsRef.current.delete(line.variantId);
+        return line.availableQuantity === live ? line : { ...line, availableQuantity: live };
+      })
+    );
+  }, [cartVariantKey]);
 
-    return () => clearTimeout(timeout);
-  }, [productQuery]);
+  useEffect(() => {
+    // Paused while a QR checkout is open: that order has itself reserved the
+    // units, so they would read as "taken" by someone else.
+    if (!cartVariantKey || qrModal) return undefined;
+    checkCartStock();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") checkCartStock();
+    }, CART_STOCK_POLL_MS);
+    window.addEventListener("focus", checkCartStock);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", checkCartStock);
+    };
+  }, [cartVariantKey, qrModal, checkCartStock]);
+
+  const stockConflicts = cart.filter((line) => line.type === "PRODUCT" && line.quantity > line.availableQuantity);
+
+  function fitLineToStock(key) {
+    setCart((current) =>
+      current
+        .map((line) => (line.key === key ? { ...line, quantity: Math.min(line.quantity, line.availableQuantity) } : line))
+        .filter((line) => line.quantity > 0)
+    );
+  }
+
+  // A product barcode scanned from the omnibar camera above is handed here,
+  // so an unknown one gets the same « Associer » flow as the till's own
+  // scanner instead of a dead-end "no result".
+  useEffect(() => {
+    if (!pendingBarcode) return;
+    addBarcode(pendingBarcode);
+    document.getElementById("counter-cart")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    onConsumePendingBarcode?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingBarcode]);
+
+  function cancelBarcodeLink() {
+    setUnknownBarcode(null);
+    setLinkCandidate(null);
+  }
+
+  async function confirmBarcodeLink() {
+    if (!linkCandidate || !unknownBarcode) return;
+    setLinkingBarcode(true);
+    const result = await linkPointOfSaleBarcode({ variantId: linkCandidate.variantId, barcode: unknownBarcode });
+    setLinkingBarcode(false);
+    if (!result.success) {
+      toast.error(result.message);
+      setLinkCandidate(null);
+      return;
+    }
+    toast.success(`Code-barres associé à « ${result.data.productName} » — il sera reconnu au prochain scan.`);
+    setUnknownBarcode(null);
+    setLinkCandidate(null);
+    setCatalogueRefreshKey((key) => key + 1);
+    addProductToCart(result.data);
+  }
 
   useEffect(() => {
     if (!scannerOpen) return undefined;
@@ -706,10 +809,6 @@ export function CounterCart({
     if (next === "CARD_QR" && (isWalkIn || sourceOrder || invoiceFlow)) return; // blocked for a client de passage, a taken-over order and an invoice sale
     if (next === "TRANSFER" && (isWalkIn || sourceOrder || !canInvoiceSale)) return; // a transfer is always an invoice sale
     setMethod(next);
-    if (next !== "EXTERNAL_TERMINAL") {
-      setTerminalApproved(false);
-      setTerminalReference("");
-    }
     if (next !== "CASH") setCashReceived("");
   }
 
@@ -728,8 +827,6 @@ export function CounterCart({
     setDepositInput("");
     setDueDate("");
     setCashReceived("");
-    setTerminalApproved(false);
-    setTerminalReference("");
     setMethod("CARD_QR");
   }
 
@@ -758,13 +855,8 @@ export function CounterCart({
       if (method === "CASH" && (cashReceived === "" || Number.isNaN(cashReceivedNumber) || cashReceivedNumber < collectedNow)) {
         return toast.error("Le montant reçu doit couvrir la somme encaissée.");
       }
-      // The terminal dialog doubles as this sale's confirmation.
-      if (method === "EXTERNAL_TERMINAL" && !terminalConfirmOpen) {
-        setTerminalConfirmOpen(true);
-        return;
-      }
     }
-    if (!(collectsNow && method === "EXTERNAL_TERMINAL") && !invoiceConfirmOpen) {
+    if (!invoiceConfirmOpen) {
       setInvoiceConfirmOpen(true);
       return;
     }
@@ -800,18 +892,18 @@ export function CounterCart({
                 mode: settleMode,
                 ...(settleMode === "DEPOSIT" ? { amount: depositAmount } : {}),
                 // The external terminal is recorded as a CARD receipt, exactly
-                // like a ticket sale paid there.
+                // like a ticket sale paid there — referenced by the sale's
+                // order number, set server-side.
                 method: method === "EXTERNAL_TERMINAL" ? "CARD" : method,
                 cashReceived: method === "CASH" ? cashReceivedNumber : null,
-                reference:
-                  method === "EXTERNAL_TERMINAL" ? terminalReference.trim() : null,
               },
       });
-      setTerminalConfirmOpen(false);
       setInvoiceConfirmOpen(false);
       if (!result?.success) {
         toast.error(result?.message ?? "Impossible d'enregistrer la vente.");
         if (result?.requiresCashSession) setCashSessionOpen(false);
+        checkCartStock();
+        setCatalogueRefreshKey((key) => key + 1);
         return;
       }
 
@@ -840,10 +932,6 @@ export function CounterCart({
     if (isWalkIn && collectWalkInEmail && !walkInEmailReady) {
       return toast.error("Indiquez l'e-mail du client pour envoyer le ticket.");
     }
-    if (method === "EXTERNAL_TERMINAL" && !terminalConfirmOpen) {
-      setTerminalConfirmOpen(true);
-      return;
-    }
     if (method === "CASH" && (cashReceived === "" || Number.isNaN(cashReceivedNumber) || cashReceivedNumber < total)) {
       return toast.error("Le montant reçu doit couvrir le total de la vente.");
     }
@@ -856,13 +944,17 @@ export function CounterCart({
         attemptKey,
         invoiceRequested,
         sourceOrderId: sourceOrder?.orderId ?? null,
-        ...(method === "EXTERNAL_TERMINAL" ? { terminalApproved, terminalReference: terminalReference.trim() } : {}),
+        // No confirmation popup any more (user's call, 2026-09-28): pressing
+        // « Encaisser » with « Terminal externe » selected is the attestation,
+        // as on every Pointage screen. The reference is the order number.
+        ...(method === "EXTERNAL_TERMINAL" ? { terminalApproved: true } : {}),
         ...(method === "CASH" ? { cashReceived: cashReceivedNumber } : {}),
       });
-      setTerminalConfirmOpen(false);
       if (!result.success) {
         toast.error(result.message);
         if (result.requiresCashSession) setCashSessionOpen(false);
+        checkCartStock();
+        setCatalogueRefreshKey((key) => key + 1);
         return;
       }
       if (method === "CARD_QR") {
@@ -1025,42 +1117,15 @@ export function CounterCart({
   return (
     <div className="space-y-6">
     {closedTillCard}
-    <div id="counter-cart" className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-      <section className="space-y-5 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+    <div id="counter-cart" className="space-y-6">
+      <section className="space-y-4 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wide text-[#c8a46a]">Caisse</p>
           <h1 className="mt-1 text-2xl font-bold text-dark dark:text-white">Vente en magasin</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-dark-6">Scannez les articles, associez le client, encaissez puis envoyez son reçu.</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-dark-6">
+            Scannez un code-barres ou touchez le produit dans le catalogue, puis associez le client et encaissez.
+          </p>
         </div>
-
-        {loadingSourceOrder && (
-          <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-dark-3">
-            <Loader2 size={15} className="animate-spin" />
-            Chargement de la commande…
-          </div>
-        )}
-
-        {sourceOrder && (
-          <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-            <div className="min-w-0">
-              <p className="font-semibold">Commande n°{sourceOrder.orderNumber} reprise à la caisse</p>
-              <p className="mt-0.5 text-xs">
-                Ajoutez ou retirez des articles, puis encaissez en espèces ou au terminal. La commande d&apos;origine
-                sera clôturée et remplacée par cette vente.
-                {sourceOrder.discountAmount > 0 &&
-                  ` Attention : sa remise de ${sourceOrder.discountAmount.toFixed(2)} € n'est pas reprise — les articles sont au prix en boutique.`}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={releaseSourceOrder}
-              disabled={isPending}
-              className="shrink-0 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:bg-transparent dark:text-amber-300"
-            >
-              Ne plus reprendre
-            </button>
-          </div>
-        )}
 
         <form
           onSubmit={(event) => {
@@ -1091,130 +1156,82 @@ export function CounterCart({
           </button>
         </form>
 
-        <div className="flex flex-col gap-2">
-          <div className="relative">
-            <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              value={productQuery}
-              onChange={(event) => setProductQuery(event.target.value)}
-              placeholder="Sans code-barres : chercher par nom, référence ou variante"
-              autoComplete="off"
-              aria-label="Rechercher un produit par nom"
-              className="h-11 w-full rounded-lg border border-gray-200 pl-10 pr-9 text-sm outline-none focus:border-[#2f3a2e] focus:ring-2 focus:ring-[#2f3a2e]/10 dark:border-dark-3 dark:bg-dark-2 dark:text-white"
-            />
-            {searchingProducts && (
-              <Loader2 size={15} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-gray-400" />
-            )}
-            {!searchingProducts && productQuery && (
-              <button
-                type="button"
-                onClick={() => setProductQuery("")}
-                aria-label="Effacer la recherche"
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-gray-400 transition-colors hover:text-gray-600"
-              >
-                <X size={15} />
-              </button>
-            )}
-          </div>
-
-          {productQuery.trim().length >= 2 && !searchingProducts && productResults.length === 0 && (
-            <div className="flex items-center gap-2 rounded-lg border border-dashed border-gray-200 px-4 py-6 text-sm text-gray-500 dark:border-dark-3">
-              <PackageSearch size={16} className="shrink-0 text-gray-400" />
-              Aucun produit actif ne correspond à « {productQuery.trim()} ».
+        {unknownBarcode && (
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200">
+            <div className="min-w-0">
+              <p className="font-semibold">Code-barres inconnu : {unknownBarcode}</p>
+              <p className="mt-0.5 text-xs">
+                Touchez ce produit dans le catalogue ci-dessous (« Associer ») : le code sera enregistré et le produit
+                s&apos;ajoutera directement au prochain scan.
+              </p>
             </div>
-          )}
+            <button
+              type="button"
+              onClick={cancelBarcodeLink}
+              className="shrink-0 rounded-md border border-sky-300 bg-white px-2.5 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100 dark:bg-transparent dark:text-sky-200"
+            >
+              Ignorer
+            </button>
+          </div>
+        )}
 
-          {productResults.length > 0 && (
-            <ul className="max-h-80 divide-y divide-gray-100 overflow-y-auto rounded-lg border border-gray-200 dark:divide-dark-3 dark:border-dark-3">
-              {productResults.map((item) => {
-                const inCart = cart.find((entry) => entry.variantId === item.variantId)?.quantity ?? 0;
-                const outOfStock = item.availableQuantity <= 0;
-                const maxedOut = !outOfStock && inCart >= item.availableQuantity;
-                const disabled = outOfStock || maxedOut;
-                return (
-                  <li key={item.variantId}>
-                    <div className="flex items-center gap-3 p-2.5">
-                      <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-100 bg-gray-50 dark:border-dark-3 dark:bg-dark-2">
-                        {item.imagePath ? (
-                          <Image
-                            src={item.imagePath}
-                            alt=""
-                            width={48}
-                            height={48}
-                            className={`h-12 w-12 object-cover ${disabled ? "opacity-40 grayscale" : ""}`}
-                          />
-                        ) : (
-                          <ImageOff size={16} className="text-gray-300" />
-                        )}
-                      </div>
+        <CounterCatalogue
+          refreshKey={catalogueRefreshKey}
+          cart={cart}
+          onAdd={addFromCatalogue}
+          linkBarcode={unknownBarcode}
+          onPickForLink={setLinkCandidate}
+        />
 
-                      <div className="min-w-0 flex-1">
-                        <p className={`truncate text-sm font-semibold ${disabled ? "text-gray-400 dark:text-dark-6" : "text-gray-900 dark:text-white"}`}>
-                          {item.productName}
-                        </p>
-                        <p className="truncate text-xs text-gray-500">
-                          {item.variantName} · {item.unitPrice.toFixed(2)} €
-                        </p>
-                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                          {outOfStock ? (
-                            <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:bg-red-500/10 dark:text-red-300">
-                              Rupture de stock
-                            </span>
-                          ) : (
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                item.isLowStock
-                                  ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
-                                  : "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
-                              }`}
-                            >
-                              {item.availableQuantity} en stock
-                            </span>
-                          )}
-                          {inCart > 0 && (
-                            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-600 dark:bg-dark-3 dark:text-dark-6">
-                              {inCart} au panier
-                            </span>
-                          )}
-                        </div>
-                      </div>
+        {cartItemCount > 0 && (
+          <button
+            type="button"
+            onClick={() => document.getElementById("counter-basket")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="sticky bottom-3 z-10 flex w-full items-center justify-between gap-3 rounded-xl bg-[#2f3a2e] px-5 py-3 text-left text-white shadow-lg transition-colors hover:bg-[#2f3a2e]/95"
+          >
+            <span className="text-sm font-semibold">
+              Panier : {cartItemCount} article{cartItemCount > 1 ? "s" : ""} · {total.toFixed(2)} €
+            </span>
+            <span className="flex items-center gap-1 text-sm font-semibold">
+              Encaisser
+              <ChevronDown size={16} />
+            </span>
+          </button>
+        )}
+      </section>
 
-                      {outOfStock && canAdjustStock ? (
-                        <a
-                          href={`/dashboard/boutique/stock?search=${encodeURIComponent(item.productName)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          title="Ouvre l'inventaire dans un nouvel onglet — le panier est conservé"
-                          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-[#2f3a2e] px-3 text-xs font-semibold text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/5 dark:border-dark-3 dark:text-white"
-                        >
-                          <SlidersHorizontal size={14} />
-                          Corriger le stock
-                        </a>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={disabled}
-                          onClick={() => addProductToCart(item)}
-                          title={
-                            outOfStock
-                              ? "Rupture de stock — demandez à un responsable de corriger l'inventaire"
-                              : maxedOut
-                                ? "Tout le stock disponible est déjà au panier"
-                                : undefined
-                          }
-                          className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3 text-xs font-semibold text-white transition-colors hover:bg-[#2f3a2e]/90 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 dark:disabled:bg-dark-3 dark:disabled:text-dark-6"
-                        >
-                          <Plus size={14} />
-                          {maxedOut ? "Max" : "Ajouter"}
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+    <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+      <section id="counter-basket" className="scroll-mt-4 space-y-5 rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+        <h2 className="text-lg font-bold text-dark dark:text-white">Panier</h2>
+
+        {loadingSourceOrder && (
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 px-4 py-3 text-sm text-gray-500 dark:border-dark-3">
+            <Loader2 size={15} className="animate-spin" />
+            Chargement de la commande…
+          </div>
+        )}
+
+        {sourceOrder && (
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+            <div className="min-w-0">
+              <p className="font-semibold">Commande n°{sourceOrder.orderNumber} reprise à la caisse</p>
+              <p className="mt-0.5 text-xs">
+                Ajoutez ou retirez des articles, puis encaissez en espèces ou au terminal. La commande d&apos;origine
+                sera clôturée et remplacée par cette vente.
+                {sourceOrder.discountAmount > 0 &&
+                  ` Attention : sa remise de ${sourceOrder.discountAmount.toFixed(2)} € n'est pas reprise — les articles sont au prix en boutique.`}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={releaseSourceOrder}
+              disabled={isPending}
+              className="shrink-0 rounded-md border border-amber-300 bg-white px-2.5 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 dark:bg-transparent dark:text-amber-300"
+            >
+              Ne plus reprendre
+            </button>
+          </div>
+        )}
 
         {canInvoiceSale && (
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1271,10 +1288,25 @@ export function CounterCart({
                 <button type="button" onClick={() => changeQuantity(item.key, -item.quantity)} aria-label="Supprimer la ligne" className="text-gray-400 hover:text-red-600"><Trash2 size={16} /></button>
               </div>
             ) : (
-              <div key={item.key} className="flex items-center gap-3 p-3">
+              <div key={item.key} className={`flex flex-wrap items-center gap-3 p-3 ${item.quantity > item.availableQuantity ? "bg-red-50 dark:bg-red-500/10" : ""}`}>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-gray-900 dark:text-white">{item.productName}</p>
                   <p className="text-xs text-gray-500">{item.variantName} · {item.unitPrice.toFixed(2)} €</p>
+                  {item.quantity > item.availableQuantity && (
+                    <p className="mt-1 flex flex-wrap items-center gap-2 text-xs font-semibold text-red-700 dark:text-red-300">
+                      <AlertTriangle size={13} />
+                      {item.availableQuantity <= 0
+                        ? "Plus disponible — vendu ou réservé en ligne entre-temps."
+                        : `Plus que ${item.availableQuantity} disponible(s) — vendu ou réservé en ligne entre-temps.`}
+                      <button
+                        type="button"
+                        onClick={() => fitLineToStock(item.key)}
+                        className="rounded-md border border-red-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-red-700 hover:bg-red-100 dark:bg-transparent"
+                      >
+                        {item.availableQuantity <= 0 ? "Retirer du panier" : `Passer à ${item.availableQuantity}`}
+                      </button>
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 rounded-lg border border-gray-200 p-1 dark:border-dark-3">
                   <button type="button" onClick={() => changeQuantity(item.key, -1)} className="rounded p-1 hover:bg-gray-100 dark:hover:bg-dark-2"><Minus size={14} /></button>
@@ -1474,6 +1506,7 @@ export function CounterCart({
             isPending ||
             !attemptKey ||
             cart.length === 0 ||
+            stockConflicts.length > 0 ||
             (isWalkIn && collectWalkInEmail && !walkInEmailReady) ||
             (collectsNow && method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
             (invoiceFlow && (!customer.vatNumber.trim() || (settleMode === "DEPOSIT" && !depositValid))) ||
@@ -1494,35 +1527,14 @@ export function CounterCart({
         {invoiceFlow && !customer.vatNumber.trim() && (
           <p className="text-xs font-medium text-amber-700">Renseignez le numéro de TVA du client : une vente avec facture l&apos;exige.</p>
         )}
+        {stockConflicts.length > 0 && (
+          <p className="text-xs font-medium text-red-700 dark:text-red-300">
+            Un article du panier n&apos;est plus disponible (vendu ou réservé en ligne). Corrigez le panier pour encaisser.
+          </p>
+        )}
       </aside>
+    </div>
 
-      <ConfirmDialog
-        open={terminalConfirmOpen}
-        title="Confirmer le paiement par terminal externe"
-        message={`Vérifiez que le terminal affiche « APPROUVÉ » avant de continuer — ${collectedNow.toFixed(2)} € pour ${customer.fullName || "ce client"}.${
-          invoiceFlow ? (settleMode === "NOW" ? " La facture sera émise à l'encaissement." : " Acompte : la facture sera émise au paiement du solde.") : ""
-        }`}
-        confirmLabel={invoiceFlow ? "Encaisser et enregistrer" : "Encaisser et envoyer le reçu"}
-        loading={isPending}
-        confirmDisabled={!terminalApproved || !terminalReference.trim()}
-        onConfirm={submitSale}
-        onCancel={() => setTerminalConfirmOpen(false)}
-      >
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <label className="flex items-start gap-2 font-medium">
-            <input
-              type="checkbox"
-              checked={terminalApproved}
-              onChange={(event) => setTerminalApproved(event.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-amber-400"
-            />
-            Je confirme que le terminal affiche « APPROUVÉ » pour ce paiement.
-          </label>
-          <div className="mt-3">
-            <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />
-          </div>
-        </div>
-      </ConfirmDialog>
 
       {qrModal && (
         <div role="dialog" aria-modal="true" aria-labelledby="pos-qr-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm sm:p-4">
@@ -1580,6 +1592,22 @@ export function CounterCart({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={Boolean(linkCandidate)}
+        title="Associer ce code-barres ?"
+        message={linkCandidate ? `Le code ${unknownBarcode} sera enregistré sur « ${linkCandidate.productName}${
+          linkCandidate.variantName && linkCandidate.variantName !== "Standard" ? ` — ${linkCandidate.variantName}` : ""
+        } ». Vérifiez bien le produit, la contenance et la teinte : chaque prochain scan de ce code ajoutera ce produit.${
+          linkCandidate.hasInternalBarcode
+            ? " Il remplace son code interne : une étiquette interne déjà imprimée pour ce produit ne sera plus reconnue."
+            : ""
+        }` : ""}
+        confirmLabel={linkCandidate && linkCandidate.availableQuantity > 0 ? "Associer et ajouter" : "Associer"}
+        loading={linkingBarcode}
+        onConfirm={confirmBarcodeLink}
+        onCancel={() => !linkingBarcode && setLinkCandidate(null)}
+      />
 
       <ConfirmDialog
         open={invoiceConfirmOpen}

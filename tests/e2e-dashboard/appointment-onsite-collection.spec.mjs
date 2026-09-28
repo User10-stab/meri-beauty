@@ -35,7 +35,6 @@ import { seedAdmin, seedStaff, seedAppointment } from "./fixtures/seed-dashboard
  */
 
 const PRICE = 60;
-const TERMINAL_REF = "E2E-TERM-0042";
 
 test.describe("an appointment paid at the counter", () => {
   test.afterAll(async () => {
@@ -94,7 +93,7 @@ test.describe("an appointment paid at the counter", () => {
     // reference is what ties the row to a real charge, so the dialog will not
     // let the collection through without one.
     await dialog.getByRole("combobox").selectOption("EXTERNAL_TERMINAL");
-    await dialog.getByLabel(/référence du ticket du terminal/i).fill(TERMINAL_REF);
+    // Nothing to type: the booking's own reference is recorded (2026-09-28).
     await dialog.getByRole("checkbox").check();
     await dialog.getByRole("button", { name: /encaisser et terminer/i }).click();
 
@@ -130,8 +129,8 @@ test.describe("an appointment paid at the counter", () => {
     expect(collection.method).toBe("CARD");
     expect(
       collection.manualReference,
-      "the card collection kept no terminal reference, so nothing ties it to a real charge",
-    ).toBe(TERMINAL_REF);
+      "the card collection kept no reference, so nothing ties it to a real charge",
+    ).toMatch(/^Prestation n°\d{2,}$/);
     expect(Number(collection.amount)).toBeCloseTo(PRICE, 2);
     expect(collection.paidAt).not.toBeNull();
     // A card collection is not a till movement: no piece number, no session.

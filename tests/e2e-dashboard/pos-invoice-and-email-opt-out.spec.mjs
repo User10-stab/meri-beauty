@@ -55,16 +55,12 @@ async function addProductToCart(page, till, product) {
   await resultRow.first().getByRole("button", { name: /^ajouter$/i }).click();
 }
 
-/** Card/terminal confirm dialog → real submission, same for every scenario below. */
-async function payByExternalTerminalAndSubmit(page, till, terminalRef) {
+/** Terminal payment → real submission, same for every scenario below. */
+async function payByExternalTerminalAndSubmit(page, till) {
   await till.getByRole("button", { name: /terminal externe/i }).click();
+  // No confirmation popup and nothing to type (2026-09-28): the button is
+  // the attestation, the order number the reference.
   await till.getByRole("button", { name: /encaisser et envoyer le ticket/i }).click();
-
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toBeVisible({ timeout: 10_000 });
-  await dialog.getByLabel(/je confirme.*terminal.*approuvé/i).check();
-  await dialog.getByPlaceholder(/référence.*ticket terminal/i).fill(terminalRef);
-  await dialog.getByRole("button", { name: /encaisser et envoyer le reçu/i }).click();
 
   await page.waitForURL(/\/dashboard\/boutique\/orders\/[^/?#]+/, { timeout: 30_000 });
   return orderIdFromUrl(page.url());
@@ -137,7 +133,7 @@ test.describe("the retail till's invoice opt-out and optional walk-in e-mail", (
     });
     await expect(invoiceCheckbox, "it must default to checked — today's automatic behaviour").toBeChecked();
 
-    const orderId = await payByExternalTerminalAndSubmit(page, till, `E2E-${runId}-INVA`);
+    const orderId = await payByExternalTerminalAndSubmit(page, till);
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -176,7 +172,7 @@ test.describe("the retail till's invoice opt-out and optional walk-in e-mail", (
     await invoiceCheckbox.uncheck();
     await expect(till.getByText(/aucune facture ne sera générée pour cette vente/i)).toBeVisible();
 
-    const orderId = await payByExternalTerminalAndSubmit(page, till, `E2E-${runId}-INVB`);
+    const orderId = await payByExternalTerminalAndSubmit(page, till);
 
     const order = await prisma.order.findUnique({
       where: { id: orderId },
@@ -217,7 +213,7 @@ test.describe("the retail till's invoice opt-out and optional walk-in e-mail", (
       "leaving the e-mail blank must not disable submission once the checkbox is unchecked",
     ).toBeEnabled();
 
-    const orderId = await payByExternalTerminalAndSubmit(page, till, `E2E-${runId}-WALKIN`);
+    const orderId = await payByExternalTerminalAndSubmit(page, till);
 
     const order = await prisma.order.findUnique({ where: { id: orderId } });
     expect(order.status).toBe("COMPLETED");

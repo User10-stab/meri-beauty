@@ -7,8 +7,8 @@ import { CASH_PAYMENT_LEGAL_LIMIT } from "@/lib/invoices/manual-invoice-constant
  * The money half of a manual invoice — shared by the composer (« Encaisser
  * maintenant ») and the list's « Encaisser » dialog, so both ask for exactly
  * what settleManualInvoice / createManualInvoice require: the amount received
- * for cash, the terminal ticket for a card, the bank reference for a
- * transfer. Fully controlled — state lives in the parent.
+ * for cash, nothing for a card (referenced by its order number), an optional
+ * bank reference for a transfer. Fully controlled — state lives in the parent.
  */
 
 const euro = (value) => new Intl.NumberFormat("fr-BE", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
@@ -23,14 +23,14 @@ const inputClass =
   "w-full rounded-lg border border-stroke bg-white px-3 py-2 text-sm text-dark outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white";
 
 /** Whether the fields are complete enough to submit — mirrors the server schema. */
-export function isPaymentComplete({ method, cashReceived, reference }, total) {
+export function isPaymentComplete({ method, cashReceived }, total) {
   if (method === "CASH") {
     const received = Number(cashReceived);
     return cashReceived !== "" && !Number.isNaN(received) && received + 0.001 >= total;
   }
-  // A card's terminal ticket is its receipt, so it stays required; a transfer's
-  // bank reference does not (see lib/validations/manual-invoice.js).
-  return method !== "CARD" || Boolean(reference?.trim());
+  // Nothing to type for a card (its reference is the order number, set
+  // server-side) nor for a transfer (see lib/validations/manual-invoice.js).
+  return true;
 }
 
 // `lockedMethod` hides the method choice — « Virement reçu » only ever
@@ -97,9 +97,11 @@ export function ManualInvoicePaymentFields({ value, onChange, total, disabled = 
         </div>
       )}
 
-      {method !== "CASH" && (
+      {method === "CARD" && <p className="text-[11px] text-gray-400">Référence enregistrée : le numéro de commande de la vente.</p>}
+
+      {method === "TRANSFER" && (
         <label className="block text-xs font-medium text-gray-500">
-          {method === "CARD" ? "Référence du ticket terminal" : "Référence du virement (communication ou n° d'opération)"}
+          Référence du virement (communication ou n° d&apos;opération)
           <input
             type="text"
             maxLength={100}
@@ -107,7 +109,7 @@ export function ManualInvoicePaymentFields({ value, onChange, total, disabled = 
             disabled={disabled}
             onChange={(event) => set({ reference: event.target.value })}
             className={`${inputClass} mt-1`}
-            placeholder={method === "CARD" ? "Ex. 004512" : "Ex. +++123/4567/89012+++"}
+            placeholder="Ex. +++123/4567/89012+++"
           />
         </label>
       )}

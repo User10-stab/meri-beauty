@@ -23,6 +23,7 @@ import { isBelgianVatNumber } from "@/lib/peppyrus";
 import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { manualSaleInvoiceInput } from "@/lib/invoices/manual-sale-invoice";
 import { listAwaitedTransfers } from "@/actions/payments/awaited-transfer";
+import { orderTerminalReference } from "@/lib/payments/terminal-reference";
 
 /**
  * Invoice sales composed at la caisse — free lines, transfers, acomptes,
@@ -145,7 +146,7 @@ function issueManualInvoice(tx, { order, buyer, paymentId }) {
  * cash session and gets its cash-book line number, exactly like a counter
  * sale. Card and transfer never touch the drawer.
  */
-async function settleInTx(tx, { paymentId, amount = null, method, cashReceived, reference }) {
+async function settleInTx(tx, { paymentId, orderNumber, amount = null, method, cashReceived, reference }) {
   const current = await tx.payment.findUnique({
     where: { id: paymentId },
     select: { status: true, totalAmount: true, paidAmount: true },
@@ -198,9 +199,10 @@ async function settleInTx(tx, { paymentId, amount = null, method, cashReceived, 
       method,
       transactionType: fullyPaid ? "FINAL_PAYMENT" : "DEPOSIT",
       paidAt,
-      // Terminal ticket for a card, bank reference for a transfer — the only
-      // record tying this sale to money actually received.
-      manualReference: method === "CASH" ? null : reference?.trim() || null,
+      // A card (terminal) payment is referenced by the sale's order number —
+      // staff no longer type the terminal ticket at the till. A transfer
+      // keeps its bank reference when one is given.
+      manualReference: method === "CASH" ? null : method === "CARD" ? orderTerminalReference(orderNumber) : reference?.trim() || null,
       cashReceived: method === "CASH" ? cashReceived : null,
       changeGiven,
       cashSessionId,
@@ -468,6 +470,7 @@ export async function createManualInvoice(input) {
         if (settlement.mode !== "LATER") {
           receipt = await settleInTx(tx, {
             paymentId: payment.id,
+            orderNumber: order.orderNumber,
             // NOW collects the whole balance; DEPOSIT only the acompte.
             amount: settlement.mode === "DEPOSIT" ? settlement.amount : null,
             method: settlement.method,
@@ -698,6 +701,7 @@ export async function settleManualInvoice(input) {
       async (tx) => {
         const recorded = await settleInTx(tx, {
           paymentId: order.payment.id,
+          orderNumber: order.orderNumber,
           amount: amount ?? null,
           method,
           cashReceived: cashReceived ?? 0,

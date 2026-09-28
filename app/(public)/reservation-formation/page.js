@@ -1116,7 +1116,7 @@ function ReservationFormationContent() {
                 {unitPrice > 0 && (
                   <>
                     <hr className="border-ink/8" />
-                    <PromoCodeField subtotal={totalPrice} onApplied={setAppliedPromo} />
+                    <PromoCodeField subtotal={totalPrice} context={{ scope: "FORMATION" }} onApplied={setAppliedPromo} />
                   </>
                 )}
 

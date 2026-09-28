@@ -36,8 +36,9 @@ import {
  *
  * Till session: completePointOfSaleSale needs one open. An already-open
  * session is reused and left open (only one may exist system-wide, and it is
- * not this suite's to close); otherwise one is opened here and closed in
- * afterAll. The boutique sale pays CASH on purpose — it is the only method
+ * not this suite's to close); otherwise one is opened here with the real
+ * carried-forward float and closed in afterAll with that float counted, so
+ * the till's chain is never broken. The boutique sale pays CASH on purpose — it is the only method
  * whose row joins the Livre de caisse, which is the thing being proved. The
  * purge script deletes that Transaction with the order, so the session's
  * running total goes back to what it was.
@@ -123,6 +124,7 @@ test.describe("CAISSE: the till for staff, the money for whoever owns the sale",
   let noCaisse; // same, without CAISSE
   let tillSessionId = null;
   let openedHere = false;
+  let carriedFloat = OPENING_FLOAT;
 
   // Names the later assertions look for in the salon's books.
   const boutiqueBuyerName = `Client Caisse Boutique ${L}`;
@@ -149,8 +151,24 @@ test.describe("CAISSE: the till for staff, the money for whoever owns the sale",
     if (open) {
       tillSessionId = open.id;
     } else {
+      // Open with the till's REAL carried-forward float and close with that
+      // same amount counted (afterAll). A made-up float, or a close with no
+      // count, breaks the chain: the next auto-open has nothing to carry and
+      // the till shows « Caisse fermée — Fond de caisse 0.00 » (25/09/2026).
+      // Opened as the till operator, like an auto-open, so the purge script
+      // can still delete this run's admin account.
+      const lastClosed = await prisma.cashSession.findFirst({
+        where: { closedAt: { not: null } },
+        orderBy: { closedAt: "desc" },
+        select: { countedCash: true },
+      });
+      carriedFloat = Number(lastClosed?.countedCash) > 0 ? Number(lastClosed.countedCash) : OPENING_FLOAT;
+      const operator = await prisma.user.findFirst({
+        where: { email: { equals: process.env.TILL_CASH_OPERATOR_EMAIL || "contact@meribeautystudio.com", mode: "insensitive" } },
+        select: { id: true },
+      });
       const created = await prisma.cashSession.create({
-        data: { openedById: admin.user.id, openingFloat: OPENING_FLOAT },
+        data: { openedById: operator?.id ?? admin.user.id, openingFloat: carriedFloat, note: `e2e ${getRunId()}` },
       });
       tillSessionId = created.id;
       openedHere = true;
@@ -159,9 +177,12 @@ test.describe("CAISSE: the till for staff, the money for whoever owns the sale",
 
   test.afterAll(async () => {
     if (openedHere && tillSessionId) {
+      // The run's own cash sale is test money the purge script deletes with
+      // its order; the drawer really holds the carried float, so that is what
+      // is counted and carried to the next session.
       await prisma.cashSession.updateMany({
         where: { id: tillSessionId, closedAt: null },
-        data: { closedAt: new Date() },
+        data: { closedAt: new Date(), expectedCash: carriedFloat, countedCash: carriedFloat, variance: 0 },
       });
     }
     await disconnect();

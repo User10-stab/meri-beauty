@@ -7,7 +7,8 @@ import { createResumeCheckoutToken, isCheckoutAuthorized } from "@/lib/resume-ch
 import bcrypt from "bcrypt";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
-import { resolvePromoCode } from "@/lib/promo-codes";
+import { resolvePromoCode, claimPromoCodeUse, promoClaimErrorMessage } from "@/lib/promo-codes";
+import { releaseReservationPromoUse } from "@/lib/promo-code-release";
 import { isValidVatFormat, isViesOutage, normalizeVatNumber, verifyVatWithVies } from "@/lib/vat-validation";
 import { validateCustomerIdentity, validateBillingAddress } from "@/lib/validations/customer-identity";
 import { captureWarning } from "@/lib/monitoring";
@@ -131,10 +132,13 @@ export async function createWorkshopReservationCheckoutSession(reservationId, ch
     } catch (error) {
       // No checkout exists, so the client cannot pay this hold — release the
       // seat now instead of leaving it looking booked until the hold lapses.
-      await prisma.workshopReservation
-        .updateMany({
-          where: { id: reservation.id, status: "PENDING_DEPOSIT", payment: { is: null } },
-          data: { status: "CANCELLED", cancelledAt: new Date(), holdExpiresAt: new Date() },
+      await prisma
+        .$transaction(async (tx) => {
+          const claim = await tx.workshopReservation.updateMany({
+            where: { id: reservation.id, status: "PENDING_DEPOSIT", payment: { is: null } },
+            data: { status: "CANCELLED", cancelledAt: new Date(), holdExpiresAt: new Date() },
+          });
+          if (claim.count > 0) await releaseReservationPromoUse(tx, "WORKSHOP", reservation.id);
         })
         .catch((releaseError) => console.error("[checkout] failed to release unpaid hold", reservation.id, releaseError));
       throw error;
@@ -446,13 +450,13 @@ export async function createWorkshopReservation(data) {
     // trust a client-computed discount amount.
     let promoCodeId = null;
     let discountAmount = 0;
-    let promoMaxUses = null;
+    let promoCaps = null;
     if (promoCode) {
-      const promoResult = await resolvePromoCode(promoCode, totalPrice);
+      const promoResult = await resolvePromoCode(promoCode, totalPrice, { scope: "WORKSHOP", customerId: user.id });
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
-      promoMaxUses = promoResult.maxUses;
+      promoCaps = { maxUses: promoResult.maxUses, maxUsesPerCustomer: promoResult.maxUsesPerCustomer };
     }
     const discountedTotal = Number(Math.max(0, totalPrice - discountAmount).toFixed(2));
     const depositAmount = isFullPayment
@@ -526,18 +530,8 @@ export async function createWorkshopReservation(data) {
             throw new Error(`SOLD_OUT:${available}`);
           }
 
-          // Atomic conditional claim — only succeeds while usedCount is
-          // still under the cap captured moments ago at resolvePromoCode
-          // time. Two concurrent bookings racing the last use of a capped
-          // code can't both win: the loser's WHERE clause matches zero rows.
-          if (promoCodeId && promoMaxUses != null) {
-            const claim = await tx.promoCode.updateMany({
-              where: { id: promoCodeId, usedCount: { lt: promoMaxUses } },
-              data: { usedCount: { increment: 1 } },
-            });
-            if (claim.count === 0) throw new Error("PROMO_EXHAUSTED");
-          } else if (promoCodeId) {
-            await tx.promoCode.update({ where: { id: promoCodeId }, data: { usedCount: { increment: 1 } } });
+          if (promoCodeId) {
+            await claimPromoCodeUse(tx, { promoCodeId, ...promoCaps, customerId: user.id });
           }
 
           const created = await tx.workshopReservation.create({
@@ -550,6 +544,8 @@ export async function createWorkshopReservation(data) {
               balanceDue,
               promoCodeId,
               discountAmount,
+              // Claimed just above — given back if the booking is cancelled.
+              promoUseClaimed: Boolean(promoCodeId),
               status: "PENDING_DEPOSIT",
               holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000), // Expiration dans 15 minutes
             },
@@ -597,9 +593,10 @@ export async function createWorkshopReservation(data) {
             message: `Il ne reste que ${available} place${available > 1 ? "s" : ""} disponible${available > 1 ? "s" : ""}. Veuillez réduire le nombre de places.`,
           };
         }
-        if (err.message === "PROMO_EXHAUSTED") {
+        const promoMessage = promoClaimErrorMessage(err);
+        if (promoMessage) {
           captureWarning("Promo code usage cap lost during checkout", { area: "promo-codes" });
-          return { success: false, message: "Ce code promo vient d'atteindre sa limite d'utilisation." };
+          return { success: false, message: promoMessage };
         }
         if (err.message === "INVALID_SESSION_CAPACITY") {
           captureWarning("Workshop session has invalid capacity during checkout", { area: "stock-capacity", sessionId });

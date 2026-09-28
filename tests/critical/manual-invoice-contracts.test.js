@@ -319,8 +319,8 @@ describe("« Payer plus tard »: a pending sale, no invoice", () => {
 });
 
 describe("« Encaisser tout »: invoiced at once", () => {
-  it("a terminal payment writes one FINAL_PAYMENT with its ticket reference, then issues the invoice — never the cash book", async () => {
-    const result = await createManualInvoice(input({ settlement: { mode: "NOW", method: "CARD", reference: "004512" } }));
+  it("a terminal payment writes one FINAL_PAYMENT referenced by its order number, then issues the invoice — never the cash book", async () => {
+    const result = await createManualInvoice(input({ settlement: { mode: "NOW", method: "CARD" } }));
     expect(result).toMatchObject({ success: true, data: { invoice: { id: "inv_1", number: "F-2026-000042", peppolApplicable: true } } });
     expect(mocks.tx.payment.updateMany.mock.calls[0][0]).toMatchObject({
       // Locked on the exact amount already paid — see settleInTx.
@@ -332,7 +332,7 @@ describe("« Encaisser tout »: invoiced at once", () => {
       method: "CARD",
       transactionType: "FINAL_PAYMENT",
       amount: 174.2,
-      manualReference: "004512",
+      manualReference: "Produit n°77",
       cashSessionId: null,
       pieceNumber: null,
     });
@@ -373,10 +373,9 @@ describe("« Encaisser tout »: invoiced at once", () => {
     );
   });
 
-  it("a card payment without its terminal reference is refused", async () => {
-    const result = await createManualInvoice(input({ settlement: { mode: "NOW", method: "CARD" } }));
-    expect(result.success).toBe(false);
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  it("a card payment ignores any typed reference: the order number is recorded", async () => {
+    await createManualInvoice(input({ settlement: { mode: "NOW", method: "CARD", reference: "004512" } }));
+    expect(mocks.tx.transaction.create.mock.calls[0][0].data).toMatchObject({ method: "CARD", manualReference: "Produit n°77" });
   });
 
   it("cash goes into the open till session with a cash-book piece number and the change given", async () => {
@@ -470,7 +469,7 @@ describe("a bank transfer stays pending until staff approve it", () => {
     expect(mocks.tx.payment.create.mock.calls[1][0].data.awaitedTransferAmount).toBeNull();
   });
 
-  it("« Accepter » takes one tick: the bank reference is optional, a card's terminal ticket is not", async () => {
+  it("« Accepter » takes one tick: the bank reference is optional, and a card asks for nothing either", async () => {
     mocks.prisma.order.findUnique.mockResolvedValue(pendingSale());
     const accepted = await settleManualInvoice({ orderId: "o_1", method: "TRANSFER" });
     expect(accepted).toMatchObject({ success: true, data: { fullyPaid: true } });
@@ -478,9 +477,10 @@ describe("a bank transfer stays pending until staff approve it", () => {
 
     mocks.prisma.$transaction.mockClear();
     mocks.prisma.order.findUnique.mockResolvedValue(pendingSale());
+    mocks.tx = makeTx();
     const card = await settleManualInvoice({ orderId: "o_1", method: "CARD", reference: "" });
-    expect(card).toMatchObject({ success: false, message: expect.stringContaining("ticket terminal") });
-    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+    expect(card).toMatchObject({ success: true });
+    expect(mocks.tx.transaction.create.mock.calls[0][0].data).toMatchObject({ method: "CARD", manualReference: "Produit n°77" });
   });
 
   it("approving it records the transfer, clears the awaited amount and — if it clears the balance — issues the invoice", async () => {

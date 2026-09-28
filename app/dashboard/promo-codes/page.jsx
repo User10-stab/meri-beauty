@@ -16,13 +16,6 @@ export default async function PromoCodesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-dark dark:text-white">Codes promo</h1>
-        <p className="mt-1 text-sm font-medium text-gray-500 dark:text-dark-6">
-          Ces codes s'appliquent à la boutique, aux ateliers/événements, aux formations et aux rendez-vous.
-        </p>
-      </div>
-
       {result.message && !result.success && (
         <div
           role="alert"

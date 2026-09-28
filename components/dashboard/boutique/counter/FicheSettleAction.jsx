@@ -12,7 +12,7 @@ import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSes
 import {
   CounterCashReceived,
   CounterPaymentMethodTiles,
-  CounterTerminalReference,
+  CounterTerminalAutoReference,
 } from "@/components/dashboard/boutique/counter/CounterPaymentMethods";
 import { CounterQrDialog } from "@/components/dashboard/boutique/counter/CounterQrDialog";
 
@@ -46,23 +46,18 @@ const SETTLE_BY_KIND = {
  *
  * `canCollectCash` is false for every staff member who is not Marie or an
  * OWNER/ADMIN (see isTillCashOperator). Their balance is still collected and
- * invoiced by the settle action, but off-till — so the payment method, the
- * terminal reference and the till-session gate all disappear, and the button
+ * invoiced by the settle action, but off-till — so the payment method and
+ * the till-session gate disappear, and the button
  * is a plain "Enregistrer et clôturer".
  */
 export function FicheSettleAction({ ticket, onChanged, canCollectCash = false }) {
-  // « Terminal externe » is the only card option: a card collection has to carry
-  // the terminal's receipt reference, or nothing ties the row to a real
-  // charge. Defaulting to it means the reference field is on screen from the
-  // start rather than appearing after a choice.
+  // « Terminal externe » is the only card option, and the default.
   const [method, setMethod] = useState("EXTERNAL_TERMINAL");
-  // The terminal's "APPROUVÉ" screen used to need its own tick. Card is now
-      // the only card option and therefore the default, so that tick sat on
-      // every card transaction — and it asserts the same fact the confirm
-      // button already states ("j'ai bien reçu X"): for a card, being paid IS
-      // the terminal approving. One attestation, one piece of evidence. The
-      // receipt reference stays required, because that is the evidence.
-  const [terminalReference, setTerminalReference] = useState("");
+  // The terminal's "APPROUVÉ" screen used to need its own tick, and its
+  // receipt reference its own field. The confirm button already states the
+  // fact ("j'ai bien reçu X"): for a card, being paid IS the terminal
+  // approving. The reference is now the booking's own, recorded server-side
+  // (lib/payments/terminal-reference.js) — nothing to type with a queue waiting.
   // Change helper only — the settle action records the amount due.
   const [cashReceived, setCashReceived] = useState("");
   const [saving, setSaving] = useState(false);
@@ -100,7 +95,6 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
 
   function selectMethod(next) {
     setMethod(next);
-    if (next !== "EXTERNAL_TERMINAL") setTerminalReference("");
     if (next !== "CASH") setCashReceived("");
   }
 
@@ -111,10 +105,6 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
     }
     if (priceChanged && adjustmentReason.trim().length < 3) {
       toast.error("Indiquez la raison de l'ajustement de prix.");
-      return;
-    }
-    if (takesMoneyAtTill && isExternalTerminal && !terminalReference.trim()) {
-      toast.error("Indiquez la référence du ticket du terminal.");
       return;
     }
     // Nothing is settled until the client has actually paid: the dialog polls
@@ -133,9 +123,7 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
             method,
             // An awaited transfer attests nothing: no money changed hands.
             paymentConfirmed: !awaitsTransfer,
-            ...(isExternalTerminal
-              ? { terminalApproved: true, terminalReference: terminalReference.trim() }
-              : {}),
+            ...(isExternalTerminal ? { terminalApproved: true } : {}),
             ...(qrSessionId ? { qrSessionId } : {}),
           }
         : {}),
@@ -211,7 +199,7 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
                 </p>
               </div>
             )}
-            {isExternalTerminal && <CounterTerminalReference value={terminalReference} onChange={setTerminalReference} />}
+            {isExternalTerminal && <CounterTerminalAutoReference />}
             {method === "CASH" && <CounterCashReceived id={`settle-cash-${ticket.reservationId}`} value={cashReceived} onChange={setCashReceived} amountDue={amountDue} />}
           </div>
           {method === "CASH" && !cashSessionOpen && (
@@ -230,7 +218,6 @@ export function FicheSettleAction({ ticket, onChanged, canCollectCash = false })
             disabled={
               saving ||
               (priceChanged && adjustmentReason.trim().length < 3) ||
-              (takesMoneyAtTill && isExternalTerminal && !terminalReference.trim()) ||
               (takesMoneyAtTill && method === "CASH" && !cashSessionOpen)
             }
             onClick={() => handleSettle()}

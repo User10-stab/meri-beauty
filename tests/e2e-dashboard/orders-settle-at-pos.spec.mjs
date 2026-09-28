@@ -94,12 +94,9 @@ test.describe("settle an unpaid pickup order at the till", () => {
     await expect(till.getByText("60.00 €").first()).toBeVisible();
 
     await till.getByRole("button", { name: /terminal externe/i }).click();
+    // No confirmation popup and nothing to type (2026-09-28): the button is
+    // the attestation, the order number the reference.
     await till.getByRole("button", { name: /encaisser et envoyer le ticket/i }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible({ timeout: 10_000 });
-    await dialog.getByLabel(/je confirme.*terminal.*approuvé/i).check();
-    await dialog.getByPlaceholder(/référence.*ticket terminal/i).fill(`E2E-SETTLE-${order.orderNumber}`);
-    await dialog.getByRole("button", { name: /encaisser et envoyer le reçu/i }).click();
 
     await page.waitForURL(/\/dashboard\/boutique\/orders\/[^/?#]+$/, { timeout: 30_000 });
     saleOrderId = /\/orders\/([^/?#]+)$/.exec(page.url())[1];
@@ -114,6 +111,9 @@ test.describe("settle an unpaid pickup order at the till", () => {
     expect(sale.items).toHaveLength(1);
     expect(sale.items[0].quantity).toBe(3);
     expect(sale.payment?.status).toBe("PAID");
+    const [receipt] = await prisma.transaction.findMany({ where: { paymentId: sale.payment.id } });
+    expect(receipt.method).toBe("CARD");
+    expect(receipt.manualReference).toBe(`Produit n°${sale.orderNumber}`);
 
     const original = await prisma.order.findUnique({ where: { id: order.id }, include: { payment: true } });
     // Not a cancellation: its own status, and a real link to the sale.

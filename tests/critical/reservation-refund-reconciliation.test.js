@@ -9,8 +9,15 @@ const authorization = RESERVATION_REFUND_AUTHORIZATION.ADMIN_EXTERNAL_STRIPE_REF
 
 function makeTx({ workshopClaims = [], formationClaims = [] } = {}) {
   return {
-    workshopReservation: { updateMany: vi.fn().mockImplementation(() => ({ count: workshopClaims.shift() ?? 0 })) },
-    formationReservation: { updateMany: vi.fn().mockImplementation(() => ({ count: formationClaims.shift() ?? 0 })) },
+    // findUnique: read by releaseReservationPromoUse — no promo code here.
+    workshopReservation: {
+      updateMany: vi.fn().mockImplementation(() => ({ count: workshopClaims.shift() ?? 0 })),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    formationReservation: {
+      updateMany: vi.fn().mockImplementation(() => ({ count: formationClaims.shift() ?? 0 })),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
   };
 }
 

@@ -16,7 +16,7 @@ import {
   buildAppointmentCreatedNotification,
   getAppointmentNotificationRecipients,
 } from "@/lib/notifications";
-import { resolvePromoCode } from "@/lib/promo-codes";
+import { resolvePromoCode, checkPromoCustomerEligibility, claimPromoCodeUse, promoClaimErrorMessage } from "@/lib/promo-codes";
 import { validateAppointmentSlot } from "@/lib/appointment-scheduling";
 import { sendEmail } from "@/lib/email";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
@@ -329,13 +329,21 @@ export async function createCheckoutSession(reservationData) {
 
     // Re-validated here regardless of any client-side preview — never trust
     // a client-computed discount amount. Mirrors create-reservation.js.
+    // The customer isn't resolved yet (that creates an account), so the
+    // "reserved for" / per-customer rules are checked just after it is.
     let promoCodeId = null;
     let discountAmount = 0;
+    let promoCaps = null;
     if (promoCode) {
-      const promoResult = await resolvePromoCode(promoCode, rawTotalAmount);
+      const promoResult = await resolvePromoCode(promoCode, rawTotalAmount, {
+        scope: "APPOINTMENT",
+        serviceId: staffService.serviceId,
+        skipCustomerChecks: true,
+      });
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
+      promoCaps = { maxUses: promoResult.maxUses, maxUsesPerCustomer: promoResult.maxUsesPerCustomer };
     }
 
     const paymentDecision = getReservationPaymentDecision({
@@ -365,6 +373,10 @@ export async function createCheckoutSession(reservationData) {
     const authenticatedCustomerId =
       authSession?.user?.role === "CUSTOMER" ? authSession.user.id : undefined;
     const { user: customerUser, isNewUser } = await resolveOrCreateCustomer(customerInfo, authenticatedCustomerId);
+    if (promoCodeId) {
+      const eligibility = await checkPromoCustomerEligibility(promoCodeId, customerUser.id);
+      if (!eligibility.success) return { success: false, message: eligibility.message };
+    }
     // A full online payment can settle before its webhook creates the VAT
     // invoice. Do not send a VAT-validated customer to Stripe unless the
     // buyer data that issueInvoice requires already exists; otherwise a
@@ -448,6 +460,10 @@ export async function createCheckoutSession(reservationData) {
         },
       });
 
+      if (promoCodeId) {
+        await claimPromoCodeUse(tx, { promoCodeId, ...promoCaps, customerId: customerUser.id });
+      }
+
       const payment = await tx.payment.create({
         data: {
           appointmentId: appointment.id,
@@ -460,6 +476,8 @@ export async function createCheckoutSession(reservationData) {
           status: "PENDING",
           promoCodeId,
           discountAmount,
+          // Claimed just above — given back if the appointment is cancelled.
+          promoUseClaimed: Boolean(promoCodeId),
         },
       });
 
@@ -576,6 +594,8 @@ export async function createCheckoutSession(reservationData) {
       throw error;
     }
   } catch (error) {
+    const promoMessage = promoClaimErrorMessage(error);
+    if (promoMessage) return { success: false, message: promoMessage };
     console.error("[createCheckoutSession]", error);
     let errorMessage = "Erreur inconnue";
     try {

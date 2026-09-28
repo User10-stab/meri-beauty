@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { issueCreditNote } from "@/lib/invoicing";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
+import { releaseAppointmentPromoUse } from "@/lib/promo-code-release";
 import { isBusinessRefundCustomer } from "@/lib/refunds/document-policy";
 import {
   isWithinCancellationWindow,
@@ -140,6 +141,8 @@ export async function cancelReservation(appointmentId) {
         },
       });
       if (claim.count === 0) return null;
+
+      await releaseAppointmentPromoUse(tx, appointmentId);
 
       let creditNote = null;
       if (wasPaid && payment.invoice && remaining > REFUND_EPSILON) {

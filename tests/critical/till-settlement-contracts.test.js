@@ -243,21 +243,22 @@ describe("nothing is marked paid before the money is in hand", () => {
     // cashier actually takes the money at the till. Off-till (see
     // isTillCashOperator) there is no method to pick, so no guard to fail.
     expect(panel).toContain("const takesMoneyAtTill = canCollectCash && !ticket.independent && amountDue > 0");
-    expect(panel).toContain('(takesMoneyAtTill && isExternalTerminal && !terminalReference.trim()) ||');
     expect(panel).toContain('(takesMoneyAtTill && method === "CASH" && !cashSessionOpen)');
     expect(source("lib/payments/counter-price-adjustment.js")).toContain(
       "Indiquez la raison de l'ajustement de prix.",
     );
   });
 
-  test("a card collection cannot be recorded without the terminal's receipt reference", () => {
+  test("a card collection goes through the terminal, with nothing to type", () => {
     // Card is EXTERNAL_TERMINAL only now: bare "CARD" was accepted with no
     // evidence at all, and of 29 card collections in the dev database exactly
     // one carried a reference — so 28 could not be reconciled against the
     // terminal's end-of-day batch. Cash at least has a piece number and an
     // open till session behind it.
     expect(panel).toContain('"EXTERNAL_TERMINAL"');
-    expect(panel).toContain("terminalReference: terminalReference.trim()");
+    // The reference is recorded server-side (2026-09-28) — no field to fill.
+    expect(panel).not.toContain("terminalReference");
+    expect(panel).toContain("<CounterTerminalAutoReference />");
     // Same tiles as the till and every other counter screen — except that a
     // transfer is withheld on an independent's sale, which the salon never
     // banks and could never accept from « Ventes en attente de paiement ».
@@ -273,8 +274,7 @@ describe("nothing is marked paid before the money is in hand", () => {
 
     // The separate "Terminal APPROUVÉ" tick is deliberately gone: for a card,
     // being paid IS the terminal approving, and the confirm button already
-    // states "j'ai bien reçu X". One attestation, one piece of evidence —
-    // the reference, which is the evidence, stays required.
+    // states "j'ai bien reçu X". One attestation.
     expect(panel).not.toContain("Terminal APPROUVÉ");
     expect(panel).toContain("terminalApproved: true");
   });

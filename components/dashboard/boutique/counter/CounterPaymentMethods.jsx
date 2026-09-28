@@ -7,7 +7,7 @@ import { Banknote, CreditCard, Landmark } from "lucide-react";
  * « Pointage & encaissement » (booking balance, pickup order, new prestation,
  * new atelier/formation seat). One component so every screen shows the same
  * tiles, the same labels, the same « montant reçu / monnaie à rendre » helper
- * and the same terminal-reference field. Before this, the till had tiles and
+ * and the same terminal note. Before this, the till had tiles and
  * « Terminal externe » while Pointage had radio buttons and « Carte — terminal »
  * for the very same payment.
  *
@@ -22,8 +22,6 @@ export const COUNTER_PAYMENT_METHODS = {
   EXTERNAL_TERMINAL: { label: "Terminal externe", icon: CreditCard },
   TRANSFER: { label: "Virement", icon: Landmark },
 };
-
-export const TERMINAL_REFERENCE_LABEL = "Référence du ticket du terminal";
 
 const inputClass =
   "h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-white";
@@ -91,16 +89,14 @@ export function CounterCashReceived({ id, value, onChange, amountDue }) {
   );
 }
 
-/** The terminal's receipt reference — the only evidence tying a card payment to a real charge. */
-export function CounterTerminalReference({ value, onChange }) {
-  return (
-    <input
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      maxLength={100}
-      placeholder={`${TERMINAL_REFERENCE_LABEL} (obligatoire)`}
-      aria-label={TERMINAL_REFERENCE_LABEL}
-      className={inputClass}
-    />
-  );
+/**
+ * Staff no longer type the terminal ticket's reference (user's call,
+ * 2026-09-28 — it held the queue up): the server records the sale's own
+ * number instead, see lib/payments/terminal-reference.js. This only says so.
+ *
+ * @param {object} props
+ * @param {string} [props.reference] what gets recorded, as staff would name it
+ */
+export function CounterTerminalAutoReference({ reference = "le numéro de la réservation" }) {
+  return <p className="text-xs text-gray-500 dark:text-dark-6">Aucune référence à saisir : {reference} est enregistré automatiquement.</p>;
 }

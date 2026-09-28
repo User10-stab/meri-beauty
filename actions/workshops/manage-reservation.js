@@ -24,6 +24,7 @@ import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { OCCUPANCY_KINDS, liveSeatFilter, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { resolvePayeeForStaff, resolvePayeeForWorkshopSession, payeeCanChargeOnline, payeeCheckoutMetadata, payeeStripeOptions, PAYEE_ONLINE_UNAVAILABLE_MESSAGE } from "@/lib/payments/resolve-payee";
 import { REFUND_DENIAL, refundDenialMessage } from "@/lib/refunds/authorize";
+import { releaseReservationPromoUse } from "@/lib/promo-code-release";
 
 // The 10% charge remains limited to seat-count changes. Moving a customer to
 // another session/activity is an admin correction and is free of charge.
@@ -181,6 +182,8 @@ export async function cancelWorkshopReservation(reservationId, { reason, refundD
         },
       });
       if (claim.count === 0) return { claimed: false, refundQueued: false, queuedRefundAmount: 0 };
+
+      await releaseReservationPromoUse(tx, "WORKSHOP", reservationId);
 
       // A cancelled booking never collects another cent, whatever happens to
       // the money already taken — refunded, forfeited, or neither. Set once
@@ -888,7 +891,7 @@ export async function changeWorkshopReservationSeatsFree(reservationId, { newSea
  */
 export async function completeWorkshopReservation(
   reservationId,
-  { method, paymentConfirmed, terminalApproved, terminalReference, qrSessionId, finalTotal, adjustmentReason } = {}
+  { method, paymentConfirmed, terminalApproved, qrSessionId, finalTotal, adjustmentReason } = {}
 ) {
   const session = await auth();
   if (!session?.user) return { success: false, message: "Non authentifié." };
@@ -906,7 +909,6 @@ export async function completeWorkshopReservation(
     method,
     paymentConfirmed,
     terminalApproved,
-    terminalReference,
     qrSessionId,
     finalTotal,
     adjustmentReason,

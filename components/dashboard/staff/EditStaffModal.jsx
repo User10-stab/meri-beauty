@@ -9,6 +9,7 @@ import {
   Loader2,
   User,
   Hash,
+  Building2,
   Calendar,
   FileText,
   Globe,
@@ -302,6 +303,7 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
       yearsOfExperience: staff.yearsOfExperience ?? "",
       hireDate:          staff.hireDate ? staff.hireDate.slice(0, 10) : "",
       vatNumber:         staff.vatNumber ?? "",
+      companyName:       staff.companyName ?? "",
       rythme:            staff.rythme    ?? "",
       isActive:          staff.isActive,
       serviceIds:        staff.serviceIds ?? [],   // pre-populated from server fetch
@@ -499,6 +501,16 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
             <Label htmlFor="editVatNumber" icon={Hash}>Numéro de TVA</Label>
             <TextInput id="editVatNumber" type="text" placeholder="ex. BE0123456789 (optionnel)" error={errors.vatNumber} {...register("vatNumber")} />
             <FieldError message={errors.vatNumber?.message} />
+          </div>
+
+          {/* Nom d'entreprise — « Entreprise » sur ses prochaines factures de
+              loyer ; son nom reste sous « À l'attention de ». Les factures
+              déjà émises ne changent pas. */}
+          <div>
+            <Label htmlFor="editCompanyName" icon={Building2}>Nom d'entreprise</Label>
+            <TextInput id="editCompanyName" type="text" placeholder="ex. JS Beauty SRL (optionnel)" error={errors.companyName} {...register("companyName")} />
+            <FieldError message={errors.companyName?.message} />
+            <p className="mt-1 text-xs text-gray-500 dark:text-dark-6">Affiché comme « Entreprise » sur ses prochaines factures. Vide : son nom.</p>
           </div>
 
           {/* Rythme souhaité */}

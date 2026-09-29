@@ -60,6 +60,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
         yearsOfExperience: fe.yearsOfExperience?.[0] ?? null,
         hireDate:          fe.hireDate?.[0]          ?? null,
         vatNumber:         fe.vatNumber?.[0]         ?? null,
+        companyName:       fe.companyName?.[0]       ?? null,
         serviceIds:        fe.serviceIds?.[0]        ?? null,
         dashboardPermissions: fe.dashboardPermissions?.[0] ?? null,
         contract:          fe["contract"]?.[0]       ?? null,
@@ -82,6 +83,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
     yearsOfExperience,
     hireDate,
     vatNumber,
+    companyName,
     serviceIds,
     dashboardPermissions,
     contract,
@@ -259,6 +261,7 @@ export async function createStaffFromRental(input, rentalRequestId) {
         isActive: true,
         hireDate: hireDate ? new Date(hireDate) : null,
         vatNumber: vatCheck.vatNumber,
+        companyName: companyName?.trim() || null,
         dashboardPermissions,
       };
 

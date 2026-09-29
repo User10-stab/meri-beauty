@@ -20,6 +20,7 @@ import {
   Briefcase,
   Layers,
   Hash,
+  Building2,
   MapPin,
 } from "lucide-react";
 import { CountrySelect } from "@/components/shared/CountrySelect";
@@ -261,6 +262,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       yearsOfExperience: "",
       hireDate:          "",
       vatNumber:         "",
+      companyName:       "",
       rythme:            "",
       serviceIds:        [],
       dashboardPermissions: initialValues.dashboardPermissions ?? [...DEFAULT_STAFF_PERMISSIONS],
@@ -606,6 +608,22 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                   {...register("vatNumber")}
                 />
                 <FieldError message={errors.vatNumber?.message} />
+              </div>
+
+              {/* Nom d'entreprise — « Entreprise » sur ses factures de loyer */}
+              <div>
+                <Label htmlFor="companyName" icon={Building2}>
+                  Nom d'entreprise
+                </Label>
+                <TextInput
+                  id="companyName"
+                  type="text"
+                  placeholder="ex. JS Beauty SRL (optionnel)"
+                  error={errors.companyName}
+                  {...register("companyName")}
+                />
+                <FieldError message={errors.companyName?.message} />
+                <p className="mt-1 text-xs text-gray-500 dark:text-dark-6">Affiché comme « Entreprise » sur ses factures. Vide : son nom.</p>
               </div>
             </div>
           </div>

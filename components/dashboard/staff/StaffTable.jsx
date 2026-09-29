@@ -21,7 +21,7 @@ import {
   Settings,
 } from "lucide-react";
 import { deleteIndependentStaff } from "@/actions/staff/delete-independent-staff";
-import { updateIndependentStaff } from "@/actions/staff/update-independent-staff";
+import { setIndependentStaffActive } from "@/actions/staff/set-independent-staff-active";
 import { checkStaffReservationReadiness } from "@/lib/reservation-compliance";
 import { ActionMenu, ActionMenuDivider, ActionMenuItem, ActionMenuTrigger } from "@/components/dashboard/Tables/ActionMenu";
 import { getStaffStripeDisplayState } from "@/lib/stripe-connect-status";
@@ -415,13 +415,7 @@ export function StaffTable({ data, isLoading = false, services = [] }) {
     }
     if (mode === "toggle") {
       startTransition(async () => {
-        const res = await updateIndependentStaff({
-          id: staff.id,
-          bio: staff.bio,
-          languages: staff.languages,
-          hireDate: staff.hireDate,
-          isActive: !staff.isActive,
-        });
+        const res = await setIndependentStaffActive({ id: staff.id, isActive: !staff.isActive });
         if (res.success) toast.success(res.message);
         else toast.error(res.message);
       });

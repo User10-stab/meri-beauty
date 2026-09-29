@@ -1652,6 +1652,11 @@ model Staff {
   isDeleted                   Boolean                     @default(false)
   deletedAt                   DateTime?
   vatNumber         String?   
+  // Name of the independent's business (« nom d'entreprise »), printed as
+  // « Entreprise » on her rent invoices, with her own name kept under
+  // « À l'attention de ». Blank = her name, as before. Read only when an
+  // invoice is issued — an invoice already issued never changes.
+  companyName       String?
   // Dashboard modules explicitly granted by an OWNER/ADMIN. Kept as stable
   // string capability keys so new permissions can be added without a DB enum migration.
   dashboardPermissions String[] @default(["APPOINTMENTS", "SERVICES", "CUSTOMERS", "FORMATIONS", "FORMATION_RESERVATIONS", "WORKSHOP_RESERVATIONS", "NEWSLETTER"])

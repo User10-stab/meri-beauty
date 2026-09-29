@@ -21,7 +21,7 @@ const REVALIDATE_PATH = "/dashboard/staff/auto-entrepreneur";
  *
  * Editable fields:
  *   User  → fullName, email, password, phone, address (addressLine1/2, city, postalCode, country)
- *   Staff → photo, bio, languages, yearsOfExperience, hireDate, isActive
+ *   Staff → photo, bio, languages, yearsOfExperience, hireDate, isActive, companyName
  *   Services → replaces the full StaffService assignment set
  *   Contract → upserts the active FIXED_RENT contract
  *
@@ -60,6 +60,7 @@ export async function updateIndependentStaff(input) {
         yearsOfExperience: fe.yearsOfExperience?.[0] ?? null,
         hireDate:          fe.hireDate?.[0]          ?? null,
         vatNumber:         fe.vatNumber?.[0]         ?? null,
+        companyName:       fe.companyName?.[0]       ?? null,
         serviceIds:        fe.serviceIds?.[0]        ?? null,
         dashboardPermissions: fe.dashboardPermissions?.[0] ?? null,
         contract:          fe["contract"]?.[0]       ?? null,
@@ -84,6 +85,7 @@ export async function updateIndependentStaff(input) {
     yearsOfExperience,
     hireDate,
     vatNumber,
+    companyName,
     rythme,
     isActive,
     serviceIds,
@@ -246,6 +248,8 @@ export async function updateIndependentStaff(input) {
           isActive,
           hireDate: hireDate ? new Date(hireDate) : null,
           ...(dashboardPermissions !== undefined ? { dashboardPermissions } : {}),
+          // Absent from a payload = keep the stored name.
+          ...(companyName !== undefined ? { companyName: companyName?.trim() || null } : {}),
         },
       });
 

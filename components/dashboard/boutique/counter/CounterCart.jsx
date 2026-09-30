@@ -29,6 +29,8 @@ import { CounterCashReceived, CounterPaymentMethodTiles } from "@/components/das
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { createManualInvoice } from "@/actions/invoices/manual-invoice";
 import { MANUAL_INVOICE_NOTES_MAX } from "@/lib/invoices/manual-invoice-constants";
+import { PromoCodeField } from "@/components/shared/PromoCodeField";
+import { previewCounterPromoCode } from "@/actions/counter/promo-code";
 
 const CART_STOCK_POLL_MS = 10_000;
 
@@ -148,7 +150,13 @@ export function CounterCart({
   // (isTillCashOperator) — a CAISSE staff member never sees this mode, and
   // the server refuses anyone else.
 
-  const total = useMemo(
+  // A promo code, as on the online checkout: { code, discountAmount }. The
+  // amount is only the live preview — completePointOfSaleSale re-prices and
+  // claims the code itself. `promoFieldKey` remounts the field to empty it.
+  const [promo, setPromo] = useState(null);
+  const [promoFieldKey, setPromoFieldKey] = useState(0);
+
+  const cartSubtotal = useMemo(
     () => Math.round(cart.reduce((sum, item) => sum + Number(item.unitPrice || 0) * item.quantity, 0) * 100) / 100,
     [cart]
   );
@@ -156,6 +164,13 @@ export function CounterCart({
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const invoiceFlow =
     canInvoiceSale && !sourceOrder && (hasFreeLines || method === "TRANSFER" || settleMode !== "NOW" || invoiceNotes.trim() !== "");
+  // An invoice sale (manual-invoice.js) has no promo code — only the ticket
+  // path below does.
+  const appliedPromo = invoiceFlow ? null : promo;
+  // What the client pays: the cart, less the promo.
+  const total = Math.max(0, Math.round((cartSubtotal - (appliedPromo?.discountAmount ?? 0)) * 100) / 100);
+  const promoItems = cart.filter((item) => item.type !== "FREE").map((item) => ({ variantId: item.variantId, quantity: item.quantity }));
+  const promoContext = { scope: "BOUTIQUE", items: promoItems, customerId: isWalkIn ? null : customer.id ?? null };
   const depositAmount = Math.round(Number(depositInput) * 100) / 100;
   const depositValid = depositAmount > 0 && depositAmount < total;
   const collectsNow = !invoiceFlow || settleMode !== "LATER";
@@ -180,6 +195,31 @@ export function CounterCart({
   useEffect(() => {
     if (invoiceFlow && method === "CARD_QR") setMethod("EXTERNAL_TERMINAL");
   }, [invoiceFlow, method]);
+
+  const promoCode = promo?.code ?? null;
+  const promoCartKey = JSON.stringify(promoItems);
+  const promoCustomerId = promoContext.customerId;
+  useEffect(() => {
+    if (!promoCode) return undefined;
+    let cancelled = false;
+    previewCounterPromoCode(promoCode, cartSubtotal, { scope: "BOUTIQUE", items: JSON.parse(promoCartKey), customerId: promoCustomerId }).then((result) => {
+      if (cancelled) return;
+      if (result.success) {
+        setPromo((current) => (current?.code === promoCode ? { ...current, discountAmount: result.discountAmount } : current));
+      } else {
+        toast.error(`Code ${promoCode} retiré : ${result.message}`);
+        clearPromo();
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [promoCode, promoCartKey, promoCustomerId, cartSubtotal]);
+
+  function clearPromo() {
+    setPromo(null);
+    setPromoFieldKey((key) => key + 1);
+  }
 
   function resetAttempt() {
     setCatalogueRefreshKey((key) => key + 1);
@@ -524,6 +564,7 @@ export function CounterCart({
   function releaseSourceOrder() {
     setSourceOrder(null);
     setCart([]);
+    clearPromo();
     router.replace("/dashboard/boutique/point-of-sale");
   }
 
@@ -819,6 +860,7 @@ export function CounterCart({
 
   function resetInvoiceSale() {
     setCart([]);
+    clearPromo();
     setCustomer(emptyCustomer);
     setAddressOnFile(false);
     setVatCheck(null);
@@ -944,6 +986,7 @@ export function CounterCart({
         attemptKey,
         invoiceRequested,
         sourceOrderId: sourceOrder?.orderId ?? null,
+        promoCode: appliedPromo?.code ?? null,
         // No confirmation popup any more (user's call, 2026-09-28): pressing
         // « Encaisser » with « Terminal externe » selected is the attestation,
         // as on every Pointage screen. The reference is the order number.
@@ -1490,7 +1533,25 @@ export function CounterCart({
           )}
         </div>
 
+        {!invoiceFlow && cart.length > 0 && (
+          <div className="border-t border-gray-100 pt-4 dark:border-dark-3">
+            <PromoCodeField
+              key={promoFieldKey}
+              subtotal={cartSubtotal}
+              context={promoContext}
+              validate={previewCounterPromoCode}
+              onApplied={setPromo}
+            />
+          </div>
+        )}
+
         <div className="space-y-1 border-t border-gray-100 pt-5 dark:border-dark-3">
+          {appliedPromo && (
+            <>
+              <div className="flex justify-between text-sm text-gray-500"><span>Sous-total</span><span>{cartSubtotal.toFixed(2)} €</span></div>
+              <div className="flex justify-between text-sm text-emerald-700"><span>Code {appliedPromo.code}</span><span>−{Number(appliedPromo.discountAmount).toFixed(2)} €</span></div>
+            </>
+          )}
           <div className="flex items-end justify-between"><span className="text-sm text-gray-500">Total</span><strong className="text-3xl text-[#2f3a2e]">{total.toFixed(2)} €</strong></div>
           {invoiceFlow && (settleMode !== "NOW" || transferAwaited) && (
             <p className="text-right text-sm text-gray-500">

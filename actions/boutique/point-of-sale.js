@@ -26,9 +26,10 @@ import {
 import { saveCheckoutVatNumber } from "@/lib/customer-vat";
 import { stripe } from "@/lib/stripe";
 import { getAppBaseUrl } from "@/lib/site-url";
-import { fulfillOrderPayment } from "@/lib/orders/fulfill-order-payment";
+import { fulfillOrderPayment, orderInvoiceLines, orderTicketLines } from "@/lib/orders/fulfill-order-payment";
 import { POS_HANDOFF_STATUSES, canSettleOrderAtPointOfSale } from "@/lib/orders/point-of-sale-handoff";
 import { orderTerminalReference } from "@/lib/payments/terminal-reference";
+import { applyCounterPromoCode, CounterPromoCodeError } from "@/lib/promo-codes";
 import {
   barcodeLookupCandidates,
   buildSearchEntry,
@@ -115,6 +116,16 @@ async function createOrRecoverPointOfSaleCheckout(order) {
   if (expiresAt < Math.floor(Date.now() / 1000) + 30 * 60) {
     throw new Error("POS_CHECKOUT_RETRY_WINDOW_EXPIRED");
   }
+  // Lines at face value, the promo as a Stripe coupon — as the online
+  // checkout does — so the amount charged is order.totalAmount.
+  const coupon = Number(order.discountAmount) > 0
+    ? await stripe.coupons.create({
+        amount_off: Math.round(Number(order.discountAmount) * 100),
+        currency: "eur",
+        duration: "once",
+        name: "Code promotionnel",
+      })
+    : null;
   const session = await stripe.checkout.sessions.create(
     {
       payment_method_types: ["card"],
@@ -126,6 +137,7 @@ async function createOrRecoverPointOfSaleCheckout(order) {
         },
         quantity: item.quantity,
       })),
+      ...(coupon ? { discounts: [{ coupon: coupon.id }] } : {}),
       mode: "payment",
       success_url: `${getAppBaseUrl()}/boutique/order/success?session_id={CHECKOUT_SESSION_ID}&source=pos`,
       cancel_url: `${getAppBaseUrl()}/boutique/order/success?pos_canceled=1`,
@@ -794,7 +806,7 @@ export async function completePointOfSaleSale(input) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de caisse invalides." };
   }
 
-  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, cashReceived, invoiceRequested, sourceOrderId } = parsed.data;
+  const { customer: requestedCustomer, walkInEmail, items, method, attemptKey, cashReceived, invoiceRequested, sourceOrderId, promoCode } = parsed.data;
   // Closing a boutique pickup order from the till is the salon's own
   // worklist (see getPointOfSaleOrderDraft), not part of CAISSE.
   if (sourceOrderId && !isTillCashOperator(guard.session.user)) {
@@ -976,7 +988,7 @@ export async function completePointOfSaleSale(input) {
             isDeleted: false,
             product: { isDeleted: false, status: "ACTIVE" },
           },
-          select: { id: true, name: true, sku: true, price: true, stockQuantity: true, reservedQuantity: true, product: { select: { name: true } } },
+          select: { id: true, name: true, sku: true, price: true, stockQuantity: true, reservedQuantity: true, productId: true, product: { select: { name: true } } },
         });
         if (!variant) throw new Error("POS_PRODUCT_UNAVAILABLE");
         const available = variant.stockQuantity - variant.reservedQuantity;
@@ -998,13 +1010,27 @@ export async function completePointOfSaleSale(input) {
         ...item,
         taxUnitPrice: repriceTtcCataloguePrice(item.price, posVatPolicy.vatRate),
       }));
-      const productSubtotal = pricedSaleItems.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
-      const subtotal = productSubtotal;
-      if (method === "CASH" && cashReceived < subtotal) {
+      const subtotal = pricedSaleItems.reduce((sum, item) => sum + item.taxUnitPrice * item.quantity, 0);
+      // Same rules as the online checkout (orders.js): the discount is
+      // worked out on the lines as priced for this customer, and only on the
+      // targeted products when the code names some. Claimed here, before the
+      // order that carries it is created — see claimPromoCodeUse.
+      const promo = promoCode
+        ? await applyCounterPromoCode(tx, promoCode, subtotal, {
+            scope: "BOUTIQUE",
+            customerId: customer?.id ?? null,
+            lines: pricedSaleItems.map((item) => ({ productId: item.productId, amount: item.taxUnitPrice * item.quantity })),
+          })
+        : null;
+      const discountAmount = promo?.discountAmount ?? 0;
+      const totalAmount = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
+      // Stripe can't open a checkout with nothing to pay.
+      if (isQrPayment && totalAmount <= 0) throw new Error("POS_QR_NOTHING_TO_PAY");
+      if (method === "CASH" && cashReceived < totalAmount) {
         throw new Error("POS_CASH_INSUFFICIENT");
       }
-      const changeGiven = method === "CASH" ? Math.round((cashReceived - subtotal) * 100) / 100 : null;
-      const taxTotals = calculateVatTotals(subtotal, posVatPolicy.vatRate);
+      const changeGiven = method === "CASH" ? Math.round((cashReceived - totalAmount) * 100) / 100 : null;
+      const taxTotals = calculateVatTotals(totalAmount, posVatPolicy.vatRate);
       const order = await tx.order.create({
         data: {
           userId: customer?.id ?? null,
@@ -1015,7 +1041,9 @@ export async function completePointOfSaleSale(input) {
           posAttemptKey: attemptKey,
           subtotal,
           shippingCost: 0,
-          totalAmount: subtotal,
+          discountAmount,
+          promoCodeId: promo?.promoCodeId ?? null,
+          totalAmount,
           taxCountryCode: posVatPolicy.taxCountryCode,
           vatTreatment: posVatPolicy.vatTreatment,
           vatRate: posVatPolicy.vatRate,
@@ -1061,7 +1089,7 @@ export async function completePointOfSaleSale(input) {
             action: "order.point_of_sale_checkout_created",
             entityType: "Order",
             entityId: order.id,
-            after: { status: "PENDING_PAYMENT", totalAmount: subtotal, paymentMethod: "CARD_QR" },
+            after: { status: "PENDING_PAYMENT", totalAmount, paymentMethod: "CARD_QR" },
             metadata: { orderNumber: order.orderNumber, customerId: customer.id, attemptKey },
           },
         });
@@ -1071,8 +1099,8 @@ export async function completePointOfSaleSale(input) {
       const payment = await tx.payment.create({
         data: {
           orderId: order.id,
-          totalAmount: subtotal,
-          paidAmount: subtotal,
+          totalAmount,
+          paidAmount: totalAmount,
           remainingAmount: 0,
           paymentType: "ON_SITE",
           status: "PAID",
@@ -1106,7 +1134,7 @@ export async function completePointOfSaleSale(input) {
       await tx.transaction.create({
         data: {
           paymentId: payment.id,
-          amount: subtotal,
+          amount: totalAmount,
           method: method === "CASH" ? "CASH" : "CARD",
           transactionType: "FINAL_PAYMENT",
           paidAt: new Date(),
@@ -1134,9 +1162,9 @@ export async function completePointOfSaleSale(input) {
         : await issueInvoice(tx, {
             paymentId: payment.id,
             source: "ORDER",
-            totalInclVat: subtotal,
+            totalInclVat: totalAmount,
             customer: buildInvoiceCustomer(customer),
-            lines: pricedSaleItems.map((item) => ({ description: `${item.product.name} — ${item.name}`, quantity: item.quantity, unitPrice: item.taxUnitPrice })),
+            lines: orderInvoiceLines(order),
             vatRate: posVatPolicy.vatRate,
             vatTreatment: posVatPolicy.vatTreatment,
             taxCountryCode: posVatPolicy.taxCountryCode,
@@ -1169,7 +1197,7 @@ export async function completePointOfSaleSale(input) {
           action: "order.point_of_sale_completed",
           entityType: "Order",
           entityId: order.id,
-          after: { status: "COMPLETED", totalAmount: subtotal, paymentMethod: method },
+          after: { status: "COMPLETED", totalAmount, paymentMethod: method },
           metadata: {
             orderNumber: order.orderNumber,
             customerId: customer?.id ?? null,
@@ -1251,7 +1279,7 @@ export async function completePointOfSaleSale(input) {
         vatRate: result.order.vatRate,
         vatAmount: result.order.totalVat,
         totalInclVat: result.order.totalAmount,
-        lines: result.order.items.map((item) => ({ description: item.productName, quantity: item.quantity, unitPrice: Number(item.unitPrice) })),
+        lines: orderTicketLines(result.order),
       }).catch((error) => {
         captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "ticket-pdf" });
         return null;
@@ -1339,7 +1367,7 @@ export async function completePointOfSaleSale(input) {
       vatRate: result.order.vatRate,
       vatAmount: result.order.totalVat,
       totalInclVat: result.order.totalAmount,
-      lines: result.order.items.map((item) => ({ description: item.productName, quantity: item.quantity, unitPrice: Number(item.unitPrice) })),
+      lines: orderTicketLines(result.order),
     }).catch((error) => {
       captureError(error, { area: "point-of-sale", orderId: result.order.id, context: "receipt-pdf" });
       return null;
@@ -1388,6 +1416,12 @@ export async function completePointOfSaleSale(input) {
       },
     };
   } catch (error) {
+    if (error instanceof CounterPromoCodeError) {
+      return { success: false, message: error.message, errors: { promoCode: error.message } };
+    }
+    if (error.message === "POS_QR_NOTHING_TO_PAY") {
+      return { success: false, message: "Le total est à 0 € après le code promo : encaissez en espèces ou au terminal." };
+    }
     if (error.message === "SELLER_LEGAL_DATA_INCOMPLETE") {
       return { success: false, message: "Identité légale du salon incomplète — complétez Réglages > Salon avant d'émettre des factures." };
     }

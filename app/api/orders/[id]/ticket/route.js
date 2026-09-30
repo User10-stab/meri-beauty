@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { canAccessDashboard, isTillCashOperator } from "@/lib/authorization";
 import { renderTicketPdf } from "@/lib/pdf/render";
 import { formatSalonAddress } from "@/lib/format-address";
+import { orderTicketLines } from "@/lib/orders/fulfill-order-payment";
 
 // react-pdf needs Node APIs — not edge-compatible.
 export const runtime = "nodejs";
@@ -60,6 +61,7 @@ export async function GET(req, { params }) {
         vatRate: true,
         totalVat: true,
         totalAmount: true,
+        discountAmount: true,
         items: { select: { productName: true, quantity: true, unitPrice: true } },
       },
     }),
@@ -126,11 +128,7 @@ export async function GET(req, { params }) {
     vatRate: order.vatRate,
     vatAmount: order.totalVat,
     totalInclVat: order.totalAmount,
-    lines: order.items.map((item) => ({
-      description: item.productName,
-      quantity: item.quantity,
-      unitPrice: Number(item.unitPrice),
-    })),
+    lines: orderTicketLines(order),
   });
 
   return new NextResponse(pdf, {

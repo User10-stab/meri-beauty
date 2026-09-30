@@ -101,7 +101,8 @@ describe("point-of-sale security contracts", () => {
     const validation = source("lib/validations/point-of-sale.js");
     expect(validation).toContain('data.method !== "CASH" || data.cashReceived != null');
 
-    expect(pos).toContain('method === "CASH" && cashReceived < subtotal');
+    // The total is what the client pays — the cart less any promo code.
+    expect(pos).toContain('method === "CASH" && cashReceived < totalAmount');
     expect(pos).toContain('throw new Error("POS_CASH_INSUFFICIENT")');
     expect(pos).toContain('cashReceived: method === "CASH" ? cashReceived : null');
     expect(pos).toContain('changeGiven: method === "CASH" ? changeGiven : null');

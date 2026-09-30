@@ -19,9 +19,13 @@ import { validatePromoCode } from "@/actions/promo-codes";
  *   subtotal: number,
  *   context: { scope: "BOUTIQUE"|"APPOINTMENT"|"WORKSHOP"|"FORMATION", lines?: {productId: string, amount: number}[], staffServiceId?: string },
  *   onApplied: (promo: {code: string, discountAmount: number} | null) => void,
+ *   validate?: (code: string, subtotal: number, context: object) => Promise<{success: boolean, message?: string, discountAmount?: number}>,
  * }} props
+ *
+ * `validate` swaps the public preview for another one — the till passes its
+ * staff-only previewCounterPromoCode (actions/counter/promo-code.js).
  */
-export function PromoCodeField({ subtotal, context, onApplied }) {
+export function PromoCodeField({ subtotal, context, onApplied, validate = validatePromoCode }) {
   const t = useTranslations("promoCode");
   const [input, setInput] = useState("");
   const [applied, setApplied] = useState(null);
@@ -34,7 +38,7 @@ export function PromoCodeField({ subtotal, context, onApplied }) {
 
     setChecking(true);
     setError(null);
-    const result = await validatePromoCode(code, subtotal, context);
+    const result = await validate(code, subtotal, context);
     setChecking(false);
 
     if (!result.success) {

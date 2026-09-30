@@ -33,7 +33,7 @@ import { calculateShippingCost, calculateTotalWeight } from "@/lib/shipping";
 import { sendCheckoutVerificationEmail } from "@/actions/shared/send-checkout-verification-email";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 import { resolvePromoCode, claimPromoCodeUse, promoClaimErrorMessage } from "@/lib/promo-codes";
-import { fulfillOrderPayment, orderInvoiceLines } from "@/lib/orders/fulfill-order-payment";
+import { fulfillOrderPayment, orderInvoiceLines, orderTicketLines } from "@/lib/orders/fulfill-order-payment";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
 import { buildTermsAcceptanceUpdate, recordTermsAcceptance } from "@/lib/terms-consent";
 import { validatePassword } from "@/lib/validations/password";
@@ -1733,7 +1733,7 @@ export async function completeOrderPickup({ orderId, pickupCode, method, termina
         vatRate: order.vatRate,
         vatAmount: order.totalVat,
         totalInclVat: order.totalAmount,
-        lines: order.items.map((item) => ({ description: item.productName, quantity: item.quantity, unitPrice: Number(item.unitPrice) })),
+        lines: orderTicketLines(order),
       }).catch((err) => {
         console.error("[completeOrderPickup] ticket PDF render failed:", err);
         return null;

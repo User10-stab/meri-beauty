@@ -113,7 +113,7 @@ test.describe("settle an unpaid pickup order at the till", () => {
     expect(sale.payment?.status).toBe("PAID");
     const [receipt] = await prisma.transaction.findMany({ where: { paymentId: sale.payment.id } });
     expect(receipt.method).toBe("CARD");
-    expect(receipt.manualReference).toBe(`Produit n°${sale.orderNumber}`);
+    expect(receipt.manualReference).toBe(`Commande n°${sale.orderNumber}`);
 
     const original = await prisma.order.findUnique({ where: { id: order.id }, include: { payment: true } });
     // Not a cancellation: its own status, and a real link to the sale.

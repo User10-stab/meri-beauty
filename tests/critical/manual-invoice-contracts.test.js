@@ -332,7 +332,7 @@ describe("« Encaisser tout »: invoiced at once", () => {
       method: "CARD",
       transactionType: "FINAL_PAYMENT",
       amount: 174.2,
-      manualReference: "Produit n°77",
+      manualReference: "Commande n°77",
       cashSessionId: null,
       pieceNumber: null,
     });
@@ -375,7 +375,7 @@ describe("« Encaisser tout »: invoiced at once", () => {
 
   it("a card payment ignores any typed reference: the order number is recorded", async () => {
     await createManualInvoice(input({ settlement: { mode: "NOW", method: "CARD", reference: "004512" } }));
-    expect(mocks.tx.transaction.create.mock.calls[0][0].data).toMatchObject({ method: "CARD", manualReference: "Produit n°77" });
+    expect(mocks.tx.transaction.create.mock.calls[0][0].data).toMatchObject({ method: "CARD", manualReference: "Commande n°77" });
   });
 
   it("cash goes into the open till session with a cash-book piece number and the change given", async () => {
@@ -480,7 +480,7 @@ describe("a bank transfer stays pending until staff approve it", () => {
     mocks.tx = makeTx();
     const card = await settleManualInvoice({ orderId: "o_1", method: "CARD", reference: "" });
     expect(card).toMatchObject({ success: true });
-    expect(mocks.tx.transaction.create.mock.calls[0][0].data).toMatchObject({ method: "CARD", manualReference: "Produit n°77" });
+    expect(mocks.tx.transaction.create.mock.calls[0][0].data).toMatchObject({ method: "CARD", manualReference: "Commande n°77" });
   });
 
   it("approving it records the transfer, clears the awaited amount and — if it clears the balance — issues the invoice", async () => {

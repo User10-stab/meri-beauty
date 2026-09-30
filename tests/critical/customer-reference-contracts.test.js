@@ -43,15 +43,15 @@ describe("parseCustomerOrderReference — what a customer reads off their receip
   });
 });
 
-describe("the receipt shows one reference and one only", () => {
+describe("the receipt shows its ticket number and the order it settles", () => {
   const ticketDocument = source("lib/pdf/TicketDocument.jsx");
 
   it("prints the ticket number", () => {
     expect(ticketDocument).toContain("N° ${ticketNumber} — ");
   });
 
-  it("no longer prints the order number next to it — that pairing is what customers read as a contradiction", () => {
-    expect(ticketDocument).not.toContain("Commande n° {ticket.orderNumber}");
+  it("prints the order number worded like the livre de recettes reference, so the two can be matched", () => {
+    expect(ticketDocument).toContain("orderTerminalReference(ticket.orderNumber)");
   });
 });
 

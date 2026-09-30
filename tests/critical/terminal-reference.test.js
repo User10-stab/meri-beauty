@@ -3,7 +3,7 @@ import { allocateBookingTerminalReference, orderTerminalReference } from "@/lib/
 
 /**
  * 2026-09-28: staff no longer type the terminal ticket's reference. What is
- * recorded instead must still read as a reference: « Produit n°36 »,
+ * recorded instead must still read as a reference: « Commande n°36 »,
  * « Atelier n°01 »…
  */
 
@@ -13,7 +13,7 @@ function txReturning(lastNumber) {
 
 describe("terminal payment references", () => {
   it("a boutique sale or pickup is referenced by its numéro de commande", () => {
-    expect(orderTerminalReference(36)).toBe("Produit n°36");
+    expect(orderTerminalReference(36)).toBe("Commande n°36");
   });
 
   it("each booking kind reads as its own numbered series", async () => {

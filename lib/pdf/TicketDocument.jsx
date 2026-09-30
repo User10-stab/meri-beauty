@@ -1,4 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
+import { orderTerminalReference } from "@/lib/payments/terminal-reference";
 import { COLORS, formatDate, money } from "./theme";
 
 /**
@@ -99,10 +100,11 @@ function TicketPage({ ticket, contact = null }) {
         {/* Cash-only: the livre de caisse line this collection produced.
             Absent for CARD/ONLINE, which never enter that book. */}
         {ticket.pieceNumber ? <Text style={styles.meta}>N° pièce {ticket.pieceNumber}</Text> : null}
-        {/* No order number by design — T-<year>-<seq> is the only reference a
-            customer is ever shown, so the two sequences can never be read as
-            contradicting each other. The return lookup accepts both, so a
-            receipt printed before this change still works. */}
+        {/* The order number, worded exactly like the terminal payment's
+            reference in the livre de recettes, so a ticket can be matched to
+            its line there (user's call, 2026-09-30 — reverses the 15/09/2026
+            "ticket number only" choice). The return lookup accepts both. */}
+        {ticket.orderNumber ? <Text style={styles.meta}>{orderTerminalReference(ticket.orderNumber)}</Text> : null}
 
         <Rule />
 

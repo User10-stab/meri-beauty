@@ -667,16 +667,6 @@
     "rejected": "Verzoek geweigerd.",
     "message": "Bericht"
   },
-  "reports": {
-    "title": "Rapporten",
-    "period": "Periode",
-    "sales": "Verkoop",
-    "orderStatuses": "Bestelstatussen",
-    "appointmentStatuses": "Afspraakstatussen",
-    "noSales": "Geen verkoop in deze periode.",
-    "noOrders": "Geen bestellingen in deze periode.",
-    "noAppointments": "Geen afspraken in deze periode."
-  },
   "settings": {
     "title": "Instellingen",
     "salon": "Saloninstellingen",
@@ -2030,8 +2020,7 @@
       "prospects": "Prospects",
       "campaigns": "Campagnes",
       "rentalRequests": "Verhuurverzoeken",
-      "reviews": "Klantbeoordelingen",
-      "reports": "Rapporten"
+      "reviews": "Klantbeoordelingen"
     },
     "stats": {
       "revenueThisMonth": "Omzet deze maand",
@@ -2161,10 +2150,6 @@
       "title": "Klantbeoordelingen",
       "subtitle": "Bekijk en beheer alle klantbeoordelingen.",
       "totalLabel": "Totaal"
-    },
-    "reports": {
-      "title": "Rapporten",
-      "subtitle": "Overzicht van de activiteit over de laatste 6 maanden — omzet, verkopen, klanten."
     },
     "settings": {
       "title": "Saloninstellingen",

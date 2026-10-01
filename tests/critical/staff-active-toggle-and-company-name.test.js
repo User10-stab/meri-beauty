@@ -57,29 +57,31 @@ describe("staff company name on rent invoices", () => {
 });
 
 /**
- * 2026-10-01: « Nom professionnel », when filled in, takes the « Entreprise »
- * line ahead of « Nom d'entreprise »; her own name stays under « À
- * l'attention de ». Blank = the nom d'entreprise rule above, unchanged.
+ * 2026-10-01: « Nom professionnel », when filled in, replaces her account's
+ * full name on the invoice (« À l'attention de »). It never takes the
+ * « Entreprise » line — that stays « Nom d'entreprise ». Blank = unchanged.
  */
 describe("staff professional name on rent invoices", () => {
   const user = { id: "u2", fullName: "Lyly Hannecart", email: "lyly@example.com", vatNumber: "BE0660821903" };
 
-  it("wins over the company name", async () => {
+  it("replaces her full name, the company stays Entreprise", async () => {
     const customer = await buildStaffCustomer({ vatNumber: null, companyName: "Mylitha", professionalName: " Aurélie Hannecart " }, user);
-    expect(customer.legalName).toBe("Aurélie Hannecart");
-    expect(customer.billingContactName).toBe("Lyly Hannecart");
+    expect(customer.legalName).toBe("Mylitha");
+    expect(customer.billingContactName).toBe("Aurélie Hannecart");
+    expect(customer.fullName).toBe("Aurélie Hannecart");
   });
 
-  it("works without a company name", async () => {
+  it("without a company name it is simply her name on the invoice", async () => {
     const customer = await buildStaffCustomer({ vatNumber: null, companyName: null, professionalName: "Aurélie Hannecart" }, user);
-    expect(customer.legalName).toBe("Aurélie Hannecart");
-    expect(customer.billingContactName).toBe("Lyly Hannecart");
+    expect(customer.legalName).toBeNull();
+    expect(customer.fullName).toBe("Aurélie Hannecart");
   });
 
-  it("blank leaves the company name in place", async () => {
+  it("blank keeps her account name", async () => {
     const customer = await buildStaffCustomer({ vatNumber: null, companyName: "Mylitha", professionalName: "  " }, user);
     expect(customer.legalName).toBe("Mylitha");
     expect(customer.billingContactName).toBe("Lyly Hannecart");
+    expect(customer.fullName).toBe("Lyly Hannecart");
   });
 
   it("is read by every rent issuing path and kept on update when absent", () => {

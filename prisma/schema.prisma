@@ -1657,9 +1657,9 @@ model Staff {
   // « À l'attention de ». Blank = her name, as before. Read only when an
   // invoice is issued — an invoice already issued never changes.
   companyName       String?
-  // « Nom professionnel » of an independent. When set it is the « Entreprise »
-  // line of her rent invoices, ahead of companyName; her own name stays under
-  // « À l'attention de ». Read only at issuance, like companyName.
+  // « Nom professionnel » of an independent. When set it replaces her
+  // account's full name on her rent invoices (« À l'attention de »); the
+  // « Entreprise » line stays companyName. Read only at issuance.
   professionalName  String?
   // Dashboard modules explicitly granted by an OWNER/ADMIN. Kept as stable
   // string capability keys so new permissions can be added without a DB enum migration.

@@ -514,13 +514,13 @@ function EditForm({ staff, services, onSuccess, onCancel }) {
             <p className="mt-1 text-xs text-gray-500 dark:text-dark-6">Affiché comme « Entreprise » sur ses prochaines factures. Vide : son nom.</p>
           </div>
 
-          {/* Nom professionnel — s'il est rempli, il prend la place du nom
-              d'entreprise sur ses prochaines factures de loyer. */}
+          {/* Nom professionnel — s'il est rempli, il prend la place de son nom
+              complet sur ses prochaines factures de loyer. */}
           <div>
             <Label htmlFor="editProfessionalName" icon={Building2}>Nom professionnel</Label>
             <TextInput id="editProfessionalName" type="text" placeholder="ex. Aurélie Hannecart (optionnel)" error={errors.professionalName} {...register("professionalName")} />
             <FieldError message={errors.professionalName?.message} />
-            <p className="mt-1 text-xs text-gray-500 dark:text-dark-6">S'il est rempli, il remplace le nom d'entreprise comme « Entreprise » sur ses prochaines factures.</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-dark-6">S'il est rempli, il remplace son nom complet sur ses prochaines factures. Le nom d'entreprise ne change pas.</p>
           </div>
 
           {/* Rythme souhaité */}

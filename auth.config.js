@@ -11,7 +11,6 @@ const ADMIN_ONLY_ROUTES = [
   "/dashboard/staff",
   "/dashboard/categories",
   "/dashboard/rental-requests",
-  "/dashboard/reports",
   "/dashboard/salon-settings",
   "/dashboard/settings",
 ];

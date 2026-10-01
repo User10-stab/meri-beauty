@@ -10,6 +10,7 @@ import { getCurrentStaffId } from "@/lib/route-protection";
 import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
 import { SALON_PAYMENT_WHERE } from "@/lib/authorization/salon-scope";
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
+import { BANK_METHODS, CASH_METHODS, METHOD_LABELS } from "@/lib/reports-filters";
 
 // Same candidate statuses as lib/orders/notify-stale-fulfilment.js — the only
 // statuses getOrderOverdueReason can ever flag. Keep in sync with that file.
@@ -42,6 +43,20 @@ function monthKeyOf(date) {
 function dateKey(date) {
   const d = new Date(date);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Which Payment foreign key says what was sold. Anything else the salon was
+// paid for (an invoice sale with free lines, …) lands in "Autres" so the
+// breakdown always adds up to the revenue card.
+const REVENUE_SOURCES = [
+  { key: "boutique", label: "Boutique", field: "orderId" },
+  { key: "appointments", label: "Rendez-vous", field: "appointmentId" },
+  { key: "workshops", label: "Ateliers", field: "workshopReservationId" },
+  { key: "formations", label: "Formations", field: "formationReservationId" },
+];
+
+function round2(value) {
+  return Math.round(value * 100) / 100;
 }
 
 function monthLabelOf(year, monthIndex) {
@@ -131,6 +146,11 @@ export async function getDashboardStats({ month = null } = {}) {
   };
 
 
+  // Every boutique Order is the salon's — online, or rung up at the till by
+  // anyone (Marie, an admin, or a staff member granted CAISSE). Who rang it up
+  // never moves boutique revenue out of the salon's books.
+  const salonOrder = {};
+
   try {
     const [
       monthPayments,
@@ -140,11 +160,21 @@ export async function getDashboardStats({ month = null } = {}) {
       listedAppointments,
       ordersInMonth,
       overdueCandidates,
+      methodRows,
+      topProductsRaw,
     ] = await Promise.all([
       // Single month query feeds both the revenue total and the daily chart.
       isAdmin ? prisma.payment.findMany({
         where: revenueWhere,
-        select: { paidAmount: true, paidAt: true, transactions: { select: { transactionType: true, amount: true } } },
+        select: {
+          paidAmount: true,
+          paidAt: true,
+          orderId: true,
+          appointmentId: true,
+          workshopReservationId: true,
+          formationReservationId: true,
+          transactions: { select: { transactionType: true, amount: true } },
+        },
       }) : Promise.resolve([]),
       canSeeAppointments ? prisma.appointment.count({
         where: appointmentCountWhere,
@@ -203,7 +233,69 @@ export async function getDashboardStats({ month = null } = {}) {
           user: { select: { fullName: true } },
         },
       }) : Promise.resolve([]),
+      // Cash vs bank, from the Transaction ledger — only a Transaction knows
+      // whether the money went into the drawer or onto a bank statement.
+      // Grouped with transactionType so a refund is netted off its own method
+      // instead of inflating takings.
+      isAdmin ? prisma.transaction.groupBy({
+        by: ["method", "transactionType"],
+        where: {
+          isDeleted: false,
+          paidAt: { gte: monthStart, lt: monthEnd },
+          payment: SALON_PAYMENT_WHERE,
+        },
+        _sum: { amount: true },
+      }) : Promise.resolve([]),
+      isAdmin ? prisma.orderItem.groupBy({
+        by: ["productName"],
+        where: {
+          order: {
+            createdAt: { gte: monthStart, lt: monthEnd },
+            // SETTLED_AT_COUNTER: its items are counted once, on the counter
+            // sale that replaced it.
+            status: { notIn: ["CANCELLED", "EXPIRED", "SETTLED_AT_COUNTER"] },
+            ...salonOrder,
+          },
+        },
+        _sum: { quantity: true },
+        orderBy: { _sum: { quantity: "desc" } },
+        take: 8,
+      }) : Promise.resolve([]),
     ]);
+
+    // ── Revenue by activity — same payments, same net figure as the card. ──
+    const sourceTotals = { boutique: 0, appointments: 0, workshops: 0, formations: 0, other: 0 };
+    for (const p of monthPayments) {
+      const source = REVENUE_SOURCES.find((s) => p[s.field] != null);
+      sourceTotals[source ? source.key : "other"] += summarizePaymentAmounts(p).netCollectedAmount;
+    }
+    const revenueBySource = REVENUE_SOURCES.map((s) => ({ key: s.key, label: s.label, value: round2(sourceTotals[s.key]) }));
+    if (round2(sourceTotals.other) !== 0) {
+      revenueBySource.push({ key: "other", label: "Autres", value: round2(sourceTotals.other) });
+    }
+
+    // ── Cash vs bank ──────────────────────────────────────────────────────
+    const netByMethod = Object.fromEntries(Object.keys(METHOD_LABELS).map((m) => [m, 0]));
+    const refundByMethod = { ...netByMethod };
+    for (const row of methodRows) {
+      const amount = Number(row._sum.amount ?? 0);
+      if (!(row.method in netByMethod)) continue;
+      if (row.transactionType === "REFUND") {
+        netByMethod[row.method] -= amount;
+        refundByMethod[row.method] += amount;
+      } else {
+        netByMethod[row.method] += amount;
+      }
+    }
+    const collectionByMethod = Object.keys(METHOD_LABELS).map((method) => ({
+      method,
+      label: METHOD_LABELS[method],
+      // Which side of the reconciliation this lands on: the drawer, or the
+      // bank statement.
+      settlement: CASH_METHODS.includes(method) ? "cash" : "bank",
+      net: round2(netByMethod[method]),
+      refunded: round2(refundByMethod[method]),
+    }));
 
     const overdueOrders = overdueCandidates
       .map((order) => ({ order, reason: getOrderOverdueReason(order, now) }))
@@ -268,6 +360,11 @@ export async function getDashboardStats({ month = null } = {}) {
           availableQuantity: v.availableQuantity,
           lowStockThreshold: v.lowStockThreshold,
         })),
+        revenueBySource,
+        collectionByMethod,
+        cashCollected: round2(CASH_METHODS.reduce((sum, m) => sum + netByMethod[m], 0)),
+        bankCollected: round2(BANK_METHODS.reduce((sum, m) => sum + netByMethod[m], 0)),
+        topProducts: topProductsRaw.map((p) => ({ name: p.productName, quantity: p._sum.quantity ?? 0 })),
         overdueOrdersCount: overdueOrders.length,
         // Capped well above the ~3 cards visible at once in the dashboard
         // carousel — enough to scroll through without re-fetching, not

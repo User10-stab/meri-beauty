@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { AlertTriangle, CalendarDays, Euro, PackageX, UserPlus } from "lucide-react";
+import { AlertTriangle, Banknote, CalendarDays, Euro, Landmark, PackageX, UserPlus } from "lucide-react";
 import { getDashboardStats } from "@/actions/dashboard/get-dashboard-stats";
 import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 import { isCurrentUserAdmin } from "@/lib/route-protection";
@@ -36,6 +36,14 @@ function currentMonthKey() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
+
+const SOURCE_COLORS = {
+  boutique: "#2f3a2e",
+  appointments: "#b89664",
+  workshops: "#0ea5e9",
+  formations: "#8b5cf6",
+  other: "#9ca3af",
+};
 
 const ORDER_STATUS_LABEL = {
   PENDING_PAYMENT: "En attente de paiement",
@@ -96,6 +104,10 @@ export default async function Home({ searchParams }) {
     ? `/dashboard/appointments?date=${todayKey}&statuses=${cardStatuses}`
     : `/dashboard/appointments?month=${data.activeMonth}&statuses=${cardStatuses}`;
   const customersHref = `/dashboard/customers?createdMonth=${data.activeMonth}`;
+
+  const maxSourceValue = Math.max(1, ...data.revenueBySource.map((s) => s.value));
+  const maxMethodValue = Math.max(1, ...data.collectionByMethod.map((row) => Math.max(row.net, 0)));
+  const maxProductQty = Math.max(1, ...data.topProducts.map((p) => p.quantity));
 
   return (
     <div className="space-y-6">
@@ -205,6 +217,92 @@ export default async function Home({ searchParams }) {
           )}
         </div>
       </div>
+
+      {/* ── The month in detail (admins only — the salon's figures) ───── */}
+      {showFilters && (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {/* ── Top products ───────────────────────────────────────────── */}
+          <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+            <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">Meilleures ventes (produits)</h2>
+            {data.topProducts.length === 0 ? (
+              <p className="text-sm text-gray-400">Aucune vente sur la période.</p>
+            ) : (
+              <ul className="space-y-3">
+                {data.topProducts.map((p) => (
+                  <li key={p.name}>
+                    <div className="mb-1 flex items-center justify-between text-sm">
+                      <span className="truncate font-medium text-dark dark:text-white">{p.name}</span>
+                      <span className="ml-2 shrink-0 text-gray-500 dark:text-dark-6">{p.quantity} vendu{p.quantity > 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-dark-3">
+                      <div className="h-full rounded-full bg-[#2f3a2e] dark:bg-white" style={{ width: `${(p.quantity / maxProductQty) * 100}%` }} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* ── Revenue by activity ────────────────────────────────────── */}
+          <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+            <h2 className="mb-4 text-lg font-bold text-dark dark:text-white">Répartition par activité</h2>
+            <ul className="space-y-4">
+              {data.revenueBySource.map((s) => (
+                <li key={s.key}>
+                  <div className="mb-1.5 flex items-center justify-between text-sm">
+                    <span className="font-medium text-dark dark:text-white">{s.label}</span>
+                    <span className="text-gray-500 dark:text-dark-6">{formatEuro(s.value)}</span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-dark-3">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: `${(Math.max(s.value, 0) / maxSourceValue) * 100}%`, backgroundColor: SOURCE_COLORS[s.key] }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* ── Cash vs bank ───────────────────────────────────────────── */}
+          <div className="rounded-[10px] border border-stroke bg-white p-6 shadow-1 dark:border-dark-3 dark:bg-gray-dark dark:shadow-card">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-lg font-bold text-dark dark:text-white">Encaissements</h2>
+              <span className="text-sm font-bold text-dark dark:text-white">{formatEuro(data.cashCollected + data.bankCollected)}</span>
+            </div>
+            <p className="mb-4 text-xs text-gray-500 dark:text-dark-6">
+              Par moyen de paiement, net des remboursements. Peut différer légèrement du chiffre d’affaires.
+            </p>
+            <ul className="space-y-4">
+              {data.collectionByMethod.map((row) => (
+                <li key={row.method}>
+                  <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
+                    <span className="flex min-w-0 items-center gap-2 font-medium text-dark dark:text-white">
+                      {row.settlement === "cash" ? <Banknote size={15} className="shrink-0" /> : <Landmark size={15} className="shrink-0" />}
+                      <span className="truncate">{row.label}</span>
+                    </span>
+                    <span className="shrink-0 text-gray-500 dark:text-dark-6">
+                      {formatEuro(row.net)}
+                      {row.refunded > 0 && (
+                        <span className="ml-2 text-xs text-red-500">−{formatEuro(row.refunded)} remboursé</span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-dark-3">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${(Math.max(row.net, 0) / maxMethodValue) * 100}%`,
+                        backgroundColor: row.settlement === "cash" ? "#2f3a2e" : "#b89664",
+                      }}
+                    />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {/* ── Upcoming appointments ────────────────────────────────────── */}

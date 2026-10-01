@@ -1,6 +1,7 @@
 "use client";
 
 import { RowActions } from "../Tables/RowActions";
+import { reservationBalanceDue } from "@/lib/payments/collectible-balance";
 
 const STATUS_STYLES = {
   PENDING_DEPOSIT: "bg-amber-50 text-amber-700 border-amber-200",
@@ -62,6 +63,7 @@ function formatSessionDate(date) {
 export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSendCheckIn, onResendPayment, isResendingPayment = false, highlighted = false, rowRef }) {
   const priceFormatted = (value) =>
     new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value ?? 0));
+  const balanceDue = reservationBalanceDue(row);
 
   return (
     <tr
@@ -137,8 +139,8 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSe
               {PAYMENT_STATUS_LABELS[row.payment.status] ?? row.payment.status}
             </span>
           )}
-          {Number(row.balanceDue) > 0 && (
-            <span className="block text-xs text-amber-600">Solde : {priceFormatted(row.balanceDue)}</span>
+          {balanceDue > 0 && (
+            <span className="block text-xs text-amber-600">Solde : {priceFormatted(balanceDue)}</span>
           )}
         </div>
       </td>

@@ -271,7 +271,7 @@ export default async function Home({ searchParams }) {
               <span className="text-sm font-bold text-dark dark:text-white">{formatEuro(data.cashCollected + data.bankCollected)}</span>
             </div>
             <p className="mb-4 text-xs text-gray-500 dark:text-dark-6">
-              Par moyen de paiement, net des remboursements. Peut différer légèrement du chiffre d’affaires.
+              Par moyen de paiement, net des remboursements — le même total que le chiffre d’affaires.
             </p>
             <ul className="space-y-4">
               {data.collectionByMethod.map((row) => (

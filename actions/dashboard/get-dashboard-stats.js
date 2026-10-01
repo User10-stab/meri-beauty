@@ -5,7 +5,6 @@ import { prisma } from "@/lib/prisma";
 import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
 import { hasPermission, DASHBOARD_PERMISSIONS, getDashboardPermissions, isAdminRole, isTillCashOperator, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getLowStockVariants } from "@/actions/boutique/stock";
-import { summarizePaymentAmounts } from "@/lib/payments/reconcile-reservation-refund";
 import { getCurrentStaffId } from "@/lib/route-protection";
 import { staffCustomerRelationshipFilters } from "@/lib/staff-customer-scope";
 import { SALON_PAYMENT_WHERE } from "@/lib/authorization/salon-scope";
@@ -23,12 +22,6 @@ function overdueSinceDate(order, reason) {
   if (reason === "NOT_CONFIRMED_DELIVERED") return order.shippedAt;
   return order.createdAt;
 }
-
-// Revenue = money that has actually landed, regardless of a later partial/
-// full refund — a refund is its own ledger event, it doesn't erase that the
-// sale happened. PENDING/FAILED/REFUND_PENDING carry no paidAmount worth
-// counting yet.
-const REVENUE_STATUSES = ["PAID", "PARTIALLY_PAID", "PARTIALLY_REFUNDED", "REFUNDED"];
 
 function startOfDay(date) {
   const d = new Date(date);
@@ -57,6 +50,12 @@ const REVENUE_SOURCES = [
 
 function round2(value) {
   return Math.round(value * 100) / 100;
+}
+
+// A REFUND is a negative entry, like in the livre de recettes.
+function signedAmount(transaction) {
+  const amount = Number(transaction.amount ?? 0);
+  return transaction.transactionType === "REFUND" ? -amount : amount;
 }
 
 function monthLabelOf(year, monthIndex) {
@@ -117,11 +116,16 @@ export async function getDashboardStats({ month = null } = {}) {
   // (Payment.payeeStaffId set) is hers, under her own VAT number, and is never
   // added to the salon's "chiffre d'affaires". Revenue is admin-only, so a
   // non-admin never runs this query. See lib/authorization/salon-scope.js.
+  //
+  // Revenue is counted the way the livre de recettes counts it: by the day the
+  // money MOVED (Transaction.paidAt), a refund being a negative entry on the
+  // day it was paid out. Counting by Payment.paidAt put a refund in September
+  // on an August sale into neither month's net (prod, Sept 2026: 7 323,30 €
+  // here against 7 308,30 € in the livre).
   const revenueWhere = {
     isDeleted: false,
-    status: { in: REVENUE_STATUSES },
     paidAt: { gte: monthStart, lt: monthEnd },
-    ...SALON_PAYMENT_WHERE,
+    payment: SALON_PAYMENT_WHERE,
   };
 
   // "Today" only exists in the current month — for another month the card
@@ -153,7 +157,7 @@ export async function getDashboardStats({ month = null } = {}) {
 
   try {
     const [
-      monthPayments,
+      monthTransactions,
       appointmentsCount,
       newCustomersInMonth,
       lowStock,
@@ -163,17 +167,22 @@ export async function getDashboardStats({ month = null } = {}) {
       methodRows,
       topProductsRaw,
     ] = await Promise.all([
-      // Single month query feeds both the revenue total and the daily chart.
-      isAdmin ? prisma.payment.findMany({
+      // Single month query feeds the revenue total, the daily chart and the
+      // split by activity.
+      isAdmin ? prisma.transaction.findMany({
         where: revenueWhere,
         select: {
-          paidAmount: true,
+          amount: true,
+          transactionType: true,
           paidAt: true,
-          orderId: true,
-          appointmentId: true,
-          workshopReservationId: true,
-          formationReservationId: true,
-          transactions: { select: { transactionType: true, amount: true } },
+          payment: {
+            select: {
+              orderId: true,
+              appointmentId: true,
+              workshopReservationId: true,
+              formationReservationId: true,
+            },
+          },
         },
       }) : Promise.resolve([]),
       canSeeAppointments ? prisma.appointment.count({
@@ -265,9 +274,9 @@ export async function getDashboardStats({ month = null } = {}) {
 
     // ── Revenue by activity — same payments, same net figure as the card. ──
     const sourceTotals = { boutique: 0, appointments: 0, workshops: 0, formations: 0, other: 0 };
-    for (const p of monthPayments) {
-      const source = REVENUE_SOURCES.find((s) => p[s.field] != null);
-      sourceTotals[source ? source.key : "other"] += summarizePaymentAmounts(p).netCollectedAmount;
+    for (const t of monthTransactions) {
+      const source = REVENUE_SOURCES.find((s) => t.payment?.[s.field] != null);
+      sourceTotals[source ? source.key : "other"] += signedAmount(t);
     }
     const revenueBySource = REVENUE_SOURCES.map((s) => ({ key: s.key, label: s.label, value: round2(sourceTotals[s.key]) }));
     if (round2(sourceTotals.other) !== 0) {
@@ -316,11 +325,11 @@ export async function getDashboardStats({ month = null } = {}) {
     for (let day = 1; day <= daysInMonth; day++) {
       dailyTotals.set(`${activeMonth}-${String(day).padStart(2, "0")}`, 0);
     }
-    for (const p of monthPayments) {
-      if (!p.paidAt) continue;
-      const key = dateKey(p.paidAt);
+    for (const t of monthTransactions) {
+      if (!t.paidAt) continue;
+      const key = dateKey(t.paidAt);
       if (dailyTotals.has(key)) {
-        dailyTotals.set(key, dailyTotals.get(key) + summarizePaymentAmounts(p).netCollectedAmount);
+        dailyTotals.set(key, round2(dailyTotals.get(key) + signedAmount(t)));
       }
     }
     const revenueTrend = Array.from(dailyTotals.entries()).map(([date, total]) => ({ date, total }));
@@ -328,10 +337,7 @@ export async function getDashboardStats({ month = null } = {}) {
     return {
       success: true,
       data: {
-        revenueThisMonth: monthPayments.reduce(
-          (sum, payment) => sum + summarizePaymentAmounts(payment).netCollectedAmount,
-          0,
-        ),
+        revenueThisMonth: round2(monthTransactions.reduce((sum, t) => sum + signedAmount(t), 0)),
         appointmentsToday: appointmentsCount,
         newCustomersThisMonth: newCustomersInMonth,
         lowStockCount: lowStock.data?.length ?? 0,

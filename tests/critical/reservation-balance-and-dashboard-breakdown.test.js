@@ -68,3 +68,19 @@ describe("the dashboard home carries what Rapports used to show", () => {
     expect(page).toContain("{showFilters && (\n        <div className=\"grid grid-cols-1 gap-4 xl:grid-cols-3\">");
   });
 });
+
+// Prod, Sept 2026: the dashboard said 7 323,30 € and the livre de recettes
+// 7 308,30 €. A card sale of 15 € paid on 29 Aug was refunded on 23 Sept; the
+// dashboard picked payments by their own date, so that refund fell into no
+// month. Revenue is now the livre's basis: ledger entries by the day the money
+// moved, a refund being negative.
+describe("the dashboard revenue ties to the livre de recettes", () => {
+  test("it sums Transaction rows of the month, not Payment rows", () => {
+    const action = source("actions/dashboard/get-dashboard-stats.js");
+    expect(action).toContain("prisma.transaction.findMany({");
+    expect(action).toContain("payment: SALON_PAYMENT_WHERE,");
+    expect(action).toContain('transaction.transactionType === "REFUND" ? -amount : amount');
+    expect(action).not.toContain("summarizePaymentAmounts");
+    expect(action).not.toContain("monthPayments");
+  });
+});

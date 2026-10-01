@@ -40,7 +40,7 @@ import { buildAppointmentCheckInEmailAssets } from "@/lib/activities/appointment
 import { allocatePieceNumber, PIECE_SERIES } from "@/lib/cash-book/piece-number";
 import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-number";
 import { resolvePayeeForAppointment, payeePaymentData } from "@/lib/payments/resolve-payee";
-import { trackNewUser } from "@/lib/prospects/track-prospect";
+import { trackExistingProspect } from "@/lib/prospects/track-prospect";
 
 const BCRYPT_SALT_ROUNDS = 12;
 const LOGIN_URL = process.env.NEXT_PUBLIC_APP_URL
@@ -132,15 +132,11 @@ export async function resolveOrCreateCustomer(customerInfo, authenticatedUserId)
       },
     });
 
-    // Hook marketing : compte invité créé depuis une réservation (fire-and-forget).
-    trackNewUser({
-      email: user.email,
-      fullName: user.fullName,
-      phone: user.phone,
-      source: "reservation",
-      userId: user.id,
-      activityType: "appointment_booked",
-      activityDescription: "Compte créé via une réservation de rendez-vous",
+    // Marketing : prospects = ajout manuel uniquement. On enrichit
+    // seulement un prospect manuel existant (même e-mail), sans création.
+    trackExistingProspect(user.email, {
+      type: "appointment_booked",
+      description: "Compte créé via une réservation de rendez-vous",
       refModel: "User",
       refId: user.id,
       promoteTo: "demo_essai",

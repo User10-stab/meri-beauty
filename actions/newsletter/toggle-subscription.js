@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
 import { buildNewsletterConsentUpdate } from "@/lib/newsletter-consent";
-import { trackNewUser, trackExistingProspect } from "@/lib/prospects/track-prospect";
+import { trackExistingProspect } from "@/lib/prospects/track-prospect";
 
 /**
  * Toggles the newsletter subscription for the currently authenticated user.
@@ -43,16 +43,12 @@ export async function toggleNewsletterSubscription() {
 
     revalidatePath("/");
 
-    // Hook marketing : inscription -> prospect + promotion `engage` ;
-    // désinscription -> activité sur le prospect existant.
+    // Marketing : prospects = ajout manuel uniquement. Inscription comme
+    // désinscription enrichissent seulement un prospect manuel existant.
     if (newStatus) {
-      trackNewUser({
-        email: user.email,
-        fullName: user.fullName,
-        source: "email",
-        userId: user.id,
-        activityType: "newsletter_subscribed",
-        activityDescription: "Inscription à la newsletter",
+      trackExistingProspect(user.email, {
+        type: "newsletter_subscribed",
+        description: "Inscription à la newsletter",
         promoteTo: "engage",
         promoteNote: "Inscription newsletter",
       });

@@ -21,7 +21,7 @@ import {
   getRentalRequestNotificationRecipients,
 } from "@/lib/notifications";
 import { isViesOutage, verifyVatWithVies } from "@/lib/vat-validation";
-import { trackNewUser } from "@/lib/prospects/track-prospect";
+import { trackExistingProspect } from "@/lib/prospects/track-prospect";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 // Admin/owner only — see the matching note in [id]/route.js. Any STAFF
@@ -257,14 +257,11 @@ export async function POST(request) {
       }
     }
 
-    // Hook marketing : prospect + activité (fire-and-forget).
-    trackNewUser({
-      email: result.rentalRequest.user?.email,
-      fullName: result.rentalRequest.user?.fullName,
-      source: "site_web",
-      userId: session.user.id,
-      activityType: "rental_request",
-      activityDescription: `Demande de location (${result.rentalRequest.rentalType})`,
+    // Marketing : prospects = ajout manuel uniquement. Enrichit seulement
+    // un prospect manuel existant (même e-mail), sans création.
+    trackExistingProspect(result.rentalRequest.user?.email, {
+      type: "rental_request",
+      description: `Demande de location (${result.rentalRequest.rentalType})`,
       refModel: "RentalRequest",
       refId: result.rentalRequest.id,
       promoteTo: "interesse",

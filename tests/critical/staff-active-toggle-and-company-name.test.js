@@ -55,3 +55,39 @@ describe("staff company name on rent invoices", () => {
     expect(action).toContain("...(companyName !== undefined ? { companyName: companyName?.trim() || null } : {}),");
   });
 });
+
+/**
+ * 2026-10-01: « Nom professionnel », when filled in, takes the « Entreprise »
+ * line ahead of « Nom d'entreprise »; her own name stays under « À
+ * l'attention de ». Blank = the nom d'entreprise rule above, unchanged.
+ */
+describe("staff professional name on rent invoices", () => {
+  const user = { id: "u2", fullName: "Lyly Hannecart", email: "lyly@example.com", vatNumber: "BE0660821903" };
+
+  it("wins over the company name", async () => {
+    const customer = await buildStaffCustomer({ vatNumber: null, companyName: "Mylitha", professionalName: " Aurélie Hannecart " }, user);
+    expect(customer.legalName).toBe("Aurélie Hannecart");
+    expect(customer.billingContactName).toBe("Lyly Hannecart");
+  });
+
+  it("works without a company name", async () => {
+    const customer = await buildStaffCustomer({ vatNumber: null, companyName: null, professionalName: "Aurélie Hannecart" }, user);
+    expect(customer.legalName).toBe("Aurélie Hannecart");
+    expect(customer.billingContactName).toBe("Lyly Hannecart");
+  });
+
+  it("blank leaves the company name in place", async () => {
+    const customer = await buildStaffCustomer({ vatNumber: null, companyName: "Mylitha", professionalName: "  " }, user);
+    expect(customer.legalName).toBe("Mylitha");
+    expect(customer.billingContactName).toBe("Lyly Hannecart");
+  });
+
+  it("is read by every rent issuing path and kept on update when absent", () => {
+    for (const file of ["lib/staff-rent-payment.js", "lib/invoices/invoice-preview.js", "actions/invoices/staff-rent.js"]) {
+      expect(source(file)).toContain("companyName: true, professionalName: true, user: true");
+    }
+    expect(source("actions/staff/update-independent-staff.js")).toContain(
+      "...(professionalName !== undefined ? { professionalName: professionalName?.trim() || null } : {}),"
+    );
+  });
+});

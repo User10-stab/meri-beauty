@@ -263,6 +263,7 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
       hireDate:          "",
       vatNumber:         "",
       companyName:       "",
+      professionalName:  "",
       rythme:            "",
       serviceIds:        [],
       dashboardPermissions: initialValues.dashboardPermissions ?? [...DEFAULT_STAFF_PERMISSIONS],
@@ -624,6 +625,22 @@ export function CreateStaffModal({ onClose, services = [], initialValues = {}, o
                 />
                 <FieldError message={errors.companyName?.message} />
                 <p className="mt-1 text-xs text-gray-500 dark:text-dark-6">Affiché comme « Entreprise » sur ses factures. Vide : son nom.</p>
+              </div>
+
+              {/* Nom professionnel — prend la place du nom d'entreprise sur ses factures de loyer */}
+              <div>
+                <Label htmlFor="professionalName" icon={Building2}>
+                  Nom professionnel
+                </Label>
+                <TextInput
+                  id="professionalName"
+                  type="text"
+                  placeholder="ex. Aurélie Hannecart (optionnel)"
+                  error={errors.professionalName}
+                  {...register("professionalName")}
+                />
+                <FieldError message={errors.professionalName?.message} />
+                <p className="mt-1 text-xs text-gray-500 dark:text-dark-6">S'il est rempli, il remplace le nom d'entreprise comme « Entreprise » sur ses factures.</p>
               </div>
             </div>
           </div>

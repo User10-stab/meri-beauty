@@ -9,6 +9,7 @@ import { Style_Script, Cormorant_Garamond , Betania_Patmos } from "next/font/goo
 import { Providers } from "@/components/providers";
 import { ConfirmProvider } from "@/components/ConfirmProvider";
 import { UtmTracker } from "@/components/analytics/UtmTracker";
+import { GoogleAnalytics } from "@/components/analytics/GoogleAnalytics";
 import { Suspense } from "react";
 import NextTopLoader from "nextjs-toploader";
 import { AppToaster } from "@/components/AppToaster";
@@ -81,6 +82,7 @@ export default async function RootLayout({ children }) {
       className={`${cormorant.variable} ${styleScript.variable} ${betaniaPatmos.variable}`}
     >
       <body className="antialiased" suppressHydrationWarning>
+        <GoogleAnalytics />
         <NextIntlClientProvider locale={locale} messages={messages}>
           <Providers session={session}>
             <ConfirmProvider>

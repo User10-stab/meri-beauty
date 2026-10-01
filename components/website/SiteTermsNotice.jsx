@@ -35,6 +35,17 @@ export default function SiteTermsNotice() {
     } catch {
       // ignore — worst case the notice reappears next visit
     }
+    // GA4 est en consentement refusé par défaut : l'acceptation du
+    // bandeau vaut accord analytics (voir components/analytics/GoogleAnalytics).
+    try {
+      window.dataLayer = window.dataLayer || [];
+      if (typeof window.gtag === "function") {
+        window.gtag("consent", "update", { analytics_storage: "granted" });
+      }
+      window.dispatchEvent(new Event("meri-beauty:terms-accepted"));
+    } catch {
+      // analytics ne casse jamais la page.
+    }
     setVisible(false);
   }
 

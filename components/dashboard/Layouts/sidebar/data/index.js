@@ -109,6 +109,7 @@ const ALL_NAV_DATA = [
           // ses jetons ouvrent les données de référencement du site, d'où
           // OWNER/ADMIN en dur plutôt qu'une permission délégable.
           { title: "Référencement Google", url: "/dashboard/seo", roles: [ROLES.OWNER, ROLES.ADMIN] },
+          { title: "Google Analytics", url: "/dashboard/marketing/analytics", roles: [ROLES.OWNER, ROLES.ADMIN] },
         ],
       },
       {

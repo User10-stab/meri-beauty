@@ -667,16 +667,6 @@
     "rejected": "Request rejected.",
     "message": "Message"
   },
-  "reports": {
-    "title": "Reports",
-    "period": "Period",
-    "sales": "Sales",
-    "orderStatuses": "Order statuses",
-    "appointmentStatuses": "Appointment statuses",
-    "noSales": "No sales in this period.",
-    "noOrders": "No orders in this period.",
-    "noAppointments": "No appointments in this period."
-  },
   "settings": {
     "title": "Settings",
     "salon": "Salon settings",
@@ -2030,8 +2020,7 @@
       "prospects": "Prospects",
       "campaigns": "Campaigns",
       "rentalRequests": "Rental requests",
-      "reviews": "Customer reviews",
-      "reports": "Reports"
+      "reviews": "Customer reviews"
     },
     "stats": {
       "revenueThisMonth": "Revenue this month",
@@ -2161,10 +2150,6 @@
       "title": "Customer reviews",
       "subtitle": "View and manage all customer reviews.",
       "totalLabel": "Total"
-    },
-    "reports": {
-      "title": "Reports",
-      "subtitle": "Overview of activity over the last 6 months — revenue, sales, customers."
     },
     "settings": {
       "title": "Salon settings",

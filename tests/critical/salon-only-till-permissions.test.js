@@ -149,7 +149,7 @@ describe("CAISSE opens the till, and only the till", () => {
   });
 
   it("counts every boutique order as the salon's, whoever rang it up", () => {
-    expect(source("actions/dashboard/get-reports-data.js")).toContain("const salonOrder = {};");
+    expect(source("actions/dashboard/get-dashboard-stats.js")).toContain("const salonOrder = {};");
     expect(source("actions/dashboard/admin-operations.js")).toContain(
       'const orderScope = scope.mode === "STAFF" ? Prisma.sql`AND false` : Prisma.empty;'
     );

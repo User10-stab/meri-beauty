@@ -55,3 +55,41 @@ describe("staff company name on rent invoices", () => {
     expect(action).toContain("...(companyName !== undefined ? { companyName: companyName?.trim() || null } : {}),");
   });
 });
+
+/**
+ * 2026-10-01: « Nom professionnel », when filled in, replaces her account's
+ * full name on the invoice (« À l'attention de »). It never takes the
+ * « Entreprise » line — that stays « Nom d'entreprise ». Blank = unchanged.
+ */
+describe("staff professional name on rent invoices", () => {
+  const user = { id: "u2", fullName: "Lyly Hannecart", email: "lyly@example.com", vatNumber: "BE0660821903" };
+
+  it("replaces her full name, the company stays Entreprise", async () => {
+    const customer = await buildStaffCustomer({ vatNumber: null, companyName: "Mylitha", professionalName: " Aurélie Hannecart " }, user);
+    expect(customer.legalName).toBe("Mylitha");
+    expect(customer.billingContactName).toBe("Aurélie Hannecart");
+    expect(customer.fullName).toBe("Aurélie Hannecart");
+  });
+
+  it("without a company name it is simply her name on the invoice", async () => {
+    const customer = await buildStaffCustomer({ vatNumber: null, companyName: null, professionalName: "Aurélie Hannecart" }, user);
+    expect(customer.legalName).toBeNull();
+    expect(customer.fullName).toBe("Aurélie Hannecart");
+  });
+
+  it("blank keeps her account name", async () => {
+    const customer = await buildStaffCustomer({ vatNumber: null, companyName: "Mylitha", professionalName: "  " }, user);
+    expect(customer.legalName).toBe("Mylitha");
+    expect(customer.billingContactName).toBe("Lyly Hannecart");
+    expect(customer.fullName).toBe("Lyly Hannecart");
+  });
+
+  it("is read by every rent issuing path and kept on update when absent", () => {
+    for (const file of ["lib/staff-rent-payment.js", "lib/invoices/invoice-preview.js", "actions/invoices/staff-rent.js"]) {
+      expect(source(file)).toContain("companyName: true, professionalName: true, user: true");
+    }
+    expect(source("actions/staff/update-independent-staff.js")).toContain(
+      "...(professionalName !== undefined ? { professionalName: professionalName?.trim() || null } : {}),"
+    );
+  });
+});

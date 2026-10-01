@@ -45,7 +45,7 @@ export function Sidebar({ userRole, isSalonAccount = false, dashboardPermissions
     "Auto-Entrepreneur": "independentStaff", "Boutique": "shop", "Produits": "products",
     "Catégories": "categories", "Stock": "stock", "Commandes": "orders", "Retours": "returns", "Factures": "invoices",
     "Codes promo": "promoCodes", "Newsletter": "newsletter", "Prospects": "prospects", "Campagnes": "campaigns", "Demandes de location": "rentalRequests",
-    "Avis clients": "reviews", "Rapports": "reports"
+    "Avis clients": "reviews"
   };
   const label = (value) => titleKeys[value] ? t(`sidebar.${titleKeys[value]}`) : value;
 

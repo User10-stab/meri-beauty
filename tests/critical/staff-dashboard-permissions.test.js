@@ -66,7 +66,7 @@ describe("granular staff dashboard permissions", () => {
     expect(count).toContain("requireStockAccess()");
     const dashboardStats = read("actions/dashboard/get-dashboard-stats.js");
     expect(dashboardStats).toContain("const canSeeOrders");
-    expect(dashboardStats).toContain("isAdmin ? prisma.payment.findMany");
+    expect(dashboardStats).toContain("isAdmin ? prisma.transaction.findMany");
   });
 
   it("opening a till session follows the till (CAISSE too); closing stays the salon's own", () => {

@@ -24,7 +24,7 @@
  *
  * WHAT IT NEVER TOUCHES
  *   paidAmount     — what actually arrived, and what the revenue reports sum
- *                    (REVENUE_STATUSES in actions/dashboard/get-reports-data.js).
+ *                    (REVENUE_STATUSES in actions/dashboard/get-dashboard-stats.js).
  *                    Income is unchanged by this script.
  *   totalAmount    — the agreed price, kept so the row still shows this was a
  *   totalPrice       part-payment on a larger booking.

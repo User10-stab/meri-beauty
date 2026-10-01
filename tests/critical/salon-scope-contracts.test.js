@@ -111,7 +111,6 @@ describe("every salon-wide figure resolves its scope from the one module", () =>
   const MONEY_CONSUMERS = [
     ["the livre de recettes", "lib/livre-de-recettes/build-recettes-journal.js"],
     ["the dashboard revenue card", "actions/dashboard/get-dashboard-stats.js"],
-    ["Rapports", "actions/dashboard/get-reports-data.js"],
   ];
 
   test.each(MONEY_CONSUMERS)("%s keeps the salon's money through SALON_PAYMENT_WHERE", (_label, path) => {
@@ -139,7 +138,6 @@ describe("every salon-wide figure resolves its scope from the one module", () =>
     ["the dashboard filter", "components/dashboard/DashboardFilters.jsx"],
     ["the dashboard stats", "actions/dashboard/get-dashboard-stats.js"],
     ["the dashboard page", "app/dashboard/page.jsx"],
-    ["the reports filter bar", "components/dashboard/reports/ReportsFilterBar.jsx"],
     ["the recettes filter bar", "components/dashboard/recettes/RecettesFilterBar.jsx"],
     ["the recettes action", "actions/dashboard/get-recettes-journal.js"],
     ["the recettes page", "app/dashboard/livre-de-recettes/page.jsx"],

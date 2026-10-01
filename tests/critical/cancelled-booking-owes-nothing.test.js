@@ -72,7 +72,7 @@ describe("cancelling a booking clears what it is owed", () => {
     const code = source(path);
     // The fix must not touch the record of the money that really arrived.
     // paidAmount is what the revenue reports sum (REVENUE_STATUSES in
-    // get-reports-data.js), and paymentType/totalAmount are how anyone later
+    // get-dashboard-stats.js), and paymentType/totalAmount are how anyone later
     // sees this was a part-payment on a larger booking.
     expect(code, `${path}: the cancellation rewrites what was collected`).not.toContain(
       "paidAmount: 0",

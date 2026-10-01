@@ -667,16 +667,6 @@
     "rejected": "Demande rejetée.",
     "message": "Message"
   },
-  "reports": {
-    "title": "Rapports",
-    "period": "Période",
-    "sales": "Ventes",
-    "orderStatuses": "Statuts des commandes",
-    "appointmentStatuses": "Statuts des rendez-vous",
-    "noSales": "Aucune vente dans cette période.",
-    "noOrders": "Aucune commande dans cette période.",
-    "noAppointments": "Aucun rendez-vous dans cette période."
-  },
   "settings": {
     "title": "Paramètres",
     "salon": "Paramètres du salon",
@@ -2030,8 +2020,7 @@
       "prospects": "Prospects",
       "campaigns": "Campagnes",
       "rentalRequests": "Demandes de location",
-      "reviews": "Avis clients",
-      "reports": "Rapports"
+      "reviews": "Avis clients"
     },
     "stats": {
       "revenueThisMonth": "Chiffre d'affaires ce mois-ci",
@@ -2161,10 +2150,6 @@
       "title": "Avis clients",
       "subtitle": "Consultez et gérez l'ensemble des avis clients.",
       "totalLabel": "Total"
-    },
-    "reports": {
-      "title": "Rapports",
-      "subtitle": "Vue d'ensemble de l'activité sur les 6 derniers mois — chiffre d'affaires, ventes, clients."
     },
     "settings": {
       "title": "Paramètres du salon",

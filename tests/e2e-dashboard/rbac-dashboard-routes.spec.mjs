@@ -72,7 +72,6 @@ const ADMIN_ONLY_ROUTES = [
   "/dashboard/payments/reconciliation",
   "/dashboard/promo-codes",
   "/dashboard/rental-requests",
-  "/dashboard/reports",
   "/dashboard/reservations/exceptions",
   "/dashboard/reviews",
   "/dashboard/settings",

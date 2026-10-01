@@ -121,7 +121,6 @@ const ALL_NAV_DATA = [
           { title: "Newsletter", url: "/dashboard/newsletter", roles: DASHBOARD_PERMISSIONS.NEWSLETTER, permission: STAFF_PERMISSIONS.NEWSLETTER },
           { title: "Demandes de location", url: "/dashboard/rental-requests", roles: DASHBOARD_PERMISSIONS.RENTAL_REQUESTS },
           { title: "Avis clients", url: "/dashboard/reviews", roles: DASHBOARD_PERMISSIONS.REVIEWS },
-          { title: "Rapports", url: "/dashboard/reports", roles: DASHBOARD_PERMISSIONS.REPORTS },
         ],
       },
     ],

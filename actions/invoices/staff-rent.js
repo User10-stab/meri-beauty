@@ -201,7 +201,7 @@ async function acceptDueRent(session, rentId, reference) {
       amount: true,
       lineDescription: true,
       dueDate: true,
-      staff: { select: { id: true, vatNumber: true, companyName: true, user: true } },
+      staff: { select: { id: true, vatNumber: true, companyName: true, professionalName: true, user: true } },
     },
   });
   if (!rent || !rent.paymentId || !rent.staff?.user) throw new Error("STAFF_RENT_NOT_FOUND");

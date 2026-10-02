@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BarChart3, ExternalLink, CheckCircle2, XCircle, ShieldCheck, MousePointerClick, Users, CalendarClock, Eye } from "lucide-react";
+import {
+  BarChart3,
+  ExternalLink,
+  XCircle,
+  ShieldCheck,
+  Users,
+  CalendarClock,
+  UserPlus,
+  Repeat,
+  Eye,
+  Target,
+} from "lucide-react";
 import { fetchJson } from "@/lib/api-client";
 
 const cardClass =
@@ -17,6 +28,10 @@ const GA_ERROR_HELP = {
 function formatDay(yyyymmdd) {
   if (!/^\d{8}$/.test(yyyymmdd ?? "")) return yyyymmdd ?? "";
   return `${yyyymmdd.slice(6, 8)}/${yyyymmdd.slice(4, 6)}`;
+}
+
+function formatNum(n) {
+  return Number(n ?? 0).toLocaleString("fr-BE");
 }
 
 function StatsSection() {
@@ -61,9 +76,6 @@ function StatsSection() {
           <li>Ajoute son e-mail en Lecteur dans GA4 (Admin &gt; Gestion des accès à la propriété).</li>
           <li>Renseigne <span className="font-mono">GA_PROPERTY_ID</span>, <span className="font-mono">GA_SERVICE_ACCOUNT_EMAIL</span> et <span className="font-mono">GA_SERVICE_ACCOUNT_PRIVATE_KEY</span> dans les variables d&apos;environnement.</li>
         </ol>
-        <p className="mt-2 text-sm text-gray-500">
-          Envoie-moi l&apos;ID de propriété + le fichier clé JSON et je termine le branchement.
-        </p>
       </div>
     );
   }
@@ -82,24 +94,30 @@ function StatsSection() {
     );
   }
 
-  const { totals, timeseries, topPages, channels } = state.overview;
+  const { totals, timeseries, topPages, channels, campaigns, events } = state.overview;
   const maxSessions = Math.max(1, ...timeseries.map((d) => d.sessions));
+
+  const kpis = [
+    { icon: Users, label: "Utilisateurs actifs", value: totals.activeUsers },
+    { icon: CalendarClock, label: "Sessions", value: totals.sessions },
+    { icon: UserPlus, label: "Nouveaux utilisateurs", value: totals.newUsers },
+    { icon: Repeat, label: "Revenants", value: totals.returningUsers },
+    { icon: Eye, label: "Pages vues", value: totals.pageViews },
+    { icon: Target, label: "Conversions", value: totals.conversions },
+  ];
 
   return (
     <div className="space-y-6">
-      {/* Totaux 28 jours */}
-      <div className="grid gap-3 sm:grid-cols-3">
-        {[
-          { icon: Users, label: "Utilisateurs (28 j)", value: totals.users },
-          { icon: CalendarClock, label: "Sessions (28 j)", value: totals.sessions },
-          { icon: Eye, label: "Pages vues (28 j)", value: totals.pageViews },
-        ].map(({ icon: Icon, label, value }) => (
+      {/* KPI — 28 derniers jours */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {kpis.map(({ icon: Icon, label, value }) => (
           <div key={label} className={cardClass}>
             <div className="flex items-center gap-2">
               <Icon className="h-5 w-5 text-[#2f3a2e] dark:text-white" />
               <h2 className="text-sm font-bold text-dark dark:text-white">{label}</h2>
             </div>
-            <p className="mt-2 text-3xl font-bold text-dark dark:text-white">{value.toLocaleString("fr-BE")}</p>
+            <p className="mt-2 text-3xl font-bold text-dark dark:text-white">{formatNum(value)}</p>
+            <p className="mt-1 text-xs text-gray-500">28 derniers jours</p>
           </div>
         ))}
       </div>
@@ -126,7 +144,60 @@ function StatsSection() {
       )}
 
       <div className="grid gap-3 lg:grid-cols-2">
-        {/* Top pages */}
+        {/* Sources de trafic */}
+        <div className={cardClass}>
+          <h2 className="text-base font-bold text-dark dark:text-white">Sources de trafic</h2>
+          {channels.length === 0 ? (
+            <p className="mt-2 text-sm text-gray-500">Pas encore de données.</p>
+          ) : (
+            <ul className="mt-2 divide-y divide-stroke dark:divide-dark-3">
+              {channels.map((c) => (
+                <li key={c.channel} className="flex items-center justify-between gap-2 py-2 text-sm">
+                  <span className="font-semibold text-dark dark:text-white">{c.channel}</span>
+                  <span className="text-xs text-gray-500">{formatNum(c.sessions)} session(s)</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Campagnes marketing (UTM) */}
+        <div className={cardClass}>
+          <h2 className="text-base font-bold text-dark dark:text-white">Campagnes marketing (UTM)</h2>
+          {campaigns.length === 0 ? (
+            <p className="mt-2 text-sm text-gray-500">Pas encore de données.</p>
+          ) : (
+            <ul className="mt-2 divide-y divide-stroke dark:divide-dark-3">
+              {campaigns.map((c, i) => (
+                <li key={`${c.campaign}-${c.source}-${c.medium}-${i}`} className="py-2 text-sm">
+                  <p className="font-semibold text-dark dark:text-white">{c.campaign}</p>
+                  <p className="text-xs text-gray-500">
+                    {c.source} · {c.medium} — {formatNum(c.sessions)} session(s) · {formatNum(c.users)} utilisateur(s)
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Événements clés */}
+        <div className={cardClass}>
+          <h2 className="text-base font-bold text-dark dark:text-white">Événements clés</h2>
+          {events.length === 0 ? (
+            <p className="mt-2 text-sm text-gray-500">Pas encore de données.</p>
+          ) : (
+            <ul className="mt-2 divide-y divide-stroke dark:divide-dark-3">
+              {events.map((e) => (
+                <li key={e.name} className="flex items-center justify-between gap-2 py-2 text-sm">
+                  <span className="font-mono font-semibold text-dark dark:text-white">{e.name}</span>
+                  <span className="text-xs text-gray-500">{formatNum(e.count)} fois</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Pages les plus vues */}
         <div className={cardClass}>
           <h2 className="text-base font-bold text-dark dark:text-white">Pages les plus vues</h2>
           {topPages.length === 0 ? (
@@ -140,84 +211,14 @@ function StatsSection() {
                   </p>
                   <p className="truncate font-mono text-xs text-gray-500">{p.path}</p>
                   <p className="text-xs text-gray-500">
-                    {p.views.toLocaleString("fr-BE")} vue(s) · {p.users.toLocaleString("fr-BE")} utilisateur(s)
+                    {formatNum(p.views)} vue(s) · {formatNum(p.users)} utilisateur(s)
                   </p>
                 </li>
               ))}
             </ul>
           )}
         </div>
-
-        {/* Canaux */}
-        <div className={cardClass}>
-          <h2 className="text-base font-bold text-dark dark:text-white">D&apos;où viennent les visiteurs</h2>
-          {channels.length === 0 ? (
-            <p className="mt-2 text-sm text-gray-500">Pas encore de données.</p>
-          ) : (
-            <ul className="mt-2 divide-y divide-stroke dark:divide-dark-3">
-              {channels.map((c) => (
-                <li key={c.channel} className="flex items-center justify-between gap-2 py-2 text-sm">
-                  <span className="font-semibold text-dark dark:text-white">{c.channel}</span>
-                  <span className="text-xs text-gray-500">
-                    {c.sessions.toLocaleString("fr-BE")} session(s)
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
       </div>
-    </div>
-  );
-}
-
-function TrackingCheck() {
-  const [result, setResult] = useState(null);
-
-  function check() {
-    const hasGtag = typeof window.gtag === "function";
-    const dataLayerSize = Array.isArray(window.dataLayer) ? window.dataLayer.length : 0;
-    setResult({ ok: hasGtag && dataLayerSize > 0, hasGtag, dataLayerSize });
-  }
-
-  return (
-    <div className={cardClass}>
-      <div className="flex items-center gap-2">
-        <MousePointerClick className="h-5 w-5 text-[#2f3a2e] dark:text-white" />
-        <h2 className="text-base font-bold text-dark dark:text-white">Tracking de ce navigateur</h2>
-      </div>
-      <p className="mt-1 text-sm text-gray-500">
-        Vérifie que ton navigateur charge bien gtag.js (sans bloqueur pub, après avoir cliqué
-        « J&apos;accepte » sur le bandeau du site).
-      </p>
-      <button
-        type="button"
-        onClick={check}
-        className="mt-3 h-10 rounded-lg bg-[#2f3a2e] px-4 text-sm font-semibold text-white hover:bg-[#3d4d3c]"
-      >
-        Vérifier le tracking
-      </button>
-      {result && (
-        <p className="mt-3 flex items-center gap-2 text-sm font-medium">
-          {result.ok ? (
-            <>
-              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-              <span className="text-emerald-700">
-                Tracking actif (dataLayer : {result.dataLayerSize} événement(s)).
-              </span>
-            </>
-          ) : (
-            <>
-              <XCircle className="h-4 w-4 text-red-600" />
-              <span className="text-red-700">
-                {result.hasGtag
-                  ? "gtag chargé mais aucun événement — navigue sur le site puis re-teste."
-                  : "gtag non détecté — vérifie NEXT_PUBLIC_GA_MEASUREMENT_ID sur Vercel et recharge sans bloqueur."}
-              </span>
-            </>
-          )}
-        </p>
-      )}
     </div>
   );
 }
@@ -275,16 +276,6 @@ export function AnalyticsClient({ data }) {
       {/* Chiffres en direct */}
       <StatsSection />
 
-      {/* Événements suivis */}
-      <div className={cardClass}>
-        <h2 className="text-base font-bold text-dark dark:text-white">Événements envoyés</h2>
-        <ul className="mt-2 space-y-1.5 text-sm text-gray-600 dark:text-dark-6">
-          <li><span className="font-mono font-semibold text-dark dark:text-white">page_view</span> — automatique à chaque navigation (avec UTM).</li>
-          <li><span className="font-mono font-semibold text-dark dark:text-white">campaign_click</span> — clic sur un lien de campagne e-mail.</li>
-          <li>Événements libres via <span className="font-mono">lib/analytics.js → trackEvent()</span> (CTA, newsletter, réservation…).</li>
-        </ul>
-      </div>
-
       {/* Consentement */}
       <div className={cardClass}>
         <div className="flex items-center gap-2">
@@ -296,8 +287,6 @@ export function AnalyticsClient({ data }) {
           « J&apos;accepte » sur le bandeau du site — aucun cookie analytics avant ce clic.
         </p>
       </div>
-
-      <TrackingCheck />
     </div>
   );
 }

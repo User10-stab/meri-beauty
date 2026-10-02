@@ -3,6 +3,7 @@ import { stripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { pickupQrDataUrl } from "@/lib/qrcode";
 import { CartClearedNotifier } from "@/components/boutique/CartClearedNotifier";
+import { PurchaseTracker } from "@/components/boutique/PurchaseTracker";
 
 export const metadata = {
   // Deliberately neutral — this page also renders the "payment pending" and
@@ -30,7 +31,9 @@ export default async function OrderSuccessPage({ searchParams }) {
   if (onsite === "1") {
     const qr = code ? await pickupQrDataUrl(code) : null;
     return (
-      <Outcome
+      <>
+        <PurchaseTracker transactionId={number ?? code ?? null} amount={null} />
+        <Outcome
         title="Commande confirmée"
         message={
           <>
@@ -39,7 +42,8 @@ export default async function OrderSuccessPage({ searchParams }) {
           </>
         }
         pickup={code ? { code, qr } : null}
-      />
+        />
+      </>
     );
   }
 
@@ -49,16 +53,19 @@ export default async function OrderSuccessPage({ searchParams }) {
   if (free === "1") {
     const qr = code ? await pickupQrDataUrl(code) : null;
     return (
-      <Outcome
-        title="Commande confirmée"
-        message={
-          <>
-            Merci ! Votre commande n°{number} est confirmée — le code promo appliqué couvre l&apos;intégralité du montant, aucun paiement n&apos;était nécessaire.
-            {code && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
-          </>
-        }
-        pickup={code ? { code, qr } : null}
-      />
+      <>
+        <PurchaseTracker transactionId={number ?? code ?? null} amount={0} />
+        <Outcome
+          title="Commande confirmée"
+          message={
+            <>
+              Merci ! Votre commande n°{number} est confirmée — le code promo appliqué couvre l&apos;intégralité du montant, aucun paiement n&apos;était nécessaire.
+              {code && " Présentez ce code (ou son QR) en boutique pour la retirer :"}
+            </>
+          }
+          pickup={code ? { code, qr } : null}
+        />
+      </>
     );
   }
 
@@ -98,6 +105,7 @@ export default async function OrderSuccessPage({ searchParams }) {
   if (state === "paid") {
     return (
       <>
+        <PurchaseTracker transactionId={sessionId} amount={details.amount} />
         <CartClearedNotifier />
         <Outcome
           title="Paiement confirmé"

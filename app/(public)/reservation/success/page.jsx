@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
+import { trackConversion } from "@/lib/analytics";
 
 export default function ReservationSuccessPage() {
   const router = useRouter();
@@ -14,6 +15,8 @@ export default function ReservationSuccessPage() {
 
   useEffect(() => {
     toast.success(t("confirmedTitle") || "Votre réservation a été créée avec succès !");
+    // Conversion GA4 : RDV / prestation (à marquer comme événement clé).
+    trackConversion("appointment_booked");
   }, [t]);
 
   return (

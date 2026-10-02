@@ -17,7 +17,10 @@ const CSP = [
   // once NEXT_PUBLIC_MONDIAL_RELAY_BRAND_ID is set, but the CSP has to allow
   // it and everything it pulls in up front, or it fails silently the moment
   // that env var is configured.
-  `script-src 'self' 'unsafe-inline' https://code.jquery.com https://widget.mondialrelay.com https://unpkg.com${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""}`,
+  // www.googletagmanager.com: gtag.js de Google Analytics 4
+  // (components/analytics/GoogleAnalytics.jsx). Sans lui, le tag est
+  // présent dans le HTML mais jamais exécuté (window.gtag indéfini).
+  `script-src 'self' 'unsafe-inline' https://code.jquery.com https://widget.mondialrelay.com https://unpkg.com https://www.googletagmanager.com${process.env.NODE_ENV !== "production" ? " 'unsafe-eval'" : ""}`,
   // fonts.googleapis.com: the widget also pulls its own Montserrat stylesheet.
   "style-src 'self' 'unsafe-inline' https://widget.mondialrelay.com https://unpkg.com https://fonts.googleapis.com",
   // static.wixstatic.com: product/service/gallery images imported from the
@@ -25,7 +28,8 @@ const CSP = [
   // *.mondialrelay.com + *.tile.openstreetmap.org + unpkg.com: map
   // tiles/markers for the pickup-point widget above (it moved to Leaflet,
   // loaded from unpkg, + OpenStreetMap tiles in v4).
-  "img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://*.wixstatic.com https://*.mondialrelay.com https://*.tile.openstreetmap.org https://unpkg.com",
+  // www.google-analytics.com: pixel de secours de la mesure GA4.
+  "img-src 'self' data: https://*.cdninstagram.com https://*.fbcdn.net https://*.wixstatic.com https://*.mondialrelay.com https://*.tile.openstreetmap.org https://unpkg.com https://www.google-analytics.com",
   // media-src has no fallback from img-src — without its own directive it
   // falls back to default-src 'self' instead, which blocks Instagram Reels
   // (<video> elements, served from the same *.fbcdn.net CDN as the photos).
@@ -39,7 +43,10 @@ const CSP = [
   // *.ingest.de.sentry.io: the Sentry SDK's client-side error/event beacon
   // (instrumentation-client.js) — without this, every browser-side error
   // report is itself silently blocked by this very CSP.
-  "connect-src 'self' https://*.mondialrelay.com wss://*.pusher.com https://*.pusher.com https://*.ingest.de.sentry.io",
+  // *.google-analytics.com: les hits GA4 (page_view, événements) partent
+  // vers la collecte régionale (region*.google-analytics.com) — sans cela
+  // gtag se charge mais aucun événement n'arrive dans les rapports.
+  "connect-src 'self' https://*.mondialrelay.com wss://*.pusher.com https://*.pusher.com https://*.ingest.de.sentry.io https://*.google-analytics.com",
   // Google Maps embed on the Contact page.
   "frame-src 'self' https://www.google.com",
   "object-src 'none'",

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { toIntlLocale } from "@/lib/intl-locale";
+import { trackConversion } from "@/lib/analytics";
 
 export default function ReservationAtelierSuccesPage() {
   return (
@@ -63,6 +64,15 @@ function ReservationAtelierSuccesContent() {
       cancelled = true;
     };
   }, [reservationId]);
+
+  useEffect(() => {
+    // Conversion GA4 : atelier réservé (à marquer comme événement clé).
+    // Seulement quand le paiement est confirmé, jamais sur "en attente".
+    const confirmed = reservation?.status === "CONFIRMED" || reservation?.status === "COMPLETED";
+    if (confirmed && reservation?.id) {
+      trackConversion("workshop_booked", { value: Number(reservation.totalPrice) || undefined, currency: "EUR" }, reservation.id);
+    }
+  }, [reservation?.id, reservation?.status, reservation?.totalPrice]);
 
   if (status === "loading") {
     return (

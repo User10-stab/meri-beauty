@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { toIntlLocale } from "@/lib/intl-locale";
+import { trackConversion } from "@/lib/analytics";
 
 export default function ReservationFormationSuccesPage() {
   return (
@@ -60,6 +61,15 @@ function ReservationFormationSuccesContent() {
       cancelled = true;
     };
   }, [reservationId]);
+
+  useEffect(() => {
+    // Conversion GA4 : formation réservée (à marquer comme événement clé).
+    // Seulement quand le paiement est confirmé, jamais sur "en attente".
+    const confirmed = reservation?.status === "CONFIRMED" || reservation?.status === "COMPLETED";
+    if (confirmed && reservation?.id) {
+      trackConversion("formation_booked", { value: Number(reservation.totalPrice) || undefined, currency: "EUR" }, reservation.id);
+    }
+  }, [reservation?.id, reservation?.status, reservation?.totalPrice]);
 
   if (status === "loading") {
     return (

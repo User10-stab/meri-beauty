@@ -6,7 +6,7 @@ import { getRunId } from "../e2e-money/fixtures/run-id.mjs";
 import { seedAdmin } from "./fixtures/seed-dashboard.mjs";
 
 /**
- * The custom next/image loader (image-loader.js + next.config.mjs
+ * The custom next/image loader (image-loader.js + .mjs
  * `loader: "custom"`) — the change that pulls the built-in /_next/image
  * optimizer out of production because sharp OOM-kills the OVH box under load
  * and blanks whole pages when the 4h optimized-image cache expires.

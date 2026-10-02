@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
+import { loadStaffSessionBlocks } from "@/lib/formations/staff-session-blocks";
 import {
   startOfDay,
   buildPerDraftSlotsForDate,
@@ -61,6 +62,14 @@ export async function getSameDaySchedule({ drafts, date, maxProposals = DEFAULT_
         },
       },
     });
+
+    allAppointments.push(
+      ...(await loadStaffSessionBlocks(prisma, {
+        staffIds: staffServices.map((ss) => ss.staffId),
+        from: selectedDate,
+        to: endOfDay,
+      }))
+    );
 
     const ssById = Object.fromEntries(staffServices.map((ss) => [ss.id, ss]));
     const apptsByStaffId = staffServices.reduce((acc, ss) => {

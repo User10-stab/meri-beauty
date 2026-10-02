@@ -324,6 +324,8 @@ export async function getFormationTransferOptions(reservationId) {
       prisma.formationSession.findMany({
         where: {
           status: "SCHEDULED",
+          // Another client's own date is not a session to move someone onto.
+          customerRequested: false,
           startDate: { gt: now },
           formation: { status: "PUBLISHED" },
         },

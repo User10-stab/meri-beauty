@@ -17,6 +17,7 @@ import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { getMyCheckoutProfile } from "@/actions/customer/settings";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown";
+import { CustomDatePicker, endTimeOf, formatDateKey, nextDateKey, perDayMinutes } from "@/components/formations/CustomDatePicker";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { validatePassword } from "@/lib/validations/password";
 import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
@@ -61,6 +62,9 @@ function ReservationFormationContent() {
 
   const formationId = searchParams.get("formation");
   const sessionId = searchParams.get("session");
+  // « Date libre »: a private formation booked on a day the client picks
+  // herself rather than on a scheduled session (?date=libre, no session).
+  const customMode = !sessionId && searchParams.get("date") === "libre";
   const isPriority = searchParams.get("priority") === "true";
   const waitingListId = searchParams.get("wl");
   const wantsWaitingList = searchParams.get("waitingList") === "true";
@@ -69,6 +73,9 @@ function ReservationFormationContent() {
   const [submitting, setSubmitting] = useState(false);
   const [formation, setFormation] = useState(null);
   const [sessionData, setSessionData] = useState(null);
+  const [customDate, setCustomDate] = useState(null); // { date, time, days }
+  // Bumped when a picked date is refused, to remount the picker on fresh availability.
+  const [pickerVersion, setPickerVersion] = useState(0);
   const [available, setAvailable] = useState(0);
   const [seats, setSeats] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState("DEPOSIT");
@@ -149,9 +156,24 @@ function ReservationFormationContent() {
   const isPrivate = formation?.type === "PRIVATE";
 
   useEffect(() => {
-    if (!formationId || !sessionId) {
+    if (!formationId || (!sessionId && !customMode)) {
       setLoading(false);
       return;
+    }
+
+    async function loadCustom() {
+      const formResult = await getPublicFormationById(formationId);
+      if (!formResult.success || !formResult.data) {
+        setError("Formation introuvable.");
+      } else if (formResult.data.type !== "PRIVATE" || !formResult.data.customDatesEnabled) {
+        setError("Cette formation ne peut pas être réservée à une date libre.");
+      } else {
+        setFormation(formResult.data);
+        setSeats(1);
+        // One client, one date of her own: there is nothing to be "full".
+        setAvailable(1);
+      }
+      setLoading(false);
     }
 
     async function load() {
@@ -196,8 +218,9 @@ function ReservationFormationContent() {
       setLoading(false);
     }
 
-    load();
-  }, [formationId, sessionId, isPriority, waitingListId]);
+    if (customMode) loadCustom();
+    else load();
+  }, [formationId, sessionId, customMode, isPriority, waitingListId]);
 
   useEffect(() => {
     const authedUser = session?.user;
@@ -315,6 +338,12 @@ function ReservationFormationContent() {
       return;
     }
 
+    if (customMode && !customDate) {
+      setError("Veuillez choisir votre date, la durée et l'heure de début.");
+      document.querySelector('[data-testid="custom-date-picker"]')?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
     setSubmitting(true);
 
     // Only send a VAT number when "Entreprise" is selected — toggling back to
@@ -357,6 +386,7 @@ function ReservationFormationContent() {
 
     const result = await createFormationReservation({
       sessionId,
+      ...(customMode ? { customDate } : {}),
       formationId,
       seatsCount: isPrivate ? 1 : seats,
       customerInfo: submittedCustomerInfo,
@@ -399,6 +429,13 @@ function ReservationFormationContent() {
           ? `${result.message} Ce champ provient de votre compte : corrigez-le dans votre profil, puis revenez.`
           : result.message || "Erreur lors de la réservation."
       );
+      // A refused date libre was taken meanwhile: drop it so the picker
+      // reloads what is still free instead of resubmitting the same slot. A
+      // field error (phone, VAT…) is not about the date, which is kept.
+      if (customMode && !result.field) {
+        setCustomDate(null);
+        setPickerVersion((version) => version + 1);
+      }
       setSubmitting(false);
     }
   }
@@ -448,7 +485,7 @@ function ReservationFormationContent() {
     );
   }
 
-  if (!formation || !sessionData) {
+  if (!formation || (!sessionData && !customMode)) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center bg-cream gap-4">
         <p className="text-ink/50">{error || "Session non disponible."}</p>
@@ -611,6 +648,24 @@ function ReservationFormationContent() {
                       </p>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* « Date libre » — day, 1 or 2 journées, start time */}
+              {customMode && (
+                <div className="rounded-xl border border-ink/8 bg-white p-5 shadow-sm">
+                  <h2 className="mb-1 text-sm font-semibold text-ink">Choisissez votre date</h2>
+                  <p className="mb-4 text-xs text-ink/50">
+                    Seuls les jours où {formation.animator?.name || "votre formatrice"} est disponible sont proposés.
+                    Votre date est confirmée dès le paiement de l&apos;acompte ou du montant total.
+                  </p>
+                  <CustomDatePicker
+                    key={pickerVersion}
+                    formationId={formation.id}
+                    durationMinutes={formation.duration}
+                    value={customDate}
+                    onChange={setCustomDate}
+                  />
                 </div>
               )}
 
@@ -1078,6 +1133,25 @@ function ReservationFormationContent() {
               <div className="sticky top-24 rounded-xl border border-ink/8 bg-white p-5 shadow-sm space-y-4">
                 <h2 className="text-sm font-semibold text-ink">Récapitulatif</h2>
 
+                {customMode ? (
+                  <div data-testid="custom-date-summary" className="flex items-start gap-3 text-sm">
+                    <Calendar size={16} className="mt-0.5 shrink-0 text-gold" />
+                    {customDate ? (
+                      <div>
+                        <p className="text-ink/80">{formatDateKey(customDate.date)}</p>
+                        {customDate.days === 2 && (
+                          <p className="text-ink/80">et {formatDateKey(nextDateKey(customDate.date))}</p>
+                        )}
+                        <p className="text-xs text-ink/50">
+                          {customDate.time} – {endTimeOf(customDate.time, perDayMinutes(formation.duration, customDate.days))}
+                          {customDate.days === 2 ? " chaque jour · 2 journées" : " · 1 journée"}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-ink/50">Date à choisir</p>
+                    )}
+                  </div>
+                ) : (
                 <div className="flex items-start gap-3 text-sm">
                   <Calendar size={16} className="mt-0.5 shrink-0 text-gold" />
                   <div>
@@ -1088,6 +1162,7 @@ function ReservationFormationContent() {
                     </p>
                   </div>
                 </div>
+                )}
 
                 <hr className="border-ink/8" />
 

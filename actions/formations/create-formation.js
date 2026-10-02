@@ -54,6 +54,15 @@ function enforceCapacityForType(data) {
 }
 
 /**
+ * A published formation normally needs a date to be bookable. A PRIVATE one
+ * does not: its client may pick any day the animator is free (« date libre »,
+ * lib/formations/custom-date-availability.js), so its dates are optional.
+ */
+function requiresScheduledSession(data) {
+  return data.status === "PUBLISHED" && data.type !== "PRIVATE";
+}
+
+/**
  * Gate for formation mutations: admin/owner may act on any formation; staff
  * may only create (no existing row to own yet) or, when requireOwnerForEdit
  * is set, act on a formation they created themselves. Assigned staff may edit
@@ -144,7 +153,7 @@ export async function createFormation(input) {
     }
 
     const { staffUserId, sessions, startDate, endDate, ...rest } = enforceCapacityForType(parsed.data);
-    if (rest.status === "PUBLISHED" && sessions.length === 0) {
+    if (requiresScheduledSession(rest) && sessions.length === 0) {
       return {
         success: false,
         message: "Une formation publiée doit avoir au moins une session planifiée.",
@@ -220,16 +229,18 @@ export async function updateFormation(input) {
     }
 
     const { id, staffUserId, sessions, startDate, endDate, ...rest } = enforceCapacityForType(parsed.data);
-    if (rest.status === "PUBLISHED" && sessions.length === 0) {
+    if (requiresScheduledSession(rest) && sessions.length === 0) {
       return {
         success: false,
         message: "Une formation publiée doit avoir au moins une session planifiée.",
       };
     }
 
+    // Only the sessions the salon scheduled: the form never lists a date a
+    // client picked herself, so it must not read as "removed" below.
     const existingFormation = await prisma.formation.findUnique({
       where: { id },
-      include: { sessions: true },
+      include: { sessions: { where: { customerRequested: false } } },
     });
     if (!existingFormation) {
       return { success: false, message: "Formation introuvable." };

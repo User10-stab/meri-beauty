@@ -24,6 +24,7 @@ export async function GET(req, { params }) {
         session: {
           select: {
             startDate: true,
+            endDate: true,
             formation: { select: { title: true } },
           },
         },

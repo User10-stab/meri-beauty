@@ -90,7 +90,12 @@ export async function getCalendarEvents({ from, to }) {
             where: {
               status: { not: "CANCELLED" },
               startDate: { lt: rangeEnd },
-              OR: [{ endDate: { gt: rangeStart } }, { endDate: null, startDate: { gte: rangeStart } }],
+              AND: [
+                { OR: [{ endDate: { gt: rangeStart } }, { endDate: null, startDate: { gte: rangeStart } }] },
+                // A date a client picked herself only exists on the calendar
+                // once she has paid for it; an abandoned pick is nothing.
+                { OR: [{ customerRequested: false }, { reservations: { some: liveSeatFilter() } }] },
+              ],
             },
             select: {
               id: true,

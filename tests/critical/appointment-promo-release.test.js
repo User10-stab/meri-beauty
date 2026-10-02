@@ -165,7 +165,9 @@ describe("every booking path flags its use and every cancellation releases it", 
       ["actions/workshops/create-workshop-reservation.js", 1],
       ["actions/formations/create-formation-reservation.js", 1],
       ["lib/workshops/fulfill-workshop-reservation-payment.js", 1],
-      ["lib/formations/fulfill-formation-reservation-payment.js", 1],
+      // Two refusals cancel the hold there: seats resold, and a « date
+      // libre » whose day was taken before the payment arrived.
+      ["lib/formations/fulfill-formation-reservation-payment.js", 2],
       ["lib/workshops/expire-stale-holds.js", 1],
       ["lib/formations/expire-stale-holds.js", 1],
       ["lib/payments/reconcile-reservation-refund.js", 1],

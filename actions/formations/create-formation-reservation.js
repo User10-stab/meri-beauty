@@ -14,10 +14,15 @@ import { validateCustomerIdentity, validateBillingAddress } from "@/lib/validati
 import { captureWarning } from "@/lib/monitoring";
 import { confirmFormationReservationPayment } from "@/lib/formations/fulfill-formation-reservation-payment";
 import { isSellerLegalDataComplete } from "@/lib/invoicing";
-import { resolvePayeeForFormationSession, payeeCanChargeOnline, payeeCheckoutMetadata, payeeStripeOptions, PAYEE_ONLINE_UNAVAILABLE_MESSAGE } from "@/lib/payments/resolve-payee";
+import { resolvePayeeForFormationSession, resolvePayeeForStaff, payeeCanChargeOnline, payeeCheckoutMetadata, payeeStripeOptions, PAYEE_ONLINE_UNAVAILABLE_MESSAGE } from "@/lib/payments/resolve-payee";
 import { isAdminRole, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { OCCUPANCY_KINDS, sessionOccupancy } from "@/lib/reservations/session-occupancy";
 import { sessionDatesRefusal } from "@/lib/formations/session-bookability";
+import {
+  CUSTOM_DATE_UNAVAILABLE_MESSAGE,
+  customSessionConflict,
+  resolveCustomDateRequest,
+} from "@/lib/formations/custom-date-availability";
 import { RELANCE_KINDS, buildActivityCheckoutParams } from "@/lib/reservations/activity-payment-relance";
 import {
   buildFormationReservationCreatedNotification,
@@ -94,6 +99,15 @@ export async function createFormationReservationCheckoutSession(reservationId, c
     // paid for any more.
     if (new Date(session.startDate) <= new Date()) {
       return { success: false, message: "Cette session a déjà eu lieu ou a déjà commencé." };
+    }
+
+    // A date the client picked herself blocks nobody until it is paid, so the
+    // animator may have been booked on it since (this call also serves the
+    // checkout resumed hours later from the e-mail confirmation link). The
+    // payment fulfilment re-checks too — this only avoids taking money for a
+    // date already known to be gone.
+    if (session.customerRequested && (await customSessionConflict(prisma, session))) {
+      return { success: false, message: CUSTOM_DATE_UNAVAILABLE_MESSAGE };
     }
 
     // Whose money this seat is: the session's animator when she is an
@@ -199,8 +213,11 @@ export async function createFormationReservation(data) {
   try {
     let { sessionId, formationId, customerInfo, paymentMethod, isPriority, waitingListEntryId, promoCode } = data;
     const isFullPayment = paymentMethod === "FULL";
+    // « Date libre » on a private formation: { date, time, days } instead of
+    // a scheduled session. A scheduled session, when given, wins.
+    const customDate = sessionId ? null : data.customDate ?? null;
 
-    if (!sessionId || !formationId || !customerInfo) {
+    if ((!sessionId && !customDate) || !formationId || !customerInfo) {
       return { success: false, message: "Données manquantes." };
     }
 
@@ -243,22 +260,42 @@ export async function createFormationReservation(data) {
 
     const formation = await prisma.formation.findUnique({
       where: { id: formationId },
-      include: { sessions: { where: { id: sessionId } } },
+      include: {
+        animator: { select: { staffId: true } },
+        ...(sessionId ? { sessions: { where: { id: sessionId } } } : {}),
+      },
     });
 
     if (!formation || formation.status !== "PUBLISHED") {
       return { success: false, message: "Formation introuvable ou non publiée." };
     }
 
-    const session = formation.sessions[0];
-    if (!session || session.status !== "SCHEDULED") {
-      return { success: false, message: "Session non disponible." };
-    }
-    // A past session, or one past its registration deadline, is no longer on
-    // sale — the public pages hide it, but an old link still lands here.
-    const datesRefusal = sessionDatesRefusal(session);
-    if (datesRefusal) {
-      return { success: false, message: datesRefusal };
+    // Exactly one of the two is set from here on: `session`, a date the salon
+    // scheduled, or `customRequest`, the date the client picked — validated
+    // against the animator's calendar, and turned into a session of its own
+    // only when the hold is written below.
+    let session = null;
+    let customRequest = null;
+    if (customDate) {
+      if (formation.type !== "PRIVATE") {
+        return { success: false, message: "Seule une formation privée peut être réservée à une date libre." };
+      }
+      customRequest = await resolveCustomDateRequest(prisma, { formation, customDate });
+      if (!customRequest.ok) {
+        return { success: false, message: customRequest.message };
+      }
+    } else {
+      session = formation.sessions[0];
+      // Another client's own date is hers alone, even while it is unpaid.
+      if (!session || session.status !== "SCHEDULED" || session.customerRequested) {
+        return { success: false, message: "Session non disponible." };
+      }
+      // A past session, or one past its registration deadline, is no longer on
+      // sale — the public pages hide it, but an old link still lands here.
+      const datesRefusal = sessionDatesRefusal(session);
+      if (datesRefusal) {
+        return { success: false, message: datesRefusal };
+      }
     }
 
     // Refused here, before a seat is held, rather than only at checkout.
@@ -272,11 +309,16 @@ export async function createFormationReservation(data) {
     // has not finished onboarding (Lyly today) would quietly fill up with holds
     // nobody can pay. Checking before anything is written costs one query and
     // makes the refusal free of side effects.
-    if (!payeeCanChargeOnline(await resolvePayeeForFormationSession(prisma, { sessionId: session.id }))) {
+    const payee = session
+      ? await resolvePayeeForFormationSession(prisma, { sessionId: session.id })
+      : await resolvePayeeForStaff(prisma, { staffId: formation.animator?.staffId });
+    if (!payeeCanChargeOnline(payee)) {
       return { success: false, message: PAYEE_ONLINE_UNAVAILABLE_MESSAGE };
     }
 
     // Validate priority access from the waiting list (first come, first served)
+    // — a date libre has no waiting list to come from.
+    if (customRequest) isPriority = false;
     if (isPriority) {
       if (!waitingListEntryId) {
         return { success: false, message: "Accès prioritaire invalide." };
@@ -490,9 +532,24 @@ export async function createFormationReservation(data) {
     // two persisted Decimal(10,2) values always add back to the total.
     const balanceDue = Number((discountedTotal - depositAmount).toFixed(2));
 
-    // This customer's own still-live hold on this session, if any.
+    // This customer's own still-live hold on this session, if any — for a
+    // date libre, on the very same date and hours of this formation.
     const liveHold = await prisma.formationReservation.findFirst({
-      where: { sessionId, customerId: user.id, status: "PENDING_DEPOSIT", holdExpiresAt: { gt: new Date() } },
+      where: {
+        customerId: user.id,
+        status: "PENDING_DEPOSIT",
+        holdExpiresAt: { gt: new Date() },
+        ...(customRequest
+          ? {
+              session: {
+                formationId,
+                customerRequested: true,
+                startDate: customRequest.startDate,
+                endDate: customRequest.endDate,
+              },
+            }
+          : { sessionId }),
+      },
       orderBy: { createdAt: "desc" },
     });
 
@@ -541,17 +598,34 @@ export async function createFormationReservation(data) {
       // from both reading the same "seats free" snapshot and both succeeding.
       try {
         reservation = await prisma.$transaction(async (tx) => {
-          await tx.$queryRaw`SELECT id FROM formation_sessions WHERE id = ${sessionId} FOR UPDATE`;
+          if (customRequest) {
+            // The client's own date becomes a session of its own, for her
+            // alone. It is not locked against anyone: like every seat it only
+            // counts once paid, and the fulfilment re-checks the calendar.
+            const requested = await tx.formationSession.create({
+              data: {
+                formationId,
+                animatorId: customRequest.animatorId,
+                startDate: customRequest.startDate,
+                endDate: customRequest.endDate,
+                capacity: 1,
+                customerRequested: true,
+              },
+            });
+            sessionId = requested.id;
+          } else {
+            await tx.$queryRaw`SELECT id FROM formation_sessions WHERE id = ${sessionId} FOR UPDATE`;
 
-          const takenSeats = await sessionOccupancy(tx, {
-            kind: OCCUPANCY_KINDS.FORMATION,
-            sessionId,
-          });
-          const capacity = session.capacity ?? formation.capacity;
-          const available = capacity - takenSeats;
+            const takenSeats = await sessionOccupancy(tx, {
+              kind: OCCUPANCY_KINDS.FORMATION,
+              sessionId,
+            });
+            const capacity = session.capacity ?? formation.capacity;
+            const available = capacity - takenSeats;
 
-          if (seatsCount > available) {
-            throw new Error(`SOLD_OUT:${available}`);
+            if (seatsCount > available) {
+              throw new Error(`SOLD_OUT:${available}`);
+            }
           }
 
 
@@ -577,7 +651,7 @@ export async function createFormationReservation(data) {
           });
 
           const recipientIds = await getActivityNotificationRecipients(
-            session.animatorId,
+            session ? session.animatorId : customRequest.animatorId,
             STAFF_PERMISSIONS.FORMATION_RESERVATIONS,
             { tx }
           );

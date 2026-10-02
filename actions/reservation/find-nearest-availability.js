@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
+import { loadStaffSessionBlocks } from "@/lib/formations/staff-session-blocks";
 import {
   startOfDay,
   addDays,
@@ -68,6 +69,8 @@ async function loadSchedulingContext(drafts, maxDaysToScan) {
       },
     },
   });
+
+  allAppointments.push(...(await loadStaffSessionBlocks(prisma, { staffIds, from: fromDate, to: toDate })));
 
   return {
     now,

@@ -37,7 +37,10 @@ export async function getFormations() {
       orderBy: { createdAt: "desc" },
       include: {
         animator: true,
-        sessions: { include: { animator: true }, orderBy: { startDate: "asc" } },
+        // Dates clients picked themselves (customerRequested) are bookings,
+        // not sessions the salon schedules: they live in Réservations, and
+        // must not appear in — or be rewritten by — the session editor.
+        sessions: { where: { customerRequested: false }, include: { animator: true }, orderBy: { startDate: "asc" } },
       },
     });
 

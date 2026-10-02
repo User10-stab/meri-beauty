@@ -317,7 +317,43 @@ export default async function FormationDetailPage({ params }) {
                 </div>
               )}
 
-              {(!formation.sessions || formation.sessions.length === 0) && (
+              {/* « Date libre » — a private formation's client may take any
+                  day the animator is free, whether or not dates are listed
+                  above. The picker itself lives on the booking page. */}
+              {formation.customDatesEnabled && (
+                <div
+                  data-testid="formation-custom-date-card"
+                  className="rounded-xl border border-gold/30 bg-white p-5 shadow-sm"
+                >
+                  <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-center sm:justify-between sm:text-left">
+                    <div className="space-y-1.5">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-gold">
+                        {formation.sessions?.length > 0 ? "Une autre date vous arrange ?" : "Date au choix"}
+                      </span>
+                      <p className="flex items-center justify-center gap-1.5 text-sm text-ink/65 sm:justify-start">
+                        <CalendarIcon />
+                        Choisissez librement votre jour et votre horaire
+                      </p>
+                      <p className="text-xs text-ink/45">
+                        Sur 1 ou 2 journées, selon les disponibilités
+                        {formation.animator ? ` de ${formation.animator.name}` : ""}. Votre date est confirmée dès
+                        le paiement de l&apos;acompte ou du montant total.
+                      </p>
+                    </div>
+                    <div className="flex w-full flex-col items-center gap-2 sm:w-auto sm:items-end">
+                      <ActivityDepositNote priceTtc={formation.price} depositPct={depositPct} />
+                      <Link
+                        href={`/reservation-formation?formation=${formation.id}&date=libre`}
+                        className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gold px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm transition-all duration-200 hover:bg-gold/90 hover:shadow-md"
+                      >
+                        Choisir ma date
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(!formation.sessions || formation.sessions.length === 0) && !formation.customDatesEnabled && (
                 <div className="rounded-xl border border-ink/8 bg-white p-6 text-center">
                   <p className="text-ink/50">Aucune session programmée pour le moment.</p>
                 </div>

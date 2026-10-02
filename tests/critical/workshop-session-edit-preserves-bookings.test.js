@@ -132,12 +132,15 @@ describe("formation mutation safeguards", () => {
     expect(fn).not.toContain("const { error } = await requireFormationAccess");
   });
 
-  test("published formations require at least one session", () => {
+  // A PRIVATE formation is the exception since 2026-10-02: its client may
+  // pick her own date (« date libre »), so it can be published with none.
+  test("published group formations require at least one session; private ones do not", () => {
     const actions = source("actions/formations/create-formation.js");
+    expect(actions).toContain('return data.status === "PUBLISHED" && data.type !== "PRIVATE";');
     const createFn = actions.slice(actions.indexOf("export async function createFormation"), actions.indexOf("/**\n * Modifie une formation"));
     const updateFn = actions.slice(actions.indexOf("export async function updateFormation"), actions.indexOf("/**\n * Supprime une formation"));
     for (const fn of [createFn, updateFn]) {
-      expect(fn).toContain('rest.status === "PUBLISHED" && sessions.length === 0');
+      expect(fn).toContain("requiresScheduledSession(rest) && sessions.length === 0");
       expect(fn).toContain("doit avoir au moins une session planifiée");
     }
   });

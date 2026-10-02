@@ -131,6 +131,12 @@ function FormationCard({ formation, t, locale }) {
               <CalendarIcon /> {dateStr}
             </span>
           )}
+          {/* A private formation whose client picks her own day. */}
+          {formation.customDatesEnabled && (
+            <span className="flex items-center gap-1.5 font-medium text-gold">
+              {!dateStr && <CalendarIcon />} {t("freeDate")}
+            </span>
+          )}
           {formation.duration && (
             <span className="flex items-center gap-1.5">
               <ClockIcon /> {formation.duration} min

@@ -244,3 +244,27 @@ A **mixed-method refund is currently unreachable through the UI.**
 single-method. So `planRefund`'s multi-leg allocation only ever serves
 historical reprise cases today — invariant 2 above guards it, but no scenario
 can construct it through the browser.
+
+## The « date libre » scenario confirms a date by paying for it
+
+`formation-private-date-libre.spec.mjs` covers a private formation whose
+client picks her own day (1 or 2 journées) instead of a date the salon
+scheduled. It is in this suite, not the dashboard one, because the rule under
+test *is* a payment: a picked date is confirmed only by a deposit or a full
+payment, an unpaid pick blocks nobody, and a pick whose day was taken before
+the money arrived must not be confirmed.
+
+It seeds its own trainer (every day 09:00–18:00) so that every closed day in
+the scenario is one the scenario closed itself — an indisponibilité, a
+fermeture exceptionnelle, a rendez-vous, a scheduled session — and then reads
+the calendar the way a client does.
+
+Two things to know before editing it:
+
+- **Its last scenario leaves a real test-mode charge to refund by hand.** It
+  pays for a date that was taken while the client was on Stripe; the app
+  refuses to confirm it and opens a `ManualRefundCase` — which is exactly the
+  assertion. Nothing refunds it automatically, by design.
+- **It deletes the one salon closure it creates**, in `afterAll`, against
+  this suite's own "never clean up" rule: a `SalonClosure` is not the run's
+  data, it closes the real salon's calendar for everyone on that database.

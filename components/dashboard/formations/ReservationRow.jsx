@@ -2,6 +2,7 @@
 
 import { RowActions } from "../Tables/RowActions";
 import { reservationBalanceDue } from "@/lib/payments/collectible-balance";
+import { formatSessionDateRange } from "@/lib/formations/custom-date-availability";
 
 const STATUS_STYLES = {
   PENDING_DEPOSIT: "bg-amber-50 text-amber-700 border-amber-200",
@@ -74,6 +75,16 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSe
       <td className="px-3 sm:px-4 py-4 pl-3 sm:pl-5 align-middle min-w-[200px]">
         <span className="block font-medium text-gray-800">{row.session?.formation?.title}</span>
         <span className="text-xs text-gray-400">{formatSessionDate(row.session?.startDate)}</span>
+        {/* A date the client picked herself, and whether it runs over two days. */}
+        {row.session?.customerRequested && (
+          <span
+            data-testid="reservation-custom-date"
+            className="mt-1 mr-1 inline-flex w-fit items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800"
+          >
+            Date choisie par la cliente
+            {formatSessionDateRange(row.session).multiDay ? " · 2 journées" : " · 1 journée"}
+          </span>
+        )}
         {typeof row.session?.remainingSeats === "number" && (
           <span
             className={`mt-1 inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[11px] font-medium border ${

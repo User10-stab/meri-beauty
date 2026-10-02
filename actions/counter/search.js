@@ -93,6 +93,8 @@ async function searchCounterSessions(query) {
         ? prisma.formationSession.findMany({
             where: {
               status: "SCHEDULED",
+              // A date a client picked for herself is hers alone.
+              customerRequested: false,
               startDate: { gte: startOfToday() },
               formation: {
                 status: { in: COUNTER_SELLABLE_CATALOGUE_STATUSES },

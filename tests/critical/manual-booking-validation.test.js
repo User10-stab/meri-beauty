@@ -41,6 +41,10 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     staffService: { findFirst: mocks.staffServiceFindFirst },
     salon: { findUnique: mocks.salonFindUnique },
+    // validateAppointmentSlot also reads the formation/atelier sessions the
+    // staff member animates (lib/formations/staff-session-blocks.js); this
+    // staff member animates none.
+    staff: { findMany: async () => [] },
     appointment: {
       findMany: mocks.appointmentFindMany,
       create: mocks.appointmentCreate,

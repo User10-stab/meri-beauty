@@ -713,6 +713,12 @@ model FormationSession {
   status               SessionStatus @default(SCHEDULED)
   registrationDeadline DateTime?
   lowSeatsNotifiedAt   DateTime?
+  // A date a client picked herself on a PRIVATE formation (« date libre »),
+  // rather than one the salon scheduled. Created together with her booking,
+  // for her alone: never listed on the public pages, the till or the
+  // dashboard's session editor, and it only occupies the animator's calendar
+  // once it is paid. See lib/formations/custom-date-availability.js.
+  customerRequested    Boolean       @default(false)
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 

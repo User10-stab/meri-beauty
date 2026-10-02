@@ -603,3 +603,140 @@ export async function purgeRun(runId = getRunId()) {
 
   return { runId, userIds, activityIds, paymentIds, deleted };
 }
+
+// ─── « Date libre » on a private formation ──────────────────────────────────
+
+const EVERY_WEEK_DAY = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"];
+
+/**
+ * A staff member whose calendar a private formation runs on, with a login.
+ *
+ * Seeded rather than borrowed: the scenario declares indisponibilités and
+ * rendez-vous on her, which must not land on a real practitioner's diary.
+ * EMPLOYEE, so her formation is the salon's sale and is charged on the
+ * platform account — an independent would need an onboarded Connect account.
+ * She works every day 09:00–18:00, so no test date can fall on a day off by
+ * accident: every closed day in the scenario is one the scenario closed.
+ */
+export async function seedFormationTrainer() {
+  const runId = getRunId();
+  const email = taggedEmail(`formatrice-date-libre.${runId}.${uniqueSuffix()}`);
+
+  const user = await prisma.user.create({
+    data: {
+      fullName: "Formatrice Date Libre",
+      email,
+      password: await bcrypt.hash(CUSTOMER_PASSWORD, 12),
+      phone: tagPhone(email),
+      role: "STAFF",
+      emailVerified: true,
+      isActive: true,
+    },
+  });
+  const staff = await prisma.staff.create({
+    data: {
+      userId: user.id,
+      type: "EMPLOYEE",
+      isActive: true,
+      setupCompleted: true,
+      languages: ["fr"],
+      yearsOfExperience: 5,
+      // Explicit, never the schema default: this is what lets her create a
+      // formation from the dashboard.
+      dashboardPermissions: ["FORMATIONS", "FORMATION_RESERVATIONS"],
+      workingHours: {
+        create: EVERY_WEEK_DAY.map((day) => ({ day, startTime: "09:00", endTime: "18:00", isClosed: false })),
+      },
+    },
+  });
+  const animator = await prisma.animator.create({ data: { name: user.fullName, email, staffId: staff.id } });
+
+  return { user, staff, animator, credentials: { email, password: CUSTOMER_PASSWORD } };
+}
+
+/** A full-day indisponibilité, the way the dashboard stores one. */
+export async function seedTrainerDayOff({ staff, start, end, reason = "E2E indisponibilité" }) {
+  return prisma.timeOff.create({ data: { staffId: staff.id, startDate: start, endDate: end, isFullDay: true, reason } });
+}
+
+/** A confirmed rendez-vous on the trainer's calendar. */
+export async function seedTrainerAppointment({ staff, trainerUser, customer, start, end }) {
+  const service = await prisma.service.findFirst({ where: { isDeleted: false }, select: { id: true } });
+  if (!service) throw new Error("seedTrainerAppointment: the database has no Service to attach a StaffService to.");
+
+  const staffService = await prisma.staffService.upsert({
+    where: { staffId_serviceId: { staffId: staff.id, serviceId: service.id } },
+    update: {},
+    // Inactive: it exists only to carry the appointment and must never show
+    // up on the public booking page.
+    create: { staffId: staff.id, serviceId: service.id, createdById: trainerUser.id, price: 10, duration: 60, photo: "", isActive: false },
+  });
+
+  return prisma.appointment.create({
+    data: {
+      userId: customer.id,
+      staffServiceId: staffService.id,
+      staffId: staff.id,
+      date: start,
+      startTime: start,
+      endTime: end,
+      status: "CONFIRMED",
+    },
+  });
+}
+
+/** A fermeture exceptionnelle of the salon, tagged so it can be removed. */
+export async function seedSalonClosure({ start, end }) {
+  return prisma.salonClosure.create({
+    data: { salonId: "main-salon", title: `E2E fermeture ${getRunId()}`, startDate: start, endDate: end, isFullDay: true },
+  });
+}
+
+/**
+ * A published PRIVATE formation on that trainer's calendar — with one
+ * scheduled date when `sessionStart` is given, with none otherwise.
+ */
+export async function seedPrivateFormation({ animator, price = 120, depositPercentage = 50, duration = 240, sessionStart = null, label = "" }) {
+  const runId = getRunId();
+  const formation = await prisma.formation.create({
+    data: {
+      type: "PRIVATE",
+      title: `E2E Formation Privee ${label} ${runId}`.replace(/\s+/g, " "),
+      description: "Formation privée créée automatiquement par la suite money e2e.",
+      price,
+      duration,
+      capacity: 1,
+      status: "PUBLISHED",
+      depositPercentage,
+      animatorId: animator.id,
+    },
+  });
+  const session = sessionStart
+    ? await prisma.formationSession.create({
+        data: { formationId: formation.id, startDate: sessionStart, capacity: 1, status: "SCHEDULED", animatorId: animator.id },
+      })
+    : null;
+  return { formation, session, price, depositPercentage, duration };
+}
+
+/**
+ * An admin of this scenario's own, rather than the shared admin account —
+ * same reasoning as tests/e2e-dashboard/fixtures/seed-dashboard.mjs#seedAdmin
+ * (its own login rate-limit bucket, and a password this suite knows).
+ */
+export async function seedFormationAdmin() {
+  const runId = getRunId();
+  const email = taggedEmail(`admin-date-libre.${runId}.${uniqueSuffix()}`);
+  const user = await prisma.user.create({
+    data: {
+      fullName: "Admin Test Automatise Date Libre",
+      email,
+      phone: tagPhone(email),
+      password: await bcrypt.hash(CUSTOMER_PASSWORD, 12),
+      role: "ADMIN",
+      emailVerified: true,
+      isActive: true,
+    },
+  });
+  return { user, credentials: { email, password: CUSTOMER_PASSWORD } };
+}

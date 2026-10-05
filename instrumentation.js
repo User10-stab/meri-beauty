@@ -49,6 +49,35 @@ export async function register() {
     } catch (err) {
       console.error("[instrumentation] startBackgroundJobs failed on boot:", err);
     }
+
+    // Initialize Instagram tokens from DB (or env fallback) so the refresh
+    // job can work immediately. This also sets up __meriInstagramToken in memory.
+    try {
+      const { initInstagramTokens } = await import("@/lib/instagram");
+      // Try to load from prisma first; if DB not ready yet, fallback to env
+      let prismaToken = null;
+      let prismaRefresh = null;
+      let prismaExpires = null;
+      try {
+        const { prisma } = await import("@/lib/prisma");
+        const salon = await prisma.salon.findUnique({ where: { id: "main-salon" } });
+        if (salon?.instagramAccessToken) {
+          prismaToken = salon.instagramAccessToken;
+          prismaRefresh = salon.instagramRefreshToken;
+          prismaExpires = salon.instagramTokenExpiresAt;
+        }
+      } catch (e) {
+        // DB not ready yet — ignore, env fallback will handle it
+        console.debug("[instrumentation] Instagram DB not ready on boot, using env fallback");
+      }
+      await initInstagramTokens({
+        accessToken: prismaToken,
+        refreshToken: prismaRefresh,
+        expiresAt: prismaExpires,
+      });
+    } catch (err) {
+      console.error("[instrumentation] initInstagramTokens failed on boot:", err);
+    }
   }
 
   if (process.env.NEXT_RUNTIME === "edge") {

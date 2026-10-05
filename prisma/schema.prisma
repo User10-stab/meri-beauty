@@ -801,6 +801,9 @@ model Salon {
   countryCode           String? @default("BE")
 
   instagram String?
+  instagramAccessToken String?
+  instagramRefreshToken String?
+  instagramTokenExpiresAt DateTime?
   facebook  String?
   tiktok    String?
 

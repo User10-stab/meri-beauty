@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   addDaysToDateKey,
+  customDateDayOptions,
   customDatePerDayMinutes,
   customDateWindows,
   customSessionWindows,
@@ -86,7 +87,9 @@ describe("date libre — which start times a day offers", () => {
 
   test("malformed input offers nothing rather than throwing", () => {
     expect(times({ dateKey: "2026-02-30" })).toEqual([]);
-    expect(times({ days: 3 })).toEqual([]);
+    expect(times({ days: 0 })).toEqual([]);
+    expect(times({ days: 11 })).toEqual([]);
+    expect(times({ days: 1.5 })).toEqual([]);
     expect(times({ durationMinutes: 0 })).toEqual([]);
     expect(isDateKey("2026-11-23")).toBe(true);
     expect(isDateKey("23/11/2026")).toBe(false);
@@ -112,8 +115,56 @@ describe("date libre — the duration is the formation's total", () => {
 
   test("the calendar and the booking both use that per-day length", () => {
     const availability = source("lib/formations/custom-date-availability.js");
-    expect(availability.split("customDatePerDayMinutes(formation.duration, ").length - 1).toBe(5);
-    expect(availability).toContain("if (!one && !two) continue;");
+    // The shared per-count helper (calendar + day slots) and the booking.
+    expect(availability).toContain("durationMinutes: customDatePerDayMinutes(formation.duration, days),");
+    expect(availability).toContain("customDateWindows({ dateKey, time, days, durationMinutes: customDatePerDayMinutes(formation.duration, days) })");
+    expect(availability).toContain("if (!Object.values(counts).some(Boolean)) continue;");
+  });
+});
+
+// 2026-10-05: a formation can run over more than two journées — the client
+// stretches it over as many as she likes, each day at least 2 h, and every
+// one of those consecutive days must be a free working day.
+describe("date libre — any number of journées", () => {
+  test("the client may stretch it over as many journées as keep each day at least 2 h", () => {
+    expect(customDateDayOptions(240)).toEqual([1, 2]);
+    expect(customDateDayOptions(900)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(customDateDayOptions(90)).toEqual([1]);
+    // Never more than ten, however long the formation.
+    expect(customDateDayOptions(6000)).toHaveLength(10);
+    expect(customDateDayOptions(0)).toEqual([]);
+    expect(customDatePerDayMinutes(900, 3)).toBe(300);
+    expect(customDatePerDayMinutes(1000, 3)).toBe(334);
+  });
+
+  test("a formation of three working days is only offered over three journées or more", () => {
+    // 30 h against a 10 h day.
+    expect(times({ days: 2, durationMinutes: customDatePerDayMinutes(1800, 2) })).toEqual([]);
+    expect(times({ days: 3, durationMinutes: customDatePerDayMinutes(1800, 3) })).toEqual(["10:00"]);
+    expect(times({ days: 4, durationMinutes: customDatePerDayMinutes(1800, 4) })).toEqual(
+      ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30"],
+    );
+  });
+
+  test("every day of the stretch must be worked and free", () => {
+    // Thursday → Sunday crosses her closed Sunday: refused. Mon → Thu is fine.
+    expect(times({ dateKey: "2026-11-26", days: 4, durationMinutes: 300 })).toEqual([]);
+    expect(times({ dateKey: MONDAY, days: 4, durationMinutes: 300 }).length).toBeGreaterThan(0);
+    // An indisponibilité on the third day refuses the stretch, not shorter ones.
+    const busy = [{ start: at("2026-11-25", "00:00"), end: at("2026-11-25", "23:59") }];
+    expect(times({ days: 3, durationMinutes: 300, busy })).toEqual([]);
+    expect(times({ days: 2, durationMinutes: 300, busy }).length).toBeGreaterThan(0);
+  });
+
+  test("a stored session over four days reads back as four journées", () => {
+    const booked = customDateWindows({ dateKey: MONDAY, time: "10:00", days: 4, durationMinutes: 300 });
+    const session = { startDate: booked[0].start, endDate: booked[3].end };
+    expect(customSessionWindows(session)).toEqual(booked);
+    expect(sessionDayCount(session)).toBe(4);
+    const range = formatSessionDateRange(session);
+    expect(range.dayCount).toBe(4);
+    expect(range.days).toBe("du lundi 23 novembre 2026 au jeudi 26 novembre 2026");
+    expect(range.hours).toBe("10:00 – 15:00 chaque jour");
   });
 });
 

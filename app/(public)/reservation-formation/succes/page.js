@@ -129,14 +129,14 @@ function ReservationFormationSuccesContent() {
                   hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels",
                 })}
               </p>
-              {/* A two-day formation: name the second day too. */}
+              {/* A formation over several days: name its last day too. */}
               {r.session?.endDate && formatSessionDateRange(r.session).multiDay && (
                 <p data-testid="formation-second-day" className="text-xs text-ink/50">
                   →{" "}
                   {new Date(r.session.endDate).toLocaleDateString(toIntlLocale(locale), {
                     weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Brussels",
                   })}{" "}
-                  (2 journées)
+                  ({formatSessionDateRange(r.session).dayCount} journées)
                 </p>
               )}
               <hr className="border-ink/8" />

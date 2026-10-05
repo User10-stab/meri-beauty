@@ -45,11 +45,16 @@ export function FicheCheckInAction({ ticket, onChanged }) {
           <span>Arrivée à confirmer</span>
         ) : (
           <>
+        {ticket.dayNumber && (
+          <span data-testid="check-in-day" className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+            Journée {ticket.dayNumber} sur {ticket.dayCount}
+          </span>
+        )}
         <span>Places réservées</span>
         <strong className="font-semibold">
           {ticket.seatsCount}
         </strong>
-        {ticket.checkedInSeats > 0 && (
+        {ticket.checkedInSeats > 0 && !ticket.newDay && (
           <span className="text-body-color dark:text-dark-6">({ticket.remainingSeats} restantes)</span>
         )}
           </>

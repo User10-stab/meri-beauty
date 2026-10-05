@@ -3,6 +3,7 @@ import { prisma, waitFor, disconnect } from "./fixtures/db.mjs";
 import { assertLedgerSound } from "./fixtures/ledger.mjs";
 import { loginAs } from "./fixtures/auth.mjs";
 import { expectOnStripeCheckout, payAndReturn } from "./fixtures/stripe-checkout.mjs";
+import { requireMailpit, waitForEmail } from "./fixtures/mailpit.mjs";
 import { getRunId } from "./fixtures/run-id.mjs";
 import {
   seedCustomer,
@@ -77,6 +78,11 @@ const DAY = {
   fullPayment: addDays(base, 12), // paid in full, 1 journée
   takenLate: addDays(base, 14), //   picked, then closed before the payment
   takenEarly: addDays(base, 16), //  picked, then closed before the submit
+  stretch: addDays(base, 20), //     a 30 h formation spread over five journées (20 → 24)
+  stretchBlocked: addDays(base, 27), // four journées from here would cross the day off at +30
+  stretchDayOff: addDays(base, 30),
+  counter: addDays(base, 33), //     sold at the till, 2 journées (33 → 34)
+  counterSecond: addDays(base, 34),
 };
 
 const picker = (page) => page.getByTestId("custom-date-picker");
@@ -293,6 +299,14 @@ test.describe("formation privée — date libre", () => {
 
     await expect(page.getByTestId("formation-second-day")).toContainText(/2 journées/, { timeout: 60_000 });
 
+    // The trainer is told by e-mail: who, which days, acompte paid.
+    await requireMailpit();
+    const staffMail = await waitForEmail({ to: trainer.user.email, subject: /formation réservée/i, timeout: 60_000 });
+    expect(staffMail.Text).toContain(payer.email);
+    expect(staffMail.Text).toContain("2 journées");
+    expect(staffMail.Text).toContain("date choisie par la cliente");
+    expect(staffMail.Text).toContain("Acompte payé");
+
     // Paid: both days are now off the calendar for the next client.
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, formationA.id);
@@ -479,5 +493,175 @@ test.describe("formation privée — date libre", () => {
       { what: "the captured deposit to be flagged for a manual refund" },
     );
     expect(refundCase.stripePaymentIntentId).toBeTruthy();
+  });
+
+  test("a 30 h formation is spread over as many journées as the client wants, every day free", async ({ page }) => {
+    // 1800 min against a 9 h working day: one, two or three journées never
+    // fit (10 h a day is too long), four is the fewest, and the client may
+    // stretch further — each day at least 2 h, so up to ten.
+    const long = await seedPrivateFormation({ animator: trainer.animator, price: PRICE, duration: 1800, label: "Trente Heures" });
+    await seedTrainerDayOff({ staff: trainer.staff, start: at(DAY.stretchDayOff, "00:00"), end: at(DAY.stretchDayOff, "23:59") });
+
+    await loginAs(page, customerCredentials(fullPayer));
+    await openPicker(page, long.formation.id);
+
+    // Every count from four up would cross the day off: nothing starts there.
+    await expectDay(page, DAY.stretchBlocked, false, "a stretch over a day off was offered");
+    await expectDay(page, addDays(DAY.stretchBlocked, -1), true, "four free days ahead were not offered");
+
+    await (await dayButton(page, DAY.stretch)).click();
+    await offeredTimes(page);
+    for (const count of [1, 2, 3]) {
+      await expect(picker(page).getByTestId(`custom-date-days-${count}`), `${count} journée(s) offered for 30 h`).toBeDisabled();
+    }
+    // The fewest that fit is chosen for her: four journées of 7 h 30.
+    await expect(picker(page).getByTestId("custom-date-days-4")).toHaveAttribute("aria-checked", "true");
+    expect(await offeredTimes(page)).toEqual(["09:00", "09:30", "10:00", "10:30"]);
+    await expect(picker(page).getByTestId("custom-date-days-10")).toBeEnabled();
+
+    // She stretches it over five: 6 h a day.
+    await picker(page).getByTestId("custom-date-days-5").click();
+    expect(await offeredTimes(page)).toEqual(["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00"]);
+    await picker(page).locator('button[data-time="09:00"]').click();
+    const summary = page.getByTestId("custom-date-summary");
+    await expect(summary).toContainText("09:00 – 15:00 chaque jour · 5 journées");
+
+    await fillAndAcceptTerms(page);
+    await page.getByRole("button", { name: /payer l'acompte de/i }).click();
+    await payAndReturn(page, /\/reservation-formation\/succes/);
+
+    const reservation = await waitFor(
+      async () => {
+        const row = await customReservation(long.formation.id, fullPayer.id);
+        return row?.status === "CONFIRMED" && row.payment?.transactions?.length ? row : null;
+      },
+      { what: "the five-journée date libre to be confirmed by its deposit" },
+    );
+    expect(reservation.session.startDate.toISOString()).toBe(at(DAY.stretch, "09:00").toISOString());
+    expect(reservation.session.endDate.toISOString(), "five journées do not end on the fifth day").toBe(
+      at(addDays(DAY.stretch, 4), "15:00").toISOString(),
+    );
+    expect(Number(reservation.totalPrice), "spreading the formation changed its price").toBeCloseTo(PRICE, 2);
+    expect(Number(reservation.payment.paidAmount)).toBeCloseTo(DEPOSIT, 2);
+    await expect(page.getByTestId("formation-second-day")).toContainText(/5 journées/, { timeout: 60_000 });
+
+    // All five days are now taken 09:00–15:00 for the next client: whatever
+    // she picks there can only start once that day's journée is over.
+    await loginAs(page, customerCredentials(neighbour));
+    await openPicker(page, formationA.id);
+    for (let offset = 0; offset < 5; offset += 1) {
+      await (await dayButton(page, addDays(DAY.stretch, offset))).click();
+      const free = await offeredTimes(page);
+      expect(free.length, `day ${offset + 1} of the paid stretch has nothing left`).toBeGreaterThan(0);
+      expect(free.filter((time) => time < "15:00"), `day ${offset + 1} of the paid stretch is still offered before 15:00`).toEqual([]);
+    }
+  });
+
+  test("an indisponibilité over a client's paid journées is refused — the booking has priority", async ({ page }) => {
+    await loginAs(page, trainer.credentials);
+    await page.goto("/dashboard/account-settings");
+    const addButton = page.getByRole("button", { name: /ajouter l.indisponibilité/i });
+    await expect(addButton).toBeVisible({ timeout: 60_000 });
+    const section = page.locator("div.space-y-3\\.5").filter({ has: addButton }).last();
+    const dates = section.locator('input[type="date"]');
+    // Only the second of the payer's two journées.
+    await dates.nth(0).fill(DAY.twoDaysSecond);
+    await dates.nth(1).fill(DAY.twoDaysSecond);
+    await section.locator("textarea").fill("Rendez-vous médical");
+    await addButton.click();
+
+    await expect(page.getByText(/impossible de créer cette indisponibilité : ce membre du personnel a déjà une formation/i).first())
+      .toBeVisible({ timeout: 60_000 });
+    const saved = await prisma.timeOff.count({
+      where: { staffId: trainer.staff.id, startDate: { lt: at(DAY.twoDaysSecond, "23:00") }, endDate: { gt: at(DAY.twoDaysSecond, "01:00") } },
+    });
+    expect(saved, "an indisponibilité was saved over a paid formation day").toBe(0);
+
+    const kept = await customReservation(formationA.id, payer.id);
+    expect(kept.status).toBe("CONFIRMED");
+  });
+
+  test("the till sells a date libre, and its ticket is admitted once on each day", async ({ page }) => {
+    const buyerEmail = `e2e+comptoir.${getRunId()}@meribeauty.test`.toLowerCase();
+    await loginAs(page, admin.credentials);
+    await page.goto("/dashboard/boutique/point-of-sale");
+    await page.locator("#counter-input").fill(titleA);
+    await page.getByRole("button", { name: "Rechercher" }).click();
+    await page.getByRole("button").filter({ hasText: titleA }).filter({ hasText: "à choisir avec la cliente" }).first().click();
+
+    // The same calendar as the website, on the trainer's agenda.
+    await (await dayButton(page, DAY.counter)).click();
+    await offeredTimes(page);
+    await picker(page).getByTestId("custom-date-days-2").click();
+    expect(await offeredTimes(page)).toContain("10:00");
+    await picker(page).locator('button[data-time="10:00"]').click();
+
+    const sell = page.getByRole("button", { name: /encaisser et réserver/i });
+    const composer = page.locator("form").filter({ has: sell });
+    await composer.getByPlaceholder("Nom complet").fill("Cliente Comptoir Test");
+    await composer.getByPlaceholder("E-mail pour le reçu").fill(buyerEmail);
+    await composer.getByPlaceholder("Téléphone (facultatif)").fill(`04${String(Date.now()).slice(-8)}`);
+    await sell.click();
+    const toast = page.locator("[data-sonner-toast]").first();
+    await expect(toast).toBeVisible({ timeout: 60_000 });
+    expect(await toast.textContent(), "the till refused the sale").toMatch(/réservation enregistrée/i);
+
+    const sold = await prisma.formationReservation.findFirst({
+      where: { customer: { email: buyerEmail }, session: { formationId: formationA.id } },
+      include: { session: true, payment: true },
+    });
+    expect(sold, "the till did not record the sale").toBeTruthy();
+    expect(sold.status).toBe("CONFIRMED");
+    expect(sold.session.customerRequested).toBe(true);
+    expect(sold.session.startDate.toISOString()).toBe(at(DAY.counter, "10:00").toISOString());
+    expect(sold.session.endDate.toISOString()).toBe(at(DAY.counterSecond, "12:00").toISOString());
+    expect(Number(sold.payment.paidAmount)).toBeCloseTo(DEPOSIT, 2);
+    expect(sold.payment.status).toBe("PARTIALLY_PAID");
+
+    // The trainer is told, like for an online booking.
+    await requireMailpit();
+    const staffMail = await waitForEmail({ to: trainer.user.email, subject: new RegExp(`formation réservée – ${titleA}`, "i"), timeout: 60_000 });
+    expect(staffMail.Text).toContain(buyerEmail);
+
+    // Sold: those hours are gone for the website's clients.
+    await loginAs(page, customerCredentials(neighbour));
+    await openPicker(page, formationA.id);
+    await (await dayButton(page, DAY.counter)).click();
+    expect((await offeredTimes(page)).filter((time) => time < "12:00"), "the till's hours are still offered online").toEqual([]);
+
+    // Check-in. Day 1 is an ordinary arrival.
+    const code = (await waitFor(
+      () => prisma.formationReservation.findUnique({ where: { id: sold.id }, select: { checkInCode: true } }).then((r) => r?.checkInCode ?? null),
+      { what: "the ticket code" },
+    ));
+    await loginAs(page, admin.credentials);
+    const scan = async () => {
+      await page.goto("/dashboard/boutique/point-of-sale");
+      await page.locator("#counter-input").fill(code);
+      await page.getByRole("button", { name: "Rechercher" }).click();
+    };
+    await scan();
+    await page.getByRole("button", { name: "Pointer l'arrivée" }).click();
+    await expect(page.getByText(/1 place pointée/i).first()).toBeVisible({ timeout: 30_000 });
+
+    // Day 2: the formation is moved so that "today" is its second day and
+    // the first arrival was yesterday — the clock cannot be moved instead.
+    const yesterday = addDays(today, -1);
+    await prisma.formationSession.update({
+      where: { id: sold.session.id },
+      data: { startDate: at(yesterday, "10:00"), endDate: at(today, "12:00") },
+    });
+    await prisma.formationReservation.update({ where: { id: sold.id }, data: { checkedInAt: at(yesterday, "09:55") } });
+
+    await scan();
+    await expect(page.getByTestId("check-in-day")).toHaveText("Journée 2 sur 2", { timeout: 30_000 });
+    await page.getByRole("button", { name: "Pointer l'arrivée" }).click();
+    await expect(page.getByText(/1 place pointée/i).first()).toBeVisible({ timeout: 30_000 });
+
+    // And not twice the same day.
+    await scan();
+    await expect(page.getByText("Déjà pointé aujourd'hui (journée 2 sur 2).")).toBeVisible({ timeout: 30_000 });
+    const after = await prisma.formationReservation.findUnique({ where: { id: sold.id } });
+    expect(after.checkedInSeats, "a later day added seats").toBe(1);
   });
 });

@@ -11,6 +11,7 @@ import {
 } from "@/lib/authorization";
 import { AUDIT_ACTIONS, writeAuditLog } from "@/lib/audit-log";
 import { CHECK_IN_KINDS, checkInDelegate, ensureCheckInCode, parseCheckInCode } from "@/lib/activities/check-in-code";
+import { formationDayAdmission } from "@/lib/activities/multi-day-check-in";
 
 /**
  * Counter scanning for rendez-vous, ateliers, événements et formations.
@@ -184,7 +185,16 @@ function presentReservation(reservation, kind) {
 
   const activity =
     kind === CHECK_IN_KINDS.WORKSHOP ? reservation.session.workshop : reservation.session.formation;
-  const remainingSeats = reservation.seatsCount - reservation.checkedInSeats;
+  // A formation over several days: the same ticket comes back each day.
+  const days = kind === CHECK_IN_KINDS.FORMATION
+    ? formationDayAdmission({
+        session: reservation.session,
+        seatsCount: reservation.seatsCount,
+        checkedInSeats: reservation.checkedInSeats,
+        checkedInAt: reservation.checkedInAt,
+      })
+    : null;
+  const remainingSeats = days?.newDay ? reservation.seatsCount : reservation.seatsCount - reservation.checkedInSeats;
 
   // Ordered by how badly each case should stop the door: an unpaid or
   // cancelled booking first, an exhausted ticket second.
@@ -196,7 +206,9 @@ function presentReservation(reservation, kind) {
   } else if (reservation.status !== "CONFIRMED") {
     blockedReason = "Cette réservation est clôturée.";
   } else if (remainingSeats <= 0) {
-    blockedReason = "Toutes les places de ce billet ont déjà été pointées.";
+    blockedReason = days?.multiDay && days.checkedInToday && days.dayNumber
+      ? `Déjà pointé aujourd'hui (journée ${days.dayNumber} sur ${days.dayCount}).`
+      : "Toutes les places de ce billet ont déjà été pointées.";
   }
 
   return {
@@ -217,6 +229,11 @@ function presentReservation(reservation, kind) {
     seatsCount: reservation.seatsCount,
     checkedInSeats: reservation.checkedInSeats,
     remainingSeats: Math.max(remainingSeats, 0),
+    // « Journée 2 sur 5 » at the door; newDay = admitted again today.
+    dayNumber: days?.multiDay ? days.dayNumber : null,
+    dayCount: days?.dayCount ?? 1,
+    newDay: Boolean(days?.newDay),
+    checkedInAt: reservation.checkedInAt ?? null,
     // The single most important number on this screen: ateliers et
     // formations are sold on a 50% acompte, so a perfectly valid ticket can
     // still owe half the price at the door.
@@ -344,7 +361,11 @@ export async function confirmActivityCheckIn({ code: rawCode }) {
         where: { id: reservation.id },
         data: isAppointment
           ? { checkedInAt: new Date(), checkedInById: guard.session.user.id }
-          : {
+          : before.newDay
+            // A later day of a formation over several days: the seats were
+            // all admitted already; only today's arrival is recorded.
+            ? { checkedInAt: new Date(), checkedInById: guard.session.user.id }
+            : {
               checkedInSeats: { increment: seatsAdmitted },
               // Keep the original arrival time if an old, partially checked-in
               // ticket is completed after this all-remaining-seats rule.
@@ -360,12 +381,13 @@ export async function confirmActivityCheckIn({ code: rawCode }) {
         entityId: reservation.id,
         before: isAppointment
           ? { checkedInAt: reservation.checkedInAt }
-          : { checkedInSeats: reservation.checkedInSeats },
+          : { checkedInSeats: reservation.checkedInSeats, checkedInAt: reservation.checkedInAt },
         after: isAppointment
           ? { checkedInAt: updated.checkedInAt }
-          : { checkedInSeats: updated.checkedInSeats },
+          : { checkedInSeats: updated.checkedInSeats, checkedInAt: updated.checkedInAt },
         metadata: {
           kind: guard.kind,
+          ...(before.dayNumber ? { dayNumber: before.dayNumber, dayCount: before.dayCount } : {}),
           seatsAdmitted,
           balanceDueAtEntry: before.balanceDue,
         },

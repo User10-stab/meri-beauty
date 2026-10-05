@@ -100,7 +100,8 @@ describe("a transfer is refused on any sale the salon does not bank", () => {
     // A formation's animator decides, resolved by the real resolver rather
     // than a copy of its rules.
     const search = source("actions/counter/search.js");
-    expect(search).toContain('import { resolvePayeeForFormationSession } from "@/lib/payments/resolve-payee"');
+    // resolvePayeeForStaff: a « date libre » row has no session yet (2026-10-05).
+    expect(search).toContain('import { resolvePayeeForFormationSession, resolvePayeeForStaff } from "@/lib/payments/resolve-payee"');
     expect(search).toContain("independent: formationPayees.get(session.id) ?? false");
     // A workshop is always the salon's.
     expect(search).toContain("independent: false");

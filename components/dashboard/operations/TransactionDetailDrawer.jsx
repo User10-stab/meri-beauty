@@ -1,5 +1,6 @@
 "use client";
 
+import { multiDaySuffix } from "@/lib/formations/custom-date-availability";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
@@ -82,7 +83,7 @@ function describeSource(payment) {
       kind: "Formation",
       title: r.session.formation.title,
       status: r.status,
-      extra: `${r.seatsCount} place(s) · session du ${dateTime(r.session.startDate)}`,
+      extra: `${r.seatsCount} place(s) · session du ${dateTime(r.session.startDate)}${multiDaySuffix(r.session)}`,
       customer: r.customer,
       performedByText: performedByLabel(r.performedBy),
     };

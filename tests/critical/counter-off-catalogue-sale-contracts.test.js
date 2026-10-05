@@ -35,7 +35,8 @@ describe("the counter sells off-catalogue entries — brouillon, archivé, désa
   test("the omnibar searches sessions on that allow-list, not on PUBLISHED alone", () => {
     expect(search).toContain('import { COUNTER_SELLABLE_CATALOGUE_STATUSES } from "@/lib/counter/catalogue-availability"');
     expect(search).not.toContain('status: "PUBLISHED"');
-    expect(search.match(/status: \{ in: COUNTER_SELLABLE_CATALOGUE_STATUSES \}/g)).toHaveLength(2);
+    // Ateliers, formation sessions, and private formations sold on a « date libre » (2026-10-05).
+    expect(search.match(/status: \{ in: COUNTER_SELLABLE_CATALOGUE_STATUSES \}/g)).toHaveLength(3);
   });
 
   test("each session row carries its catalogue status so the cashier is told what they picked", () => {

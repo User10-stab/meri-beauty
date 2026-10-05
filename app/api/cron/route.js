@@ -9,6 +9,7 @@ import { expireStaleFormationHolds } from "@/lib/formations/expire-stale-holds";
 import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds";
 import { reconcileMissedCheckouts } from "@/lib/payments/reconcile-missed-checkouts";
 import { sendScheduledCampaigns } from "@/lib/campaigns/send-campaign";
+import { refreshInstagramToken } from "@/lib/background-jobs";
 import { isValidCronSecret } from "@/lib/cron-auth";
 import { captureCriticalError } from "@/lib/monitoring";
 import { recordExternalJobRun } from "@/lib/background-jobs";
@@ -44,6 +45,7 @@ const JOBS = [
   ["reconcileMissedRefunds", reconcileMissedRefunds],
   ["reconcileMissedCheckouts", reconcileMissedCheckouts],
   ["sendScheduledCampaigns", sendScheduledCampaigns],
+  ["refreshInstagramToken", refreshInstagramToken],
 ];
 
 export async function GET(req) {

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { liveSeatFilter } from "@/lib/reservations/session-occupancy";
 import { openSessionDatesWhere } from "@/lib/formations/session-bookability";
+import { formationOffersCustomDates } from "@/lib/formations/custom-date-availability";
 
 /**
  * The catalogue lists only what a visitor can actually book: sessions that
@@ -14,13 +15,30 @@ import { openSessionDatesWhere } from "@/lib/formations/session-bookability";
  * it has none at all — a card nobody can book only makes visitors think it
  * is still on offer. The remaining sessions stay in date order, so the card
  * shows the next bookable date.
+ *
+ * The one exception is a private formation offering a « date libre »
+ * (customDatesEnabled): the client picks her own day, so it stays listed
+ * with no scheduled session at all.
  */
 function withBookableSessionsOnly(formation) {
   const openSessions = formation.sessions.filter((session) => {
     const taken = session.reservations.reduce((sum, res) => sum + res.seatsCount, 0);
     return taken < session.capacity;
   });
-  return openSessions.length > 0 ? { ...formation, sessions: openSessions } : null;
+  if (openSessions.length === 0 && !formation.customDatesEnabled) return null;
+  return { ...formation, sessions: openSessions };
+}
+
+/**
+ * Sessions the salon scheduled. A date a client picked for herself
+ * (customerRequested) is hers alone and never listed.
+ */
+function scheduledOpenSessionsWhere() {
+  return { ...openSessionDatesWhere(), customerRequested: false };
+}
+
+async function withCustomDatesFlag(formation) {
+  return { ...formation, customDatesEnabled: await formationOffersCustomDates(prisma, formation) };
 }
 
 export async function getPublicFormations() {
@@ -32,7 +50,7 @@ export async function getPublicFormations() {
         animator: true,
         sessions: {
           orderBy: { startDate: "asc" },
-          where: openSessionDatesWhere(),
+          where: scheduledOpenSessionsWhere(),
           include: {
             reservations: {
               where: liveSeatFilter(),
@@ -43,7 +61,7 @@ export async function getPublicFormations() {
       },
     });
 
-    const serializedData = formations
+    const serializedData = (await Promise.all(formations.map(withCustomDatesFlag)))
       .map(withBookableSessionsOnly)
       .filter(Boolean)
       .map((formation) => serializeDecimalFields(formation));
@@ -65,7 +83,7 @@ export async function getPublicFormationById(id) {
         animator: true,
         sessions: {
           orderBy: { startDate: "asc" },
-          where: openSessionDatesWhere(),
+          where: scheduledOpenSessionsWhere(),
           include: {
             reservations: {
               where: liveSeatFilter(),
@@ -80,7 +98,7 @@ export async function getPublicFormationById(id) {
       return { success: false, data: null, message: "Formation introuvable." };
     }
 
-    return { success: true, data: serializeDecimalFields(formation) };
+    return { success: true, data: serializeDecimalFields(await withCustomDatesFlag(formation)) };
   } catch (error) {
     console.error("[getPublicFormationById]", error);
     return { success: false, data: null, message: "Impossible de charger la formation." };

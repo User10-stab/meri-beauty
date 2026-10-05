@@ -145,7 +145,11 @@ describe("a formation seat is charged to its animator's account", () => {
     ["formation", "actions/formations/create-formation-reservation.js", "resolvePayeeForFormationSession"],
   ])("%s refuses an unready payee before holding a seat", (_kind, path, resolver) => {
     const code = source(path);
-    const gate = code.indexOf(`if (!payeeCanChargeOnline(await ${resolver}(prisma, { sessionId: session.id })))`);
+    // The payee is the scheduled session's — or, for a « date libre » whose
+    // session does not exist yet, the formation's own animator.
+    expect(code).toContain(`? await ${resolver}(prisma, { sessionId: session.id })`);
+    expect(code).toContain(": await resolvePayeeForStaff(prisma, { staffId: formation.animator?.staffId });");
+    const gate = code.indexOf("if (!payeeCanChargeOnline(payee)) {", code.indexOf("export async function createFormationReservation("));
     const hold = code.indexOf("holdExpiresAt: new Date(Date.now() + 15 * 60 * 1000)");
     expect(gate, "the pre-hold payee gate is gone").toBeGreaterThan(-1);
     expect(hold, "the 15-minute seat hold moved — re-anchor this test").toBeGreaterThan(-1);
@@ -168,15 +172,16 @@ describe("a formation seat is charged to its animator's account", () => {
   });
 
   test.each([
-    ["lib/workshops/fulfill-workshop-reservation-payment.js", "confirmWorkshopReservationPayment"],
-    ["lib/formations/fulfill-formation-reservation-payment.js", "confirmFormationReservationPayment"],
-  ])("%s records the frozen payee and the account the money landed on", (path, fn) => {
+    ["lib/workshops/fulfill-workshop-reservation-payment.js", "confirmWorkshopReservationPayment", 5],
+    // One more refusal than an atelier: a « date libre » taken before payment.
+    ["lib/formations/fulfill-formation-reservation-payment.js", "confirmFormationReservationPayment", 6],
+  ])("%s records the frozen payee and the account the money landed on", (path, fn, refundCases) => {
     const code = source(path);
     expect(code).toContain(`export async function ${fn}(session, { stripeAccountId = null } = {}) {`);
     expect(code).toContain("await resolvePayeeFromCheckout(tx, session, () =>");
     expect(code).toContain("{ stripeAccountId }\n        ),");
     // every manual-refund case points at the Stripe account the charge is on
-    expect(code.match(/, \{ stripeAccountId \}\);/g)).toHaveLength(5);
+    expect(code.match(/, \{ stripeAccountId \}\);/g)).toHaveLength(refundCases);
   });
 
   test("the webhook hands event.account to the atelier/formation confirmations and fee handlers", () => {

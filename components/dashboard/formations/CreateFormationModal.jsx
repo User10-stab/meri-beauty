@@ -551,6 +551,14 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, staf
               )}
             </div>
 
+            {/* A private formation's dates are optional: its client may pick
+                any day the animator is free, with or without dates set here. */}
+            {isPrivate && (
+              <p data-testid="private-date-hint" className="rounded-lg bg-violet-50 px-3 py-2 text-xs leading-relaxed text-violet-900">
+                {t("privateDateHint")}
+              </p>
+            )}
+
             {form.allowMultipleSessions ? (
               <>
                 {sessions.length === 0 && (
@@ -637,10 +645,10 @@ export function CreateFormationModal({ open, onClose, onCreated, formation, staf
               </>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <ModalField label={t("startDateLabel")} required>
+                <ModalField label={t("startDateLabel")} required={!isPrivate}>
                   <input
                     type="datetime-local"
-                    required
+                    required={!isPrivate}
                     value={form.startDate}
                     onChange={(e) => setForm((prev) => ({ ...prev, startDate: e.target.value }))}
                     className="h-9 w-full rounded-lg border border-gray-200 px-3 text-sm text-gray-700 outline-none focus:border-indigo-450 focus:ring-2 focus:ring-indigo-100"

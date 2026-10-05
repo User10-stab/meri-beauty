@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { toIntlLocale } from "@/lib/intl-locale";
 import { trackConversion } from "@/lib/analytics";
+import { formatSessionDateRange } from "@/lib/formations/custom-date-availability";
 
 export default function ReservationFormationSuccesPage() {
   return (
@@ -128,6 +129,16 @@ function ReservationFormationSuccesContent() {
                   hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels",
                 })}
               </p>
+              {/* A two-day formation: name the second day too. */}
+              {r.session?.endDate && formatSessionDateRange(r.session).multiDay && (
+                <p data-testid="formation-second-day" className="text-xs text-ink/50">
+                  →{" "}
+                  {new Date(r.session.endDate).toLocaleDateString(toIntlLocale(locale), {
+                    weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Brussels",
+                  })}{" "}
+                  (2 journées)
+                </p>
+              )}
               <hr className="border-ink/8" />
               <div className="flex justify-between">
                 <span className="text-ink/60">{t("seats")}</span>

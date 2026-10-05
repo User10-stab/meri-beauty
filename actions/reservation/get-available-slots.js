@@ -2,6 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { ACTIVE_APPOINTMENT_STATUSES } from "@/lib/appointment-status";
+import { loadStaffSessionBlocks } from "@/lib/formations/staff-session-blocks";
 import {
   buildAvailabilityForDate,
   parseLocalDateString,
@@ -87,6 +88,12 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
         },
       },
     });
+
+    // Formation / atelier sessions this staff member animates occupy her
+    // like a rendez-vous does (lib/formations/staff-session-blocks.js).
+    existingAppointments.push(
+      ...(await loadStaffSessionBlocks(prisma, { staffIds: [staffService.staff.id], from: startOfDay, to: endOfDay }))
+    );
 
     const availability = buildAvailabilityForDate({
       staffService,
@@ -197,6 +204,10 @@ export async function getMonthAvailability(staffServiceId, monthDate, excludeApp
         },
       },
     });
+
+    existingAppointments.push(
+      ...(await loadStaffSessionBlocks(prisma, { staffIds: [staffService.staff.id], from: startOfMonth, to: queryEndOfMonth }))
+    );
 
     const unavailableDates = [];
     const cursor = new Date(startOfMonth);

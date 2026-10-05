@@ -16,9 +16,11 @@ const source = (path) => readFileSync(`${root}${path}`, "utf8");
 // through a single choke point — flagPaymentForManualRefund — which never
 // calls Stripe's refund API, only notifies admins to refund by hand.
 describe.each([
-  { label: "workshops", path: "lib/workshops/fulfill-workshop-reservation-payment.js", fnName: "confirmWorkshopReservationPayment" },
-  { label: "formations", path: "lib/formations/fulfill-formation-reservation-payment.js", fnName: "confirmFormationReservationPayment" },
-])("$label: confirm-payment failed-sale branches never call Stripe directly", ({ path, fnName }) => {
+  { label: "workshops", path: "lib/workshops/fulfill-workshop-reservation-payment.js", fnName: "confirmWorkshopReservationPayment", failedSaleBranches: 6 },
+  // A formation has a seventh: a « date libre » whose day was taken before
+  // the payment arrived (CUSTOM_DATE_TAKEN).
+  { label: "formations", path: "lib/formations/fulfill-formation-reservation-payment.js", fnName: "confirmFormationReservationPayment", failedSaleBranches: 7 },
+])("$label: confirm-payment failed-sale branches never call Stripe directly", ({ path, fnName, failedSaleBranches }) => {
   const src = source(path);
 
   test("imports flagPaymentForManualRefund, not a Stripe refund helper", () => {
@@ -38,8 +40,8 @@ describe.each([
     const flagCalls = src.split("await flagPaymentForManualRefund(session,").length - 1;
     // reservation gone, reservation cancelled, underpayment, cancelled
     // concurrently, hold-expired-overbooked, and a second payment landing on
-    // an already-confirmed reservation = 6 sites per file.
-    expect(flagCalls).toBe(6);
+    // an already-confirmed reservation = 6 sites per file (+1 for formations).
+    expect(flagCalls).toBe(failedSaleBranches);
     expect(src).not.toContain("refunded: true");
   });
 

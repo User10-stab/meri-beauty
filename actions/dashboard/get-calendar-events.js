@@ -103,7 +103,7 @@ export async function getCalendarEvents({ from, to }) {
               endDate: true,
               capacity: true,
               formation: { select: { title: true, type: true } },
-              animator: { select: { name: true } },
+              animator: { select: { name: true, staffId: true } },
               reservations: {
                 where: liveSeatFilter(),
                 select: { seatsCount: true, customer: { select: { fullName: true } } },
@@ -147,7 +147,9 @@ export async function getCalendarEvents({ from, to }) {
       return {
         id: s.id,
         kind: "formation",
-        animatorId: s.animatorId ?? null,
+        // Animator and Staff are separate rows; the staff chip filter matches
+        // on the staff profile this animator IS (Animator.staffId).
+        animatorStaffId: s.animator?.staffId ?? null,
         title: s.formation.title,
         subtitle: `${isPrivate ? "Formation individuelle" : "Formation groupe"}${s.animator ? ` · ${s.animator.name}` : ""}${
           clientName ? "" : ` · ${seatsTaken}/${s.capacity} places`

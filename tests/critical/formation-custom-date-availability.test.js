@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   addDaysToDateKey,
+  customDateDayCount,
   customDateDayOptions,
   customDatePerDayMinutes,
   customDateWindows,
@@ -88,7 +89,7 @@ describe("date libre — which start times a day offers", () => {
   test("malformed input offers nothing rather than throwing", () => {
     expect(times({ dateKey: "2026-02-30" })).toEqual([]);
     expect(times({ days: 0 })).toEqual([]);
-    expect(times({ days: 11 })).toEqual([]);
+    expect(times({ days: 31 })).toEqual([]);
     expect(times({ days: 1.5 })).toEqual([]);
     expect(times({ durationMinutes: 0 })).toEqual([]);
     expect(isDateKey("2026-11-23")).toBe(true);
@@ -96,21 +97,37 @@ describe("date libre — which start times a day offers", () => {
   });
 });
 
-describe("date libre — the duration is the formation's total", () => {
-  test("one journée runs it whole, two journées split it in half", () => {
-    expect(customDatePerDayMinutes(240, 1)).toBe(240);
-    expect(customDatePerDayMinutes(240, 2)).toBe(120);
-    expect(customDatePerDayMinutes(900, 2)).toBe(450);
-    expect(customDatePerDayMinutes(425, 2)).toBe(213);
-    expect(customDatePerDayMinutes(0, 2)).toBe(0);
+// 2026-10-05, decided with the salon: no flexible hours any more. Every
+// journée is 10:00 → 17:00, and the formation's TOTAL duration sets how many
+// consecutive journées it takes — one per 7 h started.
+describe("date libre — fixed journées of 10:00 to 17:00", () => {
+  test("every journée lasts the full 10:00 → 17:00, whatever the total", () => {
+    expect(customDatePerDayMinutes(240, 1)).toBe(420);
+    expect(customDatePerDayMinutes(900, 3)).toBe(420);
+    expect(customDatePerDayMinutes(0, 1)).toBe(0);
   });
 
-  test("a formation longer than a working day is never one journée, only two", () => {
-    // 15 h against a 10 h day: nothing on one day, 7 h 30 a day on two.
-    expect(times({ days: 1, durationMinutes: customDatePerDayMinutes(900, 1) })).toEqual([]);
-    expect(times({ days: 2, durationMinutes: customDatePerDayMinutes(900, 2) })).toEqual(
-      ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30"],
-    );
+  test("the duration sets the number of journées: one per 7 h started", () => {
+    expect(customDateDayCount(240)).toBe(1);
+    expect(customDateDayCount(420)).toBe(1);
+    expect(customDateDayCount(421)).toBe(2);
+    expect(customDateDayCount(900)).toBe(3);
+    expect(customDateDayCount(0)).toBe(0);
+    // A single option — the client no longer chooses it.
+    expect(customDateDayOptions(900)).toEqual([3]);
+    expect(customDateDayOptions(240)).toEqual([1]);
+    expect(customDateDayOptions(0)).toEqual([]);
+  });
+
+  test("a journée is offered only when 10:00 → 17:00 is free", () => {
+    // Her day is 10:00–20:00: 10:00 is a valid start for a full journée.
+    expect(times({ days: 1, durationMinutes: 420 })).toContain("10:00");
+    // A rendez-vous at 15:00 on the day: the journée does not fit.
+    const busy = [{ start: at(MONDAY, "15:00"), end: at(MONDAY, "16:00") }];
+    expect(times({ days: 1, durationMinutes: 420, busy })).not.toContain("10:00");
+    // The calendar keeps 10:00 only.
+    const availability = source("lib/formations/custom-date-availability.js");
+    expect(availability).toContain("}).filter((time) => time === CUSTOM_DATE_DAY_START);");
   });
 
   test("the calendar and the booking both use that per-day length", () => {
@@ -122,28 +139,12 @@ describe("date libre — the duration is the formation's total", () => {
   });
 });
 
-// 2026-10-05: a formation can run over more than two journées — the client
-// stretches it over as many as she likes, each day at least 2 h, and every
-// one of those consecutive days must be a free working day.
-describe("date libre — any number of journées", () => {
-  test("the client may stretch it over as many journées as keep each day at least 2 h", () => {
-    expect(customDateDayOptions(240)).toEqual([1, 2]);
-    expect(customDateDayOptions(900)).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    expect(customDateDayOptions(90)).toEqual([1]);
-    // Never more than ten, however long the formation.
-    expect(customDateDayOptions(6000)).toHaveLength(10);
-    expect(customDateDayOptions(0)).toEqual([]);
-    expect(customDatePerDayMinutes(900, 3)).toBe(300);
-    expect(customDatePerDayMinutes(1000, 3)).toBe(334);
-  });
-
-  test("a formation of three working days is only offered over three journées or more", () => {
-    // 30 h against a 10 h day.
-    expect(times({ days: 2, durationMinutes: customDatePerDayMinutes(1800, 2) })).toEqual([]);
-    expect(times({ days: 3, durationMinutes: customDatePerDayMinutes(1800, 3) })).toEqual(["10:00"]);
-    expect(times({ days: 4, durationMinutes: customDatePerDayMinutes(1800, 4) })).toEqual(
-      ["10:00", "10:30", "11:00", "11:30", "12:00", "12:30"],
-    );
+// A formation of several journées: every one of those consecutive days must
+// be a free working day.
+describe("date libre — several journées", () => {
+  test("the number of journées has a ceiling", () => {
+    expect(customDateDayOptions(30 * 420)).toEqual([30]);
+    expect(customDateDayOptions(31 * 420)).toEqual([]);
   });
 
   test("every day of the stretch must be worked and free", () => {

@@ -1158,7 +1158,7 @@
       "durationLabel": "Durée (min)",
       "capacityLabel": "Capacité (pers.)",
       "capacityPrivateHint": "Toujours 1 personne pour une formation privée.",
-      "privateDateHint": "Date facultative pour une formation privée. Sans date — ou en plus des dates indiquées ici — la cliente choisit librement son jour (1 ou 2 journées) parmi les disponibilités de l'animatrice : horaires de travail, indisponibilités, fermetures et rendez-vous sont vérifiés. La date n'est confirmée qu'une fois l'acompte ou le total payé. La durée indiquée est la durée totale de la formation : si elle dépasse une journée de travail, elle se fait automatiquement sur 2 journées (la moitié chaque jour).",
+      "privateDateHint": "Date facultative pour une formation privée. Sans date — ou en plus des dates indiquées ici — la cliente choisit librement son jour parmi les disponibilités de l'animatrice : horaires de travail, indisponibilités, fermetures et rendez-vous sont vérifiés. Chaque journée va de 10:00 à 17:00 ; la durée indiquée est la durée totale de la formation et fixe le nombre de journées (une par tranche de 7 h). La date n'est confirmée qu'une fois l'acompte ou le total payé.",
       "capacityPublicHint": "Aucune limite maximale pour une formation groupe.",
       "depositLabel": "Acompte (%)",
       "depositHint": "Pourcentage du prix total demandé à la réservation.",

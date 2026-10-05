@@ -1158,7 +1158,7 @@
       "durationLabel": "Duur (min)",
       "capacityLabel": "Capaciteit (pers.)",
       "capacityPrivateHint": "Altijd 1 persoon voor een privé-opleiding.",
-      "privateDateHint": "De datum is optioneel voor een privé-opleiding. Zonder datum — of bovenop de hier ingestelde data — kiest de klant vrij haar dag (1 of 2 dagen) binnen de beschikbaarheid van de lesgever: werkuren, afwezigheden, sluitingen en afspraken worden gecontroleerd. De datum wordt pas bevestigd zodra het voorschot of het volledige bedrag betaald is. De duur is de totale duur van de opleiding: is die langer dan één werkdag, dan loopt ze automatisch over 2 dagen (de helft per dag).",
+      "privateDateHint": "De datum is optioneel voor een privé-opleiding. Zonder datum — of bovenop de hier ingestelde data — kiest de klant vrij haar dag binnen de beschikbaarheid van de lesgever: werkuren, afwezigheden, sluitingen en afspraken worden gecontroleerd. Elke dag loopt van 10:00 tot 17:00; de duur is de totale duur van de opleiding en bepaalt het aantal dagen (één per 7 uur). De datum wordt pas bevestigd zodra het voorschot of het volledige bedrag betaald is.",
       "capacityPublicHint": "Geen maximumlimiet voor een groepsopleiding.",
       "depositLabel": "Aanbetaling (%)",
       "depositHint": "Percentage van de totale prijs gevraagd bij reservering.",

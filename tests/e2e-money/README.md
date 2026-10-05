@@ -248,7 +248,7 @@ can construct it through the browser.
 ## The « date libre » scenario confirms a date by paying for it
 
 `formation-private-date-libre.spec.mjs` covers a private formation whose
-client picks her own day (one or several consecutive journées) instead of a date the salon
+client picks her own first day (fixed journées of 10:00–17:00, as many as the duration needs) instead of a date the salon
 scheduled. It is in this suite, not the dashboard one, because the rule under
 test *is* a payment: a picked date is confirmed only by a deposit or a full
 payment, an unpaid pick blocks nobody, and a pick whose day was taken before

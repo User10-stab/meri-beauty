@@ -195,6 +195,18 @@ function ReservationFormationContent() {
         return;
       }
 
+      // A private formation is never « complet »: a date another client
+      // already took sends this one to pick her own date instead.
+      if (
+        formResult.data.type === "PRIVATE" &&
+        formResult.data.customDatesEnabled &&
+        availResult.success &&
+        availResult.data.available <= 0
+      ) {
+        router.replace(`/reservation-formation?formation=${formationId}&date=libre`);
+        return;
+      }
+
       setFormation(formResult.data);
       setSessionData(sess);
 
@@ -220,7 +232,7 @@ function ReservationFormationContent() {
 
     if (customMode) loadCustom();
     else load();
-  }, [formationId, sessionId, customMode, isPriority, waitingListId]);
+  }, [formationId, sessionId, customMode, isPriority, waitingListId, router]);
 
   useEffect(() => {
     const authedUser = session?.user;

@@ -5,11 +5,11 @@ import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { getFormationCustomDateMonth, getFormationCustomDateSlots } from "@/actions/formations/custom-dates";
 
 /**
- * « Date libre » picker for a private formation: a day, then one or two
- * journées, then a start time. Everything it offers comes from the animator's
- * calendar (lib/formations/custom-date-availability.js) — the booking action
- * re-validates the choice, this only keeps the client from picking a day that
- * would be refused.
+ * « Date libre » picker for a private formation: the client picks the first
+ * day; the journées are fixed — 10:00 → 17:00, as many as the formation's
+ * duration needs (lib/formations/custom-date-availability.js). A day is
+ * offered only when every journée from it is free; the booking action
+ * re-validates the choice.
  */
 
 const WEEK_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -31,10 +31,9 @@ export function nextDateKey(dateKey) {
   return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`;
 }
 
-/** Same rule as customDatePerDayMinutes (lib/formations/custom-date-availability.js). */
-export function perDayMinutes(totalMinutes, days) {
-  const total = Number(totalMinutes || 0);
-  return Math.ceil(total / Math.max(1, Number(days) || 1));
+/** Same rule as customDatePerDayMinutes: a journée is always 10:00 → 17:00. */
+export function perDayMinutes() {
+  return 7 * 60;
 }
 
 /** The last day of a booking of `days` journées starting on `dateKey`. */
@@ -137,19 +136,19 @@ export function CustomDatePicker({
     onChange(null);
   }
 
-  // A formation too long for one working day (or a day with no room left
-  // for it) has no one-journée answer: move to the fewest journées that fit.
+  // Nothing left to choose once the day is picked: the number of journées
+  // comes from the duration and the hours are fixed — select it outright.
   useEffect(() => {
-    if (!slots) return;
-    if ((slots[days] ?? []).length > 0) return;
-    const fewest = Object.keys(slots).map(Number).sort((a, b) => a - b).find((count) => slots[count].length > 0);
-    if (fewest) setDays(fewest);
-  }, [slots, days]);
-
-  function pickDays(nextDays) {
-    setDays(nextDays);
-    onChange(null);
-  }
+    if (!slots || !dateKey) return;
+    const count = Object.keys(slots).map(Number).find((option) => (slots[option] ?? []).length > 0);
+    if (!count) return;
+    setDays(count);
+    const time = slots[count][0];
+    if (value?.date !== dateKey || value?.time !== time || value?.days !== count) {
+      onChange({ date: dateKey, time, days: count });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slots, dateKey]);
 
   const [year, month] = monthKey.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -161,7 +160,6 @@ export function CustomDatePicker({
     timeZone: "UTC",
   });
   const times = slots?.[days] ?? [];
-  const dayOptions = slots ? Object.keys(slots).map(Number).sort((a, b) => a - b) : [1];
 
   return (
     <div data-testid="custom-date-picker" className="space-y-5">
@@ -246,84 +244,28 @@ export function CustomDatePicker({
             <span className="font-semibold capitalize text-ink">{formatDateKey(dateKey)}</span>
           </p>
 
-          <div>
-            <p className="mb-2 text-xs font-medium text-ink/60">
-              Sur combien de journées ? <span className="text-ink/40">(formation de {formatMinutes(Number(durationMinutes))} au total)</span>
+          {loadingSlots || slots === null ? (
+            <p className="flex items-center gap-2 text-xs text-ink/50">
+              <Loader2 size={14} className="animate-spin" /> Chargement des horaires…
             </p>
-            <div role="radiogroup" aria-label="Nombre de journées" className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {dayOptions.map((option) => {
-                const disabled = slots !== null && (slots[option] ?? []).length === 0;
-                const last = lastDateKey(dateKey, option);
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    role="radio"
-                    aria-checked={days === option}
-                    data-testid={`custom-date-days-${option}`}
-                    disabled={disabled || slots === null}
-                    onClick={() => pickDays(option)}
-                    className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                      days === option ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
-                    }`}
-                  >
-                    <span className="block font-medium text-ink">
-                      {option} journée{option > 1 ? "s" : ""}
-                    </span>
-                    <span className="block text-xs text-ink/50">
-                      {disabled
-                        ? option === 1
-                          ? "Ne tient pas sur une seule journée"
-                          : "Pas disponible sur toutes ces journées"
-                        : `${formatMinutes(perDayMinutes(durationMinutes, option))} par jour${
-                            option > 1 ? ` · jusqu'au ${formatDateKey(last, { weekday: "short", day: "numeric", month: "short" })}` : ""
-                          }`}
-                    </span>
-                  </button>
-                );
-              })}
+          ) : times.length === 0 ? (
+            <p data-testid="custom-date-no-times" className="text-xs text-ink/50">
+              Cette date n&apos;est plus disponible. Choisissez-en une autre.
+            </p>
+          ) : (
+            <div data-testid="custom-date-choice" data-days={days} className="rounded-lg border border-gold bg-gold/5 px-3 py-2.5 text-sm">
+              <span className="block font-medium text-ink">
+                {days} journée{days > 1 ? "s" : ""} · {times[0]} – {endTimeOf(times[0], perDayMinutes())}
+                {days > 1 ? " chaque jour" : ""}
+              </span>
+              <span className="block text-xs text-ink/50">
+                {days > 1
+                  ? `Du ${formatDateKey(dateKey, { weekday: "short", day: "numeric", month: "short" })} au ${formatDateKey(lastDateKey(dateKey, days), { weekday: "short", day: "numeric", month: "short" })} · `
+                  : ""}
+                formation de {formatMinutes(Number(durationMinutes))} au total
+              </span>
             </div>
-          </div>
-
-          <div>
-            <p className="mb-2 text-xs font-medium text-ink/60">
-              Heure de début{days > 1 ? " (identique chaque jour)" : ""}
-            </p>
-            {loadingSlots || slots === null ? (
-              <p className="flex items-center gap-2 text-xs text-ink/50">
-                <Loader2 size={14} className="animate-spin" /> Chargement des horaires…
-              </p>
-            ) : times.length === 0 ? (
-              <p data-testid="custom-date-no-times" className="text-xs text-ink/50">
-                Plus aucun horaire disponible ce jour-là. Choisissez une autre date.
-              </p>
-            ) : (
-              <div data-testid="custom-date-times" className="flex flex-wrap gap-2">
-                {times.map((time) => {
-                  const selected = value?.date === dateKey && value?.days === days && value?.time === time;
-                  return (
-                    <button
-                      key={time}
-                      type="button"
-                      data-time={time}
-                      aria-pressed={selected}
-                      onClick={() => onChange({ date: dateKey, time, days })}
-                      className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-                        selected
-                          ? "border-gold bg-gold font-semibold text-white"
-                          : "border-ink/15 text-ink hover:border-gold/50 hover:bg-gold/10"
-                      }`}
-                    >
-                      {time}
-                      <span className={`ml-1 text-xs ${selected ? "text-white/80" : "text-ink/40"}`}>
-                        – {endTimeOf(time, perDayMinutes(durationMinutes, days))}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          )}
         </div>
       )}
     </div>

@@ -25,7 +25,7 @@ function rowKey(row) {
   if (row.type === "BOOKING") return `booking:${row.kind}:${row.id}`;
   if (row.type === "PICKUP") return `pickup:${row.orderId}`;
   if (row.type === "SERVICE") return `service:${row.staffServiceId}`;
-  if (row.type === "SESSION") return `session:${row.kind}:${row.sessionId}`;
+  if (row.type === "SESSION") return `session:${row.kind}:${row.sessionId ?? `libre:${row.catalogueId}`}`;
   if (row.type === "PRODUCT") return `product:${row.variantId}`;
   return JSON.stringify(row);
 }
@@ -115,10 +115,12 @@ function SessionRow({ row }) {
           <OffCatalogueBadge label={CATALOGUE_STATUS_LABEL[row.catalogueStatus]} />
         </div>
         <p className="truncate text-xs text-gray-500 dark:text-dark-6">
-          {SESSION_KIND_LABEL[row.kind]} · {row.seatsAvailable} place{row.seatsAvailable > 1 ? "s" : ""} restante
-          {row.seatsAvailable > 1 ? "s" : ""}
+          {SESSION_KIND_LABEL[row.kind]}
+          {row.customDate ? " privée" : ` · ${row.seatsAvailable} place${row.seatsAvailable > 1 ? "s" : ""} restante${row.seatsAvailable > 1 ? "s" : ""}`}
         </p>
-        <p className="text-xs text-gray-500 dark:text-dark-6">{formatDateTime(row.startDate)}</p>
+        <p className="text-xs text-gray-500 dark:text-dark-6">
+          {row.customDate ? "Date libre — à choisir avec la cliente" : formatDateTime(row.startDate)}
+        </p>
       </div>
       <span className="text-sm font-bold text-primary">{formatPrice(row.unitPrice)}</span>
     </>

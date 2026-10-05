@@ -1,5 +1,6 @@
 "use client";
 
+import { multiDaySuffix } from "@/lib/formations/custom-date-availability";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -230,7 +231,7 @@ function describeUnifiedRow(row) {
       kind,
       title: item.title,
       href: null,
-      detail: `${row.seatsCount} place(s) · session du ${date(row.session.startDate)}${performed ? ` · ${performed}` : ""}`,
+      detail: `${row.seatsCount} place(s) · session du ${date(row.session.startDate)}${multiDaySuffix(row.session)}${performed ? ` · ${performed}` : ""}`,
       lifecycleStatus: row.status,
       customer: row.customer,
       customerFallback: "—",

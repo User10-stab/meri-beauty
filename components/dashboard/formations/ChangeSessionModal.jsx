@@ -1,5 +1,6 @@
 "use client";
 
+import { multiDaySuffix } from "@/lib/formations/custom-date-availability";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -137,7 +138,7 @@ export function ChangeSessionModal({ open, onClose, reservation }) {
         <p className="mb-4 text-sm text-gray-500">
           {reservation.session?.formation?.title} — {reservation.customer?.fullName}
           <br />
-          {t("currentSession")} {formatSessionDate(reservation.session?.startDate)} · {reservation.seatsCount} place
+          {t("currentSession")} {formatSessionDate(reservation.session?.startDate)}{multiDaySuffix(reservation.session)} · {reservation.seatsCount} place
           {reservation.seatsCount > 1 ? "s" : ""}
         </p>
 

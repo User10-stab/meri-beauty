@@ -9,7 +9,8 @@ import { searchPointOfSaleProducts } from "@/actions/boutique/point-of-sale";
 import { searchCounterPickups } from "@/actions/boutique/orders";
 import { OCCUPANCY_KINDS, sessionOccupancyByIds } from "@/lib/reservations/session-occupancy";
 import { COUNTER_SELLABLE_CATALOGUE_STATUSES } from "@/lib/counter/catalogue-availability";
-import { resolvePayeeForFormationSession } from "@/lib/payments/resolve-payee";
+import { resolvePayeeForFormationSession, resolvePayeeForStaff } from "@/lib/payments/resolve-payee";
+import { formationOffersCustomDates } from "@/lib/formations/custom-date-availability";
 
 /**
  * The one search behind the counter's omnibar: typing three letters must
@@ -68,7 +69,7 @@ async function searchCounterSessions(query) {
   if (!value || value.length < 3) return { success: true, data: [] };
 
   try {
-    const [workshopSessions, formationSessions] = await Promise.all([
+    const [workshopSessions, formationSessions, privateFormations] = await Promise.all([
       guard.canWorkshops
         ? prisma.workshopSession.findMany({
             where: {
@@ -111,7 +112,52 @@ async function searchCounterSessions(query) {
             take: SESSION_RESULT_LIMIT,
           })
         : [],
+      // A private formation also sells on a date the client picks with the
+      // salon at the counter (« date libre ») — on the counter's own
+      // allow-list, and only with a staff calendar to book it on.
+      guard.canFormations
+        ? prisma.formation.findMany({
+            where: { type: "PRIVATE", status: { in: COUNTER_SELLABLE_CATALOGUE_STATUSES }, title: { contains: value, mode: "insensitive" } },
+            select: {
+              id: true,
+              type: true,
+              title: true,
+              price: true,
+              depositPercentage: true,
+              status: true,
+              duration: true,
+              animatorId: true,
+              createdById: true,
+              animator: { select: { staffId: true } },
+            },
+            orderBy: { title: "asc" },
+            take: SESSION_RESULT_LIMIT,
+          })
+        : [],
     ]);
+
+    const customDateRows = [];
+    for (const formation of privateFormations) {
+      if (!(await formationOffersCustomDates(prisma, formation))) continue;
+      const payee = await resolvePayeeForStaff(prisma, { staffId: formation.animator?.staffId });
+      customDateRows.push({
+        kind: "formation",
+        catalogueId: formation.id,
+        sessionId: null,
+        customDate: true,
+        title: formation.title,
+        activityType: null,
+        catalogueStatus: formation.status,
+        startDate: null,
+        durationMinutes: formation.duration,
+        unitPrice: Number(formation.price),
+        depositPercentage: formation.depositPercentage,
+        // Same as online: a date libre is one client's own session.
+        capacity: 1,
+        seatsAvailable: 1,
+        independent: Boolean(payee.payeeStaffId),
+      });
+    }
 
     // Only a formation can belong to an independent animator
     // (resolvePayeeForWorkshopSession is always the salon). The counter needs
@@ -177,7 +223,8 @@ async function searchCounterSessions(query) {
     ];
 
     rows.sort((a, b) => new Date(a.startDate) - new Date(b.startDate));
-    return { success: true, data: rows.slice(0, SESSION_RESULT_LIMIT) };
+    // Dated sessions first; a « date libre » has no date until it is picked.
+    return { success: true, data: [...rows, ...customDateRows].slice(0, SESSION_RESULT_LIMIT) };
   } catch (error) {
     console.error("[searchCounterSessions]", error);
     return { success: false, message: "Impossible de rechercher les sessions.", data: [] };

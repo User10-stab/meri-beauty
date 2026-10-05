@@ -10,6 +10,8 @@ import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { CounterBuyerForm } from "@/components/dashboard/boutique/counter/CounterBuyerForm";
 import { useCashSessionOpen } from "@/components/dashboard/boutique/counter/useCashSessionOpen";
 import { CashSessionGate } from "@/components/dashboard/boutique/counter/CashSessionGate";
+import { CustomDatePicker } from "@/components/formations/CustomDatePicker";
+import { getCounterCustomDateMonth, getCounterCustomDateSlots } from "@/actions/counter/custom-dates";
 import {
   CounterCashReceived,
   CounterPaymentMethodTiles,
@@ -117,6 +119,8 @@ export function CounterBookingComposer({
   const [sessionMethod, setSessionMethod] = useState("EXTERNAL_TERMINAL");
   const [sessionCashReceived, setSessionCashReceived] = useState("");
   const [sessionSaving, setSessionSaving] = useState(false);
+  // « Date libre »: the day, start time and journées picked with the client.
+  const [customDate, setCustomDate] = useState(null);
 
   // Derived, never chosen: exactly one of the two pending props fires at a
   // time (CounterSurface never sets both), so exactly one of these is ever
@@ -143,6 +147,7 @@ export function CounterBookingComposer({
     if (canCreateSessionBooking) {
       setSelectedService(null);
       setSession(pendingSession);
+      setCustomDate(null);
       setSeatsCount(1);
       setSessionFinalTotal(String(round2(pendingSession.unitPrice)));
     }
@@ -181,6 +186,7 @@ export function CounterBookingComposer({
     setMethod("EXTERNAL_TERMINAL");
     setCashReceived("");
     setSession(null);
+    setCustomDate(null);
     setSeatsCount(1);
     setPaymentMode("DEPOSIT");
     setSessionFinalTotal("0");
@@ -356,6 +362,7 @@ export function CounterBookingComposer({
   async function submitSession(event) {
     event.preventDefault();
     if (!session) return toast.error("Choisissez une séance.");
+    if (session.customDate && !customDate) return toast.error("Choisissez la date, les journées et l'heure avec la cliente.");
     const buyerError = buyerValidationError();
     if (buyerError) return toast.error(buyerError);
     if (sessionPriceChanged && sessionReason.trim().length < 3) return toast.error("Indiquez la raison de l'ajustement de prix.");
@@ -363,7 +370,9 @@ export function CounterBookingComposer({
     setSessionSaving(true);
     const result = await createCounterReservation({
       kind: session.kind.toUpperCase(),
-      sessionId: session.sessionId,
+      ...(session.customDate
+        ? { customDate: { formationId: session.catalogueId, ...customDate } }
+        : { sessionId: session.sessionId }),
       seatsCount,
       customer: buildBuyerPayload(),
       ...(sessionPriceChanged ? { finalTotal: sessionTotal, adjustmentReason: sessionReason.trim() } : {}),
@@ -482,12 +491,29 @@ export function CounterBookingComposer({
             <div>
               <strong className="block text-sm">{session.title}</strong>
               <small className="text-gray-500">
-                {new Date(session.startDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}
-                {" · "}{session.seatsAvailable} place{session.seatsAvailable > 1 ? "s" : ""} restante{session.seatsAvailable > 1 ? "s" : ""}
+                {session.customDate ? (
+                  "Formation privée · date libre, choisie avec la cliente"
+                ) : (
+                  <>
+                    {new Date(session.startDate).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" })}
+                    {" · "}{session.seatsAvailable} place{session.seatsAvailable > 1 ? "s" : ""} restante{session.seatsAvailable > 1 ? "s" : ""}
+                  </>
+                )}
               </small>
             </div>
             <button type="button" onClick={() => setSession(null)} className="rounded-[7px] border border-stroke p-1.5 dark:border-dark-3"><X className="h-3.5 w-3.5" /></button>
           </div>
+
+          {session.customDate && (
+            <CustomDatePicker
+              formationId={session.catalogueId}
+              durationMinutes={session.durationMinutes}
+              value={customDate}
+              onChange={setCustomDate}
+              loadMonth={getCounterCustomDateMonth}
+              loadSlots={getCounterCustomDateSlots}
+            />
+          )}
 
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="text-xs font-semibold">Places

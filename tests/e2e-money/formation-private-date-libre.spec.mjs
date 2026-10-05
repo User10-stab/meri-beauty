@@ -29,8 +29,9 @@ import { parseBrusselsInputValue, toBrusselsInputValue } from "../../lib/datetim
  *     animator is free — her working hours, indisponibilités (jours fériés
  *     included), the salon's fermetures exceptionnelles, her rendez-vous and
  *     the sessions she already animates are all read;
- *   - she chooses 1 journée or 2 journées, the second being the next day at
- *     the same hours, and both days must be free;
+ *   - every journée is 10:00 → 17:00 (no flexible hours, 2026-10-05); the
+ *     formation's total duration sets how many consecutive journées it takes
+ *     (one per 7 h started), and every one of them must be free;
  *   - the date is confirmed ONLY by a payment — deposit or full. An unpaid
  *     pick blocks nobody, and a pick whose day was taken before the money
  *     arrived is not confirmed.
@@ -40,18 +41,15 @@ import { parseBrusselsInputValue, toBrusselsInputValue } from "../../lib/datetim
  * by what.
  *
  * The trainer is seeded and works every day 09:00–18:00, so every day this
- * scenario finds closed is one it closed itself. The formation lasts 4 h in
- * total: 4 h on one journée, 2 h on each of two. A formation too long for one
- * working day is two journées automatically.
+ * scenario finds closed is one it closed itself. Formation A lasts 10 h in
+ * total, so it is always two journées; formation B lasts 4 h, one journée.
  */
 
 const PRICE = 120;
 const DEPOSIT = 60;
-const DURATION = 240;
-const FULL_DAY_TIMES = ["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00"];
-// Two journées: 2 h a day, so the last start is 16:00.
-const HALF_DAY_TIMES = [...FULL_DAY_TIMES, "14:30", "15:00", "15:30", "16:00"];
-const AFTER_NOON = HALF_DAY_TIMES.slice(HALF_DAY_TIMES.indexOf("12:00"));
+// Formation A: 10 h → two journées of 10:00–17:00. Formation B: 4 h → one.
+const DURATION_A = 600;
+const DURATION_B = 240;
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -70,16 +68,17 @@ const base = addDays(today, 40);
 const DAY = {
   twoDays: base, //            free, and so is the next day   → paid, 2 journées
   twoDaysSecond: addDays(base, 1),
-  beforeDayOff: addDays(base, 4), // free, but the next day is off → 1 journée only
+  beforeDayOff: addDays(base, 4), // free, but the next day is off → no two journées from it
   dayOff: addDays(base, 5), //       full-day indisponibilité
   closure: addDays(base, 7), //      fermeture exceptionnelle of the salon
-  appointment: addDays(base, 9), //  a rendez-vous 12:00–13:00
+  appointment: addDays(base, 9), //  a rendez-vous 12:00–13:00 → the whole journée is gone
+  lateAppointment: addDays(base, 2), // a rendez-vous 17:30–18:00 → after the journée, still free
   scheduled: addDays(base, 11), //   formation B's own scheduled date, 10:00
   fullPayment: addDays(base, 12), // paid in full, 1 journée
   takenLate: addDays(base, 14), //   picked, then closed before the payment
   takenEarly: addDays(base, 16), //  picked, then closed before the submit
-  stretch: addDays(base, 20), //     a 30 h formation spread over five journées (20 → 24)
-  stretchBlocked: addDays(base, 27), // four journées from here would cross the day off at +30
+  stretch: addDays(base, 20), //     a 30 h formation: five journées (20 → 24)
+  stretchBlocked: addDays(base, 27), // five journées from here would cross the day off at +30
   stretchDayOff: addDays(base, 30),
   counter: addDays(base, 33), //     sold at the till, 2 journées (33 → 34)
   counterSecond: addDays(base, 34),
@@ -106,10 +105,13 @@ async function expectDay(page, dateKey, free, why) {
   if (!free) await expect(day, why).toBeDisabled();
 }
 
-/** Clicks a day and returns the start times offered for the selected duration. */
-async function offeredTimes(page) {
+/** Picks a first day; the journées are then chosen for her. Returns the choice shown. */
+async function pickDay(page, dateKey) {
+  await (await dayButton(page, dateKey)).click();
   await expect(picker(page).getByText("Chargement des horaires…")).toBeHidden({ timeout: 30_000 });
-  return picker(page).locator("button[data-time]").evaluateAll((buttons) => buttons.map((b) => b.dataset.time));
+  const choice = picker(page).getByTestId("custom-date-choice");
+  await expect(choice).toBeVisible({ timeout: 30_000 });
+  return choice;
 }
 
 async function openPicker(page, formationId) {
@@ -161,10 +163,17 @@ test.describe("formation privée — date libre", () => {
       start: at(DAY.appointment, "12:00"),
       end: at(DAY.appointment, "13:00"),
     });
+    await seedTrainerAppointment({
+      staff: trainer.staff,
+      trainerUser: trainer.user,
+      customer: neighbour,
+      start: at(DAY.lateAppointment, "17:30"),
+      end: at(DAY.lateAppointment, "18:00"),
+    });
     formationB = await seedPrivateFormation({
       animator: trainer.animator,
       price: PRICE,
-      duration: DURATION,
+      duration: DURATION_B,
       sessionStart: at(DAY.scheduled, "10:00"),
       label: "Avec Date",
     });
@@ -192,7 +201,7 @@ test.describe("formation privée — date libre", () => {
 
     await form.getByPlaceholder("ex. Formation Extension de Cils").fill(titleA);
     await form.getByPlaceholder("0.00").fill(String(PRICE));
-    await form.getByPlaceholder("180").fill(String(DURATION));
+    await form.getByPlaceholder("180").fill(String(DURATION_A));
     // The staff member whose calendar the formation will run on.
     await form.locator("select").filter({ hasText: "Sélectionner un formateur" }).selectOption(trainer.user.id);
     await form.locator("select").filter({ hasText: "Brouillon" }).selectOption("PUBLISHED");
@@ -223,31 +232,25 @@ test.describe("formation privée — date libre", () => {
     await expectDay(page, DAY.dayOff, false, "a day of indisponibilité was offered");
     await expectDay(page, DAY.closure, false, "a fermeture exceptionnelle was offered");
     await expectDay(page, DAY.twoDays, true, "a free day was not offered");
-
-    // A rendez-vous 12:00–13:00 leaves only the starts that clear it (4 h).
-    await (await dayButton(page, DAY.appointment)).click();
-    expect(await offeredTimes(page), "start times overlapping a rendez-vous were offered").toEqual(["13:00", "13:30", "14:00"]);
-
-    // The day before a day off: one journée, never two.
-    await (await dayButton(page, DAY.beforeDayOff)).click();
-    expect(await offeredTimes(page)).toEqual(FULL_DAY_TIMES);
-    await expect(picker(page).getByTestId("custom-date-days-2"), "two journées were offered into a day off").toBeDisabled();
+    // A rendez-vous anywhere between 10:00 and 17:00 takes the journée…
+    await expectDay(page, DAY.appointment, false, "a journée was offered over a rendez-vous");
+    // …and two journées cannot start the day before it either.
+    await expectDay(page, addDays(DAY.appointment, -1), false, "two journées were offered into a rendez-vous");
+    // A rendez-vous after 17:00 does not.
+    await expectDay(page, DAY.lateAppointment, true, "a rendez-vous after 17:00 closed the journée");
+    // Two journées never run into a day off.
+    await expectDay(page, DAY.beforeDayOff, false, "two journées were offered into a day off");
   });
 
   test("two journées paid by deposit: confirmed, and both days are then taken", async ({ page, browser }) => {
     await loginAs(page, customerCredentials(payer));
     await openPicker(page, formationA.id);
 
-    await (await dayButton(page, DAY.twoDays)).click();
-    await offeredTimes(page);
-    await picker(page).getByTestId("custom-date-days-2").click();
-    expect(await offeredTimes(page)).toEqual(HALF_DAY_TIMES);
-    await picker(page).locator('button[data-time="10:00"]').click();
-
-    // The 4 h are split: 2 h on each day.
-    const summary = page.getByTestId("custom-date-summary");
-    await expect(summary).toContainText("10:00 – 12:00");
-    await expect(summary).toContainText(/2 journées/);
+    // Nothing to choose but the first day: 10 h is two journées of 10:00–17:00.
+    const choice = await pickDay(page, DAY.twoDays);
+    await expect(choice).toHaveAttribute("data-days", "2");
+    await expect(choice).toContainText("2 journées · 10:00 – 17:00 chaque jour");
+    await expect(page.getByTestId("custom-date-summary")).toContainText(/10:00 – 17:00 chaque jour · 2 journées/);
 
     await fillAndAcceptTerms(page);
     await page.getByRole("button", { name: /payer l'acompte de/i }).click();
@@ -266,8 +269,6 @@ test.describe("formation privée — date libre", () => {
       await loginAs(otherPage, customerCredentials(neighbour));
       await openPicker(otherPage, formationA.id);
       await expectDay(otherPage, DAY.twoDays, true, "an unpaid pick blocked the day for everyone else");
-      await (await dayButton(otherPage, DAY.twoDays)).click();
-      expect(await offeredTimes(otherPage), "an unpaid pick removed start times").toEqual(FULL_DAY_TIMES);
     } finally {
       await other.close();
     }
@@ -286,11 +287,11 @@ test.describe("formation privée — date libre", () => {
     expect(reservation.session.capacity).toBe(1);
     expect(reservation.session.animatorId).toBe(trainer.animator.id);
     expect(reservation.session.startDate.toISOString()).toBe(at(DAY.twoDays, "10:00").toISOString());
-    expect(reservation.session.endDate.toISOString(), "two journées do not end on the second day").toBe(
-      at(DAY.twoDaysSecond, "12:00").toISOString(),
+    expect(reservation.session.endDate.toISOString(), "two journées do not end at 17:00 on the second day").toBe(
+      at(DAY.twoDaysSecond, "17:00").toISOString(),
     );
 
-    expect(Number(reservation.totalPrice), "two journées changed the price").toBeCloseTo(PRICE, 2);
+    expect(Number(reservation.totalPrice)).toBeCloseTo(PRICE, 2);
     expect(Number(reservation.payment.paidAmount)).toBeCloseTo(DEPOSIT, 2);
     expect(Number(reservation.balanceDue)).toBeCloseTo(PRICE - DEPOSIT, 2);
     expect(reservation.payment.status).toBe("PARTIALLY_PAID");
@@ -307,44 +308,28 @@ test.describe("formation privée — date libre", () => {
     expect(staffMail.Text).toContain("date choisie par la cliente");
     expect(staffMail.Text).toContain("Acompte payé");
 
-    // Paid: both days are now off the calendar for the next client.
+    // Paid: both days are now off the calendar for the next client, and so is
+    // the day before (its second journée would land on the first).
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, formationA.id);
-    await expectDay(page, DAY.twoDays, true, "the first paid day lost its remaining free hours");
-    await (await dayButton(page, DAY.twoDays)).click();
-    // 10:00–12:00 is taken on each day; a 4 h journée only fits from 12:00.
-    const afterBooking = FULL_DAY_TIMES.slice(FULL_DAY_TIMES.indexOf("12:00"));
-    expect(await offeredTimes(page), "the paid hours of day one are still offered").toEqual(afterBooking);
-    await (await dayButton(page, DAY.twoDaysSecond)).click();
-    expect(await offeredTimes(page), "the paid hours of day two are still offered").toEqual(afterBooking);
-    // The day before the booking can no longer run two journées into it at 10:00.
-    await (await dayButton(page, addDays(DAY.twoDays, -1))).click();
-    await offeredTimes(page);
-    await picker(page).getByTestId("custom-date-days-2").click();
-    expect(await offeredTimes(page)).toEqual(AFTER_NOON);
+    await expectDay(page, DAY.twoDays, false, "the first paid day is still offered");
+    await expectDay(page, DAY.twoDaysSecond, false, "the second paid day is still offered");
+    await expectDay(page, addDays(DAY.twoDays, -1), false, "two journées were offered into the paid days");
   });
 
-  test("a formation too long for one working day is two journées automatically", async ({ page }) => {
-    // 15 h in total against a 9 h working day (09:00–18:00): never one
-    // journée, 7 h 30 on each of two.
+  test("a long formation takes as many journées as its duration needs", async ({ page }) => {
+    // 15 h in total: three journées of 10:00–17:00, set for her.
     const long = await seedPrivateFormation({ animator: trainer.animator, price: PRICE, duration: 900, label: "Longue" });
 
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, long.formation.id);
 
-    await expectDay(page, DAY.fullPayment, true, "a long formation greyed out a day with two free days ahead");
-    await expectDay(page, DAY.beforeDayOff, false, "a long formation was offered into a day off");
-
-    await (await dayButton(page, DAY.fullPayment)).click();
-    await offeredTimes(page);
-    await expect(picker(page).getByTestId("custom-date-days-1"), "one journée was offered for a 15 h formation").toBeDisabled();
-    await expect(picker(page).getByTestId("custom-date-days-2")).toHaveAttribute("aria-checked", "true");
-    expect(await offeredTimes(page)).toEqual(["09:00", "09:30", "10:00", "10:30"]);
-
-    await picker(page).locator('button[data-time="09:00"]').click();
-    const summary = page.getByTestId("custom-date-summary");
-    await expect(summary).toContainText("09:00 – 16:30");
-    await expect(summary).toContainText(/2 journées/);
+    // Three journées from two days before the day off would cross it.
+    await expectDay(page, addDays(DAY.dayOff, -2), false, "three journées were offered into a day off");
+    const choice = await pickDay(page, DAY.fullPayment);
+    await expect(choice).toHaveAttribute("data-days", "3");
+    await expect(choice).toContainText("3 journées · 10:00 – 17:00 chaque jour");
+    await expect(page.getByTestId("custom-date-summary")).toContainText(/3 journées/);
   });
 
   test("the salon sees the booking, and saving the formation does not delete the client's date", async ({ page }) => {
@@ -381,14 +366,12 @@ test.describe("formation privée — date libre", () => {
     await card.getByRole("link", { name: /choisir ma date/i }).click();
     await expect(picker(page)).toBeVisible({ timeout: 30_000 });
 
-    // The scheduled session occupies the trainer 10:00–14:00 that day.
-    await (await dayButton(page, DAY.scheduled)).click();
-    expect(await offeredTimes(page), "the trainer's own scheduled session was double-booked").toEqual(["14:00"]);
+    // The scheduled session occupies the trainer that day: no journée there.
+    await expectDay(page, DAY.scheduled, false, "the trainer's own scheduled session was double-booked");
 
-    await (await dayButton(page, DAY.fullPayment)).click();
-    await offeredTimes(page);
-    await picker(page).locator('button[data-time="13:30"]').click();
-    await expect(page.getByTestId("custom-date-summary")).toContainText(/13:30 – 17:30 · 1 journée/);
+    const choice = await pickDay(page, DAY.fullPayment);
+    await expect(choice).toContainText("1 journée · 10:00 – 17:00");
+    await expect(page.getByTestId("custom-date-summary")).toContainText(/10:00 – 17:00 · 1 journée/);
 
     await page.getByRole("button", { name: /payer le montant total/i }).first().click();
     await fillAndAcceptTerms(page);
@@ -405,8 +388,8 @@ test.describe("formation privée — date libre", () => {
 
     expect(reservation.session.customerRequested).toBe(true);
     expect(reservation.session.id, "the booking landed on the scheduled session").not.toBe(formationB.session.id);
-    expect(reservation.session.startDate.toISOString()).toBe(at(DAY.fullPayment, "13:30").toISOString());
-    expect(reservation.session.endDate.toISOString()).toBe(at(DAY.fullPayment, "17:30").toISOString());
+    expect(reservation.session.startDate.toISOString()).toBe(at(DAY.fullPayment, "10:00").toISOString());
+    expect(reservation.session.endDate.toISOString()).toBe(at(DAY.fullPayment, "17:00").toISOString());
     expect(Number(reservation.payment.paidAmount)).toBeCloseTo(PRICE, 2);
     expect(Number(reservation.balanceDue)).toBeCloseTo(0, 2);
     expect(reservation.payment.status).toBe("PAID");
@@ -425,20 +408,47 @@ test.describe("formation privée — date libre", () => {
     await expect(page.getByRole("link", { name: /^réserver$/i }), "a client's own date was listed as a public session").toHaveCount(1);
   });
 
+  test("a private formation is never « complet »: a taken date sends the next client to her own", async ({ page }) => {
+    // The scheduled date of formation B gets booked by someone else…
+    await prisma.formationReservation.create({
+      data: {
+        sessionId: formationB.session.id,
+        customerId: payer.id,
+        seatsCount: 1,
+        totalPrice: PRICE,
+        depositAmount: DEPOSIT,
+        balanceDue: PRICE - DEPOSIT,
+        discountAmount: 0,
+        status: "CONFIRMED",
+      },
+    });
+
+    await loginAs(page, customerCredentials(neighbour));
+    await page.goto(`/formations/${formationB.formation.id}`);
+    // …so it is no longer shown, nothing says « Complet », and the client
+    // still books the same formation on a date of her own.
+    await expect(page.getByTestId("formation-custom-date-card")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/^complet$/i)).toHaveCount(0);
+    await expect(page.getByRole("link", { name: /^réserver$/i })).toHaveCount(0);
+
+    // An old link to the taken date lands on the date picker instead.
+    await page.goto(`/reservation-formation?formation=${formationB.formation.id}&session=${formationB.session.id}`);
+    await expect(page).toHaveURL(/date=libre/, { timeout: 30_000 });
+    await expect(picker(page)).toBeVisible({ timeout: 30_000 });
+  });
+
   test("a day that closes between picking and submitting is refused, with nothing recorded", async ({ page }) => {
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, formationA.id);
 
-    await (await dayButton(page, DAY.takenEarly)).click();
-    await offeredTimes(page);
-    await picker(page).locator('button[data-time="09:00"]').click();
+    await pickDay(page, DAY.takenEarly);
     await fillAndAcceptTerms(page);
 
     // The trainer declares herself unavailable while the form is open.
     await seedTrainerDayOff({ staff: trainer.staff, start: at(DAY.takenEarly, "00:00"), end: at(DAY.takenEarly, "23:59") });
 
     await page.getByRole("button", { name: /payer l'acompte de/i }).click();
-    await expect(page.getByText(/cette date n'est plus disponible/i)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/cette date n'est plus disponible/i).first()).toBeVisible({ timeout: 30_000 });
     await expect(page).not.toHaveURL(/checkout\.stripe\.com/);
 
     expect(
@@ -453,9 +463,7 @@ test.describe("formation privée — date libre", () => {
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, formationA.id);
 
-    await (await dayButton(page, DAY.takenLate)).click();
-    await offeredTimes(page);
-    await picker(page).locator('button[data-time="09:00"]').click();
+    await pickDay(page, DAY.takenLate);
     await fillAndAcceptTerms(page);
     await page.getByRole("button", { name: /payer l'acompte de/i }).click();
     await expectOnStripeCheckout(page);
@@ -495,36 +503,22 @@ test.describe("formation privée — date libre", () => {
     expect(refundCase.stripePaymentIntentId).toBeTruthy();
   });
 
-  test("a 30 h formation is spread over as many journées as the client wants, every day free", async ({ page }) => {
-    // 1800 min against a 9 h working day: one, two or three journées never
-    // fit (10 h a day is too long), four is the fewest, and the client may
-    // stretch further — each day at least 2 h, so up to ten.
+  test("a 30 h formation runs over five journées, every one of them free", async ({ page }) => {
+    // 1800 min = 4 × 7 h + 2 h: five journées of 10:00–17:00.
     const long = await seedPrivateFormation({ animator: trainer.animator, price: PRICE, duration: 1800, label: "Trente Heures" });
     await seedTrainerDayOff({ staff: trainer.staff, start: at(DAY.stretchDayOff, "00:00"), end: at(DAY.stretchDayOff, "23:59") });
 
     await loginAs(page, customerCredentials(fullPayer));
     await openPicker(page, long.formation.id);
 
-    // Every count from four up would cross the day off: nothing starts there.
-    await expectDay(page, DAY.stretchBlocked, false, "a stretch over a day off was offered");
-    await expectDay(page, addDays(DAY.stretchBlocked, -1), true, "four free days ahead were not offered");
+    // Five days from here, or from the day before, would cross the day off.
+    await expectDay(page, DAY.stretchBlocked, false, "five journées over a day off were offered");
+    await expectDay(page, addDays(DAY.stretchBlocked, -1), false, "five journées over a day off were offered");
+    await expectDay(page, addDays(DAY.stretchBlocked, -2), true, "five free days ahead were not offered");
 
-    await (await dayButton(page, DAY.stretch)).click();
-    await offeredTimes(page);
-    for (const count of [1, 2, 3]) {
-      await expect(picker(page).getByTestId(`custom-date-days-${count}`), `${count} journée(s) offered for 30 h`).toBeDisabled();
-    }
-    // The fewest that fit is chosen for her: four journées of 7 h 30.
-    await expect(picker(page).getByTestId("custom-date-days-4")).toHaveAttribute("aria-checked", "true");
-    expect(await offeredTimes(page)).toEqual(["09:00", "09:30", "10:00", "10:30"]);
-    await expect(picker(page).getByTestId("custom-date-days-10")).toBeEnabled();
-
-    // She stretches it over five: 6 h a day.
-    await picker(page).getByTestId("custom-date-days-5").click();
-    expect(await offeredTimes(page)).toEqual(["09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00"]);
-    await picker(page).locator('button[data-time="09:00"]').click();
-    const summary = page.getByTestId("custom-date-summary");
-    await expect(summary).toContainText("09:00 – 15:00 chaque jour · 5 journées");
+    const choice = await pickDay(page, DAY.stretch);
+    await expect(choice).toHaveAttribute("data-days", "5");
+    await expect(page.getByTestId("custom-date-summary")).toContainText("10:00 – 17:00 chaque jour · 5 journées");
 
     await fillAndAcceptTerms(page);
     await page.getByRole("button", { name: /payer l'acompte de/i }).click();
@@ -537,23 +531,19 @@ test.describe("formation privée — date libre", () => {
       },
       { what: "the five-journée date libre to be confirmed by its deposit" },
     );
-    expect(reservation.session.startDate.toISOString()).toBe(at(DAY.stretch, "09:00").toISOString());
-    expect(reservation.session.endDate.toISOString(), "five journées do not end on the fifth day").toBe(
-      at(addDays(DAY.stretch, 4), "15:00").toISOString(),
+    expect(reservation.session.startDate.toISOString()).toBe(at(DAY.stretch, "10:00").toISOString());
+    expect(reservation.session.endDate.toISOString(), "five journées do not end on the fifth day at 17:00").toBe(
+      at(addDays(DAY.stretch, 4), "17:00").toISOString(),
     );
-    expect(Number(reservation.totalPrice), "spreading the formation changed its price").toBeCloseTo(PRICE, 2);
+    expect(Number(reservation.totalPrice)).toBeCloseTo(PRICE, 2);
     expect(Number(reservation.payment.paidAmount)).toBeCloseTo(DEPOSIT, 2);
     await expect(page.getByTestId("formation-second-day")).toContainText(/5 journées/, { timeout: 60_000 });
 
-    // All five days are now taken 09:00–15:00 for the next client: whatever
-    // she picks there can only start once that day's journée is over.
+    // All five days are now taken for the next client.
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, formationA.id);
     for (let offset = 0; offset < 5; offset += 1) {
-      await (await dayButton(page, addDays(DAY.stretch, offset))).click();
-      const free = await offeredTimes(page);
-      expect(free.length, `day ${offset + 1} of the paid stretch has nothing left`).toBeGreaterThan(0);
-      expect(free.filter((time) => time < "15:00"), `day ${offset + 1} of the paid stretch is still offered before 15:00`).toEqual([]);
+      await expectDay(page, addDays(DAY.stretch, offset), false, `day ${offset + 1} of the paid formation is still offered`);
     }
   });
 
@@ -590,11 +580,8 @@ test.describe("formation privée — date libre", () => {
     await page.getByRole("button").filter({ hasText: titleA }).filter({ hasText: "à choisir avec la cliente" }).first().click();
 
     // The same calendar as the website, on the trainer's agenda.
-    await (await dayButton(page, DAY.counter)).click();
-    await offeredTimes(page);
-    await picker(page).getByTestId("custom-date-days-2").click();
-    expect(await offeredTimes(page)).toContain("10:00");
-    await picker(page).locator('button[data-time="10:00"]').click();
+    const choice = await pickDay(page, DAY.counter);
+    await expect(choice).toContainText("2 journées · 10:00 – 17:00 chaque jour");
 
     const sell = page.getByRole("button", { name: /encaisser et réserver/i });
     const composer = page.locator("form").filter({ has: sell });
@@ -614,7 +601,7 @@ test.describe("formation privée — date libre", () => {
     expect(sold.status).toBe("CONFIRMED");
     expect(sold.session.customerRequested).toBe(true);
     expect(sold.session.startDate.toISOString()).toBe(at(DAY.counter, "10:00").toISOString());
-    expect(sold.session.endDate.toISOString()).toBe(at(DAY.counterSecond, "12:00").toISOString());
+    expect(sold.session.endDate.toISOString()).toBe(at(DAY.counterSecond, "17:00").toISOString());
     expect(Number(sold.payment.paidAmount)).toBeCloseTo(DEPOSIT, 2);
     expect(sold.payment.status).toBe("PARTIALLY_PAID");
 
@@ -623,11 +610,11 @@ test.describe("formation privée — date libre", () => {
     const staffMail = await waitForEmail({ to: trainer.user.email, subject: new RegExp(`formation réservée – ${titleA}`, "i"), timeout: 60_000 });
     expect(staffMail.Text).toContain(buyerEmail);
 
-    // Sold: those hours are gone for the website's clients.
+    // Sold: those days are gone for the website's clients.
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, formationA.id);
-    await (await dayButton(page, DAY.counter)).click();
-    expect((await offeredTimes(page)).filter((time) => time < "12:00"), "the till's hours are still offered online").toEqual([]);
+    await expectDay(page, DAY.counter, false, "the day sold at the till is still offered online");
+    await expectDay(page, DAY.counterSecond, false, "the second day sold at the till is still offered online");
 
     // Check-in. Day 1 is an ordinary arrival.
     const code = (await waitFor(

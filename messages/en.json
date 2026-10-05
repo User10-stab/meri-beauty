@@ -1158,7 +1158,7 @@
       "durationLabel": "Duration (min)",
       "capacityLabel": "Capacity (pers.)",
       "capacityPrivateHint": "Always 1 person for a private formation.",
-      "privateDateHint": "The date is optional for a private formation. With no date — or in addition to the dates set here — the client freely picks her day (1 or 2 days) among the trainer's availability: working hours, time off, closures and appointments are checked. The date is only confirmed once the deposit or the full amount is paid. The duration is the formation's total: if it is longer than one working day, it automatically runs over 2 days (half each day).",
+      "privateDateHint": "The date is optional for a private formation. With no date — or in addition to the dates set here — the client freely picks her day among the trainer's availability: working hours, time off, closures and appointments are checked. Each day runs from 10:00 to 17:00; the duration is the formation's total and sets the number of days (one per 7 hours). The date is only confirmed once the deposit or the full amount is paid.",
       "capacityPublicHint": "No maximum limit for a group formation.",
       "depositLabel": "Deposit (%)",
       "depositHint": "Percentage of total price requested at reservation.",

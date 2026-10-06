@@ -138,6 +138,16 @@ export default async function FormationDetailPage({ params }) {
   const isPrivate = formation.type === "PRIVATE";
   const depositPct = formation.depositPercentage ?? 50;
 
+  // A private formation is never « complet » (2026-10-05): a date another
+  // client already booked is simply not shown, and the next client books the
+  // same formation on a date of her own.
+  if (isPrivate && formation.sessions?.length) {
+    formation.sessions = formation.sessions.filter((session) => {
+      const taken = session.reservations?.reduce((sum, r) => sum + r.seatsCount, 0) ?? 0;
+      return (session.capacity ?? formation.capacity) - taken > 0;
+    });
+  }
+
   const courseSchema = buildCourseSchema(formation);
 
   return (

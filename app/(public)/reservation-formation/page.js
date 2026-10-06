@@ -17,7 +17,7 @@ import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { getMyCheckoutProfile } from "@/actions/customer/settings";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown";
-import { CustomDatePicker, endTimeOf, formatDateKey, nextDateKey, perDayMinutes } from "@/components/formations/CustomDatePicker";
+import { CustomDatePicker, endTimeOf, formatDateKey, lastDateKey, perDayMinutes } from "@/components/formations/CustomDatePicker";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { validatePassword } from "@/lib/validations/password";
 import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
@@ -195,6 +195,18 @@ function ReservationFormationContent() {
         return;
       }
 
+      // A private formation is never « complet »: a date another client
+      // already took sends this one to pick her own date instead.
+      if (
+        formResult.data.type === "PRIVATE" &&
+        formResult.data.customDatesEnabled &&
+        availResult.success &&
+        availResult.data.available <= 0
+      ) {
+        router.replace(`/reservation-formation?formation=${formationId}&date=libre`);
+        return;
+      }
+
       setFormation(formResult.data);
       setSessionData(sess);
 
@@ -220,7 +232,7 @@ function ReservationFormationContent() {
 
     if (customMode) loadCustom();
     else load();
-  }, [formationId, sessionId, customMode, isPriority, waitingListId]);
+  }, [formationId, sessionId, customMode, isPriority, waitingListId, router]);
 
   useEffect(() => {
     const authedUser = session?.user;
@@ -1138,13 +1150,16 @@ function ReservationFormationContent() {
                     <Calendar size={16} className="mt-0.5 shrink-0 text-gold" />
                     {customDate ? (
                       <div>
-                        <p className="text-ink/80">{formatDateKey(customDate.date)}</p>
-                        {customDate.days === 2 && (
-                          <p className="text-ink/80">et {formatDateKey(nextDateKey(customDate.date))}</p>
+                        <p className="text-ink/80">
+                          {customDate.days > 1 ? "Du " : ""}
+                          {formatDateKey(customDate.date)}
+                        </p>
+                        {customDate.days > 1 && (
+                          <p className="text-ink/80">au {formatDateKey(lastDateKey(customDate.date, customDate.days))}</p>
                         )}
                         <p className="text-xs text-ink/50">
                           {customDate.time} – {endTimeOf(customDate.time, perDayMinutes(formation.duration, customDate.days))}
-                          {customDate.days === 2 ? " chaque jour · 2 journées" : " · 1 journée"}
+                          {customDate.days > 1 ? ` chaque jour · ${customDate.days} journées` : " · 1 journée"}
                         </p>
                       </div>
                     ) : (

@@ -5,11 +5,11 @@ import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { getFormationCustomDateMonth, getFormationCustomDateSlots } from "@/actions/formations/custom-dates";
 
 /**
- * « Date libre » picker for a private formation: a day, then one or two
- * journées, then a start time. Everything it offers comes from the animator's
- * calendar (lib/formations/custom-date-availability.js) — the booking action
- * re-validates the choice, this only keeps the client from picking a day that
- * would be refused.
+ * « Date libre » picker for a private formation: the client picks the first
+ * day; the journées are fixed — 10:00 → 17:00, as many as the formation's
+ * duration needs (lib/formations/custom-date-availability.js). A day is
+ * offered only when every journée from it is free; the booking action
+ * re-validates the choice.
  */
 
 const WEEK_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -31,10 +31,23 @@ export function nextDateKey(dateKey) {
   return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}`;
 }
 
-/** Same rule as customDatePerDayMinutes (lib/formations/custom-date-availability.js). */
-export function perDayMinutes(totalMinutes, days) {
-  const total = Number(totalMinutes || 0);
-  return days === 2 ? Math.ceil(total / 2) : total;
+/** Same rule as customDatePerDayMinutes: a journée is always 10:00 → 17:00. */
+export function perDayMinutes() {
+  return 7 * 60;
+}
+
+/** The last day of a booking of `days` journées starting on `dateKey`. */
+export function lastDateKey(dateKey, days) {
+  let key = dateKey;
+  for (let index = 1; index < days; index += 1) key = nextDateKey(key);
+  return key;
+}
+
+/** "7 h 30" from 450 minutes. */
+export function formatMinutes(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`;
 }
 
 /** "10:00" + 240 min → "14:00". */
@@ -62,23 +75,32 @@ function shiftMonth(monthKey, delta) {
  * @param {object} props
  * @param {string} props.formationId
  * @param {number} props.durationMinutes - the formation's TOTAL duration
- * @param {{ date: string, time: string, days: 1|2 } | null} props.value
- * @param {(value: { date: string, time: string, days: 1|2 } | null) => void} props.onChange
+ * @param {{ date: string, time: string, days: number } | null} props.value
+ * @param {(value: { date: string, time: string, days: number } | null) => void} props.onChange
+ * @param {Function} [props.loadMonth] - defaults to the public getFormationCustomDateMonth
+ * @param {Function} [props.loadSlots] - defaults to the public getFormationCustomDateSlots
  */
-export function CustomDatePicker({ formationId, durationMinutes, value, onChange }) {
+export function CustomDatePicker({
+  formationId,
+  durationMinutes,
+  value,
+  onChange,
+  loadMonth = getFormationCustomDateMonth,
+  loadSlots = getFormationCustomDateSlots,
+}) {
   const firstMonth = currentMonthKey();
   const [monthKey, setMonthKey] = useState(firstMonth);
   const [monthDays, setMonthDays] = useState(null); // null = loading
   const [dateKey, setDateKey] = useState(value?.date ?? null);
   const [days, setDays] = useState(value?.days ?? 1);
-  const [slots, setSlots] = useState(null); // { 1: string[], 2: string[] } | null
+  const [slots, setSlots] = useState(null); // { [journées]: string[] } | null
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     let active = true;
     setMonthDays(null);
-    getFormationCustomDateMonth(formationId, monthKey).then((result) => {
+    loadMonth(formationId, monthKey).then((result) => {
       if (!active) return;
       if (!result.success) {
         setLoadError(result.message || "Impossible de charger les disponibilités.");
@@ -91,21 +113,21 @@ export function CustomDatePicker({ formationId, durationMinutes, value, onChange
     return () => {
       active = false;
     };
-  }, [formationId, monthKey]);
+  }, [formationId, monthKey, loadMonth]);
 
   useEffect(() => {
     if (!dateKey) return;
     let active = true;
     setLoadingSlots(true);
-    getFormationCustomDateSlots(formationId, dateKey).then((result) => {
+    loadSlots(formationId, dateKey).then((result) => {
       if (!active) return;
       setLoadingSlots(false);
-      setSlots(result.success ? result.data.times : { 1: [], 2: [] });
+      setSlots(result.success ? result.data.times : {});
     });
     return () => {
       active = false;
     };
-  }, [formationId, dateKey]);
+  }, [formationId, dateKey, loadSlots]);
 
   function pickDate(nextDateKeyValue) {
     setDateKey(nextDateKeyValue);
@@ -114,17 +136,19 @@ export function CustomDatePicker({ formationId, durationMinutes, value, onChange
     onChange(null);
   }
 
-  // A formation too long for one working day (or a day with no room left for
-  // it) has no one-journée answer: it is two journées automatically.
+  // Nothing left to choose once the day is picked: the number of journées
+  // comes from the duration and the hours are fixed — select it outright.
   useEffect(() => {
-    if (!slots) return;
-    if (days === 1 && slots[1].length === 0 && slots[2].length > 0) setDays(2);
-  }, [slots, days]);
-
-  function pickDays(nextDays) {
-    setDays(nextDays);
-    onChange(null);
-  }
+    if (!slots || !dateKey) return;
+    const count = Object.keys(slots).map(Number).find((option) => (slots[option] ?? []).length > 0);
+    if (!count) return;
+    setDays(count);
+    const time = slots[count][0];
+    if (value?.date !== dateKey || value?.time !== time || value?.days !== count) {
+      onChange({ date: dateKey, time, days: count });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slots, dateKey]);
 
   const [year, month] = monthKey.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -136,8 +160,6 @@ export function CustomDatePicker({ formationId, durationMinutes, value, onChange
     timeZone: "UTC",
   });
   const times = slots?.[days] ?? [];
-  const twoDaysPossible = (slots?.[2] ?? []).length > 0;
-  const oneDayPossible = (slots?.[1] ?? []).length > 0;
 
   return (
     <div data-testid="custom-date-picker" className="space-y-5">
@@ -222,79 +244,28 @@ export function CustomDatePicker({ formationId, durationMinutes, value, onChange
             <span className="font-semibold capitalize text-ink">{formatDateKey(dateKey)}</span>
           </p>
 
-          <div>
-            <p className="mb-2 text-xs font-medium text-ink/60">Durée de la formation</p>
-            <div role="radiogroup" aria-label="Durée de la formation" className="grid grid-cols-2 gap-2">
-              {[1, 2].map((option) => {
-                const disabled = slots !== null && (option === 2 ? !twoDaysPossible : !oneDayPossible && twoDaysPossible);
-                return (
-                  <button
-                    key={option}
-                    type="button"
-                    role="radio"
-                    aria-checked={days === option}
-                    data-testid={`custom-date-days-${option}`}
-                    disabled={disabled || slots === null}
-                    onClick={() => pickDays(option)}
-                    className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-                      days === option ? "border-gold bg-gold/5" : "border-ink/10 hover:border-ink/20"
-                    }`}
-                  >
-                    <span className="block font-medium text-ink">{option === 1 ? "1 journée" : "2 journées"}</span>
-                    <span className="block text-xs text-ink/50">
-                      {option === 1
-                        ? disabled
-                          ? "Ne tient pas sur une seule journée"
-                          : "La formation sur un seul jour"
-                        : disabled
-                          ? "Le lendemain n'est pas disponible"
-                          : `Ce jour et le lendemain (${formatDateKey(nextDateKey(dateKey), { weekday: "long", day: "numeric", month: "long" })})`}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <p className="mb-2 text-xs font-medium text-ink/60">
-              Heure de début{days === 2 ? " (identique les deux jours)" : ""}
+          {loadingSlots || slots === null ? (
+            <p className="flex items-center gap-2 text-xs text-ink/50">
+              <Loader2 size={14} className="animate-spin" /> Chargement des horaires…
             </p>
-            {loadingSlots || slots === null ? (
-              <p className="flex items-center gap-2 text-xs text-ink/50">
-                <Loader2 size={14} className="animate-spin" /> Chargement des horaires…
-              </p>
-            ) : times.length === 0 ? (
-              <p data-testid="custom-date-no-times" className="text-xs text-ink/50">
-                Plus aucun horaire disponible ce jour-là. Choisissez une autre date.
-              </p>
-            ) : (
-              <div data-testid="custom-date-times" className="flex flex-wrap gap-2">
-                {times.map((time) => {
-                  const selected = value?.date === dateKey && value?.days === days && value?.time === time;
-                  return (
-                    <button
-                      key={time}
-                      type="button"
-                      data-time={time}
-                      aria-pressed={selected}
-                      onClick={() => onChange({ date: dateKey, time, days })}
-                      className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-                        selected
-                          ? "border-gold bg-gold font-semibold text-white"
-                          : "border-ink/15 text-ink hover:border-gold/50 hover:bg-gold/10"
-                      }`}
-                    >
-                      {time}
-                      <span className={`ml-1 text-xs ${selected ? "text-white/80" : "text-ink/40"}`}>
-                        – {endTimeOf(time, perDayMinutes(durationMinutes, days))}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          ) : times.length === 0 ? (
+            <p data-testid="custom-date-no-times" className="text-xs text-ink/50">
+              Cette date n&apos;est plus disponible. Choisissez-en une autre.
+            </p>
+          ) : (
+            <div data-testid="custom-date-choice" data-days={days} className="rounded-lg border border-gold bg-gold/5 px-3 py-2.5 text-sm">
+              <span className="block font-medium text-ink">
+                {days} journée{days > 1 ? "s" : ""} · {times[0]} – {endTimeOf(times[0], perDayMinutes())}
+                {days > 1 ? " chaque jour" : ""}
+              </span>
+              <span className="block text-xs text-ink/50">
+                {days > 1
+                  ? `Du ${formatDateKey(dateKey, { weekday: "short", day: "numeric", month: "short" })} au ${formatDateKey(lastDateKey(dateKey, days), { weekday: "short", day: "numeric", month: "short" })} · `
+                  : ""}
+                formation de {formatMinutes(Number(durationMinutes))} au total
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

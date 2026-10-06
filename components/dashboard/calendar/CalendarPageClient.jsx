@@ -165,10 +165,10 @@ export function CalendarPageClient({
     if (selectedStaffId === null) {
       return activityEvents; // Show all for admin "all staff" view
     }
-    // For specific staff: only show formations linked to this staff member
-    // via animatorId. Exclude events and ateliers entirely.
+    // For specific staff: only show formations she animates (her Animator
+    // row's staffId). Exclude events and ateliers entirely.
     return activityEvents.filter(
-      (ev) => ev.kind === "formation" && ev.animatorId === selectedStaffId,
+      (ev) => ev.kind === "formation" && ev.animatorStaffId === selectedStaffId,
     );
   }, [activityEvents, selectedStaffId]);
 

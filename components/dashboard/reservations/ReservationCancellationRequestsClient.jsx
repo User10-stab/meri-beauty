@@ -1,5 +1,6 @@
 "use client";
 
+import { multiDaySuffix } from "@/lib/formations/custom-date-availability";
 import { useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -26,6 +27,7 @@ function describe(request) {
     kindLabel: "Formation",
     title: request.formationReservation?.session?.formation?.title ?? "Formation",
     startDate: request.formationReservation?.session?.startDate,
+    lastDay: multiDaySuffix(request.formationReservation?.session),
     seats: request.formationReservation?.seatsCount,
     payment: request.formationReservation?.payment,
   };
@@ -83,7 +85,7 @@ export function ReservationCancellationRequestsClient({ initialRequests }) {
                   {request.requestedBy.fullName} — {info.title}
                 </h2>
                 <p className="mt-1 text-sm text-gray-500 dark:text-dark-6">
-                  {info.kindLabel} : {formatDate(info.startDate)}
+                  {info.kindLabel} : {formatDate(info.startDate)}{info.lastDay ?? ""}
                   {info.seats ? ` · ${info.seats} place${info.seats > 1 ? "s" : ""}` : ""}
                 </p>
                 <p className="text-sm text-gray-500 dark:text-dark-6">

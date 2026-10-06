@@ -1,5 +1,6 @@
 "use client";
 
+import { formatSessionDateRange } from "@/lib/formations/custom-date-availability";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -70,7 +71,12 @@ function formatDate(date) {
   });
 }
 
-function formatSessionDate(date) {
+function formatSessionDate(date, endDate = null) {
+  // A formation over several days: "du … au …, N journées".
+  if (endDate) {
+    const range = formatSessionDateRange({ startDate: date, endDate });
+    if (range.multiDay) return `${range.days}, ${range.dayCount} journées`;
+  }
   return new Date(date).toLocaleDateString("fr-FR", {
     day: "2-digit",
     month: "short",
@@ -576,7 +582,7 @@ function ReservationReviewModal({ target, onClose, onSaved }) {
             <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gold">Laisser un avis</p>
             <h3 className="mt-1 text-xl font-bold text-primary">{item.title}</h3>
             <p className="mt-1 text-sm text-neutral-500">
-              {typeLabel} · {formatSessionDate(reservation.session.startDate)}
+              {typeLabel} · {formatSessionDate(reservation.session.startDate, reservation.session.endDate)}
             </p>
           </div>
           <button type="button" onClick={onClose} className="text-sm font-semibold text-neutral-400 hover:text-neutral-600">
@@ -682,7 +688,7 @@ function ReservationCard({ reservation, kind, onOpenReview }) {
           <div>
             <span className="text-[10px] font-semibold uppercase tracking-wide text-gold">{typeLabel}</span>
             <p className="text-sm font-bold text-ink">{item.title}</p>
-            <p className="mt-0.5 text-xs text-ink/45">{formatSessionDate(reservation.session.startDate)} · {reservation.seatsCount} place{reservation.seatsCount > 1 ? "s" : ""}</p>
+            <p className="mt-0.5 text-xs text-ink/45">{formatSessionDate(reservation.session.startDate, reservation.session.endDate)} · {reservation.seatsCount} place{reservation.seatsCount > 1 ? "s" : ""}</p>
           </div>
           <StatusBadge status={reservation.status} labels={RESERVATION_STATUS_LABELS} />
         </div>

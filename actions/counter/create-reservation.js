@@ -26,7 +26,9 @@ import { workshopReservationConfirmationEmail, formationReservationConfirmationE
 import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
 import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
 import { revalidatePath } from "next/cache";
-import { resolvePayeeForWorkshopSession, resolvePayeeForFormationSession, payeePaymentData } from "@/lib/payments/resolve-payee";
+import { resolvePayeeForWorkshopSession, resolvePayeeForFormationSession, resolvePayeeForStaff, payeePaymentData } from "@/lib/payments/resolve-payee";
+import { customSessionConflict, formatSessionDateRange, resolveCustomDateRequest } from "@/lib/formations/custom-date-availability";
+import { notifyFormationStaffOfPaidReservation } from "@/lib/formations/notify-formation-staff";
 
 /**
  * Sells a brand-new workshop/formation/événement seat at the counter —
@@ -100,7 +102,17 @@ const buyerSchema = z.union([
 
 const createReservationSchema = z.object({
   kind: z.enum(["WORKSHOP", "FORMATION"]),
-  sessionId: z.string().min(1),
+  // Either a scheduled session, or — private formation only — the date the
+  // client picks at the counter (« date libre »), turned into her own session.
+  sessionId: z.string().min(1).optional(),
+  customDate: z
+    .object({
+      formationId: z.string().min(1),
+      date: z.string(),
+      time: z.string(),
+      days: z.number().int().min(1),
+    })
+    .optional(),
   seatsCount: z.number().int().min(1).max(50),
   customer: buyerSchema,
   finalTotal: z.number().nonnegative().max(100_000).optional(),
@@ -124,6 +136,7 @@ const ERROR_MESSAGES = {
   SESSION_ENDED: "Cette séance est déjà terminée.",
   INVALID_SESSION_CAPACITY: "Capacité de séance invalide.",
   SESSION_FULL: "Pas assez de places disponibles sur cette séance.",
+  CUSTOM_DATE_TAKEN: "Cette date n'est plus libre dans l'agenda de la formatrice. Choisissez-en une autre.",
   CASH_SESSION_REQUIRED: "Aucune session de caisse n'est ouverte. Ouvrez la caisse avant d'encaisser en espèces.",
   SELLER_LEGAL_DATA_INCOMPLETE:
     "Identité légale du salon incomplète — complétez Réglages > Salon avant de vendre une réservation facturée.",
@@ -157,6 +170,12 @@ function formatSessionDate(date) {
   });
 }
 
+/** A formation over several days names all of them. */
+function formatCounterSessionDate({ sessionStartDate, sessionEndDate }) {
+  const range = formatSessionDateRange({ startDate: sessionStartDate, endDate: sessionEndDate });
+  return range.multiDay ? `${range.days} (${range.hours})` : formatSessionDate(sessionStartDate);
+}
+
 /**
  * @param {object} input
  * @param {"WORKSHOP"|"FORMATION"} input.kind
@@ -172,19 +191,44 @@ export async function createCounterReservation(input) {
   if (!parsed.success) return { success: false, message: "Vérifiez la séance, le client et le paiement." };
   const data = parsed.data;
   const config = COUNTER_CREATE_KINDS[data.kind];
+  if (Boolean(data.sessionId) === Boolean(data.customDate) || (data.customDate && data.kind !== "FORMATION")) {
+    return { success: false, message: "Vérifiez la séance, le client et le paiement." };
+  }
 
   const guard = await authorizeCounterBooking(data.kind);
   if (guard.error) return { success: false, message: guard.error };
+
+  // « Date libre »: checked against the trainer's calendar exactly like the
+  // website does; the session itself is created inside the transaction.
+  let customRequest = null;
+  let customFormation = null;
+  if (data.customDate) {
+    customFormation = await prisma.formation.findUnique({
+      where: { id: data.customDate.formationId },
+      select: { id: true, type: true, status: true, duration: true, animatorId: true, createdById: true, animator: { select: { staffId: true } } },
+    });
+    if (!customFormation || customFormation.type !== "PRIVATE" || !isCounterSellableCatalogueStatus(customFormation.status)) {
+      return { success: false, message: "Seule une formation privée peut être réservée à une date libre." };
+    }
+    if (data.seatsCount !== 1) {
+      return { success: false, message: "Une date libre se réserve pour une seule personne." };
+    }
+    customRequest = await resolveCustomDateRequest(prisma, { formation: customFormation, customDate: data.customDate });
+    if (!customRequest.ok) return { success: false, message: customRequest.message };
+  }
 
   // The salon's seat goes into the Livre de caisse when the seller may run the
   // till (canUseSalonTill: Marie, the admins, a CAISSE staff member).
   // A seat an independent animates is her sale: off-till whoever sells it,
   // no salon ticket or invoice. Resolved once, and the same payee is written
   // on the Payment below.
+  // A date libre is paid to the same payee the website would use for it.
   const payee =
     data.kind === "WORKSHOP"
       ? await resolvePayeeForWorkshopSession(prisma, { sessionId: data.sessionId })
-      : await resolvePayeeForFormationSession(prisma, { sessionId: data.sessionId });
+      : customRequest
+        ? await resolvePayeeForStaff(prisma, { staffId: customFormation.animator?.staffId })
+        : await resolvePayeeForFormationSession(prisma, { sessionId: data.sessionId });
   const offTill = Boolean(payee.payeeStaffId) || !(await canUseSalonTill(guard.session.user));
   const useTill = !offTill && data.payment.method === "CASH";
 
@@ -225,12 +269,34 @@ export async function createCounterReservation(input) {
           if (!openCashSession) throw new Error("CASH_SESSION_REQUIRED");
         }
 
+        let sessionId = data.sessionId;
+        if (customRequest) {
+          // The client's own date becomes her own session — confirmed on the
+          // spot, so the calendar is re-checked under the trainer's lock.
+          const requested = await tx.formationSession.create({
+            data: {
+              formationId: customFormation.id,
+              animatorId: customRequest.animatorId,
+              startDate: customRequest.startDate,
+              endDate: customRequest.endDate,
+              capacity: 1,
+              customerRequested: true,
+            },
+          });
+          const taken = await customSessionConflict(tx, {
+            ...requested,
+            formation: { animatorId: customFormation.animatorId, createdById: customFormation.createdById },
+          });
+          if (taken) throw new Error("CUSTOM_DATE_TAKEN");
+          sessionId = requested.id;
+        }
+
         await tx.$queryRaw(
-          Prisma.sql`SELECT id FROM ${Prisma.raw(config.sessionTable)} WHERE id = ${data.sessionId} FOR UPDATE`
+          Prisma.sql`SELECT id FROM ${Prisma.raw(config.sessionTable)} WHERE id = ${sessionId} FOR UPDATE`
         );
 
         const session = await config.sessionDelegate(tx).findUnique({
-          where: { id: data.sessionId },
+          where: { id: sessionId },
           include: { [config.catalogueKey]: config.catalogueSelect },
         });
         if (!session) throw new Error("SESSION_NOT_FOUND");
@@ -394,7 +460,9 @@ export async function createCounterReservation(input) {
         return {
           reservationId: reservation.id,
           title: catalogue.title,
+          sessionId: session.id,
           sessionStartDate: session.startDate,
+          sessionEndDate: session.endDate,
           customer: { fullName: user.fullName, email: user.email, isCompany: user.isCompany, vatNumber: user.vatNumber, vatValidatedAt: user.vatValidatedAt },
           seatsCount: data.seatsCount,
           paidAmount: awaitsTransfer ? 0 : collected,
@@ -462,7 +530,7 @@ export async function createCounterReservation(input) {
         ...config.buildConfirmationEmail({
           customerName: result.customer.fullName,
           title: result.title,
-          sessionDate: formatSessionDate(result.sessionStartDate),
+          sessionDate: formatCounterSessionDate(result),
           seatsCount: result.seatsCount,
           paidAmount: result.paidAmount,
           totalAmount: result.totalAmount,
@@ -479,9 +547,29 @@ export async function createCounterReservation(input) {
         return { success: false };
       });
 
-  config.lowSeatsBroadcast(data.sessionId).catch((error) =>
-    console.error("[createCounterReservation] low-seats broadcast failed:", error)
-  );
+  if (!customRequest) {
+    config.lowSeatsBroadcast(data.sessionId).catch((error) =>
+      console.error("[createCounterReservation] low-seats broadcast failed:", error)
+    );
+  }
+
+  // The trainer hears about a formation sold at the counter too — once money
+  // was actually taken (not on a transfer still awaited).
+  if (data.kind === "FORMATION" && !awaitsTransfer) {
+    const sold = await prisma.formationReservation.findUnique({
+      where: { id: result.reservationId },
+      include: { customer: true, session: { include: { formation: true } } },
+    });
+    if (sold) {
+      notifyFormationStaffOfPaidReservation(sold, {
+        sessionDate: formatCounterSessionDate(result),
+        sessionRange: formatSessionDateRange(sold.session),
+        paidAmount: result.paidAmount,
+        totalAmount: result.totalAmount,
+        isFullPayment: result.isFullPayment,
+      }).catch((error) => console.error("[createCounterReservation] staff e-mail failed:", error));
+    }
+  }
 
   if (useTill) revalidateCaisseRoutes();
   revalidatePath(config.revalidatePath);

@@ -298,7 +298,7 @@ export function CounterSurface({
                 <PickupFiche order={ticket} onSettled={() => setTicket(null)} canCollectCash={canCollectCash} />
               ) : (
                 <CounterFiche
-                  key={`${ticket.code}:${ticket.checkedInSeats}:${ticket.balanceDue}:${ticket.seatsCount}:${ticket.totalPrice}`}
+                  key={`${ticket.code}:${ticket.checkedInSeats}:${ticket.checkedInAt ?? ""}:${ticket.balanceDue}:${ticket.seatsCount}:${ticket.totalPrice}`}
                   ticket={ticket}
                   onChanged={handleTicketChanged}
                   canCollectCash={canCollectCash}

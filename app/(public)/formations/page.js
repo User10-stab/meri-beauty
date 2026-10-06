@@ -103,8 +103,9 @@ function FormationCard({ formation, t, locale }) {
           </div>
         )}
 
+        {/* A private formation is never « complet »: the next client picks her own date. */}
         {session && (
-          available === 0 ? (
+          available === 0 && !isPrivate ? (
             <span className="absolute bottom-3 right-3 rounded-full bg-red-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
               {t("full")}
             </span>

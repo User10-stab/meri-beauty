@@ -10,7 +10,7 @@ import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds"
 import { reconcileMissedCheckouts } from "@/lib/payments/reconcile-missed-checkouts";
 import { sendScheduledCampaigns } from "@/lib/campaigns/send-campaign";
 import { refreshInstagramToken } from "@/lib/background-jobs";
-import { sendReviewRequests } from "@/lib/background-jobs";
+import { sendReviewRequests } from "@/lib/reviews/send-review-requests";
 import { isValidCronSecret } from "@/lib/cron-auth";
 import { captureCriticalError } from "@/lib/monitoring";
 import { recordExternalJobRun } from "@/lib/background-jobs";
@@ -121,6 +121,7 @@ export async function GET(req) {
         scheduledCampaignsChecked: results.sendScheduledCampaigns?.checked ?? null,
         scheduledCampaignsSent: results.sendScheduledCampaigns?.sentCount ?? null,
         scheduledCampaignsQueued: results.sendScheduledCampaigns?.queuedCount ?? null,
+        reviewsSent: results.sendReviewRequests?.sentCount ?? null,
         failedJobs: settled
           .map((outcome, i) => (outcome.status === "rejected" ? JOBS[i][0] : null))
           .filter(Boolean),

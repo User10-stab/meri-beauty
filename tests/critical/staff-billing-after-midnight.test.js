@@ -28,6 +28,7 @@ vi.mock("@/lib/payments/reconcile-missed-refunds", () => ({ reconcileMissedRefun
 vi.mock("@/lib/payments/reconcile-missed-checkouts", () => ({ reconcileMissedCheckouts: noop() }));
 vi.mock("@/lib/campaigns/send-campaign", () => ({ sendScheduledCampaigns: noop() }));
 vi.mock("@/lib/cash-book/auto-session", () => ({ autoCloseCashSession: noop() }));
+vi.mock("@/lib/reviews/send-review-requests", () => ({ sendReviewRequests: noop() }));
 vi.mock("@/lib/monitoring", () => ({ captureCriticalError: vi.fn() }));
 
 const TICK = 5 * 60 * 1000;

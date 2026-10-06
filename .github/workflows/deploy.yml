@@ -86,6 +86,9 @@ jobs:
             echo ">>> Generating Prisma Client..."
             npx prisma generate
 
+            echo ">>> Resolving any failed migration state..."
+            npx prisma migrate resolve --rolled-back "20261005161957_add_review_requested_at" || true
+
             echo ">>> Applying production migrations..."
             npx prisma migrate deploy
 

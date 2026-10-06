@@ -582,6 +582,8 @@ model WorkshopReservation {
   notes             String?
   reminderSentAt    DateTime?
 
+  reviewRequestedAt DateTime?
+
   // Check-in ticket. Only issued once the reservation is CONFIRMED — i.e.
   // once money has actually moved — so a scan is proof of payment, not proof
   // of booking. Prefixed by domain ("A-") so one scanner can route a code to
@@ -757,6 +759,7 @@ model FormationReservation {
   cancelledByUserId String?
   cancelledBy       User?                      @relation("FormationReservationCancelledBy", fields: [cancelledByUserId], references: [id])
   reminderSentAt    DateTime?
+  reviewRequestedAt DateTime?
 
   // Same check-in ticket as WorkshopReservation, prefixed "F-".
   checkInCode    String?   @unique
@@ -1448,7 +1451,8 @@ model Order {
   // the cron cannot tell them apart. Releasing the reservation on a guess is
   // how an item already in the customer's bag becomes sellable again.
   expiresAt    DateTime?
-  cancelledAt  DateTime?
+  cancelledAt       DateTime?
+  reviewRequestedAt DateTime?
   cancelReason String?
 
   // When the reserved stock of an expired on-site pickup was actually given
@@ -1807,6 +1811,7 @@ model Appointment {
   createdAt            DateTime                         @default(now())
   updatedAt            DateTime                         @updatedAt
   isDeleted            Boolean                          @default(false)
+  reviewRequestedAt DateTime?
   deletedAt            DateTime?
   payment              Payment?
   review        Review?

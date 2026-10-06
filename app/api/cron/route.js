@@ -10,6 +10,7 @@ import { reconcileMissedRefunds } from "@/lib/payments/reconcile-missed-refunds"
 import { reconcileMissedCheckouts } from "@/lib/payments/reconcile-missed-checkouts";
 import { sendScheduledCampaigns } from "@/lib/campaigns/send-campaign";
 import { refreshInstagramToken } from "@/lib/background-jobs";
+import { sendReviewRequests } from "@/lib/background-jobs";
 import { isValidCronSecret } from "@/lib/cron-auth";
 import { captureCriticalError } from "@/lib/monitoring";
 import { recordExternalJobRun } from "@/lib/background-jobs";
@@ -46,6 +47,7 @@ const JOBS = [
   ["reconcileMissedCheckouts", reconcileMissedCheckouts],
   ["sendScheduledCampaigns", sendScheduledCampaigns],
   ["refreshInstagramToken", refreshInstagramToken],
+  ["sendReviewRequests", sendReviewRequests],
 ];
 
 export async function GET(req) {

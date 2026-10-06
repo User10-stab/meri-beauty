@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { getReviewTargetFromToken, submitReviewWithToken } from "@/actions/review/token-review-actions";
 
 function StarRating({ rating, setRating, disabled }) {
@@ -138,7 +139,7 @@ export function NouvelAvisPageClient({ token }) {
           <div style={{ fontSize: "32px", marginBottom: "16px" }}>😕</div>
           <h2 style={{ color: darkColor, fontSize: "20px", margin: "0 0 12px" }}>Lien invalide</h2>
           <p style={{ color: "#666", fontSize: "14px", lineHeight: "1.6" }}>{error}</p>
-          <a
+          <Link
             href="/"
             style={{
               display: "inline-block",
@@ -153,7 +154,7 @@ export function NouvelAvisPageClient({ token }) {
             }}
           >
             Retour à l&apos;accueil
-          </a>
+          </Link>
         </div>
       </div>
     );
@@ -169,7 +170,7 @@ export function NouvelAvisPageClient({ token }) {
           <p style={{ color: "#666", fontSize: "14px", lineHeight: "1.6" }}>
             Vous avez déjà laissé un avis pour cette prestation. Nous vous remercions chaleureusement !
           </p>
-          <a
+          <Link
             href="/"
             style={{
               display: "inline-block",
@@ -184,7 +185,7 @@ export function NouvelAvisPageClient({ token }) {
             }}
           >
             Retour à l&apos;accueil
-          </a>
+          </Link>
         </div>
       </div>
     );
@@ -211,7 +212,7 @@ export function NouvelAvisPageClient({ token }) {
           <p style={{ color: "#666", fontSize: "14px", lineHeight: "1.6" }}>
             Votre retour est précieux et nous aide à nous améliorer chaque jour.
           </p>
-          <a
+          <Link
             href="/"
             style={{
               display: "inline-block",
@@ -226,7 +227,7 @@ export function NouvelAvisPageClient({ token }) {
             }}
           >
             Découvrir Meri Beauty
-          </a>
+          </Link>
         </div>
       </div>
     );

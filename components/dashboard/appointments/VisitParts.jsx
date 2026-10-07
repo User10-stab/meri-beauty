@@ -87,7 +87,11 @@ export function VisitPrestationsList({ visit, currentId }) {
               </p>
             </div>
             <div className="flex-shrink-0 text-right">
-              <p className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-200">{formatVisitPrice(p.price)}</p>
+              {/* An independent's prestation is her own sale: the salon sees
+                  that it is on the client's schedule, never what it brings in. */}
+              <p className="text-sm font-semibold tabular-nums text-gray-800 dark:text-gray-200">
+                {p.independent ? <span className="text-xs font-medium text-gray-500">Indépendante — sa propre vente</span> : formatVisitPrice(p.price)}
+              </p>
               <p className={`mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium ${settled ? "text-emerald-700" : "text-gray-500"}`}>
                 {p.status === "COMPLETED" && <Check size={10} strokeWidth={3} />}
                 {p.coveredByVisit ? "Encaissée avec la visite" : STATUS_LABELS[p.status] ?? p.status}

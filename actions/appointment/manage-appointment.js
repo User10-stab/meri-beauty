@@ -1355,6 +1355,10 @@ const VISIT_COVER_CHANGED_MESSAGE =
  * A prestation that has not started yet is left alone, exactly like
  * « Terminer » on a single rendez-vous: nothing is cashed before it happens.
  *
+ * Closed by the salon (an admin), a visit never includes an independent's
+ * prestation: that sale is hers and stays out of the salon's hands and books.
+ * Closed by a staff member, it only ever includes her own prestations.
+ *
  * The same payment method and the same « j'ai bien reçu » attestation apply
  * to the whole visit: the client pays once at the counter. Only cash and the
  * card terminal are offered — a transfer, a QR charge or a price adjustment
@@ -1407,19 +1411,35 @@ export async function completeVisit(appointmentId, { method, paymentConfirmed, t
       orderBy: { startTime: "asc" },
       select: { id: true, staffId: true, payment: { select: { id: true } } },
     });
-    // The prestation the button was pressed on is not completable itself
-    // (already closed, not started…): let completeAppointment say why.
-    if (!legs.some((leg) => leg.id === appointmentId)) return completeAppointment(appointmentId, options);
+    // The salon closes and cashes the salon's prestations only. An
+    // independent's prestation is her own sale (lib/payments/resolve-payee.js):
+    // it is never swept into a visit the salon is closing — she closes it
+    // herself, from her own dashboard, and its money never crosses the
+    // salon's counter as part of someone else's total.
+    let salonLegs = legs;
+    if (!ownStaffId) {
+      const independentStaffIds = new Set();
+      for (const staffId of new Set(legs.map((leg) => leg.staffId))) {
+        const payee = await resolvePayeeForAppointment(prisma, { staffId });
+        if (payee.payeeStaffId) independentStaffIds.add(staffId);
+      }
+      salonLegs = legs.filter((leg) => !independentStaffIds.has(leg.staffId));
+    }
+
+    // The prestation the button was pressed on is not part of that (already
+    // closed, not started, or an independent's own): plain « Terminer », and
+    // completeAppointment applies its own rules to it.
+    if (!salonLegs.some((leg) => leg.id === appointmentId)) return completeAppointment(appointmentId, options);
 
     // The pressed prestation's staff member first, so a refusal that needs
     // the form again (payment not confirmed, till closed) comes before
     // anything is written.
-    const staffIds = [anchor.staffId, ...new Set(legs.map((leg) => leg.staffId).filter((id) => id !== anchor.staffId))];
+    const staffIds = [anchor.staffId, ...new Set(salonLegs.map((leg) => leg.staffId).filter((id) => id !== anchor.staffId))];
 
     let closed = 0;
     let lastResult = null;
     for (const staffId of staffIds) {
-      const own = legs.filter((leg) => leg.staffId === staffId);
+      const own = salonLegs.filter((leg) => leg.staffId === staffId);
       const unpaid = own.filter((leg) => !leg.payment);
       const calls = [];
       if (unpaid.length > 0) {

@@ -641,15 +641,27 @@ export async function createOrderFromCart(input) {
     let promoCodeId = null;
     let discountAmount = 0;
     let promoCaps = null;
+    // A multi-offer code discounts each line by its own offer (by variant id).
+    let lineDiscountByVariantId = new Map();
+    // …and the order keeps those offers, for returns (lib/orders/return-refund.js).
+    let promoSnapshot;
     if (promoCode) {
       const promoResult = await resolvePromoCode(promoCode, subtotal, {
         scope: "BOUTIQUE",
         customerId: user.id,
-        lines: pricedItems.map((item) => ({ productId: item.variant.productId, amount: item.taxUnitPrice * item.quantity })),
+        lines: pricedItems.map((item) => ({
+          key: item.variantId,
+          productId: item.variant.productId,
+          unitPrice: item.taxUnitPrice,
+          quantity: item.quantity,
+          amount: item.taxUnitPrice * item.quantity,
+        })),
       });
       if (!promoResult.success) return { success: false, message: promoResult.message };
       promoCodeId = promoResult.promoCodeId;
       discountAmount = promoResult.discountAmount;
+      lineDiscountByVariantId = new Map((promoResult.lineDiscounts ?? []).map((line) => [line.key, line]));
+      promoSnapshot = promoResult.snapshot ?? undefined;
       promoCaps = { maxUses: promoResult.maxUses, maxUsesPerCustomer: promoResult.maxUsesPerCustomer };
     }
 
@@ -739,6 +751,7 @@ export async function createOrderFromCart(input) {
           taxNote: taxPolicy.taxNote,
           promoCodeId,
           discountAmount,
+          promoSnapshot,
           pickupPointId: pickupPoint?.id ?? null,
           pickupPointName: pickupPoint?.name ?? null,
           pickupPointAddress: pickupPoint?.address ?? null,
@@ -756,6 +769,8 @@ export async function createOrderFromCart(input) {
               sku: item.variant.sku,
               unitPrice: item.taxUnitPrice,
               quantity: item.quantity,
+              discountAmount: lineDiscountByVariantId.get(item.variantId)?.discountAmount ?? 0,
+              promoLabel: lineDiscountByVariantId.get(item.variantId)?.label ?? null,
             })),
           },
         },

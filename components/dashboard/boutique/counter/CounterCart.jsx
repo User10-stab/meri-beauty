@@ -205,7 +205,7 @@ export function CounterCart({
     previewCounterPromoCode(promoCode, cartSubtotal, { scope: "BOUTIQUE", items: JSON.parse(promoCartKey), customerId: promoCustomerId }).then((result) => {
       if (cancelled) return;
       if (result.success) {
-        setPromo((current) => (current?.code === promoCode ? { ...current, discountAmount: result.discountAmount } : current));
+        setPromo((current) => (current?.code === promoCode ? { ...current, discountAmount: result.discountAmount, appliedRules: result.appliedRules ?? [] } : current));
       } else {
         toast.error(`Code ${promoCode} retiré : ${result.message}`);
         clearPromo();
@@ -1550,6 +1550,9 @@ export function CounterCart({
             <>
               <div className="flex justify-between text-sm text-gray-500"><span>Sous-total</span><span>{cartSubtotal.toFixed(2)} €</span></div>
               <div className="flex justify-between text-sm text-emerald-700"><span>Code {appliedPromo.code}</span><span>−{Number(appliedPromo.discountAmount).toFixed(2)} €</span></div>
+              {appliedPromo.appliedRules?.map((rule) => (
+                <div key={rule.label} className="flex justify-between gap-3 pl-3 text-xs text-emerald-700/80"><span>{rule.label}</span><span>−{Number(rule.discountAmount).toFixed(2)} €</span></div>
+              ))}
             </>
           )}
           <div className="flex items-end justify-between"><span className="text-sm text-gray-500">Total</span><strong className="text-3xl text-[#2f3a2e]">{total.toFixed(2)} €</strong></div>

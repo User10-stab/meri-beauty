@@ -6,6 +6,10 @@ import { PROMO_CODE_SCOPES, PROMO_CODE_SCOPE_LABELS } from "@/lib/promo-code-sco
 const TZ = "Europe/Brussels";
 
 export function formatPromoValue(promo) {
+  if (promo.type === "MULTI_RULE") {
+    const count = promo.rules?.length ?? 0;
+    return count === 1 ? "1 offre" : `${count} offres`;
+  }
   const value = Number(promo.value) || 0;
   if (promo.type === "PERCENTAGE") return `-${value % 1 === 0 ? value : value.toFixed(2)} %`;
   return `-${value.toFixed(2).replace(".", ",")} €`;
@@ -55,9 +59,40 @@ export function scopeSummary(scopes) {
   return PROMO_CODE_SCOPES.filter((s) => scopes.includes(s)).map((s) => PROMO_CODE_SCOPE_LABELS[s]).join(" · ");
 }
 
+const percentText = (percent) => {
+  const value = Number(percent) || 0;
+  return `-${value % 1 === 0 ? value : value.toFixed(2).replace(".", ",")} %`;
+};
+
+/** What one offer of a multi-offer code does — « -15 % dès 2 articles ». */
+export function describeRuleMechanic(rule) {
+  const buy = Number(rule.buyQuantity) || 0;
+  if (rule.kind === "NTH_DISCOUNTED") return `${buy} achetés = le ${buy + 1}e à ${percentText(rule.percent)}`;
+  if (rule.kind === "BUY_X_GET_Y_FREE") {
+    const free = Number(rule.freeQuantity) || 0;
+    return `${buy} achetés = ${free} offert${free > 1 ? "s" : ""}${rule.samePriceOnly ? " (même prix)" : ""}`;
+  }
+  const min = Number(rule.minQuantity) || 1;
+  return `${percentText(rule.percent)}${min > 1 ? ` dès ${min} articles` : ""}`;
+}
+
+export function ruleTargets(rule) {
+  return [...(rule.brands ?? []), ...(rule.categories ?? []), ...(rule.subcategories ?? []), ...(rule.products ?? [])];
+}
+
+/** The label a customer reads when the salon didn't write one. */
+export function defaultRuleLabel(rule) {
+  const names = ruleTargets(rule).map((target) => target.name);
+  const targets = names.length > 3 ? `${names.slice(0, 3).join(", ")}…` : names.join(", ");
+  return `${targets ? `${targets} : ` : ""}${describeRuleMechanic(rule)}`.slice(0, 120);
+}
+
 /** Plain-French one-liner of every rule on a code, for previews and cards. */
 export function describePromoRules(promo) {
   const parts = [];
+  if (promo.type === "MULTI_RULE") {
+    for (const rule of promo.rules ?? []) parts.push(rule.label?.trim() || defaultRuleLabel(rule));
+  }
   const scopes = promo.scopes ?? PROMO_CODE_SCOPES;
   const productCount = promo.products?.length ?? 0;
   const serviceCount = promo.services?.length ?? 0;

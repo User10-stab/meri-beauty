@@ -32,7 +32,7 @@ import {
   refundMethodLabel,
   validateManualRefundConfirmation,
 } from "@/lib/payments/refund-method";
-import { allocateOrderDiscount } from "@/lib/orders/discount-allocation";
+import { computeReturnRefund } from "@/lib/orders/return-refund";
 import { getClientIp, isRateLimited, recordRateLimitHit } from "@/lib/rate-limit";
 
 /**
@@ -136,10 +136,32 @@ function claimedQuantities(order) {
   return claimed;
 }
 
+// What computeReturnRefund needs from the order, for the staff preview.
+const REFUND_PREVIEW_SELECT = {
+  discountAmount: true,
+  shippingCost: true,
+  promoSnapshot: true,
+  items: { select: { id: true, variantId: true, unitPrice: true, quantity: true, discountAmount: true } },
+  returnRequests: { select: { id: true, status: true, items: { select: { orderItemId: true, quantity: true } } } },
+};
+
+/**
+ * What finalising this request will refund — shown to staff BEFORE they hand
+ * money back at the counter, since it is not always the price on the line: a
+ * promo code lowers it, and a multi-offer code re-prices what the client
+ * keeps. Null once the request is settled, or when the order wasn't loaded.
+ */
+function expectedRefund(rr) {
+  if (!rr.order?.items || !["REQUESTED", "APPROVED"].includes(rr.status)) return null;
+  const { total, shipping, recalculated } = computeReturnRefund({ order: rr.order, request: rr });
+  return { total: Math.round(total * 100) / 100, shipping, recalculated };
+}
+
 function serializeReturnRequest(rr) {
   const paymentMethod = getOrderPaymentMethod(rr.order?.payment);
   return {
     id: rr.id,
+    expectedRefund: expectedRefund(rr),
     status: rr.status,
     reasonCategory: rr.reasonCategory,
     reasonCategoryLabel: RETURN_REASON_CATEGORY_LABEL[rr.reasonCategory] ?? rr.reasonCategory,
@@ -453,6 +475,7 @@ export async function listReturnRequests({ status, search, page = 1, pageSize = 
               ticketNumber: true,
               user: { select: { fullName: true, email: true } },
               payment: { select: { transactionReference: true, transactions: { select: { method: true, transactionType: true } } } },
+              ...REFUND_PREVIEW_SELECT,
             },
           },
           items: { include: { orderItem: true } },
@@ -482,6 +505,7 @@ export async function getReturnRequestById(id) {
             ticketNumber: true,
             user: { select: { fullName: true, email: true } },
             payment: { select: { transactionReference: true, transactions: { select: { method: true, transactionType: true } } } },
+            ...REFUND_PREVIEW_SELECT,
           },
         },
         items: { include: { orderItem: true } },
@@ -651,30 +675,31 @@ export async function completeReturnRequest(input) {
     // later return of a different item on the same order needs. See
     // allocateOrderDiscount() / bigbatch.txt P0 "Les promotions rendent les
     // retours partiels incorrects".
-    const netAmountByOrderItemId = allocateOrderDiscount(rr.order);
-    const refundAmount = rr.items.reduce((sum, i) => {
-      const netForFullQuantity = netAmountByOrderItemId.get(i.orderItemId) ?? Number(i.orderItem.unitPrice) * i.orderItem.quantity;
-      const netUnitPrice = netForFullQuantity / i.orderItem.quantity;
-      return sum + netUnitPrice * i.quantity;
-    }, 0);
-
-    // Is every unit of the order now returned? Only COMPLETED requests
-    // (items physically confirmed back) count toward this — an APPROVED
-    // request is just "cleared to return," not proof the item actually
-    // came back, so counting it here could refund shipping before every
-    // item is truly accounted for.
-    const claimed = new Map();
-    for (const other of rr.order.returnRequests) {
-      const effectiveStatus = other.id === rr.id ? "COMPLETED" : other.status;
-      if (effectiveStatus !== "COMPLETED") continue;
-      for (const item of other.items) {
-        claimed.set(item.orderItemId, (claimed.get(item.orderItemId) ?? 0) + item.quantity);
-      }
-    }
-    const fullyReturned = rr.order.items.every((oi) => (claimed.get(oi.id) ?? 0) >= oi.quantity);
-    const shippingRefund = fullyReturned ? Number(rr.order.shippingCost) : 0;
-    const totalRefund = refundAmount + shippingRefund;
+    //
+    // A multi-offer code goes one step further: its offers depend on the
+    // quantity bought, so what the client keeps is re-priced and she is
+    // refunded the difference — see lib/orders/return-refund.js.
+    //
+    // Shipping is refunded once every unit of the order is back. Only
+    // COMPLETED requests (items physically confirmed back) count toward
+    // that — an APPROVED request is just "cleared to return," not proof the
+    // item actually came back, so counting it could refund shipping before
+    // every item is truly accounted for.
+    const { total: totalRefund, recalculated: discountRecalculated } = computeReturnRefund({ order: rr.order, request: rr });
     const REFUND_EPSILON = 0.01;
+
+    // What the client keeps costs, without the lot she no longer has, as much
+    // as she paid for everything (5 cires at -40 %, one sent back). Stopped
+    // here, before stock, documents or money move: a return that refunds
+    // nothing is the salon's call — refuse the request, or have the whole
+    // lot sent back.
+    if (discountRecalculated && totalRefund < REFUND_EPSILON) {
+      return {
+        success: false,
+        message:
+          "Aucun remboursement dû : avec le code promo de cette commande, les articles que la cliente garde coûtent autant que ce qu'elle a payé (l'offre dépendait de la quantité achetée). Refusez la demande ou convenez avec elle du retour du lot complet.",
+      };
+    }
 
     const manualRefund = isManualOrderRefund(rr.order.payment);
     const { creditNote, refundQueued } = await prisma.$transaction(async (tx) => {
@@ -870,6 +895,7 @@ export async function completeReturnRequest(input) {
         customerName: rr.order.user.fullName,
         reference: customerReference(rr.order),
         refundAmount: totalRefund,
+        discountRecalculated,
         manualRefund,
         refundPending: !manualRefund && refundQueued,
         creditNoteAttached: Boolean(creditNotePdf),

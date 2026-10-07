@@ -236,6 +236,24 @@ function ReturnDetailDialog({ returnRequest, onClose, onCompleted }) {
           </button>
         </div>
 
+        {rr.expectedRefund && (
+          <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-900">
+            <div className="flex items-center justify-between font-semibold">
+              <span>Montant à rembourser</span>
+              <span>{formatPrice(rr.expectedRefund.total)}</span>
+            </div>
+            {rr.expectedRefund.recalculated && (
+              <p className="mt-1 text-xs font-normal text-emerald-800">
+                Commande passée avec un code à offres multiples : la remise est recalculée sur les articles que la cliente garde. Le
+                montant peut donc être inférieur au prix des articles retournés.
+              </p>
+            )}
+            {rr.expectedRefund.shipping > 0 && (
+              <p className="mt-1 text-xs font-normal text-emerald-800">Frais de livraison inclus ({formatPrice(rr.expectedRefund.shipping)}) : toute la commande est retournée.</p>
+            )}
+          </div>
+        )}
+
         <div className="mb-4 space-y-2">
           {rr.items.map((item) => (
             <div key={item.id} className="space-y-1.5 text-sm">

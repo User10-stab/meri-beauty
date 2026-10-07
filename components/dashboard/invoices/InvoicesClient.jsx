@@ -268,7 +268,31 @@ export function InvoicesClient({ data, pendingRows = [] }) {
   const pendingByNumber = new Map(
     pendingRows.filter((row) => row.invoiceNumber && shownNumbers.has(row.invoiceNumber)).map((row) => [row.invoiceNumber, row])
   );
-  const looseRows = pendingRows.filter((row) => !row.invoiceNumber || !shownNumbers.has(row.invoiceNumber));
+  const looseRows = pendingRows
+    .filter((row) => !row.invoiceNumber || !shownNumbers.has(row.invoiceNumber))
+    .filter((row) => {
+      const { late } = pendingPaymentState(row);
+      if (filters.paymentStatus === "PAID") return false;
+      if (filters.paymentStatus === "EN_RETARD" && !late) return false;
+      if (filters.paymentStatus === "PENDING" && late) return false;
+
+      if (filters.q) {
+        const query = filters.q.toLowerCase();
+        const matchesName = row.customerName?.toLowerCase().includes(query);
+        const matchesEmail = row.customerEmail?.toLowerCase().includes(query);
+        const matchesLabel = row.label?.toLowerCase().includes(query);
+        const matchesSummary = row.summary?.toLowerCase().includes(query);
+        if (!matchesName && !matchesEmail && !matchesLabel && !matchesSummary) {
+          return false;
+        }
+      }
+
+      if (filters.delivery === "SENT" || filters.delivery === "CREDITED" || filters.delivery === "PEPPOL_PENDING") {
+        return false;
+      }
+
+      return true;
+    });
 
   /** One tick, whatever the row is: the whole balance, received by transfer. */
   async function acceptPending(row) {

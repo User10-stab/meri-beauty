@@ -50,17 +50,11 @@ const DELIVERY_OPTIONS = [
 
 const PAYMENT_STATUS_OPTIONS = [
   ["ALL", "Tous les statuts"],
-  ["PENDING", "En attente"],
   ["PAID", "Payé"],
-  ["PARTIALLY_PAID", "Partiellement payé"],
-  ["FAILED", "Échec"],
+  ["PENDING", "En attente de paiement"],
+  ["EN_RETARD", "En retard"],
 ];
 
-const PAYMENT_DEADLINE_OPTIONS = [
-  ["ALL", "Toutes échéances"],
-  ["EN_RETARD", "En retard"],
-  ["EN_ATTENTE", "En attente"],
-];
 const SOURCE_OPTIONS = [["ALL", "Toutes origines"], ...Object.entries(INVOICE_SOURCE_LABELS)];
 
 const inputClass =
@@ -317,7 +311,7 @@ export function InvoicesClient({ data, pendingRows = [] }) {
   }
 
   const hasActiveFilters =
-    filters.q || filters.from || filters.to || [filters.delivery, filters.source].some((v) => v !== "ALL");
+    filters.q || filters.from || filters.to || [filters.delivery, filters.source, filters.paymentStatus].some((v) => v !== "ALL");
 
   return (
     <div className="space-y-5">
@@ -376,17 +370,9 @@ export function InvoicesClient({ data, pendingRows = [] }) {
           </select>
         </label>
         <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-          Statut paiement
+          Statut de paiement
           <select value={draft.paymentStatus} onChange={(e) => setDraft((d) => ({ ...d, paymentStatus: e.target.value }))} className={inputClass}>
             {PAYMENT_STATUS_OPTIONS.map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
-          Échéance
-          <select value={draft.paymentDeadline} onChange={(e) => setDraft((d) => ({ ...d, paymentDeadline: e.target.value }))} className={inputClass}>
-            {PAYMENT_DEADLINE_OPTIONS.map(([value, label]) => (
               <option key={value} value={value}>{label}</option>
             ))}
           </select>

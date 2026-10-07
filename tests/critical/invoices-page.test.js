@@ -73,6 +73,30 @@ describe("filters never widen or break the query", () => {
     });
   });
 
+  it("paymentStatus supports PAID, PENDING, and EN_RETARD filters", () => {
+    expect(buildInvoiceWhere(normalizeInvoiceFilters({ paymentStatus: "PAID" }))).toEqual({
+      AND: [{ payment: { status: "PAID" } }],
+    });
+
+    const pendingWhere = buildInvoiceWhere(normalizeInvoiceFilters({ paymentStatus: "PENDING" }));
+    expect(pendingWhere.AND.length).toBe(2);
+    expect(pendingWhere.AND[0]).toEqual({
+      OR: [
+        { payment: { status: { in: ["PENDING", "PARTIALLY_PAID"] } } },
+        { paymentId: null },
+      ],
+    });
+
+    const lateWhere = buildInvoiceWhere(normalizeInvoiceFilters({ paymentStatus: "EN_RETARD" }));
+    expect(lateWhere.AND.length).toBe(2);
+    expect(lateWhere.AND[0]).toEqual({
+      OR: [
+        { payment: { status: { not: "PAID" } } },
+        { paymentId: null },
+      ],
+    });
+  });
+
   it("manual invoices have their own origin filter", () => {
     expect(buildInvoiceWhere(normalizeInvoiceFilters({ source: "MANUAL" }))).toEqual({ AND: [{ source: "MANUAL" }] });
   });

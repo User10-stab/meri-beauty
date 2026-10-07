@@ -27,7 +27,6 @@ export default async function FacturesPage({ searchParams }) {
       from: params?.from,
       to: params?.to,
       paymentStatus: params?.paymentStatus,
-      paymentDeadline: params?.paymentDeadline,
     }),
     // Manual sales paid by acompte or later: no invoice until fully paid.
     listPendingManualSales(),

@@ -226,6 +226,8 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       scope: "BOUTIQUE",
       lines: cart.items.map((item) => ({
         productId: item.variant.product.id,
+        unitPrice: applyVatRate(item.variant.priceExclVat, vatPreview.vatRate),
+        quantity: item.quantity,
         amount: applyVatRate(item.variant.priceExclVat, vatPreview.vatRate) * item.quantity,
       })),
     }),
@@ -890,6 +892,16 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
                 <span>Réduction ({appliedPromo.code})</span>
                 <span>-€{netTotals.discountNet.toFixed(2)}</span>
               </div>
+            )}
+            {discountAmount > 0 && appliedPromo.appliedRules?.length > 0 && (
+              <ul className="space-y-0.5 pl-3 text-xs text-emerald-600/80">
+                {appliedPromo.appliedRules.map((rule) => (
+                  <li key={rule.label} className="flex justify-between gap-3">
+                    <span>{rule.label}</span>
+                    <span>-€{roundMoney(rule.discountAmount / (1 + vatPreview.vatRate / 100)).toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
             )}
             <div className="flex justify-between text-gray-600">
               <span>TVA ({vatPreview.vatRate}%)</span>

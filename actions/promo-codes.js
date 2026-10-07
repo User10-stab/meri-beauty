@@ -29,7 +29,37 @@ const PROMO_INCLUDE = {
   products: { select: { id: true, name: true }, orderBy: { name: "asc" } },
   services: { select: { id: true, name: true }, orderBy: { name: "asc" } },
   customers: { select: { id: true, fullName: true, email: true }, orderBy: { fullName: "asc" } },
+  rules: {
+    orderBy: { position: "asc" },
+    include: {
+      brands: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+      categories: { select: { id: true, name: true, brand: { select: { name: true } } }, orderBy: { name: "asc" } },
+      subcategories: {
+        select: { id: true, name: true, category: { select: { name: true, brand: { select: { name: true } } } } },
+        orderBy: { name: "asc" },
+      },
+      products: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+    },
+  },
 };
+
+/** One offer of a multi-offer code, with its targets named for display. */
+function serializePromoRule(rule) {
+  return {
+    id: rule.id,
+    label: rule.label,
+    kind: rule.kind,
+    percent: rule.percent != null ? Number(rule.percent) : null,
+    minQuantity: rule.minQuantity,
+    buyQuantity: rule.buyQuantity,
+    freeQuantity: rule.freeQuantity,
+    samePriceOnly: rule.samePriceOnly,
+    brands: rule.brands,
+    categories: rule.categories.map((c) => ({ id: c.id, name: `${c.brand.name} › ${c.name}` })),
+    subcategories: rule.subcategories.map((s) => ({ id: s.id, name: `${s.category.brand.name} › ${s.category.name} › ${s.name}` })),
+    products: rule.products,
+  };
+}
 
 function serializePromoCode(p) {
   return {
@@ -49,13 +79,35 @@ function serializePromoCode(p) {
     products: p.products ?? [],
     services: p.services ?? [],
     customers: p.customers ?? [],
+    rules: (p.rules ?? []).map(serializePromoRule),
   };
 }
 
 /** Builds the Prisma write payload shared by create and update. */
 function promoWriteData(data, { isUpdate }) {
   const relation = (ids) => (isUpdate ? { set: ids.map((id) => ({ id })) } : { connect: ids.map((id) => ({ id })) });
+  const connect = (ids) => ({ connect: ids.map((id) => ({ id })) });
+  // Offers have no history of their own (an order line keeps its discount
+  // and label), so an update simply replaces them.
+  const rules = {
+    ...(isUpdate ? { deleteMany: {} } : {}),
+    create: data.rules.map((rule, position) => ({
+      position,
+      label: rule.label,
+      kind: rule.kind,
+      percent: rule.percent,
+      minQuantity: rule.minQuantity,
+      buyQuantity: rule.buyQuantity,
+      freeQuantity: rule.freeQuantity,
+      samePriceOnly: rule.samePriceOnly,
+      brands: connect(rule.brandIds),
+      categories: connect(rule.categoryIds),
+      subcategories: connect(rule.subcategoryIds),
+      products: connect(rule.productIds),
+    })),
+  };
   return {
+    rules,
     code: data.code,
     type: data.type,
     value: data.value,
@@ -73,7 +125,24 @@ function promoWriteData(data, { isUpdate }) {
 }
 
 /** Rejects ids that don't point at a live product / prestation / customer. */
-async function findUnknownTargets({ productIds, serviceIds, customerIds }) {
+async function findUnknownTargets({ productIds, serviceIds, customerIds, rules }) {
+  const ruleIds = (field) => [...new Set(rules.flatMap((rule) => rule[field]))];
+  const [brandIds, categoryIds, subcategoryIds, ruleProductIds] = ["brandIds", "categoryIds", "subcategoryIds", "productIds"].map(ruleIds);
+  const [ruleBrands, ruleCategories, ruleSubcategories, ruleProducts] = await Promise.all([
+    brandIds.length ? prisma.brand.count({ where: { id: { in: brandIds }, isDeleted: false } }) : 0,
+    categoryIds.length ? prisma.productCategory.count({ where: { id: { in: categoryIds } } }) : 0,
+    subcategoryIds.length ? prisma.productSubcategory.count({ where: { id: { in: subcategoryIds } } }) : 0,
+    ruleProductIds.length ? prisma.product.count({ where: { id: { in: ruleProductIds }, isDeleted: false } }) : 0,
+  ]);
+  if (
+    ruleBrands !== brandIds.length ||
+    ruleCategories !== categoryIds.length ||
+    ruleSubcategories !== subcategoryIds.length ||
+    ruleProducts !== ruleProductIds.length
+  ) {
+    return { rules: ["Une marque, une catégorie ou un produit d'une offre n'existe plus."] };
+  }
+
   const [products, services, customers] = await Promise.all([
     productIds.length ? prisma.product.count({ where: { id: { in: productIds }, isDeleted: false } }) : 0,
     serviceIds.length ? prisma.service.count({ where: { id: { in: serviceIds }, isDeleted: false } }) : 0,
@@ -96,7 +165,14 @@ async function previewContext(rawContext) {
   if (!scope) return null;
 
   const lines = Array.isArray(rawContext.lines)
-    ? rawContext.lines.slice(0, 100).map((l) => ({ productId: String(l?.productId ?? ""), amount: Math.max(0, Number(l?.amount) || 0) }))
+    ? rawContext.lines.slice(0, 100).map((l, index) => ({
+        key: index,
+        productId: String(l?.productId ?? ""),
+        amount: Math.max(0, Number(l?.amount) || 0),
+        // Only a multi-offer code needs these (« dès 2 boîtes », « 3 + 2 offerts »).
+        unitPrice: Math.max(0, Number(l?.unitPrice) || 0),
+        quantity: Math.max(0, Math.trunc(Number(l?.quantity) || 0)),
+      }))
     : null;
 
   let serviceId = null;
@@ -131,7 +207,11 @@ export async function validatePromoCode(rawCode, subtotal, rawContext = null) {
     if (!context) return { success: false, message: "Impossible de vérifier ce code pour le moment." };
     const result = await resolvePromoCode(code, Number(subtotal) || 0, context);
     if (!result.success) return result;
-    return { success: true, discountAmount: result.discountAmount };
+    return {
+      success: true,
+      discountAmount: result.discountAmount,
+      appliedRules: (result.appliedRules ?? []).map((rule) => ({ label: rule.label, discountAmount: rule.discountAmount })),
+    };
   } catch (error) {
     console.error("[validatePromoCode]", error);
     return { success: false, message: "Impossible de vérifier ce code pour le moment." };
@@ -467,6 +547,50 @@ export async function searchPromoProducts(query) {
       price: p.variants[0] ? Number(p.variants[0].price) : null,
     })),
   };
+}
+
+/**
+ * Admin — the catalogue tree an offer of a multi-offer code can target:
+ * brands › categories › subcategories, with how many live products each holds.
+ */
+export async function listPromoCatalogueTree() {
+  const guard = await requireAdmin();
+  if (guard.error) return { success: false, data: [] };
+
+  const brands = await prisma.brand.findMany({
+    where: { isDeleted: false },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      categories: {
+        orderBy: [{ position: "asc" }, { name: "asc" }],
+        select: {
+          id: true,
+          name: true,
+          subcategories: {
+            orderBy: [{ position: "asc" }, { name: "asc" }],
+            select: { id: true, name: true, _count: { select: { products: { where: { isDeleted: false } } } } },
+          },
+        },
+      },
+    },
+  });
+
+  const data = brands
+    .map((brand) => {
+      const categories = brand.categories
+        .map((category) => {
+          const subcategories = category.subcategories
+            .map((sub) => ({ id: sub.id, name: sub.name, productCount: sub._count.products }))
+            .filter((sub) => sub.productCount > 0);
+          return { id: category.id, name: category.name, subcategories, productCount: subcategories.reduce((sum, sub) => sum + sub.productCount, 0) };
+        })
+        .filter((category) => category.productCount > 0);
+      return { id: brand.id, name: brand.name, categories, productCount: categories.reduce((sum, category) => sum + category.productCount, 0) };
+    })
+    .filter((brand) => brand.productCount > 0);
+  return { success: true, data };
 }
 
 /** Admin — every bookable prestation, grouped by category on the client. */

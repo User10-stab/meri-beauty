@@ -66,6 +66,8 @@ describe("filters never widen or break the query", () => {
       q: "",
       delivery: "ALL",
       source: "ALL",
+      paymentStatus: "ALL",
+      paymentDeadline: "ALL",
       from: "",
       to: "",
     });

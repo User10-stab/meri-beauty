@@ -105,7 +105,10 @@ describe("the server applies the same rule, and is the one that matters", () => 
   const action = source("actions/appointment/manage-appointment.js");
 
   test("the on-site collection is derived from the service price", () => {
-    expect(action).toContain("const onSitePrice = Number(appointment.staffService?.price ?? 0);");
+    // Its own price, plus the prestations of the same visit cashed with it
+    // (coverAppointmentIds) — still nothing but StaffService.price.
+    expect(action).toContain("Number(appointment.staffService?.price ?? 0) +");
+    expect(action).toContain("covered.reduce((sum, c) => sum + Number(c.staffService?.price ?? 0), 0);");
     expect(action).toContain("const collectsOnSite = !payment && priceAdjustment.amountDue > 0;");
     expect(action).toContain("const collectsMoney = hasBalanceDue || collectsOnSite;");
   });

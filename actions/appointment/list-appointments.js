@@ -1,6 +1,7 @@
 "use server";
 
 import { prisma } from "@/lib/prisma";
+import { VISIT_SELECT, presentVisit } from "@/lib/appointments/visit";
 import { auth } from "@/auth";
 import { ROLES, isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
@@ -103,9 +104,11 @@ export async function getAllAppointments({ status, statuses, staffId, search, da
         },
         payment: { select: { id: true, status: true, paymentType: true, totalAmount: true, paidAmount: true, remainingAmount: true } },
         review: { select: { id: true, rating: true, comment: true, createdAt: true } },
+        visit: VISIT_SELECT,
       },
     });
 
+    const now = new Date();
     return {
       success: true,
       data: appointments.map((a) => ({
@@ -132,6 +135,9 @@ export async function getAllAppointments({ status, statuses, staffId, search, da
         // "collect payment" dialog never opens — see
         // lib/appointments/counter-collection.js.
         servicePrice: a.staffService.price != null ? Number(a.staffService.price) : 0,
+        // The visit this prestation belongs to, with every prestation of it.
+        visit: presentVisit(a.visit, { ownStaffId: staffScopeId, now }),
+        coveredByVisit: Boolean(a.coveredByPaymentId),
         payment: a.payment
           ? {
               id: a.payment.id,

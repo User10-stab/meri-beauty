@@ -89,11 +89,13 @@ function describeSource(payment) {
     };
   }
   if (payment?.appointment) {
+    const prestations = payment.appointment.prestations ?? [];
     return {
-      kind: "Rendez-vous",
-      title: dateTime(payment.appointment.date),
+      kind: prestations.length > 1 ? "Visite" : "Rendez-vous",
+      title: dateTime(payment.appointment.startTime ?? payment.appointment.date),
       status: payment.appointment.status,
-      extra: null,
+      extra: prestations.length > 1 ? `${prestations.length} prestations encaissées en une seule opération` : null,
+      prestations,
       customer: payment.appointment.user,
       performedByText: performedByLabel(payment.appointment.performedBy),
     };
@@ -112,6 +114,9 @@ function describeSource(payment) {
   }
   return { kind: "—", title: "—", status: null, extra: null, customer: null };
 }
+
+const timeOnly = (value) =>
+  value ? new Date(value).toLocaleTimeString("fr-BE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Brussels" }) : "—";
 
 const dateOnly = (value) =>
   value ? new Date(value).toLocaleDateString("fr-BE", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" }) : "—";
@@ -615,6 +620,31 @@ export function TransactionDetailDrawer({ transactionId = null, orderId = null, 
                 <Row label="E-mail" value={source.customer?.email} />
                 <Row label="Réalisé par" value={source.performedByText} />
               </div>
+
+              {source.prestations?.length > 0 && (
+                <div data-testid="operation-prestations">
+                  <SectionTitle>{source.prestations.length > 1 ? `Prestations (${source.prestations.length})` : "Prestation"}</SectionTitle>
+                  {source.prestations.map((prestation) => (
+                    <div key={prestation.id} className="flex items-start justify-between gap-4 py-1.5 text-sm">
+                      <span className="min-w-0">
+                        <span className="block font-medium text-gray-900">{prestation.serviceName}</span>
+                        <span className="block text-xs text-gray-500">
+                          {dateTime(prestation.startTime)} – {timeOnly(prestation.endTime)}
+                        </span>
+                      </span>
+                      <span className="flex-shrink-0 font-medium tabular-nums text-gray-900">{money(prestation.price)}</span>
+                    </div>
+                  ))}
+                  {source.prestations.length > 1 && (
+                    <div className="mt-1 flex items-center justify-between gap-4 border-t border-gray-100 pt-2 text-sm">
+                      <span className="text-gray-500">Total des prestations</span>
+                      <span className="font-semibold tabular-nums text-gray-900">
+                        {money(source.prestations.reduce((sum, prestation) => sum + prestation.price, 0))}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div>
                 <SectionTitle>Paiement</SectionTitle>

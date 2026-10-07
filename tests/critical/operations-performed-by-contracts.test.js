@@ -68,7 +68,12 @@ describe("operations attribution: who on staff/admin side this revenue belongs t
     const fnIdx = actions.indexOf("export async function getTransactionDetail");
     const fn = actions.slice(fnIdx);
     expect(fn).toContain("createdByStaff: { select: { fullName: true, role: true } }");
-    expect(fn).toContain("staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } }");
+    // The appointment select also reads the service name and price now (the
+    // drawer lists the prestations an operation settled), so what is pinned
+    // is the attribution itself, inside the appointment's staffService.
+    expect(fn).toMatch(
+      /appointment: \{ select: \{[^\n]*staffService: \{ select: \{[^\n]*staff: \{ select: \{ user: \{ select: \{ fullName: true, role: true \} \} \} \}/
+    );
     // Workshop and Formation both carry this select and both resolve the
     // bridge — the workshop branch was the historical gap (fixed alongside
     // this test), so this must not match only the formation branch.

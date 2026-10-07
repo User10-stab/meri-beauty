@@ -375,6 +375,27 @@ export async function confirmActivityCheckIn({ code: rawCode }) {
         include: RESERVATION_INCLUDE[guard.kind],
       });
 
+      // One ticket for the whole visit: the client carries a single QR code
+      // (the first prestation's), so scanning it also admits her to the other
+      // prestations of that visit on the same day. A staff member scanning
+      // only ever touches her own.
+      let visitAlsoCheckedIn = 0;
+      if (isAppointment && reservation.visitId) {
+        const siblings = await tx.appointment.updateMany({
+          where: {
+            visitId: reservation.visitId,
+            id: { not: reservation.id },
+            date: reservation.date,
+            status: "CONFIRMED",
+            checkedInAt: null,
+            isDeleted: false,
+            ...(guard.ownStaffId ? { staffId: guard.ownStaffId } : {}),
+          },
+          data: { checkedInAt: updated.checkedInAt, checkedInById: guard.session.user.id },
+        });
+        visitAlsoCheckedIn = siblings.count;
+      }
+
       await writeAuditLog(tx, {
         action: AUDIT_ACTIONS.RESERVATION_CHECKED_IN,
         entityType: table,
@@ -390,12 +411,13 @@ export async function confirmActivityCheckIn({ code: rawCode }) {
           ...(before.dayNumber ? { dayNumber: before.dayNumber, dayCount: before.dayCount } : {}),
           seatsAdmitted,
           balanceDueAtEntry: before.balanceDue,
+          ...(visitAlsoCheckedIn ? { visitId: reservation.visitId, visitAlsoCheckedIn } : {}),
         },
         actor: guard.session.user,
       });
 
       return {
-        data: presentReservation(updated, guard.kind),
+        data: { ...presentReservation(updated, guard.kind), visitAlsoCheckedIn },
         seatsAdmitted,
       };
     });

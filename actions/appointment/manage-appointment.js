@@ -770,13 +770,22 @@ export async function markAppointmentNoShow(appointmentId) {
  * at all to record that money or issue the legally-required invoice for
  * it, since the checkout webhook only invoices fully-paid-online bookings.
  *
+ * `coverAppointmentIds` is « Terminer toute la visite » for one staff member:
+ * other prestations of the same visit, with this same staff member, that are
+ * cashed HERE — one Payment, one Transaction, one ticket, one row in
+ * Opérations — and closed in the same transaction. Each of them then points
+ * at this appointment's Payment (Appointment.coveredByPaymentId) and never
+ * gets one of its own. Only prestations that carry no Payment yet can be
+ * covered; one that already took an acompte online settles its own balance.
+ * See completeVisit below, the only caller that passes it.
+ *
  * @param {string} appointmentId
- * @param {{ method?: "CASH" | "EXTERNAL_TERMINAL", terminalApproved?: boolean }} [options] - method is required only
+ * @param {{ method?: "CASH" | "EXTERNAL_TERMINAL", terminalApproved?: boolean, coverAppointmentIds?: string[] }} [options] - method is required only
  *   when a balance is actually due.
  */
 export async function completeAppointment(
   appointmentId,
-  { method, paymentConfirmed, terminalApproved, qrSessionId, finalTotal, adjustmentReason } = {}
+  { method, paymentConfirmed, terminalApproved, qrSessionId, finalTotal, adjustmentReason, coverAppointmentIds } = {}
 ) {
   try {
     if (!appointmentId) {
@@ -828,8 +837,55 @@ export async function completeAppointment(
       return { success: false, message: "Ce rendez-vous n'a pas encore eu lieu — impossible de le marquer comme terminé." };
     }
 
+    // The ids come from the browser, so every one is re-read here against
+    // the only prestations this appointment may cover: same visit, same staff
+    // member, same client, confirmed, already started, and with no money
+    // recorded anywhere yet.
+    const coverIds = Array.isArray(coverAppointmentIds)
+      ? [...new Set(coverAppointmentIds)].filter((id) => typeof id === "string" && id && id !== appointmentId)
+      : [];
+    let covered = [];
+    if (coverIds.length > 0) {
+      if (appointment.payment || !appointment.visitId) {
+        return { success: false, message: VISIT_COVER_CHANGED_MESSAGE };
+      }
+      if (finalTotal !== undefined && finalTotal !== null) {
+        return { success: false, message: "Un ajustement de prix se fait prestation par prestation, pas sur toute la visite." };
+      }
+      if (isCounterQr(method)) {
+        return { success: false, message: "Le paiement par QR se fait prestation par prestation, pas sur toute la visite." };
+      }
+      covered = await prisma.appointment.findMany({
+        where: {
+          id: { in: coverIds },
+          visitId: appointment.visitId,
+          staffId: appointment.staffId,
+          userId: appointment.userId,
+          status: "CONFIRMED",
+          isDeleted: false,
+          startTime: { lte: new Date() },
+          coveredByPaymentId: null,
+          payment: { is: null },
+        },
+        orderBy: { startTime: "asc" },
+        select: { id: true, staffService: { select: { price: true, service: { select: { name: true } } } } },
+      });
+      if (covered.length !== coverIds.length) {
+        return { success: false, message: VISIT_COVER_CHANGED_MESSAGE };
+      }
+    }
+    const coveredIds = covered.map((c) => c.id);
+    // What the ticket and the invoice call this sale: every prestation it settles.
+    const serviceItems = [appointment, ...covered].map((a) => ({
+      description: a.staffService?.service?.name ?? "Prestation",
+      amount: Number(a.staffService?.price ?? 0),
+    }));
+    const serviceDescription = serviceItems.map((item) => item.description).join(" + ");
+
     const payment = appointment.payment;
-    const onSitePrice = Number(appointment.staffService?.price ?? 0);
+    const onSitePrice =
+      Number(appointment.staffService?.price ?? 0) +
+      covered.reduce((sum, c) => sum + Number(c.staffService?.price ?? 0), 0);
     const priceAdjustment = resolveCounterPriceAdjustment({
       baseTotal: Number(payment?.totalAmount ?? onSitePrice),
       paidAmount: Number(payment?.paidAmount ?? 0),
@@ -969,6 +1025,17 @@ export async function completeAppointment(
         return { claimed: false };
       }
 
+      // Same atomic claim for the prestations cashed with this one. Losing
+      // any of them (completed, cancelled or moved in the meantime) rolls the
+      // whole thing back rather than cashing a total that no longer holds.
+      if (coveredIds.length > 0) {
+        const coveredClaim = await tx.appointment.updateMany({
+          where: { id: { in: coveredIds }, status: "CONFIRMED", coveredByPaymentId: null },
+          data: { status: "COMPLETED" },
+        });
+        if (coveredClaim.count !== coveredIds.length) throw new Error("VISIT_COVER_CHANGED");
+      }
+
       let invoice = null;
       // Set only when a counter adjustment forced an existing invoice to be
       // credited and reissued — see resolveSettlementInvoice.
@@ -1106,7 +1173,8 @@ export async function completeAppointment(
               totalInclVat: Number(updatedPayment.totalAmount),
               customer: buildInvoiceCustomer(appointment.user),
               lines: buildServiceInvoiceLines({
-                description: appointment.staffService.service?.name ?? "Prestation",
+                description: serviceDescription,
+                items: serviceItems,
                 totalAmount: Number(updatedPayment.totalAmount),
                 discountAmount: Number(updatedPayment.discountAmount),
                 // Signed, and only when the counter actually moved the price —
@@ -1145,7 +1213,8 @@ export async function completeAppointment(
               totalInclVat: Number(updatedPayment.totalAmount),
               customer: buildInvoiceCustomer(appointment.user),
               lines: buildServiceInvoiceLines({
-                description: appointment.staffService.service?.name ?? "Prestation",
+                description: serviceDescription,
+                items: serviceItems,
                 totalAmount: Number(updatedPayment.totalAmount),
                 discountAmount: Number(updatedPayment.discountAmount ?? 0),
                 adjustmentAmount: supersedesInvoiceId
@@ -1177,6 +1246,15 @@ export async function completeAppointment(
               paidAmountBeforeAdjustment: priceAdjustment.paidAmount,
             },
           },
+        });
+      }
+
+      // The money of the covered prestations is on this appointment's
+      // Payment. Nothing to point at when the whole lot was free.
+      if (coveredIds.length > 0 && updatedPayment) {
+        await tx.appointment.updateMany({
+          where: { id: { in: coveredIds } },
+          data: { coveredByPaymentId: updatedPayment.id },
         });
       }
 
@@ -1245,8 +1323,137 @@ export async function completeAppointment(
           "Le numéro de TVA de ce client n'est plus valide : sa facture ne peut pas être réémise au nouveau prix. Revalidez-le sur sa fiche, puis réessayez.",
       };
     }
+    if (error.message === "VISIT_COVER_CHANGED") {
+      return { success: false, message: VISIT_COVER_CHANGED_MESSAGE };
+    }
     console.error("[completeAppointment]", error);
     return { success: false, message: "Erreur lors de la finalisation du rendez-vous." };
+  }
+}
+
+const VISIT_COVER_CHANGED_MESSAGE =
+  "Une prestation de cette visite vient de changer d'état. Actualisez la page, puis réessayez.";
+
+/**
+ * « Terminer toute la visite »: closes every prestation of the appointment's
+ * visit that is confirmed and has already started, and cashes them in as few
+ * operations as the money allows — ONE PER STAFF MEMBER.
+ *
+ * Per staff member, not per visit, because that is where the money stops
+ * being one thing: an independent's prestation is her own sale, under her
+ * own VAT number (lib/payments/resolve-payee.js), and even between two
+ * employees the takings are counted per practitioner (her contract's
+ * commission, the dashboard's per-staff revenue). So one staff member doing
+ * two prestations is a single operation and a single ticket; two staff
+ * members are two.
+ *
+ * Within one staff member, the prestations with no money recorded yet are
+ * cashed together on one Payment (completeAppointment's coverAppointmentIds).
+ * A prestation that already has its own Payment — an acompte taken online —
+ * settles its own balance, as it always did.
+ *
+ * A prestation that has not started yet is left alone, exactly like
+ * « Terminer » on a single rendez-vous: nothing is cashed before it happens.
+ *
+ * The same payment method and the same « j'ai bien reçu » attestation apply
+ * to the whole visit: the client pays once at the counter. Only cash and the
+ * card terminal are offered — a transfer, a QR charge or a price adjustment
+ * is about one exact amount and stays a per-prestation action.
+ *
+ * Each staff member's part is its own database transaction. If a later part
+ * fails after an earlier one succeeded, the answer says how far it got; what
+ * is closed stays closed and « Terminer » can simply be pressed again.
+ *
+ * @param {string} appointmentId - any prestation of the visit
+ * @param {{ method?: "CASH" | "EXTERNAL_TERMINAL", paymentConfirmed?: boolean, terminalApproved?: boolean }} [options]
+ */
+export async function completeVisit(appointmentId, { method, paymentConfirmed, terminalApproved } = {}) {
+  try {
+    if (!appointmentId) {
+      return { success: false, message: "ID de rendez-vous manquant" };
+    }
+
+    const authCheck = await authorizeAppointmentAction(appointmentId);
+    if (!authCheck.authorized) {
+      return { success: false, message: authCheck.message };
+    }
+
+    const options = { method, paymentConfirmed, terminalApproved };
+    const anchor = await prisma.appointment.findUnique({
+      where: { id: appointmentId, isDeleted: false },
+      select: { id: true, visitId: true, staffId: true },
+    });
+    // Not part of a visit: this is plain « Terminer ».
+    if (!anchor?.visitId) return completeAppointment(appointmentId, options);
+
+    if (method && !["CASH", "EXTERNAL_TERMINAL"].includes(method)) {
+      return {
+        success: false,
+        message:
+          "Une visite entière s'encaisse en espèces ou par carte sur le terminal. Pour un autre mode de paiement, terminez les prestations une par une.",
+      };
+    }
+
+    // A staff member closes her own prestations of the visit, never a colleague's.
+    const ownStaffId = isAdminRole(authCheck.userRole) ? null : await getCurrentStaffId();
+    const legs = await prisma.appointment.findMany({
+      where: {
+        visitId: anchor.visitId,
+        isDeleted: false,
+        status: "CONFIRMED",
+        startTime: { lte: new Date() },
+        ...(ownStaffId ? { staffId: ownStaffId } : {}),
+      },
+      orderBy: { startTime: "asc" },
+      select: { id: true, staffId: true, payment: { select: { id: true } } },
+    });
+    // The prestation the button was pressed on is not completable itself
+    // (already closed, not started…): let completeAppointment say why.
+    if (!legs.some((leg) => leg.id === appointmentId)) return completeAppointment(appointmentId, options);
+
+    // The pressed prestation's staff member first, so a refusal that needs
+    // the form again (payment not confirmed, till closed) comes before
+    // anything is written.
+    const staffIds = [anchor.staffId, ...new Set(legs.map((leg) => leg.staffId).filter((id) => id !== anchor.staffId))];
+
+    let closed = 0;
+    let lastResult = null;
+    for (const staffId of staffIds) {
+      const own = legs.filter((leg) => leg.staffId === staffId);
+      const unpaid = own.filter((leg) => !leg.payment);
+      const calls = [];
+      if (unpaid.length > 0) {
+        const lead = unpaid.find((leg) => leg.id === appointmentId) ?? unpaid[0];
+        calls.push({
+          id: lead.id,
+          count: unpaid.length,
+          options: { ...options, coverAppointmentIds: unpaid.filter((leg) => leg.id !== lead.id).map((leg) => leg.id) },
+        });
+      }
+      for (const leg of own.filter((l) => l.payment)) calls.push({ id: leg.id, count: 1, options });
+
+      for (const call of calls) {
+        const result = await completeAppointment(call.id, call.options);
+        if (!result.success) {
+          if (closed === 0) return result;
+          revalidatePath("/dashboard/operations");
+          return {
+            success: false,
+            partial: true,
+            message: `${closed} prestation${closed > 1 ? "s" : ""} de la visite ${closed > 1 ? "sont terminées" : "est terminée"}, mais la suite a échoué : ${result.message}`,
+          };
+        }
+        closed += call.count;
+        lastResult = result;
+      }
+    }
+
+    return closed > 1
+      ? { success: true, message: `Visite terminée — ${closed} prestations clôturées.` }
+      : lastResult;
+  } catch (error) {
+    console.error("[completeVisit]", error);
+    return { success: false, message: "Erreur lors de la finalisation de la visite." };
   }
 }
 

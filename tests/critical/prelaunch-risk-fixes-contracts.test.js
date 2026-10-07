@@ -25,7 +25,10 @@ describe("48h pre-launch risk fixes", () => {
     // The confirm button now also waits on the terminal receipt reference when
     // the method is a card, so the expression spans several lines. What has to
     // hold is that it still cannot be pressed without the attestation.
-    expect(drawer).toMatch(/disabled=\{\s*isPending \|\|\s*!paymentConfirmed/);
+    // « Terminer toute la visite » can close prestations with nothing left to
+    // collect, so the attestation is required exactly when money is asked for.
+    expect(drawer).toMatch(/disabled=\{\s*isPending \|\|\s*\(dialogAsksPayment && !paymentConfirmed\)/);
+    expect(drawer).toContain("if (asksPayment && !paymentConfirmed) return;");
 
     const list = source("components/dashboard/appointments/AppointmentsPageClient.jsx");
     expect(list).toContain("paymentConfirmed");

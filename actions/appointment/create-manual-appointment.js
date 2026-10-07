@@ -6,7 +6,9 @@ import { prisma } from "@/lib/prisma";
 import { stripe } from "@/lib/stripe";
 import { sendEmail } from "@/lib/email";
 import {
+  multiReservationConfirmationEmail,
   reservationCreatedAutomaticEmail,
+  staffMultipleReservationsConfirmedEmail,
   staffReservationConfirmedEmail,
   staffReservationRequestedEmail,
 } from "@/lib/email-templates";
@@ -417,16 +419,21 @@ async function resolveManualCustomer(customer) {
 }
 
 /**
- * Writes one validated prestation as its own appointment and sends its own
- * e-mails: one to the client, one to each recipient of that staff member.
- * A booking of several prestations is this, once per prestation — every
- * appointment keeps its own check-in ticket, and its own acompte link when
- * that staff member requires one.
+ * Writes one validated prestation as its own appointment.
+ *
+ * Booked on its own (`visitId` null) it also sends its own e-mails: one to
+ * the client, one to each recipient of that staff member. As part of a visit
+ * it only writes the appointment and the dashboard notifications — the
+ * client and each staff member then get ONE e-mail for the whole visit, sent
+ * by sendVisitEmails once every prestation is written. The acompte link of a
+ * staff member who requires one is the exception: it is that prestation's
+ * own payment, on her own Stripe account, and always goes out by itself.
  *
  * @returns {Promise<{ appointmentId: string, status: string, requiresPayment: boolean, paymentUrl?: string }>}
  */
-async function createManualLeg(leg, user, notes) {
+async function createManualLeg(leg, user, notes, visitId = null) {
   const { staffId, staffServiceId, staffService, paymentDecision, time, appointmentDate, startTime, endTime } = leg;
+  const inVisit = Boolean(visitId);
 
   // ── Branch on whether an acompte is required for this staff ─────────────
   // Reuses the same Staff.depositEnabled / depositPercentage / allowedPaymentMethods
@@ -452,6 +459,7 @@ async function createManualLeg(leg, user, notes) {
           endTime,
           status: "PENDING",
           notes: notes || null,
+          visitId,
         },
       });
       const pay = await tx.payment.create({
@@ -548,7 +556,7 @@ async function createManualLeg(leg, user, notes) {
     }).catch((err) => console.error("[createManualAppointment] deposit email failed:", err));
 
     // Staff email: keep them informed (pending)
-    const emailRecipients = await getAppointmentEmailRecipients(staffId);
+    const emailRecipients = inVisit ? [] : await getAppointmentEmailRecipients(staffId);
     for (const recipient of emailRecipients) {
       sendEmail({
         to: recipient.email,
@@ -582,6 +590,7 @@ async function createManualLeg(leg, user, notes) {
       endTime,
       status: paymentDecision.appointmentStatusBeforePayment,
       notes: notes || null,
+      visitId,
     },
   });
 
@@ -603,6 +612,8 @@ async function createManualLeg(leg, user, notes) {
       console.error("[createManualAppointment] notifications failed:", err)
     );
   }
+
+  if (inVisit) return { appointmentId: appointment.id, status: "CONFIRMED", requiresPayment: false };
 
   const ticket = await buildAppointmentCheckInEmailAssets(appointment.id);
   sendEmail({
@@ -639,6 +650,96 @@ async function createManualLeg(leg, user, notes) {
 }
 
 /**
+ * The e-mails of a visit, once all its prestations are written: one to the
+ * client listing the whole visit with a single check-in ticket, and one to
+ * each staff member (and her dashboard recipients) listing hers.
+ *
+ * The ticket is the first confirmed prestation's own check-in code — scanning
+ * it checks in every prestation of the visit that day (actions/activities/
+ * check-in.js), so the client carries one QR code, not one per prestation.
+ */
+async function sendVisitEmails(legs, created, user) {
+  const lines = legs.map((leg, i) => ({
+    appointmentId: created[i].appointmentId,
+    pending: created[i].requiresPayment,
+    staffId: leg.staffId,
+    serviceName: leg.staffService.service?.name ?? "—",
+    staffName: leg.staffService.staff?.user?.fullName ?? "—",
+    date: leg.appointmentDate,
+    time: leg.time,
+    duration: leg.staffService.duration,
+    amount: Number(leg.staffService.price ?? 0),
+  }));
+  const totalAmount = lines.reduce((sum, line) => sum + line.amount, 0);
+
+  // A visit whose every prestation still awaits its acompte has nothing
+  // confirmed to announce: the payment e-mails already say what to do.
+  const firstConfirmed = lines.find((line) => !line.pending);
+  if (firstConfirmed) {
+    const ticket = await buildAppointmentCheckInEmailAssets(firstConfirmed.appointmentId);
+    sendEmail({
+      to: user.email,
+      ...multiReservationConfirmationEmail({
+        customerName: user.fullName,
+        appointments: lines.map((line) => ({
+          serviceName: line.serviceName,
+          staffName: line.staffName,
+          date: line.date,
+          time: line.time,
+          note: line.pending ? "Confirmé après le paiement de l'acompte (lien envoyé séparément)." : null,
+        })),
+        totalDepositPaid: 0,
+        totalAmount,
+        checkInCode: ticket.checkInCode,
+      }),
+      ...(ticket.attachment ? { attachments: [ticket.attachment] } : {}),
+    }).catch((err) => console.error("[createManualAppointment] visit confirmation email failed:", err));
+  }
+
+  const byStaff = new Map();
+  for (const line of lines) {
+    if (!byStaff.has(line.staffId)) byStaff.set(line.staffId, []);
+    byStaff.get(line.staffId).push(line);
+  }
+  for (const [staffId, own] of byStaff) {
+    const isPending = own.every((line) => line.pending);
+    const ownTotal = own.reduce((sum, line) => sum + line.amount, 0);
+    const recipients = await getAppointmentEmailRecipients(staffId);
+    for (const recipient of recipients) {
+      const mail =
+        own.length > 1
+          ? staffMultipleReservationsConfirmedEmail({
+              staffName: recipient.fullName,
+              customerName: user.fullName,
+              appointments: own,
+              totalAmount: ownTotal,
+              isPending,
+            })
+          : isPending
+            ? staffReservationRequestedEmail({
+                staffName: recipient.fullName,
+                customerName: user.fullName,
+                serviceName: own[0].serviceName,
+                date: own[0].date,
+                time: own[0].time,
+              })
+            : staffReservationConfirmedEmail({
+                staffName: recipient.fullName,
+                customerName: user.fullName,
+                serviceName: own[0].serviceName,
+                date: own[0].date,
+                time: own[0].time,
+                duration: own[0].duration,
+                totalAmount: own[0].amount,
+              });
+      sendEmail({ to: recipient.email, ...mail }).catch((err) =>
+        console.error("[createManualAppointment] visit staff email failed:", err)
+      );
+    }
+  }
+}
+
+/**
  * Lets staff/admin add a booking directly from the dashboard calendar — a
  * phone booking or walk-in that never went through the public site — made of
  * one or several prestations for the same client, with the same staff member
@@ -652,8 +753,11 @@ async function createManualLeg(leg, user, notes) {
  *
  * Each appointment follows its own staff member's payment rules (deposit,
  * online payment, cash payment) and is CONFIRMED unless that staff member
- * requires an online payment first. The client receives one e-mail per
- * prestation and each staff member one e-mail per prestation of hers.
+ * requires an online payment first.
+ *
+ * Several prestations are ONE VISIT (model AppointmentVisit): the client gets
+ * one e-mail and one check-in ticket for it, each staff member one e-mail
+ * for hers, and the dashboard shows, checks in and cashes it as one.
  *
  * @param {{
  *   items: Array<{ staffId: string, staffServiceId: string, date: string, time: string }>,
@@ -715,14 +819,20 @@ export async function createManualAppointments(input) {
     if (resolved.error) return resolved.error;
     const { user } = resolved;
 
+    const visit = several ? await prisma.appointmentVisit.create({ data: {} }) : null;
+
     const created = [];
     for (let i = 0; i < legs.length; i++) {
       try {
-        created.push(await createManualLeg(legs[i], user, notes));
+        created.push(await createManualLeg(legs[i], user, notes, visit?.id ?? null));
       } catch (error) {
         if (created.length === 0) throw error;
-        // Already-written appointments have had their e-mails sent; say
-        // exactly where it stopped rather than pretending nothing happened.
+        // The prestations already written are a real visit: tell the client
+        // and the staff about those, exactly as if they were the whole booking.
+        await sendVisitEmails(legs.slice(0, created.length), created, user).catch((err) =>
+          console.error("[createManualAppointment] visit emails failed:", err)
+        );
+        // Say exactly where it stopped rather than pretending nothing happened.
         console.error("[createManualAppointment] prestation failed after earlier ones were created:", error);
         return {
           success: false,
@@ -732,6 +842,12 @@ export async function createManualAppointments(input) {
           data: { appointments: created },
         };
       }
+    }
+
+    if (visit) {
+      await sendVisitEmails(legs, created, user).catch((err) =>
+        console.error("[createManualAppointment] visit emails failed:", err)
+      );
     }
 
     const awaitingPayment = created.filter((c) => c.requiresPayment).length;
@@ -746,7 +862,7 @@ export async function createManualAppointments(input) {
       message = `${created.length} rendez-vous ajoutés avec succès.`;
     }
 
-    return { success: true, message, data: { appointments: created } };
+    return { success: true, message, data: { appointments: created, visitId: visit?.id ?? null } };
   } catch (error) {
     console.error("[createManualAppointment]", error);
     return { success: false, message: "Une erreur est survenue lors de la création du rendez-vous." };

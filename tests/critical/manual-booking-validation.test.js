@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   salonFindUnique: vi.fn(),
   appointmentFindMany: vi.fn(),
   appointmentCreate: vi.fn(),
+  appointmentVisitCreate: vi.fn(),
   userFindFirst: vi.fn(),
   userFindUnique: vi.fn(),
   userCreate: vi.fn(),
@@ -49,6 +50,7 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mocks.appointmentFindMany,
       create: mocks.appointmentCreate,
     },
+    appointmentVisit: { create: mocks.appointmentVisitCreate },
     user: {
       findFirst: mocks.userFindFirst,
       findUnique: mocks.userFindUnique,
@@ -127,6 +129,7 @@ beforeEach(() => {
   mocks.salonFindUnique.mockResolvedValue({});
   mocks.appointmentFindMany.mockResolvedValue([]);
   mocks.appointmentCreate.mockImplementation(async ({ data }) => ({ id: "appt-1", ...data }));
+  mocks.appointmentVisitCreate.mockResolvedValue({ id: "visit-1" });
   mocks.userFindFirst.mockResolvedValue(null);
   mocks.userFindUnique.mockResolvedValue(null);
   mocks.userCreate.mockImplementation(async ({ data }) => ({ id: "user-new", ...data }));
@@ -222,6 +225,9 @@ describe("manual booking — same availability rules as the normal flow", () => 
     expect(data.staffId).toBe("staff-1");
     expect(data.status).toBe("CONFIRMED");
     expect(data.startTime.getHours()).toBe(10);
+    // A prestation booked on its own is not a visit.
+    expect(data.visitId).toBeNull();
+    expect(mocks.appointmentVisitCreate).not.toHaveBeenCalled();
   });
 });
 
@@ -256,7 +262,7 @@ describe("manual booking — several prestations for one client", () => {
   const item = (overrides = {}) => ({ staffId: "staff-1", staffServiceId: "ss-1", date: DATE_KEY, time: "10:00", ...overrides });
   const book = (items) => createManualAppointments({ items, notes: null, customer: { userId: "user-existing" } });
 
-  test("two staff members: one appointment each, one e-mail per prestation to the client and to each staff", async () => {
+  test("two staff members: one visit — an appointment each, ONE e-mail and one ticket for the client, one e-mail per staff", async () => {
     mocks.getAppointmentEmailRecipients.mockImplementation(async (staffId) => [
       { email: `${staffId}@example.com`, fullName: staffId },
     ]);
@@ -266,10 +272,21 @@ describe("manual booking — several prestations for one client", () => {
     expect(res.success).toBe(true);
     expect(res.data.appointments).toHaveLength(2);
     expect(mocks.appointmentCreate.mock.calls.map(([{ data }]) => data.staffId)).toEqual(["staff-1", "staff-2"]);
-    const recipients = mocks.sendEmail.mock.calls.map(([mail]) => mail.to);
-    expect(recipients.filter((to) => to === "cliente@example.com")).toHaveLength(2);
-    expect(recipients).toContain("staff-1@example.com");
-    expect(recipients).toContain("staff-2@example.com");
+    // Both prestations belong to the same visit.
+    expect(mocks.appointmentVisitCreate).toHaveBeenCalledTimes(1);
+    expect(res.data.visitId).toBe("visit-1");
+    expect(mocks.appointmentCreate.mock.calls.map(([{ data }]) => data.visitId)).toEqual(["visit-1", "visit-1"]);
+
+    const mails = mocks.sendEmail.mock.calls.map(([mail]) => mail);
+    const toClient = mails.filter((mail) => mail.to === "cliente@example.com");
+    expect(toClient).toHaveLength(1);
+    // The whole visit in one message, with a single check-in ticket.
+    expect(toClient[0].html).toContain("Coupe");
+    expect(toClient[0].html).toContain("Pédicure");
+    expect(toClient[0].html.match(/R-TEST/g)).toHaveLength(1);
+    expect(mocks.buildAppointmentCheckInEmailAssets).toHaveBeenCalledTimes(1);
+    expect(mails.filter((mail) => mail.to === "staff-1@example.com")).toHaveLength(1);
+    expect(mails.filter((mail) => mail.to === "staff-2@example.com")).toHaveLength(1);
   });
 
   test("same staff member: the second prestation may not start inside the first one's rest time", async () => {
@@ -283,11 +300,19 @@ describe("manual booking — several prestations for one client", () => {
     expect(mocks.sendEmail).not.toHaveBeenCalled();
   });
 
-  test("same staff member: a prestation after the rest time is accepted", async () => {
+  test("same staff member: a prestation after the rest time is accepted, and she gets one e-mail for both", async () => {
+    mocks.getAppointmentEmailRecipients.mockImplementation(async (staffId) => [
+      { email: `${staffId}@example.com`, fullName: staffId },
+    ]);
+
     const res = await book([item(), item({ time: "11:30" })]);
 
     expect(res.success).toBe(true);
     expect(mocks.appointmentCreate).toHaveBeenCalledTimes(2);
+    const toStaff = mocks.sendEmail.mock.calls.map(([mail]) => mail).filter((mail) => mail.to === "staff-1@example.com");
+    expect(toStaff).toHaveLength(1);
+    expect(toStaff[0].text).toContain("10:00");
+    expect(toStaff[0].text).toContain("11:30");
   });
 
   test("one invalid prestation refuses the whole booking — nothing is written", async () => {

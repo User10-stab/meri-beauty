@@ -2,6 +2,7 @@
 
 import { Check } from "lucide-react";
 import { getStaffColor } from "./staffColors";
+import { VisitBadge } from "@/components/dashboard/appointments/VisitParts";
 
 // Muted palette for finished reservations — immediately distinguishable
 // from upcoming ones while staying consistent with the dashboard UI.
@@ -72,6 +73,8 @@ export function AppointmentCard({ appointment, onClick, compact = false }) {
           >
             {appointment.serviceName}
           </h4>
+          {/* Several prestations booked together for this client. */}
+          <VisitBadge visit={appointment.visit} />
           {isCompleted ? (
             <span
               className="flex flex-shrink-0 items-center gap-0.5 rounded bg-white/70 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider shadow-sm"

@@ -1146,7 +1146,9 @@ export async function getTransactionDetail(transactionId) {
             order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, pickupCode: true, pickedUpAt: true, user: { select: { fullName: true, email: true } }, createdByStaff: { select: { fullName: true, role: true } } } },
             workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             formationReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, endDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
-            appointment: { select: { id: true, date: true, status: true, checkInCode: true, checkedInAt: true, user: { select: { fullName: true, email: true } }, staffService: { select: { staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
+            appointment: { select: { id: true, date: true, startTime: true, endTime: true, status: true, visitId: true, checkInCode: true, checkedInAt: true, user: { select: { fullName: true, email: true } }, staffService: { select: { price: true, service: { select: { name: true } }, staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
+            // The other prestations of the same visit this Payment settled.
+            coveredAppointments: { orderBy: { startTime: "asc" }, select: { id: true, startTime: true, endTime: true, status: true, staffService: { select: { price: true, service: { select: { name: true } } } } } },
             // Staff rent (« Loyer staff »): the contract and the billed period.
             staffContract: { select: { fixedRent: true, startDate: true, dueDate: true, staff: { select: { user: { select: { fullName: true, email: true } } } } } },
             staffRentPeriod: { select: { billingYear: true, billingMonth: true, lineDescription: true, dueDate: true, status: true } },
@@ -1181,6 +1183,20 @@ export async function getTransactionDetail(transactionId) {
     } else if (transaction.payment?.appointment) {
       const staffUser = transaction.payment.appointment.staffService?.staff?.user;
       transaction.payment.appointment.performedBy = staffUser ? { name: staffUser.fullName, role: staffUser.role } : null;
+      // Every prestation this operation is about: the appointment's own, then
+      // the ones of the same visit cashed with it — so the drawer can say
+      // "two prestations" rather than show one date and a doubled amount.
+      transaction.payment.appointment.prestations = [
+        transaction.payment.appointment,
+        ...(transaction.payment.coveredAppointments ?? []),
+      ].map((a) => ({
+        id: a.id,
+        serviceName: a.staffService?.service?.name ?? "Prestation",
+        startTime: a.startTime,
+        endTime: a.endTime,
+        status: a.status,
+        price: Number(a.staffService?.price ?? 0),
+      }));
     } else if (transaction.payment?.workshopReservation) {
       const animator = transaction.payment.workshopReservation.session?.animator;
       let performedBy = null;

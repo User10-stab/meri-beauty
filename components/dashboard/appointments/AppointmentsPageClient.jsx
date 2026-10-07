@@ -7,7 +7,8 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 import { ActionMenu, ActionMenuDivider, ActionMenuItem, ActionMenuTrigger } from "@/components/dashboard/Tables/ActionMenu";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { getAllAppointments } from "@/actions/appointment/list-appointments";
-import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow, deleteAppointment } from "@/actions/appointment/manage-appointment";
+import { acceptAppointment, rejectAppointment, completeAppointment, completeVisit, markAppointmentNoShow, deleteAppointment } from "@/actions/appointment/manage-appointment";
+import { VisitBadge, VisitPrestationsList, VisitScopeChoice, visitCompletion } from "@/components/dashboard/appointments/VisitParts";
 import { resendPaymentEmail } from "@/actions/payment/resend-payment-email";
 import { resendCheckInQr } from "@/actions/payments/send-checkin-email";
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
@@ -88,7 +89,9 @@ function getAppointmentMenuItems(row, handlers) {
       // flag on `row.payment`. Shared with the calendar drawer and mirrors
       // completeAppointment's own server-side rule.
       const handleComplete = () => {
-        if (appointmentCollectsAtCounter(row)) {
+        // A visit with other prestations to close always asks first: the
+        // whole visit, or only this one.
+        if (visitCompletion(row.visit, row.id).available || appointmentCollectsAtCounter(row)) {
           onOpenCompleteDialog(row);
         } else {
           onComplete(row.id);
@@ -225,6 +228,8 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
   const [toComplete, setToComplete] = useState(null);
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  // « Toute la visite » or only this prestation — see completeVisit.
+  const [completeScope, setCompleteScope] = useState("VISIT");
   // A card collection is only accepted as EXTERNAL_TERMINAL now. The
   // existing "j'ai bien reçu" checkbox already says "ou carte APPROUVÉE sur le
   // terminal", so it doubles as the approval attestation. Its reference is the
@@ -377,17 +382,33 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
     }
   }
 
+  // What the « Terminer » dialog is about to do for the row it was opened on.
+  const completion = visitCompletion(toComplete?.visit, toComplete?.id);
+  const wholeVisit = completion.available && completeScope === "VISIT";
+  const dialogAmountDue = toComplete
+    ? wholeVisit ? completion.amountDue : appointmentAmountDueAtCounter(toComplete)
+    : 0;
+  // Money is only asked for — method and attestation — from someone who takes
+  // it at the counter, and only when there is some to take.
+  const dialogAsksPayment =
+    Boolean(toComplete) &&
+    canCollectCash &&
+    (wholeVisit ? completion.amountDue > 0 : appointmentCollectsAtCounter(toComplete));
+
   function handleCompleteWithPayment() {
-    if (!toComplete || !paymentConfirmed) return;
+    if (!toComplete || (dialogAsksPayment && !paymentConfirmed)) return;
     setRowLoadingId(toComplete.id);
     startTransition(async () => {
-      const result = await completeAppointment(toComplete.id, {
-        method: completeMethod,
-        paymentConfirmed,
-        ...(completeMethod === "EXTERNAL_TERMINAL"
-          ? { terminalApproved: paymentConfirmed }
-          : {}),
-      });
+      const options = dialogAsksPayment
+        ? {
+            method: completeMethod,
+            paymentConfirmed,
+            ...(completeMethod === "EXTERNAL_TERMINAL" ? { terminalApproved: paymentConfirmed } : {}),
+          }
+        : {};
+      const result = wholeVisit
+        ? await completeVisit(toComplete.id, options)
+        : await completeAppointment(toComplete.id, options);
       setRowLoadingId(null);
       setToComplete(null);
       if (result.success) {
@@ -566,6 +587,8 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                     </TableCell>
                     <TableCell>
                       <span className="block max-w-[160px] truncate text-gray-600 dark:text-dark-6" title={a.serviceName}>{a.serviceName}</span>
+                      {/* Several prestations booked together for this client. */}
+                      <VisitBadge visit={a.visit} className="mt-0.5 border border-gray-200 bg-gray-50" />
                     </TableCell>
                     <TableCell>
                       <span className="block max-w-[140px] truncate text-gray-600 dark:text-dark-6" title={a.staffName}>{a.staffName}</span>
@@ -641,8 +664,8 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                           // For everyone else the balance is recorded off-till
                           // by completeAppointment, so there is no popup — the
                           // "Terminer" click just closes it out.
-                          canCollectCash
-                            ? (setPaymentConfirmed(false), setToComplete(row))
+                          canCollectCash || visitCompletion(row.visit, row.id).available
+                            ? (setPaymentConfirmed(false), setCompleteScope("VISIT"), setToComplete(row))
                             : handleCompleteDirect(row.id)
                         }
                       />
@@ -707,12 +730,29 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
         >
           <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
             <h3 className="text-base font-semibold text-gray-800">
-              {toComplete.paymentStatus ? "Encaisser le solde restant" : "Encaisser le paiement"}
+              {completion.available
+                ? "Terminer la visite"
+                : toComplete.paymentStatus ? "Encaisser le solde restant" : "Encaisser le paiement"}
             </h3>
+            {completion.available && (
+              <div className="mt-3 space-y-3">
+                <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-3">
+                  <VisitPrestationsList visit={toComplete.visit} currentId={toComplete.id} />
+                </div>
+                <VisitScopeChoice
+                  completion={completion}
+                  singleAmountDue={appointmentAmountDueAtCounter(toComplete)}
+                  value={completeScope}
+                  onChange={setCompleteScope}
+                />
+              </div>
+            )}
+            {dialogAsksPayment && (
+            <>
             <p className="mt-1.5 text-sm text-gray-500">
-              {toComplete.customer?.fullName ?? toComplete.customerName} doit {toComplete.paymentStatus ? "encore " : ""}régler{" "}
-              <span className="font-medium text-gray-700">
-                €{appointmentAmountDueAtCounter(toComplete).toFixed(2)}
+              {toComplete.customer?.fullName ?? toComplete.customerName} doit {toComplete.paymentStatus && !wholeVisit ? "encore " : ""}régler{" "}
+              <span className="font-medium text-gray-700" data-testid="complete-amount-due">
+                €{dialogAmountDue.toFixed(2)}
               </span>{" "}
               sur place. Une facture sera émise pour le montant total dès l'encaissement.
             </p>
@@ -738,6 +778,8 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
               />
               Je confirme avoir bien reçu ce paiement (espèces en main, ou carte APPROUVÉE sur le terminal).
             </label>
+            </>
+            )}
 
             <div className="mt-5 flex justify-end gap-2">
               <button
@@ -753,11 +795,11 @@ export function AppointmentsPageClient({ initialAppointments, staffOptions, show
                 onClick={handleCompleteWithPayment}
                 disabled={
                   isPending ||
-                  !paymentConfirmed
+                  (dialogAsksPayment && !paymentConfirmed)
                 }
                 className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-medium text-white hover:bg-[#2f3a2e]/90 disabled:opacity-50"
               >
-                {isPending ? <Loader2 size={14} className="animate-spin" /> : "Encaisser et terminer"}
+                {isPending ? <Loader2 size={14} className="animate-spin" /> : dialogAsksPayment ? "Encaisser et terminer" : "Terminer"}
               </button>
             </div>
           </div>

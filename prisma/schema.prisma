@@ -1813,10 +1813,25 @@ model Appointment {
   isDeleted            Boolean                          @default(false)
   reviewRequestedAt DateTime?
   deletedAt            DateTime?
-  payment              Payment?
+  payment              Payment?                         @relation("AppointmentPayment")
   review        Review?
   notifications        Notification[]
   cancellationRequests AppointmentCancellationRequest[]
+
+  // Several prestations booked together for one client are one visit — see
+  // model AppointmentVisit. Null for an appointment booked on its own.
+  visitId String?
+  visit   AppointmentVisit? @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
+  // Set when this prestation was cashed together with another one of the
+  // same visit and the same staff member: the money is on THAT appointment's
+  // Payment (one operation, one ticket), and this one never gets a Payment of
+  // its own. Only ever written by completeAppointment, in the same
+  // transaction that marks this appointment COMPLETED — so a covered
+  // appointment is always a completed one, and cancelling, moving or
+  // marking it absent never has prepaid money to account for.
+  coveredByPaymentId String?
+  coveredByPayment   Payment? @relation("AppointmentCoveredByPayment", fields: [coveredByPaymentId], references: [id], onDelete: SetNull)
 
   // Dedup markers for the reminder cron (mirrors reservations'
   // reminderSentAt), one per window since appointments send both a 24h and
@@ -1841,6 +1856,24 @@ model Appointment {
   @@index([userId, startTime]) // "my appointments"
   @@index([isDeleted, status, startTime]) // dashboard filters
   @@index([cancelledByUserId])
+  @@index([visitId])
+  @@index([coveredByPaymentId])
+}
+
+// One client's visit to the salon: the prestations booked together from the
+// dashboard's « Ajouter un rendez-vous » dialog, with one staff member or
+// several, back to back or hours apart.
+//
+// Each prestation stays its own Appointment — that is what blocks each staff
+// member's agenda, enforces her rest time and keeps an independent's sale
+// hers. The visit only ties them together, so the screens can show, check in
+// and cash them as one.
+model AppointmentVisit {
+  id String @id @default(cuid())
+
+  createdAt DateTime @default(now())
+
+  appointments Appointment[]
 }
 
 // A late cancellation request does not change the appointment or payment by
@@ -1923,7 +1956,10 @@ model ReservationCancellationRequest {
 model Payment {
   id                     String                @id @default(cuid())
   appointmentId          String?               @unique
-  appointment            Appointment?          @relation(fields: [appointmentId], references: [id])
+  appointment            Appointment?          @relation("AppointmentPayment", fields: [appointmentId], references: [id])
+  // The other prestations of the same visit, with the same staff member,
+  // that this one Payment also settled — see Appointment.coveredByPaymentId.
+  coveredAppointments    Appointment[]         @relation("AppointmentCoveredByPayment")
   orderId                String?               @unique
   order                  Order?                @relation(fields: [orderId], references: [id])
   workshopReservationId  String?               @unique

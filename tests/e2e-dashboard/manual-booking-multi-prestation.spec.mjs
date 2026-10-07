@@ -391,6 +391,78 @@ test.describe("a visit — several prestations for one client", () => {
     expect(open.coveredByPaymentId).toBeNull();
   });
 
+  test("an independent's prestation in the visit: the salon neither cashes it nor sees its amount", async ({ page }) => {
+    const admin = await seedAdmin({ label: "visit-independent" });
+    const salonStaff = await seedStaff({ label: "visit-salon-side", permissions: ["APPOINTMENTS"] });
+    const independent = await seedStaff({ label: "visit-independent-side", permissions: ["APPOINTMENTS"] });
+    // An independent practitioner: her prestation is her own sale, under her
+    // own VAT number (lib/payments/resolve-payee.js).
+    await prisma.staff.update({ where: { id: independent.staff.id }, data: { type: "INDEPENDENT" } });
+    const customer = await seedCustomer({ label: "visit-independent" });
+    const { appointments } = await seedPastVisit({
+      admin,
+      customer,
+      legs: [
+        { staff: salonStaff.staff, hoursFromNow: -3, price: 60 },
+        { staff: independent.staff, hoursFromNow: -3, price: 85 },
+      ],
+    });
+
+    await loginAs(page, admin.credentials);
+    await page.goto(`/dashboard/appointments?appointmentId=${appointments[0].id}`);
+    await page.getByRole("button", { name: "Actions du rendez-vous" }).first().click();
+    await page.getByRole("menuitem", { name: "Terminer" }).click();
+
+    // With nothing else of the SALON's to close, this is the plain single
+    // « Terminer »: the salon's 60 €, and not a word about her 85 €.
+    const dialog = page.getByRole("dialog").filter({ hasText: /encaisser le paiement/i });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).not.toContainText("Terminer la visite");
+    await expect(dialog.getByTestId("complete-amount-due")).toContainText("60");
+    await expect(dialog).not.toContainText("85");
+    await expect(dialog).not.toContainText("145");
+    await payByTerminalAndConfirm(dialog);
+
+    const rows = await waitFor(
+      async () => {
+        const all = await appointmentsOf(customer.id);
+        return all.some((row) => row.status === "COMPLETED") ? all : null;
+      },
+      { what: "the salon's prestation completed", timeout: 30_000 },
+    );
+    const salonRow = rows.find((row) => row.id === appointments[0].id);
+    const herRow = rows.find((row) => row.id === appointments[1].id);
+
+    // The salon cashed its own prestation, as the salon's money.
+    expect(salonRow.status).toBe("COMPLETED");
+    expect(Number(salonRow.payment.totalAmount)).toBeCloseTo(60, 2);
+    expect(salonRow.payment.payeeStaffId, "the salon's sale was recorded as someone else's").toBeNull();
+
+    // Hers is untouched: still to be closed by her, nothing recorded.
+    expect(herRow.status, "the salon closed an independent's prestation").toBe("CONFIRMED");
+    expect(herRow.payment, "the salon recorded an independent's money").toBeNull();
+    expect(herRow.coveredByPaymentId).toBeNull();
+
+    // The visit is still shown as a whole on the calendar's own data — her
+    // prestation is there, without its price.
+    // Opened from the keyboard rather than with a pointer click: these runs
+    // leave many test rendez-vous at the same hour, and their cards overlap
+    // on the grid.
+    await page.goto("/dashboard/calendrier");
+    const card = page
+      .getByRole("button", { name: /Client Test Automatise visit-independent — Staff Test Automatise visit-salon-side/ })
+      .first();
+    await expect(card).toBeVisible({ timeout: 20_000 });
+    await page.waitForLoadState("networkidle");
+    await card.focus();
+    await page.keyboard.press("Enter");
+    const visitList = page.getByTestId("visit-prestations");
+    await expect(visitList).toBeVisible({ timeout: 20_000 });
+    await expect(visitList.getByRole("listitem")).toHaveCount(2);
+    await expect(visitList).toContainText("Indépendante — sa propre vente");
+    await expect(visitList).not.toContainText("85");
+  });
+
   test("a company client: ONE invoice for the visit, one line per prestation — and Opérations lists both", async ({ page }) => {
     const admin = await seedAdmin({ label: "visit-invoice" });
     const staff = await seedStaff({ label: "visit-invoice", permissions: ["APPOINTMENTS"] });

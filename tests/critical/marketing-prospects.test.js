@@ -113,6 +113,9 @@ describe("segments", () => {  it("tous les segments métier salon existent", () 
       expect(isValidSegment(s)).toBe(true);
     }
   });
+  it("segment anciens clients (réimportés)", () => {
+    expect(isValidSegment("anciens_clients")).toBe(true);
+  });
   it("dedupe par email en gardant le userId", () => {
     const out = dedupeRecipients([
       { email: "a@b.c", firstName: null, userId: null },
@@ -182,7 +185,8 @@ describe("resolveCampaignAttachment", () => {  it("lit un fichier local confiné
 describe("PROSPECT_SOURCE_CHOICES (dropdown)", () => {  const ENUM_VALUES = [
     "google", "google_ads", "linkedin", "facebook", "instagram", "email",
     "campagne", "salon_evenement", "recommandation", "site_web", "reservation",
-    "boutique", "atelier", "formation", "contact", "autre",
+    "boutique", "atelier", "formation", "contact", "anciens_clients",
+    "import_excel", "autre",
   ];
   it("couvre exactement les valeurs de l'enum, avec labels FR", () => {
     expect(PROSPECT_SOURCE_CHOICES.map((c) => c.value).sort()).toEqual([...ENUM_VALUES].sort());
@@ -194,7 +198,18 @@ describe("PROSPECT_SOURCE_CHOICES (dropdown)", () => {  const ENUM_VALUES = [
   });
   it("getSourceLabel résout les labels", () => {
     expect(getSourceLabel("salon_evenement")).toBe("Salon / Événement");
+    expect(getSourceLabel("anciens_clients")).toBe("Anciens clients");
+    expect(getSourceLabel("import_excel")).toBe("Import Excel");
     expect(getSourceLabel("inconnu")).toBe("inconnu");
+  });
+  it("sources d'import distinguées (anciens clients / fichier Excel)", () => {
+    expect(isValidSource("anciens_clients")).toBe(true);
+    expect(isValidSource("import_excel")).toBe(true);
+    expect(normalizeSource("Anciens clients")).toBe("anciens_clients");
+    expect(normalizeSource("ancien client")).toBe("anciens_clients");
+    expect(normalizeSource("Import Excel")).toBe("import_excel");
+    expect(normalizeSource("fichier xls")).toBe("import_excel");
+    expect(normalizeSource("export podia")).toBe("autre");
   });
 });
 

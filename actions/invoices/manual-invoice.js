@@ -11,6 +11,7 @@ import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import {
   calculateVatTotals,
+  hasInvoiceableVatIdentity,
   hasReusableVatValidation,
   repriceTtcCataloguePrice,
   resolveGoodsVatPolicy,
@@ -24,6 +25,9 @@ import { AUDIT_ACTIONS } from "@/lib/audit-log";
 import { manualSaleInvoiceInput } from "@/lib/invoices/manual-sale-invoice";
 import { listAwaitedTransfers } from "@/actions/payments/awaited-transfer";
 import { orderTerminalReference } from "@/lib/payments/terminal-reference";
+import { allocateOrderTicketNumber } from "@/lib/tickets/allocate-ticket-number";
+import { applyCounterPromoCode, CounterPromoCodeError } from "@/lib/promo-codes";
+import { deliverManualSaleReceipt } from "@/lib/invoices/manual-sale-receipt";
 
 /**
  * Invoice sales composed at la caisse — free lines, transfers, acomptes,
@@ -35,6 +39,12 @@ import { orderTerminalReference } from "@/lib/payments/terminal-reference";
  * (source MANUAL) with its lines, a Payment, and one Transaction per receipt.
  * That is what puts it in the Livre de recettes, the reports and the cash
  * book (cash only) like every other sale.
+ *
+ * Whether the sale gets an invoice at all follows the ticket path's rule,
+ * whatever the payment method: only a buyer with a VIES-validated VAT number
+ * who asked for one (`invoiceRequested`) is invoiced. Anyone else — no VAT
+ * number, or the invoice declined — gets a ticket once the sale is fully
+ * paid. A promo code applies here exactly as on the ticket path.
  *
  * The invoice follows the site-wide rule for deposits: it is only issued
  * once the sale is FULLY paid — never on an acompte, never unpaid (same as
@@ -118,8 +128,9 @@ const BUYER_INCLUDE = {
 
 /**
  * issueInvoice's own buyer guards, run without numbering anything. Called at
- * creation for every mode, so a sale whose invoice would later be refused is
- * refused before any money is recorded.
+ * creation, for every mode, on a sale that will be invoiced — so a sale
+ * whose invoice would later be refused is refused before any money is
+ * recorded.
  */
 function assertInvoiceable(buyer) {
   if (!hasReusableVatValidation(buyer, buyer.vatNumber)) throw new Error("B2C_INVOICE_NOT_ALLOWED");
@@ -252,6 +263,10 @@ function mapError(error, context) {
   if (message === "MANUAL_INVOICE_DEPOSIT_NOT_PARTIAL") {
     return "Un acompte doit être inférieur au total — pour tout encaisser, choisissez « Encaisser tout ».";
   }
+  if (error instanceof CounterPromoCodeError) return error.message;
+  if (message === "MANUAL_INVOICE_NOTHING_TO_PAY") {
+    return "Le total est à 0 € après le code promo : encaissez la vente en espèces ou au terminal, « Payé maintenant ».";
+  }
   if (message === "MANUAL_SALE_NOT_CANCELLABLE") {
     return "Cette vente ne peut plus être annulée ici : elle a été encaissée, facturée ou annulée entre-temps. Rechargez la page.";
   }
@@ -285,7 +300,7 @@ export async function createManualInvoice(input) {
   if (!parsed.success) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de facture invalides." };
   }
-  const { attemptKey, customer: requestedCustomer, lines, notes, dueDate, settlement } = parsed.data;
+  const { attemptKey, customer: requestedCustomer, lines, notes, dueDate, settlement, invoiceRequested, promoCode } = parsed.data;
   const paidInFull = settlement.mode === "NOW";
 
   const replay = await findReplay(attemptKey, session.user.id);
@@ -324,8 +339,12 @@ export async function createManualInvoice(input) {
       async (tx) => {
         const buyer = await tx.user.findUnique({ where: { id: customer.id }, include: BUYER_INCLUDE });
 
-        // Whatever the mode: a sale recorded here must be invoiceable.
-        assertInvoiceable(buyer);
+        // The ticket path's rule, whatever the mode or the method: an invoice
+        // only for a VIES-validated buyer who wants one. A sale that will be
+        // invoiced must be invoiceable now, before any money is recorded.
+        const isVatEligible = hasInvoiceableVatIdentity(buyer);
+        const wantsInvoice = isVatEligible && invoiceRequested !== false;
+        if (wantsInvoice) assertInvoiceable(buyer);
 
         const vatPolicy = resolveGoodsVatPolicy({ customer: buyer });
 
@@ -340,7 +359,7 @@ export async function createManualInvoice(input) {
           await tx.$queryRaw`SELECT id FROM "ProductVariant" WHERE id = ${variantId} FOR UPDATE`;
           const variant = await tx.productVariant.findFirst({
             where: { id: variantId, isActive: true, isDeleted: false, product: { isDeleted: false, status: "ACTIVE" } },
-            select: { id: true, name: true, sku: true, price: true, stockQuantity: true, reservedQuantity: true, product: { select: { name: true } } },
+            select: { id: true, name: true, sku: true, price: true, stockQuantity: true, reservedQuantity: true, productId: true, product: { select: { name: true } } },
           });
           if (!variant) throw new Error("MANUAL_INVOICE_PRODUCT_UNAVAILABLE");
           if (quantity > variant.stockQuantity - variant.reservedQuantity) {
@@ -358,7 +377,28 @@ export async function createManualInvoice(input) {
           const variant = variants.get(line.variantId);
           return { ...line, variant, unitPrice: repriceTtcCataloguePrice(variant.price, vatPolicy.vatRate) };
         });
-        const total = roundMoney(priced.reduce((sum, line) => sum + roundMoney(line.unitPrice * line.quantity), 0));
+        const subtotal = roundMoney(priced.reduce((sum, line) => sum + roundMoney(line.unitPrice * line.quantity), 0));
+
+        // A promo code, as on the ticket path: worked out on the catalogue
+        // lines as priced for this buyer (a free line is never discounted),
+        // and claimed here, before the order that carries it is created.
+        const productLines = [...requestedByVariant].map(([variantId, quantity]) => {
+          const variant = variants.get(variantId);
+          const unitPrice = repriceTtcCataloguePrice(variant.price, vatPolicy.vatRate);
+          return { key: variantId, productId: variant.productId, unitPrice, quantity, amount: unitPrice * quantity };
+        });
+        const promo = promoCode
+          ? await applyCounterPromoCode(tx, promoCode, productLines.reduce((sum, line) => sum + line.amount, 0), {
+              scope: "BOUTIQUE",
+              customerId: buyer.id,
+              lines: productLines,
+            })
+          : null;
+        const discountAmount = roundMoney(promo?.discountAmount ?? 0);
+        const lineDiscountByVariantId = new Map((promo?.lineDiscounts ?? []).map((line) => [line.key, line]));
+        const total = Math.max(0, roundMoney(subtotal - discountAmount));
+        // Nothing left to collect later: a 0 € sale is paid in full now.
+        if (total <= 0 && settlement.mode !== "NOW") throw new Error("MANUAL_INVOICE_NOTHING_TO_PAY");
         const taxTotals = calculateVatTotals(total, vatPolicy.vatRate);
 
         // An acompte has to leave a balance: the whole amount is « Encaisser
@@ -379,22 +419,28 @@ export async function createManualInvoice(input) {
             source: "MANUAL",
             createdByStaffId: session.user.id,
             posAttemptKey: attemptKey,
-            subtotal: total,
+            subtotal,
             shippingCost: 0,
+            discountAmount,
+            promoCodeId: promo?.promoCodeId ?? null,
+            // A multi-offer code's offers, kept for returns (lib/orders/return-refund.js).
+            promoSnapshot: promo?.snapshot ?? undefined,
             totalAmount: total,
             taxCountryCode: vatPolicy.taxCountryCode,
             vatTreatment: vatPolicy.vatTreatment,
             vatRate: vatPolicy.vatRate,
             totalExclVat: taxTotals.totalExclVat,
             totalVat: taxTotals.vatAmount,
-            customerVatNumber: buyer.vatNumber ?? null,
+            customerVatNumber: wantsInvoice ? buyer.vatNumber ?? null : null,
             taxNote: vatPolicy.taxNote,
-            invoiceRequested: true,
+            // Read back by the payment that clears the balance: true is the
+            // only value that issues an invoice (see settleManualInvoice).
+            invoiceRequested: isVatEligible ? wantsInvoice : null,
             pickedUpAt: now,
             pickedUpByStaffId: session.user.id,
             notes: MANUAL_ORDER_NOTE,
             // Kept until the invoice exists — see model Order.
-            invoiceNotes: notes || null,
+            invoiceNotes: wantsInvoice ? notes || null : null,
             // Noon rather than midnight, so the date never slips a day
             // whichever way the timestamp is later formatted. Meaningless
             // once paid in full.
@@ -407,6 +453,12 @@ export async function createManualInvoice(input) {
                 sku: line.variant?.sku ?? null,
                 unitPrice: line.unitPrice,
                 quantity: line.quantity,
+                ...(line.variant && lineDiscountByVariantId.has(line.variant.id)
+                  ? {
+                      discountAmount: lineDiscountByVariantId.get(line.variant.id).discountAmount,
+                      promoLabel: lineDiscountByVariantId.get(line.variant.id).label ?? null,
+                    }
+                  : {}),
               })),
             },
           },
@@ -414,6 +466,7 @@ export async function createManualInvoice(input) {
             id: true,
             orderNumber: true,
             totalAmount: true,
+            discountAmount: true,
             vatRate: true,
             vatTreatment: true,
             taxCountryCode: true,
@@ -467,7 +520,7 @@ export async function createManualInvoice(input) {
         }
 
         let receipt = null;
-        if (settlement.mode !== "LATER") {
+        if (settlement.mode !== "LATER" && total > 0) {
           receipt = await settleInTx(tx, {
             paymentId: payment.id,
             orderNumber: order.orderNumber,
@@ -479,11 +532,20 @@ export async function createManualInvoice(input) {
           });
         }
 
-        // Invoiced only once fully paid — here, only « Encaisser tout ».
-        const invoice = receipt?.fullyPaid ? await issueManualInvoice(tx, { order, buyer, paymentId: payment.id }) : null;
+        // A sale the promo brought to 0 € has nothing to collect: it is
+        // paid as it stands.
+        if (total <= 0) {
+          await tx.payment.update({ where: { id: payment.id }, data: { status: "PAID", remainingAmount: 0, paidAt: now } });
+        }
+        const fullyPaid = total <= 0 || Boolean(receipt?.fullyPaid);
+
+        // Invoiced only once fully paid — here, only « Encaisser tout » —
+        // and only when wanted. Otherwise the paid sale gets its ticket.
+        const invoice = fullyPaid && wantsInvoice ? await issueManualInvoice(tx, { order, buyer, paymentId: payment.id }) : null;
+        const ticketNumber = fullyPaid && !invoice ? await allocateOrderTicketNumber(tx, order.id, now) : null;
 
         const paidAmount = receipt?.paidAfter ?? 0;
-        const remainingAmount = receipt ? receipt.remainingAfter : total;
+        const remainingAmount = fullyPaid ? 0 : receipt ? receipt.remainingAfter : total;
         await tx.auditLog.create({
           data: {
             actorId: session.user.id,
@@ -493,7 +555,10 @@ export async function createManualInvoice(input) {
             entityId: invoice ? invoice.id : order.id,
             after: {
               ...(invoice ? { number: invoice.number } : {}),
+              ...(ticketNumber ? { ticketNumber } : {}),
               totalInclVat: total,
+              invoiceRequested: wantsInvoice,
+              ...(promo ? { promoCodeId: promo.promoCodeId, discountAmount } : {}),
               vatRate: vatPolicy.vatRate,
               settlement: settlement.mode,
               ...(awaitedTransferAmount ? { awaitedTransferAmount } : {}),
@@ -515,6 +580,7 @@ export async function createManualInvoice(input) {
 
         return {
           invoice,
+          ticketNumber,
           sale: serializePendingSale({ order, buyer, totalAmount: total, paidAmount, remainingAmount }),
         };
       },
@@ -532,10 +598,17 @@ export async function createManualInvoice(input) {
     return { success: false, message: mapError(error, "createManualInvoice") };
   }
 
+  // Paid in full without an invoice: the client's ticket, as at the till.
+  const receiptDelivery = result.ticketNumber ? await deliverManualSaleReceipt(result.sale.orderId) : null;
+
   revalidateManualInvoiceViews();
   return {
     success: true,
-    data: { invoice: result.invoice ? serializeIssuedInvoice(result.invoice) : null, sale: result.sale },
+    data: {
+      invoice: result.invoice ? serializeIssuedInvoice(result.invoice) : null,
+      sale: result.sale,
+      ...(receiptDelivery ? { receipt: receiptDelivery } : {}),
+    },
   };
 }
 
@@ -576,6 +649,7 @@ function findPendingManualOrders() {
       createdAt: true,
       paymentDueDate: true,
       customerVatNumber: true,
+      invoiceRequested: true,
       user: { select: { fullName: true, email: true, billingProfile: { select: { companyLegalName: true } } } },
       items: { select: { productName: true, variantName: true, quantity: true }, orderBy: { id: "asc" } },
       payment: {
@@ -616,6 +690,8 @@ export async function listPendingManualSales() {
     customerLegalName: order.user?.billingProfile?.companyLegalName ?? null,
     customerEmail: order.user?.email ?? null,
     customerVatNumber: order.customerVatNumber,
+    // false: recorded without an invoice — the payment that clears it issues a ticket.
+    invoiceWanted: order.invoiceRequested === true,
     summary: order.items.map((item) => `${item.quantity} × ${item.variantName ? `${item.productName} — ${item.variantName}` : item.productName}`).join(", "),
     totalAmount: Number(order.payment.totalAmount),
     paidAmount: Number(order.payment.paidAmount),
@@ -662,6 +738,7 @@ export async function settleManualInvoice(input) {
       orderNumber: true,
       source: true,
       status: true,
+      invoiceRequested: true,
       user: { include: BUYER_INCLUDE },
       payment: { select: { id: true, status: true, totalAmount: true, paidAmount: true, invoice: { select: { id: true } } } },
     },
@@ -676,7 +753,10 @@ export async function settleManualInvoice(input) {
 
   const balance = roundMoney(Number(order.payment.totalAmount) - Number(order.payment.paidAmount));
   const clearsBalance = amount == null || amount + 0.001 >= balance;
-  const issuesInvoice = clearsBalance && !order.payment.invoice;
+  // Only a sale recorded with its invoice wanted is invoiced — one recorded
+  // without (no validated VAT number, or declined) gets its ticket instead.
+  const wantsInvoice = order.invoiceRequested === true;
+  const issuesInvoice = clearsBalance && wantsInvoice && !order.payment.invoice;
 
   // The invoice about to be issued needs a VIES validation under 90 days
   // (issueInvoice's B2C_INVOICE_NOT_ALLOWED). A pending sale can outlive
@@ -712,7 +792,8 @@ export async function settleManualInvoice(input) {
         await tx.payment.update({ where: { id: order.payment.id }, data: { awaitedTransferAmount: null } });
 
         let invoice = null;
-        if (recorded.fullyPaid && !order.payment.invoice) {
+        let ticketNumber = null;
+        if (recorded.fullyPaid && wantsInvoice && !order.payment.invoice) {
           const [sale, buyer] = await Promise.all([
             tx.order.findUnique({
               where: { id: order.id },
@@ -723,12 +804,15 @@ export async function settleManualInvoice(input) {
                 taxCountryCode: true,
                 taxNote: true,
                 invoiceNotes: true,
+                discountAmount: true,
                 items: { select: { productName: true, variantName: true, quantity: true, unitPrice: true }, orderBy: { id: "asc" } },
               },
             }),
             tx.user.findUnique({ where: { id: order.user.id }, include: BUYER_INCLUDE }),
           ]);
           invoice = await issueManualInvoice(tx, { order: sale, buyer, paymentId: order.payment.id });
+        } else if (recorded.fullyPaid && !order.payment.invoice) {
+          ticketNumber = await allocateOrderTicketNumber(tx, order.id);
         }
 
         await tx.auditLog.create({
@@ -745,6 +829,7 @@ export async function settleManualInvoice(input) {
               method,
               amount: recorded.received,
               ...(invoice ? { number: invoice.number } : {}),
+              ...(ticketNumber ? { ticketNumber } : {}),
             },
             metadata: {
               orderId: order.id,
@@ -754,7 +839,7 @@ export async function settleManualInvoice(input) {
             },
           },
         });
-        return { recorded, invoice };
+        return { recorded, invoice, ticketNumber };
       },
       { timeout: 20000, maxWait: 10000 }
     );
@@ -762,12 +847,15 @@ export async function settleManualInvoice(input) {
     return { success: false, message: mapError(error, "settleManualInvoice") };
   }
 
+  const { recorded, invoice, ticketNumber } = outcome;
+  const receiptDelivery = ticketNumber ? await deliverManualSaleReceipt(order.id) : null;
   revalidateManualInvoiceViews();
-  const { recorded, invoice } = outcome;
   return {
     success: true,
     message: invoice
       ? `Vente n°${order.orderNumber} soldée — facture ${invoice.number} émise.`
+      : ticketNumber
+      ? `Vente n°${order.orderNumber} soldée — ticket ${ticketNumber} ${receiptDelivery?.receiptEmailSent ? "envoyé au client" : "émis"}.`
       : recorded.fullyPaid
       ? `Vente n°${order.orderNumber} entièrement encaissée.`
       : `Acompte de ${euro(recorded.received)} enregistré sur la vente n°${order.orderNumber} — reste ${euro(recorded.remainingAfter)} à encaisser.`,
@@ -776,6 +864,7 @@ export async function settleManualInvoice(input) {
       paidAmount: recorded.paidAfter,
       remainingAmount: recorded.remainingAfter,
       invoice: invoice ? serializeIssuedInvoice(invoice) : null,
+      ...(receiptDelivery ? { receipt: receiptDelivery } : {}),
     },
   };
 }
@@ -818,8 +907,16 @@ export async function cancelManualSale(input) {
 
         const cancelled = await tx.order.findUnique({
           where: { id: orderId },
-          select: { id: true, orderNumber: true, totalAmount: true, items: { select: { variantId: true, quantity: true } } },
+          select: { id: true, orderNumber: true, totalAmount: true, promoCodeId: true, items: { select: { variantId: true, quantity: true } } },
         });
+        // Its promo code use goes back, as for any cancelled order (the
+        // per-client count already ignores a CANCELLED order).
+        if (cancelled.promoCodeId) {
+          await tx.promoCode.updateMany({
+            where: { id: cancelled.promoCodeId, usedCount: { gt: 0 } },
+            data: { usedCount: { decrement: 1 } },
+          });
+        }
         for (const item of cancelled.items) {
           // Free lines carry no stock.
           if (!item.variantId) continue;

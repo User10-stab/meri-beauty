@@ -203,7 +203,8 @@ function PendingActions({ pending, busy, onAccept, onSettle }) {
   // A row already invoiced has its own « Voir »; the others show, before the
   // tick, the invoice they would get — or why there would be none. Rent
   // invoices are never issued from here: the daily job issues them.
-  const preview = pending.invoiceNumber ? null : previewHref(pending);
+  // A sale recorded without an invoice ends with a ticket: nothing to preview.
+  const preview = pending.invoiceNumber || pending.invoiceWanted === false ? null : previewHref(pending);
   return (
     <>
       {preview && (

@@ -86,7 +86,7 @@ export function PendingManualSales({ data }) {
             {stats.count} · reste {euro(stats.remainingTotal)}
           </span>
         </div>
-        <p className="text-xs text-gray-500 dark:text-dark-6">La facture est émise au paiement du solde, comme pour tout acompte.</p>
+        <p className="text-xs text-gray-500 dark:text-dark-6">La facture — ou le ticket, pour une vente sans facture — est émise au paiement du solde, comme pour tout acompte.</p>
       </header>
 
       {rows.length > 0 && (

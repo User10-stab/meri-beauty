@@ -10,6 +10,10 @@ import { fileURLToPath } from "node:url";
  * once. Acompte or nothing yet → a pending sale with no invoice, invoiced by
  * the payment that clears the balance.
  *
+ * And, whatever the payment method, the ticket path's rule on whether there
+ * is an invoice at all: only a VIES-validated buyer who did not decline it.
+ * Anyone else gets a ticket once fully paid. Promo codes apply as at the till.
+ *
  * The invoice itself is written by the real-world issueInvoice, mocked here —
  * its own guards (B2C_INVOICE_NOT_ALLOWED before numbering, …) are covered by
  * b2c-no-invoice-contracts / vies-verified-b2b-invoice-contracts. What these
@@ -32,6 +36,9 @@ const mocks = vi.hoisted(() => ({
   allocatePieceNumber: vi.fn(),
   isSellerLegalDataComplete: vi.fn(),
   listAwaitedTransfers: vi.fn(),
+  allocateOrderTicketNumber: vi.fn(),
+  deliverManualSaleReceipt: vi.fn(),
+  applyCounterPromoCode: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mocks.auth }));
@@ -48,6 +55,12 @@ vi.mock("@/lib/cash-book/piece-number", () => ({
 }));
 vi.mock("@/lib/counter/resolve-counter-customer", () => ({ resolveCounterCustomer: mocks.resolveCounterCustomer }));
 vi.mock("@/lib/customer-vat", () => ({ saveCheckoutVatNumber: mocks.saveCheckoutVatNumber }));
+vi.mock("@/lib/tickets/allocate-ticket-number", () => ({ allocateOrderTicketNumber: mocks.allocateOrderTicketNumber }));
+vi.mock("@/lib/invoices/manual-sale-receipt", () => ({ deliverManualSaleReceipt: mocks.deliverManualSaleReceipt }));
+vi.mock("@/lib/promo-codes", () => ({
+  applyCounterPromoCode: mocks.applyCounterPromoCode,
+  CounterPromoCodeError: class CounterPromoCodeError extends Error {},
+}));
 vi.mock("@/lib/invoicing", () => ({
   issueInvoice: mocks.issueInvoice,
   buildInvoiceCustomer: (user) => ({ fullName: user.fullName, email: user.email, vatNumber: user.vatNumber, address: user.addressLine1 ?? "" }),
@@ -66,6 +79,17 @@ const ADMIN = { id: "u_admin", role: "ADMIN", email: "admin@meribeauty.com" };
 const MARIE = { id: "u_marie", role: "STAFF", email: "contact@meribeautystudio.com" };
 const INDEPENDENT = { id: "u_julie", role: "STAFF", email: "julie@example.com" };
 
+// No VAT number at all — a private client.
+const PRIVATE_BUYER = {
+  id: "u_client",
+  fullName: "Jeanne Client",
+  email: "jeanne@example.be",
+  vatNumber: null,
+  vatValidatedAt: null,
+  addressLine1: "Rue Client 2",
+  billingProfile: null,
+};
+
 const BELGIAN_BUYER = {
   id: "u_client",
   fullName: "Client SRL",
@@ -83,6 +107,7 @@ const VARIANT = {
   price: "12.10",
   stockQuantity: 5,
   reservedQuantity: 1,
+  productId: "prod_1",
   product: { name: "Sérum" },
 };
 
@@ -155,6 +180,7 @@ function makeTx({
           taxCountryCode: data.taxCountryCode,
           taxNote: data.taxNote,
           invoiceNotes: data.invoiceNotes,
+          discountAmount: data.discountAmount,
         })
       ),
       findUnique: vi.fn().mockResolvedValue({ id: "o_1", orderNumber: 77, ...RECORDED_SALE, items: RECORDED_SALE.items.map((item, i) => ({ ...item, variantId: i === 0 ? "v1" : null })) }),
@@ -171,6 +197,7 @@ function makeTx({
     cashSession: { findFirst: vi.fn().mockResolvedValue(openSession) },
     transaction: { create: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: "t_1", pieceNumber: data.pieceNumber })) },
     auditLog: { create: vi.fn() },
+    promoCode: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
   };
 }
 
@@ -192,6 +219,7 @@ function pendingSale(over = {}) {
     orderNumber: 77,
     source: "MANUAL",
     status: "COMPLETED",
+    invoiceRequested: true,
     user: BELGIAN_BUYER,
     payment: { id: "p_1", status: "PENDING", totalAmount: "174.20", paidAmount: "0.00", invoice: null },
     ...over,
@@ -209,6 +237,8 @@ beforeEach(() => {
   mocks.ensureCashSessionOpen.mockResolvedValue({ id: "cs_1" });
   mocks.allocatePieceNumber.mockResolvedValue("V0042");
   mocks.issueInvoice.mockResolvedValue(ISSUED);
+  mocks.allocateOrderTicketNumber.mockResolvedValue("T-2026-000099");
+  mocks.deliverManualSaleReceipt.mockResolvedValue({ ticketNumber: "T-2026-000099", ticketPdfBase64: "cGRm", receiptEmailSent: true });
   mocks.tx = makeTx();
   mocks.prisma.$transaction.mockImplementation((fn) => fn(mocks.tx));
 });
@@ -234,10 +264,11 @@ describe("who may record one", () => {
     expect(mocks.tx.order.create.mock.calls[0][0].data.createdByStaffId).toBe("u_marie");
   });
 
-  it("the VAT number is mandatory — refused up front, before any customer is created", async () => {
+  it("the VAT number is optional — a client without one is recorded, without an invoice", async () => {
+    mocks.tx = makeTx({ buyer: PRIVATE_BUYER });
     const result = await createManualInvoice(input({ customer: { ...input().customer, vatNumber: "" } }));
-    expect(result).toMatchObject({ success: false, message: expect.stringContaining("TVA") });
-    expect(mocks.resolveCounterCustomer).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ success: true, data: { invoice: null } });
+    expect(mocks.resolveCounterCustomer).toHaveBeenCalled();
   });
 
   it("an incomplete salon identity blocks before any work", async () => {
@@ -248,18 +279,61 @@ describe("who may record one", () => {
   });
 });
 
-describe("a sale that could never be invoiced is refused at creation — whatever the mode", () => {
-  it("buyer VAT number not VIES-validated: nothing recorded, even for « Payer plus tard »", async () => {
-    mocks.tx = makeTx({ buyer: { ...BELGIAN_BUYER, vatValidatedAt: null } });
-    for (const settlement of [{ mode: "LATER" }, { mode: "DEPOSIT", amount: 50, method: "CARD", reference: "r" }]) {
-      const result = await createManualInvoice(input({ settlement }));
-      expect(result).toMatchObject({ success: false, message: expect.stringContaining("assujetti") });
+describe("an invoice only for a VIES-validated client who wants one — whatever the payment method", () => {
+  it("no VAT number: recorded without an invoice, in every mode — the order says so", async () => {
+    mocks.tx = makeTx({ buyer: PRIVATE_BUYER });
+    for (const [i, settlement] of [
+      { mode: "LATER" },
+      { mode: "LATER", awaitedTransferAmount: 174.2 },
+      { mode: "DEPOSIT", amount: 50, method: "CARD" },
+    ].entries()) {
+      const result = await createManualInvoice(input({ attemptKey: `attempt-key-000000000${i}`, settlement, invoiceRequested: true }));
+      expect(result).toMatchObject({ success: true, data: { invoice: null } });
+      const order = mocks.tx.order.create.mock.calls[i][0].data;
+      expect(order).toMatchObject({ invoiceRequested: null, customerVatNumber: null, invoiceNotes: null });
     }
-    expect(mocks.tx.order.create).not.toHaveBeenCalled();
-    expect(mocks.tx.transaction.create).not.toHaveBeenCalled();
+    expect(mocks.issueInvoice).not.toHaveBeenCalled();
+    // Not fully paid yet: the ticket waits for the payment that clears it.
+    expect(mocks.allocateOrderTicketNumber).not.toHaveBeenCalled();
   });
 
-  it("buyer address missing: refused with issueInvoice's own message", async () => {
+  it("a VAT number VIES did not validate gets no invoice either — as on the ticket path", async () => {
+    mocks.tx = makeTx({ buyer: { ...BELGIAN_BUYER, vatValidatedAt: null } });
+    const result = await createManualInvoice(input());
+    expect(result).toMatchObject({ success: true, data: { invoice: null } });
+    expect(mocks.tx.order.create.mock.calls[0][0].data.invoiceRequested).toBeNull();
+  });
+
+  it("paid in full without an invoice: a ticket is numbered in the sale's transaction, then sent", async () => {
+    mocks.tx = makeTx({ buyer: PRIVATE_BUYER });
+    const result = await createManualInvoice(input({ settlement: { mode: "NOW", method: "CARD" } }));
+    expect(result).toMatchObject({
+      success: true,
+      data: { invoice: null, sale: { remainingAmount: 0 }, receipt: { ticketNumber: "T-2026-000099", receiptEmailSent: true } },
+    });
+    expect(mocks.issueInvoice).not.toHaveBeenCalled();
+    expect(mocks.allocateOrderTicketNumber).toHaveBeenCalledWith(mocks.tx, "o_1", expect.any(Date));
+    expect(mocks.deliverManualSaleReceipt).toHaveBeenCalledWith("o_1");
+  });
+
+  it("a VAT-eligible client who unticks « facture » gets a ticket, and the order remembers the choice", async () => {
+    const result = await createManualInvoice(input({ settlement: { mode: "NOW", method: "CARD" }, invoiceRequested: false }));
+    expect(result).toMatchObject({ success: true, data: { invoice: null, receipt: { ticketNumber: "T-2026-000099" } } });
+    expect(mocks.issueInvoice).not.toHaveBeenCalled();
+    expect(mocks.tx.order.create.mock.calls[0][0].data).toMatchObject({ invoiceRequested: false, customerVatNumber: null });
+
+    await createManualInvoice(input({ attemptKey: "attempt-key-0000000002", invoiceRequested: false }));
+    expect(mocks.tx.order.create.mock.calls[1][0].data.invoiceRequested).toBe(false);
+  });
+
+  it("a VAT-eligible client who keeps « facture » is invoiced, and the order says so", async () => {
+    await createManualInvoice(input({ settlement: { mode: "NOW", method: "CARD" } }));
+    expect(mocks.issueInvoice).toHaveBeenCalledTimes(1);
+    expect(mocks.allocateOrderTicketNumber).not.toHaveBeenCalled();
+    expect(mocks.tx.order.create.mock.calls[0][0].data).toMatchObject({ invoiceRequested: true, customerVatNumber: "BE0417497106" });
+  });
+
+  it("an invoice wanted with the buyer's address missing: refused with issueInvoice's own message", async () => {
     mocks.tx = makeTx({ buyer: { ...BELGIAN_BUYER, addressLine1: null } });
     const result = await createManualInvoice(input());
     expect(result).toMatchObject({ success: false, message: "Adresse manquante." });
@@ -499,7 +573,7 @@ describe("a bank transfer stays pending until staff approve it", () => {
 
   it("the till never records a transfer as paid: it announces it and says where to approve it", () => {
     const cart = source("components/dashboard/boutique/counter/CounterCart.jsx");
-    expect(cart).toContain('const transferAwaited = invoiceFlow && collectsNow && method === "TRANSFER";');
+    expect(cart).toContain('const transferAwaited = manualSaleFlow && collectsNow && method === "TRANSFER";');
     expect(cart).toContain('? { mode: "LATER", awaitedTransferAmount: settleMode === "DEPOSIT" ? depositAmount : total }');
     expect(cart).not.toContain("transferReference");
     const panel = source("components/dashboard/invoices/PendingManualSales.jsx");
@@ -542,6 +616,24 @@ describe("« Encaisser » a pending sale", () => {
       notes: "Merci de mentionner le numéro de facture.",
     });
     expect(mocks.tx.auditLog.create.mock.calls[0][0].data).toMatchObject({ action: "invoice.manual_settled", entityType: "Invoice", entityId: "inv_1" });
+  });
+
+  it("a sale recorded without an invoice is cleared with a ticket — no invoice, no VIES re-check", async () => {
+    mocks.prisma.order.findUnique.mockResolvedValue(pendingSale({ invoiceRequested: null, user: PRIVATE_BUYER }));
+    const result = await settleManualInvoice({ orderId: "o_1", method: "TRANSFER", reference: "ref" });
+    expect(result).toMatchObject({ success: true, data: { fullyPaid: true, invoice: null, receipt: { ticketNumber: "T-2026-000099" } } });
+    expect(result.message).toContain("T-2026-000099");
+    expect(mocks.issueInvoice).not.toHaveBeenCalled();
+    expect(mocks.saveCheckoutVatNumber).not.toHaveBeenCalled();
+    expect(mocks.allocateOrderTicketNumber).toHaveBeenCalledWith(mocks.tx, "o_1");
+    expect(mocks.deliverManualSaleReceipt).toHaveBeenCalledWith("o_1");
+  });
+
+  it("an acompte on a sale without an invoice issues no ticket yet", async () => {
+    mocks.prisma.order.findUnique.mockResolvedValue(pendingSale({ invoiceRequested: false }));
+    await settleManualInvoice({ orderId: "o_1", amount: 20, method: "CARD" });
+    expect(mocks.allocateOrderTicketNumber).not.toHaveBeenCalled();
+    expect(mocks.deliverManualSaleReceipt).not.toHaveBeenCalled();
   });
 
   it("a further partial amount is another acompte — still no invoice", async () => {
@@ -655,6 +747,15 @@ describe("« Annuler » a pending sale", () => {
     expect(mocks.tx.auditLog.create.mock.calls[0][0].data).toMatchObject({ action: "manual_sale.cancelled", entityId: "o_1" });
   });
 
+  it("gives back the promo code use the sale claimed", async () => {
+    mocks.tx.order.findUnique.mockResolvedValue({ id: "o_1", orderNumber: 77, totalAmount: "160.00", promoCodeId: "promo_1", items: [] });
+    await cancelManualSale({ orderId: "o_1", reason: "erreur de saisie" });
+    expect(mocks.tx.promoCode.updateMany).toHaveBeenCalledWith({
+      where: { id: "promo_1", usedCount: { gt: 0 } },
+      data: { usedCount: { decrement: 1 } },
+    });
+  });
+
   it("refused once anything was collected, invoiced or cancelled — nothing touched", async () => {
     mocks.tx = makeTx({ cancelClaimCount: 0 });
     const result = await cancelManualSale({ orderId: "o_1", reason: "erreur de saisie" });
@@ -668,6 +769,76 @@ describe("« Annuler » a pending sale", () => {
   });
 });
 
+describe("a promo code, whatever the payment method", () => {
+  const PROMO = {
+    promoCodeId: "promo_1",
+    discountAmount: 4.2,
+    lineDiscounts: [{ key: "v1", discountAmount: 4.2, label: "-20 % Sérum" }],
+    snapshot: { rules: [] },
+  };
+
+  it("is claimed on the catalogue lines only, priced for the buyer — a free line is never discounted", async () => {
+    mocks.applyCounterPromoCode.mockResolvedValue(PROMO);
+    await createManualInvoice(input({ promoCode: "SERUM20", settlement: { mode: "DEPOSIT", amount: 50, method: "CARD" } }));
+    expect(mocks.applyCounterPromoCode).toHaveBeenCalledWith(mocks.tx, "SERUM20", 24.2, {
+      scope: "BOUTIQUE",
+      customerId: "u_client",
+      lines: [{ key: "v1", productId: "prod_1", unitPrice: 12.1, quantity: 2, amount: 24.2 }],
+    });
+  });
+
+  it("the sale is recorded at the discounted total — for an acompte, a transfer or « payer plus tard »", async () => {
+    mocks.applyCounterPromoCode.mockResolvedValue(PROMO);
+    for (const [i, settlement] of [
+      { mode: "DEPOSIT", amount: 50, method: "CARD" },
+      { mode: "LATER", awaitedTransferAmount: 500 },
+      { mode: "LATER" },
+    ].entries()) {
+      const result = await createManualInvoice(input({ attemptKey: `attempt-key-000000001${i}`, promoCode: "SERUM20", settlement }));
+      expect(result.data.sale.totalAmount).toBe(170);
+      const order = mocks.tx.order.create.mock.calls[i][0].data;
+      expect(order).toMatchObject({ subtotal: 174.2, discountAmount: 4.2, promoCodeId: "promo_1", totalAmount: 170 });
+      expect(order.items.create[0]).toMatchObject({ variantId: "v1", discountAmount: 4.2, promoLabel: "-20 % Sérum" });
+      expect(order.items.create[1]).not.toHaveProperty("discountAmount");
+      expect(mocks.tx.payment.create.mock.calls[i][0].data).toMatchObject({ totalAmount: 170, remainingAmount: 170 });
+    }
+    // The transfer announced never exceeds the discounted total.
+    expect(mocks.tx.payment.create.mock.calls[1][0].data.awaitedTransferAmount).toBe(170);
+  });
+
+  it("the invoice shows the promo as its own negative line", async () => {
+    mocks.applyCounterPromoCode.mockResolvedValue(PROMO);
+    await createManualInvoice(input({ promoCode: "SERUM20", settlement: { mode: "NOW", method: "CARD" } }));
+    expect(mocks.issueInvoice.mock.calls[0][1]).toMatchObject({
+      totalInclVat: 170,
+      lines: [
+        { description: "Sérum — 50 ml", quantity: 2, unitPrice: 12.1 },
+        { description: "Formation privée — 2 h", quantity: 1, unitPrice: 150 },
+        { description: "Code promotionnel", quantity: 1, unitPrice: -4.2 },
+      ],
+    });
+  });
+
+  it("a refused code is reported to the cashier and nothing is recorded", async () => {
+    const { CounterPromoCodeError } = await import("@/lib/promo-codes");
+    mocks.applyCounterPromoCode.mockRejectedValue(new CounterPromoCodeError("Ce code promo a expiré."));
+    const result = await createManualInvoice(input({ promoCode: "OLD" }));
+    expect(result).toMatchObject({ success: false, message: "Ce code promo a expiré." });
+  });
+
+  it("an acompte must stay below the discounted total", async () => {
+    mocks.applyCounterPromoCode.mockResolvedValue(PROMO);
+    const result = await createManualInvoice(input({ promoCode: "SERUM20", settlement: { mode: "DEPOSIT", amount: 172, method: "CARD" } }));
+    expect(result).toMatchObject({ success: false, message: expect.stringContaining("inférieur au total") });
+  });
+
+  it("with no code, nothing is claimed", async () => {
+    await createManualInvoice(input());
+    expect(mocks.applyCounterPromoCode).not.toHaveBeenCalled();
+    expect(mocks.tx.order.create.mock.calls[0][0].data).toMatchObject({ discountAmount: 0, promoCodeId: null });
+  });
+});
+
 describe("the pending list", () => {
   it("lists manual sales still owed money — the Order is the unit, not an invoice", async () => {
     mocks.prisma.order.findMany.mockResolvedValue([
@@ -678,6 +849,7 @@ describe("the pending list", () => {
         paymentDueDate: null,
         invoiceNotes: null,
         customerVatNumber: "BE0417497106",
+        invoiceRequested: true,
         user: { fullName: "Client SRL", email: "compta@client.be", billingProfile: null },
         items: RECORDED_SALE.items,
         payment: { totalAmount: "174.20", paidAmount: "50.00", remainingAmount: "124.20", awaitedTransferAmount: "50.00", invoice: null },
@@ -696,6 +868,7 @@ describe("the pending list", () => {
       remainingAmount: 124.2,
       invoiceNumber: null,
       awaitedTransferAmount: 50,
+      invoiceWanted: true,
       summary: "2 × Sérum — 50 ml, 1 × Formation privée — 2 h",
     });
     expect(result.data.stats).toEqual({ count: 1, remainingTotal: 124.2 });
@@ -744,26 +917,39 @@ describe("idempotency", () => {
 describe("composed at la caisse", () => {
   const cart = () => source("components/dashboard/boutique/counter/CounterCart.jsx");
 
-  it("a free line, a transfer, an acompte, « payer plus tard » or a comment routes the sale to createManualInvoice", () => {
+  it("a free line, a transfer, an acompte, « payer plus tard » or an invoice comment routes the sale to createManualInvoice", () => {
     expect(cart()).toContain(
-      'canInvoiceSale && !sourceOrder && (hasFreeLines || method === "TRANSFER" || settleMode !== "NOW" || invoiceNotes.trim() !== "")'
+      '(hasFreeLines || method === "TRANSFER" || settleMode !== "NOW" || (invoiceWanted && invoiceNotes.trim() !== ""))'
     );
-    expect(cart()).toContain("if (invoiceFlow) return submitInvoiceSale();");
+    expect(cart()).toContain("if (manualSaleFlow) return submitManualSale();");
     expect(cart()).toContain("await createManualInvoice({");
+  });
+
+  it("the invoice follows the ticket path's rule — a VAT number and « facture » ticked — whatever the method", () => {
+    expect(cart()).toContain(
+      "const invoiceWanted = !isWalkIn && invoiceRequested && (customer.vatInvoiceReady || Boolean(customer.vatNumber.trim()));"
+    );
+    expect(cart()).toContain("invoiceRequested: invoiceWanted,");
+    expect(cart()).not.toContain("showInvoiceOptOut={");
+  });
+
+  it("the promo code field and its discount are there for every payment mode", () => {
+    expect(cart()).toContain("const appliedPromo = promo;");
+    expect(cart()).toContain("promoCode: appliedPromo?.code ?? null,");
+    expect(cart()).toContain("{cart.length > 0 && (\n          <div className=\"border-t border-gray-100 pt-4 dark:border-dark-3\">\n            <PromoCodeField");
   });
 
   it("a plain paid sale still goes through the ticket path, untouched", () => {
     expect(cart()).toContain("const result = await completePointOfSaleSale({");
   });
 
-  it("an invoice sale can't be anonymous, opt out of its invoice, or be paid by QR", () => {
-    expect(cart()).toContain("allowWalkIn={!invoiceFlow}");
-    expect(cart()).toContain("showInvoiceOptOut={!invoiceFlow}");
-    expect(cart()).toContain('if (invoiceFlow && method === "CARD_QR") setMethod("EXTERNAL_TERMINAL");');
+  it("a manual sale can't be anonymous or be paid by QR", () => {
+    expect(cart()).toContain("allowWalkIn={!manualSaleFlow}");
+    expect(cart()).toContain('if (manualSaleFlow && method === "CARD_QR") setMethod("EXTERNAL_TERMINAL");');
   });
 
-  it("with the till closed, only a transfer or « payer plus tard » invoice sale can be recorded", () => {
-    expect(cart()).toContain('const allowedWhileClosed = invoiceFlow && (settleMode === "LATER" || method === "TRANSFER");');
+  it("with the till closed, only a transfer or « payer plus tard » manual sale can be recorded", () => {
+    expect(cart()).toContain('const allowedWhileClosed = manualSaleFlow && (settleMode === "LATER" || method === "TRANSFER");');
     expect(cart()).toContain("(tillClosed && !allowedWhileClosed)");
   });
 

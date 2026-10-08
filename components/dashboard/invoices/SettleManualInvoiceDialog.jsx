@@ -120,10 +120,12 @@ export function SettleManualInvoiceDialog({ sale, transferReceived = false, onCl
         )}
         {isPartial ? (
           <p className="text-xs font-medium text-amber-700">
-            Acompte : il restera {euro(balance - amount)} à encaisser. La facture ne sera émise qu&apos;au paiement du solde.
+            Acompte : il restera {euro(balance - amount)} à encaisser. {sale?.invoiceWanted === false ? "Le ticket ne sera émis" : "La facture ne sera émise"} qu&apos;au paiement du solde.
           </p>
         ) : amountValid && !sale?.invoiceNumber ? (
-          <p className="text-xs font-medium text-emerald-700">Ce paiement solde la vente : la facture sera émise et numérotée.</p>
+          <p className="text-xs font-medium text-emerald-700">
+            Ce paiement solde la vente : {sale?.invoiceWanted === false ? "le ticket sera émis et envoyé au client (vente sans facture)." : "la facture sera émise et numérotée."}
+          </p>
         ) : null}
         <ManualInvoicePaymentFields
           value={payment}

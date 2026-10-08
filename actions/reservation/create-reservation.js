@@ -120,7 +120,10 @@ export async function resolveOrCreateCustomer(customerInfo, authenticatedUserId)
       data: {
         fullName: customerInfo.fullName.trim(),
         email: customerInfo.email.trim().toLowerCase(),
-        phone: customerInfo.phone.trim(),
+        // null, never "": the phone index is unique over non-null values, so
+        // a second client created at the counter without a phone would
+        // otherwise collide with the first (PhoneAlreadyRegisteredError).
+        phone: customerInfo.phone?.trim() || null,
         password: hashedPassword,
         role: "CUSTOMER",
         emailVerified: false,

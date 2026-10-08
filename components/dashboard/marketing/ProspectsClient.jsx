@@ -401,8 +401,33 @@ function ImportProspectsModal({ onClose, onImported }) {
   const [file, setFile] = useState(null);
   const [source, setSource] = useState("anciens_clients");
   const [uploading, setUploading] = useState(false);
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+
+  // Télécharge le modèle Excel via blob (un <a href="/api/..."> est
+  // interdit par la règle @next/next/no-html-link-for-pages).
+  async function downloadTemplate() {
+    setDownloadingTemplate(true);
+    setError("");
+    try {
+      const res = await fetch("/api/prospects/import");
+      if (!res.ok) throw new Error("Téléchargement du modèle impossible.");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "modele-import-prospects.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDownloadingTemplate(false);
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -443,12 +468,14 @@ function ImportProspectsModal({ onClose, onImported }) {
           Fichier Excel (.xlsx) ou CSV — 2000 lignes max, 5 Mo max. Seul l&apos;e-mail est obligatoire.
           Les e-mails déjà connus ne sont jamais écrasés : seuls leurs champs vides sont complétés.
         </p>
-        <a
-          href="/api/prospects/import"
-          className="inline-block text-xs font-semibold text-[#2f3a2e] underline dark:text-white"
+        <button
+          type="button"
+          onClick={downloadTemplate}
+          disabled={downloadingTemplate}
+          className="inline-block text-xs font-semibold text-[#2f3a2e] underline disabled:opacity-50 dark:text-white"
         >
-          ⬇ Télécharger le modèle Excel
-        </a>
+          {downloadingTemplate ? "Téléchargement…" : "⬇ Télécharger le modèle Excel"}
+        </button>
         {error && <p className="text-sm text-red-600">{error}</p>}
         {result && (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">

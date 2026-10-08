@@ -133,12 +133,15 @@ export function CounterCart({
   const [sourceOrder, setSourceOrder] = useState(null);
   const [loadingSourceOrder, setLoadingSourceOrder] = useState(Boolean(sourceOrderId));
 
-  // ── Invoice sale ────────────────────────────────────────────────────
+  // ── Manual sale ─────────────────────────────────────────────────────
   // A free line, a transfer, an acompte, « payer plus tard » or an invoice
-  // comment turns the sale into an invoice sale, recorded by
-  // actions/invoices/manual-invoice.js instead of completePointOfSaleSale:
-  // VAT number mandatory, and — like every deposit on the site — the invoice
-  // is only issued once the sale is fully paid. A plain paid sale is
+  // comment turns the sale into a manual sale, recorded by
+  // actions/invoices/manual-invoice.js instead of completePointOfSaleSale.
+  // Whether it gets an invoice follows the ticket path's rule, whatever the
+  // payment method: only a client with a VAT number who keeps « facture »
+  // ticked (invoiceWanted) — anyone else gets a ticket once fully paid. Like
+  // every deposit on the site, the invoice is only issued once the sale is
+  // fully paid. A promo code applies on both paths. A plain paid sale is
   // untouched and still goes through the ticket path below.
   const [settleMode, setSettleMode] = useState("NOW"); // NOW | DEPOSIT | LATER
   const [depositInput, setDepositInput] = useState("");
@@ -146,13 +149,14 @@ export function CounterCart({
   const [invoiceNotes, setInvoiceNotes] = useState("");
   const [invoiceConfirmOpen, setInvoiceConfirmOpen] = useState(false);
   const [issuedInvoice, setIssuedInvoice] = useState(null);
-  // `canInvoiceSale`: invoice sales stay the salon's own accounts
+  // `canInvoiceSale`: manual sales stay the salon's own accounts
   // (isTillCashOperator) — a CAISSE staff member never sees this mode, and
   // the server refuses anyone else.
 
   // A promo code, as on the online checkout: { code, discountAmount }. The
-  // amount is only the live preview — completePointOfSaleSale re-prices and
-  // claims the code itself. `promoFieldKey` remounts the field to empty it.
+  // amount is only the live preview — completePointOfSaleSale and
+  // createManualInvoice re-price and claim the code themselves.
+  // `promoFieldKey` remounts the field to empty it.
   const [promo, setPromo] = useState(null);
   const [promoFieldKey, setPromoFieldKey] = useState(0);
 
@@ -162,39 +166,44 @@ export function CounterCart({
   );
   const hasFreeLines = cart.some((item) => item.type === "FREE");
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-  const invoiceFlow =
-    canInvoiceSale && !sourceOrder && (hasFreeLines || method === "TRANSFER" || settleMode !== "NOW" || invoiceNotes.trim() !== "");
-  // An invoice sale (manual-invoice.js) has no promo code — only the ticket
-  // path below does.
-  const appliedPromo = invoiceFlow ? null : promo;
+  // Same rule as the ticket path (and the server): an invoice only for a
+  // client with a VAT number who did not decline it.
+  const invoiceWanted = !isWalkIn && invoiceRequested && (customer.vatInvoiceReady || Boolean(customer.vatNumber.trim()));
+  const manualSaleFlow =
+    canInvoiceSale &&
+    !sourceOrder &&
+    (hasFreeLines || method === "TRANSFER" || settleMode !== "NOW" || (invoiceWanted && invoiceNotes.trim() !== ""));
+  const appliedPromo = promo;
   // What the client pays: the cart, less the promo.
   const total = Math.max(0, Math.round((cartSubtotal - (appliedPromo?.discountAmount ?? 0)) * 100) / 100);
   const promoItems = cart.filter((item) => item.type !== "FREE").map((item) => ({ variantId: item.variantId, quantity: item.quantity }));
   const promoContext = { scope: "BOUTIQUE", items: promoItems, customerId: isWalkIn ? null : customer.id ?? null };
   const depositAmount = Math.round(Number(depositInput) * 100) / 100;
   const depositValid = depositAmount > 0 && depositAmount < total;
-  const collectsNow = !invoiceFlow || settleMode !== "LATER";
+  const collectsNow = !manualSaleFlow || settleMode !== "LATER";
   // A transfer is never accepted at the till: it takes days to arrive. The
   // sale is recorded unpaid, « virement attendu », and only counts as paid
-  // (and gets its invoice) once staff approve it — « Virement reçu », with
-  // the bank reference, from « Ventes en attente de paiement ».
-  const transferAwaited = invoiceFlow && collectsNow && method === "TRANSFER";
+  // (and gets its invoice or ticket) once staff approve it — « Virement
+  // reçu », with the bank reference, from « Ventes en attente de paiement ».
+  const transferAwaited = manualSaleFlow && collectsNow && method === "TRANSFER";
   // What changes hands now: the whole total, an acompte, or nothing.
   const collectedNow =
-    transferAwaited ? 0 : !invoiceFlow || settleMode === "NOW" ? total : settleMode === "DEPOSIT" ? (depositValid ? depositAmount : 0) : 0;
-  // The invoice is issued by this very sale only when it is paid in full now.
-  const issuesInvoiceNow = invoiceFlow && settleMode === "NOW" && !transferAwaited;
+    transferAwaited ? 0 : !manualSaleFlow || settleMode === "NOW" ? total : settleMode === "DEPOSIT" ? (depositValid ? depositAmount : 0) : 0;
+  // Paid in full by this very sale: the invoice (when wanted) or the ticket
+  // is issued now; otherwise by the payment that clears the balance.
+  const paidInFullNow = manualSaleFlow && settleMode === "NOW" && !transferAwaited;
+  const issuesInvoiceNow = paidInFullNow && invoiceWanted;
   const cashReceivedNumber = Number(cashReceived);
   const changeDue = cashReceived !== "" && !Number.isNaN(cashReceivedNumber) ? cashReceivedNumber - collectedNow : null;
   // With no till session, only what never touches the drawer can be
-  // recorded: an invoice sale paid by transfer, or not paid yet.
+  // recorded: a manual sale paid by transfer, or not paid yet.
   const tillClosed = tillGateApplies && !cashSessionOpen;
-  const allowedWhileClosed = invoiceFlow && (settleMode === "LATER" || method === "TRANSFER");
+  const allowedWhileClosed = manualSaleFlow && (settleMode === "LATER" || method === "TRANSFER");
   const walkInEmailReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(walkInEmail.trim());
 
   useEffect(() => {
-    if (invoiceFlow && method === "CARD_QR") setMethod("EXTERNAL_TERMINAL");
-  }, [invoiceFlow, method]);
+    if (manualSaleFlow && method === "CARD_QR") setMethod("EXTERNAL_TERMINAL");
+  }, [manualSaleFlow, method]);
 
   const promoCode = promo?.code ?? null;
   const promoCartKey = JSON.stringify(promoItems);
@@ -847,8 +856,8 @@ export function CounterCart({
   const willBeBelgianB2B = willHaveVatInvoice && customer.vatNumber.trim().toUpperCase().startsWith("BE");
 
   function selectMethod(next) {
-    if (next === "CARD_QR" && (isWalkIn || sourceOrder || invoiceFlow)) return; // blocked for a client de passage, a taken-over order and an invoice sale
-    if (next === "TRANSFER" && (isWalkIn || sourceOrder || !canInvoiceSale)) return; // a transfer is always an invoice sale
+    if (next === "CARD_QR" && (isWalkIn || sourceOrder || manualSaleFlow)) return; // blocked for a client de passage, a taken-over order and a manual sale
+    if (next === "TRANSFER" && (isWalkIn || sourceOrder || !canInvoiceSale)) return; // a transfer is always a manual sale
     setMethod(next);
     if (next !== "CASH") setCashReceived("");
   }
@@ -865,6 +874,7 @@ export function CounterCart({
     setAddressOnFile(false);
     setVatCheck(null);
     setInvoiceNotes("");
+    setInvoiceRequested(true);
     setSettleMode("NOW");
     setDepositInput("");
     setDueDate("");
@@ -873,16 +883,15 @@ export function CounterCart({
   }
 
   /**
-   * An invoice sale (see invoiceFlow): recorded by createManualInvoice. Paid
-   * in full, its invoice is issued at once and the sending card opens; with
+   * A manual sale (see manualSaleFlow): recorded by createManualInvoice. Paid
+   * in full, its invoice (when wanted) or its ticket is issued at once; with
    * an acompte or nothing collected it joins « Ventes en attente de
-   * paiement » below, and is invoiced by the payment that clears it.
+   * paiement » below, and the payment that clears it issues the document.
    */
-  function submitInvoiceSale() {
+  function submitManualSale() {
     if (!cart.length) return toast.error("Ajoutez au moins une ligne.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
-    if (!customer.fullName.trim() || !customer.email.trim()) return toast.error("Nom et e-mail du client obligatoires pour une facture.");
-    if (!customer.vatNumber.trim()) return toast.error("Une facture exige le numéro de TVA du client.");
+    if (!customer.fullName.trim() || !customer.email.trim()) return toast.error("Nom et e-mail du client obligatoires pour cette vente.");
     if (needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim())) {
       return toast.error("L'adresse de facturation du client est obligatoire.");
     }
@@ -923,8 +932,10 @@ export function CounterCart({
             ? { type: "FREE", description: item.description.trim(), quantity: item.quantity, unitPrice: Number(item.unitPrice) }
             : { type: "PRODUCT", variantId: item.variantId, quantity: item.quantity }
         ),
-        notes: invoiceNotes,
-        dueDate: issuesInvoiceNow ? null : dueDate || null,
+        notes: invoiceWanted ? invoiceNotes : "",
+        dueDate: paidInFullNow ? null : dueDate || null,
+        invoiceRequested: invoiceWanted,
+        promoCode: appliedPromo?.code ?? null,
         settlement:
           settleMode === "LATER"
             ? { mode: "LATER" }
@@ -952,15 +963,24 @@ export function CounterCart({
       localStorage.removeItem("meri-pos-attempt-key");
       resetAttempt();
       resetInvoiceSale();
-      const { invoice, sale } = result.data;
+      const { invoice, sale, receipt } = result.data;
       if (invoice) {
         toast.success(`Facture ${invoice.number} émise — vente n°${sale.orderNumber} encaissée.`);
         setIssuedInvoice(invoice); // « proposer l'envoi »
+      } else if (receipt) {
+        // Paid in full without an invoice: the same ticket as a till sale.
+        if (receipt.ticketPdfBase64) {
+          const bytes = Uint8Array.from(atob(receipt.ticketPdfBase64), (c) => c.charCodeAt(0));
+          window.open(URL.createObjectURL(new Blob([bytes], { type: "application/pdf" })), "_blank");
+        }
+        (receipt.receiptEmailSent ? toast.success : toast.error)(
+          `Vente n°${sale.orderNumber} encaissée. Ticket prêt à imprimer${receipt.receiptEmailSent ? ", et envoyé par e-mail au client" : ", mais l'e-mail n'a pas pu être envoyé"}.`
+        );
       } else {
         toast.success(
           transferAwaited
-            ? `Vente n°${sale.orderNumber} enregistrée — virement attendu. Cliquez « Virement reçu » quand il arrive : la facture sera émise au paiement complet.`
-            : `Vente n°${sale.orderNumber} enregistrée — reste ${sale.remainingAmount.toFixed(2)} € à encaisser. La facture sera émise au paiement du solde.`
+            ? `Vente n°${sale.orderNumber} enregistrée — virement attendu. Cliquez « Virement reçu » quand il arrive : ${invoiceWanted ? "la facture sera émise" : "le ticket sera émis"} au paiement complet.`
+            : `Vente n°${sale.orderNumber} enregistrée — reste ${sale.remainingAmount.toFixed(2)} € à encaisser. ${invoiceWanted ? "La facture sera émise" : "Le ticket sera émis"} au paiement du solde.`
         );
       }
       router.refresh();
@@ -968,7 +988,7 @@ export function CounterCart({
   }
 
   function submitSale() {
-    if (invoiceFlow) return submitInvoiceSale();
+    if (manualSaleFlow) return submitManualSale();
     if (!cart.length) return toast.error("Ajoutez au moins un produit.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
     if (isWalkIn && collectWalkInEmail && !walkInEmailReady) {
@@ -1105,7 +1125,7 @@ export function CounterCart({
           Aucune session de caisse n&apos;est ouverte. Ouvrez-la avant d&apos;encaisser une vente en espèces, au
           terminal ou par QR.
           {canInvoiceSale &&
-            " En attendant, seule une vente avec facture réglée par virement, ou à payer plus tard, peut être enregistrée ci-dessous."}
+            " En attendant, seule une vente réglée par virement, ou à payer plus tard, peut être enregistrée ci-dessous."}
         </p>
         {canOpenCashSession ? (
           <>
@@ -1279,13 +1299,13 @@ export function CounterCart({
         {canInvoiceSale && (
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-gray-500 dark:text-dark-6">
-              Prestation, frais ou forfait hors catalogue : ajoutez une ligne libre (vente avec facture).
+              Prestation, frais ou forfait hors catalogue : ajoutez une ligne libre.
             </p>
             <button
               type="button"
               onClick={addFreeLine}
               disabled={isWalkIn || Boolean(sourceOrder)}
-              title={isWalkIn ? "Indisponible en mode client de passage : une ligne libre exige une facture" : sourceOrder ? "Indisponible sur une commande reprise" : undefined}
+              title={isWalkIn ? "Indisponible en mode client de passage : une ligne libre exige un client identifié" : sourceOrder ? "Indisponible sur une commande reprise" : undefined}
               className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2f3a2e] px-3 text-xs font-semibold text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/5 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Plus size={14} />
@@ -1387,25 +1407,28 @@ export function CounterCart({
           onCollectWalkInEmailChange={setCollectWalkInEmail}
           invoiceRequested={invoiceRequested}
           onInvoiceRequestedChange={setInvoiceRequested}
-          // An invoice sale always ends in an invoice: no anonymous client,
-          // no opting out of it.
-          allowWalkIn={!invoiceFlow}
-          showInvoiceOptOut={!invoiceFlow}
+          // A manual sale needs a named client (someone owes the balance),
+          // but the invoice stays optional, exactly as on the ticket path.
+          allowWalkIn={!manualSaleFlow}
         />
 
-        {invoiceFlow && (
+        {manualSaleFlow && (
           <div className="flex items-start gap-2 rounded-lg border border-[#2f3a2e]/20 bg-[#f4f7f3] px-3 py-2.5 text-xs text-[#2f3a2e] dark:border-dark-3 dark:bg-dark-2 dark:text-dark-6">
             <FileText size={15} className="mt-0.5 shrink-0" />
             <p>
-              <span className="font-semibold">Vente avec facture</span> — numéro de TVA du client obligatoire.{" "}
-              {issuesInvoiceNow
-                ? "La facture est émise à l'encaissement."
-                : "La facture ne sera émise qu'au paiement complet, depuis « Ventes en attente de paiement »."}
+              <span className="font-semibold">{invoiceWanted ? "Vente avec facture" : "Vente sans facture"}</span> —{" "}
+              {invoiceWanted
+                ? issuesInvoiceNow
+                  ? "la facture est émise à l'encaissement."
+                  : "la facture ne sera émise qu'au paiement complet, depuis « Ventes en attente de paiement »."
+                : paidInFullNow
+                ? "un ticket est remis à l'encaissement."
+                : "un ticket sera remis au paiement complet, depuis « Ventes en attente de paiement »."}
             </p>
           </div>
         )}
 
-        {canInvoiceSale && !isWalkIn && !sourceOrder && (
+        {canInvoiceSale && invoiceWanted && !sourceOrder && (
           <label className="block text-xs font-medium text-gray-500 dark:text-dark-6">
             Commentaire imprimé sur la facture (facultatif)
             <textarea
@@ -1489,7 +1512,7 @@ export function CounterCart({
           {collectsNow && (
             <>
               <p className="pt-2 text-sm font-medium text-gray-700 dark:text-dark-6">
-                {invoiceFlow && settleMode === "DEPOSIT" ? "Paiement de l'acompte" : "Paiement encaissé"}
+                {manualSaleFlow && settleMode === "DEPOSIT" ? "Paiement de l'acompte" : "Paiement encaissé"}
               </p>
               <CounterPaymentMethodTiles
                 label=""
@@ -1501,8 +1524,8 @@ export function CounterCart({
                     ? "Indisponible en mode client de passage"
                     : sourceOrder
                     ? "Une commande reprise se règle en espèces ou au terminal"
-                    : invoiceFlow
-                    ? "Indisponible pour une vente avec facture"
+                    : manualSaleFlow
+                    ? "Indisponible pour un virement, un acompte, « payer plus tard » ou une ligne libre"
                     : tillClosed
                     ? "Caisse fermée"
                     : undefined,
@@ -1511,7 +1534,7 @@ export function CounterCart({
                   // A transfer never touches the drawer, so a closed till
                   // does not block it — see allowedWhileClosed.
                   TRANSFER: isWalkIn
-                    ? "Indisponible en mode client de passage : un virement exige une facture"
+                    ? "Indisponible en mode client de passage : un virement exige un client identifié"
                     : sourceOrder
                     ? "Une commande reprise se règle en espèces ou au terminal"
                     : undefined,
@@ -1533,7 +1556,7 @@ export function CounterCart({
           )}
         </div>
 
-        {!invoiceFlow && cart.length > 0 && (
+        {cart.length > 0 && (
           <div className="border-t border-gray-100 pt-4 dark:border-dark-3">
             <PromoCodeField
               key={promoFieldKey}
@@ -1556,7 +1579,7 @@ export function CounterCart({
             </>
           )}
           <div className="flex items-end justify-between"><span className="text-sm text-gray-500">Total</span><strong className="text-3xl text-[#2f3a2e]">{total.toFixed(2)} €</strong></div>
-          {invoiceFlow && (settleMode !== "NOW" || transferAwaited) && (
+          {manualSaleFlow && (settleMode !== "NOW" || transferAwaited) && (
             <p className="text-right text-sm text-gray-500">
               Encaissé maintenant : <span className="font-semibold text-emerald-700">{collectedNow.toFixed(2)} €</span> · reste{" "}
               {(total - collectedNow).toFixed(2)} €
@@ -1573,24 +1596,23 @@ export function CounterCart({
             stockConflicts.length > 0 ||
             (isWalkIn && collectWalkInEmail && !walkInEmailReady) ||
             (collectsNow && method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
-            (invoiceFlow && (!customer.vatNumber.trim() || (settleMode === "DEPOSIT" && !depositValid))) ||
+            (manualSaleFlow && settleMode === "DEPOSIT" && !depositValid) ||
             (tillClosed && !allowedWhileClosed) ||
             (!isWalkIn && needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim()))
           }
         >
           {isPending
             ? "Enregistrement…"
-            : invoiceFlow
+            : manualSaleFlow
             ? issuesInvoiceNow
               ? "Encaisser et émettre la facture"
+              : paidInFullNow
+              ? "Encaisser et envoyer le ticket"
               : "Enregistrer la vente"
             : method === "CARD_QR"
             ? "Générer le QR de paiement"
             : "Encaisser et envoyer le ticket"}
         </Button>
-        {invoiceFlow && !customer.vatNumber.trim() && (
-          <p className="text-xs font-medium text-amber-700">Renseignez le numéro de TVA du client : une vente avec facture l&apos;exige.</p>
-        )}
         {stockConflicts.length > 0 && (
           <p className="text-xs font-medium text-red-700 dark:text-red-300">
             Un article du panier n&apos;est plus disponible (vendu ou réservé en ligne). Corrigez le panier pour encaisser.
@@ -1675,19 +1697,23 @@ export function CounterCart({
 
       <ConfirmDialog
         open={invoiceConfirmOpen}
-        title={issuesInvoiceNow ? "Encaisser et émettre la facture ?" : "Enregistrer la vente ?"}
+        title={issuesInvoiceNow ? "Encaisser et émettre la facture ?" : paidInFullNow ? "Encaisser la vente ?" : "Enregistrer la vente ?"}
         message={`${customer.fullName || "Client"} — ${total.toFixed(2)} € TTC. ${
           issuesInvoiceNow
             ? "La facture est émise tout de suite ; son numéro est définitif, une erreur ne se corrige ensuite que par une note de crédit."
+            : paidInFullNow
+            ? "Sans facture : un ticket est émis et envoyé au client."
             : `${
                 transferAwaited
                   ? `Virement attendu de ${(settleMode === "DEPOSIT" ? depositAmount : total).toFixed(2)} € : rien n'est enregistré comme payé avant « Virement reçu ».`
                   : settleMode === "DEPOSIT"
                   ? `Acompte de ${collectedNow.toFixed(2)} € encaissé maintenant, solde de ${(total - collectedNow).toFixed(2)} € plus tard.`
                   : "Rien n'est encaissé maintenant."
-              } Aucune facture n'est émise avant le paiement complet : la vente rejoint « Ventes en attente de paiement ».`
+              } ${
+                invoiceWanted ? "Aucune facture n'est émise" : "Le ticket n'est émis qu'au paiement complet"
+              }${invoiceWanted ? " avant le paiement complet" : ""} : la vente rejoint « Ventes en attente de paiement ».`
         }`}
-        confirmLabel={issuesInvoiceNow ? "Encaisser et émettre" : "Enregistrer"}
+        confirmLabel={issuesInvoiceNow ? "Encaisser et émettre" : paidInFullNow ? "Encaisser" : "Enregistrer"}
         loading={isPending}
         onConfirm={submitSale}
         onCancel={() => !isPending && setInvoiceConfirmOpen(false)}

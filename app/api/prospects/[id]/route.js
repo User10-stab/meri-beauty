@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { ok, badRequest, notFound, serverError, prismaError } from "@/lib/api-response";
 import { requireMarketingApi } from "@/lib/prospects/require-marketing";
-import { normalizeEmail } from "@/lib/prospects/prospect-service";
+import { normalizeEmail, splitFullName, buildFullName } from "@/lib/prospects/prospect-service";
 import { buildTimeline, buildCampaignEngagement, TIMELINE_LIMIT } from "@/lib/prospects/timeline";
 
 // ─── GET /api/prospects/:id — prospect + timeline fusionnée + engagement ─────
@@ -63,10 +63,43 @@ export async function PUT(request, { params }) {
     const { id } = await params;
     const body = await request.json();
 
+    const current = await prisma.prospect.findUnique({ where: { id } });
+    if (!current) return notFound("Prospect introuvable.");
+
     const data = {};
-    for (const field of ["firstName", "lastName", "phone", "company", "city", "website", "country", "notes"]) {
+    for (const field of ["phone", "company", "city", "region", "website", "country", "notes"]) {
       if (body?.[field] !== undefined) {
         data[field] = body[field] === "" ? null : body[field];
+      }
+    }
+    // Noms : fullName canonique + first/last historiques gardés synchronisés.
+    // - fullName fourni -> fait foi ; first/last dérivés seulement si
+    //   l'admin ne les a pas saisis explicitement ;
+    // - sinon first/last fournis -> fullName reconstruit (sauf s'il existe
+    //   déjà et que les deux noms deviennent vides : on le conserve).
+    if (body?.fullName !== undefined || body?.firstName !== undefined || body?.lastName !== undefined) {
+      if (body?.fullName !== undefined) {
+        const nextFull = body.fullName === "" ? null : body.fullName;
+        data.fullName = nextFull;
+        if (body?.firstName === undefined && body?.lastName === undefined && nextFull) {
+          const split = splitFullName(nextFull);
+          data.firstName = split.firstName;
+          data.lastName = split.lastName;
+        } else {
+          if (body?.firstName !== undefined) data.firstName = body.firstName === "" ? null : body.firstName;
+          if (body?.lastName !== undefined) data.lastName = body.lastName === "" ? null : body.lastName;
+        }
+      } else {
+        const nextFirst = body?.firstName !== undefined
+          ? (body.firstName === "" ? null : body.firstName)
+          : current.firstName;
+        const nextLast = body?.lastName !== undefined
+          ? (body.lastName === "" ? null : body.lastName)
+          : current.lastName;
+        if (body?.firstName !== undefined) data.firstName = nextFirst;
+        if (body?.lastName !== undefined) data.lastName = nextLast;
+        const rebuilt = buildFullName(nextFirst, nextLast, null);
+        data.fullName = rebuilt ?? current.fullName;
       }
     }
     if (body?.email !== undefined) {

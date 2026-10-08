@@ -34,10 +34,14 @@ export async function GET(request) {
     if (search) {
       where.OR = [
         { email: { contains: search, mode: "insensitive" } },
+        { fullName: { contains: search, mode: "insensitive" } },
         { firstName: { contains: search, mode: "insensitive" } },
         { lastName: { contains: search, mode: "insensitive" } },
         { company: { contains: search, mode: "insensitive" } },
         { phone: { contains: search, mode: "insensitive" } },
+        { city: { contains: search, mode: "insensitive" } },
+        { region: { contains: search, mode: "insensitive" } },
+        { country: { contains: search, mode: "insensitive" } },
       ];
     }
 
@@ -85,11 +89,13 @@ export async function POST(request) {
       : normalizeSource(utm.utmSource);
     const prospect = await createProspect({
       email,
+      fullName: body?.fullName,
       firstName: body?.firstName,
       lastName: body?.lastName,
       phone: body?.phone,
       company: body?.company,
       city: body?.city,
+      region: body?.region,
       website: body?.website,
       country: body?.country,
       source,

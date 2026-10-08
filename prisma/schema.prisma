@@ -3357,9 +3357,14 @@ model Prospect {
   email     String  @unique
   firstName String?
   lastName  String?
+  // Nom complet : nouveau champ canonique affiché partout. firstName /
+  // lastName sont conservés (compat + backfill) et ne sont jamais écrasés
+  // par une valeur vide — voir prospect-service.js.
+  fullName  String?
   phone     String?
   company   String?
   city      String?
+  region    String?
   website   String?
   country   String? @default("BE")
 

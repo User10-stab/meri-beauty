@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
+  Users,
   UserPlus,
   Mail,
   Eye,
@@ -16,6 +17,7 @@ import { fetchJson } from "@/lib/api-client";
 import {
   PROSPECT_SOURCE_CHOICES,
   PROSPECT_STATUS_LABELS,
+  getProspectDisplayName,
   getSourceLabel,
 } from "@/lib/prospects/prospect-choices";
 
@@ -61,6 +63,7 @@ export function ProspectsClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -107,7 +110,24 @@ export function ProspectsClient() {
     <div className="space-y-6">
       {/* Stats */}
       {stats && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9">
+          <button
+            onClick={() => setStatus("")}
+            title="Tous les prospects (retirer le filtre statut)"
+            className={`rounded-xl border-2 px-3 py-2 text-left transition-all bg-[#2f3a2e] text-white dark:bg-[#2f3a2e] dark:text-white ${
+              status === ""
+                ? "border-[#B89664] ring-1 ring-[#B89664]"
+                : "border-[#2f3a2e] dark:border-[#2f3a2e]"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              <span className="text-xl font-bold leading-none">
+                {stats.total ?? 0}
+              </span>
+            </div>
+            <div className="mt-0.5 text-xs font-medium opacity-80">Total</div>
+          </button>
           {Object.entries(PROSPECT_STATUS_LABELS).map(([key, label]) => {
             const Icon = STATUS_ICONS[key];
             return (
@@ -138,7 +158,7 @@ export function ProspectsClient() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Rechercher (e-mail, nom, société, téléphone)…"
+          placeholder="Rechercher (e-mail, nom, société, ville, région, pays)…"
           className="h-10 flex-1 rounded-lg border border-stroke bg-transparent px-3 text-sm text-dark outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:text-white"
         />
         <select
@@ -151,6 +171,12 @@ export function ProspectsClient() {
             <option key={c.value} value={c.value}>{c.label}</option>
           ))}
         </select>
+        <button
+          onClick={() => setShowImport(true)}
+          className="h-10 shrink-0 rounded-lg border border-[#2f3a2e] px-4 text-sm font-semibold text-[#2f3a2e] hover:bg-[#2f3a2e]/5"
+        >
+          ⬆ Importer Excel
+        </button>
         <button
           onClick={() => setShowCreate(true)}
           className="h-10 shrink-0 rounded-lg bg-[#2f3a2e] px-4 text-sm font-semibold text-white hover:bg-[#3d4d3c]"
@@ -188,12 +214,14 @@ export function ProspectsClient() {
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-dark dark:text-white">
-                    {p.firstName || p.lastName ? `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() : p.email}
+                    {getProspectDisplayName(p)}
                   </p>
                   <p className="truncate text-xs text-gray-500">
                     {p.email}
                     {p.company ? ` · ${p.company}` : ""}
                     {p.city ? ` · ${p.city}` : ""}
+                    {p.region ? ` · ${p.region}` : ""}
+                    {p.country ? ` · ${p.country}` : ""}
                     {p.source ? ` · ${getSourceLabel(p.source)}` : ""}
                     {p._count?.activities ? ` · ${p._count.activities} activité(s)` : ""}
                   </p>
@@ -247,6 +275,17 @@ export function ProspectsClient() {
           }}
         />
       )}
+
+      {showImport && (
+        <ImportProspectsModal
+          onClose={() => setShowImport(false)}
+          onImported={() => {
+            setShowImport(false);
+            fetchStats();
+            fetchProspects(1);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -254,11 +293,12 @@ export function ProspectsClient() {
 function CreateProspectModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
     email: "",
-    firstName: "",
-    lastName: "",
+    fullName: "",
     phone: "",
     company: "",
     city: "",
+    region: "",
+    country: "BE",
     website: "",
     source: "autre",
   });
@@ -307,14 +347,15 @@ function CreateProspectModal({ onClose, onCreated }) {
         <h2 className="text-lg font-bold text-dark dark:text-white">Nouveau prospect</h2>
         {error && <p className="text-sm text-red-600">{error}</p>}
         {textField("email", "E-mail *", true)}
-        <div className="grid grid-cols-2 gap-3">
-          {textField("firstName", "Prénom")}
-          {textField("lastName", "Nom")}
-        </div>
+        {textField("fullName", "Nom complet", false, "Marie Dupont")}
         {textField("phone", "Téléphone")}
         {textField("company", "Société")}
         <div className="grid grid-cols-2 gap-3">
           {textField("city", "Ville", false, "Bruxelles")}
+          {textField("region", "Région", false, "Bruxelles-Capitale")}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {textField("country", "Pays", false, "BE")}
           {textField("website", "Site web", false, "https://…")}
         </div>
         <label className="block">
@@ -337,6 +378,97 @@ function CreateProspectModal({ onClose, onCreated }) {
           <button type="submit" disabled={saving} className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
             {saving ? "Création…" : "Créer"}
           </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ImportProspectsModal({ onClose, onImported }) {
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!file) {
+      setError("Choisissez un fichier Excel (.xlsx) ou CSV.");
+      return;
+    }
+    setUploading(true);
+    setError("");
+    setResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/prospects/import", { method: "POST", body: formData });
+      const json = await res.json();
+      if (!json?.success) {
+        const details = json?.data?.errors?.slice(0, 5)?.map((e) => `Ligne ${e.row} : ${e.message}`).join(" ");
+        throw new Error(details ? `${json?.message} ${details}` : json?.message || "Import impossible.");
+      }
+      setResult(json.data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <form
+        onSubmit={handleSubmit}
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[90vh] w-full max-w-md space-y-4 overflow-y-auto rounded-2xl bg-white p-6 dark:bg-gray-dark"
+      >
+        <h2 className="text-lg font-bold text-dark dark:text-white">Importer des prospects</h2>
+        <p className="text-xs text-gray-500">
+          Fichier Excel (.xlsx) ou CSV — 2000 lignes max, 5 Mo max. Seul l&apos;e-mail est obligatoire.
+          Les e-mails déjà connus ne sont jamais écrasés : seuls leurs champs vides sont complétés.
+        </p>
+        <a
+          href="/api/prospects/import"
+          className="inline-block text-xs font-semibold text-[#2f3a2e] underline dark:text-white"
+        >
+          ⬇ Télécharger le modèle Excel
+        </a>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {result && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <p className="font-semibold">{result.created} créé(s) · {result.updated} complété(s) · {result.skipped} ignoré(s)</p>
+            {result.errors?.length > 0 && (
+              <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-xs">
+                {result.errors.slice(0, 20).map((e, i) => (
+                  <li key={i}>Ligne {e.row}{e.email ? ` (${e.email})` : ""} : {e.message}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-500">Fichier Excel / CSV</span>
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="w-full text-sm text-dark file:mr-3 file:rounded-lg file:border-0 file:bg-[#2f3a2e] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white dark:text-white"
+          />
+        </label>
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="rounded-lg border border-stroke px-4 py-2 text-sm dark:border-dark-3">
+            {result ? "Fermer" : "Annuler"}
+          </button>
+          {result ? (
+            <button type="button" onClick={onImported} className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-semibold text-white">
+              Actualiser la liste
+            </button>
+          ) : (
+            <button type="submit" disabled={uploading || !file} className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              {uploading ? "Import…" : "Importer"}
+            </button>
+          )}
         </div>
       </form>
     </div>

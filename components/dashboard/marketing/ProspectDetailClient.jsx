@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/api-client";
-import { PROSPECT_STATUS_LABELS, getSourceLabel } from "@/lib/prospects/prospect-choices";
+import { PROSPECT_STATUS_LABELS, getProspectDisplayName, getSourceLabel } from "@/lib/prospects/prospect-choices";
 
 const NEXT_ACTIONS = [
   "envoyer_email",
@@ -34,6 +34,9 @@ export function ProspectDetailClient({ id }) {
   const [statusNote, setStatusNote] = useState("");
   const [nextAction, setNextAction] = useState({ type: "", dueDate: "", note: "" });
   const [noteText, setNoteText] = useState("");
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState(null);
+  const [editSaving, setEditSaving] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     setLoading(true);
@@ -114,15 +117,15 @@ export function ProspectDetailClient({ id }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-dark dark:text-white">
-              {prospect.firstName || prospect.lastName
-                ? `${prospect.firstName ?? ""} ${prospect.lastName ?? ""}`.trim()
-                : prospect.email}
+              {getProspectDisplayName(prospect)}
             </h1>
             <p className="mt-1 text-sm text-gray-500">
               {prospect.email}
               {prospect.phone ? ` · ${prospect.phone}` : ""}
               {prospect.company ? ` · ${prospect.company}` : ""}
               {prospect.city ? ` · ${prospect.city}` : ""}
+              {prospect.region ? ` · ${prospect.region}` : ""}
+              {prospect.country ? ` · ${prospect.country}` : ""}
               {prospect.website ? (
                 <>
                   {" · "}
@@ -169,6 +172,99 @@ export function ProspectDetailClient({ id }) {
               🗑 Supprimer
             </button>
           </div>
+        </div>
+
+        {/* Édition des infos */}
+        <div className="mt-4 border-t border-stroke pt-4 dark:border-dark-3">
+          {!showEdit ? (
+            <button
+              onClick={() => {
+                setEditForm({
+                  fullName: prospect.fullName ?? "",
+                  phone: prospect.phone ?? "",
+                  company: prospect.company ?? "",
+                  city: prospect.city ?? "",
+                  region: prospect.region ?? "",
+                  country: prospect.country ?? "",
+                  website: prospect.website ?? "",
+                  notes: prospect.notes ?? "",
+                });
+                setShowEdit(true);
+              }}
+              className="rounded-lg border border-stroke px-3 py-1.5 text-xs font-medium dark:border-dark-3"
+            >
+              ✏️ Modifier les infos
+            </button>
+          ) : (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setEditSaving(true);
+                try {
+                  const json = await fetchJson(`/api/prospects/${id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(editForm),
+                  });
+                  if (!json?.success) throw new Error(json?.message || "Enregistrement impossible.");
+                  setShowEdit(false);
+                  setEditForm(null);
+                  await fetchDetail();
+                } catch (err) {
+                  alert(err.message);
+                } finally {
+                  setEditSaving(false);
+                }
+              }}
+              className="space-y-3"
+            >
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {[
+                  ["fullName", "Nom complet"],
+                  ["phone", "Téléphone"],
+                  ["company", "Société"],
+                  ["city", "Ville"],
+                  ["region", "Région"],
+                  ["country", "Pays"],
+                  ["website", "Site web"],
+                ].map(([key, label]) => (
+                  <label key={key} className="block">
+                    <span className="mb-1 block text-xs font-medium text-gray-500">{label}</span>
+                    <input
+                      value={editForm?.[key] ?? ""}
+                      onChange={(e) => setEditForm((f) => ({ ...f, [key]: e.target.value }))}
+                      className="h-10 w-full rounded-lg border border-stroke bg-transparent px-3 text-sm dark:border-dark-3"
+                    />
+                  </label>
+                ))}
+              </div>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-gray-500">Notes</span>
+                <textarea
+                  value={editForm?.notes ?? ""}
+                  onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                  rows={2}
+                  className="w-full rounded-lg border border-stroke bg-transparent px-3 py-2 text-sm dark:border-dark-3"
+                />
+              </label>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowEdit(false); setEditForm(null); }}
+                  className="rounded-lg border border-stroke px-4 py-2 text-sm dark:border-dark-3"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSaving}
+                  className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {editSaving ? "Enregistrement…" : "Enregistrer"}
+                </button>
+              </div>
+            </form>
+          )}
         </div>
 
         {/* Changement de statut */}

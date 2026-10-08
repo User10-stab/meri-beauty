@@ -10,6 +10,6 @@ ADD COLUMN "region" TEXT;
 -- (donc toutes les lignes existantes) et où au moins un des deux champs
 -- est renseigné. Les chaînes vides / espaces seules donnent NULL.
 UPDATE "Prospect"
-SET "fullName" = NULLIF(BTRIM(CONCAT_WS(' ', NULLIF(BTRIM("firstName"), ''), NULLIF(BTRIM("lastName"), ''))), ''), '')
+SET "fullName" = NULLIF(TRIM(CONCAT_WS(' ', NULLIF(TRIM("firstName"), ''), NULLIF(TRIM("lastName"), ''))), '')
 WHERE "fullName" IS NULL
   AND ("firstName" IS NOT NULL OR "lastName" IS NOT NULL);

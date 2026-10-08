@@ -4,7 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fetchJson } from "@/lib/api-client";
-import { PROSPECT_STATUS_LABELS, getProspectDisplayName, getSourceLabel } from "@/lib/prospects/prospect-choices";
+import { PROSPECT_SOURCE_CHOICES, PROSPECT_STATUS_LABELS, getProspectDisplayName, getSourceLabel } from "@/lib/prospects/prospect-choices";
+
+const SOURCE_BADGES = {
+  import_excel: { label: "📥 Import Excel", title: "Prospect importé depuis un fichier Excel", className: "bg-slate-700 text-white dark:bg-slate-600" },
+  anciens_clients: { label: "🤝 Anciens clients", title: "Ancien client réimporté", className: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" },
+};
 
 const NEXT_ACTIONS = [
   "envoyer_email",
@@ -155,6 +160,14 @@ export function ProspectDetailClient({ id }) {
             <span className="rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400">
               {PROSPECT_STATUS_LABELS[prospect.status] ?? prospect.status}
             </span>
+            {SOURCE_BADGES[prospect.source] && (
+              <span
+                title={SOURCE_BADGES[prospect.source].title}
+                className={`rounded-full px-3 py-1 text-sm font-semibold ${SOURCE_BADGES[prospect.source].className}`}
+              >
+                {SOURCE_BADGES[prospect.source].label}
+              </span>
+            )}
             <button
               disabled={actionLoading}
               onClick={() => callApi(`/api/prospects/${id}/resync`, "POST")}
@@ -187,6 +200,7 @@ export function ProspectDetailClient({ id }) {
                   region: prospect.region ?? "",
                   country: prospect.country ?? "",
                   website: prospect.website ?? "",
+                  source: prospect.source ?? "autre",
                   notes: prospect.notes ?? "",
                 });
                 setShowEdit(true);
@@ -237,6 +251,18 @@ export function ProspectDetailClient({ id }) {
                     />
                   </label>
                 ))}
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-gray-500">Source</span>
+                  <select
+                    value={editForm?.source ?? "autre"}
+                    onChange={(e) => setEditForm((f) => ({ ...f, source: e.target.value }))}
+                    className="h-10 w-full rounded-lg border border-stroke bg-transparent px-3 text-sm dark:border-dark-3"
+                  >
+                    {PROSPECT_SOURCE_CHOICES.map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-gray-500">Notes</span>

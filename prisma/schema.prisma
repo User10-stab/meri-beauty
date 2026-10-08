@@ -3209,6 +3209,8 @@ enum ProspectSource {
   atelier // atelier & événement
   formation // formation pro
   contact // formulaire de contact
+  anciens_clients // anciens clients réimportés (ex. export Podia)
+  import_excel // import de fichier (Excel / CSV) — signe distinctif demandé
   autre
 }
 

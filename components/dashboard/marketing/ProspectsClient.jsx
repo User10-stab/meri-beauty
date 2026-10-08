@@ -43,6 +43,11 @@ const STATUS_BORDERS = {
   perdu: "border-red-200 dark:border-red-900/50",
 };
 
+const SOURCE_BADGES = {
+  import_excel: { label: "📥 Import Excel", className: "bg-slate-700 text-white dark:bg-slate-600" },
+  anciens_clients: { label: "🤝 Anciens clients", className: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" },
+};
+
 const STATUS_COLORS = {  nouveau: "bg-gray-100 text-gray-700 dark:bg-dark-2 dark:text-dark-6",
   contacte: "bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400",
   lecteur: "bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-400",
@@ -231,6 +236,14 @@ export function ProspectsClient() {
                     → {p.nextActionType.replace(/_/g, " ")}
                   </span>
                 )}
+                {SOURCE_BADGES[p.source] && (
+                  <span
+                    title={p.source === "import_excel" ? "Prospect importé depuis un fichier Excel" : "Ancien client réimporté"}
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${SOURCE_BADGES[p.source].className}`}
+                  >
+                    {SOURCE_BADGES[p.source].label}
+                  </span>
+                )}
                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${STATUS_COLORS[p.status] ?? STATUS_COLORS.nouveau}`}>
                   {PROSPECT_STATUS_LABELS[p.status] ?? p.status}
                 </span>
@@ -386,6 +399,7 @@ function CreateProspectModal({ onClose, onCreated }) {
 
 function ImportProspectsModal({ onClose, onImported }) {
   const [file, setFile] = useState(null);
+  const [source, setSource] = useState("anciens_clients");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
@@ -402,6 +416,7 @@ function ImportProspectsModal({ onClose, onImported }) {
     try {
       const formData = new FormData();
       formData.append("file", file);
+      formData.append("source", source);
       const res = await fetch("/api/prospects/import", { method: "POST", body: formData });
       const json = await res.json();
       if (!json?.success) {
@@ -455,6 +470,22 @@ function ImportProspectsModal({ onClose, onImported }) {
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             className="w-full text-sm text-dark file:mr-3 file:rounded-lg file:border-0 file:bg-[#2f3a2e] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white dark:text-white"
           />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-gray-500">Source à appliquer *</span>
+          <select
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+            required
+            className="h-10 w-full rounded-lg border border-stroke bg-transparent px-3 text-sm text-dark outline-none focus:border-[#2f3a2e] dark:border-dark-3 dark:text-white"
+          >
+            {PROSPECT_SOURCE_CHOICES.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-gray-400">
+            Appliquée aux lignes sans colonne « Source ». Une colonne « Source » remplie dans le fichier reste prioritaire.
+          </span>
         </label>
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="rounded-lg border border-stroke px-4 py-2 text-sm dark:border-dark-3">

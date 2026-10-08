@@ -42,7 +42,10 @@ export async function GET() {
 }
 
 // ─── POST /api/prospects/import — import Excel/CSV ───────────────────────────
-// Body : FormData { file }. Seul l'e-mail est requis par ligne.
+// Body : FormData { file, source? }. Seul l'e-mail est requis par ligne.
+// `source` = source par défaut choisie dans la modale (ex. Anciens clients) :
+// elle s'applique aux lignes SANS colonne Source ; une colonne Source
+// explicite et valide dans le fichier reste prioritaire.
 // Idempotent : un e-mail déjà connu n'est JAMAIS écrasé — seuls les champs
 // encore vides sont complétés (même règle que la création manuelle).
 export async function POST(request) {
@@ -74,6 +77,14 @@ export async function POST(request) {
 
     const buffer = Buffer.from(await file.arrayBuffer());
 
+    // Source par défaut (modale) — repli `import_excel` si absente/inconnue.
+    const requestedDefault = formData.get("source");
+    const defaultSource = requestedDefault
+      ? isValidSource(String(requestedDefault).trim())
+        ? String(requestedDefault).trim()
+        : normalizeSource(requestedDefault)
+      : "import_excel";
+
     let rows;
     try {
       rows = await parseImportBuffer(buffer, filename);
@@ -102,11 +113,13 @@ export async function POST(request) {
 
     for (const { rowNumber, data } of valid) {
       try {
+        // Colonne Source du fichier prioritaire, sinon la source par défaut
+        // choisie dans la modale (ex. Anciens clients).
         const source = data.source
           ? isValidSource(String(data.source).trim())
             ? String(data.source).trim()
             : normalizeSource(data.source)
-          : undefined;
+          : defaultSource;
         const isKnown = knownSet.has(data.email);
         const before = isKnown
           ? await prisma.prospect.findUnique({ where: { email: data.email } })

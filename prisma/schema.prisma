@@ -120,6 +120,22 @@ enum InvoiceSource {
 enum PromoCodeType {
   PERCENTAGE
   FIXED
+  // One code, several offers — each PromoCodeRule has its own targets and
+  // mechanic. Boutique only; `value` is unused (stored as 0).
+  MULTI_RULE
+}
+
+// How a PromoCodeRule discounts the cart lines it targets.
+//  PERCENT_OFF      — `percent` off every targeted unit, once the cart holds
+//                     at least `minQuantity` of them.
+//  NTH_DISCOUNTED   — per group of `buyQuantity` + 1 targeted units, the
+//                     cheapest one is `percent` off.
+//  BUY_X_GET_Y_FREE — per group of `buyQuantity` + `freeQuantity` targeted
+//                     units, `freeQuantity` of them are free.
+enum PromoRuleKind {
+  PERCENT_OFF
+  NTH_DISCOUNTED
+  BUY_X_GET_Y_FREE
 }
 
 // Which purchase flows a promo code can be redeemed in. APPOINTMENT = a
@@ -1061,6 +1077,7 @@ model Brand {
   updatedAt DateTime @updatedAt
 
   categories ProductCategory[]
+  promoRules PromoCodeRule[]   @relation("PromoRuleBrands")
 
   @@index([slug])
   @@index([isActive, isDeleted])
@@ -1084,6 +1101,7 @@ model ProductCategory {
   updatedAt DateTime @updatedAt
 
   subcategories ProductSubcategory[]
+  promoRules    PromoCodeRule[]      @relation("PromoRuleCategories")
 
   @@unique([brandId, slug])
   @@index([brandId])
@@ -1103,7 +1121,8 @@ model ProductSubcategory {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  products Product[]
+  products   Product[]
+  promoRules PromoCodeRule[] @relation("PromoRuleSubcategories")
 
   @@unique([categoryId, slug])
   @@index([categoryId])
@@ -1153,6 +1172,7 @@ model Product {
   variants ProductVariant[]
   images   ProductImage[]
   promoCodes PromoCode[] @relation("PromoCodeProducts")
+  promoRules PromoCodeRule[] @relation("PromoRuleProducts")
 
   @@index([slug])
   @@index([subcategoryId])
@@ -1376,6 +1396,11 @@ model Order {
   promoCodeId    String?
   promoCode      PromoCode? @relation(fields: [promoCodeId], references: [id])
   discountAmount Decimal    @default(0) @db.Decimal(10, 2)
+  // MULTI_RULE code only — the code's offers and where each line sat in the
+  // catalogue when the order was placed ({ rules, placements }). A return
+  // re-prices the articles the client keeps from this, whatever happened to
+  // the code or the catalogue since (see lib/orders/return-refund.js).
+  promoSnapshot  Json?
 
   // Shipping (SHIPPING_PREPAID) — legacy bpost home-delivery fields, kept
   // nullable/unused so historical bpost orders keep their data rather than
@@ -1559,6 +1584,13 @@ model OrderItem {
 
   unitPrice Decimal @db.Decimal(10, 2)
   quantity  Int
+
+  // This line's share of Order.discountAmount, for its full quantity — only
+  // written for a MULTI_RULE promo code, whose offers differ per line (0
+  // otherwise: allocateOrderDiscount then prorates the order discount).
+  discountAmount Decimal @default(0) @db.Decimal(10, 2)
+  // The offer that produced it, e.g. « KLYN -15 % dès 2 boîtes ».
+  promoLabel     String?
 
   createdAt DateTime @default(now())
 
@@ -1813,10 +1845,25 @@ model Appointment {
   isDeleted            Boolean                          @default(false)
   reviewRequestedAt DateTime?
   deletedAt            DateTime?
-  payment              Payment?
+  payment              Payment?                         @relation("AppointmentPayment")
   review        Review?
   notifications        Notification[]
   cancellationRequests AppointmentCancellationRequest[]
+
+  // Several prestations booked together for one client are one visit — see
+  // model AppointmentVisit. Null for an appointment booked on its own.
+  visitId String?
+  visit   AppointmentVisit? @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
+  // Set when this prestation was cashed together with another one of the
+  // same visit and the same staff member: the money is on THAT appointment's
+  // Payment (one operation, one ticket), and this one never gets a Payment of
+  // its own. Only ever written by completeAppointment, in the same
+  // transaction that marks this appointment COMPLETED — so a covered
+  // appointment is always a completed one, and cancelling, moving or
+  // marking it absent never has prepaid money to account for.
+  coveredByPaymentId String?
+  coveredByPayment   Payment? @relation("AppointmentCoveredByPayment", fields: [coveredByPaymentId], references: [id], onDelete: SetNull)
 
   // Dedup markers for the reminder cron (mirrors reservations'
   // reminderSentAt), one per window since appointments send both a 24h and
@@ -1841,6 +1888,24 @@ model Appointment {
   @@index([userId, startTime]) // "my appointments"
   @@index([isDeleted, status, startTime]) // dashboard filters
   @@index([cancelledByUserId])
+  @@index([visitId])
+  @@index([coveredByPaymentId])
+}
+
+// One client's visit to the salon: the prestations booked together from the
+// dashboard's « Ajouter un rendez-vous » dialog, with one staff member or
+// several, back to back or hours apart.
+//
+// Each prestation stays its own Appointment — that is what blocks each staff
+// member's agenda, enforces her rest time and keeps an independent's sale
+// hers. The visit only ties them together, so the screens can show, check in
+// and cash them as one.
+model AppointmentVisit {
+  id String @id @default(cuid())
+
+  createdAt DateTime @default(now())
+
+  appointments Appointment[]
 }
 
 // A late cancellation request does not change the appointment or payment by
@@ -1923,7 +1988,10 @@ model ReservationCancellationRequest {
 model Payment {
   id                     String                @id @default(cuid())
   appointmentId          String?               @unique
-  appointment            Appointment?          @relation(fields: [appointmentId], references: [id])
+  appointment            Appointment?          @relation("AppointmentPayment", fields: [appointmentId], references: [id])
+  // The other prestations of the same visit, with the same staff member,
+  // that this one Payment also settled — see Appointment.coveredByPaymentId.
+  coveredAppointments    Appointment[]         @relation("AppointmentCoveredByPayment")
   orderId                String?               @unique
   order                  Order?                @relation(fields: [orderId], references: [id])
   workshopReservationId  String?               @unique
@@ -2142,6 +2210,8 @@ model PromoCode {
   // Optional per-customer cap, counted from live sales/bookings (see
   // countCustomerPromoUses) — null = no per-customer limit.
   maxUsesPerCustomer Int?
+  // MULTI_RULE only — the offers the code bundles, in display order.
+  rules          PromoCodeRule[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -2151,6 +2221,35 @@ model PromoCode {
   formationReservations FormationReservation[]
 
   @@index([isActive])
+}
+
+// PROMO CODE RULE
+// One offer of a MULTI_RULE code. A cart line is targeted when its product,
+// subcategory, category or brand is listed; when several rules target the
+// same line, the one that discounts it most wins — offers never stack (see
+// lib/promo-rules.js).
+model PromoCodeRule {
+  id          String    @id @default(cuid())
+  promoCodeId String
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  position    Int       @default(0)
+  // Shown to the customer next to the discount it produced.
+  label       String
+  kind        PromoRuleKind
+
+  percent       Decimal? @db.Decimal(5, 2)
+  minQuantity   Int      @default(1)
+  buyQuantity   Int?
+  freeQuantity  Int?
+  // Groups are only formed between units of the same unit price.
+  samePriceOnly Boolean  @default(false)
+
+  brands        Brand[]              @relation("PromoRuleBrands")
+  categories    ProductCategory[]    @relation("PromoRuleCategories")
+  subcategories ProductSubcategory[] @relation("PromoRuleSubcategories")
+  products      Product[]            @relation("PromoRuleProducts")
+
+  @@index([promoCodeId])
 }
 
 // NUMBERING COUNTER

@@ -19,7 +19,8 @@ import {
   UserX,
   Loader2,
 } from "lucide-react";
-import { acceptAppointment, rejectAppointment, completeAppointment, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { acceptAppointment, rejectAppointment, completeAppointment, completeVisit, markAppointmentNoShow } from "@/actions/appointment/manage-appointment";
+import { VisitPrestationsList, VisitScopeChoice, visitCompletion } from "@/components/dashboard/appointments/VisitParts";
 import { appointmentCollectsAtCounter, appointmentAmountDueAtCounter } from "@/lib/appointments/counter-collection";
 import { collectibleBalance } from "@/lib/payments/collectible-balance";
 import { getStaffColor } from "./staffColors";
@@ -139,6 +140,9 @@ export function AppointmentDrawer({
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [completeMethod, setCompleteMethod] = useState("CASH");
   const [paymentConfirmed, setPaymentConfirmed] = useState(false);
+  // « Toute la visite » or only this prestation — asked when the visit has
+  // other prestations to close (see completeVisit).
+  const [completeScope, setCompleteScope] = useState("VISIT");
   // A card collection is only accepted as EXTERNAL_TERMINAL now. The
   // existing "j'ai bien reçu" checkbox already says "ou carte APPROUVÉE sur le
   // terminal", so it doubles as the approval attestation. Its reference is the
@@ -170,6 +174,7 @@ export function AppointmentDrawer({
     setShowPaymentDialog(false);
     setCompleteMethod("CASH");
     setPaymentConfirmed(false);
+    setCompleteScope("VISIT");
   }, [appointment?.id]);
 
   async function handleConfirm() {
@@ -199,6 +204,12 @@ export function AppointmentDrawer({
     // Only Marie / an admin takes money at the counter — for everyone else the
     // balance is recorded off-till by completeAppointment, so the payment
     // popup is skipped and "Terminer" just closes the rendez-vous out.
+    // A visit with other prestations to close always asks first: the whole
+    // visit, or only this one.
+    if (visitCompletion(appointment.visit, appointment.id).available) {
+      setShowPaymentDialog(true);
+      return;
+    }
     if (canCollectCash && appointmentCollectsAtCounter(appointment)) {
       setShowPaymentDialog(true);
       return;
@@ -219,17 +230,27 @@ export function AppointmentDrawer({
   }
 
   async function handleCompleteWithPayment() {
-    if (!appointment?.id || isPending || !paymentConfirmed) return;
+    if (!appointment?.id || isPending) return;
+    const completion = visitCompletion(appointment.visit, appointment.id);
+    const wholeVisit = completion.available && completeScope === "VISIT";
+    // Money is only asked for — method and attestation — from someone who
+    // takes it at the counter, and only when there is some to take.
+    const asksPayment =
+      canCollectCash && (wholeVisit ? completion.amountDue > 0 : appointmentCollectsAtCounter(appointment));
+    if (asksPayment && !paymentConfirmed) return;
     setIsPending(true);
     setFeedback(null);
     try {
-      const result = await completeAppointment(appointment.id, {
-        method: completeMethod,
-        paymentConfirmed,
-        ...(completeMethod === "EXTERNAL_TERMINAL"
-          ? { terminalApproved: paymentConfirmed }
-          : {}),
-      });
+      const options = asksPayment
+        ? {
+            method: completeMethod,
+            paymentConfirmed,
+            ...(completeMethod === "EXTERNAL_TERMINAL" ? { terminalApproved: paymentConfirmed } : {}),
+          }
+        : {};
+      const result = wholeVisit
+        ? await completeVisit(appointment.id, options)
+        : await completeAppointment(appointment.id, options);
       setShowPaymentDialog(false);
       if (result.success) {
         setFeedback({ type: "success", message: result.message ?? t("success.appointmentCompleted") });
@@ -305,6 +326,12 @@ export function AppointmentDrawer({
       new Date(appointment.endTime).getMinutes()
     : 0;
   const derivedDuration = appointment.duration ?? (endHour - startHour);
+
+  const completion = visitCompletion(appointment.visit, appointment.id);
+  const wholeVisit = completion.available && completeScope === "VISIT";
+  const dialogAmountDue = wholeVisit ? completion.amountDue : balanceDue;
+  const dialogAsksPayment =
+    canCollectCash && (wholeVisit ? completion.amountDue > 0 : appointmentCollectsAtCounter(appointment));
 
   return (
     <>
@@ -388,6 +415,13 @@ export function AppointmentDrawer({
             />
           </Section>
 
+          {/* ── Section: Visite — every prestation booked together ──── */}
+          {appointment.visit && (
+            <Section title={`Visite — ${appointment.visit.prestations.length} prestation${appointment.visit.prestations.length > 1 ? "s" : ""}`}>
+              <VisitPrestationsList visit={appointment.visit} currentId={appointment.id} />
+            </Section>
+          )}
+
           {/* ── Section: Horaire ───────────────────────────────────── */}
           <Section title={t("appointmentDetails.date")}>
             <DrawerRow icon={CalendarDays} label={t("appointmentDetails.date")} value={formatDate(appointment.date)} />
@@ -424,12 +458,15 @@ export function AppointmentDrawer({
                 value={formatPrice(appointment.paidAmount)}
               />
             )}
-            {amountStillDue(appointment) > 0 && (
+            {amountStillDue(appointment) > 0 && !appointment.coveredByVisit && (
               <DrawerRow
                 icon={CreditCard}
                 label={t("appointmentPayment.paymentDue")}
                 value={formatPrice(amountStillDue(appointment))}
               />
+            )}
+            {appointment.coveredByVisit && (
+              <DrawerRow icon={CreditCard} label="Encaissement" value="Encaissée avec la visite (une seule opération)" />
             )}
             <div className="flex items-start gap-3 py-2.5">
               <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-700">
@@ -467,11 +504,25 @@ export function AppointmentDrawer({
           {/* ── Encaisser le solde (partial payment) ───────────────── */}
           {showPaymentDialog && (
             <div className="mt-2 rounded-xl border border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-800/30">
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-white">{t("appointmentPayment.collectBalance")}</h3>
+              <h3 className="text-sm font-semibold text-gray-800 dark:text-white">
+                {completion.available ? "Terminer la visite" : t("appointmentPayment.collectBalance")}
+              </h3>
+              {completion.available && (
+                <div className="mt-3">
+                  <VisitScopeChoice
+                    completion={completion}
+                    singleAmountDue={balanceDue ?? 0}
+                    value={completeScope}
+                    onChange={setCompleteScope}
+                  />
+                </div>
+              )}
+              {dialogAsksPayment && (
+              <>
               <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                 {t("appointmentPayment.stillDue")}{" "}
-                <span className="font-semibold text-gray-700 dark:text-gray-200">
-                  {formatPrice(balanceDue)}
+                <span className="font-semibold text-gray-700 dark:text-gray-200" data-testid="complete-amount-due">
+                  {formatPrice(dialogAmountDue)}
                 </span>{" "}
                 sur place. Une facture sera émise pour le montant total dès l&apos;encaissement.
               </p>
@@ -499,6 +550,8 @@ export function AppointmentDrawer({
                 />
                 Je confirme avoir bien reçu ce paiement (espèces en main, ou carte APPROUVÉE sur le terminal).
               </label>
+              </>
+              )}
               <div className="mt-3 flex justify-end gap-2">
                 <button
                   type="button"
@@ -513,7 +566,7 @@ export function AppointmentDrawer({
                   onClick={handleCompleteWithPayment}
                   disabled={
                     isPending ||
-                    !paymentConfirmed
+                    (dialogAsksPayment && !paymentConfirmed)
                   }
                   className="inline-flex items-center gap-1.5 rounded-lg bg-[#2f3a2e] px-3.5 py-2 text-xs font-semibold text-white hover:bg-[#3d4e3b] disabled:opacity-60"
                 >

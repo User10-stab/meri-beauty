@@ -1019,10 +1019,18 @@ export async function completePointOfSaleSale(input) {
         ? await applyCounterPromoCode(tx, promoCode, subtotal, {
             scope: "BOUTIQUE",
             customerId: customer?.id ?? null,
-            lines: pricedSaleItems.map((item) => ({ productId: item.productId, amount: item.taxUnitPrice * item.quantity })),
+            lines: pricedSaleItems.map((item) => ({
+              key: item.id,
+              productId: item.productId,
+              unitPrice: item.taxUnitPrice,
+              quantity: item.quantity,
+              amount: item.taxUnitPrice * item.quantity,
+            })),
           })
         : null;
       const discountAmount = promo?.discountAmount ?? 0;
+      // A multi-offer code discounts each line by its own offer (by variant id).
+      const lineDiscountByVariantId = new Map((promo?.lineDiscounts ?? []).map((line) => [line.key, line]));
       const totalAmount = Math.max(0, Math.round((subtotal - discountAmount) * 100) / 100);
       // Stripe can't open a checkout with nothing to pay.
       if (isQrPayment && totalAmount <= 0) throw new Error("POS_QR_NOTHING_TO_PAY");
@@ -1043,6 +1051,8 @@ export async function completePointOfSaleSale(input) {
           shippingCost: 0,
           discountAmount,
           promoCodeId: promo?.promoCodeId ?? null,
+          // A multi-offer code's offers, kept for returns (lib/orders/return-refund.js).
+          promoSnapshot: promo?.snapshot ?? undefined,
           totalAmount,
           taxCountryCode: posVatPolicy.taxCountryCode,
           vatTreatment: posVatPolicy.vatTreatment,
@@ -1069,6 +1079,8 @@ export async function completePointOfSaleSale(input) {
                 sku: item.sku,
                 unitPrice: item.taxUnitPrice,
                 quantity: item.quantity,
+                discountAmount: lineDiscountByVariantId.get(item.id)?.discountAmount ?? 0,
+                promoLabel: lineDiscountByVariantId.get(item.id)?.label ?? null,
               })),
           },
         },

@@ -38,7 +38,7 @@ export function PromoTicket({ promo, muted = false, size = "md" }) {
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_0%,rgba(200,164,106,0.4),transparent_65%)]" />
           <span className="relative text-[10px] font-semibold uppercase tracking-[0.2em] text-[#C8A46A]">Remise</span>
           <span className={`relative mt-1.5 whitespace-nowrap font-bold leading-none tracking-tight ${big ? "text-3xl" : "text-2xl"}`}>
-            {promo.value ? formatPromoValue(promo) : "—"}
+            {promo.value || promo.type === "MULTI_RULE" ? formatPromoValue(promo) : "—"}
           </span>
         </div>
 

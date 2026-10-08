@@ -44,7 +44,13 @@ export async function previewCounterPromoCode(rawCode, subtotal, context = {}) {
         where: { id: { in: [...quantities.keys()] } },
         select: { id: true, productId: true, price: true },
       });
-      lines = variants.map((v) => ({ productId: v.productId, amount: Number(v.price) * quantities.get(v.id) }));
+      lines = variants.map((v) => ({
+        key: v.id,
+        productId: v.productId,
+        unitPrice: Number(v.price),
+        quantity: quantities.get(v.id),
+        amount: Number(v.price) * quantities.get(v.id),
+      }));
       base = lines.reduce((sum, line) => sum + line.amount, 0);
     }
 
@@ -60,7 +66,7 @@ export async function previewCounterPromoCode(rawCode, subtotal, context = {}) {
     const customerId = typeof context.customerId === "string" && context.customerId ? context.customerId : null;
     const result = await resolvePromoCode(rawCode, base, { scope, lines, serviceId, customerId, skipCustomerChecks: !customerId });
     if (!result.success) return result;
-    return { success: true, discountAmount: result.discountAmount };
+    return { success: true, discountAmount: result.discountAmount, appliedRules: result.appliedRules ?? [] };
   } catch (error) {
     console.error("[previewCounterPromoCode]", error);
     return { success: false, message: "Impossible de vérifier ce code pour le moment." };

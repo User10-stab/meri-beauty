@@ -114,7 +114,9 @@ describe("the e-mail body carries the code, not just the attachment", () => {
     // reservationConfirmedEmail, workshop/formationReservationConfirmationEmail,
     // and checkInReminderEmail — the reminder sent closer to the event also
     // needs the code front and center, not just the original confirmation.
-    expect(templates.match(/\$\{checkInTicketBlock\(checkInCode\)\}/g) ?? []).toHaveLength(4);
+    // Plus multiReservationConfirmationEmail: a visit of several prestations
+    // booked from the dashboard carries one ticket for the whole visit.
+    expect(templates.match(/\$\{checkInTicketBlock\(checkInCode\)\}/g) ?? []).toHaveLength(5);
   });
 
   test("the block disappears entirely when no code was minted", () => {

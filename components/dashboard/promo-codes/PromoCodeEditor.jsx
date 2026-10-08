@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowLeft, Loader2, Wand2, Percent, Euro, ShoppingBag, CalendarHeart, Palette, GraduationCap, Globe2,
-  UserRound, Infinity as InfinityIcon, CalendarClock, Check, Info,
+  UserRound, Infinity as InfinityIcon, CalendarClock, Check, Info, Layers,
 } from "lucide-react";
 import Button from "@/components/ui/Button";
 import { createPromoCode, updatePromoCode } from "@/actions/promo-codes";
@@ -14,6 +14,7 @@ import { parseBrusselsInputValue, toBrusselsInputValue } from "@/lib/datetime/br
 import { PROMO_CODE_SCOPES, PROMO_CODE_SCOPE_LABELS } from "@/lib/promo-code-scopes";
 import { PromoTicket } from "./PromoTicket";
 import { CustomerPicker, ProductPicker, ServicePicker } from "./PromoTargetPickers";
+import { PromoRulesEditor, emptyRule, ruleProblem, ruleToForm, ruleToPayload } from "./PromoRulesEditor";
 import { PromoUsageHistory } from "./PromoUsageHistory";
 import { STATUS_META, describePromoRules, promoStatus } from "./promo-format";
 
@@ -80,6 +81,9 @@ export function PromoCodeEditor({ promoCode }) {
   const [minOrderAmount, setMinOrderAmount] = useState(promoCode?.minOrderAmount ?? "");
   const [description, setDescription] = useState(promoCode?.description ?? "");
   const [isActive, setIsActive] = useState(promoCode?.isActive ?? true);
+  // A multi-offer code: its offers replace the single value, boutique only.
+  const [rules, setRules] = useState(() => (promoCode?.rules ?? []).map(ruleToForm));
+  const isMulti = type === "MULTI_RULE";
 
   const [scopes, setScopes] = useState(promoCode?.scopes?.length ? promoCode.scopes : PROMO_CODE_SCOPES);
   const [productMode, setProductMode] = useState(promoCode?.products?.length ? "SOME" : "ALL");
@@ -110,9 +114,10 @@ export function PromoCodeEditor({ promoCode }) {
       type,
       value: Number(value) || 0,
       minOrderAmount: Number(minOrderAmount) || null,
-      scopes,
-      products: productMode === "SOME" ? products : [],
-      services: serviceMode === "SOME" ? services : [],
+      scopes: isMulti ? ["BOUTIQUE"] : scopes,
+      products: !isMulti && productMode === "SOME" ? products : [],
+      services: !isMulti && serviceMode === "SOME" ? services : [],
+      rules: isMulti ? rules : [],
       customers: audience === "SOME" ? customers : [],
       maxUses: Number(maxUses) || null,
       maxUsesPerCustomer: Number(maxUsesPerCustomer) || null,
@@ -120,13 +125,18 @@ export function PromoCodeEditor({ promoCode }) {
       isActive,
       usedCount: promoCode?.usedCount ?? 0,
     }),
-    [code, type, value, minOrderAmount, scopes, productMode, products, serviceMode, services, audience, customers, maxUses, maxUsesPerCustomer, expiresAt, isActive, promoCode?.usedCount]
+    [code, type, value, minOrderAmount, scopes, productMode, products, serviceMode, services, audience, customers, maxUses, maxUsesPerCustomer, expiresAt, isActive, promoCode?.usedCount, isMulti, rules]
   );
-  const rules = describePromoRules(draft);
+  const ruleSummary = describePromoRules(draft);
   const status = STATUS_META[promoStatus(draft)];
 
   function toggleScope(scope) {
     setScopes((prev) => (prev.includes(scope) ? prev.filter((s) => s !== scope) : PROMO_CODE_SCOPES.filter((s) => s === scope || prev.includes(s))));
+  }
+
+  function chooseType(next) {
+    setType(next);
+    if (next === "MULTI_RULE" && rules.length === 0) setRules([emptyRule()]);
   }
 
   function applyPreset(preset) {
@@ -140,9 +150,15 @@ export function PromoCodeEditor({ promoCode }) {
     e.preventDefault();
 
     const clientErrors = {};
-    if (!scopes.length) clientErrors.scopes = "Choisissez au moins un domaine.";
-    if (scopes.includes("BOUTIQUE") && productMode === "SOME" && !products.length) clientErrors.productIds = "Choisissez au moins un produit.";
-    if (scopes.includes("APPOINTMENT") && serviceMode === "SOME" && !services.length) clientErrors.serviceIds = "Choisissez au moins une prestation.";
+    if (isMulti) {
+      const incomplete = rules.findIndex((rule) => ruleProblem(rule));
+      if (!rules.length) clientErrors.rules = "Ajoutez au moins une offre à ce code.";
+      else if (incomplete !== -1) clientErrors.rules = `Offre ${incomplete + 1} : ${ruleProblem(rules[incomplete])}.`;
+    } else {
+      if (!scopes.length) clientErrors.scopes = "Choisissez au moins un domaine.";
+      if (scopes.includes("BOUTIQUE") && productMode === "SOME" && !products.length) clientErrors.productIds = "Choisissez au moins un produit.";
+      if (scopes.includes("APPOINTMENT") && serviceMode === "SOME" && !services.length) clientErrors.serviceIds = "Choisissez au moins une prestation.";
+    }
     if (audience === "SOME" && !customers.length) clientErrors.customerIds = "Ajoutez au moins une cliente.";
     if (expiryMode === "DATE" && !expiryDate) clientErrors.expiresAt = "Choisissez la date d'expiration.";
     if (Object.keys(clientErrors).length) {
@@ -163,6 +179,7 @@ export function PromoCodeEditor({ promoCode }) {
       productIds: productMode === "SOME" ? products.map((p) => p.id) : [],
       serviceIds: serviceMode === "SOME" ? services.map((s) => s.id) : [],
       customerIds: audience === "SOME" ? customers.map((c) => c.id) : [],
+      rules: isMulti ? rules.map(ruleToPayload) : [],
       maxUses: maxUses === "" ? null : maxUses,
       maxUsesPerCustomer: maxUsesPerCustomer === "" ? null : maxUsesPerCustomer,
       expiresAt,
@@ -241,17 +258,18 @@ export function PromoCodeEditor({ promoCode }) {
                   </div>
                 </Field>
 
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <Field label="Type de remise">
-                    <div className="grid h-10 grid-cols-2 rounded-lg bg-gray-100 p-1 dark:bg-dark-2">
+                <div className={`grid grid-cols-1 gap-4 ${isMulti ? "" : "sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]"}`}>
+                  <Field label="Type de remise" hint={isMulti ? "Un seul code, plusieurs offres : chaque article du panier reçoit celle qui le concerne." : undefined}>
+                    <div className="grid h-10 grid-cols-3 rounded-lg bg-gray-100 p-1 dark:bg-dark-2">
                       {[
                         { v: "PERCENTAGE", label: "Pourcentage", icon: Percent },
                         { v: "FIXED", label: "Montant fixe", icon: Euro },
+                        { v: "MULTI_RULE", label: "Offres multiples", icon: Layers },
                       ].map((o) => (
                         <button
                           key={o.v}
                           type="button"
-                          onClick={() => setType(o.v)}
+                          onClick={() => chooseType(o.v)}
                           className={`flex items-center justify-center gap-1.5 rounded-md text-xs font-semibold transition ${
                             type === o.v ? "bg-white text-[#2f3a2e] shadow-sm dark:bg-gray-dark dark:text-white" : "text-gray-500"
                           }`}
@@ -262,6 +280,7 @@ export function PromoCodeEditor({ promoCode }) {
                       ))}
                     </div>
                   </Field>
+                  {!isMulti && (
                   <Field label="Valeur" required error={errors.value}>
                     <div className="relative">
                       <input
@@ -280,6 +299,7 @@ export function PromoCodeEditor({ promoCode }) {
                       </span>
                     </div>
                   </Field>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -311,6 +331,13 @@ export function PromoCodeEditor({ promoCode }) {
               </div>
             </Section>
 
+            {isMulti && (
+              <Section step="2" title="Offres du code" subtitle="Valable sur la boutique (en ligne et à la caisse). Une offre par famille de produits.">
+                <PromoRulesEditor value={rules} onChange={setRules} error={errors.rules} />
+              </Section>
+            )}
+
+            {!isMulti && (
             <Section step="2" title="Où le code est-il valable ?" subtitle="Produits, prestations, ateliers, formations — ou tout à la fois.">
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 {PROMO_CODE_SCOPES.map((scope) => {
@@ -389,6 +416,7 @@ export function PromoCodeEditor({ promoCode }) {
                 </SubPanel>
               )}
             </Section>
+            )}
 
             <Section step="3" title="Pour qui ?" subtitle="Un code pour tout le monde, ou réservé à une ou plusieurs clientes.">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -488,13 +516,15 @@ export function PromoCodeEditor({ promoCode }) {
 
               <div className="mt-5 space-y-2.5">
                 <p className="text-sm font-semibold text-dark dark:text-white">
-                  {draft.value
+                  {isMulti
+                    ? `${rules.length} offre${rules.length > 1 ? "s" : ""} dans ce code`
+                    : draft.value
                     ? `${type === "PERCENTAGE" ? `${draft.value} %` : `${Number(draft.value).toFixed(2).replace(".", ",")} €`} de remise`
                     : "Définissez la valeur de la remise"}
                 </p>
-                <SummaryRow ok label={scopes.length === PROMO_CODE_SCOPES.length ? "Valable partout" : `Valable : ${scopes.map((s) => PROMO_CODE_SCOPE_LABELS[s]).join(", ") || "—"}`} />
-                {rules.map((r) => (
-                  <SummaryRow key={r} ok label={r.charAt(0).toUpperCase() + r.slice(1)} />
+                <SummaryRow ok label={!isMulti && scopes.length === PROMO_CODE_SCOPES.length ? "Valable partout" : `Valable : ${draft.scopes.map((s) => PROMO_CODE_SCOPE_LABELS[s]).join(", ") || "—"}`} />
+                {ruleSummary.map((r, i) => (
+                  <SummaryRow key={`${i}-${r}`} ok label={r.charAt(0).toUpperCase() + r.slice(1)} />
                 ))}
                 {!draft.maxUses && !draft.maxUsesPerCustomer && <SummaryRow label="Utilisations illimitées" />}
                 <SummaryRow label={draft.expiresAt ? "Date de fin programmée" : "Sans date de fin"} />

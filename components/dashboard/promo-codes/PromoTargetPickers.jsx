@@ -76,7 +76,10 @@ function useClickOutside(onOutside) {
   return ref;
 }
 
-export function ProductPicker({ value, onChange, error }) {
+const PRODUCT_EMPTY_HINT = "Choisissez au moins un produit (ou repassez sur « Toute la boutique »).";
+
+/** `emptyHint={null}` when picking no product at all is a valid choice. */
+export function ProductPicker({ value, onChange, error, emptyHint = PRODUCT_EMPTY_HINT }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const ref = useClickOutside(() => setOpen(false));
@@ -147,7 +150,7 @@ export function ProductPicker({ value, onChange, error }) {
           ))}
         </div>
       ) : (
-        <p className="text-xs text-amber-700">Choisissez au moins un produit (ou repassez sur « Toute la boutique »).</p>
+        emptyHint && <p className="text-xs text-amber-700">{emptyHint}</p>
       )}
       {error && <p className="text-xs font-medium text-red-600">{error}</p>}
     </div>

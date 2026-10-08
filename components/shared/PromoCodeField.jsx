@@ -17,8 +17,8 @@ import { validatePromoCode } from "@/actions/promo-codes";
  *
  * @param {{
  *   subtotal: number,
- *   context: { scope: "BOUTIQUE"|"APPOINTMENT"|"WORKSHOP"|"FORMATION", lines?: {productId: string, amount: number}[], staffServiceId?: string },
- *   onApplied: (promo: {code: string, discountAmount: number} | null) => void,
+ *   context: { scope: "BOUTIQUE"|"APPOINTMENT"|"WORKSHOP"|"FORMATION", lines?: {productId: string, amount: number, unitPrice: number, quantity: number}[], staffServiceId?: string },
+ *   onApplied: (promo: {code: string, discountAmount: number, appliedRules: {label: string, discountAmount: number}[]} | null) => void,
  *   validate?: (code: string, subtotal: number, context: object) => Promise<{success: boolean, message?: string, discountAmount?: number}>,
  * }} props
  *
@@ -46,7 +46,8 @@ export function PromoCodeField({ subtotal, context, onApplied, validate = valida
       return;
     }
 
-    const promo = { code: code.toUpperCase(), discountAmount: result.discountAmount };
+    // appliedRules: a multi-offer code's breakdown — [{ label, discountAmount }].
+    const promo = { code: code.toUpperCase(), discountAmount: result.discountAmount, appliedRules: result.appliedRules ?? [] };
     setApplied(promo);
     onApplied(promo);
   }

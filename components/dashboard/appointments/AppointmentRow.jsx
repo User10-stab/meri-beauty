@@ -9,6 +9,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { ActionMenu, ActionMenuDivider, ActionMenuItem, ActionMenuTrigger } from "@/components/dashboard/Tables/ActionMenu";
+import { VisitBadge } from "@/components/dashboard/appointments/VisitParts";
 
 // ─── Status badge config ───────────────────────────────────────────────────────
 
@@ -263,7 +264,10 @@ export function AppointmentRow({ row, onConfirm, onCancel, onView }) {
 
       {/* Service */}
       <td className="px-4 py-3 align-middle">
-        <span className="text-sm text-gray-700">{row.serviceName}</span>
+        <span className="inline-flex items-center gap-1.5 text-sm text-gray-700">
+          {row.serviceName}
+          <VisitBadge visit={row.visit} className="border border-gray-200 bg-gray-50" />
+        </span>
       </td>
 
       {/* Staff */}

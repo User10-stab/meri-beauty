@@ -2,6 +2,7 @@
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { VISIT_SELECT, presentVisit } from "@/lib/appointments/visit";
 import { isAdminRole, ROLES, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { getCurrentStaffId } from "@/lib/route-protection";
 
@@ -55,11 +56,13 @@ export async function getCalendarAppointments({ from, to }) {
     };
 
     // ── Role filter ────────────────────────────────────────────────────────
+    let ownStaffId = null;
     if (role === ROLES.STAFF) {
       const staffId = await getCurrentStaffId();
       if (!staffId) {
         return { success: false, message: "Profil staff introuvable" };
       }
+      ownStaffId = staffId;
       where = {
         ...where,
         staffService: { staffId },
@@ -110,10 +113,12 @@ export async function getCalendarAppointments({ from, to }) {
             paymentType: true,
           },
         },
+        visit: VISIT_SELECT,
       },
     });
 
     // ── Serialise ──────────────────────────────────────────────────────────
+    const now = new Date();
     const data = appointments.map((appt) => {
       const staffService = appt.staffService;
       const staff = staffService?.staff;
@@ -160,6 +165,9 @@ export async function getCalendarAppointments({ from, to }) {
         remainingAmount: appt.payment?.remainingAmount
           ? Number(appt.payment.remainingAmount)
           : null,
+        // The visit this prestation belongs to, with every prestation of it.
+        visit: presentVisit(appt.visit, { ownStaffId, now }),
+        coveredByVisit: Boolean(appt.coveredByPaymentId),
         // Meta
         createdAt: appt.createdAt?.toISOString() ?? null,
       };

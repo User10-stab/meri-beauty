@@ -944,7 +944,10 @@ describe("composed at la caisse", () => {
   });
 
   it("a manual sale can't be anonymous or be paid by QR", () => {
-    expect(cart()).toContain("allowWalkIn={!manualSaleFlow}");
+    // A client de passage may buy a free line (2026-10-09): paid in full now,
+    // anonymous ticket. Ticking it undoes acompte / pay later / transfer.
+    expect(cart()).not.toContain("allowWalkIn={!manualSaleFlow}");
+    expect(cart()).toContain('if (next) setSettleMode("NOW");');
     expect(cart()).toContain('if (manualSaleFlow && method === "CARD_QR") setMethod("EXTERNAL_TERMINAL");');
   });
 

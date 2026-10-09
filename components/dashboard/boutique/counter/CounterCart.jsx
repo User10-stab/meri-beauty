@@ -891,7 +891,10 @@ export function CounterCart({
 
   function toggleWalkIn(next) {
     setIsWalkIn(next);
-    if (next && method === "CARD_QR") setMethod("CASH");
+    // A client de passage pays the whole sale on the spot: no QR, and no
+    // acompte, « payer plus tard » or transfer left over from before the tick.
+    if (next && (method === "CARD_QR" || method === "TRANSFER")) setMethod("CASH");
+    if (next) setSettleMode("NOW");
   }
 
   function resetInvoiceSale() {
@@ -919,8 +922,12 @@ export function CounterCart({
   function submitManualSale() {
     if (!cart.length) return toast.error("Ajoutez au moins une ligne.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
-    if (!customer.fullName.trim() || !customer.email.trim()) return toast.error("Nom et e-mail du client obligatoires pour cette vente.");
-    if (needsAddress && !addressComplete) {
+    if (isWalkIn) {
+      if (collectWalkInEmail && !walkInEmailReady) return toast.error("Indiquez l'e-mail du client pour envoyer le ticket.");
+    } else if (!customer.fullName.trim() || !customer.email.trim()) {
+      return toast.error("Nom et e-mail du client obligatoires pour cette vente.");
+    }
+    if (!isWalkIn && needsAddress && !addressComplete) {
       return toast.error("L'adresse de facturation est obligatoire pour un client avec un numéro de TVA.");
     }
     if (cart.some((item) => item.type === "FREE" && (!item.description.trim() || !(Number(item.unitPrice) > 0)))) {
@@ -943,7 +950,8 @@ export function CounterCart({
     startTransition(async () => {
       const result = await createManualInvoice({
         attemptKey,
-        customer: customerPayload,
+        customer: isWalkIn ? null : customerPayload,
+        walkInEmail: isWalkIn ? walkInEmail.trim() : "",
         lines: cart.map((item) =>
           item.type === "FREE"
             ? { type: "FREE", description: item.description.trim(), quantity: item.quantity, unitPrice: Number(item.unitPrice) }
@@ -1321,8 +1329,8 @@ export function CounterCart({
             <button
               type="button"
               onClick={addFreeLine}
-              disabled={isWalkIn || Boolean(sourceOrder)}
-              title={isWalkIn ? "Indisponible en mode client de passage : une ligne libre exige un client identifié" : sourceOrder ? "Indisponible sur une commande reprise" : undefined}
+              disabled={Boolean(sourceOrder)}
+              title={sourceOrder ? "Indisponible sur une commande reprise" : undefined}
               className="flex h-9 items-center gap-1.5 rounded-lg border border-[#2f3a2e] px-3 text-xs font-semibold text-[#2f3a2e] transition-colors hover:bg-[#2f3a2e]/5 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Plus size={14} />
@@ -1424,9 +1432,6 @@ export function CounterCart({
           onCollectWalkInEmailChange={setCollectWalkInEmail}
           invoiceRequested={invoiceRequested}
           onInvoiceRequestedChange={setInvoiceRequested}
-          // A manual sale needs a named client (someone owes the balance),
-          // but the invoice stays optional, exactly as on the ticket path.
-          allowWalkIn={!manualSaleFlow}
         />
 
         {manualSaleFlow && (

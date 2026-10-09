@@ -111,7 +111,7 @@ function serializePendingSale({ order, buyer, totalAmount, paidAmount, remaining
   return {
     orderId: order.id,
     orderNumber: order.orderNumber,
-    customerName: buyer.billingProfile?.companyLegalName || buyer.fullName,
+    customerName: buyer ? buyer.billingProfile?.companyLegalName || buyer.fullName : "Client de passage",
     totalAmount: Number(totalAmount),
     paidAmount: Number(paidAmount),
     remainingAmount: Number(remainingAmount),
@@ -300,7 +300,10 @@ export async function createManualInvoice(input) {
   if (!parsed.success) {
     return { success: false, message: parsed.error.issues[0]?.message ?? "Données de facture invalides." };
   }
-  const { attemptKey, customer: requestedCustomer, lines, notes, dueDate, settlement, invoiceRequested, promoCode } = parsed.data;
+  const { attemptKey, customer: requestedCustomer, walkInEmail, lines, notes, dueDate, settlement, invoiceRequested, promoCode } = parsed.data;
+  // Client de passage: no account is created and no invoice can follow —
+  // the sale ends with an anonymous ticket, as on the ticket path.
+  const isWalkIn = requestedCustomer === null;
   const paidInFull = settlement.mode === "NOW";
 
   const replay = await findReplay(attemptKey, session.user.id);
@@ -321,7 +324,7 @@ export async function createManualInvoice(input) {
     // must not hold a database transaction open. A customer created or a VAT
     // number validated here survives a later failure — harmless, and exactly
     // what a retry needs.
-    const customer = await resolveCounterCustomer(prisma, {
+    const customer = isWalkIn ? null : await resolveCounterCustomer(prisma, {
       userId: requestedCustomer.id || undefined,
       fullName: requestedCustomer.fullName,
       email: requestedCustomer.email,
@@ -337,12 +340,12 @@ export async function createManualInvoice(input) {
 
     result = await prisma.$transaction(
       async (tx) => {
-        const buyer = await tx.user.findUnique({ where: { id: customer.id }, include: BUYER_INCLUDE });
+        const buyer = isWalkIn ? null : await tx.user.findUnique({ where: { id: customer.id }, include: BUYER_INCLUDE });
 
         // The ticket path's rule, whatever the mode or the method: an invoice
         // only for a VIES-validated buyer who wants one. A sale that will be
         // invoiced must be invoiceable now, before any money is recorded.
-        const isVatEligible = hasInvoiceableVatIdentity(buyer);
+        const isVatEligible = !isWalkIn && hasInvoiceableVatIdentity(buyer);
         const wantsInvoice = isVatEligible && invoiceRequested !== false;
         if (wantsInvoice) assertInvoiceable(buyer);
 
@@ -390,7 +393,7 @@ export async function createManualInvoice(input) {
         const promo = promoCode
           ? await applyCounterPromoCode(tx, promoCode, productLines.reduce((sum, line) => sum + line.amount, 0), {
               scope: "BOUTIQUE",
-              customerId: buyer.id,
+              customerId: buyer?.id ?? null,
               lines: productLines,
             })
           : null;
@@ -413,7 +416,8 @@ export async function createManualInvoice(input) {
         const now = new Date();
         const order = await tx.order.create({
           data: {
-            userId: buyer.id,
+            userId: buyer?.id ?? null,
+            posTicketEmailTo: isWalkIn ? walkInEmail || null : null,
             fulfilmentMode: "PICKUP_ON_SITE",
             status: "COMPLETED",
             source: "MANUAL",
@@ -570,7 +574,7 @@ export async function createManualInvoice(input) {
               orderId: order.id,
               orderNumber: order.orderNumber,
               paymentId: payment.id,
-              customerId: buyer.id,
+              customerId: buyer?.id ?? null,
               lineCount: lines.length,
               attemptKey,
               ...(receipt?.pieceNumber ? { pieceNumber: receipt.pieceNumber } : {}),

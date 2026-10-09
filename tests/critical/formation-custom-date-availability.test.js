@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import {
   addDaysToDateKey,
   customDateDayCount,
+  customDateDayKeys,
   customDateDayOptions,
   customDatePerDayMinutes,
   customDateWindows,
@@ -99,7 +100,7 @@ describe("date libre — which start times a day offers", () => {
 
 // 2026-10-05, decided with the salon: no flexible hours any more. Every
 // journée is 10:00 → 17:00, and the formation's TOTAL duration sets how many
-// consecutive journées it takes — one per 7 h started.
+// journées it takes — one per 7 h started.
 describe("date libre — fixed journées of 10:00 to 17:00", () => {
   test("every journée lasts the full 10:00 → 17:00, whatever the total", () => {
     expect(customDatePerDayMinutes(240, 1)).toBe(420);
@@ -127,20 +128,99 @@ describe("date libre — fixed journées of 10:00 to 17:00", () => {
     expect(times({ days: 1, durationMinutes: 420, busy })).not.toContain("10:00");
     // The calendar keeps 10:00 only.
     const availability = source("lib/formations/custom-date-availability.js");
-    expect(availability).toContain("}).filter((time) => time === CUSTOM_DATE_DAY_START);");
+    expect(availability).toContain(".includes(CUSTOM_DATE_DAY_START)");
+    expect(availability).toContain("keys.length > 0 ? [CUSTOM_DATE_DAY_START] : []");
   });
 
   test("the calendar and the booking both use that per-day length", () => {
     const availability = source("lib/formations/custom-date-availability.js");
-    // The shared per-count helper (calendar + day slots) and the booking.
-    expect(availability).toContain("durationMinutes: customDatePerDayMinutes(formation.duration, days),");
-    expect(availability).toContain("customDateWindows({ dateKey, time, days, durationMinutes: customDatePerDayMinutes(formation.duration, days) })");
+    expect(availability).toContain("durationMinutes: CUSTOM_DATE_DAY_MINUTES, workingHours, busy, now })");
+    expect(availability).toContain("customDateWindows({ dateKeys, time, durationMinutes: customDatePerDayMinutes(formation.duration, days) })");
     expect(availability).toContain("if (!Object.values(counts).some(Boolean)) continue;");
   });
 });
 
-// A formation of several journées: every one of those consecutive days must
-// be a free working day.
+// 2026-10-09: the journées no longer have to follow each other. Until then a
+// three-journée formation could never be booked with Julie, who works Monday,
+// Tuesday and Friday: no three days in a row exist in her week. Now the first
+// journée is the day the client picks and each following one is her next free
+// working day.
+describe("date libre — journées on her next free days", () => {
+  // Julie's real week.
+  const JULIE = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"].map((day) => ({
+    day,
+    startTime: "09:00",
+    endTime: "18:00",
+    isClosed: !["MONDAY", "TUESDAY", "FRIDAY"].includes(day),
+  }));
+  const keys = ({ dateKey = MONDAY, days = 3, busy = [], workingHours = JULIE } = {}) =>
+    customDateDayKeys({ dateKey, days, workingHours, busy, now: BEFORE });
+
+  test("three journées step over the days she does not work", () => {
+    expect(keys()).toEqual(["2026-11-23", "2026-11-24", "2026-11-27"]);
+    // From the Tuesday: Tuesday, Friday, then the next Monday.
+    expect(keys({ dateKey: "2026-11-24" })).toEqual(["2026-11-24", "2026-11-27", "2026-11-30"]);
+  });
+
+  test("the day the client picks must itself be a free journée", () => {
+    // Wednesday is closed: it is not offered as a start, it is never moved.
+    expect(keys({ dateKey: "2026-11-25" })).toEqual([]);
+    expect(keys({ dateKey: SUNDAY })).toEqual([]);
+    const busy = [{ start: at(MONDAY, "11:00"), end: at(MONDAY, "12:00") }];
+    expect(keys({ busy })).toEqual([]);
+  });
+
+  test("a day she is taken on is stepped over like a closed one", () => {
+    // A rendez-vous on the Friday afternoon: the third journée moves to Monday.
+    const rendezVous = [{ start: at("2026-11-27", "15:00"), end: at("2026-11-27", "16:00") }];
+    expect(keys({ busy: rendezVous })).toEqual(["2026-11-23", "2026-11-24", "2026-11-30"]);
+    // An indisponibilité over the Tuesday.
+    const timeOff = [{ start: at("2026-11-24", "00:00"), end: at("2026-11-24", "23:59") }];
+    expect(keys({ busy: timeOff })).toEqual(["2026-11-23", "2026-11-27", "2026-11-30"]);
+  });
+
+  test("a week with no closed day keeps consecutive journées", () => {
+    expect(keys({ workingHours: WORKING_HOURS })).toEqual(["2026-11-23", "2026-11-24", "2026-11-25"]);
+    expect(keys({ days: 1 })).toEqual([MONDAY]);
+  });
+
+  test("journées that cannot be placed within 60 days are not offered", () => {
+    const mondaysOnly = JULIE.map((hours) => ({ ...hours, isClosed: hours.day !== "MONDAY" }));
+    // 9 Mondays fit in 60 days after the first (56 days), 10 do not (63).
+    expect(keys({ days: 9, workingHours: mondaysOnly })).toHaveLength(9);
+    expect(keys({ days: 10, workingHours: mondaysOnly })).toEqual([]);
+  });
+
+  test("the session keeps its own days: they are what blocks her and what is shown", () => {
+    const dateKeys = keys();
+    const booked = customDateWindows({ dateKeys, time: "10:00", durationMinutes: 420 });
+    const session = { startDate: booked[0].start, endDate: booked[2].end, customDateKeys: dateKeys };
+    expect(customSessionWindows(session)).toEqual(booked);
+    expect(sessionDayCount(session)).toBe(3);
+    const range = formatSessionDateRange(session);
+    expect(range.dayCount).toBe(3);
+    expect(range.days).toBe("lundi 23 novembre 2026, mardi 24 novembre 2026 et vendredi 27 novembre 2026");
+    expect(range.hours).toBe("10:00 – 17:00 chaque jour");
+    // Without the stored days (a date booked before this change) it still
+    // reads as every day from start to end.
+    expect(sessionDayCount({ startDate: booked[0].start, endDate: booked[2].end })).toBe(5);
+  });
+
+  test("the days are stored with the booking, online and at the till, and re-validated", () => {
+    const availability = source("lib/formations/custom-date-availability.js");
+    expect(availability).toContain("shown.some((key, index) => key !== dateKeys[index])");
+    for (const path of ["actions/formations/create-formation-reservation.js", "actions/counter/create-reservation.js"]) {
+      expect(source(path)).toContain("customDateKeys: customRequest.dateKeys,");
+    }
+    // Everything that rebuilds a date libre's days reads the stored ones.
+    expect(availability).toContain("customDateKeys: true,");
+    expect(source("lib/time-off-validation.js")).toContain("customerRequested: true, customDateKeys: true }");
+    expect(source("actions/activities/check-in.js")).toContain("endDate: true, customDateKeys: true,");
+  });
+});
+
+// The single-stretch arithmetic underneath (freeStartTimes with several days
+// still means consecutive ones; the booking places its journées one by one).
 describe("date libre — several journées", () => {
   test("the number of journées has a ceiling", () => {
     expect(customDateDayOptions(30 * 420)).toEqual([30]);

@@ -34,6 +34,19 @@ describe("checking in a formation over several days", () => {
     expect(result).toMatchObject({ dayNumber: null, newDay: false });
   });
 
+  test("a date libre is admitted on its own journées only, not on the days in between", () => {
+    // Monday, Tuesday and Friday: Wednesday is not a day of the formation.
+    const skipping = {
+      startDate: at("2026-11-23", "10:00"),
+      endDate: at("2026-11-27", "17:00"),
+      customDateKeys: ["2026-11-23", "2026-11-24", "2026-11-27"],
+    };
+    const on = (day, checkedInAt) =>
+      formationDayAdmission({ session: skipping, ...admitted, checkedInAt, now: at(day, "09:55") });
+    expect(on("2026-11-25", at("2026-11-24", "09:55"))).toMatchObject({ dayCount: 3, dayNumber: null, newDay: false });
+    expect(on("2026-11-27", at("2026-11-24", "09:55"))).toMatchObject({ dayCount: 3, dayNumber: 3, newDay: true });
+  });
+
   test("a one-day formation is unchanged: one check-in", () => {
     const oneDay = { startDate: at("2026-11-23", "09:00"), endDate: at("2026-11-23", "15:00") };
     const result = formationDayAdmission({ session: oneDay, ...admitted, checkedInAt: at("2026-11-23", "09:00"), now: at("2026-11-24", "09:00") });

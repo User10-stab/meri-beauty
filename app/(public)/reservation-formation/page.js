@@ -17,7 +17,7 @@ import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { getMyCheckoutProfile } from "@/actions/customer/settings";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { ServicePriceBreakdown } from "@/components/shared/ServicePriceBreakdown";
-import { CustomDatePicker, endTimeOf, formatDateKey, lastDateKey, perDayMinutes } from "@/components/formations/CustomDatePicker";
+import { CustomDatePicker, endTimeOf, formatDateKey, perDayMinutes } from "@/components/formations/CustomDatePicker";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { validatePassword } from "@/lib/validations/password";
 import { hasReusableVatValidation, repriceTtcCataloguePrice, resolveServiceVatPolicy } from "@/lib/tax-policy";
@@ -73,7 +73,7 @@ function ReservationFormationContent() {
   const [submitting, setSubmitting] = useState(false);
   const [formation, setFormation] = useState(null);
   const [sessionData, setSessionData] = useState(null);
-  const [customDate, setCustomDate] = useState(null); // { date, time, days }
+  const [customDate, setCustomDate] = useState(null); // { date, time, days, dates }
   // Bumped when a picked date is refused, to remount the picker on fresh availability.
   const [pickerVersion, setPickerVersion] = useState(0);
   const [available, setAvailable] = useState(0);
@@ -1150,13 +1150,9 @@ function ReservationFormationContent() {
                     <Calendar size={16} className="mt-0.5 shrink-0 text-gold" />
                     {customDate ? (
                       <div>
-                        <p className="text-ink/80">
-                          {customDate.days > 1 ? "Du " : ""}
-                          {formatDateKey(customDate.date)}
-                        </p>
-                        {customDate.days > 1 && (
-                          <p className="text-ink/80">au {formatDateKey(lastDateKey(customDate.date, customDate.days))}</p>
-                        )}
+                        {(customDate.days > 1 ? customDate.dates : [customDate.date]).map((key) => (
+                          <p key={key} data-date={key} className="text-ink/80">{formatDateKey(key)}</p>
+                        ))}
                         <p className="text-xs text-ink/50">
                           {customDate.time} – {endTimeOf(customDate.time, perDayMinutes(formation.duration, customDate.days))}
                           {customDate.days > 1 ? ` chaque jour · ${customDate.days} journées` : " · 1 journée"}

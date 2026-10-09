@@ -3,6 +3,7 @@ import { getPublicFormations } from "@/actions/formations/get-public-formations"
 import { AnimatedCard } from "@/components/website/AnimatedCard";
 import { ActivityPriceTag } from "@/components/activities/ActivityPrice";
 import { getLocale, getTranslations } from "next-intl/server";
+import { formatDurationShort } from "@/lib/format-duration";
 
 export const metadata = {
   title: "Formations — Meri Beauty",
@@ -140,7 +141,7 @@ function FormationCard({ formation, t, locale }) {
           )}
           {formation.duration && (
             <span className="flex items-center gap-1.5">
-              <ClockIcon /> {formation.duration} min
+              <ClockIcon /> {formatDurationShort(formation.duration)}
             </span>
           )}
         </div>

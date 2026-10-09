@@ -7,9 +7,10 @@ import { getFormationCustomDateMonth, getFormationCustomDateSlots } from "@/acti
 /**
  * « Date libre » picker for a private formation: the client picks the first
  * day; the journées are fixed — 10:00 → 17:00, as many as the formation's
- * duration needs (lib/formations/custom-date-availability.js). A day is
- * offered only when every journée from it is free; the booking action
- * re-validates the choice.
+ * duration needs (lib/formations/custom-date-availability.js). The journées
+ * after the first fall on the animator's next free days, which the server
+ * names; the client is shown each of them, and the booking action
+ * re-validates the choice against those same days.
  */
 
 const WEEK_DAYS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -34,13 +35,6 @@ export function nextDateKey(dateKey) {
 /** Same rule as customDatePerDayMinutes: a journée is always 10:00 → 17:00. */
 export function perDayMinutes() {
   return 7 * 60;
-}
-
-/** The last day of a booking of `days` journées starting on `dateKey`. */
-export function lastDateKey(dateKey, days) {
-  let key = dateKey;
-  for (let index = 1; index < days; index += 1) key = nextDateKey(key);
-  return key;
 }
 
 /** "7 h 30" from 450 minutes. */
@@ -75,8 +69,8 @@ function shiftMonth(monthKey, delta) {
  * @param {object} props
  * @param {string} props.formationId
  * @param {number} props.durationMinutes - the formation's TOTAL duration
- * @param {{ date: string, time: string, days: number } | null} props.value
- * @param {(value: { date: string, time: string, days: number } | null) => void} props.onChange
+ * @param {{ date: string, time: string, days: number, dates: string[] } | null} props.value
+ * @param {(value: { date: string, time: string, days: number, dates: string[] } | null) => void} props.onChange
  * @param {Function} [props.loadMonth] - defaults to the public getFormationCustomDateMonth
  * @param {Function} [props.loadSlots] - defaults to the public getFormationCustomDateSlots
  */
@@ -94,6 +88,7 @@ export function CustomDatePicker({
   const [dateKey, setDateKey] = useState(value?.date ?? null);
   const [days, setDays] = useState(value?.days ?? 1);
   const [slots, setSlots] = useState(null); // { [journées]: string[] } | null
+  const [slotDates, setSlotDates] = useState({}); // { [journées]: the days of that booking }
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [loadError, setLoadError] = useState("");
 
@@ -122,6 +117,7 @@ export function CustomDatePicker({
     loadSlots(formationId, dateKey).then((result) => {
       if (!active) return;
       setLoadingSlots(false);
+      setSlotDates(result.success ? result.data.dates ?? {} : {});
       setSlots(result.success ? result.data.times : {});
     });
     return () => {
@@ -144,8 +140,9 @@ export function CustomDatePicker({
     if (!count) return;
     setDays(count);
     const time = slots[count][0];
-    if (value?.date !== dateKey || value?.time !== time || value?.days !== count) {
-      onChange({ date: dateKey, time, days: count });
+    const dates = slotDates[count] ?? [];
+    if (value?.date !== dateKey || value?.time !== time || value?.days !== count || value?.dates?.join() !== dates.join()) {
+      onChange({ date: dateKey, time, days: count, dates });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slots, dateKey]);
@@ -160,6 +157,7 @@ export function CustomDatePicker({
     timeZone: "UTC",
   });
   const times = slots?.[days] ?? [];
+  const dates = slotDates[days] ?? [];
 
   return (
     <div data-testid="custom-date-picker" className="space-y-5">
@@ -258,10 +256,17 @@ export function CustomDatePicker({
                 {days} journée{days > 1 ? "s" : ""} · {times[0]} – {endTimeOf(times[0], perDayMinutes())}
                 {days > 1 ? " chaque jour" : ""}
               </span>
-              <span className="block text-xs text-ink/50">
-                {days > 1
-                  ? `Du ${formatDateKey(dateKey, { weekday: "short", day: "numeric", month: "short" })} au ${formatDateKey(lastDateKey(dateKey, days), { weekday: "short", day: "numeric", month: "short" })} · `
-                  : ""}
+              {days > 1 && (
+                <ul data-testid="custom-date-days" className="mt-1.5 space-y-0.5 text-xs capitalize text-ink/70">
+                  {dates.map((key, index) => (
+                    <li key={key} data-date={key}>
+                      <span className="normal-case text-ink/45">Journée {index + 1} · </span>
+                      {formatDateKey(key, { weekday: "long", day: "numeric", month: "long" })}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <span className="mt-1 block text-xs text-ink/50">
                 formation de {formatMinutes(Number(durationMinutes))} au total
               </span>
             </div>

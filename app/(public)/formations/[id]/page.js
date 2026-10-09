@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { getPublicFormationById } from "@/actions/formations/get-public-formations";
 import { ActivityPriceTag, ActivityDepositNote } from "@/components/activities/ActivityPrice";
 import { getAppBaseUrl } from "@/lib/site-url";
+import { formatDurationShort } from "@/lib/format-duration";
+import { customDateDayCount } from "@/lib/formations/custom-date-availability";
 
 const SITE_URL = getAppBaseUrl();
 
@@ -342,10 +344,12 @@ export default async function FormationDetailPage({ params }) {
                       </span>
                       <p className="flex items-center justify-center gap-1.5 text-sm text-ink/65 sm:justify-start">
                         <CalendarIcon />
-                        Choisissez librement votre jour et votre horaire
+                        Choisissez librement votre date
                       </p>
                       <p className="text-xs text-ink/45">
-                        Sur 1 ou 2 journées, selon les disponibilités
+                        {customDateDayCount(formation.duration) > 1
+                          ? `Sur ${customDateDayCount(formation.duration)} journées de 10:00 à 17:00, qui ne se suivent pas forcément, selon les disponibilités`
+                          : "Sur 1 journée, de 10:00 à 17:00, selon les disponibilités"}
                         {formation.animator ? ` de ${formation.animator.name}` : ""}. Votre date est confirmée dès
                         le paiement de l&apos;acompte ou du montant total.
                       </p>
@@ -393,7 +397,7 @@ export default async function FormationDetailPage({ params }) {
                   <li className="flex  gap-3 sm:justify-start">
                     <ClockIcon />
                     <div className="text-center sm:text-left">
-                      <p className="text-sm font-semibold text-ink">{formation.duration} min</p>
+                      <p className="text-sm font-semibold text-ink">{formatDurationShort(formation.duration)}</p>
                       <p className="text-xs text-ink/45">Durée</p>
                     </div>
                   </li>

@@ -111,6 +111,8 @@ const createReservationSchema = z.object({
       date: z.string(),
       time: z.string(),
       days: z.number().int().min(1),
+      // The journées the till displayed — refused if the calendar moved since.
+      dates: z.array(z.string()).max(30),
     })
     .optional(),
   seatsCount: z.number().int().min(1).max(50),
@@ -171,8 +173,8 @@ function formatSessionDate(date) {
 }
 
 /** A formation over several days names all of them. */
-function formatCounterSessionDate({ sessionStartDate, sessionEndDate }) {
-  const range = formatSessionDateRange({ startDate: sessionStartDate, endDate: sessionEndDate });
+function formatCounterSessionDate({ sessionStartDate, sessionEndDate, sessionDateKeys }) {
+  const range = formatSessionDateRange({ startDate: sessionStartDate, endDate: sessionEndDate, customDateKeys: sessionDateKeys });
   return range.multiDay ? `${range.days} (${range.hours})` : formatSessionDate(sessionStartDate);
 }
 
@@ -281,6 +283,7 @@ export async function createCounterReservation(input) {
               endDate: customRequest.endDate,
               capacity: 1,
               customerRequested: true,
+              customDateKeys: customRequest.dateKeys,
             },
           });
           const taken = await customSessionConflict(tx, {
@@ -463,6 +466,7 @@ export async function createCounterReservation(input) {
           sessionId: session.id,
           sessionStartDate: session.startDate,
           sessionEndDate: session.endDate,
+          sessionDateKeys: session.customDateKeys ?? [],
           customer: { fullName: user.fullName, email: user.email, isCompany: user.isCompany, vatNumber: user.vatNumber, vatValidatedAt: user.vatValidatedAt },
           seatsCount: data.seatsCount,
           paidAmount: awaitsTransfer ? 0 : collected,

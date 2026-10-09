@@ -551,7 +551,7 @@ async function hydrateFormations(ids) {
     include: {
       customer: { select: { fullName: true, email: true, vatNumber: true, isCompany: true, vatValidatedAt: true } },
       payment: { select: PAYMENT_LEDGER_SELECT },
-      session: { select: { startDate: true, endDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } },
+      session: { select: { startDate: true, endDate: true, customDateKeys: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } },
     },
   });
   const staffByEmail = await resolveStaffByEmails(rows.map((row) => row.session?.animator?.email));
@@ -1145,7 +1145,7 @@ export async function getTransactionDetail(transactionId) {
             transactions: { orderBy: { paidAt: "asc" }, select: { id: true, amount: true, method: true, transactionType: true, paidAt: true, isDeleted: true } },
             order: { select: { id: true, orderNumber: true, status: true, fulfilmentMode: true, pickupCode: true, pickedUpAt: true, user: { select: { fullName: true, email: true } }, createdByStaff: { select: { fullName: true, role: true } } } },
             workshopReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, workshop: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
-            formationReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, endDate: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
+            formationReservation: { select: { id: true, status: true, seatsCount: true, checkInCode: true, checkedInAt: true, checkedInSeats: true, session: { select: { startDate: true, endDate: true, customDateKeys: true, formation: { select: { title: true, type: true } }, animator: { select: { name: true, email: true } } } }, customer: { select: { fullName: true, email: true } } } },
             appointment: { select: { id: true, date: true, startTime: true, endTime: true, status: true, visitId: true, checkInCode: true, checkedInAt: true, user: { select: { fullName: true, email: true } }, staffService: { select: { price: true, service: { select: { name: true } }, staff: { select: { user: { select: { fullName: true, role: true } } } } } } } },
             // The other prestations of the same visit this Payment settled.
             coveredAppointments: { orderBy: { startTime: "asc" }, select: { id: true, startTime: true, endTime: true, status: true, staffService: { select: { price: true, service: { select: { name: true } } } } } },

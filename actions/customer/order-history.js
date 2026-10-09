@@ -128,6 +128,7 @@ export async function getMyOrderHistory() {
           select: {
             startDate: true,
             endDate: true,
+            customDateKeys: true,
             formation: { select: { title: true, type: true, cover: true } },
           },
         },

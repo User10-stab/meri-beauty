@@ -155,11 +155,12 @@ describe("every screen that captures a buyer uses the same fields", () => {
     );
   });
 
-  it("each screen says why the address is required, without claiming the other's rule", () => {
+  it("each screen says why the address is required: only once a VAT number is attached", () => {
     expect(buyerForm).toContain("Adresse de facturation obligatoire {addressReason}");
-    // The till: any new customer or one with no address on file.
-    expect(buyerForm).toContain('addressReason = "pour ce client (nouveau ou sans adresse enregistrée)"');
-    // A booking: only once a VAT number is attached (resolveCounterCustomer).
+    // The till follows the booking rule since 2026-10-09: a particulier
+    // gives a name and an e-mail, nothing else.
+    expect(buyerForm).toContain('addressReason = "pour un client avec un numéro de TVA"');
+    // A booking: same rule (resolveCounterCustomer).
     expect(source("components/dashboard/boutique/counter/CounterBookingComposer.jsx")).toContain(
       'addressReason="pour un client avec un numéro de TVA"'
     );

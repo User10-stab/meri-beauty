@@ -104,6 +104,10 @@ export function CounterCart({
   // keystroke typed into it, so city/postal code could never be filled and
   // the server rejected every new-customer sale with POS_ADDRESS_REQUIRED.
   const [addressOnFile, setAddressOnFile] = useState(false);
+  // Whether the *resolved* customer already has a VAT number stored. Clearing
+  // the VAT box doesn't remove it server-side, so the address stays required
+  // for that account even when the field on screen is empty.
+  const [vatOnFile, setVatOnFile] = useState(false);
   const [matches, setMatches] = useState([]);
   // Live preview only, mirroring the online checkout's own VAT box — the
   // authoritative VIES check (and the actual save onto the customer) happens
@@ -779,6 +783,7 @@ export function CounterCart({
       addressCountry: match.addressCountry ?? "BE",
     });
     setAddressOnFile(Boolean(match.addressLine1));
+    setVatOnFile(Boolean(match.vatNumber));
     setVatCheck(null);
     setMatches([]);
   }
@@ -791,7 +796,10 @@ export function CounterCart({
     // isCompany resets the same way: it describes the matched account, not
     // whoever is now being typed.
     const wasMatched = Boolean(customer.id);
-    if (wasMatched) setAddressOnFile(false);
+    if (wasMatched) {
+      setAddressOnFile(false);
+      setVatOnFile(false);
+    }
     setCustomer((current) => ({
       ...current,
       ...(wasMatched ? emptyAddress : null),
@@ -837,12 +845,31 @@ export function CounterCart({
     });
   }
 
-  // A returning customer with an address already on file shouldn't have to
-  // re-enter it at every counter sale — only ask when it's genuinely
-  // missing (new customer, or an existing one with none saved yet). Mirrors
-  // the server's own rule, which also tests the stored record rather than
-  // the submitted payload.
-  const needsAddress = !addressOnFile;
+  // A particulier only gives a name and an e-mail: no invoice follows, so no
+  // billing address is asked. It is required only for a customer with a VAT
+  // number (typed now or already on file) who has none saved yet. Mirrors the
+  // server's own rule, which also tests the stored record rather than the
+  // submitted payload.
+  const needsAddress = !addressOnFile && (vatOnFile || Boolean(customer.vatNumber.trim()));
+  const addressComplete = Boolean(customer.addressLine1.trim() && customer.addressCity.trim() && customer.addressPostalCode.trim());
+  // Only what the form is actually showing is sent: a half-typed address left
+  // behind after the VAT number was removed must not fail the sale.
+  const customerPayload = {
+    id: customer.id,
+    fullName: customer.fullName,
+    email: customer.email,
+    phone: customer.phone,
+    vatNumber: customer.vatNumber,
+    ...(needsAddress
+      ? {
+          addressLine1: customer.addressLine1,
+          addressLine2: customer.addressLine2,
+          addressCity: customer.addressCity,
+          addressPostalCode: customer.addressPostalCode,
+          addressCountry: customer.addressCountry,
+        }
+      : null),
+  };
 
   // Existing VIES proof is reused silently; a newly typed VAT number is
   // checked again server-side when the sale is submitted.
@@ -872,6 +899,7 @@ export function CounterCart({
     clearPromo();
     setCustomer(emptyCustomer);
     setAddressOnFile(false);
+    setVatOnFile(false);
     setVatCheck(null);
     setInvoiceNotes("");
     setInvoiceRequested(true);
@@ -892,8 +920,8 @@ export function CounterCart({
     if (!cart.length) return toast.error("Ajoutez au moins une ligne.");
     if (!attemptKey) return toast.error("Initialisation de la caisse en cours. Réessayez dans un instant.");
     if (!customer.fullName.trim() || !customer.email.trim()) return toast.error("Nom et e-mail du client obligatoires pour cette vente.");
-    if (needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim())) {
-      return toast.error("L'adresse de facturation du client est obligatoire.");
+    if (needsAddress && !addressComplete) {
+      return toast.error("L'adresse de facturation est obligatoire pour un client avec un numéro de TVA.");
     }
     if (cart.some((item) => item.type === "FREE" && (!item.description.trim() || !(Number(item.unitPrice) > 0)))) {
       return toast.error("Chaque ligne libre doit avoir une description et un prix supérieur à 0.");
@@ -915,18 +943,7 @@ export function CounterCart({
     startTransition(async () => {
       const result = await createManualInvoice({
         attemptKey,
-        customer: {
-          id: customer.id,
-          fullName: customer.fullName,
-          email: customer.email,
-          phone: customer.phone,
-          vatNumber: customer.vatNumber,
-          addressLine1: customer.addressLine1,
-          addressLine2: customer.addressLine2,
-          addressCity: customer.addressCity,
-          addressPostalCode: customer.addressPostalCode,
-          addressCountry: customer.addressCountry,
-        },
+        customer: customerPayload,
         lines: cart.map((item) =>
           item.type === "FREE"
             ? { type: "FREE", description: item.description.trim(), quantity: item.quantity, unitPrice: Number(item.unitPrice) }
@@ -999,7 +1016,7 @@ export function CounterCart({
     }
     startTransition(async () => {
       const result = await completePointOfSaleSale({
-        customer: isWalkIn ? null : customer,
+        customer: isWalkIn ? null : customerPayload,
         walkInEmail: isWalkIn ? walkInEmail.trim() : "",
         items: cart.map((item) => ({ type: "PRODUCT", variantId: item.variantId, quantity: item.quantity })),
         method,
@@ -1598,7 +1615,7 @@ export function CounterCart({
             (collectsNow && method === "CASH" && (cashReceived === "" || changeDue < 0)) ||
             (manualSaleFlow && settleMode === "DEPOSIT" && !depositValid) ||
             (tillClosed && !allowedWhileClosed) ||
-            (!isWalkIn && needsAddress && (!customer.addressLine1.trim() || !customer.addressCity.trim() || !customer.addressPostalCode.trim()))
+            (!isWalkIn && needsAddress && !addressComplete)
           }
         >
           {isPending

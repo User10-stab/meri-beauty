@@ -139,11 +139,18 @@ describe("returns and reminders contracts", () => {
     expect(appointmentReminders).toContain("appointmentReminderEmail");
   });
 
-  test.each([
-    ["workshop", workshopReminders],
-    ["formation", formationReminders],
-  ])("%s reminders exclude and mark already-sent reservations", (_name, code) => {
-    expect(code).toMatch(/reminderSentAt:\s*null/);
-    expect(code).toMatch(/data:\s*\{\s*reminderSentAt:\s*now\s*\}/);
+  test("workshop reminders exclude and mark already-sent reservations", () => {
+    expect(workshopReminders).toMatch(/reminderSentAt:\s*null/);
+    expect(workshopReminders).toMatch(/data:\s*\{\s*reminderSentAt:\s*now\s*\}/);
+  });
+
+  test("formation reminders are claimed per journée on the marker that was read", () => {
+    // One reminder per journée since 2026-10-09, so the marker is no longer
+    // "null or sent": a journée already reminded is excluded by
+    // journeeToRemind, and the claim is conditional on the value read
+    // (tests/critical/formation-reminder-each-journee.test.js).
+    expect(formationReminders).toContain("journeeToRemind({ session: reservation.session, reminderSentAt: reservation.reminderSentAt, now })");
+    expect(formationReminders).toContain("where: { id: reservation.id, reminderSentAt: reservation.reminderSentAt },");
+    expect(formationReminders).toMatch(/data:\s*\{\s*reminderSentAt:\s*now\s*\}/);
   });
 });

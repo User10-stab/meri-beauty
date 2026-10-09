@@ -25,6 +25,7 @@ export async function GET(req, { params }) {
           select: {
             startDate: true,
             endDate: true,
+            customDateKeys: true,
             formation: { select: { title: true } },
           },
         },

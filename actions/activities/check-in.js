@@ -102,7 +102,7 @@ const RESERVATION_INCLUDE = {
     customer: { select: HOLDER_SELECT },
     payment: { select: { totalAmount: true, paidAmount: true, remainingAmount: true, payeeStaffId: true } },
     session: {
-      select: { startDate: true, endDate: true, formation: { select: { title: true, type: true } } },
+      select: { startDate: true, endDate: true, customDateKeys: true, formation: { select: { title: true, type: true } } },
     },
   },
   [CHECK_IN_KINDS.APPOINTMENT]: {

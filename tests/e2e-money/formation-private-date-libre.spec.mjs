@@ -30,8 +30,12 @@ import { parseBrusselsInputValue, toBrusselsInputValue } from "../../lib/datetim
  *     included), the salon's fermetures exceptionnelles, her rendez-vous and
  *     the sessions she already animates are all read;
  *   - every journée is 10:00 → 17:00 (no flexible hours, 2026-10-05); the
- *     formation's total duration sets how many consecutive journées it takes
- *     (one per 7 h started), and every one of them must be free;
+ *     formation's total duration sets how many journées it takes (one per
+ *     7 h started);
+ *   - the journées need not follow each other (2026-10-09): the first is the
+ *     day the client picks, each next one the trainer's next free day — a day
+ *     off, a fermeture or a day with a rendez-vous is stepped over, and the
+ *     booking keeps the exact days it was given;
  *   - the date is confirmed ONLY by a payment — deposit or full. An unpaid
  *     pick blocks nobody, and a pick whose day was taken before the money
  *     arrived is not confirmed.
@@ -68,7 +72,9 @@ const base = addDays(today, 40);
 const DAY = {
   twoDays: base, //            free, and so is the next day   → paid, 2 journées
   twoDaysSecond: addDays(base, 1),
-  beforeDayOff: addDays(base, 4), // free, but the next day is off → no two journées from it
+  beforeDayOff: addDays(base, 4), // free, the next day is off → the journées step over it
+  afterDayOff: addDays(base, 6), //  free, between the day off and the closure
+  afterClosure: addDays(base, 8), // free, after the closure
   dayOff: addDays(base, 5), //       full-day indisponibilité
   closure: addDays(base, 7), //      fermeture exceptionnelle of the salon
   appointment: addDays(base, 9), //  a rendez-vous 12:00–13:00 → the whole journée is gone
@@ -78,7 +84,7 @@ const DAY = {
   takenLate: addDays(base, 14), //   picked, then closed before the payment
   takenEarly: addDays(base, 16), //  picked, then closed before the submit
   stretch: addDays(base, 20), //     a 30 h formation: five journées (20 → 24)
-  stretchBlocked: addDays(base, 27), // five journées from here would cross the day off at +30
+  stretchBlocked: addDays(base, 27), // five journées from here step over the day off at +30
   stretchDayOff: addDays(base, 30),
   counter: addDays(base, 33), //     sold at the till, 2 journées (33 → 34)
   counterSecond: addDays(base, 34),
@@ -103,6 +109,11 @@ async function expectDay(page, dateKey, free, why) {
   const day = await dayButton(page, dateKey);
   await expect(day, why).toHaveAttribute("data-free", free ? "true" : "false");
   if (!free) await expect(day, why).toBeDisabled();
+}
+
+/** The days the picker lists under a choice of several journées. */
+function listedDays(choice) {
+  return choice.getByTestId("custom-date-days").locator("li").evaluateAll((items) => items.map((li) => li.dataset.date));
 }
 
 /** Picks a first day; the journées are then chosen for her. Returns the choice shown. */
@@ -142,6 +153,8 @@ test.describe("formation privée — date libre", () => {
   let payer; // pays a deposit for two journées
   let neighbour; // sees what the payer's booking left, and is refused twice
   let fullPayer; // pays in full for one journée
+  let skipper; // pays for three journées that do not follow each other
+  let long; // 15 h: three journées
   let formationA; // created through the dashboard, with no date at all
   let formationB; // seeded with one scheduled date
   let closure;
@@ -153,6 +166,7 @@ test.describe("formation privée — date libre", () => {
     payer = await seedCustomer({ label: "datelibre" });
     neighbour = await seedCustomer({ label: "voisine" });
     fullPayer = await seedCustomer({ label: "totalite" });
+    skipper = await seedCustomer({ label: "saute" });
 
     await seedTrainerDayOff({ staff: trainer.staff, start: at(DAY.dayOff, "00:00"), end: at(DAY.dayOff, "23:59") });
     closure = await seedSalonClosure({ start: at(DAY.closure, "00:00"), end: at(DAY.closure, "23:59") });
@@ -234,12 +248,14 @@ test.describe("formation privée — date libre", () => {
     await expectDay(page, DAY.twoDays, true, "a free day was not offered");
     // A rendez-vous anywhere between 10:00 and 17:00 takes the journée…
     await expectDay(page, DAY.appointment, false, "a journée was offered over a rendez-vous");
-    // …and two journées cannot start the day before it either.
-    await expectDay(page, addDays(DAY.appointment, -1), false, "two journées were offered into a rendez-vous");
+    // …but the day before it is still a start: the second journée steps over.
+    await expectDay(page, addDays(DAY.appointment, -1), true, "a day was refused because the NEXT one has a rendez-vous");
     // A rendez-vous after 17:00 does not.
     await expectDay(page, DAY.lateAppointment, true, "a rendez-vous after 17:00 closed the journée");
-    // Two journées never run into a day off.
-    await expectDay(page, DAY.beforeDayOff, false, "two journées were offered into a day off");
+    // A day off after the first journée does not close it: it is stepped over.
+    await expectDay(page, DAY.beforeDayOff, true, "a day was refused because the NEXT one is a day off");
+    const choice = await pickDay(page, DAY.beforeDayOff);
+    expect(await listedDays(choice), "the second journée did not step over the day off").toEqual([DAY.beforeDayOff, DAY.afterDayOff]);
   });
 
   test("two journées paid by deposit: confirmed, and both days are then taken", async ({ page, browser }) => {
@@ -290,6 +306,7 @@ test.describe("formation privée — date libre", () => {
     expect(reservation.session.endDate.toISOString(), "two journées do not end at 17:00 on the second day").toBe(
       at(DAY.twoDaysSecond, "17:00").toISOString(),
     );
+    expect(reservation.session.customDateKeys, "the booking did not keep its own days").toEqual([DAY.twoDays, DAY.twoDaysSecond]);
 
     expect(Number(reservation.totalPrice)).toBeCloseTo(PRICE, 2);
     expect(Number(reservation.payment.paidAmount)).toBeCloseTo(DEPOSIT, 2);
@@ -308,28 +325,70 @@ test.describe("formation privée — date libre", () => {
     expect(staffMail.Text).toContain("date choisie par la cliente");
     expect(staffMail.Text).toContain("Acompte payé");
 
-    // Paid: both days are now off the calendar for the next client, and so is
-    // the day before (its second journée would land on the first).
+    // Paid: both days are now off the calendar for the next client. The day
+    // before stays a start — its second journée lands after the paid days.
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, formationA.id);
     await expectDay(page, DAY.twoDays, false, "the first paid day is still offered");
     await expectDay(page, DAY.twoDaysSecond, false, "the second paid day is still offered");
-    await expectDay(page, addDays(DAY.twoDays, -1), false, "two journées were offered into the paid days");
+    const dayBefore = addDays(DAY.twoDays, -1);
+    const next = await pickDay(page, dayBefore);
+    expect(await listedDays(next), "a second journée was placed on a paid day").toEqual([dayBefore, DAY.lateAppointment]);
   });
 
   test("a long formation takes as many journées as its duration needs", async ({ page }) => {
     // 15 h in total: three journées of 10:00–17:00, set for her.
-    const long = await seedPrivateFormation({ animator: trainer.animator, price: PRICE, duration: 900, label: "Longue" });
+    long = await seedPrivateFormation({ animator: trainer.animator, price: PRICE, duration: 900, label: "Longue" });
 
     await loginAs(page, customerCredentials(neighbour));
     await openPicker(page, long.formation.id);
 
-    // Three journées from two days before the day off would cross it.
-    await expectDay(page, addDays(DAY.dayOff, -2), false, "three journées were offered into a day off");
     const choice = await pickDay(page, DAY.fullPayment);
     await expect(choice).toHaveAttribute("data-days", "3");
     await expect(choice).toContainText("3 journées · 10:00 – 17:00 chaque jour");
     await expect(page.getByTestId("custom-date-summary")).toContainText(/3 journées/);
+  });
+
+  // The case that started it (2026-10-09): Julie works Monday, Tuesday and
+  // Friday, so three days in a row never exist and her three-journée formation
+  // could not be booked at all. Here the days in between are a day off and a
+  // fermeture of the salon.
+  test("three journées that do not follow each other: paid, stored and taken one by one", async ({ page }) => {
+    const days = [DAY.beforeDayOff, DAY.afterDayOff, DAY.afterClosure];
+
+    await loginAs(page, customerCredentials(skipper));
+    await openPicker(page, long.formation.id);
+
+    const choice = await pickDay(page, DAY.beforeDayOff);
+    await expect(choice).toHaveAttribute("data-days", "3");
+    expect(await listedDays(choice), "the journées did not step over the day off and the closure").toEqual(days);
+    // The summary names each day; it does not promise the days in between.
+    await expect(page.getByTestId("custom-date-summary").locator("[data-date]")).toHaveCount(3);
+
+    await fillAndAcceptTerms(page);
+    await page.getByRole("button", { name: /payer l'acompte de/i }).click();
+    await payAndReturn(page, /\/reservation-formation\/succes/);
+
+    const reservation = await waitFor(
+      async () => {
+        const row = await customReservation(long.formation.id, skipper.id);
+        return row?.status === "CONFIRMED" && row.payment?.transactions?.length ? row : null;
+      },
+      { what: "the three non-consecutive journées to be confirmed by their deposit" },
+    );
+    expect(reservation.session.customDateKeys, "the booking did not keep the days it was sold").toEqual(days);
+    expect(reservation.session.startDate.toISOString()).toBe(at(days[0], "10:00").toISOString());
+    expect(reservation.session.endDate.toISOString()).toBe(at(days[2], "17:00").toISOString());
+    expect(Number(reservation.payment.paidAmount)).toBeCloseTo(DEPOSIT, 2);
+    await assertLedgerSound(reservation.payment.id, { expectHeld: DEPOSIT });
+
+    // Three journées — not the five calendar days from the first to the last.
+    await expect(page.getByTestId("formation-second-day")).toContainText(/3 journées/, { timeout: 60_000 });
+
+    // Each of the three days is now taken for the next client.
+    await loginAs(page, customerCredentials(neighbour));
+    await openPicker(page, formationA.id);
+    for (const day of days) await expectDay(page, day, false, `${day}, a paid journée, is still offered`);
   });
 
   test("the salon sees the booking, and saving the formation does not delete the client's date", async ({ page }) => {
@@ -511,10 +570,11 @@ test.describe("formation privée — date libre", () => {
     await loginAs(page, customerCredentials(fullPayer));
     await openPicker(page, long.formation.id);
 
-    // Five days from here, or from the day before, would cross the day off.
-    await expectDay(page, DAY.stretchBlocked, false, "five journées over a day off were offered");
-    await expectDay(page, addDays(DAY.stretchBlocked, -1), false, "five journées over a day off were offered");
-    await expectDay(page, addDays(DAY.stretchBlocked, -2), true, "five free days ahead were not offered");
+    // Five journées from here meet the day off: it is stepped over.
+    const around = await pickDay(page, DAY.stretchBlocked);
+    expect(await listedDays(around), "five journées did not step over the day off").toEqual(
+      [0, 1, 2, 4, 5].map((offset) => addDays(DAY.stretchBlocked, offset)),
+    );
 
     const choice = await pickDay(page, DAY.stretch);
     await expect(choice).toHaveAttribute("data-days", "5");
@@ -535,6 +595,7 @@ test.describe("formation privée — date libre", () => {
     expect(reservation.session.endDate.toISOString(), "five journées do not end on the fifth day at 17:00").toBe(
       at(addDays(DAY.stretch, 4), "17:00").toISOString(),
     );
+    expect(reservation.session.customDateKeys).toEqual([0, 1, 2, 3, 4].map((offset) => addDays(DAY.stretch, offset)));
     expect(Number(reservation.totalPrice)).toBeCloseTo(PRICE, 2);
     expect(Number(reservation.payment.paidAmount)).toBeCloseTo(DEPOSIT, 2);
     await expect(page.getByTestId("formation-second-day")).toContainText(/5 journées/, { timeout: 60_000 });
@@ -636,7 +697,7 @@ test.describe("formation privée — date libre", () => {
     const yesterday = addDays(today, -1);
     await prisma.formationSession.update({
       where: { id: sold.session.id },
-      data: { startDate: at(yesterday, "10:00"), endDate: at(today, "12:00") },
+      data: { startDate: at(yesterday, "10:00"), endDate: at(today, "12:00"), customDateKeys: [yesterday, today] },
     });
     await prisma.formationReservation.update({ where: { id: sold.id }, data: { checkedInAt: at(yesterday, "09:55") } });
 

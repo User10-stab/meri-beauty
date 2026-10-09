@@ -610,6 +610,7 @@ export async function createFormationReservation(data) {
                 endDate: customRequest.endDate,
                 capacity: 1,
                 customerRequested: true,
+                customDateKeys: customRequest.dateKeys,
               },
             });
             sessionId = requested.id;

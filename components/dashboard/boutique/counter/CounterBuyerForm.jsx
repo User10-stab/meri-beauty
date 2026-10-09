@@ -89,7 +89,7 @@ export function CounterBuyerForm({
   invoiceRequested = true,
   onInvoiceRequestedChange,
   showInvoiceOptOut = true,
-  addressReason = "pour ce client (nouveau ou sans adresse enregistrée)",
+  addressReason = "pour un client avec un numéro de TVA",
 }) {
   return (
     <>

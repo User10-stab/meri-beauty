@@ -116,9 +116,11 @@ describe("point-of-sale security contracts", () => {
     expect(source("components/dashboard/boutique/counter/CounterPaymentMethods.jsx")).toContain("Monnaie à rendre");
   });
 
-  test("billing address is required only when the resolved customer doesn't already have one on file", () => {
+  test("billing address is required only for a customer with a VAT number and none on file", () => {
     expect(pos).toContain('throw new Error("POS_ADDRESS_REQUIRED")');
     expect(pos).toContain("needsAddress = !customer?.addressLine1");
+    expect(pos).toContain("hasVatNumber = Boolean(requestedCustomer.vatNumber || customer?.vatNumber)");
+    expect(pos).toContain("if (needsAddress && hasVatNumber && !addressSupplied)");
     expect(pos).toContain('error.message === "POS_ADDRESS_REQUIRED"');
 
     const validation = source("lib/validations/counter-customer.js");
@@ -128,7 +130,7 @@ describe("point-of-sale security contracts", () => {
     expect(validation).toContain('.optional().or(z.literal(""))');
 
     const ui = source("components/dashboard/boutique/counter/CounterCart.jsx");
-    expect(ui).toContain("needsAddress = !addressOnFile");
+    expect(ui).toContain("needsAddress = !addressOnFile && (vatOnFile || Boolean(customer.vatNumber.trim()))");
 
     const buyerForm = source("components/dashboard/boutique/counter/CounterBuyerForm.jsx");
     expect(buyerForm).toContain("updateCustomerAddress");

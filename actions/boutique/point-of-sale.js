@@ -871,18 +871,20 @@ export async function completePointOfSaleSale(input) {
       if (!isWalkIn) {
         customer = await resolvePointOfSaleCustomer(tx, requestedCustomer, billingProfileInclude);
 
-        // Only require the address when the resolved customer doesn't already
-        // have one on file — a returning customer shouldn't have to re-enter
-        // their billing address on every counter sale. New/incomplete
-        // customers do need it: invoices are mandatory-address for every
-        // named-customer account (see lib/format-address.js) — a walk-in
-        // sale skips this entirely since it never creates an account.
+        // A particulier only gives a name and an e-mail: a ticket follows,
+        // never an invoice, so no billing address is asked. It is required
+        // only for a customer with a VAT number (typed on this sale or
+        // already on file) who has none stored yet — same rule as
+        // resolveCounterCustomer. A returning customer never re-enters it; a
+        // walk-in sale skips this entirely since it never creates an account.
         const needsAddress = !customer?.addressLine1;
-        if (needsAddress && (!requestedCustomer.addressLine1 || !requestedCustomer.addressCity || !requestedCustomer.addressPostalCode)) {
+        const hasVatNumber = Boolean(requestedCustomer.vatNumber || customer?.vatNumber);
+        const addressSupplied = Boolean(requestedCustomer.addressLine1 && requestedCustomer.addressCity && requestedCustomer.addressPostalCode);
+        if (needsAddress && hasVatNumber && !addressSupplied) {
           throw new Error("POS_ADDRESS_REQUIRED");
         }
 
-        const addressData = needsAddress
+        const addressData = needsAddress && addressSupplied
           ? {
               addressLine1: requestedCustomer.addressLine1,
               addressLine2: requestedCustomer.addressLine2 || null,
@@ -908,7 +910,7 @@ export async function completePointOfSaleSale(input) {
               ...addressData,
             },
           });
-        } else if (needsAddress) {
+        } else if (needsAddress && addressSupplied) {
           customer = await tx.user.update({ where: { id: customer.id }, data: addressData });
         }
 
@@ -1463,7 +1465,7 @@ export async function completePointOfSaleSale(input) {
     if (error.message === "POS_ADDRESS_REQUIRED") {
       return {
         success: false,
-        message: "L'adresse de facturation est obligatoire pour ce client.",
+        message: "L'adresse de facturation est obligatoire pour un client avec un numéro de TVA.",
         errors: { addressLine1: "Obligatoire", addressCity: "Obligatoire", addressPostalCode: "Obligatoire" },
       };
     }

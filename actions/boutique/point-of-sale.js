@@ -1308,11 +1308,14 @@ export async function completePointOfSaleSale(input) {
           html: `<p>Bonjour,</p><p>Merci pour votre achat en magasin.</p><p>Votre ticket de caisse pour la commande n°${result.order.orderNumber} (<strong>${Number(result.order.totalAmount).toFixed(2)} €</strong>) est joint à cet e-mail.</p><p>L'équipe Meri Beauty</p>`,
           attachments: [{ filename: `${result.order.ticketNumber}.pdf`, content: ticketPdf }],
         };
-        let ticketEmailResult = await sendEmail(ticketEmail);
+        let ticketEmailResult = await sendEmail(ticketEmail).catch(() => null);
         // One immediate retry, same as the nominative receipt below — the
         // sale and the ticket already exist regardless of whether this ever
-        // succeeds, so this never blocks or rolls back the payment.
-        if (!ticketEmailResult?.success) ticketEmailResult = await sendEmail(ticketEmail);
+        // succeeds, so this never blocks or rolls back the payment. The
+        // .catch matters: a transport that throws (Mailpit down) would
+        // otherwise reach the action's catch-all and report a sale that is
+        // already committed as « Impossible d'enregistrer la vente ».
+        if (!ticketEmailResult?.success) ticketEmailResult = await sendEmail(ticketEmail).catch(() => null);
         ticketEmailSent = Boolean(ticketEmailResult?.success);
         if (!ticketEmailSent) {
           captureError(new Error(ticketEmailResult?.error || "POS walk-in ticket email failed"), {
@@ -1404,8 +1407,8 @@ export async function completePointOfSaleSale(input) {
     // every independent's sale would be a standing lie, so it goes only when
     // there is a document to carry. A render failure keeps its old
     // behaviour: the attempt is still made, and still reported.
-    let receiptEmailResult = result.order.ticketNumber ? await sendEmail(receiptEmail) : null;
-    if (result.order.ticketNumber && !receiptEmailResult?.success) receiptEmailResult = await sendEmail(receiptEmail);
+    let receiptEmailResult = result.order.ticketNumber ? await sendEmail(receiptEmail).catch(() => null) : null;
+    if (result.order.ticketNumber && !receiptEmailResult?.success) receiptEmailResult = await sendEmail(receiptEmail).catch(() => null);
     if (result.order.ticketNumber && !receiptEmailResult?.success) {
       captureError(new Error(receiptEmailResult?.error || "POS receipt email failed"), {
         area: "point-of-sale",

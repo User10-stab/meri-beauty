@@ -609,10 +609,13 @@ export function OrderDetailClient({ order, isAdmin = false }) {
               )}
 
               {canMarkReady && (
-                <Button className="w-full" onClick={() => runAction(markOrderReadyForPickup, order.id)} disabled={isPending}>
-                  {isPending && <Loader2 size={14} className="animate-spin" />}
-                  Marquer prête pour retrait
-                </Button>
+                <div className="space-y-1">
+                  <Button className="w-full" onClick={() => runAction(markOrderReadyForPickup, order.id)} disabled={isPending}>
+                    {isPending && <Loader2 size={14} className="animate-spin" />}
+                    Marquer prête pour retrait
+                  </Button>
+                  <p className="text-center text-xs text-gray-500">Le client sera prévenu par e-mail.</p>
+                </div>
               )}
 
               {canCompletePickup && (

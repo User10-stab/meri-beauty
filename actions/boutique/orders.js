@@ -48,6 +48,7 @@ import {
 } from "@/lib/notifications";
 import { getOrderPaymentMethod, refundMethodLabel } from "@/lib/payments/refund-method";
 import { getOrderOverdueReason } from "@/lib/orders/overdue-rules";
+import { buildOrderReadyForPickupEmail } from "@/lib/orders/ready-for-pickup-email";
 import { queueManualRefund } from "@/lib/refunds/queue-manual-refund";
 import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabledFor } from "@/lib/commerce-availability";
 import { AWAITED_TRANSFER_METHOD, AWAITED_TRANSFER_OFF_TILL_MESSAGE, isAwaitedTransfer } from "@/lib/payments/awaited-transfer";
@@ -1309,11 +1310,62 @@ export async function markOrderReadyForPickup(orderId) {
       return { success: false, message: "Cette commande ne peut pas être marquée prête pour le moment." };
     }
 
+    // Only the click that won the claim above reaches this point, so the
+    // customer gets exactly one « commande prête » e-mail per order.
+    const notified = await sendOrderReadyForPickupEmail(orderId);
+
     revalidatePath("/dashboard/boutique/orders");
-    return { success: true, message: "Commande marquée comme prête pour le retrait." };
+    return {
+      success: true,
+      message: notified
+        ? "Commande marquée comme prête — le client a été prévenu par e-mail."
+        : "Commande marquée comme prête pour le retrait (e-mail au client non envoyé).",
+    };
   } catch (error) {
     console.error("[markOrderReadyForPickup]", error);
     return { success: false, message: "Impossible de mettre à jour la commande." };
+  }
+}
+
+/**
+ * Never throws: a failed e-mail must not undo or hide the status change that
+ * already happened. Returns whether the e-mail was actually handed off.
+ */
+async function sendOrderReadyForPickupEmail(orderId) {
+  try {
+    const [order, salon] = await Promise.all([
+      prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          user: { select: { fullName: true, email: true } },
+          items: { select: { productName: true, variantName: true, quantity: true } },
+        },
+      }),
+      prisma.salon.findUnique({
+        where: { id: "main-salon" },
+        select: { address: true, addressLine1: true, addressLine2: true, postalCode: true, city: true, countryCode: true },
+      }),
+    ]);
+    if (!order?.user?.email) return false;
+
+    const qr = order.pickupCode
+      ? await qrPngAttachment(order.pickupCode, `retrait-${order.orderNumber}.png`).catch((err) => {
+          console.error("[sendOrderReadyForPickupEmail] QR generation failed:", err);
+          return null;
+        })
+      : null;
+
+    const email = buildOrderReadyForPickupEmail({
+      order,
+      customerName: order.user.fullName,
+      salonAddress: salon?.address?.trim() || formatSalonAddress(salon),
+      hasQrAttachment: Boolean(qr),
+    });
+    const result = await sendEmail({ to: order.user.email, ...email, ...(qr ? { attachments: [qr] } : {}) });
+    return Boolean(result?.success);
+  } catch (err) {
+    console.error("[sendOrderReadyForPickupEmail] failed:", err);
+    return false;
   }
 }
 

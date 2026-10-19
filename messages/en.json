@@ -837,7 +837,7 @@
       "postalCode": "Postal code",
       "city": "City",
       "countriesServed": "Delivery to Belgium and France, via Mondial Relay.",
-      "country": "Pickup point country",
+      "deliverTo": "Where should we deliver?",
       "belgium": "Belgium",
       "france": "France"
     },

@@ -27,15 +27,61 @@ const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
  * she still has Mondial Relay access): plain manual text entry so checkout
  * keeps working end-to-end without any Mondial Relay credentials at all.
  */
-export function MondialRelayPicker({ value, onChange }) {
+export function MondialRelayPicker({ value, onChange, country = "BE", onCountryChange }) {
   const t = useTranslations("boutique.mondialRelay");
-  if (!BRAND_ID) {
-    return <ManualPickupPointForm value={value} onChange={onChange} t={t} />;
-  }
-  return <WidgetPickupPointPicker value={value} onChange={onChange} t={t} />;
+  return (
+    <div className="space-y-4">
+      <CountryChoice country={country} onCountryChange={onCountryChange} t={t} />
+      {BRAND_ID ? (
+        // Remounted per country: Mondial Relay's widget only reads Country
+        // when it initializes.
+        <WidgetPickupPointPicker key={country} value={value} onChange={onChange} country={country} t={t} />
+      ) : (
+        <ManualPickupPointForm value={value} onChange={onChange} country={country} t={t} />
+      )}
+    </div>
+  );
 }
 
-function WidgetPickupPointPicker({ value, onChange, t }) {
+/**
+ * Our own country question, above the map. The widget's flag selector sits
+ * in a corner and customers didn't know a French relay point needed it — so
+ * the widget is locked to the country chosen here instead.
+ */
+function CountryChoice({ country, onCountryChange, t }) {
+  const options = [
+    { value: "BE", label: t("belgium") },
+    { value: "FR", label: t("france") },
+  ];
+  return (
+    <div>
+      <p className="mb-2 text-sm text-[#2F3A2E]">{t("deliverTo")}</p>
+      <div role="radiogroup" aria-label={t("deliverTo")} className="grid grid-cols-2 gap-3">
+        {options.map((option) => {
+          const selected = option.value === country;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => !selected && onCountryChange?.(option.value)}
+              className={`border px-4 py-3 text-sm transition-colors ${
+                selected
+                  ? "border-[#C8A46A] bg-[#C8A46A]/10 font-medium text-[#2F3A2E]"
+                  : "border-neutral-200 text-gray-600 hover:border-[#C8A46A]"
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function WidgetPickupPointPicker({ value, onChange, country, t }) {
   const containerRef = useRef(null);
   const [jqueryReady, setJqueryReady] = useState(false);
   const [leafletReady, setLeafletReady] = useState(false);
@@ -54,11 +100,10 @@ function WidgetPickupPointPicker({ value, onChange, t }) {
       $(containerRef.current).MR_ParcelShopPicker({
         Target: "#mr-parcel-shop-target",
         Brand: BRAND_ID,
-        // Belgium first; the widget's own country list lets a French
-        // customer switch to France (the only two countries priced in
-        // lib/shipping.js).
-        Country: "BE",
-        AllowedCountries: "BE,FR",
+        // Locked to the country chosen above the map (CountryChoice), so the
+        // widget's own flag can never disagree with the price shown.
+        Country: country,
+        AllowedCountries: country,
         NbResults: 10,
         Responsive: true,
         Theme: "mondialrelay",
@@ -69,7 +114,7 @@ function WidgetPickupPointPicker({ value, onChange, t }) {
             id: data.ID ?? data.Num ?? null,
             name: data.Nom ?? "",
             address: [data.Adresse1, data.Adresse2].filter(Boolean).join(" ").trim(),
-            countryCode: data.Pays ?? "BE",
+            countryCode: data.Pays ?? country,
             postalCode: data.CP ?? "",
             city: data.Ville ?? "",
           });
@@ -94,7 +139,7 @@ function WidgetPickupPointPicker({ value, onChange, t }) {
   }, [widgetReady, widgetFailed]);
 
   if (widgetFailed) {
-    return <ManualPickupPointForm value={value} onChange={onChange} t={t} widgetUnavailable />;
+    return <ManualPickupPointForm value={value} onChange={onChange} country={country} t={t} widgetUnavailable />;
   }
 
   return (
@@ -145,9 +190,9 @@ function WidgetPickupPointPicker({ value, onChange, t }) {
   );
 }
 
-function ManualPickupPointForm({ value, onChange, t, widgetUnavailable = false }) {
-  const point = value ?? { name: "", address: "", postalCode: "", city: "", countryCode: "BE" };
-  const countryCode = point.countryCode ?? "BE";
+function ManualPickupPointForm({ value, onChange, country, t, widgetUnavailable = false }) {
+  const point = value ?? { name: "", address: "", postalCode: "", city: "" };
+  const countryCode = country;
 
   function handleChange(e) {
     const { name, value: fieldValue } = e.target;
@@ -164,16 +209,6 @@ function ManualPickupPointForm({ value, onChange, t, widgetUnavailable = false }
             : t("autoSearchComing")}
         </p>
       </div>
-      <select
-        name="countryCode"
-        value={countryCode}
-        onChange={handleChange}
-        aria-label={t("country")}
-        className="w-full border border-neutral-200 bg-white px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
-      >
-        <option value="BE">{t("belgium")}</option>
-        <option value="FR">{t("france")}</option>
-      </select>
       <input
         name="name"
         value={point.name}

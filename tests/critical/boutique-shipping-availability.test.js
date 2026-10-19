@@ -24,7 +24,7 @@ describe("boutique shipping availability", () => {
     expect(orders).toContain('fulfilmentMode === "SHIPPING_PREPAID" && !isBoutiqueShippingEnabledFor(customerInfo.email)');
     expect(orders).toContain("!isBoutiqueShippingEnabledFor(order.user?.email)");
     expect(orders).toContain("BOUTIQUE_SHIPPING_DISABLED_MESSAGE");
-    expect(shipping).toContain("export async function getCartShippingCost()");
+    expect(shipping).toContain('export async function getCartShippingCost(countryCode = "BE")');
     expect(shipping).toContain("export async function requestShippingQuote(input)");
     expect(shipping).toContain("!isBoutiqueShippingEnabledFor(session?.user?.email)");
     expect(shipping).toContain("!isBoutiqueShippingEnabledFor(email)");

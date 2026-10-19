@@ -34,7 +34,10 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/mondial-relay", () => ({ createShipmentLabel: mocks.createShipmentLabel }));
+vi.mock("@/lib/mondial-relay", async (importOriginal) => ({
+  ...(await importOriginal()),
+  createShipmentLabel: mocks.createShipmentLabel,
+}));
 vi.mock("@/lib/mondial-relay-label-storage", () => ({ storeShippingLabel: mocks.storeShippingLabel }));
 vi.mock("@/lib/monitoring", () => ({ captureCriticalError: mocks.captureCriticalError }));
 
@@ -169,6 +172,35 @@ describe("generateShippingLabel — weight computation", () => {
     mocks.createShipmentLabel.mockResolvedValue({ success: true, shipmentNumber: "MR1", labelUrl: "https://x/1.pdf", rawResponse: "<ok/>" });
     await generateShippingLabel("order-1");
     expect(mocks.createShipmentLabel).toHaveBeenCalledWith(expect.objectContaining({ weightGrams: 500 }));
+  });
+});
+
+describe("generateShippingLabel — relay point country", () => {
+  const ok = { success: true, shipmentNumber: "MR1", labelUrl: "https://x/1.pdf", rawResponse: "<ok/>" };
+
+  test("a French relay point goes out as FR, on the recipient and the 24R location", async () => {
+    mocks.orderFindUnique.mockResolvedValue(baseOrder({
+      shippingCountry: "FR",
+      pickupPointId: "066974",
+      pickupPointPostalCode: "59000",
+      pickupPointCity: "Lille",
+    }));
+    mocks.createShipmentLabel.mockResolvedValue(ok);
+    await generateShippingLabel("order-1");
+    const call = mocks.createShipmentLabel.mock.calls[0][0];
+    expect(call.recipient.countryCode).toBe("FR");
+    expect(call.recipient.postCode).toBe("59000");
+    expect(call.deliveryMode).toEqual({ mode: "24R", location: "FR-066974" });
+    expect(call.sender.countryCode).toBe("BE");
+  });
+
+  test("an order saved before France (no shippingCountry) stays Belgian", async () => {
+    mocks.orderFindUnique.mockResolvedValue(baseOrder({ shippingCountry: null }));
+    mocks.createShipmentLabel.mockResolvedValue(ok);
+    await generateShippingLabel("order-1");
+    const call = mocks.createShipmentLabel.mock.calls[0][0];
+    expect(call.recipient.countryCode).toBe("BE");
+    expect(call.deliveryMode.location).toBe("BE-REL123");
   });
 });
 

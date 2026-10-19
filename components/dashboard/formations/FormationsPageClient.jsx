@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useTransition } from "react";
+import { useState, useMemo, useCallback, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Filter } from "lucide-react";
 import { toast } from "sonner";
@@ -13,7 +13,9 @@ import { isAdminRole } from "@/lib/authorization";
 import Button from "@/components/ui/Button";
 import { useTranslations } from "next-intl";
 
-export function FormationsPageClient({ initialFormations = [], initialStaffOptions = [], userRole, currentUserId }) {
+export function FormationsPageClient({ initialFormations = [], initialStaffOptions = [], userRole, currentUserId, canEnrol = false }) {
+  // Stable component identity — DataTable renders it as <CustomRow />.
+  const renderFormationRow = useCallback((props) => <FormationRow {...props} canEnrol={canEnrol} />, [canEnrol]);
   const t = useTranslations("dashboardFormations");
   const router = useRouter();
   const confirm = useConfirm();
@@ -126,7 +128,7 @@ export function FormationsPageClient({ initialFormations = [], initialStaffOptio
           { key: "animator", label: t("columns.animator") },
           { key: "status", label: t("columns.status") },
         ]}
-        renderRow={FormationRow}
+        renderRow={renderFormationRow}
         onView={handleEdit}
         onEdit={handleEdit}
         onDelete={handleDelete}

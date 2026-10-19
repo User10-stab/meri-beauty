@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { requireDashboardPermission } from "@/lib/route-protection";
-import { STAFF_PERMISSIONS } from "@/lib/authorization";
+import { STAFF_PERMISSIONS, canUseSalonTill, hasDashboardPermission } from "@/lib/authorization";
 import { getFormations } from "@/actions/formations/get-formations";
 import { getFormationStaffOptions } from "@/actions/formations/get-formation-staff";
 import { FormationsPageClient } from "@/components/dashboard/formations/FormationsPageClient";
@@ -15,10 +15,15 @@ export const dynamic = "force-dynamic";
 export default async function FormationsPage() {
   const { user } = await requireDashboardPermission(STAFF_PERMISSIONS.FORMATIONS);
 
-  const [formationsResult, staffResult] = await Promise.all([
+  const [formationsResult, staffResult, canUseTill, canReserve] = await Promise.all([
     getFormations(),
     getFormationStaffOptions(),
+    canUseSalonTill(user),
+    hasDashboardPermission(user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS),
   ]);
+  // « Inscrire une élève » opens the till's booking composer — the same
+  // rights createCounterReservation re-checks server-side.
+  const canEnrol = canUseTill && canReserve;
 
   const formations = formationsResult.data ?? [];
   const staffOptions = staffResult.data ?? [];
@@ -56,6 +61,7 @@ export default async function FormationsPage() {
           initialStaffOptions={staffOptions}
           userRole={user.role}
           currentUserId={user.id}
+          canEnrol={canEnrol}
         />
       </Suspense>
     </div>

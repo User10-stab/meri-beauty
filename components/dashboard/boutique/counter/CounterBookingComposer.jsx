@@ -573,7 +573,7 @@ export function CounterBookingComposer({
           {sessionMethod === "CASH" && (
             <CounterCashReceived id="composer-session-cash" value={sessionCashReceived} onChange={setSessionCashReceived} amountDue={sessionCollected} />
           )}
-          {sessionMethod === "TRANSFER" && <AwaitedTransferNote />}
+          {sessionMethod === "TRANSFER" && <AwaitedTransferNote emailsInstructions />}
           {tillGateApplies && sessionMethod === "CASH" && !cashSessionOpen && <CashSessionGate onOpened={markCashSessionOpen} />}
 
           <div className="flex justify-end border-t border-stroke pt-3 dark:border-dark-3">
@@ -603,7 +603,7 @@ export function CounterBookingComposer({
  * « Virement »: nothing is collected now — the money is only recorded when
  * an admin accepts the transfer (lib/payments/awaited-transfer.js).
  */
-function AwaitedTransferNote() {
+function AwaitedTransferNote({ emailsInstructions = false }) {
   return (
     <div className="rounded-lg border border-sky-200 bg-sky-50/60 p-3 text-xs text-sky-900 dark:border-sky-900 dark:bg-sky-900/10 dark:text-sky-200">
       <p className="font-semibold">Virement en attente de validation</p>
@@ -611,6 +611,12 @@ function AwaitedTransferNote() {
         Rien n&apos;est encaissé maintenant. À la réception du virement, acceptez-le dans « Ventes en attente de paiement » : c&apos;est là que le
         paiement, le ticket et la facture sont créés.
       </p>
+      {emailsInstructions && (
+        <p className="mt-1">
+          Le client reçoit tout de suite un e-mail avec le montant, le compte du salon (Réglages &gt; Salon) et la communication à
+          indiquer ; la confirmation et son QR code partent à l&apos;acceptation du virement.
+        </p>
+      )}
     </div>
   );
 }

@@ -1,9 +1,17 @@
 "use client";
 
+import Link from "next/link";
+import { UserPlus } from "lucide-react";
 import { RowActions } from "../Tables/RowActions";
 import { useTranslations } from "next-intl";
 
-export function FormationRow({ row, onView, onEdit, onDelete }) {
+/**
+ * @param {boolean} [props.canEnrol] Shows « Inscrire une élève »: opens the
+ *   till with this formation already searched, where a seat is booked by hand
+ *   — paid on the spot, or « Virement » (seat held, client confirmed once the
+ *   transfer is accepted on Factures / under the till).
+ */
+export function FormationRow({ row, onView, onEdit, onDelete, canEnrol = false }) {
   const t = useTranslations("dashboardFormations");
   const priceFormatted = new Intl.NumberFormat("fr-FR", {
     style: "currency",
@@ -47,6 +55,15 @@ export function FormationRow({ row, onView, onEdit, onDelete }) {
               <span className="text-xs text-gray-400 block max-w-xs truncate">
                 {row.description}
               </span>
+            )}
+            {canEnrol && row.status !== "CANCELLED" && (
+              <Link
+                href={`/dashboard/boutique/point-of-sale?recherche=${encodeURIComponent(row.title)}`}
+                className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+              >
+                <UserPlus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                Inscrire une élève
+              </Link>
             )}
           </div>
         </div>

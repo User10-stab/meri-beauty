@@ -22,7 +22,7 @@ import { allocatePaymentTicketNumber } from "@/lib/tickets/allocate-ticket-numbe
 import { allocateBookingTerminalReference } from "@/lib/payments/terminal-reference";
 import { revalidateCaisseRoutes } from "@/lib/cash-book/revalidate-caisse";
 import { ensureCashSessionOpen } from "@/lib/cash-book/session-lifecycle";
-import { workshopReservationConfirmationEmail, formationReservationConfirmationEmail } from "@/lib/email-templates";
+import { workshopReservationConfirmationEmail, formationReservationConfirmationEmail, awaitedTransferReservationEmail } from "@/lib/email-templates";
 import { sendLowSeatsBroadcast } from "@/lib/workshops/notify-low-seats";
 import { sendFormationLowSeatsBroadcast } from "@/lib/formations/notify-low-seats";
 import { revalidatePath } from "next/cache";
@@ -62,6 +62,7 @@ const COUNTER_CREATE_KINDS = {
     buildConfirmationEmail: (args) => workshopReservationConfirmationEmail({ activityTitle: args.title, ...args }),
     lowSeatsBroadcast: sendLowSeatsBroadcast,
     revalidatePath: "/dashboard/workshops/reservations",
+    kindName: (catalogue) => (catalogue?.type === "EVENT" ? "Événement" : "Atelier"),
   },
   FORMATION: {
     sessionDelegate: (client) => client.formationSession,
@@ -79,6 +80,7 @@ const COUNTER_CREATE_KINDS = {
     buildConfirmationEmail: (args) => formationReservationConfirmationEmail({ formationTitle: args.title, ...args }),
     lowSeatsBroadcast: sendFormationLowSeatsBroadcast,
     revalidatePath: "/dashboard/formations/reservations",
+    kindName: () => "Formation",
   },
 };
 
@@ -463,6 +465,7 @@ export async function createCounterReservation(input) {
         return {
           reservationId: reservation.id,
           title: catalogue.title,
+          kindName: config.kindName(catalogue),
           sessionId: session.id,
           sessionStartDate: session.startDate,
           sessionEndDate: session.endDate,
@@ -516,7 +519,10 @@ export async function createCounterReservation(input) {
       })
     : null;
 
-  const salon = await prisma.salon.findUnique({ where: { id: "main-salon" }, select: { phone: true, email: true } });
+  const salon = await prisma.salon.findUnique({
+    where: { id: "main-salon" },
+    select: { phone: true, email: true, rib: true, legalName: true, name: true },
+  });
   const pendingInvoiceNote = !result.invoice
     ? ""
     : isPeppolMandatoryCustomer(result.customer)
@@ -524,11 +530,33 @@ export async function createCounterReservation(input) {
       : `Votre facture officielle (n°${result.invoice.number}) vous sera transmise séparément par e-mail.`;
 
   // Announced by transfer: nothing was received, so the client is NOT told
-  // the seat is confirmed and gets no check-in QR. That confirmation is sent
-  // only when an admin accepts the transfer — actions/payments/awaited-transfer.js.
+  // the seat is confirmed and gets no check-in QR — that confirmation is sent
+  // only when an admin accepts the transfer (actions/payments/awaited-transfer.js).
+  // She is told what to transfer, where, and with which communication, so the
+  // salon can match it on « Virement reçu » (same name + title listed there).
   const awaitsTransfer = result.awaitedTransferAmount != null;
   const emailResult = awaitsTransfer
-    ? null
+    ? await sendEmail({
+        to: result.customer.email,
+        ...awaitedTransferReservationEmail({
+          kindName: result.kindName,
+          customerName: result.customer.fullName,
+          title: result.title,
+          sessionDate: formatCounterSessionDate(result),
+          seatsCount: result.seatsCount,
+          transferAmount: result.awaitedTransferAmount,
+          totalAmount: result.totalAmount,
+          isFullPayment: result.isFullPayment,
+          beneficiary: salon?.legalName || salon?.name || null,
+          rib: salon?.rib || null,
+          communication: `${result.customer.fullName} – ${result.title}`.slice(0, 140),
+          salonPhone: salon?.phone,
+          salonEmail: salon?.email,
+        }),
+      }).catch((error) => {
+        console.error("[createCounterReservation] transfer instructions email failed:", error);
+        return { success: false };
+      })
     : await sendEmail({
         to: result.customer.email,
         ...config.buildConfirmationEmail({
@@ -582,7 +610,9 @@ export async function createCounterReservation(input) {
   return {
     success: true,
     message: awaitsTransfer
-      ? "Réservation enregistrée — virement attendu. Le client sera confirmé par e-mail à l'acceptation du virement."
+      ? emailResult?.success
+        ? "Réservation enregistrée — virement attendu. Les coordonnées du virement ont été envoyées au client ; la confirmation suivra à l'acceptation du virement."
+        : "Réservation enregistrée — virement attendu, mais l'e-mail avec les coordonnées du virement n'a pas pu être envoyé."
       : emailResult?.success
         ? "Réservation enregistrée et e-mail de confirmation envoyé."
         : "Réservation enregistrée, mais l'e-mail n'a pas pu être envoyé.",

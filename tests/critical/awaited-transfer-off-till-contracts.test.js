@@ -109,13 +109,43 @@ describe("a transfer is refused on any sale the salon does not bank", () => {
 });
 
 describe("the client hears nothing until the transfer is accepted", () => {
-  it("a séance booked by transfer sends no confirmation and no check-in QR", () => {
+  it("a séance booked by transfer sends the transfer instructions — no confirmation, no check-in QR", () => {
     const code = source("actions/counter/create-reservation.js");
     expect(code).toContain("const awaitsTransfer = result.awaitedTransferAmount != null;");
     // The confirmation carries the check-in QR: sending it would tell the
-    // client the seat is confirmed before a cent arrived.
-    expect(code).toContain("const emailResult = awaitsTransfer\n    ? null\n    : await sendEmail({");
-    expect(code).toContain("Le client sera confirmé par e-mail à l'acceptation du virement.");
+    // client the seat is confirmed before a cent arrived. What she gets
+    // instead is how much to transfer, where, and with which communication.
+    expect(code).toMatch(/const emailResult = awaitsTransfer\r?\n\s+\? await sendEmail\(\{\r?\n\s+to: result\.customer\.email,\r?\n\s+\.\.\.awaitedTransferReservationEmail\(\{/);
+    const transferBranch = code.slice(code.indexOf("const emailResult = awaitsTransfer"), code.indexOf("    : await sendEmail({"));
+    expect(transferBranch).not.toContain("checkInCode");
+    expect(transferBranch).not.toContain("attachments");
+    expect(code).toContain("la confirmation suivra à l'acceptation du virement.");
+  });
+
+  it("the transfer instructions e-mail never reads as a confirmation", async () => {
+    const { awaitedTransferReservationEmail } = await import("../../lib/email-templates.js");
+    const base = {
+      kindName: "Formation",
+      customerName: "Élève Test",
+      title: "Cil à cil",
+      sessionDate: "lundi 9 novembre 2026",
+      seatsCount: 1,
+      transferAmount: 60,
+      totalAmount: 120,
+      isFullPayment: false,
+      communication: "Élève Test – Cil à cil",
+    };
+    const mail = awaitedTransferReservationEmail({ ...base, beneficiary: "Meri Beauty", rib: "BE00 0000 0000 0000" });
+    expect(mail.subject).toContain("virement en attente");
+    expect(mail.subject).not.toContain("confirmée");
+    expect(mail.text).toContain("BE00 0000 0000 0000");
+    expect(mail.text).toContain("€60.00");
+    expect(mail.text).toContain("Solde à régler sur place : €60.00");
+    expect(mail.html).toContain("Élève Test – Cil à cil");
+    // No account on file: she is told to ask rather than shown an empty IBAN.
+    const noRib = awaitedTransferReservationEmail(base);
+    expect(noRib.text).not.toContain("IBAN");
+    expect(noRib.text).toContain("contactez-nous");
   });
 
   it("accepting the transfer is what sends it", () => {

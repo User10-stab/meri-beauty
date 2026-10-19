@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ScanLine, Ticket } from "lucide-react";
 import { lookupCounterCode } from "@/actions/counter/lookup";
@@ -63,6 +63,7 @@ export function CounterSurface({
   canInvoiceSale = false,
   sourceOrderId = null,
   pendingManualSales = null,
+  initialSearch = "",
 }) {
   const [input, setInput] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -203,6 +204,13 @@ export function CounterSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+
+  // Arriving from « Inscrire une élève » (?recherche=): run that search once.
+  useEffect(() => {
+    if (!initialSearch) return;
+    setInput(initialSearch);
+    runNameSearch(initialSearch);
+  }, [initialSearch, runNameSearch]);
 
   function runDispatch(value) {
     if (looksLikeCode(value)) {

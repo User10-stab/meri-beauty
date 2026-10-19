@@ -17,6 +17,9 @@ export default async function PointOfSalePage({ searchParams }) {
   // ?order=<id>: the till opens pre-filled with that order's lines and client.
   const params = await searchParams;
   const sourceOrderId = typeof params?.order === "string" ? params.order : null;
+  // « Inscrire une élève » on a formation lands here with ?recherche=<titre>:
+  // the till runs that search on arrival, so the session is one click away.
+  const initialSearch = typeof params?.recherche === "string" ? params.recherche.trim().slice(0, 120) : "";
 
   const session = await auth();
 
@@ -63,6 +66,7 @@ export default async function PointOfSalePage({ searchParams }) {
       // whoever collects it.
       canCollectCash
       sourceOrderId={sourceOrderId}
+      initialSearch={initialSearch}
       pendingManualSales={pendingManualSales?.success ? pendingManualSales.data : null}
     />
   );

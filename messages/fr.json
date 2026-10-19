@@ -837,7 +837,7 @@
       "postalCode": "Code postal",
       "city": "Ville",
       "countriesServed": "Livraison en Belgique et en France, via Mondial Relay.",
-      "country": "Pays du point relais",
+      "deliverTo": "Où souhaitez-vous être livré(e) ?",
       "belgium": "Belgique",
       "france": "France"
     },

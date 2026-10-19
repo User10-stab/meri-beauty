@@ -68,6 +68,14 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
   );
 
   const [pickupPoint, setPickupPoint] = useState(null);
+  // Asked above the relay map (Belgique / France). A signed-in customer
+  // whose saved address is French starts on France.
+  const [relayCountry, setRelayCountry] = useState(customerSession?.addressCountry === "FR" ? "FR" : "BE");
+  const shippingCountry = pickupPoint?.countryCode ?? relayCountry;
+  function changeRelayCountry(country) {
+    setRelayCountry(country);
+    setPickupPoint(null);
+  }
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState(null);
@@ -156,7 +164,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       }
 
       setShippingDetails(prev => ({ ...prev, loading: true }));
-      const result = await getCartShippingCost(pickupPoint?.countryCode ?? "BE");
+      const result = await getCartShippingCost(shippingCountry);
       if (result.success) {
         setShippingDetails({
           cost: result.data.cost,
@@ -185,7 +193,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     }
 
     fetchShippingCost();
-  }, [fulfilmentMode, cart.subtotal, cart.items, pickupPoint?.countryCode]);
+  }, [fulfilmentMode, cart.subtotal, cart.items, shippingCountry]);
 
   const shippingCost = shippingDetails.cost;
   const quoteRequired = fulfilmentMode === "SHIPPING_PREPAID" && shippingDetails.quoteRequired;
@@ -197,7 +205,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
   // what's billed. The fallback keeps the preview safely at 21% if malformed
   // account data ever reaches the page.
   const vatPreview = useMemo(() => {
-    const destinationCountry = fulfilmentMode === "SHIPPING_PREPAID" ? pickupPoint?.countryCode ?? "BE" : "BE";
+    const destinationCountry = fulfilmentMode === "SHIPPING_PREPAID" ? shippingCountry : "BE";
     try {
       return {
         ...resolveGoodsVatPolicy({
@@ -212,7 +220,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     } catch {
       return { vatTreatment: "DOMESTIC", vatRate: BELGIUM_VAT_RATE, destinationCountry };
     }
-  }, [fulfilmentMode, pickupPoint?.countryCode, savedVatProfile, customerInfo.vatNumber]);
+  }, [fulfilmentMode, shippingCountry, savedVatProfile, customerInfo.vatNumber]);
 
   const vatSubtotal = useMemo(
     () => cart.items.reduce(
@@ -698,7 +706,12 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
               <h2 className="mb-4 text-sm font-semibold uppercase tracking-[0.2em] text-[#2F3A2E]">
                 Point relais Mondial Relay
               </h2>
-              <MondialRelayPicker value={pickupPoint} onChange={setPickupPoint} />
+              <MondialRelayPicker
+                value={pickupPoint}
+                onChange={setPickupPoint}
+                country={relayCountry}
+                onCountryChange={changeRelayCountry}
+              />
             </section>
           )}
 

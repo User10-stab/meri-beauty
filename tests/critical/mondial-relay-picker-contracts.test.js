@@ -22,6 +22,15 @@ describe("Mondial Relay picker availability", () => {
   test("falls back to manual point entry instead of blocking checkout", () => {
     expect(picker).toContain("onError={() => setWidgetFailed(true)}");
     expect(picker).toContain("widget rendered no content; using manual fallback");
-    expect(picker).toContain("<ManualPickupPointForm value={value} onChange={onChange} t={t} widgetUnavailable />");
+    expect(picker).toContain("<ManualPickupPointForm value={value} onChange={onChange} country={country} t={t} widgetUnavailable />");
+  });
+
+  // A French customer didn't find the widget's corner flag: the country is
+  // asked above the map and the widget is locked to it.
+  test("asks Belgique / France above the map and locks the widget to that country", () => {
+    expect(picker).toContain("<CountryChoice country={country} onCountryChange={onCountryChange} t={t} />");
+    expect(picker).toContain("<WidgetPickupPointPicker key={country}");
+    expect(picker).toContain("Country: country,");
+    expect(picker).toContain("AllowedCountries: country,");
   });
 });

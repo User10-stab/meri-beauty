@@ -121,6 +121,26 @@ describe("lib/peppyrus/build-ubl", () => {
     expect(xml).toContain("Autoliquidation");
   });
 
+  // BR-27: Peppyrus rejected a real invoice whose "Code promotionnel" line
+  // went out as 1 × −8,26 HT. Same line amount as −1 × 8,26, price positive.
+  it("sends a promo-code line with a negative quantity and a positive price (BR-27)", () => {
+    const invoice = baseInvoice({
+      subtotalExclVat: 41.32,
+      vatAmount: 8.68,
+      totalInclVat: 50,
+      lines: [
+        { description: "Produit", quantity: 1, unitPrice: 60, lineTotal: 60, unitPriceExclVat: 49.59, lineTotalExclVat: 49.59 },
+        { description: "Code promotionnel", quantity: 1, unitPrice: -10, lineTotal: -10, unitPriceExclVat: -8.27, lineTotalExclVat: -8.27 },
+      ],
+    });
+    const xml = buildInvoiceUbl({ invoice, salon, buyerParticipantId: "9925:0999999999" });
+    const prices = [...xml.matchAll(/<cbc:PriceAmount[^>]*>([^<]+)<\/cbc:PriceAmount>/g)].map((m) => Number(m[1]));
+    expect(prices.every((p) => p >= 0)).toBe(true);
+    expect(xml).toMatch(/<cbc:InvoicedQuantity[^>]*>-1(\.00)?<\/cbc:InvoicedQuantity>/);
+    expect(xml).toMatch(/<cbc:LineExtensionAmount[^>]*>-8\.27<\/cbc:LineExtensionAmount>/);
+    expect(xml).toMatch(/<cbc:PayableAmount[^>]*>50(\.00)?<\/cbc:PayableAmount>/);
+  });
+
   it("throws for an out-of-scope VAT treatment (EXPORT)", () => {
     const invoice = baseInvoice({ vatTreatment: "EXPORT" });
     expect(() => buildInvoiceUbl({ invoice, salon, buyerParticipantId: null })).toThrow(/non pris en charge/);

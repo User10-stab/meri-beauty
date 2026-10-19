@@ -40,7 +40,7 @@ describe("reservation settlement — collecting the on-site balance", () => {
     // number and an open till session behind it. The boutique POS and the
     // refund path already refused a referenceless card; settlement was the
     // last place that did not.
-    expect(lib).toContain('!["CASH", "EXTERNAL_TERMINAL", AWAITED_TRANSFER_METHOD, COUNTER_QR_METHOD].includes(method)');
+    expect(lib).toContain('!["CASH", "EXTERNAL_TERMINAL", AWAITED_TRANSFER_METHOD, COUNTER_QR_METHOD, "TRANSFER_RECEIVED"].includes(method)');
     expect(lib, "a card collection was accepted without a terminal reference").not.toContain(
       '["CASH", "CARD", "EXTERNAL_TERMINAL"]',
     );
@@ -59,7 +59,7 @@ describe("reservation settlement — collecting the on-site balance", () => {
     expect(lib).toContain("const terminalReference = isTerminalCard ? await allocateBookingTerminalReference(tx, kind, activityType) : null;");
     expect(lib).toContain("manualReference: isTerminalCard ? terminalReference : isQr ? qrPayment.paymentIntentId : null");
     expect(lib).not.toContain("terminalReference?.trim()");
-    expect(lib).toContain("method: isQr ? \"ONLINE\" : isTerminalCard ? \"CARD\" : \"CASH\"");
+    expect(lib).toContain('method: manualTransferReceived ? "TRANSFER" : isQr ? "ONLINE" : isTerminalCard ? "CARD" : "CASH"');
   });
 
   test("claims the reservation atomically before invoicing, so a double-click can't invoice twice", () => {

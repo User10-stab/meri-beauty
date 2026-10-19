@@ -21,8 +21,8 @@ export default async function FormationsPage() {
     canUseSalonTill(user),
     hasDashboardPermission(user, STAFF_PERMISSIONS.FORMATION_RESERVATIONS),
   ]);
-  // « Inscrire une élève » opens the till's booking composer — the same
-  // rights createCounterReservation re-checks server-side.
+  // Offline enrollment records a received bank transfer and checks the same
+  // reservation/till permissions again inside the server action.
   const canEnrol = canUseTill && canReserve;
 
   const formations = formationsResult.data ?? [];

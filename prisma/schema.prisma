@@ -759,6 +759,9 @@ model FormationReservation {
   // Restrict for the same reason as WorkshopReservation.session above.
   session           FormationSession           @relation(fields: [sessionId], references: [id], onDelete: Restrict)
   customerId        String
+  // Staff created this booking for an offline student. Its Payment records
+  // the bank transfer as received outside the online checkout flow.
+  offlineEnrollment Boolean                    @default(false)
   customer          User                       @relation(fields: [customerId], references: [id])
   payment           Payment?
   seatsCount        Int                        @default(1) // always 1 for PRIVATE
@@ -884,8 +887,11 @@ model User {
   id                       String    @id @default(cuid())
   fullName                 String
   nickName                 String?
-  email                    String
-  password                 String
+  // A student entered by staff for an offline formation reservation may not
+  // have an e-mail address or a website login. These stay required by the
+  // public signup flow, not by every customer record.
+  email                    String?
+  password                 String?
   // A counter sale needs a receipt email, but a phone number is optional.
   // Online checkout and booking forms still require it at their own
   // validation boundary.

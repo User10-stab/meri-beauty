@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { DataTable } from "../Tables/DataTable";
 import { FormationRow } from "./FormationRow";
 import { CreateFormationModal } from "./CreateFormationModal";
+import { OfflineFormationEnrollmentForm } from "./OfflineFormationEnrollmentForm";
 import { deleteFormation } from "@/actions/formations/create-formation";
 import { useConfirm } from "@/components/ConfirmProvider";
 import { isAdminRole } from "@/lib/authorization";
@@ -14,8 +15,12 @@ import Button from "@/components/ui/Button";
 import { useTranslations } from "next-intl";
 
 export function FormationsPageClient({ initialFormations = [], initialStaffOptions = [], userRole, currentUserId, canEnrol = false }) {
+  const [enrolFormationId, setEnrolFormationId] = useState(null);
   // Stable component identity — DataTable renders it as <CustomRow />.
-  const renderFormationRow = useCallback((props) => <FormationRow {...props} canEnrol={canEnrol} />, [canEnrol]);
+  const renderFormationRow = useCallback(
+    (props) => <FormationRow {...props} canEnrol={canEnrol} onEnrol={(row) => setEnrolFormationId(row.id)} />,
+    [canEnrol],
+  );
   const t = useTranslations("dashboardFormations");
   const router = useRouter();
   const confirm = useConfirm();
@@ -140,6 +145,14 @@ export function FormationsPageClient({ initialFormations = [], initialStaffOptio
           row.animator?.name?.toLowerCase().includes(query)
         }
       />
+
+      {canEnrol && (
+        <OfflineFormationEnrollmentForm
+          open={Boolean(enrolFormationId)}
+          formationId={enrolFormationId ?? ""}
+          onClose={() => setEnrolFormationId(null)}
+        />
+      )}
 
       <CreateFormationModal
         open={showFormationModal}

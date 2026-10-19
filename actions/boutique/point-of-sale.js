@@ -171,6 +171,7 @@ export async function searchPointOfSaleCustomers(query) {
       where: {
         role: "CUSTOMER",
         isDeleted: false,
+        email: { not: null },
         OR: [
           { fullName: { contains: value, mode: "insensitive" } },
           { email: { contains: value, mode: "insensitive" } },

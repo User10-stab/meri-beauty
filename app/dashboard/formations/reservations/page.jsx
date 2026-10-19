@@ -1,8 +1,7 @@
-import Link from "next/link";
-import { UserPlus } from "lucide-react";
 import { requireDashboardPermission } from "@/lib/route-protection";
 import { STAFF_PERMISSIONS, canUseSalonTill } from "@/lib/authorization";
 import { getFormationReservations } from "@/actions/formations/get-reservations";
+import { OfflineEnrollmentButton } from "@/components/dashboard/formations/OfflineEnrollmentButton";
 import { ReservationsPageClient } from "@/components/dashboard/formations/ReservationsPageClient";
 
 export const metadata = {
@@ -34,18 +33,10 @@ export default async function FormationReservationsPage({ searchParams }) {
             Toutes les réservations de formations, privées et de groupe confondues.
           </p>
         </div>
-        {/* A seat booked by hand goes through the till's booking composer:
-            paid on the spot, or « Virement » — held, and confirmed to the
-            client once the transfer is accepted. */}
+        {/* Manual enrollment: the form records a deposit or full bank transfer
+            as already received, without sending the student through Stripe. */}
         {canCollectCash && (
-          <Link
-            href="/dashboard/boutique/point-of-sale"
-            title="Ouvre la caisse : cherchez la formation, choisissez la date et l'élève, puis « Virement » si elle paie par virement."
-            className="inline-flex items-center gap-2 self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-          >
-            <UserPlus className="h-4 w-4" strokeWidth={1.75} />
-            Inscrire une élève
-          </Link>
+          <OfflineEnrollmentButton />
         )}
       </div>
 

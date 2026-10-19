@@ -14,24 +14,25 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
  * so a human has to attest before the system books it as real revenue and
  * issues an invoice against it.
  *
- * `canCollectCash` is false for every staff member who is not Marie or an
- * OWNER/ADMIN (see isTillCashOperator). Their balance is still collected and
- * invoiced, but off-till — so there is no payment method to pick and nothing
- * to attest, and this dialog collapses to a plain "Clôturer" confirmation.
+ * `canCollectCash` is false for every staff member who may not run the till.
+ * Their balance is still collected off-till. An offline formation enrollment
+ * is the exception: it exposes an attested "virement déjà reçu" option, which
+ * never enters the till drawer.
  */
 export function SettleReservationDialog({ reservation, onClose, onConfirm, loading, canCollectCash = true }) {
   const [method, setMethod] = useState("CASH");
   const [confirmed, setConfirmed] = useState(false);
 
   const balance = Number(reservation?.payment?.remainingAmount ?? 0);
-  const hasBalance = balance > 0 && canCollectCash;
-  const collectsOffTill = balance > 0 && !canCollectCash;
+  const isOfflineEnrollment = Boolean(reservation?.offlineEnrollment);
+  const hasBalance = balance > 0 && (canCollectCash || isOfflineEnrollment);
+  const collectsOffTill = balance > 0 && !canCollectCash && !isOfflineEnrollment;
 
   // Reset per reservation, so a previous row's attestation never carries over.
   useEffect(() => {
-    setMethod("CASH");
+    setMethod(reservation?.offlineEnrollment ? "TRANSFER_RECEIVED" : "CASH");
     setConfirmed(false);
-  }, [reservation?.id]);
+  }, [reservation?.id, reservation?.offlineEnrollment]);
 
   if (!reservation) return null;
 
@@ -43,12 +44,14 @@ export function SettleReservationDialog({ reservation, onClose, onConfirm, loadi
       title="Clôturer la réservation"
       message={
         hasBalance
-          ? `Encaissez le solde de ${priceFormatted} avant de clôturer. Une facture sera émise et envoyée au client.`
+          ? isOfflineEnrollment
+            ? `Confirmez que le virement bancaire de ${priceFormatted} a bien été reçu avant de clôturer.`
+            : `Encaissez le solde de ${priceFormatted} avant de clôturer. Une facture sera émise et envoyée au client.`
           : collectsOffTill
             ? `Le solde de ${priceFormatted} sera enregistré et facturé à la clôture. L'encaissement en caisse est réservé à l'administration.`
             : "Cette réservation est déjà entièrement payée. Elle sera simplement marquée comme terminée."
       }
-      confirmLabel={hasBalance ? "Encaisser et clôturer" : "Clôturer"}
+      confirmLabel={hasBalance ? (isOfflineEnrollment ? "Confirmer le virement et clôturer" : "Encaisser et clôturer") : "Clôturer"}
       loading={loading}
       confirmDisabled={hasBalance && !confirmed}
       onConfirm={() => (hasBalance ? onConfirm({ method, paymentConfirmed: confirmed }) : onConfirm({}))}
@@ -60,11 +63,13 @@ export function SettleReservationDialog({ reservation, onClose, onConfirm, loadi
             <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-gray-500">
               Mode de paiement du solde
             </span>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { value: "CASH", label: "Espèces" },
-                { value: "CARD", label: "Carte (terminal)" },
-              ].map((option) => (
+            <div className={`grid gap-2 ${isOfflineEnrollment ? "grid-cols-1" : "grid-cols-2"}`}>
+              {(isOfflineEnrollment
+                ? [{ value: "TRANSFER_RECEIVED", label: "Virement bancaire déjà reçu" }]
+                : [
+                    { value: "CASH", label: "Espèces" },
+                    { value: "CARD", label: "Carte (terminal)" },
+                  ]).map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -90,7 +95,11 @@ export function SettleReservationDialog({ reservation, onClose, onConfirm, loadi
             />
             <span>
               Je confirme avoir bien reçu {priceFormatted}
-              {method === "CARD" ? " — le terminal affiche « APPROUVÉ »." : " en espèces."}
+              {method === "TRANSFER_RECEIVED"
+                ? " par virement bancaire."
+                : method === "CARD"
+                  ? " — le terminal affiche « APPROUVÉ »."
+                  : " en espèces."}
             </span>
           </label>
         </div>

@@ -72,6 +72,7 @@ export async function getFormations() {
         ...serializeDecimalFields(formation),
         canEdit,
         canDelete,
+        upcomingSessions: upcoming,
         nextSession: upcoming[0] ?? null,
         upcomingSessionsCount: upcoming.length,
       };

@@ -200,6 +200,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
+        // A staff-created offline student has no web-login credentials.
+        if (!user.password) {
+          return null;
+        }
+
         if (autologinToken) {
           const { verifyAutologinToken } = await import("@/lib/autologin");
           const isValid = verifyAutologinToken(email, autologinToken);

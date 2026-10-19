@@ -86,9 +86,11 @@ describe("the settlement UIs hide the espèces / carte popup for a non-operator"
       expect(source(file)).toContain("canCollectCash={isTillCashOperator(user)}");
     }
     // A CAISSE staff member may settle the salon's own atelier seats on-till.
-    for (const file of ["app/dashboard/workshops/reservations/page.jsx", "app/dashboard/formations/reservations/page.jsx"]) {
-      expect(source(file)).toContain("canCollectCash={await canUseSalonTill(user)}");
-    }
+    expect(source("app/dashboard/workshops/reservations/page.jsx")).toContain("canCollectCash={await canUseSalonTill(user)}");
+    // Formations reads it once: it also gates the « Inscrire une élève » button.
+    const formations = source("app/dashboard/formations/reservations/page.jsx");
+    expect(formations).toMatch(/const \[result, canCollectCash\] = await Promise\.all\(\[getFormationReservations\(\), canUseSalonTill\(user\)\]\)/);
+    expect(formations).toContain("canCollectCash={canCollectCash}");
     // The till page is only reachable by someone who may run it.
     expect(source("app/(dashboard)/dashboard/boutique/point-of-sale/page.jsx")).toContain("await requireSalonTill();");
   });

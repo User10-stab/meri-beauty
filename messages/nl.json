@@ -836,7 +836,10 @@
       "pointAddress": "Adres afhaalpunt",
       "postalCode": "Postcode",
       "city": "Stad",
-      "belgiumOnly": "Levering alleen in België, via Mondial Relay."
+      "countriesServed": "Levering in België en Frankrijk, via Mondial Relay.",
+      "country": "Land van het afhaalpunt",
+      "belgium": "België",
+      "france": "Frankrijk"
     },
     "metadata": {
       "boutiquePage": "Winkel – Meri Beauty",

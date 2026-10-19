@@ -12,6 +12,7 @@ import { verifyVatNumber } from "@/actions/vat/verify-vat";
 import { validatePromoCode } from "@/actions/promo-codes";
 import { PromoCodeField } from "@/components/shared/PromoCodeField";
 import { MondialRelayPicker } from "@/components/boutique/MondialRelayPicker";
+import { isValidPickupPostalCode } from "@/lib/shipping";
 import { isDisposableEmail } from "@/lib/validations/customer-identity";
 import { validatePassword } from "@/lib/validations/password";
 import { resolveGoodsVatPolicy, hasReusableVatValidation, applyVatRate, roundMoney, BELGIUM_VAT_RATE, VAT_LEGAL_NOTES } from "@/lib/tax-policy";
@@ -155,7 +156,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       }
 
       setShippingDetails(prev => ({ ...prev, loading: true }));
-      const result = await getCartShippingCost();
+      const result = await getCartShippingCost(pickupPoint?.countryCode ?? "BE");
       if (result.success) {
         setShippingDetails({
           cost: result.data.cost,
@@ -184,7 +185,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
     }
 
     fetchShippingCost();
-  }, [fulfilmentMode, cart.subtotal, cart.items]);
+  }, [fulfilmentMode, cart.subtotal, cart.items, pickupPoint?.countryCode]);
 
   const shippingCost = shippingDetails.cost;
   const quoteRequired = fulfilmentMode === "SHIPPING_PREPAID" && shippingDetails.quoteRequired;
@@ -346,7 +347,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       }
     }
     if (fulfilmentMode === "SHIPPING_PREPAID") {
-      if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !/^\d{4}$/.test((pickupPoint?.postalCode ?? "").trim())) {
+      if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !isValidPickupPostalCode(pickupPoint?.postalCode, pickupPoint?.countryCode ?? "BE")) {
         toast.error("Veuillez choisir un point relais Mondial Relay valide.");
         return;
       }
@@ -450,7 +451,7 @@ export function CheckoutPageClient({ cart, customerSession, shippingEnabled = tr
       toast.error("Les adresses e-mail temporaires ne sont pas acceptées.");
       return;
     }
-    if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !/^\d{4}$/.test((pickupPoint?.postalCode ?? "").trim())) {
+    if (!pickupPoint?.name?.trim() || !pickupPoint?.city?.trim() || !isValidPickupPostalCode(pickupPoint?.postalCode, pickupPoint?.countryCode ?? "BE")) {
       toast.error("Veuillez choisir un point relais Mondial Relay valide.");
       return;
     }

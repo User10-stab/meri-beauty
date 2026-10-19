@@ -836,7 +836,10 @@
       "pointAddress": "Pickup point address",
       "postalCode": "Postal code",
       "city": "City",
-      "belgiumOnly": "Delivery to Belgium only, via Mondial Relay."
+      "countriesServed": "Delivery to Belgium and France, via Mondial Relay.",
+      "country": "Pickup point country",
+      "belgium": "Belgium",
+      "france": "France"
     },
     "metadata": {
       "boutiquePage": "Shop – Meri Beauty",

@@ -3,7 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 import { isAdminRole, isTillCashOperator } from "@/lib/authorization";
-import { createShipmentLabel } from "@/lib/mondial-relay";
+import { createShipmentLabel, relayPointLocation } from "@/lib/mondial-relay";
 import { storeShippingLabel } from "@/lib/mondial-relay-label-storage";
 import { fetchShipmentTracing } from "@/lib/mondial-relay-tracking";
 import { isBoutiqueShippingEnabledFor } from "@/lib/commerce-availability";
@@ -140,6 +140,10 @@ export async function generateShippingLabel(orderId) {
   // recorded rather than sending "0" and risking an outright rejection.
   const weightGrams = totalWeightGrams > 0 ? totalWeightGrams : 500;
 
+  // Order.shippingCountry is the relay point's country, saved at checkout
+  // (BE or FR); older orders predate France and are all Belgian.
+  const relayCountry = order.shippingCountry || "BE";
+
   const result = await createShipmentLabel({
     credentials: {
       login: process.env.MONDIAL_RELAY_API_LOGIN,
@@ -164,13 +168,13 @@ export async function generateShippingLabel(orderId) {
       // reference text. Physical routing uses deliveryMode.location below.
       street: order.pickupPointAddress || "",
       houseNo: "",
-      countryCode: "BE",
+      countryCode: relayCountry,
       postCode: order.pickupPointPostalCode || "",
       city: order.pickupPointCity || "",
       phone: order.user?.phone || "",
       email: order.user?.email || "",
     },
-    deliveryMode: { mode: "24R", location: order.pickupPointId },
+    deliveryMode: { mode: "24R", location: relayPointLocation(relayCountry, order.pickupPointId) },
     collectionMode: {
       mode: process.env.MONDIAL_RELAY_COLLECTION_MODE || "REL",
       location: process.env.MONDIAL_RELAY_COLLECTION_POINT_ID || "Auto",

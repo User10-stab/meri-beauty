@@ -54,7 +54,11 @@ function WidgetPickupPointPicker({ value, onChange, t }) {
       $(containerRef.current).MR_ParcelShopPicker({
         Target: "#mr-parcel-shop-target",
         Brand: BRAND_ID,
+        // Belgium first; the widget's own country list lets a French
+        // customer switch to France (the only two countries priced in
+        // lib/shipping.js).
         Country: "BE",
+        AllowedCountries: "BE,FR",
         NbResults: 10,
         Responsive: true,
         Theme: "mondialrelay",
@@ -142,11 +146,12 @@ function WidgetPickupPointPicker({ value, onChange, t }) {
 }
 
 function ManualPickupPointForm({ value, onChange, t, widgetUnavailable = false }) {
-  const point = value ?? { name: "", address: "", postalCode: "", city: "" };
+  const point = value ?? { name: "", address: "", postalCode: "", city: "", countryCode: "BE" };
+  const countryCode = point.countryCode ?? "BE";
 
   function handleChange(e) {
     const { name, value: fieldValue } = e.target;
-    onChange({ ...point, id: null, [name]: fieldValue });
+    onChange({ ...point, countryCode, id: null, [name]: fieldValue });
   }
 
   return (
@@ -159,6 +164,16 @@ function ManualPickupPointForm({ value, onChange, t, widgetUnavailable = false }
             : t("autoSearchComing")}
         </p>
       </div>
+      <select
+        name="countryCode"
+        value={countryCode}
+        onChange={handleChange}
+        aria-label={t("country")}
+        className="w-full border border-neutral-200 bg-white px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
+      >
+        <option value="BE">{t("belgium")}</option>
+        <option value="FR">{t("france")}</option>
+      </select>
       <input
         name="name"
         value={point.name}
@@ -181,7 +196,7 @@ function ManualPickupPointForm({ value, onChange, t, widgetUnavailable = false }
           value={point.postalCode}
           onChange={handleChange}
           placeholder={t("postalCode")}
-          maxLength={4}
+          maxLength={countryCode === "FR" ? 5 : 4}
           className="w-full border border-neutral-200 px-4 py-3 text-sm focus:border-[#C8A46A] focus:outline-none"
           required
         />
@@ -194,7 +209,7 @@ function ManualPickupPointForm({ value, onChange, t, widgetUnavailable = false }
           required
         />
       </div>
-      <p className="text-xs text-gray-400">{t("belgiumOnly")}</p>
+      <p className="text-xs text-gray-400">{t("countriesServed")}</p>
     </div>
   );
 }

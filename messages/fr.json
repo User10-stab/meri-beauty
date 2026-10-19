@@ -836,7 +836,10 @@
       "pointAddress": "Adresse du point relais",
       "postalCode": "Code postal",
       "city": "Ville",
-      "belgiumOnly": "Livraison en Belgique uniquement, via Mondial Relay."
+      "countriesServed": "Livraison en Belgique et en France, via Mondial Relay.",
+      "country": "Pays du point relais",
+      "belgium": "Belgique",
+      "france": "France"
     },
     "metadata": {
       "boutiquePage": "Boutique – Meri Beauty",

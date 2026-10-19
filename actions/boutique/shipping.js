@@ -6,15 +6,16 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { shippingQuoteRequestOwnerEmail, shippingQuoteRequestConfirmationEmail } from "@/lib/email-templates";
 import { shippingQuoteRequestSchema } from "@/lib/validations/commerce";
-import { calculateShippingCost, calculateTotalWeight, getShippingDetails } from "@/lib/shipping";
+import { calculateShippingCost, calculateTotalWeight, getShippingDetails, isSupportedShippingCountry } from "@/lib/shipping";
 import { applyVatRate, repriceTtcCataloguePrice, resolveGoodsVatPolicy } from "@/lib/tax-policy";
 import { BOUTIQUE_SHIPPING_DISABLED_MESSAGE, isBoutiqueShippingEnabledFor } from "@/lib/commerce-availability";
 
 /**
  * Get current cart shipping calculation for checkout display
  * Returns the same shipping cost that will be charged at checkout
+ * @param {string} [countryCode] - the chosen relay point's country ("BE" or "FR")
  */
-export async function getCartShippingCost() {
+export async function getCartShippingCost(countryCode = "BE") {
   // Fetched up front (not just further down for the VAT policy) so the
   // Mondial Relay pilot allowlist can be checked before the base flag —
   // see isBoutiqueShippingEnabledFor. A guest (no session) is simply never
@@ -22,6 +23,9 @@ export async function getCartShippingCost() {
   const session = await auth();
   if (!isBoutiqueShippingEnabledFor(session?.user?.email)) {
     return { success: false, message: BOUTIQUE_SHIPPING_DISABLED_MESSAGE };
+  }
+  if (!isSupportedShippingCountry(countryCode)) {
+    return { success: false, message: "Livraison Mondial Relay disponible en Belgique et en France uniquement." };
   }
 
   try {
@@ -51,7 +55,7 @@ export async function getCartShippingCost() {
       0
     );
     const totalWeight = calculateTotalWeight(fullCart.items);
-    const catalogueCost = calculateShippingCost(totalWeight, subtotal);
+    const catalogueCost = calculateShippingCost(totalWeight, subtotal, countryCode);
 
     // Handle >30kg orders that require manual shipping quote
     if (catalogueCost === "QUOTE_REQUIRED") {
@@ -67,7 +71,7 @@ export async function getCartShippingCost() {
       };
     }
 
-    const details = getShippingDetails(totalWeight, subtotal);
+    const details = getShippingDetails(totalWeight, subtotal, countryCode);
     const cost = applyVatRate(catalogueCost, vatPolicy.vatRate);
 
     return {
@@ -131,7 +135,7 @@ export async function requestShippingQuote(input) {
     const subtotal = fullCart.items.reduce((sum, item) => sum + Number(item.variant.price) * item.quantity, 0);
     const totalWeightKg = totalWeight / 1000;
 
-    if (calculateShippingCost(totalWeight, subtotal) !== "QUOTE_REQUIRED") {
+    if (calculateShippingCost(totalWeight, subtotal, pickupPoint?.countryCode ?? "BE") !== "QUOTE_REQUIRED") {
       return { success: false, message: "Un devis n'est pas nécessaire pour cette commande — le tarif automatique s'applique." };
     }
 

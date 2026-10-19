@@ -624,7 +624,7 @@ export async function createOrderFromCart(input) {
     let shippingCost = 0;
     if (fulfilmentMode === "SHIPPING_PREPAID") {
       const totalWeight = calculateTotalWeight(fullCart.items);
-      shippingCost = calculateShippingCost(totalWeight, subtotal);
+      shippingCost = calculateShippingCost(totalWeight, subtotal, destinationCountry);
 
       // Handle >30kg orders that require manual shipping quote
       if (shippingCost === "QUOTE_REQUIRED") {

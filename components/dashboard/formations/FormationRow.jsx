@@ -1,17 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { UserPlus } from "lucide-react";
 import { RowActions } from "../Tables/RowActions";
 import { useTranslations } from "next-intl";
 
 /**
- * @param {boolean} [props.canEnrol] Shows « Inscrire une élève »: opens the
- *   till with this formation already searched, where a seat is booked by hand
- *   — paid on the spot, or « Virement » (seat held, client confirmed once the
- *   transfer is accepted on Factures / under the till).
+ * @param {boolean} [props.canEnrol] Shows « Ajouter une élève hors ligne »,
+ *   which calls `onEnrol(row)` to open the enrolment popup.
  */
-export function FormationRow({ row, onView, onEdit, onDelete, canEnrol = false }) {
+export function FormationRow({ row, onView, onEdit, onDelete, onEnrol, canEnrol = false }) {
   const t = useTranslations("dashboardFormations");
   const priceFormatted = new Intl.NumberFormat("fr-FR", {
     style: "currency",
@@ -56,14 +53,16 @@ export function FormationRow({ row, onView, onEdit, onDelete, canEnrol = false }
                 {row.description}
               </span>
             )}
-            {canEnrol && row.status !== "CANCELLED" && (
-              <Link
-                href={`/dashboard/boutique/point-of-sale?recherche=${encodeURIComponent(row.title)}`}
+            {canEnrol && onEnrol && row.status !== "CANCELLED" &&
+              (row.type === "PRIVATE" || row.upcomingSessions?.some((session) => session.remainingSeats > 0)) && (
+              <button
+                type="button"
+                onClick={() => onEnrol(row)}
                 className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
               >
                 <UserPlus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                Inscrire une élève
-              </Link>
+                Ajouter une élève hors ligne
+              </button>
             )}
           </div>
         </div>

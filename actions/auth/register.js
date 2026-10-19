@@ -128,15 +128,16 @@ export async function registerUser(input) {
     const user = await prisma.$transaction(async (tx) => {
       const activeUserWithEmail = await tx.user.findFirst({
         where: { email: email.toLowerCase(), isDeleted: false },
-        select: { id: true },
+        select: { id: true, role: true, password: true },
       });
-      if (activeUserWithEmail) {
+      const isOfflineProfile = activeUserWithEmail?.role === "CUSTOMER" && activeUserWithEmail.password == null;
+      if (activeUserWithEmail && !isOfflineProfile) {
         throw Object.assign(new Error("Duplicate active email"), { code: "P2002", meta: { target: ["email"] } });
       }
 
       const activeUserWithPhone = phone
         ? await tx.user.findFirst({
-            where: { phone, isDeleted: false },
+            where: { phone, isDeleted: false, ...(activeUserWithEmail ? { id: { not: activeUserWithEmail.id } } : {}) },
             select: { id: true },
           })
         : null;
@@ -144,32 +145,32 @@ export async function registerUser(input) {
         throw Object.assign(new Error("Duplicate active phone"), { code: "P2002", meta: { target: ["phone"] } });
       }
 
-      const newUser = await tx.user.create({
-        data: {
-          fullName,
-          nickName: nickName || null,
-          email,
-          phone,
-          password: hashedPassword,
-          role: "CUSTOMER",
-          emailVerified: false,
-          isActive: true,
-          isCompany,
-          vatNumber: vatNumberToSave,
-          ...(vatValidation ?? {}),
-          // Address is entreprise-only at signup (particulier registers with
-          // identity fields only, like the reservation flow): store empties
-          // as null, matching reservation-created accounts.
-          addressLine1: addressLine1 || null,
-          addressLine2: addressLine2 || null,
-          addressCity: addressCity || null,
-          addressPostalCode: addressPostalCode || null,
-          addressCountry,
-          ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "registration"),
-          ...buildTermsAcceptanceUpdate(),
-        },
-        select: userSelect,
-      });
+      const userData = {
+        fullName,
+        nickName: nickName || null,
+        email,
+        phone,
+        password: hashedPassword,
+        role: "CUSTOMER",
+        emailVerified: false,
+        isActive: true,
+        isCompany,
+        vatNumber: vatNumberToSave,
+        ...(vatValidation ?? {}),
+        // Address is entreprise-only at signup (particulier registers with
+        // identity fields only, like the reservation flow): store empties
+        // as null, matching reservation-created accounts.
+        addressLine1: addressLine1 || null,
+        addressLine2: addressLine2 || null,
+        addressCity: addressCity || null,
+        addressPostalCode: addressPostalCode || null,
+        addressCountry,
+        ...buildNewsletterConsentUpdate(newsletterSubscribed ?? false, "registration"),
+        ...buildTermsAcceptanceUpdate(),
+      };
+      const newUser = activeUserWithEmail
+        ? await tx.user.update({ where: { id: activeUserWithEmail.id }, data: userData, select: userSelect })
+        : await tx.user.create({ data: userData, select: userSelect });
 
       await tx.emailVerificationToken.create({
         data: {

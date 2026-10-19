@@ -111,7 +111,12 @@ export function ReservationRow({ row, onEdit, onDelete, onSettle, onNoShow, onSe
         {row.customer ? (
           <>
             <span className="block text-sm font-medium text-gray-700">{row.customer.fullName}</span>
-            <span className="text-xs text-gray-400">{row.customer.email}</span>
+            {row.customer.email && <span className="text-xs text-gray-400">{row.customer.email}</span>}
+            {row.offlineEnrollment && (
+              <span className="mt-1 inline-flex rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[10px] font-medium text-violet-700">
+                Inscription hors ligne
+              </span>
+            )}
           </>
         ) : (
           <span className="text-sm text-gray-400 italic">Client non disponible</span>

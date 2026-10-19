@@ -53,6 +53,7 @@ export async function loginUser(input) {
         select: {
           role: true,
           emailVerified: true,
+          password: true,
         },
       });
 
@@ -60,6 +61,13 @@ export async function loginUser(input) {
         return {
           success: false,
           message: "Adresse e-mail ou mot de passe incorrect.",
+        };
+      }
+
+      if (!user.password) {
+        return {
+          success: false,
+          message: "Aucun accès en ligne n'est configuré pour ce profil. Contactez le salon si vous souhaitez créer un compte.",
         };
       }
 

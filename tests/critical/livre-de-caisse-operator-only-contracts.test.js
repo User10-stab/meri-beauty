@@ -95,10 +95,12 @@ describe("the settlement UIs hide the espèces / carte popup for a non-operator"
     expect(source("app/(dashboard)/dashboard/boutique/point-of-sale/page.jsx")).toContain("await requireSalonTill();");
   });
 
-  test("SettleReservationDialog collapses to a plain confirmation off-till", () => {
+  test("SettleReservationDialog stays off-till except for a received transfer on an offline formation", () => {
     const dialog = source("components/dashboard/reservations/SettleReservationDialog.jsx");
     expect(dialog).toContain("canCollectCash = true");
-    expect(dialog).toContain("const hasBalance = balance > 0 && canCollectCash");
+    expect(dialog).toContain("const isOfflineEnrollment = Boolean(reservation?.offlineEnrollment)");
+    expect(dialog).toContain("const hasBalance = balance > 0 && (canCollectCash || isOfflineEnrollment)");
+    expect(dialog).toContain("const collectsOffTill = balance > 0 && !canCollectCash && !isOfflineEnrollment");
     expect(dialog).toContain("onConfirm({})");
   });
 

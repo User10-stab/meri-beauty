@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Check, ChevronLeft, ChevronRight, Eye, FileMinus, FilePlus2, FileSearch, HandCoins, Hourglass, Loader2, Mail, RotateCcw, Search, Send, Wallet } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Eye, FileSpreadsheet, Printer, FileMinus, FilePlus2, FileSearch, HandCoins, Hourglass, Loader2, Mail, RotateCcw, Search, Send, Wallet } from "lucide-react";
 import { DocumentDeliveryDialog } from "@/components/dashboard/operations/DocumentDeliveryDialog";
 import { TransactionDetailDrawer } from "@/components/dashboard/operations/TransactionDetailDrawer";
 import { GenerateCreditNoteDialog } from "@/components/dashboard/operations/GenerateCreditNoteDialog";
@@ -335,6 +335,27 @@ export function InvoicesClient({ data, pendingRows = [] }) {
     router.push(pathname);
   }
 
+  // Month pickers fill the same Du / Au fields (applied with « Filtrer »):
+  // first day of the start month, last day of the end month.
+  const pad = (n) => String(n).padStart(2, "0");
+  function pickFromMonth(value) {
+    if (!value) return;
+    setDraft((d) => ({ ...d, from: `${value}-01` }));
+  }
+  function pickToMonth(value) {
+    if (!value) return;
+    const [year, month] = value.split("-").map(Number);
+    setDraft((d) => ({ ...d, to: `${value}-${pad(new Date(year, month, 0).getDate())}` }));
+  }
+
+  // The exports follow the filters currently APPLIED (the URL), not the draft.
+  const exportQuery = new URLSearchParams();
+  for (const key of ["q", "delivery", "source", "paymentStatus", "from", "to"]) {
+    const value = filters[key];
+    if (value && value !== "ALL") exportQuery.set(key, value);
+  }
+  const exportSuffix = exportQuery.toString() ? `?${exportQuery.toString()}` : "";
+
   const hasActiveFilters =
     filters.q || filters.from || filters.to || [filters.delivery, filters.source, filters.paymentStatus].some((v) => v !== "ALL");
 
@@ -410,6 +431,14 @@ export function InvoicesClient({ data, pendingRows = [] }) {
           Au
           <input type="date" value={draft.to} onChange={(e) => setDraft((d) => ({ ...d, to: e.target.value }))} className={inputClass} />
         </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
+          Du mois
+          <input type="month" value={draft.from ? draft.from.slice(0, 7) : ""} onChange={(e) => pickFromMonth(e.target.value)} className={inputClass} />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-gray-500">
+          Au mois
+          <input type="month" value={draft.to ? draft.to.slice(0, 7) : ""} onChange={(e) => pickToMonth(e.target.value)} className={inputClass} />
+        </label>
         <div className="flex gap-2">
           <button type="submit" className="rounded-lg bg-[#2f3a2e] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1f291f]">
             Filtrer
@@ -425,6 +454,30 @@ export function InvoicesClient({ data, pendingRows = [] }) {
           )}
         </div>
       </form>
+
+      {/* ── Exports (Excel / CSV / PDF), same filters as the list ───── */}
+      <div className="flex flex-wrap justify-end gap-2">
+        <a
+          href={`/api/factures/export${exportSuffix}`}
+          className="inline-flex items-center gap-2 rounded-lg bg-[#217346] px-4 py-2 text-sm font-semibold text-white hover:bg-[#185c37]"
+        >
+          <FileSpreadsheet size={16} /> Exporter Excel (.xlsx)
+        </a>
+        <a
+          href={`/api/factures/csv${exportSuffix}`}
+          className="inline-flex items-center gap-2 rounded-lg border border-stroke bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:border-[#2f3a2e] dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6"
+        >
+          <Download size={16} /> Exporter CSV
+        </a>
+        <a
+          href={`/api/factures/pdf${exportSuffix}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-lg border border-stroke bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:border-[#2f3a2e] dark:border-dark-3 dark:bg-gray-dark dark:text-dark-6"
+        >
+          <Printer size={16} /> Imprimer (PDF)
+        </a>
+      </div>
 
       {/* ── Tableau ──────────────────────────────────────────────────── */}
       <div className="overflow-x-auto rounded-xl border border-stroke bg-white dark:border-dark-3 dark:bg-gray-dark">

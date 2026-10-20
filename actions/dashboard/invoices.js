@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { isBelgianVatNumber } from "@/lib/peppyrus";
+import { buildInvoicesExport } from "@/lib/invoices/build-invoices-export";
 import {
   INVOICES_PAGE_SIZE,
   buildInvoiceWhere,
@@ -149,6 +150,25 @@ export async function listInvoices(rawFilters = {}) {
     };
   } catch (error) {
     console.error("[listInvoices]", error);
+    return { success: false, message: "Impossible de charger les factures." };
+  }
+}
+
+/**
+ * The whole filtered Factures list for the Excel / CSV / PDF exports —
+ * every page at once, same filters as the screen. Re-checks the admin role
+ * and re-normalizes its params: a hand-edited URL cannot widen the scope.
+ */
+export async function getInvoicesExport(rawFilters = {}) {
+  const session = await auth();
+  if (!session?.user || !isAdminRole(session.user.role)) {
+    return { success: false, message: "Non autorisé." };
+  }
+  try {
+    const data = await buildInvoicesExport(prisma, normalizeInvoiceFilters(rawFilters));
+    return { success: true, data };
+  } catch (error) {
+    console.error("[getInvoicesExport]", error);
     return { success: false, message: "Impossible de charger les factures." };
   }
 }

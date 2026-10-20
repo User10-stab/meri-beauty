@@ -27,9 +27,9 @@ export default async function LivreDeRecettesPage({ searchParams }) {
       <div className="flex flex-col gap-1 print:hidden">
         <h1 className="text-2xl font-bold text-dark dark:text-white">Livre de recettes</h1>
         <p className="text-sm font-medium text-gray-500 dark:text-dark-6">
-          Journal chronologique de toutes les recettes encaissées — espèces, carte et en ligne, y compris
-          les espèces perçues hors caisse. Ne se rapproche pas 1:1 du Livre de caisse, qui ne couvre qu'une
-          session de caisse.
+          Journal chronologique des recettes encaissées sans facture — espèces, carte, en ligne et virement.
+          Les ventes avec facture se retrouvent dans la page Factures. Ne se rapproche pas 1:1 du Livre de
+          caisse, qui ne couvre qu'une session de caisse.
         </p>
       </div>
 

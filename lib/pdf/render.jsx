@@ -4,6 +4,7 @@ import { buildRentalPeriodLabel, shortContractRef } from "@/lib/invoicing";
 import { InvoiceDocument, CreditNoteDocument } from "./InvoiceDocument";
 import { TicketDocument } from "./TicketDocument";
 import { RecettesJournalDocument } from "./RecettesJournalDocument";
+import { InvoicesListDocument } from "./InvoicesListDocument";
 import { CashBookDocument } from "./CashBookDocument";
 import { InventorySnapshotDocument } from "./InventorySnapshotDocument";
 import { StockMovementsDocument } from "./StockMovementsDocument";
@@ -147,6 +148,11 @@ export async function renderCreditNotePdf(creditNote, invoice) {
  */
 export async function renderRecettesJournalPdf(journal) {
   return renderToBuffer(<RecettesJournalDocument journal={journal} />);
+}
+
+/** The Factures list printout — plain numbers already (see build-invoices-export.js). */
+export async function renderInvoicesListPdf(data) {
+  return renderToBuffer(<InvoicesListDocument data={data} />);
 }
 
 /**

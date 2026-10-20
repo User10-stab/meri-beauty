@@ -63,6 +63,26 @@ describe("buildRecettesJournal", () => {
     );
   });
 
+  it("keeps only invoice-less payments when excludeInvoiced is set, and everything otherwise", async () => {
+    const client = clientMock();
+    await buildRecettesJournal(client, { ...RANGE, excludeInvoiced: true });
+    expect(client.transaction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ payment: { payeeStaffId: null, invoice: { is: null } } }),
+      })
+    );
+
+    const plain = clientMock();
+    await buildRecettesJournal(plain, RANGE);
+    expect(plain.transaction.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ payment: { payeeStaffId: null } }) })
+    );
+  });
+
+  it("the Livre de recettes action always excludes invoiced sales", () => {
+    expect(source("actions/dashboard/get-recettes-journal.js")).toContain("excludeInvoiced: true");
+  });
+
   it("windows the query on paidAt between the normalized range bounds", async () => {
     const client = clientMock();
     await buildRecettesJournal(client, RANGE);

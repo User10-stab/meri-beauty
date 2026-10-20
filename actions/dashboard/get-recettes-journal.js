@@ -18,6 +18,10 @@ import { buildRecettesJournal } from "@/lib/livre-de-recettes/build-recettes-jou
  * than trusting the page that called it — a hand-edited query string must
  * not widen the window.
  *
+ * Only the takings WITHOUT an invoice: every invoiced sale is listed (and
+ * exported) in Factures instead. Set here, not from a query param, so no URL
+ * can bring them back.
+ *
  * The salon's revenue only: an independent practitioner's takings are never
  * in this journal, and no parameter can put them there.
  *
@@ -33,7 +37,7 @@ export async function getRecettesJournal(params = {}) {
   const normalized = normalizeRecettesParams(params);
 
   try {
-    const data = await buildRecettesJournal(prisma, normalized);
+    const data = await buildRecettesJournal(prisma, { ...normalized, excludeInvoiced: true });
     return { success: true, data: serializeDecimalFields(data) };
   } catch (error) {
     console.error("[getRecettesJournal]", error);

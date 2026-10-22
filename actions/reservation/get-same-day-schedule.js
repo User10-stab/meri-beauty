@@ -34,6 +34,7 @@ export async function getSameDaySchedule({ drafts, date, maxProposals = DEFAULT_
           staff: {
             include: {
               workingHours: true,
+              workingDayOverrides: true,
               timeOffs: true,
               contracts: { where: { status: "ACTIVE" }, take: 1 },
               user: { select: { isDeleted: true, isActive: true } },

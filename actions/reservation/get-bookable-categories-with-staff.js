@@ -81,6 +81,7 @@ export async function getBookableCategoriesWithStaff() {
                       select: { id: true, fullName: true, avatar: true },
                     },
                     workingHours: true,
+                    workingDayOverrides: true,
                     timeOffs: true,
                     contracts: {
                       where: { status: "ACTIVE" },

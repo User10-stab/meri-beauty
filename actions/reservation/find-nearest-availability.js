@@ -34,6 +34,7 @@ async function loadSchedulingContext(drafts, maxDaysToScan) {
         staff: {
           include: {
             workingHours: true,
+            workingDayOverrides: true,
             timeOffs: true,
             contracts: { where: { status: "ACTIVE" }, take: 1 },
             user: { select: { isDeleted: true, isActive: true } },

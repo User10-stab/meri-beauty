@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Clock, X } from "lucide-react";
 import { toast } from "sonner";
 import { getWorkingHours, upsertWorkingHours } from "@/actions/staff/working-hours";
+import { WEEKS_OF_MONTH } from "@/lib/working-day-overrides";
+import { FifthDayAssignDialog, fifthDayLabel } from "@/components/dashboard/staff/FifthDayAssignDialog";
 
 const DAY_LABELS = {
   MONDAY: "Lundi",
@@ -25,6 +27,16 @@ const DAY_ORDER = [
   "SUNDAY",
 ];
 
+const WEEK_LABELS = { 1: "1er", 2: "2e", 3: "3e", 4: "4e" };
+
+// How many coming 5th days are listed under a shared weekday.
+const FIFTH_DAYS_SHOWN = 2;
+
+/** The weeks of the month as the form holds them: never empty, [1–4] = every week. */
+function weeksOf(day) {
+  return day.weeksOfMonth?.length ? day.weeksOfMonth : WEEKS_OF_MONTH;
+}
+
 /**
  * @param {object} props
  * @param {object} props.staff — { id, user: { fullName } }
@@ -34,6 +46,9 @@ export function WorkingHoursModal({ staff, onClose }) {
   const [days, setDays] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // The coming 5th days of the weekdays shared by weeks of the month, as saved.
+  const [fifthDays, setFifthDays] = useState([]);
+  const [assigning, setAssigning] = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -41,6 +56,7 @@ export function WorkingHoursModal({ staff, onClose }) {
       const res = await getWorkingHours(staff.id);
       if (res.success) {
         setDays(res.data);
+        setFifthDays(res.fifthDays ?? []);
       } else {
         toast.error(res.message);
         onClose();
@@ -62,6 +78,29 @@ export function WorkingHoursModal({ staff, onClose }) {
       return next;
     });
   }
+
+  // At least one week stays ticked: an open day with no week would mean nothing.
+  // Toggled from the latest state, so two quick clicks never undo each other.
+  function toggleWeek(index, week) {
+    const toggle = (weeks) => (weeks.includes(week) ? weeks.filter((w) => w !== week) : [...weeks, week].sort());
+    if (toggle(weeksOf(days[index])).length === 0) {
+      toast.error("Gardez au moins une semaine, ou cochez « Fermé ».");
+      return;
+    }
+    setDays((prev) => {
+      const next = toggle(weeksOf(prev[index]));
+      if (next.length === 0) return prev;
+      const copy = [...prev];
+      copy[index] = { ...copy[index], weeksOfMonth: next };
+      return copy;
+    });
+  }
+
+  const closeAssign = useCallback(() => setAssigning(null), []);
+  const reloadFifthDays = useCallback(async () => {
+    const res = await getWorkingHours(staff.id);
+    if (res.success) setFifthDays(res.fifthDays ?? []);
+  }, [staff.id]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -95,6 +134,7 @@ export function WorkingHoursModal({ staff, onClose }) {
         startTime: d.isClosed ? "00:00" : d.startTime,
         endTime: d.isClosed ? "00:00" : d.endTime,
         isClosed: d.isClosed,
+        weeksOfMonth: d.isClosed ? [] : weeksOf(d),
       })),
     });
 
@@ -110,11 +150,11 @@ export function WorkingHoursModal({ staff, onClose }) {
   // Close on Escape
   useEffect(() => {
     function handleKey(e) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !assigning) onClose();
     }
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  }, [onClose, assigning]);
 
   return (
     <div
@@ -126,7 +166,7 @@ export function WorkingHoursModal({ staff, onClose }) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className=" rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95 duration-200">
+      <div className="flex max-h-[92vh] w-full max-w-[760px] flex-col rounded-2xl bg-white shadow-xl animate-in fade-in-0 zoom-in-95 duration-200">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
           <div className="flex items-center gap-3">
@@ -161,7 +201,12 @@ export function WorkingHoursModal({ staff, onClose }) {
             Chargement des horaires…
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="px-6 py-4 space-y-1">
+          <form onSubmit={handleSubmit} className="overflow-y-auto px-6 py-4 space-y-1">
+            <p className="pb-2 text-xs text-gray-500">
+              Sous chaque jour, cochez les semaines du mois où elle travaille (ex. le 1er et le 3e samedi) : réglé une
+              fois, appliqué tous les mois. Le 5e jour d&apos;un mois (ex. un 5e samedi) n&apos;est jamais compris, même
+              si les 4 semaines sont cochées : c&apos;est vous qui choisissez, à chaque fois, qui le travaille.
+            </p>
             {DAY_ORDER.map((dayKey, index) => {
               const d = days[index];
               if (!d) return null;
@@ -169,10 +214,15 @@ export function WorkingHoursModal({ staff, onClose }) {
               const hasStartError = d._errors?.includes("startTime");
               const hasEndError = d._errors?.includes("endTime");
 
+              const weeks = weeksOf(d);
+              const dayName = DAY_LABELS[dayKey].toLowerCase();
+              const comingFifths = fifthDays.filter((f) => f.day === dayKey).slice(0, FIFTH_DAYS_SHOWN);
+              const canAssign = comingFifths.some((f) => f.isCandidate);
+
               return (
+                <div key={dayKey} className="py-2.5 border-b border-gray-50 last:border-b-0">
                 <div
-                  key={dayKey}
-                  className={`grid grid-cols-[1fr_auto] items-center gap-3 py-2.5 border-b border-gray-50 last:border-b-0 ${
+                  className={`grid grid-cols-[1fr_auto] items-center gap-3 ${
                     d.isClosed ? "opacity-50" : ""
                   }`}
                 >
@@ -232,6 +282,60 @@ export function WorkingHoursModal({ staff, onClose }) {
                     />
                   </label>
                 </div>
+
+                {!d.isClosed && (
+                  <div className="mt-2 pl-[112px] text-xs text-gray-500">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span>Semaines du mois :</span>
+                      {WEEKS_OF_MONTH.map((week) => (
+                        <button
+                          key={week}
+                          type="button"
+                          aria-pressed={weeks.includes(week)}
+                          aria-label={`${WEEK_LABELS[week]} ${dayName} du mois`}
+                          data-week={week}
+                          onClick={() => toggleWeek(index, week)}
+                          className={`h-7 min-w-[44px] rounded-md border px-2 font-medium transition-colors ${
+                            weeks.includes(week)
+                              ? "border-[#2f3a2e] bg-[#2f3a2e] text-white"
+                              : "border-gray-200 bg-white text-gray-400 hover:border-gray-300"
+                          }`}
+                        >
+                          {WEEK_LABELS[week]}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="mt-1.5 space-y-1" data-fifth-days={dayKey}>
+                      <p className="text-gray-500">5e {dayName} du mois — vous choisissez à chaque fois qui le travaille :</p>
+                      {!canAssign ? (
+                        <p className="text-gray-400">
+                          Ce jour n&apos;est pas encore enregistré pour elle : cliquez sur « Enregistrer », puis rouvrez
+                          cette fenêtre pour choisir les prochains 5es {dayName}s.
+                        </p>
+                      ) : (
+                        comingFifths.map((f) => (
+                          <div key={f.dateKey} className="flex items-center gap-2">
+                            <span className="text-gray-600">{fifthDayLabel(f.dateKey, f.day)} :</span>
+                            {f.assignedNames.length > 0 ? (
+                              <span className="font-medium text-gray-800">{f.assignedNames.join(", ")}</span>
+                            ) : (
+                              <span className="font-medium text-amber-700">personne pour l&apos;instant</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setAssigning(f.dateKey)}
+                              className="rounded-md border border-gray-200 px-2 py-0.5 text-gray-600 hover:bg-gray-50"
+                            >
+                              Choisir
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+                </div>
               );
             })}
 
@@ -262,6 +366,8 @@ export function WorkingHoursModal({ staff, onClose }) {
           </form>
         )}
       </div>
+
+      {assigning && <FifthDayAssignDialog dateKey={assigning} onClose={closeAssign} onAssigned={reloadFifthDays} />}
     </div>
   );
 }

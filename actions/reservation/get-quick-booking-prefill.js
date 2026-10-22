@@ -62,6 +62,7 @@ export async function getQuickBookingPrefill({ staffId, serviceId }) {
               },
             },
             workingHours: true,
+            workingDayOverrides: true,
             timeOffs: true,
             contracts: { where: { status: "ACTIVE" }, take: 1 },
           },

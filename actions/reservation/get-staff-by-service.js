@@ -75,6 +75,7 @@ export async function getStaffByService(serviceId) {
               },
             },
             workingHours: true,
+            workingDayOverrides: true,
             timeOffs: true,
             contracts: {
               where: { status: "ACTIVE" },

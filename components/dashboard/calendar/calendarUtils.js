@@ -2,6 +2,8 @@
  * Calendar utility helpers — pure functions, no React.
  */
 
+import { workingHourForDate } from "@/lib/working-day-overrides";
+
 // ─── Week helpers ─────────────────────────────────────────────────────────────
 
 /** Return Monday of the ISO week that contains `date`. */
@@ -123,8 +125,6 @@ export function buildTimeSlots(openingTime = "09:00", closingTime = "19:00") {
 
 // ─── Staff-based timeline derivation ─────────────────────────────────────────
 
-const JS_TO_WEEKDAY = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
-
 /**
  * Derive the opening/closing times for a single day based on staff working
  * hours and any events (formations, ateliers) scheduled that day.
@@ -139,15 +139,13 @@ const JS_TO_WEEKDAY = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "
  * @returns {{ openingTime: string, closingTime: string }}
  */
 export function deriveDayTimeline(date, staffList, events = []) {
-  const dayName = JS_TO_WEEKDAY[date.getDay()];
-
   let earliestMin = Infinity;
   let latestMin = -Infinity;
 
   // Check staff working hours for this day
   for (const staff of staffList) {
-    const wh = (staff.workingHours || []).find((w) => w.day === dayName);
-    if (!wh || wh.isClosed) continue;
+    const wh = getStaffWorkingHoursForDay(staff.workingHours || [], date, staff.workingDayOverrides);
+    if (!wh) continue;
 
     const { hour: sh, minute: sm } = parseTime(wh.startTime);
     const { hour: eh, minute: em } = parseTime(wh.endTime);
@@ -486,12 +484,13 @@ export function isToday(date) {
  *
  * @param {Array<{ day: string, startTime: string, endTime: string, isClosed: boolean }>} workingHours
  * @param {Date} date
+ * @param {Array<{ dateKey: string, isWorking: boolean, startTime?: string, endTime?: string }>} [overrides]
+ *   days blocked or added by an admin — they win over the weekly template
  * @returns {{ startTime: string, endTime: string } | null}  null when staff is closed
  */
-export function getStaffWorkingHoursForDay(workingHours, date) {
-  const dayName = JS_TO_WEEKDAY[date.getDay()];
-  const wh = (workingHours || []).find((w) => w.day === dayName);
-  if (!wh || wh.isClosed) return null;
+export function getStaffWorkingHoursForDay(workingHours, date, overrides = []) {
+  const wh = workingHourForDate(workingHours, overrides, date);
+  if (!wh) return null;
   return { startTime: wh.startTime, endTime: wh.endTime };
 }
 
@@ -520,7 +519,7 @@ export function timeOffsForDay(timeOffs, targetDate) {
  * @returns {{ label: string, kind: "open" | "closed" | "unavailable" }}
  */
 export function getStaffAvailabilityStatus(staffMember, date) {
-  const wh = getStaffWorkingHoursForDay(staffMember.workingHours || [], date);
+  const wh = getStaffWorkingHoursForDay(staffMember.workingHours || [], date, staffMember.workingDayOverrides);
   if (!wh) {
     return { label: "Fermé", kind: "closed" };
   }
@@ -542,7 +541,7 @@ export function getStaffAvailabilityStatus(staffMember, date) {
  * @returns {string}  e.g. "09:00 – 18:00" or "Fermé"
  */
 export function staffWorkingHoursLabel(staffMember, date) {
-  const wh = getStaffWorkingHoursForDay(staffMember.workingHours || [], date);
+  const wh = getStaffWorkingHoursForDay(staffMember.workingHours || [], date, staffMember.workingDayOverrides);
   if (!wh) return "Fermé";
   return `${wh.startTime} – ${wh.endTime}`;
 }

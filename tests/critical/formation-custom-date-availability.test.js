@@ -134,7 +134,7 @@ describe("date libre — fixed journées of 10:00 to 17:00", () => {
 
   test("the calendar and the booking both use that per-day length", () => {
     const availability = source("lib/formations/custom-date-availability.js");
-    expect(availability).toContain("durationMinutes: CUSTOM_DATE_DAY_MINUTES, workingHours, busy, now })");
+    expect(availability).toContain("durationMinutes: CUSTOM_DATE_DAY_MINUTES, workingHours, overrides, busy, now })");
     expect(availability).toContain("customDateWindows({ dateKeys, time, durationMinutes: customDatePerDayMinutes(formation.duration, days) })");
     expect(availability).toContain("if (!Object.values(counts).some(Boolean)) continue;");
   });
@@ -158,8 +158,9 @@ describe("date libre — journées on her next free days", () => {
 
   test("three journées step over the days she does not work", () => {
     expect(keys()).toEqual(["2026-11-23", "2026-11-24", "2026-11-27"]);
-    // From the Tuesday: Tuesday, Friday, then the next Monday.
-    expect(keys({ dateKey: "2026-11-24" })).toEqual(["2026-11-24", "2026-11-27", "2026-11-30"]);
+    // From the Tuesday: Tuesday, Friday, then — the 30th being November's 5th
+    // Monday, in nobody's hours until it is given — the next Tuesday.
+    expect(keys({ dateKey: "2026-11-24" })).toEqual(["2026-11-24", "2026-11-27", "2026-12-01"]);
   });
 
   test("the day the client picks must itself be a free journée", () => {
@@ -171,12 +172,20 @@ describe("date libre — journées on her next free days", () => {
   });
 
   test("a day she is taken on is stepped over like a closed one", () => {
-    // A rendez-vous on the Friday afternoon: the third journée moves to Monday.
+    // A rendez-vous on the Friday afternoon: the third journée moves past the
+    // 5th Monday (the 30th, nobody's) to the Tuesday.
     const rendezVous = [{ start: at("2026-11-27", "15:00"), end: at("2026-11-27", "16:00") }];
-    expect(keys({ busy: rendezVous })).toEqual(["2026-11-23", "2026-11-24", "2026-11-30"]);
+    expect(keys({ busy: rendezVous })).toEqual(["2026-11-23", "2026-11-24", "2026-12-01"]);
     // An indisponibilité over the Tuesday.
     const timeOff = [{ start: at("2026-11-24", "00:00"), end: at("2026-11-24", "23:59") }];
-    expect(keys({ busy: timeOff })).toEqual(["2026-11-23", "2026-11-27", "2026-11-30"]);
+    expect(keys({ busy: timeOff })).toEqual(["2026-11-23", "2026-11-27", "2026-12-01"]);
+    // Once that 5th Monday is given to her, it is a journée like any other.
+    const given = [{ dateKey: "2026-11-30", isWorking: true, startTime: "09:00", endTime: "18:00" }];
+    expect(customDateDayKeys({ dateKey: MONDAY, days: 3, workingHours: JULIE, overrides: given, busy: timeOff, now: BEFORE })).toEqual([
+      "2026-11-23",
+      "2026-11-27",
+      "2026-11-30",
+    ]);
   });
 
   test("a week with no closed day keeps consecutive journées", () => {
@@ -186,9 +195,10 @@ describe("date libre — journées on her next free days", () => {
 
   test("journées that cannot be placed within 60 days are not offered", () => {
     const mondaysOnly = JULIE.map((hours) => ({ ...hours, isClosed: hours.day !== "MONDAY" }));
-    // 9 Mondays fit in 60 days after the first (56 days), 10 do not (63).
-    expect(keys({ days: 9, workingHours: mondaysOnly })).toHaveLength(9);
-    expect(keys({ days: 10, workingHours: mondaysOnly })).toEqual([]);
+    // The 30th (5th Monday) is nobody's, so 8 Mondays fit in 60 days after the
+    // first (the 8th is 18/01, 56 days), 9 do not (25/01, 63).
+    expect(keys({ days: 8, workingHours: mondaysOnly })).toHaveLength(8);
+    expect(keys({ days: 9, workingHours: mondaysOnly })).toEqual([]);
   });
 
   test("the session keeps its own days: they are what blocks her and what is shown", () => {

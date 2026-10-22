@@ -8,6 +8,9 @@ import { isSellerLegalDataComplete } from "@/lib/invoicing";
 import { OverdueOrdersCarousel } from "@/components/dashboard/OverdueOrdersCarousel";
 import { DashboardFilters } from "@/components/dashboard/DashboardFilters";
 import { RevenueTrendChart } from "@/components/dashboard/RevenueTrendChart";
+import { FifthDayAlert } from "@/components/dashboard/FifthDayAlert";
+import { prisma } from "@/lib/prisma";
+import { loadUnassignedFifthDays } from "@/lib/fifth-days";
 
 // Mirrors messages/fr.json's dashboardBoutique.orders.overdue.* copy — this
 // page doesn't use next-intl (see ORDER_STATUS_LABEL below), so the strings
@@ -68,6 +71,14 @@ export default async function Home({ searchParams }) {
     isCurrentUserAdmin(),
   ]);
 
+  // A shared weekday's 5th occurrence nobody has been given yet (admins only).
+  const unassignedFifthDays = showFilters
+    ? await loadUnassignedFifthDays(prisma).catch((error) => {
+        console.error("[dashboard] fifth days", error);
+        return [];
+      })
+    : [];
+
   if (!result.success) {
     return (
       <div
@@ -126,6 +137,7 @@ export default async function Home({ searchParams }) {
           </span>
         </div>
       )}
+      <FifthDayAlert days={unassignedFifthDays} />
       {/* ── Global filters (admins only — recalculated server-side) ──── */}
       {showFilters && (
         <Suspense>

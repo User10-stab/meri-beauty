@@ -1778,6 +1778,7 @@ model Staff {
 
   staffServices   StaffService[]
   workingHours  WorkingHour[]
+  workingDayOverrides WorkingDayOverride[]
   timeOffs      TimeOff[]
   contracts     Contract[]
   appointments    Appointment[]
@@ -3075,6 +3076,38 @@ model WorkingHour {
   startTime String
   endTime   String
   isClosed  Boolean @default(false)
+  // Which occurrences of this weekday in a month she works: 1 = the first
+  // Monday of the month … 4 = the fourth. Empty = every week, the 5th
+  // included. With a partial rule a 5th occurrence is nobody's until Marie
+  // assigns it (WorkingDayOverride) — lib/working-day-overrides.js.
+  weeksOfMonth Int[] @default([])
+}
+
+// One calendar day that departs from the staff member's weekly WorkingHour
+// template, set by an OWNER/ADMIN: today, the 5th occurrence of a weekday
+// (e.g. a month's 5th Saturday) assigned to one of the staff members who
+// share that day (isWorking true, with that day's hours). isWorking false — a
+// usual day not worked — is still honoured if present. Read by every
+// availability check through lib/working-day-overrides.js — the template
+// answers every other day.
+model WorkingDayOverride {
+  id String @id @default(cuid())
+
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  // Salon calendar day, "YYYY-MM-DD" — a string so the day never shifts
+  // with the server's timezone.
+  dateKey   String
+  isWorking Boolean
+  startTime String?
+  endTime   String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([staffId, dateKey])
 }
 
 // TIME OFF

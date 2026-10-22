@@ -8,6 +8,7 @@ import { completeAppointment } from "@/actions/appointment/manage-appointment";
 import { CounterCustomerError, PhoneAlreadyRegisteredError } from "@/lib/reservation-errors";
 import { counterCustomerSchema } from "@/lib/validations/counter-customer";
 import { resolveCounterCustomer } from "@/lib/counter/resolve-counter-customer";
+import { walkInUnavailabilityReason } from "@/lib/staff-day-unavailability";
 
 // Same "existing account, or a brand-new one with a phone" shape as
 // create-reservation.js's own buyerSchema. The {userId} branch merges in the
@@ -158,9 +159,17 @@ export async function createCounterWalkInService(input) {
         service: { isDeleted: false },
         ...(guard.ownStaffId ? { staffId: guard.ownStaffId } : {}),
       },
-      select: { id: true, staffId: true, duration: true, price: true },
+      select: { id: true, staffId: true, duration: true, price: true, staff: { select: { user: { select: { fullName: true } } } } },
     });
     if (!staffService) return { success: false, message: "Prestation introuvable ou non autorisée." };
+
+    // A staff member blocked today (or on a full-day leave) does not work
+    // today — no prestation is recorded in her name.
+    const unavailable = await walkInUnavailabilityReason(prisma, {
+      staffId: staffService.staffId,
+      staffName: staffService.staff?.user?.fullName,
+    });
+    if (unavailable) return { success: false, message: unavailable };
 
     // Same resolver a booking-buyer completion uses (actions/counter/
     // update-buyer.js): a B2B walk-in now gets the same VAT/VIES and

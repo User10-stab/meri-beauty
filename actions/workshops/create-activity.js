@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/authorization";
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { parseBrusselsInputValue } from "@/lib/datetime/brussels-input";
+import { scheduledSessions, sessionAnimatorUnavailability } from "@/lib/staff-day-unavailability";
 
 const sessionSchema = z.object({
   id: z.string().optional(),
@@ -124,6 +125,14 @@ export async function createActivity(input) {
       }
     }
 
+    // A day its animatrice is blocked or on leave cannot hold a session.
+    const unavailable = await sessionAnimatorUnavailability(
+      prisma,
+      scheduledSessions(sessions, { defaultAnimatorId: animatorId }),
+      { durationMinutes: rest.duration }
+    );
+    if (unavailable) return { success: false, message: unavailable };
+
     const activity = await prisma.activity.create({
       data: {
         ...rest,
@@ -234,6 +243,18 @@ export async function updateActivity(input) {
       }
 
     }
+
+    // A day its animatrice is blocked or on leave cannot hold a session.
+    const unavailable = await sessionAnimatorUnavailability(
+      prisma,
+      scheduledSessions(sessions, {
+        defaultAnimatorId: animatorId,
+        existingById: new Map(existingActivity.sessions.map((s) => [s.id, s])),
+        existingDefaultAnimatorId: existingActivity.animatorId,
+      }),
+      { durationMinutes: rest.duration ?? existingActivity.duration }
+    );
+    if (unavailable) return { success: false, message: unavailable };
 
     // No payee guard here, unlike formations: an atelier's money is the
     // salon's whoever animates it (see resolvePayeeForWorkshopSession), so

@@ -38,6 +38,7 @@ export async function getBookableCategories() {
                 staff: {
                   include: {
                     workingHours: true,
+                    workingDayOverrides: true,
                     timeOffs: true,
                     contracts: {
                       where: { status: "ACTIVE" },

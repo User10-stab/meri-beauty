@@ -39,7 +39,12 @@ export async function getStaffForCalendar() {
           startTime: true,
           endTime: true,
           isClosed: true,
+          weeksOfMonth: true,
         },
+      },
+      // Days Marie blocked or added — the calendar reads them before the template.
+      workingDayOverrides: {
+        select: { dateKey: true, isWorking: true, startTime: true, endTime: true },
       },
       timeOffs: {
         select: {
@@ -68,6 +73,7 @@ export async function getStaffForCalendar() {
         name: s.user?.fullName ?? "—",
         photo: s.photo ?? null,
         workingHours: s.workingHours ?? [],
+        workingDayOverrides: s.workingDayOverrides ?? [],
         timeOffs: (s.timeOffs ?? []).map((to) => ({
           id: to.id,
           startDate: to.startDate.toISOString(),
@@ -99,6 +105,7 @@ export async function getStaffForCalendar() {
           name: me.user?.fullName ?? "—",
           photo: me.photo ?? null,
           workingHours: me.workingHours ?? [],
+          workingDayOverrides: me.workingDayOverrides ?? [],
           timeOffs: (me.timeOffs ?? []).map((to) => ({
             id: to.id,
             startDate: to.startDate.toISOString(),

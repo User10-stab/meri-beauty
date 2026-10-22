@@ -42,6 +42,7 @@ export async function getBookableServices(categoryId) {
               include: {
                 user: { select: { id: true, fullName: true, email: true } },
                 workingHours: true,
+                workingDayOverrides: true,
                 timeOffs: true,
                 contracts: {
                   where: { status: "ACTIVE" },

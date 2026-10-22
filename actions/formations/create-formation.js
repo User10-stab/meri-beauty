@@ -8,6 +8,7 @@ import { isAdminRole, hasDashboardPermission, STAFF_PERMISSIONS } from "@/lib/au
 import { serializeDecimalFields } from "@/lib/serialize-prisma";
 import { parseBrusselsInputValue } from "@/lib/datetime/brussels-input";
 import { sessionsBlockedByPayeeChange, PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE } from "@/lib/payments/resolve-payee";
+import { scheduledSessions, sessionAnimatorUnavailability } from "@/lib/staff-day-unavailability";
 
 const sessionSchema = z.object({
   id: z.string().optional(),
@@ -166,6 +167,14 @@ export async function createFormation(input) {
         animatorId: await resolveFormationAnimatorId(session, item.staffUserId),
       }))
     );
+
+    // A day her animatrice is blocked or on leave cannot hold a session.
+    const unavailable = await sessionAnimatorUnavailability(
+      prisma,
+      scheduledSessions(resolvedSessions, { defaultAnimatorId: animatorId }),
+      { durationMinutes: rest.duration }
+    );
+    if (unavailable) return { success: false, message: unavailable };
 
     const formation = await prisma.formation.create({
       data: {
@@ -339,6 +348,18 @@ export async function updateFormation(input) {
     if (blockedSessions.length > 0) {
       return { success: false, message: PAYEE_CHANGE_ON_PAID_SESSION_MESSAGE };
     }
+
+    // A day her animatrice is blocked or on leave cannot hold a session.
+    const unavailable = await sessionAnimatorUnavailability(
+      prisma,
+      scheduledSessions(resolvedSessions, {
+        defaultAnimatorId: animatorId,
+        existingById: existingSessionById,
+        existingDefaultAnimatorId: existingFormation.animatorId,
+      }),
+      { durationMinutes: rest.duration ?? existingFormation.duration }
+    );
+    if (unavailable) return { success: false, message: unavailable };
 
     const updated = await prisma.$transaction(async (tx) => {
       if (idsToDelete.length > 0) {

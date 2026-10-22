@@ -41,6 +41,14 @@ export async function upsertMyWorkingHours(input) {
     const { days } = parsed.data;
 
     await prisma.$transaction(async (tx) => {
+      // The weeks of the month a day is worked are Marie's to set (« Définir
+      // les horaires de travail »): carried over, never reset by the staff.
+      const previous = await tx.workingHour.findMany({
+        where: { staffId: staff.id },
+        select: { day: true, weeksOfMonth: true },
+      });
+      const weeksByDay = new Map(previous.map((wh) => [wh.day, wh.weeksOfMonth ?? []]));
+
       // Delete existing records
       await tx.workingHour.deleteMany({ where: { staffId: staff.id } });
 
@@ -53,6 +61,7 @@ export async function upsertMyWorkingHours(input) {
             startTime: day.isClosed ? "00:00" : day.startTime,
             endTime: day.isClosed ? "00:00" : day.endTime,
             isClosed: day.isClosed,
+            weeksOfMonth: weeksByDay.get(day.day) ?? [],
           },
         });
       }

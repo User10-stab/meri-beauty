@@ -35,6 +35,7 @@ export async function getAvailableSlots(staffServiceId, date, excludeAppointment
         staff: {
           include: {
             workingHours: true,
+            workingDayOverrides: true,
             timeOffs: true,
             contracts: true,
           },
@@ -159,6 +160,7 @@ export async function getMonthAvailability(staffServiceId, monthDate, excludeApp
         staff: {
           include: {
             workingHours: true,
+            workingDayOverrides: true,
             timeOffs: true,
             contracts: true,
           },

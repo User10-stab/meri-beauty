@@ -64,13 +64,15 @@ const { createManualAppointment, createManualAppointments } = await import(
   "@/actions/appointment/create-manual-appointment.js"
 );
 
-// A Thursday strictly in the future (past slots are rejected by everyone).
+// A Thursday strictly in the future (past slots are rejected by everyone),
+// and not a month's 5th Thursday: that one is in nobody's working hours until
+// it is given (lib/working-day-overrides.js).
 function futureThursday() {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   do {
     d.setDate(d.getDate() + 1);
-  } while (d.getDay() !== 4);
+  } while (d.getDay() !== 4 || d.getDate() >= 29);
   return d;
 }
 const DAY = futureThursday();

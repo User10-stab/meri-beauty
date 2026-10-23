@@ -13,16 +13,17 @@ import { parseBrusselsInputValue, toBrusselsInputValue } from "../../lib/datetim
  * 2026-10-22: Marie sets once, in « Définir les horaires de travail », which
  * weeks of the month each one works a weekday (Julie the 1st and 3rd
  * Saturdays, Lyly the 2nd and 4th). A month's 5th occurrence of a weekday is
- * in nobody's rule — not even « every week »: it is extra work Marie agrees
- * directly, so it is nobody's until she gives it — the dashboard warns about
- * it three weeks ahead.
+ * extra work: hers only with « 5e » ticked (2026-10-23), or given for that one
+ * date — the dashboard warns three weeks ahead about a 5th day nobody has.
  *
  *   the rule             set from the modal, stored, and a change that would
  *                        take away a day already booked is refused;
- *   rendez-vous          no slot on her partner's weeks nor on an unassigned
- *                        5th day (even with all four weeks ticked); a form
- *                        opened before a change is refused on submit;
+ *   rendez-vous          no slot on her partner's weeks nor on a 5th day she
+ *                        does not have (even with the four weeks ticked); a
+ *                        form opened before a change is refused on submit;
  *   5th day              once given to A, bookable with A and not with B;
+ *                        « 5e » ticked for B: hers with no action, until one
+ *                        date is taken away from her;
  *   formation privée     the « date libre » picker follows the same days;
  *   formation / atelier  a new session on her partner's week is refused at
  *   à date fixe          creation, one on her own week is accepted;
@@ -107,18 +108,24 @@ async function openWorkingHours(page, staffEmail) {
   // The row menu closes on any scroll (Tables/ActionMenu), and reaching the
   // last column scrolls the table — so scroll first, then open it.
   const actions = row.getByRole("button", { name: "Actions sur la ligne" });
+  const dialog = page.getByRole("dialog").filter({ hasText: "Définir les horaires de travail" });
   await actions.scrollIntoViewIfNeeded();
   await expect(async () => {
+    // A retry must not click the row again once the modal is open: that click
+    // lands on its backdrop and closes it.
+    if (await dialog.isVisible()) return;
     await actions.click();
     await page.getByRole("menuitem", { name: "Horaires de travail" }).click({ timeout: 2_000 });
   }).toPass({ timeout: 20_000 });
-  const dialog = page.getByRole("dialog").filter({ hasText: "Définir les horaires de travail" });
   await expect(dialog.getByRole("button", { name: "Enregistrer" })).toBeVisible();
   return dialog;
 }
 
 const weekButton = (dialog, k) =>
-  dialog.getByRole("button", { name: `${["", "1er", "2e", "3e", "4e"][k]} ${DAY_FR[SHARED_DAY]} du mois`, exact: true });
+  dialog.getByRole("button", { name: `${["", "1er", "2e", "3e", "4e", "5e"][k]} ${DAY_FR[SHARED_DAY]} du mois`, exact: true });
+
+/** The line of one coming 5th day under SHARED_DAY in the modal. */
+const fifthRowOf = (dialog, dateKey) => dialog.locator(`[data-fifth-days="${SHARED_DAY}"] div`).filter({ hasText: label(dateKey) });
 
 async function openBookingDialog(page) {
   await page.goto("/dashboard/appointments");
@@ -198,9 +205,10 @@ test.describe("staff sharing a weekday by weeks of the month", () => {
     const dialog = await openWorkingHours(page, a.user.email);
 
     for (const k of [1, 2, 3, 4]) await expect(weekButton(dialog, k)).toHaveAttribute("aria-pressed", "true");
+    await expect(weekButton(dialog, 5)).toHaveAttribute("aria-pressed", "false");
     await weekButton(dialog, 2).click();
     await weekButton(dialog, 4).click();
-    await expect(dialog.getByText(`5e ${DAY_FR[SHARED_DAY]} du mois — vous choisissez à chaque fois qui le travaille :`)).toBeVisible();
+    await expect(dialog.getByText(`5e ${DAY_FR[SHARED_DAY]} : elle ne le travaille pas.`)).toBeVisible();
 
     await dialog.getByRole("button", { name: "Enregistrer" }).click();
     await expect(page.getByText("Les horaires de travail ont été enregistrés avec succès.")).toBeVisible();
@@ -219,7 +227,7 @@ test.describe("staff sharing a weekday by weeks of the month", () => {
     expect(await offersSlots(form, bookingA, FIFTH), "A is bookable on an unassigned 5th day").toBe(false);
     expect(await offersSlots(form, bookingB, FIFTH), "B is bookable on an unassigned 5th day").toBe(false);
 
-    // All four weeks ticked: every week — still not the 5th until it is given.
+    // The four weeks ticked — still not the 5th: « 5e » is a tick of its own.
     await prisma.workingHour.updateMany({ where: { staffId: b.staff.id, day: SHARED_DAY }, data: { weeksOfMonth: [] } });
     expect(await offersSlots(form, bookingB, DAY.aFirst), "B (every week) is not bookable on a 1st week").toBe(true);
     expect(await offersSlots(form, bookingB, FIFTH), "every week gave B the 5th day by itself").toBe(false);
@@ -236,12 +244,12 @@ test.describe("staff sharing a weekday by weeks of the month", () => {
     }
 
     const dialog = await openWorkingHours(page, a.user.email);
-    const fifthRow = dialog.locator(`[data-fifth-days="${SHARED_DAY}"] div`).filter({ hasText: label(FIFTH) });
+    const fifthRow = fifthRowOf(dialog, FIFTH);
     await expect(fifthRow).toContainText("personne pour l'instant");
-    await fifthRow.getByRole("button", { name: "Choisir" }).click();
+    await fifthRow.getByRole("button", { name: "Modifier" }).click();
 
     const assign = page.getByRole("dialog").filter({ hasText: "Qui travaille ce jour-là ?" });
-    // Nobody is ticked until Marie says so.
+    // Neither has « 5e »: nobody is ticked until Marie says so.
     await expect(assign.getByRole("checkbox", { name: a.user.fullName })).not.toBeChecked();
     await expect(assign.getByRole("checkbox", { name: b.user.fullName })).not.toBeChecked();
     await assign.getByRole("checkbox", { name: a.user.fullName }).check();
@@ -262,6 +270,56 @@ test.describe("staff sharing a weekday by weeks of the month", () => {
     const form = await openBookingDialog(page);
     expect(await offersSlots(form, bookingA, FIFTH), "A is not bookable on the 5th day given to her").toBe(true);
     expect(await offersSlots(form, bookingB, FIFTH), "B is bookable on the 5th day given to A").toBe(false);
+  });
+
+  test("« 5e » ticked for B: her 5th days with no action each month, until one date is taken away", async ({ page }) => {
+    await loginAs(page, admin.credentials);
+
+    let dialog = await openWorkingHours(page, b.user.email);
+    await weekButton(dialog, 5).click();
+    await expect(weekButton(dialog, 5)).toHaveAttribute("aria-pressed", "true");
+    await expect(dialog.getByText(`5e ${DAY_FR[SHARED_DAY]} : elle le travaille, sans rien à faire chaque mois.`)).toBeVisible();
+    await expect(dialog.getByText("Enregistrez pour l'appliquer.")).toBeVisible();
+    await dialog.getByRole("button", { name: "Enregistrer" }).click();
+    await expect(page.getByText("Les horaires de travail ont été enregistrés avec succès.")).toBeVisible();
+    expect(await staffRule(b.staff.id)).toEqual([2, 4, 5]);
+    // The rule alone — no one-day exception was written for her.
+    expect(await prisma.workingDayOverride.count({ where: { staffId: b.staff.id } })).toBe(0);
+
+    let form = await openBookingDialog(page);
+    expect(await offersSlots(form, bookingB, FIFTH), "« 5e » did not give B the 5th day").toBe(true);
+    expect(await offersSlots(form, bookingB, DAY.aFirst), "« 5e » gave B A's 1st week").toBe(false);
+
+    // Marie takes that one date away from B; A keeps it.
+    dialog = await openWorkingHours(page, b.user.email);
+    const fifthRow = fifthRowOf(dialog, FIFTH);
+    await expect(fifthRow).toContainText(b.user.fullName);
+    await expect(fifthRow).toContainText(a.user.fullName);
+    await fifthRow.getByRole("button", { name: "Modifier" }).click();
+    const assign = page.getByRole("dialog").filter({ hasText: "Qui travaille ce jour-là ?" });
+    await expect(assign.getByRole("checkbox", { name: a.user.fullName })).toBeChecked();
+    await expect(assign.getByRole("checkbox", { name: b.user.fullName })).toBeChecked();
+    await expect(assign.getByText("(« 5e » coché)")).toHaveCount(1);
+    await assign.getByRole("checkbox", { name: b.user.fullName }).uncheck();
+    await assign.getByRole("button", { name: "Valider" }).click();
+    await expect(page.getByText(`${a.user.fullName} travaillera ce jour-là.`)).toBeVisible();
+    await expect(fifthRow).not.toContainText(b.user.fullName);
+
+    const takenAway = await prisma.workingDayOverride.findMany({ where: { staffId: b.staff.id } });
+    expect(takenAway.map((o) => [o.dateKey, o.isWorking])).toEqual([[FIFTH, false]]);
+    expect(await staffRule(b.staff.id), "a one-date change touched her rule").toEqual([2, 4, 5]);
+
+    form = await openBookingDialog(page);
+    expect(await offersSlots(form, bookingB, FIFTH), "B is bookable on the 5th day taken away from her").toBe(false);
+    expect(await offersSlots(form, bookingA, FIFTH)).toBe(true);
+
+    // « 5e » unticked again: the exception, now only repeating the rule, goes with it.
+    dialog = await openWorkingHours(page, b.user.email);
+    await weekButton(dialog, 5).click();
+    await dialog.getByRole("button", { name: "Enregistrer" }).click();
+    await expect(page.getByText("Les horaires de travail ont été enregistrés avec succès.")).toBeVisible();
+    expect(await staffRule(b.staff.id)).toEqual([2, 4]);
+    expect(await prisma.workingDayOverride.count({ where: { staffId: b.staff.id } })).toBe(0);
   });
 
   test("rendez-vous: a form opened before her week is taken away is refused on submit", async ({ page }) => {

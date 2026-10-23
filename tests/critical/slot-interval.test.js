@@ -7,12 +7,14 @@ import { buildAvailabilityForDate } from "@/lib/slot-availability";
 // TimeOff, appointment-conflict and working-hours rules are orthogonal and
 // must keep working exactly as before.
 
+// Never a month's 5th occurrence (the 29th–31st): those are only worked with
+// « 5e » ticked (lib/working-day-overrides.js), which this template is not.
 function nextDateForWeekday(weekDayName) {
   const dayMap = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
   const targetIndex = dayMap.indexOf(weekDayName);
   const date = new Date();
   date.setHours(0, 0, 0, 0);
-  while (date.getDay() !== targetIndex) {
+  while (date.getDay() !== targetIndex || date.getDate() >= 29) {
     date.setDate(date.getDate() + 1);
   }
   return date;

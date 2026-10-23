@@ -11,9 +11,9 @@ import { bookedDays, bookedDaysRefusal } from "@/lib/staff-day-unavailability";
 import { weekOfMonthOfDateKey } from "@/lib/working-day-overrides";
 
 /**
- * A month's 5th Saturday (Monday…) is never in anyone's rule: Marie gives it,
- * each time, to the staff members she agreed it with — one, several, or
- * nobody. See lib/fifth-days.js.
+ * One month's 5th Saturday (Monday…), outside the rule: Marie picks exactly
+ * who works it — one, several, or nobody — whatever their « 5e » tick says.
+ * Only the differences from the rule are stored. See lib/fifth-days.js.
  */
 
 const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -78,25 +78,20 @@ export async function assignFifthDay(input) {
     }
 
     await prisma.$transaction(async (tx) => {
-      await tx.workingDayOverride.deleteMany({
-        where: {
-          dateKey,
-          isWorking: true,
-          staffId: { in: fifth.candidates.map((c) => c.staffId).filter((id) => !staffIds.includes(id)) },
-        },
-      });
-      for (const member of chosen) {
+      for (const member of fifth.candidates) {
+        const isWorking = staffIds.includes(member.staffId);
+        // What her « 5e » tick says already needs no exception.
+        if (isWorking === member.byRule) {
+          await tx.workingDayOverride.deleteMany({ where: { staffId: member.staffId, dateKey } });
+          continue;
+        }
+        const hours = isWorking
+          ? { startTime: member.startTime, endTime: member.endTime }
+          : { startTime: null, endTime: null };
         await tx.workingDayOverride.upsert({
           where: { staffId_dateKey: { staffId: member.staffId, dateKey } },
-          update: { isWorking: true, startTime: member.startTime, endTime: member.endTime, createdById: session.user.id },
-          create: {
-            staffId: member.staffId,
-            dateKey,
-            isWorking: true,
-            startTime: member.startTime,
-            endTime: member.endTime,
-            createdById: session.user.id,
-          },
+          update: { isWorking, ...hours, createdById: session.user.id },
+          create: { staffId: member.staffId, dateKey, isWorking, ...hours, createdById: session.user.id },
         });
       }
     });

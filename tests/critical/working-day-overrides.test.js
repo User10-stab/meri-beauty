@@ -7,6 +7,7 @@ import {
   normalizeWeeksOfMonth,
   weekOfMonthOfDateKey,
   workingHourForDateKey,
+  worksFifthByRule,
 } from "@/lib/working-day-overrides";
 
 // 2026-10-22: the weekly template (« Lundi 10:00–18:00 ») could not say "not
@@ -125,17 +126,45 @@ describe("weeks of the month", () => {
     expect(workingHourForDateKey(julie, given, "2026-08-29")?.startTime).toBe("09:00");
   });
 
-  test("every week (empty rule) does NOT include the 5th — it is given each time", () => {
+  test("every week (empty rule) does NOT include the 5th — « 5e » is a tick of its own", () => {
     expect(workingHourForDateKey(marie, [], "2026-08-29")).toBeNull();
     expect(workingHourForDateKey(marie, [], "2026-08-22")?.startTime).toBe("10:00");
     const given = [{ dateKey: "2026-08-29", isWorking: true, startTime: "10:00", endTime: "20:00" }];
     expect(workingHourForDateKey(marie, given, "2026-08-29")?.startTime).toBe("10:00");
   });
 
-  test("a rule is stored sorted, and all four weeks are stored as every week", () => {
+  test("a rule is stored sorted, and exactly the first four weeks are stored as the default", () => {
     expect(normalizeWeeksOfMonth([3, 1, 3])).toEqual([1, 3]);
     expect(normalizeWeeksOfMonth([4, 3, 2, 1])).toEqual([]);
-    expect(normalizeWeeksOfMonth([0, 5, 2])).toEqual([2]);
+    expect(normalizeWeeksOfMonth([5, 4, 3, 2, 1])).toEqual([1, 2, 3, 4, 5]);
+    expect(normalizeWeeksOfMonth([0, 6, 5, 2])).toEqual([2, 5]);
+  });
+
+  // 2026-10-23: « 5e » ticked = the 5th occurrences are hers too, by rule —
+  // Marie no longer gives them one by one. A one-day override still wins.
+  test("« 5e » ticked: every 5th Saturday is hers, with no action each month", () => {
+    const julieFifth = [{ ...julie[0], weeksOfMonth: [1, 3, 5] }];
+    expect(workingHourForDateKey(julieFifth, [], "2026-08-29")?.startTime).toBe("09:00");
+    expect(workingHourForDateKey(julieFifth, [], "2026-10-31")?.startTime).toBe("09:00");
+    expect(workingHourForDateKey(julieFifth, [], "2026-11-14")).toBeNull(); // still not her 2nd
+    expect(isDayGivenAway(julieFifth, [], "2026-08-29")).toBe(false);
+    expect(worksFifthByRule(julieFifth[0])).toBe(true);
+    expect(worksFifthByRule(julie[0])).toBe(false);
+    expect(worksFifthByRule({ ...julieFifth[0], isClosed: true })).toBe(false);
+  });
+
+  test("a one-day exception takes one 5th day away from « 5e », and only that one", () => {
+    const julieFifth = [{ ...julie[0], weeksOfMonth: [1, 3, 5] }];
+    const takenAway = [{ dateKey: "2026-08-29", isWorking: false }];
+    expect(workingHourForDateKey(julieFifth, takenAway, "2026-08-29")).toBeNull();
+    expect(isDayGivenAway(julieFifth, takenAway, "2026-08-29")).toBe(true);
+    expect(workingHourForDateKey(julieFifth, takenAway, "2026-10-31")?.startTime).toBe("09:00");
+  });
+
+  test("only « 5e »: she works the 5th occurrences and nothing else", () => {
+    const fifthOnly = [{ ...lyly[0], weeksOfMonth: [5] }];
+    expect(workingHourForDateKey(fifthOnly, [], "2026-08-29")?.startTime).toBe("10:00");
+    expect(["2026-11-07", "2026-11-14", "2026-11-21", "2026-11-28"].some((k) => workingHourForDateKey(fifthOnly, [], k))).toBe(false);
   });
 
   test("« given away » = her weekday but not her day; a weekday she never works is not", () => {

@@ -27,8 +27,9 @@ export function fifthDayLabel(dateKey, day) {
 }
 
 /**
- * Gives a month's 5th day (its 5th Saturday, say) to the staff members Marie
- * agreed it with — one, several, or nobody. Nobody is ticked until she says so.
+ * Who works one month's 5th day (its 5th Saturday, say) — one, several, or
+ * nobody — for that date only. Ticked to start with: the staff members who
+ * work it already (« 5e » in their hours, or given that day).
  *
  * @param {object} props
  * @param {string} props.dateKey - "YYYY-MM-DD"
@@ -107,8 +108,8 @@ export function FifthDayAssignDialog({ dateKey, onClose, onAssigned }) {
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
             <p className="mb-3 text-xs text-gray-500">
-              Le 5e {DAY_LABELS[options.day]} n&apos;est dans les horaires de personne. Cochez qui travaille ce jour-là
-              (en plus de ses semaines habituelles) — ou personne.
+              Pour cette date seulement : cochez qui travaille ce jour-là — ou personne. Les horaires de chacune (et
+              leur case « 5e ») ne changent pas pour les autres mois.
             </p>
             <fieldset className="space-y-2">
               <legend className="sr-only">Membres du personnel</legend>
@@ -134,6 +135,7 @@ export function FifthDayAssignDialog({ dateKey, onClose, onAssigned }) {
                       className="h-4 w-4 rounded border-gray-300 text-[#2f3a2e] focus:ring-[#2f3a2e]"
                     />
                     <span className="font-medium text-gray-800">{c.name}</span>
+                    {c.byRule && <span className="text-xs text-gray-400">(« 5e » coché)</span>}
                   </span>
                   <span className="text-xs text-gray-400">
                     {c.startTime} – {c.endTime}

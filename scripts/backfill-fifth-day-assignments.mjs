@@ -2,10 +2,10 @@
  * Gives each coming 5th day (a month's 5th Saturday…) to the staff members
  * who already have something booked on it.
  *
- * Since 2026-10-22 no working-hours rule covers a month's 5th occurrence of a
- * weekday — not even « every week »: Marie gives it, each time, to the staff
- * she agreed it with (WorkingDayOverride isWorking true, see
- * lib/working-day-overrides.js and lib/fifth-days.js). Before that, a staff
+ * Since 2026-10-22 a month's 5th occurrence of a weekday is not in the usual
+ * four weeks: it is hers only with « 5e » ticked (2026-10-23) or given for that
+ * date (WorkingDayOverride isWorking true, see lib/working-day-overrides.js
+ * and lib/fifth-days.js). Before that, a staff
  * member working every Monday also worked the 5th Mondays, and clients may
  * already have booked them. Run once when the change is deployed, so those
  * days stay hers: without it they would read as nobody's — no new booking,
@@ -95,7 +95,7 @@ async function main() {
       id: true,
       userId: true,
       user: { select: { fullName: true, email: true } },
-      workingHours: { select: { day: true, startTime: true, endTime: true, isClosed: true } },
+      workingHours: { select: { day: true, startTime: true, endTime: true, isClosed: true, weeksOfMonth: true } },
       workingDayOverrides: { where: { dateKey: { in: fifthDays } }, select: { dateKey: true } },
     },
   });
@@ -172,6 +172,8 @@ async function main() {
       // A weekday she never works: the change does not touch that day.
       const wh = staff.workingHours.find((w) => w.day === weekDayOf(dateKey));
       if (!wh || wh.isClosed) continue;
+      // « 5e » ticked: the day is hers already.
+      if ((wh.weeksOfMonth ?? []).includes(5)) continue;
       if (staff.workingDayOverrides.some((o) => o.dateKey === dateKey)) continue;
       toGive.push({ staff, dateKey, wh, booked });
     }

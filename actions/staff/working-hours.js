@@ -6,7 +6,14 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/authorization";
 import { workingHoursSchema } from "@/lib/validations/working-hours";
 import { addDaysToDateKey, brusselsDateKey } from "@/lib/formations/custom-date-availability";
-import { normalizeWeeksOfMonth, weekDayOfDateKey, workingHourForDateKey, worksWeekday } from "@/lib/working-day-overrides";
+import {
+  normalizeWeeksOfMonth,
+  weekDayOfDateKey,
+  weekOfMonthOfDateKey,
+  workingHourForDateKey,
+  worksFifthByRule,
+  worksWeekday,
+} from "@/lib/working-day-overrides";
 import { bookedDays, bookedDaysRefusal } from "@/lib/staff-day-unavailability";
 import { loadFifthDays } from "@/lib/fifth-days";
 
@@ -24,7 +31,9 @@ const FIFTH_DAYS_AHEAD = 120;
  * A change that takes days away from her — a weekday closed, fewer weeks of
  * the month — is refused while something is already booked on one of those
  * days in the coming year. A weekday she no longer works also drops the 5th
- * days she had been given on it.
+ * days she had been given on it, and a 5th-day exception that the new rule
+ * now says anyway (« 5e » ticked or unticked) is dropped as redundant — so
+ * unticking « 5e » later really takes her 5th days away.
  *
  * @param {object} input — { staffId: string, days: Array<{ day: WeekDay, startTime: string, endTime: string, isClosed: boolean, weeksOfMonth?: number[] }> }
  * @returns {{ success: boolean, message: string, errors?: object }}
@@ -87,10 +96,13 @@ export async function upsertWorkingHours(input) {
       }),
     ]);
 
-    // A 5th day she was given on a weekday she no longer works.
-    const droppedOverrides = oldOverrides.filter(
-      (o) => o.isWorking && !worksWeekday(days.find((d) => d.day === weekDayOfDateKey(o.dateKey)))
-    );
+    const droppedOverrides = oldOverrides.filter((o) => {
+      const day = days.find((d) => d.day === weekDayOfDateKey(o.dateKey));
+      // A 5th day she was given on a weekday she no longer works.
+      if (o.isWorking && !worksWeekday(day)) return true;
+      // A 5th-day exception that only repeats her new rule.
+      return worksWeekday(day) && weekOfMonthOfDateKey(o.dateKey) === 5 && o.isWorking === worksFifthByRule(day);
+    });
     const droppedIds = new Set(droppedOverrides.map((o) => o.id));
     const newOverrides = oldOverrides.filter((o) => !droppedIds.has(o.id));
 

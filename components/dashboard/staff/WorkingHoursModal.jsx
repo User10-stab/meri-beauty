@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Clock, X } from "lucide-react";
 import { toast } from "sonner";
 import { getWorkingHours, upsertWorkingHours } from "@/actions/staff/working-hours";
-import { WEEKS_OF_MONTH } from "@/lib/working-day-overrides";
+import { WEEKS_OF_MONTH, weeksOfRule } from "@/lib/working-day-overrides";
 import { FifthDayAssignDialog, fifthDayLabel } from "@/components/dashboard/staff/FifthDayAssignDialog";
 
 const DAY_LABELS = {
@@ -27,15 +27,13 @@ const DAY_ORDER = [
   "SUNDAY",
 ];
 
-const WEEK_LABELS = { 1: "1er", 2: "2e", 3: "3e", 4: "4e" };
+const WEEK_LABELS = { 1: "1er", 2: "2e", 3: "3e", 4: "4e", 5: "5e" };
 
-// How many coming 5th days are listed under a shared weekday.
+// How many coming 5th days are listed under a weekday.
 const FIFTH_DAYS_SHOWN = 2;
 
-/** The weeks of the month as the form holds them: never empty, [1–4] = every week. */
-function weeksOf(day) {
-  return day.weeksOfMonth?.length ? day.weeksOfMonth : WEEKS_OF_MONTH;
-}
+/** The weeks of the month as the form holds them: never empty, the default [1–4] spelled out. */
+const weeksOf = weeksOfRule;
 
 /**
  * @param {object} props
@@ -44,6 +42,8 @@ function weeksOf(day) {
  */
 export function WorkingHoursModal({ staff, onClose }) {
   const [days, setDays] = useState([]);
+  // Whether « 5e » was ticked when the modal opened, per weekday — the 5th days listed reflect that.
+  const [savedFifth, setSavedFifth] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   // The coming 5th days of the weekdays shared by weeks of the month, as saved.
@@ -56,6 +56,7 @@ export function WorkingHoursModal({ staff, onClose }) {
       const res = await getWorkingHours(staff.id);
       if (res.success) {
         setDays(res.data);
+        setSavedFifth(Object.fromEntries(res.data.map((d) => [d.day, weeksOf(d).includes(5)])));
         setFifthDays(res.fifthDays ?? []);
       } else {
         toast.error(res.message);
@@ -204,8 +205,8 @@ export function WorkingHoursModal({ staff, onClose }) {
           <form onSubmit={handleSubmit} className="overflow-y-auto px-6 py-4 space-y-1">
             <p className="pb-2 text-xs text-gray-500">
               Sous chaque jour, cochez les semaines du mois où elle travaille (ex. le 1er et le 3e samedi) : réglé une
-              fois, appliqué tous les mois. Le 5e jour d&apos;un mois (ex. un 5e samedi) n&apos;est jamais compris, même
-              si les 4 semaines sont cochées : c&apos;est vous qui choisissez, à chaque fois, qui le travaille.
+              fois, appliqué tous les mois. « 5e » = le 5e samedi (lundi…) des mois qui en ont un : cochez-le si elle le
+              travaille aussi. Pour changer une seule date, utilisez « Modifier ».
             </p>
             {DAY_ORDER.map((dayKey, index) => {
               const d = days[index];
@@ -218,6 +219,7 @@ export function WorkingHoursModal({ staff, onClose }) {
               const dayName = DAY_LABELS[dayKey].toLowerCase();
               const comingFifths = fifthDays.filter((f) => f.day === dayKey).slice(0, FIFTH_DAYS_SHOWN);
               const canAssign = comingFifths.some((f) => f.isCandidate);
+              const fifthChanged = weeks.includes(5) !== Boolean(savedFifth[dayKey]);
 
               return (
                 <div key={dayKey} className="py-2.5 border-b border-gray-50 last:border-b-0">
@@ -293,9 +295,12 @@ export function WorkingHoursModal({ staff, onClose }) {
                           type="button"
                           aria-pressed={weeks.includes(week)}
                           aria-label={`${WEEK_LABELS[week]} ${dayName} du mois`}
+                          title={week === 5 ? `Le 5e ${dayName} des mois qui en ont un` : undefined}
                           data-week={week}
                           onClick={() => toggleWeek(index, week)}
                           className={`h-7 min-w-[44px] rounded-md border px-2 font-medium transition-colors ${
+                            week === 5 ? "ml-2 " : ""
+                          }${
                             weeks.includes(week)
                               ? "border-[#2f3a2e] bg-[#2f3a2e] text-white"
                               : "border-gray-200 bg-white text-gray-400 hover:border-gray-300"
@@ -307,11 +312,16 @@ export function WorkingHoursModal({ staff, onClose }) {
                     </div>
 
                     <div className="mt-1.5 space-y-1" data-fifth-days={dayKey}>
-                      <p className="text-gray-500">5e {dayName} du mois — vous choisissez à chaque fois qui le travaille :</p>
-                      {!canAssign ? (
+                      <p className="text-gray-500">
+                        {weeks.includes(5)
+                          ? `5e ${dayName} : elle le travaille, sans rien à faire chaque mois.`
+                          : `5e ${dayName} : elle ne le travaille pas.`}
+                        {fifthChanged && <span className="ml-1 text-amber-700">Enregistrez pour l&apos;appliquer.</span>}
+                      </p>
+                      {fifthChanged ? null : !canAssign ? (
                         <p className="text-gray-400">
                           Ce jour n&apos;est pas encore enregistré pour elle : cliquez sur « Enregistrer », puis rouvrez
-                          cette fenêtre pour choisir les prochains 5es {dayName}s.
+                          cette fenêtre pour voir les prochains 5es {dayName}s.
                         </p>
                       ) : (
                         comingFifths.map((f) => (
@@ -327,7 +337,7 @@ export function WorkingHoursModal({ staff, onClose }) {
                               onClick={() => setAssigning(f.dateKey)}
                               className="rounded-md border border-gray-200 px-2 py-0.5 text-gray-600 hover:bg-gray-50"
                             >
-                              Choisir
+                              Modifier
                             </button>
                           </div>
                         ))

@@ -24,13 +24,14 @@ function makeStaffService({ availableDays, weekDay = "WEDNESDAY" }) {
   };
 }
 
-// Find the next date (from today) that falls on the given weekday name.
+// Find the next date (from today) that falls on the given weekday name — never
+// a month's 5th occurrence (29th–31st), only worked with « 5e » ticked.
 function nextDateForWeekday(weekDayName) {
   const dayMap = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
   const targetIndex = dayMap.indexOf(weekDayName);
   const date = new Date();
   date.setHours(0, 0, 0, 0);
-  while (date.getDay() !== targetIndex) {
+  while (date.getDay() !== targetIndex || date.getDate() >= 29) {
     date.setDate(date.getDate() + 1);
   }
   return date;

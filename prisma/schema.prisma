@@ -3233,6 +3233,13 @@ model RentalRequest {
   message        String?
   ownerResponse  String?
   specialty      String?
+  // Coordonnées saisies dans le formulaire « Vous souhaitez nous rejoindre ? »
+  // (audit MB-004) : obligatoires à la saisie depuis 2026-10, nullables pour
+  // les demandes antérieures (le compte User reste la source pour celles-là).
+  firstName      String?
+  lastName       String?
+  email          String?
+  phone          String?
   isDeleted      Boolean             @default(false)
   deletedAt      DateTime?
   createdAt      DateTime            @default(now())

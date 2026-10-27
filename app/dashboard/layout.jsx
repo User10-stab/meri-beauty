@@ -1,6 +1,7 @@
 import { DashboardShell } from "@/components/dashboard/Layouts/dashboard-shell";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
+import { NextIntlClientProvider } from "next-intl";
 import { getDashboardPermissions, isTillCashOperator } from "@/lib/authorization";
 import { countPickupsToVerify } from "@/lib/orders/count-pickups-to-verify";
 import { countUnreadUserNotifications } from "@/lib/notifications";
@@ -34,15 +35,20 @@ export default async function DashboardLayout({ children }) {
   // afterwards over Pusher, so a stale count between navigations is harmless.
   const unreadNotificationsCount = await countUnreadUserNotifications(session.user.id);
 
+  // Le layout racine n'envoie au navigateur que les namespaces publics
+  // (i18n/client-messages.js) : sans props, ce provider serveur hérite de
+  // l'intégralité des messages de la requête pour tout le tableau de bord.
   return (
-    <DashboardShell
-      user={session.user}
-      isSalonAccount={isTillCashOperator(session.user)}
-      dashboardPermissions={dashboardPermissions}
-      pickupsToVerifyCount={pickupsToVerifyCount}
-      unreadNotificationsCount={unreadNotificationsCount}
-    >
-      {children}
-    </DashboardShell>
+    <NextIntlClientProvider>
+      <DashboardShell
+        user={session.user}
+        isSalonAccount={isTillCashOperator(session.user)}
+        dashboardPermissions={dashboardPermissions}
+        pickupsToVerifyCount={pickupsToVerifyCount}
+        unreadNotificationsCount={unreadNotificationsCount}
+      >
+        {children}
+      </DashboardShell>
+    </NextIntlClientProvider>
   );
 }

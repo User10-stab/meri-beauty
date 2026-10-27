@@ -77,7 +77,12 @@ function rentalRequestBody(vatNumber) {
     rentalType: "Cabine privative",
     startDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
     commissionType: "FIXED",
-    specialty: "Coiffure",
+    specialty: "Onglerie",
+    // Coordonnées obligatoires depuis l'audit MB-004.
+    lastName: "Test",
+    firstName: tag,
+    email: `${tag}-pro@example.test`,
+    phone: "0470 12 34 56",
     ...(vatNumber === undefined ? {} : { vatNumber }),
   };
 }
@@ -163,15 +168,21 @@ describe("rental request: the VAT verification proof never outlives the number",
     expect(requests).toHaveLength(0);
   });
 
-  test("a missing number is refused — the asterisk on the form is now true", async () => {
-    const response = await postRentalRequest(undefined);
-    expect(response.status).toBe(400);
+  // TVA facultative depuis 2026-10 (décision de la cliente, MB-004) : la
+  // demande passe, et le numéro déjà vérifié du compte n'est pas touché.
+  test("a missing number is accepted and leaves the account's proof alone", async () => {
+    const before = await prisma.user.findUniqueOrThrow({ where: { id: pro.id } });
 
-    const body = await response.json();
-    expect(JSON.stringify(body)).toContain("obligatoire");
+    const response = await postRentalRequest(undefined);
+    expect(response.status).toBe(201);
+
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: pro.id } });
+    expect(after.vatNumber).toBe(VERIFIED_VAT);
+    expect(after.vatValidatedAt).toEqual(before.vatValidatedAt);
 
     const requests = await prisma.rentalRequest.findMany({ where: { userId: pro.id } });
-    expect(requests).toHaveLength(0);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].phone).toBe("0470 12 34 56");
   });
 
   test("a Belgian number failing the checksum is refused", async () => {

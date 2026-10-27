@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSession, signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import Image from "next/image";
 import { isValidVatFormat } from "@/lib/vat-validation";
+import { CONTACT_EMAIL_PATTERN, isPlausibleContactPhone } from "@/lib/validations/rental-request";
 import { useTranslations } from "next-intl";
 
 
@@ -67,40 +67,144 @@ function formatDateInputValue(date) {
   return `${year}-${month}-${day}`;
 }
 
+const EMPTY_FORM = {
+  lastName: "",
+  firstName: "",
+  email: "",
+  phone: "",
+  startDate: "",
+  desiredPace: "",
+  specialty: "",
+  vatNumber: "",
+  message: "",
+};
+
+// Corps envoyé à POST /api/rental-requests — commun à l'envoi direct et à
+// l'envoi automatique après connexion.
+function buildRequestData(data) {
+  const requestData = {
+    rentalType: "Cabine",
+    commissionType: "FIXED",
+    startDate: data.startDate,
+    specialty: data.specialty || undefined,
+    vatNumber: data.vatNumber?.trim() || undefined,
+    message: data.message || undefined,
+    lastName: data.lastName?.trim(),
+    firstName: data.firstName?.trim(),
+    email: data.email?.trim(),
+    phone: data.phone?.trim(),
+  };
+  // Only include desiredPace if the user provided one
+  if (data.desiredPace) {
+    requestData.desiredPace = data.desiredPace;
+  }
+  return requestData;
+}
+
 export default function BecomePartner() {
   const t = useTranslations("becomePartner");
   const [sectionRef, sectionInView] = useInView();
   const todayDate = formatDateInputValue(new Date());
 
-  const [formData, setFormData] = useState({
-    startDate: "",
-    desiredPace: "",
-    specialty: "",
-    vatNumber: "",
-    message: "",
-  });
+  const [formData, setFormData] = useState(EMPTY_FORM);
 
   const [loading, setLoading] = useState(false);
   const [submitStatus, setSubmitStatus] = useState({ type: null, message: "" });
+  // Confirmation affichée à la place du formulaire après l'envoi (MB-004) :
+  // avant, un toast puis une redirection vers l'accueil — la page où l'on
+  // était déjà — et rien ne disait comment on serait recontactée.
+  const [submitted, setSubmitted] = useState(false);
   const { data: session, status: sessionStatus } = useSession();
-  const router = useRouter();
-  
-  // Fetch user's VAT number from their profile
+
+  // Pré-remplit nom, prénom, e-mail, téléphone et TVA depuis le profil, sans
+  // écraser ce que la candidate a déjà tapé.
   useEffect(() => {
     if (sessionStatus === "authenticated" && session?.user?.id) {
-      fetchUserVatNumber(session.user.id);
+      fetchUserProfile(session.user.id);
     }
   }, [sessionStatus, session?.user?.id]);
-  
-  async function fetchUserVatNumber(userId) {
+
+  async function fetchUserProfile(userId) {
     try {
       const response = await fetch(`/api/users/${userId}`);
       if (response.ok) {
         const userData = await response.json();
-        setFormData(prev => ({ ...prev, vatNumber: userData.vatNumber || "" }));
+        const [first = "", ...rest] = (userData.fullName || "").trim().split(/\s+/);
+        setFormData((prev) => ({
+          ...prev,
+          firstName: prev.firstName || first,
+          lastName: prev.lastName || rest.join(" "),
+          email: prev.email || userData.email || "",
+          phone: prev.phone || userData.phone || "",
+          vatNumber: prev.vatNumber || userData.vatNumber || "",
+        }));
       }
     } catch (error) {
-      console.error("Error fetching user VAT number:", error);
+      console.error("Error fetching user profile:", error);
+    }
+  }
+
+  // Mêmes règles que lib/validations/rental-request.js (le serveur revérifie).
+  // Renvoie le message d'erreur à afficher, ou null.
+  function validateForm(data) {
+    if (!data.lastName?.trim()) return t("lastNameRequired");
+    if (!data.firstName?.trim()) return t("firstNameRequired");
+    if (!CONTACT_EMAIL_PATTERN.test(data.email?.trim() || "")) return t("emailInvalid");
+    if (!isPlausibleContactPhone(data.phone || "")) return t("phoneInvalid");
+    if (!data.startDate) return t("startDateRequired");
+    if (data.startDate < todayDate) return t("startDateInPast");
+    // TVA facultative : le format n'est vérifié que si un numéro est saisi.
+    if (data.vatNumber?.trim() && !isValidVatFormat(data.vatNumber)) return t("vatInvalid");
+    return null;
+  }
+
+  async function sendRequest(data) {
+    setLoading(true);
+    setSubmitStatus({ type: null, message: "" });
+
+    try {
+      const response = await fetch("/api/rental-requests", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(buildRequestData(data)),
+      });
+
+      const text = await response.text();
+      let result = null;
+      try {
+        result = text ? JSON.parse(text) : null;
+      } catch (err) {
+        console.error("Invalid JSON response from /api/rental-requests:", text);
+        throw new Error(t("invalidServerResponse"));
+      }
+
+      if (!response.ok) {
+        if (result?.errors) {
+          const errorMessages = result.errors
+            .map((err) => err.message)
+            .join("\n");
+          throw new Error(errorMessages);
+        }
+        throw new Error(result?.message || t("serverError", { status: response.status }));
+      }
+
+      if (result?.success) {
+        toast.success(t("requestSent"));
+        setFormData(EMPTY_FORM);
+        setSubmitted(true);
+      } else {
+        throw new Error(result?.message || t("sendError"));
+      }
+    } catch (error) {
+      console.error("Error submitting rental request:", error);
+      setSubmitStatus({
+        type: "error",
+        message: error.message || t("genericError"),
+      });
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -127,72 +231,30 @@ export default function BecomePartner() {
       return;
     }
 
-    // Submit the pending request
-    (async () => {
-      setLoading(true);
-      setSubmitStatus({ type: null, message: "" });
+    // Une demande mise de côté avant cette version n'a pas de coordonnées :
+    // on la remet dans le formulaire au lieu de l'envoyer incomplète.
+    const pendingForm = { ...EMPTY_FORM, ...pendingData };
+    const error = validateForm(pendingForm);
+    if (error) {
+      setFormData(pendingForm);
+      setSubmitStatus({ type: "error", message: error });
+      return;
+    }
 
-      try {
-        const rentalType = "Cabine";
-
-        const requestData = {
-          rentalType,
-          commissionType: "FIXED",
-          startDate: pendingData.startDate,
-          specialty: pendingData.specialty || undefined,
-          vatNumber: pendingData.vatNumber || undefined,
-          message: pendingData.message || undefined,
-        };
-
-        if (pendingData.desiredPace) {
-          requestData.desiredPace = pendingData.desiredPace;
-        }
-
-        const response = await fetch("/api/rental-requests", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestData),
-        });
-
-        const text = await response.text();
-        let result = null;
-        try {
-          result = text ? JSON.parse(text) : null;
-        } catch (err) {
-          console.error("Invalid JSON response from /api/rental-requests:", text);
-          throw new Error(t("invalidServerResponse"));
-        }
-
-        if (!response.ok) {
-          if (result?.errors) {
-            const errorMessages = result.errors
-              .map((err) => `${err.field}: ${err.message}`)
-              .join("\n");
-            throw new Error(errorMessages);
-          }
-          throw new Error(result?.message || t("serverError", { status: response.status }));
-        }
-
-        if (result?.success) {
-          toast.success(t("requestSent"));
-          router.push("/");
-        } else {
-          throw new Error(result.message || t("sendError"));
-        }
-      } catch (error) {
-        console.error("Error submitting rental request:", error);
-        setSubmitStatus({
-          type: "error",
-          message: error.message || t("genericError"),
-        });
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [sessionStatus, router]);
+    sendRequest(pendingForm);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionStatus]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Vérifié avant la redirection vers la connexion : la candidate corrige
+    // tout de suite, au lieu de découvrir l'erreur au retour.
+    const error = validateForm(formData);
+    if (error) {
+      setSubmitStatus({ type: "error", message: error });
+      return;
+    }
 
     // If the user is not authenticated, save form data and redirect to auth
     if (sessionStatus !== "authenticated") {
@@ -209,96 +271,7 @@ export default function BecomePartner() {
       return;
     }
 
-    if (!formData.startDate) {
-      setSubmitStatus({ type: "error", message: t("startDateRequired") });
-      return;
-    }
-
-    if (formData.startDate < todayDate) {
-      setSubmitStatus({ type: "error", message: t("startDateInPast") });
-      return;
-    }
-
-    // The field is marked with a red asterisk and carries `required`, but that
-    // is browser-only — and the schema behind the POST route used to accept it
-    // missing. Checked here too so a typo shows an explanation instead of a
-    // bare 422 from the API.
-    if (!formData.vatNumber?.trim()) {
-      setSubmitStatus({ type: "error", message: t("startDateRequired") });
-      return;
-    }
-    if (!isValidVatFormat(formData.vatNumber)) {
-      setSubmitStatus({
-        type: "error",
-        message:
-          "Numéro de TVA invalide. Indiquez le préfixe du pays, par exemple BE0751854027.",
-      });
-      return;
-    }
-
-    setLoading(true);
-    setSubmitStatus({ type: null, message: "" });
-
-    try {
-      const rentalType = "Cabine";
-
-      const requestData = {
-        rentalType,
-        commissionType: "FIXED",
-        startDate: formData.startDate,
-        specialty: formData.specialty || undefined,
-        vatNumber: formData.vatNumber || undefined,
-        message: formData.message || undefined,
-      };
-
-      // Only include desiredPace if the user provided one
-      if (formData.desiredPace) {
-        requestData.desiredPace = formData.desiredPace;
-      }
-
-      const response = await fetch("/api/rental-requests", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestData),
-      });
-
-      const text = await response.text();
-      let result = null;
-      try {
-        result = text ? JSON.parse(text) : null;
-      } catch (err) {
-        console.error("Invalid JSON response from /api/rental-requests:", text);
-        throw new Error(t("invalidServerResponse"));
-      }
-
-      if (!response.ok) {
-        if (result?.errors) {
-          const errorMessages = result.errors
-            .map((err) => `${err.field}: ${err.message}`)
-            .join("\n");
-          throw new Error(errorMessages);
-        }
-        throw new Error(result?.message || t("serverError", { status: response.status }));
-      }
-
-      if (result?.success) {
-        // Show success toast and redirect to home page
-        toast.success(t("requestSent"));
-        router.push("/");
-      } else {
-        throw new Error(result.message || t("sendError"));
-      }
-    } catch (error) {
-      console.error("Error submitting rental request:", error);
-      setSubmitStatus({ 
-        type: "error", 
-        message: error.message || t("genericError") 
-      });
-    } finally {
-      setLoading(false);
-    }
+    await sendRequest(formData);
   };
 
   const handleChange = (e) => {
@@ -409,7 +382,54 @@ export default function BecomePartner() {
               {t("formSubtitle")}
             </p>
 
-            <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            {submitted ? (
+              <div role="status" className="flex flex-col items-center gap-4 rounded-xl bg-cream/60 px-5 py-8 text-center lg:items-start lg:text-left">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gold/15">
+                  <CheckIcon className="h-5 w-5 text-gold" />
+                </span>
+                <p className="text-[1.05rem] font-semibold text-ink">{t("successTitle")}</p>
+                <p className="text-[13.5px] leading-relaxed text-ink/60">{t("successBody")}</p>
+                <button
+                  type="button"
+                  onClick={() => setSubmitted(false)}
+                  className="mt-1 text-[13px] font-medium text-gold underline decoration-gold/40 underline-offset-4 hover:decoration-gold"
+                >
+                  {t("sendAnother")}
+                </button>
+              </div>
+            ) : (
+            <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
+              {/* Coordonnées — obligatoires (MB-004) : sans elles, impossible de
+                  « revenir vers vous rapidement ». */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {[
+                  { name: "lastName", type: "text", autoComplete: "family-name" },
+                  { name: "firstName", type: "text", autoComplete: "given-name" },
+                  { name: "email", type: "email", autoComplete: "email" },
+                  { name: "phone", type: "tel", autoComplete: "tel" },
+                ].map((field) => (
+                  <div key={field.name} className="flex flex-col gap-1.5">
+                    <label
+                      htmlFor={`partner-${field.name}`}
+                      className="block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
+                    >
+                      {t(`${field.name}Label`)} <span className="text-red-400">{t("requiredAsterisk")}</span>
+                    </label>
+                    <input
+                      type={field.type}
+                      id={`partner-${field.name}`}
+                      name={field.name}
+                      required
+                      autoComplete={field.autoComplete}
+                      placeholder={t(`${field.name}Placeholder`)}
+                      value={formData[field.name]}
+                      onChange={handleChange}
+                      className="w-full rounded-xl border border-ink/12 bg-white px-4 py-3 text-[13.5px] text-ink transition-all duration-200 focus:border-gold focus:outline-none focus:ring-2 focus:ring-gold/15"
+                    />
+                  </div>
+                ))}
+              </div>
+
               {/* Date range + Desired pace */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="flex h-full flex-col gap-1.5">
@@ -477,13 +497,13 @@ export default function BecomePartner() {
                     htmlFor="vatNumber"
                     className="block text-[11.5px] font-semibold uppercase tracking-[0.09em] text-ink/60"
                   >
-                    {t("vatLabel")} <span className="text-red-400">{t("requiredAsterisk")}</span>
+                    {t("vatLabel")}{" "}
+                    <span className="font-normal normal-case tracking-normal text-ink/40">{t("vatOptional")}</span>
                   </label>
                   <input
                     type="text"
                     id="vatNumber"
                     name="vatNumber"
-                    required
                     placeholder="ex. BE0123456789"
                     value={formData.vatNumber}
                     onChange={handleChange}
@@ -512,7 +532,7 @@ export default function BecomePartner() {
 
               {/* Status message */}
               {submitStatus.type && (
-                <div className={`mt-2 rounded-lg p-3 text-sm ${submitStatus.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+                <div role="alert" className={`mt-2 whitespace-pre-line rounded-lg p-3 text-sm ${submitStatus.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
                   {submitStatus.message}
                 </div>
               )}
@@ -539,6 +559,7 @@ export default function BecomePartner() {
                 )}
               </button>
             </form>
+            )}
           </div>
         </div>
 

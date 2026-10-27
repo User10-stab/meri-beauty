@@ -17,6 +17,7 @@ import { AppToaster } from "@/components/AppToaster";
 import { getMetadataBase } from "@/lib/site-url";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
+import { pickPublicMessages } from "@/i18n/client-messages";
 import { auth } from "@/auth";
 
 const cormorant = Cormorant_Garamond({
@@ -45,7 +46,7 @@ const betaniaPatmos = Betania_Patmos({
 });
 
 const SITE_DESCRIPTION =
-  "Salon de beauté & bien-être à Jette, Bruxelles — coiffure, soins visage, manucure, massage et rituels corps sur mesure.";
+  "Salon de beauté & bien-être à Jette, Bruxelles — beauté des pieds et des mains, soins du visage, épilations, massages, formations et boutique.";
 
 export const metadata = {
   metadataBase: getMetadataBase(),
@@ -72,7 +73,10 @@ export const metadata = {
 
 export default async function RootLayout({ children }) {
   const locale = await getLocale();
-  const messages = await getMessages();
+  // Seuls les namespaces publics partent vers le navigateur ici ; le tableau
+  // de bord remet tous les messages dans son propre layout (voir
+  // i18n/client-messages.js).
+  const messages = pickPublicMessages(await getMessages());
   const session = await auth();
 
   return (

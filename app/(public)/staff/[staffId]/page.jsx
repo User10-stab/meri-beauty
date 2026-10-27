@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { isWellFormedStaffId } from "@/lib/website/staff-profile-path";
 import StaffProfileHero from "@/components/staff-profile/StaffProfileHero";
 import StaffServices from "@/components/staff-profile/StaffServices";
 import StaffViewportLock from "@/components/staff-profile/StaffViewportLock";
@@ -103,13 +104,12 @@ async function getSalonSocialLinks() {
 
 export async function generateMetadata({ params }) {
   const { staffId } = await params;
+  // Plus de titre « Membre introuvable » sur une page servie normalement : un
+  // id mal formé, inconnu ou désactivé passe par notFound(), comme la page.
+  if (!isWellFormedStaffId(staffId)) notFound();
   const staff = await getStaffProfile(staffId);
 
-  if (!staff) {
-    return {
-      title: "Membre introuvable \u2014 Meri Beauty",
-    };
-  }
+  if (!staff) notFound();
 
   const firstName = staff.user.fullName.split(" ")[0];
   const title = `${firstName} \u2014 ${staff.bio ? "Experte beaut\u00e9" : "Membre de l\u2019\u00e9quipe"} | Meri Beauty`;
@@ -139,6 +139,13 @@ export async function generateMetadata({ params }) {
 
 export default async function StaffProfilePage({ params }) {
   const { staffId } = await params;
+  // /staff/1 … /staff/5 (liens de l'ancienne équipe de démonstration) sont
+  // rejetés avant toute requête. Attention : sous app/(public)/loading.js la
+  // réponse est déjà en streaming quand notFound() est atteint — la page porte
+  // alors <meta name="robots" content="noindex"> mais garde le statut HTTP 200
+  // (docs Next 16, loading.js « Status Codes »). Le vrai 404 pour un id mal
+  // formé vient de proxy.js, voir lib/website/staff-profile-path.js.
+  if (!isWellFormedStaffId(staffId)) notFound();
   const [staff, salonSocial, session] = await Promise.all([
     getStaffProfile(staffId),
     getSalonSocialLinks(),

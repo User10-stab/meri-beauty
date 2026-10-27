@@ -1,11 +1,16 @@
 import Link from "next/link";
 import { getPublicAnimators } from "@/actions/workshops/get-public-animators";
+import { getTranslations } from "next-intl/server";
 
-export const metadata = {
-  title: "Nos Animateurs — Meri Beauty",
-  description: "Découvrez les professionnels qui animent nos ateliers et événements beauté.",
-  alternates: { canonical: "/animateurs" },
-};
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("animateurs");
+  return {
+    title: t("metadataTitle"),
+    description: t("metadataDescription"),
+    alternates: { canonical: "/animateurs" },
+  };
+}
 
 function formatDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("fr-FR", {

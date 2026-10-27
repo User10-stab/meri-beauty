@@ -5,11 +5,15 @@ import { ActivityPriceTag } from "@/components/activities/ActivityPrice";
 import { getLocale, getTranslations } from "next-intl/server";
 import { formatDurationShort } from "@/lib/format-duration";
 
-export const metadata = {
-  title: "Formations — Meri Beauty",
-  description: "Formations professionnelles privées et de groupe animées par nos expertes.",
-  alternates: { canonical: "/formations" },
-};
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("pageMeta");
+  return {
+    title: t("formationsTitle"),
+    description: t("formationsDescription"),
+    alternates: { canonical: "/formations" },
+  };
+}
 
 function CalendarIcon() {
   return (

@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { toIntlLocale } from "@/lib/intl-locale";
 import CardBotanicalSprigs from "@/components/reservation/CardBotanicalSprigs";
+import { translateCategoryName } from "@/lib/category-label";
 import StepBackArrow from "@/components/reservation/StepBackArrow";
 
 function SectionCard({ title, onEdit, children }) {
@@ -53,7 +54,8 @@ function SingleServiceCard({ data, onEdit }) {
   const t = useTranslations("reservationSteps");
   const locale = useLocale();
   const draft = data.appointmentDrafts[0];
-  const categoryName = draft?.category?.name ?? data.category?.name ?? "—";
+  const tCat = useTranslations("categories.names");
+  const categoryName = translateCategoryName(tCat, draft?.category?.name ?? data.category?.name, locale) ?? "—";
   const serviceName = draft?.service?.name ?? data.service?.name ?? "—";
   const staffName = draft?.staff?.user?.fullName ?? data.staff?.user?.fullName ?? "—";
   const staffPhoto = draft?.staff?.photo ?? data.staff?.photo ?? null;
@@ -180,6 +182,8 @@ function MultiAppointmentNotice({ totalAmount }) {
 
 export default function ReviewStep({ data, nextStep, prevStep, customerSession, goToStep, lockPreset = false, origin = "/reservation", showStatus }) {
   const t = useTranslations("reservationSteps");
+  const tUi = useTranslations("bookingUi");
+  const locale = useLocale();
   const [processing, setProcessing] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const router = useRouter();
@@ -187,7 +191,7 @@ export default function ReviewStep({ data, nextStep, prevStep, customerSession, 
   const primaryDraft = data.appointmentDrafts?.[0] ?? null;
   const primaryServiceName = primaryDraft?.service?.name ?? data.service?.name ?? null;
   const primaryStaffName = primaryDraft?.staff?.user?.fullName ?? data.staff?.user?.fullName ?? null;
-  const primaryDateLabel = data.date ? `${new Date(data.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" })} • ${data.time ?? ""}` : null;
+  const primaryDateLabel = data.date ? `${new Date(data.date).toLocaleDateString(toIntlLocale(locale), { day: "2-digit", month: "short", year: "numeric", timeZone: "Europe/Brussels" })} • ${data.time ?? ""}` : null;
 
   const drafts = data.appointmentDrafts ?? [];
   const isMultiDraft = drafts.length > 1;
@@ -330,7 +334,7 @@ export default function ReviewStep({ data, nextStep, prevStep, customerSession, 
         )}
 
         <button onClick={handleContinue} disabled={processing || (!requiresPaymentStep && !acceptedTerms)} className={`w-full rounded-full px-5 py-2.5 text-[13px] font-medium text-white transition-all ${processing || (!requiresPaymentStep && !acceptedTerms) ? "cursor-not-allowed bg-[#ede5d8] text-white/70" : "bg-[#b89664] hover:bg-[#a38353] hover:shadow-md hover:-translate-y-px"}`}>{ctaLabel}</button>
-        <p className="text-center text-[11px] text-[#9a9590]">Paiement sécurisé • Confirmation instantanée</p>
+        <p className="text-center text-[11px] text-[#9a9590]">{tUi("securePaymentInstant")}</p>
       </div>
     </div>
   );

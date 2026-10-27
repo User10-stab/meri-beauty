@@ -2,6 +2,7 @@ import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig } from "./auth.config";
 import { defaultLocale, isLocale } from "./i18n/routing";
+import { isMalformedStaffProfilePath } from "./lib/website/staff-profile-path";
 
 const COOKIE_NAME = "meri_site_access";
 const GATE_PASSWORD = process.env.SITE_ACCESS_PASSWORD;
@@ -35,6 +36,13 @@ export default async function proxy(request) {
       // Locked — send everyone to the gate page.
       return NextResponse.redirect(new URL("/acces", request.url));
     }
+  }
+
+  // /staff/<id> dont l'id ne peut correspondre à aucune fiche (ex. /staff/1,
+  // anciens liens de démonstration) : vrai 404 HTTP. La page seule ne le peut
+  // pas, son statut 200 part avant notFound() (voir staff-profile-path.js).
+  if (isMalformedStaffProfilePath(request.nextUrl.pathname)) {
+    return NextResponse.rewrite(new URL("/__introuvable", request.url));
   }
 
   const authResponse = await NextAuth(authConfig).auth(request);

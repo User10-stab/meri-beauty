@@ -1,9 +1,14 @@
-export const metadata = {
-  title: "Le Concept — MeriBeauty Studio & Shop",
-  description:
-    "Découvrez l'univers MeriBeauty : un salon de beauté, une boutique, des formations et des ateliers réunis sous un même toit à Jette, Bruxelles.",
-  alternates: { canonical: "/concept" },
-};
+import { getTranslations } from "next-intl/server";
+
+// Titre traduit selon la langue choisie (cookie NEXT_LOCALE) — MB-008.
+export async function generateMetadata() {
+  const t = await getTranslations("pageMeta");
+  return {
+    title: t("conceptTitle"),
+    description: t("conceptDescription"),
+    alternates: { canonical: "/concept" },
+  };
+}
 
 export default function ConceptLayout({ children }) {
   return children;

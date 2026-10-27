@@ -964,3 +964,20 @@ input[type="search"]::-webkit-search-cancel-button {
   width: 100%;
   height: 100%;
 }
+
+/*
+  iOS Safari zoome la page dès qu'un champ de moins de 16 px reçoit le focus
+  (audit 2026-10 : « Champs de saisie de moins de 16 px sur smartphone »).
+  Volontairement HORS de tout @layer : une règle non layerisée l'emporte sur
+  les utilitaires Tailwind (text-sm, text-xs… sont dans @layer utilities), sans
+  !important. Limité aux petits écrans : le tableau de bord desktop garde ses
+  champs compacts. Les cases à cocher, radios, boutons, fichiers, couleurs et
+  curseurs ne déclenchent pas ce zoom et ne sont pas touchés.
+*/
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]):not([type="hidden"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

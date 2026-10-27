@@ -114,6 +114,8 @@ function StatusBadge({ label, className }) {
  * split to show, just checkedInAt as a single already-used flag.
  */
 function CheckInTicket({ reservation }) {
+  const locale = useLocale();
+  const language = locale === "nl" ? "nl" : locale === "en" ? "en" : "fr";
   if (!reservation.checkInQr || !reservation.checkInCode) return null;
 
   const alreadyUsed = Boolean(reservation.checkedInAt);
@@ -124,23 +126,23 @@ function CheckInTicket({ reservation }) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={reservation.checkInQr}
-        alt="QR code d'entrée du rendez-vous"
+        alt={language === "nl" ? "Toegangs-QR-code voor de afspraak" : language === "en" ? "Appointment entry QR code" : "QR code d'entrée du rendez-vous"}
         width={160}
         height={160}
         className={`h-40 w-40 shrink-0 rounded-lg bg-white p-1 ${alreadyUsed ? "opacity-40" : ""}`}
       />
       <div>
         <p className="text-sm font-bold text-[#2F3A2E]">
-          {alreadyUsed ? "Billet déjà utilisé" : "Votre QR code d'entrée"}
+          {alreadyUsed ? (language === "nl" ? "Ticket al gebruikt" : language === "en" ? "Ticket already used" : "Billet déjà utilisé") : (language === "nl" ? "Uw toegangs-QR-code" : language === "en" ? "Your entry QR code" : "Votre QR code d'entrée")}
         </p>
         <p className="mt-1 text-xs leading-relaxed text-gray-500">
           {alreadyUsed
-            ? "Ce rendez-vous a déjà été pointé à l'accueil."
-            : "Présentez ce QR code à l'accueil. Il est vérifié auprès du salon, une capture d'écran ne le remplace pas."}
+            ? (language === "nl" ? "Deze afspraak is al ingecheckt bij de receptie." : language === "en" ? "This appointment has already been checked in at reception." : "Ce rendez-vous a déjà été pointé à l'accueil.")
+            : (language === "nl" ? "Toon deze QR-code bij de receptie. De code wordt bij het salon gecontroleerd; een screenshot is niet geldig." : language === "en" ? "Show this QR code at reception. It is verified with the salon; a screenshot cannot be used instead." : "Présentez ce QR code à l'accueil. Il est vérifié auprès du salon, une capture d'écran ne le remplace pas.")}
         </p>
         {!alreadyUsed && remainingDue > 0 && (
           <p className="mt-1 text-xs font-semibold text-amber-700">
-            Solde de {remainingDue.toFixed(2)} € à régler sur place.
+            {language === "nl" ? `Nog ${new Intl.NumberFormat(toIntlLocale(locale), { style: "currency", currency: "EUR" }).format(remainingDue)} te betalen ter plaatse.` : language === "en" ? `Balance of ${new Intl.NumberFormat(toIntlLocale(locale), { style: "currency", currency: "EUR" }).format(remainingDue)} due on site.` : `Solde de ${remainingDue.toFixed(2)} € à régler sur place.`}
           </p>
         )}
         <p className="mt-2 font-mono text-lg font-bold tracking-widest text-[#2F3A2E]">
@@ -474,14 +476,14 @@ function ReservationCard({ reservation, onCancelled }) {
                 {hasPendingRequest ? (
                   <div className="rounded-lg sm:rounded-xl bg-amber-50 border border-amber-200 px-3 sm:px-4 py-2 sm:py-3">
                     <p className="text-[11px] sm:text-xs text-amber-800 font-medium">
-                      Votre demande est en attente d'une décision de l'équipe. Aucun remboursement n'est engagé avant son accord.
+                      {t("exceptionRequestPending")}
                     </p>
                   </div>
                 ) : hasRejectedRequest && !requestOpen ? (
                   <div className="rounded-lg sm:rounded-xl bg-red-50 border border-red-200 px-3 sm:px-4 py-2 sm:py-3">
                     <p className="text-[11px] sm:text-xs text-red-700 font-medium">
-                      Votre demande exceptionnelle a été refusée. Le rendez-vous et l'acompte restent inchangés.
-                      {cancellationRequest.decisionNote ? ` Message de l'équipe : ${cancellationRequest.decisionNote}` : ""}
+                      {t("exceptionRequestRejected")}
+                      {cancellationRequest.decisionNote ? ` ${t("teamMessage")} ${cancellationRequest.decisionNote}` : ""}
                     </p>
                     <button
                       type="button"
@@ -491,19 +493,19 @@ function ReservationCard({ reservation, onCancelled }) {
                       }}
                       className="mt-2 text-[11px] sm:text-xs font-semibold text-[#2f3a2e] hover:underline"
                     >
-                      Envoyer une nouvelle demande
+                      {t("exceptionRequestSendAgain")}
                     </button>
                   </div>
                 ) : requestOpen ? (
                   <div className="space-y-1.5 sm:space-y-2 rounded-lg sm:rounded-xl border border-amber-200 bg-amber-50/70 p-2.5 sm:p-3">
                     <p className="text-[11px] sm:text-xs text-amber-900">
-                      Après avoir contacté le salon, expliquez votre situation. Cette demande n'annule pas le rendez-vous et ne garantit pas un remboursement.
+                      {t("exceptionRequestIntro")}
                     </p>
                     <textarea
                       value={requestReason}
                       onChange={(event) => setRequestReason(event.target.value)}
                       rows={2}
-                      placeholder="Ex. maladie soudaine, avec toute information utile pour l'équipe"
+                      placeholder={t("exceptionRequestPlaceholder")}
                       className="w-full rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs text-gray-700 outline-none focus:border-amber-500"
                     />
                     <div className="flex justify-end gap-2">
@@ -513,7 +515,7 @@ function ReservationCard({ reservation, onCancelled }) {
                         disabled={submittingRequest}
                         className="text-[11px] sm:text-xs font-semibold text-gray-600 hover:text-gray-800"
                       >
-                        Retour
+                        {t("exceptionRequestBack")}
                       </button>
                       <button
                         type="button"
@@ -527,7 +529,7 @@ function ReservationCard({ reservation, onCancelled }) {
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                           </svg>
                         )}
-                        Envoyer la demande
+                        {t("exceptionRequestSend")}
                       </button>
                     </div>
                   </div>
@@ -537,7 +539,7 @@ function ReservationCard({ reservation, onCancelled }) {
                     onClick={() => setRequestOpen(true)}
                     className="w-full text-center text-xs sm:text-sm font-semibold text-[#2f3a2e] hover:underline"
                   >
-                    Demander un examen exceptionnel
+                    {t("exceptionRequestCta")}
                   </button>
                 )}
               </div>

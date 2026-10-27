@@ -99,6 +99,7 @@ function resolveCountryCode(value) {
 
 export default function CustomerInfoStep({ data, updateData, nextStep, prevStep, returnTo = "/reservation" }) {
   const t = useTranslations("reservationSteps");
+  const tUi = useTranslations("bookingUi");
   const router = useRouter();
   const [mode, setMode] = useState("register");
   const [formData, setFormData] = useState(
@@ -372,7 +373,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
       if (result?.emailSent) {
         savePendingReservation(buildReservationSnapshot(formData.email));
         toast.success(
-          "Votre compte a été créé avec succès. Un e-mail de vérification a été envoyé. Vérifiez votre boîte de réception ou vos spams, puis validez votre adresse e-mail avant de vous connecter.",
+          tUi("accountCreatedVerify"),
           { duration: 8000 }
         );
         setVerificationSent({ email: formData.email.trim() });
@@ -870,7 +871,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
                   name="addressLine1"
                   value={formData.addressLine1}
                   onChange={handleChange}
-                  placeholder="Rue de la Paix 123"
+                  placeholder={tUi("streetExample")}
                   autoComplete="street-address"
                   aria-invalid={Boolean(errors.addressLine1)}
                   aria-describedby={errors.addressLine1 ? "addressLine1-error" : undefined}
@@ -901,7 +902,7 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
                     name="addressCity"
                     value={formData.addressCity}
                     onChange={handleChange}
-                    placeholder="Bruxelles"
+                    placeholder={tUi("cityExample")}
                     autoComplete="address-level2"
                     aria-invalid={Boolean(errors.addressCity)}
                     aria-describedby={errors.addressCity ? "addressCity-error" : undefined}
@@ -964,7 +965,12 @@ export default function CustomerInfoStep({ data, updateData, nextStep, prevStep,
         <button type="submit" disabled={sendingVerification} className={`mt-5 w-full rounded-full px-5 py-2.5 text-[13px] font-medium text-white transition-all ${sendingVerification ? "cursor-not-allowed bg-[#ede5d8] text-white/70" : "bg-[#b89664] hover:bg-[#a38353] hover:shadow-md hover:-translate-y-px"}`}>
           {sendingVerification ? (<span className="flex items-center justify-center gap-2"><Loader2 size={16} className="animate-spin" />{t("customer.sendingVerification")}</span>) : (t("customer.continueToReview"))}
         </button>
-        <p className="mt-3 text-center text-[11px] leading-relaxed text-[#9a9590]">En continuant, vous acceptez nos conditions générales et notre politique de confidentialité.</p>
+        <p className="mt-3 text-center text-[11px] leading-relaxed text-[#9a9590]">
+          {tUi.rich("continueAcceptsTerms", {
+            cgv: (chunks) => <a href="/cgv" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#b89664]">{chunks}</a>,
+            privacy: (chunks) => <a href="/politique-de-confidentialite" target="_blank" rel="noopener noreferrer" className="underline hover:text-[#b89664]">{chunks}</a>,
+          })}
+        </p>
       </form>
     </div>
   );
